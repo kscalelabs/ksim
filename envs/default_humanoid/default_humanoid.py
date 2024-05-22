@@ -1,4 +1,3 @@
-
 import jax
 import jax.numpy as jp
 from brax.envs.base import PipelineEnv, State

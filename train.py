@@ -18,7 +18,7 @@ with open(args.config, 'r') as file:
     config = yaml.safe_load(file)
 
 # Initialize wandb
-wandb.init(project="robotic-locomotion-training", name=config.get('experiment_name', 'ppo-training'))
+wandb.init(project=config.get('project_name', 'robotic-locomotion-training'), name=config.get('experiment_name', 'ppo-training'))
 
 DEFAULT_REWARD_PARAMS = {
     'rew_forward': {'weight': 1.25},
@@ -32,8 +32,12 @@ reset_noise_scale = config.get('reset_noise_scale', 1e-2)
 exclude_current_positions_from_observation = config.get('exclude_current_positions_from_observation', True)
 log_reward_breakdown = config.get('log_reward_breakdown', True)
 
+print(f'env_name: {config.get("env_name", "stompy")}')
+print(f'reward_params: {reward_params}')
+print(f'training on {config["num_envs"]} environments')
+
 env = get_env(
-    "default_humanoid", 
+    name=config.get('env_name', 'stompy'),
     reward_params=reward_params,
     terminate_when_unhealthy=terminate_when_unhealthy,
     reset_noise_scale=reset_noise_scale,
