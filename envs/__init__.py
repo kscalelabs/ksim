@@ -6,6 +6,6 @@ environments = {
     "default_humanoid": DefaultHumanoidEnv
 }
 
-def get_env(name: str) -> envs.Env:
+def get_env(name: str, **kwargs) -> envs.Env:
     envs.register_environment(name, environments[name])
-    return envs.get_environment(name)
+    return envs.get_environment(name, **kwargs)

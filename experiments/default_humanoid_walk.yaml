@@ -1,0 +1,31 @@
+project_name: default_humanoid_walk
+experiment_name: constant_alive_reward_fixing
+num_timesteps: 30000000
+num_evals: 5
+reward_scaling: 0.1
+episode_length: 1000
+normalize_observations: true
+action_repeat: 1
+unroll_length: 10
+num_minibatches: 32
+num_updates_per_batch: 8
+discounting: 0.97
+learning_rate: 0.0003
+entropy_cost: 0.001
+num_envs: 2048
+batch_size: 1024
+seed: 0
+env_name: default_humanoid
+reward_params:
+  rew_forward:
+    weight: 1.25
+  rew_healthy:
+    weight: 5.0
+    healthy_z_lower: 1.0
+    healthy_z_upper: 2.0
+  rew_ctrl_cost:
+    weight: 0.1
+terminate_when_unhealthy: true
+reset_noise_scale: 0.01
+exclude_current_positions_from_observation: true
+log_reward_breakdown: true
