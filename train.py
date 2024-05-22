@@ -90,6 +90,3 @@ make_inference_fn, params, _ = train_fn(environment=env, progress_fn=progress, p
 
 print(f'time to jit: {times[1] - times[0]}')
 print(f'time to train: {times[-1] - times[1]}')
-
-model_path = config.get('project_name', 'model') + ".pkl"
-model.save_params(model_path, params)
