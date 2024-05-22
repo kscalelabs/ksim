@@ -1,7 +1,7 @@
 from brax import envs
 
-from .default_humanoid.default_humanoid import DefaultHumanoidEnv
-from .stompy.stompy import StompyEnv
+from .default_humanoid_env.default_humanoid import DefaultHumanoidEnv
+from .stompy_env.stompy import StompyEnv
 
 environments = {
     "default_humanoid": DefaultHumanoidEnv,
