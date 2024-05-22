@@ -7,6 +7,7 @@ import functools
 import matplotlib.pyplot as plt
 from datetime import datetime
 from brax import envs
+from brax.io import model
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='Run PPO training with specified config file.')
@@ -78,8 +79,11 @@ def progress(num_steps, metrics):
     ydataerr.append(metrics['eval/episode_reward_std'])
 
     # Log metrics to wandb
-    print(metrics)
-    wandb.log({"steps": num_steps, **metrics})
+    wandb.log({
+        "steps": num_steps,
+        "epoch_time": (times[-1] - times[-2]).total_seconds(),
+        **metrics
+    })
 
     plt.xlim([0, train_fn.keywords['num_timesteps'] * 1.25])
     plt.ylim([min_y, max_y])
@@ -96,3 +100,6 @@ make_inference_fn, params, _ = train_fn(environment=env, progress_fn=progress)
 
 print(f'time to jit: {times[1] - times[0]}')
 print(f'time to train: {times[-1] - times[1]}')
+
+model_path = "/weights/" + config.get('project_name', 'model') + ".pkl"
+model.save_params(model_path, params)
