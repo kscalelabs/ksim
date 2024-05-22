@@ -1,3 +1,0 @@
-Wed May 22 18:01:37 2024
-WARNING: File size over 2GB is not supported. File: '/home/mlutz/data/sim/sim/stompy'
-

@@ -74,32 +74,22 @@ max_y, min_y = 13000, 0
 
 def progress(num_steps, metrics):
     times.append(datetime.now())
-    x_data.append(num_steps)
-    y_data.append(metrics['eval/episode_reward'])
-    ydataerr.append(metrics['eval/episode_reward_std'])
 
-    # Log metrics to wandb
     wandb.log({
         "steps": num_steps,
         "epoch_time": (times[-1] - times[-2]).total_seconds(),
         **metrics
     })
 
-    plt.xlim([0, train_fn.keywords['num_timesteps'] * 1.25])
-    plt.ylim([min_y, max_y])
+def save_model(current_step, make_policy, params):
+    model_path = "weights/ " + config.get('project_name', 'model') + ".pkl"
+    model.save_params(model_path, params)
+    print(f"Saved model at step {current_step} to {model_path}")
 
-    plt.xlabel('# environment steps')
-    plt.ylabel('reward per episode')
-    plt.title(f'y={y_data[-1]:.3f}')
-
-    plt.errorbar(
-        x_data, y_data, yerr=ydataerr)
-    plt.show()
-
-make_inference_fn, params, _ = train_fn(environment=env, progress_fn=progress)
+make_inference_fn, params, _ = train_fn(environment=env, progress_fn=progress, policy_params_fn=save_model)
 
 print(f'time to jit: {times[1] - times[0]}')
 print(f'time to train: {times[-1] - times[1]}')
 
-model_path = "/weights/" + config.get('project_name', 'model') + ".pkl"
+model_path = config.get('project_name', 'model') + ".pkl"
 model.save_params(model_path, params)

@@ -1,7 +1,7 @@
 project_name: default_humanoid_walk
 experiment_name: constant_alive_reward_fixing
-num_timesteps: 30000000
-num_evals: 5
+num_timesteps: 100000000
+num_evals: 10
 reward_scaling: 0.1
 episode_length: 1000
 normalize_observations: true
