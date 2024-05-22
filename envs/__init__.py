@@ -1,9 +1,11 @@
+from brax import envs
 
 from .default_humanoid.default_humanoid import DefaultHumanoidEnv
 
-envs = {
+environments = {
     "default_humanoid": DefaultHumanoidEnv
 }
 
-def get_env(name: str):
-    return envs[name]
+def get_env(name: str) -> envs.Env:
+    envs.register_environment(name, environments[name])
+    return envs.get_environment(name)

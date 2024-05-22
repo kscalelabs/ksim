@@ -7,12 +7,12 @@ from brax.io import mjcf
 import mujoco
 from mujoco import mjx
 from etils import epath
-from rewards import get_reward_fn
+from .rewards import get_reward_fn
 
 DEFAULT_REWARD_PARAMS = {
-	'forward_reward': {'weight': 1.25},
-	'healthy_reward': {'weight': 5.0, 'healthy_z_lower': 1.0, 'healthy_z_upper': 2.0},
-	'ctrl_cost': {'weight': 0.1}
+	'rew_forward': {'weight': 1.25},
+	'rew_healthy': {'weight': 5.0, 'healthy_z_lower': 1.0, 'healthy_z_upper': 2.0},
+	'rew_ctrl_cost': {'weight': 0.1}
 }
 
 class DefaultHumanoidEnv(PipelineEnv):
@@ -51,7 +51,13 @@ class DefaultHumanoidEnv(PipelineEnv):
 		self.reward_fn = get_reward_fn(self._reward_params, self.dt, include_reward_breakdown=True)
 
 	def reset(self, rng: jp.ndarray) -> State:
-		"""Resets the environment to an initial state."""
+		"""Resets the environment to an initial state.
+		
+		Args:
+			rng: Random number generator seed.
+		Returns:
+			The initial state of the environment.
+		"""
 		rng, rng1, rng2 = jax.random.split(rng, 3)
 
 		low, hi = -self._reset_noise_scale, self._reset_noise_scale
@@ -76,7 +82,14 @@ class DefaultHumanoidEnv(PipelineEnv):
 		return State(mjx_state, obs, reward, done, metrics)
 
 	def step(self, state: State, action: jp.ndarray) -> State:
-		"""Runs one timestep of the environment's dynamics."""
+		"""Runs one timestep of the environment's dynamics.
+
+		Args:
+			state: The current state of the environment.
+			action: The action to take.
+		Returns:
+			A tuple of the next state, the reward, whether the episode has ended, and additional information.
+		"""
 		mjx_state = state.pipeline_state
 		assert mjx_state, 'state.pipeline_state was recorded as None'
 		# TODO: determine whether to raise an error or reset the environment
@@ -93,9 +106,9 @@ class DefaultHumanoidEnv(PipelineEnv):
 		reward, is_healthy, reward_breakdown = self.reward_fn(mjx_state, action, next_mjx_state)
 	
 		if self._terminate_when_unhealthy:
-			done = jp.logical_not(is_healthy)
+			done = 1.0 - is_healthy
 		else:
-			done = jp.array(False)
+			done = jp.array(0)
 
 		state.metrics.update(
 			x_position=next_mjx_state.subtree_com[1][0],
@@ -116,7 +129,14 @@ class DefaultHumanoidEnv(PipelineEnv):
 	def _get_obs(
 		self, data: mjxState, action: jp.ndarray
 	) -> jp.ndarray:
-		"""Observes humanoid body position, velocities, and angles."""
+		"""Observes humanoid body position, velocities, and angles.
+
+		Args:
+			data: The current state of the environment.
+			action: The current action.
+		Returns:
+			Observations of the environment.
+		"""
 		position = data.qpos
 		if self._exclude_current_positions_from_observation:
 			position = position[2:]
