@@ -1,0 +1,24 @@
+Traceback (most recent call last):
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/play.py", line 77, in <module>
+    train(config, args.n_steps, args.render_every)
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/play.py", line 21, in train
+    env = get_env(
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/envs/__init__.py", line 10, in get_env
+    return envs.get_environment(name, **kwargs)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/envs/__init__.py", line 63, in get_environment
+    return _envs[env_name](**kwargs)
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/envs/stompy_env/stompy.py", line 30, in __init__
+    mj_model = mujoco.MjModel.from_xml_path(path)  # type: ignore
+ValueError: mjParseXML: resource not found via provider or OS filesystem: '/robot_simplified.xml'
+Traceback (most recent call last):
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/play.py", line 77, in <module>
+    train(config, args.n_steps, args.render_every)
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/play.py", line 21, in train
+    env = get_env(
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/envs/__init__.py", line 10, in get_env
+    return envs.get_environment(name, **kwargs)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/envs/__init__.py", line 63, in get_environment
+    return _envs[env_name](**kwargs)
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/envs/stompy_env/stompy.py", line 30, in __init__
+    mj_model = mujoco.MjModel.from_xml_path(path)  # type: ignore
+ValueError: mjParseXML: resource not found via provider or OS filesystem: '/robot_simplified.xml'

@@ -1,0 +1,12 @@
+
+{'eval/walltime': 29.162562370300293, 'eval/episode_distance_from_origin': Array(19.281342, dtype=float32), 'eval/episode_rew_ctrl_cost': Array(-25.85895, dtype=float32), 'eval/episode_rew_forward': Array(-0.01970105, dtype=float32), 'eval/episode_rew_healthy': Array(112.61719, dtype=float32), 'eval/episode_reward': Array(86.73854, dtype=float32), 'eval/episode_x_position': Array(0.32444775, dtype=float32), 'eval/episode_x_velocity': Array(-0.01576079, dtype=float32), 'eval/episode_y_position': Array(0.03457178, dtype=float32), 'eval/episode_y_velocity': Array(0.27064663, dtype=float32), 'eval/episode_distance_from_origin_std': Array(3.482161, dtype=float32), 'eval/episode_rew_ctrl_cost_std': Array(4.714012, dtype=float32), 'eval/episode_rew_forward_std': Array(4.778629, dtype=float32), 'eval/episode_rew_healthy_std': Array(19.901758, dtype=float32), 'eval/episode_reward_std': Array(17.597637, dtype=float32), 'eval/episode_x_position_std': Array(0.7759967, dtype=float32), 'eval/episode_x_velocity_std': Array(3.8229032, dtype=float32), 'eval/episode_y_position_std': Array(0.8331288, dtype=float32), 'eval/episode_y_velocity_std': Array(4.569114, dtype=float32), 'eval/avg_episode_length': Array(23.523438, dtype=float32), 'eval/epoch_eval_time': 29.162562370300293, 'eval/sps': 4389.189069694288}
+Traceback (most recent call last):
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/train.py", line 91, in <module>
+    make_inference_fn, params, _ = train_fn(environment=env, progress_fn=progress)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/training/agents/ppo/train.py", line 435, in train
+    metrics = evaluator.run_evaluation(
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/training/acting.py", line 125, in run_evaluation
+    eval_state = self._generate_eval_unroll(policy_params, unroll_key)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/mujoco/mjx/_src/dataclasses.py", line 81, in clz_from_iterable
+    def clz_from_iterable(meta, data):
+KeyboardInterrupt

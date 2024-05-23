@@ -1,0 +1,13 @@
+env_name: default_humanoid
+reward_params: {'rew_forward': {'weight': 1.25}, 'rew_healthy': {'weight': 5.0, 'healthy_z_lower': 1.0, 'healthy_z_upper': 2.0}, 'rew_ctrl_cost': {'weight': 0.1}}
+testing on 2048 environments
+Traceback (most recent call last):
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/play.py", line 48, in <module>
+    params = model.load_params(model_path)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/io/model.py", line 23, in load_params
+    with epath.Path(path).open('rb') as fin:
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/etils/epath/gpath.py", line 242, in open
+    gfile = self._backend.open(self._path_str, mode)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/etils/epath/backend.py", line 109, in open
+    return open(path, mode, encoding=encoding)
+FileNotFoundError: [Errno 2] No such file or directory: '/weights/default_humanoid_walk.pkl'

@@ -1,0 +1,14 @@
+env_name: default_humanoid
+reward_params: {'rew_forward': {'weight': 1.25}, 'rew_healthy': {'weight': 5.0, 'healthy_z_lower': 1.0, 'healthy_z_upper': 2.0}, 'rew_ctrl_cost': {'weight': 0.1}}
+training on 2048 environments
+Saved model at step 11141120 to weights/ default_humanoid_walk.pkl
+Saved model at step 22282240 to weights/ default_humanoid_walk.pkl
+Saved model at step 33423360 to weights/ default_humanoid_walk.pkl
+Saved model at step 44564480 to weights/ default_humanoid_walk.pkl
+Saved model at step 55705600 to weights/ default_humanoid_walk.pkl
+Saved model at step 66846720 to weights/ default_humanoid_walk.pkl
+Saved model at step 77987840 to weights/ default_humanoid_walk.pkl
+Saved model at step 89128960 to weights/ default_humanoid_walk.pkl
+Saved model at step 100270080 to weights/ default_humanoid_walk.pkl
+time to jit: 0:00:48.114692
+time to train: 0:09:53.670830

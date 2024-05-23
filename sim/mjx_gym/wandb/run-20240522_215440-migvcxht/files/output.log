@@ -1,0 +1,27 @@
+env_name: default_humanoid
+reward_params: {'rew_forward': {'weight': 1.25}, 'rew_healthy': {'weight': 5.0, 'healthy_z_lower': 1.0, 'healthy_z_upper': 2.0}, 'rew_ctrl_cost': {'weight': 0.1}}
+testing on 2048 environments
+/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/glfw/__init__.py:914: GLFWError: (65550) b'Failed to detect any supported platform'
+  warnings.warn(message, GLFWError)
+/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/glfw/__init__.py:914: GLFWError: (65537) b'The GLFW library is not initialized'
+  warnings.warn(message, GLFWError)
+Traceback (most recent call last):
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/play.py", line 74, in <module>
+    media.show_video(env.render(rollout[::render_every], camera='side'), fps=1.0 / env.dt / render_every)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/envs/base.py", line 159, in render
+    return image.render_array(self.sys, trajectory, height, width, camera)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/io/image.py", line 35, in render_array
+    renderer = mujoco.Renderer(sys.mj_model, height=height, width=width)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/mujoco/renderer.py", line 86, in __init__
+    self._mjr_context = _render.MjrContext(
+mujoco.FatalError: an OpenGL platform library has not been loaded into this process, this most likely means that a valid OpenGL context has not been created before mjr_makeContext was called
+Traceback (most recent call last):
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/play.py", line 74, in <module>
+    media.show_video(env.render(rollout[::render_every], camera='side'), fps=1.0 / env.dt / render_every)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/envs/base.py", line 159, in render
+    return image.render_array(self.sys, trajectory, height, width, camera)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/io/image.py", line 35, in render_array
+    renderer = mujoco.Renderer(sys.mj_model, height=height, width=width)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/mujoco/renderer.py", line 86, in __init__
+    self._mjr_context = _render.MjrContext(
+mujoco.FatalError: an OpenGL platform library has not been loaded into this process, this most likely means that a valid OpenGL context has not been created before mjr_makeContext was called

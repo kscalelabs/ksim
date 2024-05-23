@@ -1,0 +1,84 @@
+env_name: stompy
+reward_params: {'rew_forward': {'weight': 1.25}, 'rew_healthy': {'weight': 5.0, 'healthy_z_lower': 5.0, 'healthy_z_upper': 2.0}, 'rew_ctrl_cost': {'weight': 0.1}}
+training on 2048 environments
+Traceback (most recent call last):
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/train.py", line 89, in <module>
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/training/agents/ppo/train.py", line 226, in train
+    env_state = reset_fn(key_envs)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/traceback_util.py", line 179, in reraise_with_filtered_traceback
+    return fun(*args, **kwargs)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/pjit.py", line 304, in cache_miss
+    outs, out_flat, out_tree, args_flat, jaxpr, attrs_tracked = _python_pjit_helper(
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/pjit.py", line 171, in _python_pjit_helper
+    attrs_tracked) = _infer_params(jit_info, args, kwargs)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/pjit.py", line 598, in _infer_params
+    jaxpr, consts, out_shardings_flat, out_layouts_flat, attrs_tracked = _pjit_jaxpr(
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/pjit.py", line 1206, in _pjit_jaxpr
+    jaxpr, final_consts, out_type, attrs_tracked = _create_pjit_jaxpr(
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/linear_util.py", line 350, in memoized_fun
+    ans = call(fun, *args)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/pjit.py", line 1154, in _create_pjit_jaxpr
+    jaxpr, global_out_avals, consts, attrs_tracked = pe.trace_to_jaxpr_dynamic(
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/profiler.py", line 335, in wrapper
+    return func(*args, **kwargs)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/interpreters/partial_eval.py", line 2326, in trace_to_jaxpr_dynamic
+    jaxpr, out_avals, consts, attrs_tracked = trace_to_subjaxpr_dynamic(
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/interpreters/partial_eval.py", line 2348, in trace_to_subjaxpr_dynamic
+    ans = fun.call_wrapped(*in_tracers_)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/linear_util.py", line 192, in call_wrapped
+    ans = self.f(*args, **dict(self.params, **kwargs))
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/traceback_util.py", line 179, in reraise_with_filtered_traceback
+    return fun(*args, **kwargs)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/api.py", line 1214, in vmap_f
+    out_flat = batching.batch(
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/linear_util.py", line 192, in call_wrapped
+    ans = self.f(*args, **dict(self.params, **kwargs))
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/envs/wrappers/training.py", line 111, in reset
+    state = self.env.reset(rng)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/envs/wrappers/training.py", line 68, in reset
+    return jax.vmap(self.env.reset)(rng)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/traceback_util.py", line 179, in reraise_with_filtered_traceback
+    return fun(*args, **kwargs)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/api.py", line 1214, in vmap_f
+    out_flat = batching.batch(
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/linear_util.py", line 192, in call_wrapped
+    ans = self.f(*args, **dict(self.params, **kwargs))
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/envs/wrappers/training.py", line 83, in reset
+    state = self.env.reset(rng)
+  File "/ephemeral/users/mlutz/sim/sim/mjx_gym/envs/stompy_env/stompy.py", line 68, in reset
+    mjx_state = self.pipeline_init(qpos, qvel)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/envs/base.py", line 119, in pipeline_init
+    return self._pipeline.init(self.sys, q, qd, act, self._debug)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/brax/mjx/pipeline.py", line 68, in init
+    data = mjx.forward(sys, data)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/mujoco/mjx/_src/forward.py", line 56, in wrapper
+    res = fn(*args, **kwargs)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/mujoco/mjx/_src/forward.py", line 349, in forward
+    d = fwd_position(m, d)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/mujoco/mjx/_src/forward.py", line 56, in wrapper
+    res = fn(*args, **kwargs)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/mujoco/mjx/_src/forward.py", line 71, in fwd_position
+    d = collision_driver.collision(m, d)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/mujoco/mjx/_src/collision_driver.py", line 352, in collision
+    groups = _contact_groups(m, d)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/mujoco/mjx/_src/collision_driver.py", line 251, in _contact_groups
+    margin = jp.maximum(m.geom_margin[geom1], m.geom_margin[geom2])
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/array.py", line 336, in __getitem__
+    return lax_numpy._rewriting_take(self, idx)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/numpy/lax_numpy.py", line 5616, in _rewriting_take
+    return _gather(arr, treedef, static_idx, dynamic_idx, indices_are_sorted,
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/numpy/lax_numpy.py", line 5657, in _gather
+    return expand_dims(y, indexer.newaxis_dims)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/numpy/lax_numpy.py", line 1151, in expand_dims
+    return lax.expand_dims(a, axis)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/lax/lax.py", line 1388, in expand_dims
+    return broadcast_in_dim(array, result_shape, broadcast_dims)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/lax/lax.py", line 831, in broadcast_in_dim
+    return broadcast_in_dim_p.bind(
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/core.py", line 387, in bind
+    return self.bind_with_trace(find_top_trace(args), args, params)
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/core.py", line 1320, in find_top_trace
+    top_tracer._assert_live()
+  File "/home/mlutz/miniconda3/envs/kscale-dev/lib/python3.9/site-packages/jax/_src/interpreters/partial_eval.py", line 1719, in _assert_live
+    if not self._trace.main.jaxpr_stack:  # type: ignore
+KeyboardInterrupt

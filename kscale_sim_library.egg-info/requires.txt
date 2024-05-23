@@ -1,0 +1,15 @@
+mediapy
+torch
+
+[dev]
+black
+darglint
+mypy
+pytest
+ruff
+mujoco
+mujoco-mjx
+brax
+tqdm
+moviepy
+imageio

@@ -1,0 +1,1 @@
+{"# environment steps": 30146560, "reward per episode": 4706.5361328125, "reward std": 2133.330078125, "x_position": 0, "y_position": 0, "distance_from_origin": 0, "x_velocity": 0, "y_velocity": 0, "_timestamp": 1716363458.4669182, "_runtime": 258.05828332901, "_step": 4, "_wandb": {"runtime": 258}}

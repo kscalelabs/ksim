@@ -1,0 +1,664 @@
+2024-05-22 22:00:54,847 INFO    StreamThr :3280232 [internal.py:wandb_internal():85] W&B internal server running at pid: 3280232, started at: 2024-05-22 22:00:54.847469
+2024-05-22 22:00:54,849 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status
+2024-05-22 22:00:54,851 INFO    WriterThread:3280232 [datastore.py:open_for_write():87] open: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/run-tqehb9de.wandb
+2024-05-22 22:00:54,851 DEBUG   SenderThread:3280232 [sender.py:send():378] send: header
+2024-05-22 22:00:54,859 DEBUG   SenderThread:3280232 [sender.py:send():378] send: run
+2024-05-22 22:00:55,026 INFO    SenderThread:3280232 [dir_watcher.py:__init__():211] watching files in: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files
+2024-05-22 22:00:55,027 INFO    SenderThread:3280232 [sender.py:_start_run_threads():1123] run started: tqehb9de with start time 1716415254.847488
+2024-05-22 22:00:55,033 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: check_version
+2024-05-22 22:00:55,033 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: check_version
+2024-05-22 22:00:55,094 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: run_start
+2024-05-22 22:00:55,140 DEBUG   HandlerThread:3280232 [system_info.py:__init__():26] System info init
+2024-05-22 22:00:55,140 DEBUG   HandlerThread:3280232 [system_info.py:__init__():41] System info init done
+2024-05-22 22:00:55,140 INFO    HandlerThread:3280232 [system_monitor.py:start():194] Starting system monitor
+2024-05-22 22:00:55,141 INFO    SystemMonitor:3280232 [system_monitor.py:_start():158] Starting system asset monitoring threads
+2024-05-22 22:00:55,141 INFO    HandlerThread:3280232 [system_monitor.py:probe():214] Collecting system info
+2024-05-22 22:00:55,144 INFO    SystemMonitor:3280232 [interfaces.py:start():188] Started cpu monitoring
+2024-05-22 22:00:55,144 INFO    SystemMonitor:3280232 [interfaces.py:start():188] Started disk monitoring
+2024-05-22 22:00:55,145 INFO    SystemMonitor:3280232 [interfaces.py:start():188] Started gpu monitoring
+2024-05-22 22:00:55,145 INFO    SystemMonitor:3280232 [interfaces.py:start():188] Started memory monitoring
+2024-05-22 22:00:55,146 INFO    SystemMonitor:3280232 [interfaces.py:start():188] Started network monitoring
+2024-05-22 22:00:55,263 DEBUG   HandlerThread:3280232 [system_info.py:probe():150] Probing system
+2024-05-22 22:00:55,269 DEBUG   HandlerThread:3280232 [system_info.py:_probe_git():135] Probing git
+2024-05-22 22:00:55,277 DEBUG   HandlerThread:3280232 [system_info.py:_probe_git():143] Probing git done
+2024-05-22 22:00:55,277 DEBUG   HandlerThread:3280232 [system_info.py:probe():198] Probing system done
+2024-05-22 22:00:55,277 DEBUG   HandlerThread:3280232 [system_monitor.py:probe():223] {'os': 'Linux-5.15.0-1047-oracle-x86_64-with-glibc2.35', 'python': '3.9.19', 'heartbeatAt': '2024-05-22T22:00:55.264750', 'startedAt': '2024-05-22T22:00:54.844445', 'docker': None, 'cuda': None, 'args': ('--config', '/home/mlutz/data/sim/sim/mjx_gym/experiments/default_humanoid_walk.yaml'), 'state': 'running', 'program': '/ephemeral/users/mlutz/sim/sim/mjx_gym/train.py', 'codePathLocal': 'train.py', 'codePath': 'sim/mjx_gym/train.py', 'git': {'remote': 'https://github.com/kscalelabs/sim.git', 'commit': 'ba5419b1d3804043f0f59c298a3092dad4a36ab3'}, 'email': 'michaeljeffreylutz@gmail.com', 'root': '/ephemeral/users/mlutz/sim', 'host': 'inst-vbps0-dpsh-rdma-pool', 'username': 'mlutz', 'executable': '/home/mlutz/miniconda3/envs/kscale-dev/bin/python3', 'cpu_count': 128, 'cpu_count_logical': 255, 'cpu_freq': {'current': 2566.2258705882355, 'min': 1500.0, 'max': 2550.0}, 'cpu_freq_per_core': [{'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 3186.972, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 3248.399, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 3248.529, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 3249.751, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 3248.69, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 3248.664, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 3249.489, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}, {'current': 2550.0, 'min': 1500.0, 'max': 2550.0}], 'disk': {'/': {'total': 992.2479553222656, 'used': 218.67669296264648}}, 'gpu': 'NVIDIA A100-SXM4-80GB', 'gpu_count': 8, 'gpu_devices': [{'name': 'NVIDIA A100-SXM4-80GB', 'memory_total': 85899345920}, {'name': 'NVIDIA A100-SXM4-80GB', 'memory_total': 85899345920}, {'name': 'NVIDIA A100-SXM4-80GB', 'memory_total': 85899345920}, {'name': 'NVIDIA A100-SXM4-80GB', 'memory_total': 85899345920}, {'name': 'NVIDIA A100-SXM4-80GB', 'memory_total': 85899345920}, {'name': 'NVIDIA A100-SXM4-80GB', 'memory_total': 85899345920}, {'name': 'NVIDIA A100-SXM4-80GB', 'memory_total': 85899345920}, {'name': 'NVIDIA A100-SXM4-80GB', 'memory_total': 85899345920}], 'memory': {'total': 2015.608554840088}}
+2024-05-22 22:00:55,277 INFO    HandlerThread:3280232 [system_monitor.py:probe():224] Finished collecting system info
+2024-05-22 22:00:55,277 INFO    HandlerThread:3280232 [system_monitor.py:probe():227] Publishing system info
+2024-05-22 22:00:55,277 DEBUG   HandlerThread:3280232 [system_info.py:_save_conda():207] Saving list of conda packages installed into the current environment
+2024-05-22 22:00:56,028 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_created():271] file/dir created: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/conda-environment.yaml
+2024-05-22 22:00:56,394 DEBUG   HandlerThread:3280232 [system_info.py:_save_conda():222] Saving conda packages done
+2024-05-22 22:00:56,396 INFO    HandlerThread:3280232 [system_monitor.py:probe():229] Finished publishing system info
+2024-05-22 22:00:56,398 DEBUG   SenderThread:3280232 [sender.py:send():378] send: files
+2024-05-22 22:00:56,398 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-metadata.json with policy now
+2024-05-22 22:00:56,466 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: python_packages
+2024-05-22 22:00:56,466 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: python_packages
+2024-05-22 22:00:56,467 DEBUG   SenderThread:3280232 [sender.py:send():378] send: telemetry
+2024-05-22 22:00:56,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:00:56,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:00:56,600 INFO    wandb-upload_0:3280232 [upload_job.py:push():130] Uploaded file /tmp/tmpn10cdp1hwandb/sn1241pa-wandb-metadata.json
+2024-05-22 22:00:57,027 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/conda-environment.yaml
+2024-05-22 22:00:57,028 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_created():271] file/dir created: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/requirements.txt
+2024-05-22 22:00:57,028 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_created():271] file/dir created: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-metadata.json
+2024-05-22 22:00:57,028 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_created():271] file/dir created: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/output.log
+2024-05-22 22:00:59,028 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/output.log
+2024-05-22 22:01:00,550 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:01:05,550 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:01:10,551 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:01:11,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:01:11,467 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:01:15,599 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:01:20,600 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:01:25,603 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:01:26,033 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/config.yaml
+2024-05-22 22:01:26,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:01:26,467 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:01:31,564 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:01:36,565 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:01:41,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:01:41,467 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:01:42,526 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:01:47,527 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:01:47,853 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:01:47,855 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:01:47,856 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:01:47,857 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:01:48,037 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_created():271] file/dir created: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:01:52,858 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:01:55,146 DEBUG   SystemMonitor:3280232 [system_monitor.py:_start():172] Starting system metrics aggregation loop
+2024-05-22 22:01:55,149 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:01:56,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:01:56,467 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:01:58,591 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:03,592 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:08,592 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:11,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:02:11,467 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:02:14,524 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:19,524 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:24,525 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:25,152 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:02:26,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:02:26,467 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:02:29,598 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:34,598 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:39,599 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:41,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:02:41,467 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:02:45,596 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:50,596 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:55,155 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:02:56,157 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:02:56,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:02:56,467 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:03:01,587 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:03:06,587 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:03:11,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:03:11,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:03:11,608 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:03:16,609 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:03:17,494 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:03:17,495 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:03:17,495 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:03:17,497 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:03:18,055 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:03:22,497 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:03:25,157 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:03:26,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:03:26,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:03:27,581 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:03:32,582 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:03:37,583 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:03:41,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:03:41,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:03:42,588 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:03:47,589 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:03:52,589 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:03:55,159 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:03:56,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:03:56,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:03:58,553 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:03,554 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:08,554 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:11,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:04:11,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:04:13,584 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:18,584 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:21,308 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:04:21,309 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:04:21,309 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:04:21,311 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:04:22,070 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:04:24,311 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:25,162 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:04:26,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:04:26,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:04:29,567 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:34,567 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:39,567 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:41,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:04:41,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:04:44,583 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:49,584 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:54,584 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:04:55,164 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:04:56,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:04:56,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:05:00,522 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:05:05,522 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:05:10,523 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:05:11,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:05:11,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:05:16,504 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:05:21,504 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:05:22,318 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:05:22,319 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:05:22,319 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:05:22,321 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:05:23,084 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:05:25,169 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:05:26,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:05:26,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:05:26,574 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:05:31,574 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:05:36,575 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:05:41,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:05:41,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:05:41,615 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:05:46,616 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:05:51,616 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:05:55,169 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:05:56,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:05:56,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:05:57,528 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:02,528 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:07,529 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:11,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:06:11,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:06:12,592 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:17,593 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:22,593 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:23,274 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:06:23,275 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:06:23,275 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:06:23,277 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:06:24,098 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:06:25,171 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:06:26,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:06:26,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:06:28,577 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:33,577 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:38,577 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:41,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:06:41,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:06:44,569 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:49,569 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:54,570 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:06:55,175 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:06:56,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:06:56,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:06:59,610 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:07:04,611 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:07:09,611 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:07:11,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:07:11,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:07:15,557 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:07:20,557 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:07:24,197 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:07:24,198 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:07:24,198 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:07:24,198 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:07:25,112 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:07:25,175 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:07:26,177 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:07:26,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:07:26,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:07:31,553 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:07:36,553 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:07:41,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:07:41,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:07:42,507 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:07:47,507 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:07:52,508 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:07:55,178 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:07:56,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:07:56,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:07:57,528 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:02,528 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:07,529 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:11,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:08:11,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:08:12,566 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:17,566 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:22,567 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:25,157 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:08:25,158 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:08:25,158 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:08:25,158 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:08:25,181 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:08:26,126 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:08:26,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:08:26,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:08:27,581 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:32,581 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:37,582 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:41,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:08:41,470 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:08:43,547 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:48,547 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:53,547 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:08:55,185 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:08:56,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:08:56,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:08:59,534 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:04,535 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:09,535 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:11,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:09:11,470 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:09:14,552 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:19,553 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:24,553 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:25,185 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:09:25,999 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:09:26,000 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:09:26,001 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:09:26,001 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:09:26,140 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:09:26,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:09:26,470 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:09:30,509 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:35,509 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:40,510 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:41,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:09:41,470 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:09:45,544 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:50,545 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:55,188 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:09:56,190 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:09:56,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:09:56,470 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:10:01,534 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:10:06,534 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:10:11,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:10:11,470 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:10:12,529 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:10:17,529 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:10:22,530 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:10:25,190 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:10:26,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:10:26,470 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:10:26,924 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:10:26,925 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:10:26,926 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:10:26,926 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:10:27,156 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:10:27,926 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:10:32,927 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:10:37,927 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:10:41,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:10:41,470 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:10:43,570 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:10:48,571 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:10:53,571 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:10:55,193 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:10:56,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:10:56,470 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:10:59,556 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:11:04,556 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:11:09,557 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:11:11,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:11:11,470 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:11:15,532 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:11:20,533 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:11:25,196 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:11:26,197 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:11:26,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:11:26,470 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:11:27,687 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:11:27,688 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:11:27,688 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:11:27,689 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:11:28,172 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:11:31,689 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:11:36,690 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:11:41,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:11:41,471 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:11:42,526 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:11:47,527 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:11:52,527 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:11:55,198 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:11:56,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:11:56,471 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:11:57,599 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:02,599 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:07,599 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:11,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:12:11,471 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:12:13,560 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:18,560 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:23,561 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:25,203 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:12:26,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:12:26,471 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:12:28,579 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:28,603 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:12:28,604 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:12:28,605 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:12:28,605 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:12:29,188 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:12:33,606 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:38,606 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:41,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:12:41,471 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:12:44,518 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:49,519 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:54,519 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:12:55,202 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:12:56,470 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:12:56,471 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:12:59,608 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:13:04,608 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:13:09,609 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:13:11,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:13:11,471 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:13:15,542 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:13:20,542 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:13:25,206 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:13:26,207 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:13:26,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:13:26,471 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:13:29,493 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:13:29,494 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:13:29,494 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:13:29,495 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:13:30,203 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:13:31,495 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:13:36,495 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:13:41,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:13:41,474 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:13:41,565 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:13:46,565 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:13:51,566 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:13:55,207 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:13:56,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:13:56,471 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:13:57,558 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:02,558 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:07,559 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:11,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:14:11,471 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:14:13,524 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:18,524 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:23,525 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:25,209 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:14:26,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:14:26,471 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:14:28,544 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:30,357 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:14:30,358 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:14:30,358 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:14:30,359 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:14:31,218 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:14:34,360 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:39,360 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:41,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:14:41,472 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:14:44,534 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:49,535 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:54,535 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:14:55,212 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:14:56,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:14:56,472 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:15:00,520 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:05,521 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:10,522 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:11,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:15:11,472 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:15:15,611 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:20,612 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:25,215 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:15:26,216 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:26,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:15:26,472 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:15:31,507 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:36,507 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:41,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:15:41,472 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:15:41,603 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:46,603 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:51,603 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:55,216 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:15:56,471 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:15:56,472 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:15:57,128 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:15:57,129 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:15:57,129 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:15:57,130 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:15:57,130 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:15:57,241 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:16:02,131 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:16:07,131 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:16:11,472 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:16:11,472 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:16:12,606 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:16:17,606 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:16:22,607 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:16:25,219 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:16:26,472 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:16:26,476 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:16:28,573 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:16:33,573 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:16:38,574 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:16:41,472 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:16:41,473 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:16:43,586 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:16:48,587 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:16:53,588 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:16:55,222 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:16:56,472 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:16:56,472 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:16:59,533 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:04,534 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:09,535 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:11,472 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:17:11,473 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:17:14,607 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:19,608 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:24,608 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:25,224 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:17:26,472 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:17:26,473 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:17:30,593 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:35,593 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:40,594 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:41,472 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:17:41,473 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:17:45,618 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:50,619 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:55,227 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:17:56,229 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:17:56,472 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:17:56,473 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:18:01,555 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:18:06,555 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:18:11,473 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:18:11,473 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:18:11,577 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:18:16,578 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:18:21,579 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:18:25,229 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:18:26,473 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:18:26,473 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:18:26,606 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:18:31,606 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:18:36,607 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:18:41,473 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:18:41,473 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:18:42,577 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:18:47,578 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:18:52,579 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:18:55,231 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:18:56,473 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:18:56,473 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:18:58,536 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:19:03,537 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:19:08,538 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:19:11,473 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:19:11,473 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:19:13,559 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:19:18,560 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:19:23,560 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:19:25,234 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:19:26,473 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: stop_status
+2024-05-22 22:19:26,473 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: stop_status
+2024-05-22 22:19:28,576 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:19:31,723 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: partial_history
+2024-05-22 22:19:31,724 DEBUG   SenderThread:3280232 [sender.py:send():378] send: history
+2024-05-22 22:19:31,725 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: summary_record
+2024-05-22 22:19:31,725 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:19:32,302 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:19:32,652 DEBUG   SenderThread:3280232 [sender.py:send():378] send: exit
+2024-05-22 22:19:32,652 INFO    SenderThread:3280232 [sender.py:send_exit():585] handling exit code: 1
+2024-05-22 22:19:32,652 INFO    SenderThread:3280232 [sender.py:send_exit():587] handling runtime: 1117
+2024-05-22 22:19:32,652 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:19:32,652 INFO    SenderThread:3280232 [sender.py:send_exit():593] send defer
+2024-05-22 22:19:32,652 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:32,653 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 0
+2024-05-22 22:19:32,653 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:32,653 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 0
+2024-05-22 22:19:32,653 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 1
+2024-05-22 22:19:32,653 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:32,653 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 1
+2024-05-22 22:19:32,653 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:32,653 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 1
+2024-05-22 22:19:32,653 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 2
+2024-05-22 22:19:32,653 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:32,653 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 2
+2024-05-22 22:19:32,653 INFO    HandlerThread:3280232 [system_monitor.py:finish():203] Stopping system monitor
+2024-05-22 22:19:32,653 DEBUG   SystemMonitor:3280232 [system_monitor.py:_start():179] Finished system metrics aggregation loop
+2024-05-22 22:19:32,654 INFO    HandlerThread:3280232 [interfaces.py:finish():200] Joined cpu monitor
+2024-05-22 22:19:32,654 DEBUG   SystemMonitor:3280232 [system_monitor.py:_start():183] Publishing last batch of metrics
+2024-05-22 22:19:32,655 INFO    HandlerThread:3280232 [interfaces.py:finish():200] Joined disk monitor
+2024-05-22 22:19:33,303 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:19:34,303 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/output.log
+2024-05-22 22:19:34,463 INFO    HandlerThread:3280232 [interfaces.py:finish():200] Joined gpu monitor
+2024-05-22 22:19:34,464 INFO    HandlerThread:3280232 [interfaces.py:finish():200] Joined memory monitor
+2024-05-22 22:19:34,464 INFO    HandlerThread:3280232 [interfaces.py:finish():200] Joined network monitor
+2024-05-22 22:19:34,464 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: poll_exit
+2024-05-22 22:19:34,464 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:19:34,464 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:34,464 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 2
+2024-05-22 22:19:34,465 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 3
+2024-05-22 22:19:34,465 DEBUG   SenderThread:3280232 [sender.py:send():378] send: stats
+2024-05-22 22:19:34,465 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:34,466 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: poll_exit
+2024-05-22 22:19:34,466 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 3
+2024-05-22 22:19:34,467 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:34,467 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 3
+2024-05-22 22:19:34,467 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 4
+2024-05-22 22:19:34,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:34,467 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 4
+2024-05-22 22:19:34,467 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:34,467 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 4
+2024-05-22 22:19:34,467 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 5
+2024-05-22 22:19:34,467 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:34,467 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 5
+2024-05-22 22:19:34,467 DEBUG   SenderThread:3280232 [sender.py:send():378] send: summary
+2024-05-22 22:19:34,468 INFO    SenderThread:3280232 [sender.py:_save_file():1389] saving file wandb-summary.json with policy end
+2024-05-22 22:19:34,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:34,468 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 5
+2024-05-22 22:19:34,468 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 6
+2024-05-22 22:19:34,468 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:34,468 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 6
+2024-05-22 22:19:34,468 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:34,468 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 6
+2024-05-22 22:19:34,468 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 7
+2024-05-22 22:19:34,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: status_report
+2024-05-22 22:19:34,469 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:34,469 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 7
+2024-05-22 22:19:34,469 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:34,469 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 7
+2024-05-22 22:19:34,653 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: poll_exit
+2024-05-22 22:19:35,303 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:19:35,304 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/output.log
+2024-05-22 22:19:36,655 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 8
+2024-05-22 22:19:36,655 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: poll_exit
+2024-05-22 22:19:36,655 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:36,656 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 8
+2024-05-22 22:19:36,656 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:36,656 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 8
+2024-05-22 22:19:36,656 INFO    SenderThread:3280232 [job_builder.py:build():432] Attempting to build job artifact
+2024-05-22 22:19:36,656 INFO    SenderThread:3280232 [job_builder.py:_get_source_type():565] is repo sourced job
+2024-05-22 22:19:36,673 INFO    SenderThread:3280232 [job_builder.py:build():541] adding wandb-job metadata file
+2024-05-22 22:19:36,676 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 9
+2024-05-22 22:19:36,677 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:36,677 DEBUG   SenderThread:3280232 [sender.py:send():378] send: artifact
+2024-05-22 22:19:36,677 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 9
+2024-05-22 22:19:36,857 INFO    SenderThread:3280232 [sender.py:send_artifact():1467] sent artifact job-https___github.com_kscalelabs_sim.git_sim_mjx_gym_train.py - {'id': 'QXJ0aWZhY3Q6ODQ2NjIwODY1', 'state': 'COMMITTED', 'artifactSequence': {'id': 'QXJ0aWZhY3RDb2xsZWN0aW9uOjE3ODExNDg4Nw==', 'latestArtifact': {'id': 'QXJ0aWZhY3Q6ODQ2NjIwODY1', 'versionIndex': 3}}}
+2024-05-22 22:19:36,857 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:36,857 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 9
+2024-05-22 22:19:36,857 INFO    SenderThread:3280232 [dir_watcher.py:finish():358] shutting down directory watcher
+2024-05-22 22:19:37,304 INFO    Thread-12 :3280232 [dir_watcher.py:_on_file_modified():288] file/dir modified: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/output.log
+2024-05-22 22:19:37,305 INFO    SenderThread:3280232 [dir_watcher.py:finish():388] scan: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files
+2024-05-22 22:19:37,305 INFO    SenderThread:3280232 [dir_watcher.py:finish():402] scan save: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/output.log output.log
+2024-05-22 22:19:37,305 INFO    SenderThread:3280232 [dir_watcher.py:finish():402] scan save: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json wandb-summary.json
+2024-05-22 22:19:37,305 INFO    SenderThread:3280232 [dir_watcher.py:finish():402] scan save: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-metadata.json wandb-metadata.json
+2024-05-22 22:19:37,308 INFO    SenderThread:3280232 [dir_watcher.py:finish():402] scan save: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/config.yaml config.yaml
+2024-05-22 22:19:37,310 INFO    SenderThread:3280232 [dir_watcher.py:finish():402] scan save: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/conda-environment.yaml conda-environment.yaml
+2024-05-22 22:19:37,310 INFO    SenderThread:3280232 [dir_watcher.py:finish():402] scan save: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/requirements.txt requirements.txt
+2024-05-22 22:19:37,313 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 10
+2024-05-22 22:19:37,313 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:37,315 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 10
+2024-05-22 22:19:37,316 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:37,317 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 10
+2024-05-22 22:19:37,317 INFO    SenderThread:3280232 [file_pusher.py:finish():169] shutting down file pusher
+2024-05-22 22:19:37,491 INFO    wandb-upload_0:3280232 [upload_job.py:push():130] Uploaded file /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/output.log
+2024-05-22 22:19:37,620 INFO    wandb-upload_4:3280232 [upload_job.py:push():130] Uploaded file /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/requirements.txt
+2024-05-22 22:19:37,620 INFO    wandb-upload_2:3280232 [upload_job.py:push():130] Uploaded file /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/config.yaml
+2024-05-22 22:19:37,622 INFO    wandb-upload_1:3280232 [upload_job.py:push():130] Uploaded file /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/wandb-summary.json
+2024-05-22 22:19:37,654 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: poll_exit
+2024-05-22 22:19:37,655 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: poll_exit
+2024-05-22 22:19:37,664 INFO    wandb-upload_3:3280232 [upload_job.py:push():130] Uploaded file /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/files/conda-environment.yaml
+2024-05-22 22:19:37,864 INFO    Thread-11 :3280232 [sender.py:transition_state():613] send defer: 11
+2024-05-22 22:19:37,864 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:37,864 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 11
+2024-05-22 22:19:37,865 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:37,865 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 11
+2024-05-22 22:19:37,865 INFO    SenderThread:3280232 [file_pusher.py:join():175] waiting for file pusher
+2024-05-22 22:19:37,865 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 12
+2024-05-22 22:19:37,865 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:37,865 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 12
+2024-05-22 22:19:37,865 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:37,866 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 12
+2024-05-22 22:19:37,866 INFO    SenderThread:3280232 [file_stream.py:finish():601] file stream finish called
+2024-05-22 22:19:38,030 INFO    SenderThread:3280232 [file_stream.py:finish():605] file stream finish is done
+2024-05-22 22:19:38,030 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 13
+2024-05-22 22:19:38,030 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:38,030 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 13
+2024-05-22 22:19:38,030 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:38,030 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 13
+2024-05-22 22:19:38,030 INFO    SenderThread:3280232 [sender.py:transition_state():613] send defer: 14
+2024-05-22 22:19:38,031 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: defer
+2024-05-22 22:19:38,031 INFO    HandlerThread:3280232 [handler.py:handle_request_defer():184] handle defer: 14
+2024-05-22 22:19:38,031 DEBUG   SenderThread:3280232 [sender.py:send():378] send: final
+2024-05-22 22:19:38,031 DEBUG   SenderThread:3280232 [sender.py:send():378] send: footer
+2024-05-22 22:19:38,031 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: defer
+2024-05-22 22:19:38,031 INFO    SenderThread:3280232 [sender.py:send_request_defer():609] handle sender defer: 14
+2024-05-22 22:19:38,031 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: poll_exit
+2024-05-22 22:19:38,032 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: poll_exit
+2024-05-22 22:19:38,032 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: poll_exit
+2024-05-22 22:19:38,032 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: poll_exit
+2024-05-22 22:19:38,032 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: server_info
+2024-05-22 22:19:38,033 DEBUG   SenderThread:3280232 [sender.py:send_request():405] send_request: server_info
+2024-05-22 22:19:38,034 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: get_summary
+2024-05-22 22:19:38,035 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: sampled_history
+2024-05-22 22:19:38,036 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: internal_messages
+2024-05-22 22:19:38,065 INFO    MainThread:3280232 [wandb_run.py:_footer_history_summary_info():3994] rendering history
+2024-05-22 22:19:38,066 INFO    MainThread:3280232 [wandb_run.py:_footer_history_summary_info():4026] rendering summary
+2024-05-22 22:19:38,066 INFO    MainThread:3280232 [wandb_run.py:_footer_sync_info():3953] logging synced files
+2024-05-22 22:19:38,066 DEBUG   HandlerThread:3280232 [handler.py:handle_request():158] handle_request: shutdown
+2024-05-22 22:19:38,066 INFO    HandlerThread:3280232 [handler.py:finish():882] shutting down handler
+2024-05-22 22:19:39,033 INFO    WriterThread:3280232 [datastore.py:close():296] close: /ephemeral/users/mlutz/sim/sim/mjx_gym/wandb/run-20240522_220054-tqehb9de/run-tqehb9de.wandb
+2024-05-22 22:19:39,065 INFO    SenderThread:3280232 [sender.py:finish():1545] shutting down sender
+2024-05-22 22:19:39,065 INFO    SenderThread:3280232 [file_pusher.py:finish():169] shutting down file pusher
+2024-05-22 22:19:39,065 INFO    SenderThread:3280232 [file_pusher.py:join():175] waiting for file pusher

@@ -1,0 +1,5 @@
+env_name: default_humanoid
+reward_params: {'rew_forward': {'weight': 1.25}, 'rew_healthy': {'weight': 5.0, 'healthy_z_lower': 1.0, 'healthy_z_upper': 2.0}, 'rew_ctrl_cost': {'weight': 0.1}}
+training on 2048 environments
+time to jit: 0:03:43.753455
+time to train: 0:00:00
