@@ -1,11 +1,13 @@
-import jax
-from tqdm import tqdm
-import mujoco
-from mujoco import mjx
 from typing import List
-from brax.mjx.base import State as mjxState
+
+import jax
 import jax.numpy as jp
+import mujoco
 import numpy as np
+from brax.mjx.base import State as mjxState
+from mujoco import mjx
+from tqdm import tqdm
+
 
 def mjx_rollout(env, inference_fn, n_steps=1000, render_every=2, seed=0) -> List[mjxState]:
     """
@@ -22,7 +24,7 @@ def mjx_rollout(env, inference_fn, n_steps=1000, render_every=2, seed=0) -> List
     It is worth noting that env, a Brax environment, is expected to implement MJX
     in the background. See default_humanoid_env for reference.
     """
-    print(f'Rolling out {n_steps} steps with MJX')
+    print(f"Rolling out {n_steps} steps with MJX")
     reset_fn = jax.jit(env.reset)
     step_fn = jax.jit(env.step)
     inference_fn = jax.jit(inference_fn)
@@ -41,6 +43,7 @@ def mjx_rollout(env, inference_fn, n_steps=1000, render_every=2, seed=0) -> List
 
     return rollout
 
+
 def render_mjx_rollout(env, inference_fn, n_steps=1000, render_every=2, seed=0) -> np.ndarray:
     """
     Rollout a trajectory using MuJoCo and render it
@@ -55,9 +58,10 @@ def render_mjx_rollout(env, inference_fn, n_steps=1000, render_every=2, seed=0) 
         A list of renderings of the policy rollout with dimensions (T, H, W, C)
     """
     rollout = mjx_rollout(env, inference_fn, n_steps, render_every, seed)
-    images = env.render(rollout[::render_every], camera='side')
+    images = env.render(rollout[::render_every], camera="side")
 
     return np.array(images)
+
 
 def render_mujoco_rollout(env, inference_fn, n_steps=1000, render_every=2, seed=0):
     """
@@ -71,7 +75,7 @@ def render_mujoco_rollout(env, inference_fn, n_steps=1000, render_every=2, seed=
     Returns:
         A list of images of the policy rollout (T, H, W, C)
     """
-    print(f'Rolling out {n_steps} steps with MuJoCo')
+    print(f"Rolling out {n_steps} steps with MuJoCo")
     model = env.sys.mj_model
     data = mujoco.MjData(model)
     renderer = mujoco.Renderer(model)
@@ -81,15 +85,15 @@ def render_mujoco_rollout(env, inference_fn, n_steps=1000, render_every=2, seed=
     rng = jax.random.PRNGKey(seed)
     for step in tqdm(range(n_steps)):
         act_rng, seed = jax.random.split(rng)
-        obs = env._get_obs(mjx.put_data(model, data), ctrl) 
+        obs = env._get_obs(mjx.put_data(model, data), ctrl)
         # TODO: implement methods in envs that avoid having to use mjx in a hacky way...
         ctrl, _ = inference_fn(obs, act_rng)
         data.ctrl = ctrl
         for _ in range(env._n_frames):
             mujoco.mj_step(model, data)
-        
+
         if step % render_every == 0:
-            renderer.update_scene(data, camera='side')
+            renderer.update_scene(data, camera="side")
             images.append(renderer.render())
 
     return images
