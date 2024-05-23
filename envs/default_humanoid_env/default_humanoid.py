@@ -7,16 +7,16 @@ import mujoco
 from mujoco import mjx
 from etils import epath
 from .rewards import get_reward_fn
-
-DEFAULT_REWARD_PARAMS = {
-	'rew_forward': {'weight': 1.25},
-	'rew_healthy': {'weight': 5.0, 'healthy_z_lower': 1.0, 'healthy_z_upper': 2.0},
-	'rew_ctrl_cost': {'weight': 0.1}
-}
+from utils.default import DEFAULT_REWARD_PARAMS
 
 class DefaultHumanoidEnv(PipelineEnv):
 	"""
 	An environment for humanoid body position, velocities, and angles.
+
+	Note: This environment is based on the default humanoid environment in the Brax library.
+	https://github.com/google/brax/blob/main/brax/envs/humanoid.py
+
+	However, this environment is designed to work with modular reward functions, allowing for quicker experimentation.
 	"""
 	def __init__(
 		self,

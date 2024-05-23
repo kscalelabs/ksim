@@ -81,6 +81,7 @@ def ctrl_cost_reward_fn(state: mjxState, action: jp.ndarray, next_state: mjxStat
 
     return ctrl_cost, jp.array(1.)
 
+# NOTE: After defining the reward functions, they must be added here to be used in the combined reward function.
 reward_functions = {
     'rew_forward': forward_reward_fn,
     'rew_healthy': healthy_reward_fn,
