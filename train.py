@@ -2,7 +2,6 @@ import argparse
 import functools
 from datetime import datetime
 
-import matplotlib.pyplot as plt
 import wandb
 import yaml
 from brax.io import model
@@ -10,6 +9,7 @@ from brax.training.agents.ppo import train as ppo
 
 from envs import get_env
 from envs.default_humanoid_env.default_humanoid import DEFAULT_REWARD_PARAMS
+
 
 def train(config):
     wandb.init(
@@ -50,6 +50,7 @@ def train(config):
     )
 
     times = [datetime.now()]
+
     def progress(num_steps, metrics):
         times.append(datetime.now())
 
@@ -65,6 +66,7 @@ def train(config):
     print(f"time to jit: {times[1] - times[0]}")
     print(f"time to train: {times[-1] - times[1]}")
 
+
 if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Run PPO training with specified config file.")
@@ -74,5 +76,5 @@ if __name__ == "__main__":
     # Load config from YAML file
     with open(args.config, "r") as file:
         config = yaml.safe_load(file)
-    
+
     train(config)

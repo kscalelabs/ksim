@@ -2,7 +2,6 @@ from typing import Callable, Dict, Tuple
 
 import jax
 import jax.numpy as jp
-from brax import base
 from brax.mjx.base import State as mjxState
 
 DEFAULT_REWARD_PARAMS = {
@@ -10,6 +9,7 @@ DEFAULT_REWARD_PARAMS = {
     "rew_healthy": {"weight": 5.0, "healthy_z_lower": 1.0, "healthy_z_upper": 2.0},
     "rew_ctrl_cost": {"weight": 0.1},
 }
+
 
 def get_reward_fn(
     reward_params: Dict[str, Dict[str, float]], dt, include_reward_breakdown

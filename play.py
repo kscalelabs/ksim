@@ -11,6 +11,7 @@ from envs import get_env
 from envs.default_humanoid_env.default_humanoid import DEFAULT_REWARD_PARAMS
 from utils.rollouts import render_mjx_rollout, render_mujoco_rollout
 
+
 def train(config, n_steps, render_every):
     wandb.init(
         project=config.get("project_name", "robotic_locomotion_training") + "_test",
@@ -38,7 +39,9 @@ def train(config, n_steps, render_every):
     params = model.load_params(model_path)
     normalize = lambda x, y: x
     if config.get("normalize_observations", False):
-        normalize = running_statistics.normalize # NOTE: very important to keep training & test normalization consistent
+        normalize = (
+            running_statistics.normalize
+        )  # NOTE: very important to keep training & test normalization consistent
     policy_network = ppo_networks.make_ppo_networks(
         env.observation_size, env.action_size, preprocess_observations_fn=normalize
     )
@@ -59,6 +62,7 @@ def train(config, n_steps, render_every):
     fps = 1 / env.dt
     wandb.log({"training_rollouts": wandb.Video(images_tchw, fps=fps, format="mp4")})
     media.write_video("video.mp4", images_thwc, fps=fps)
+
 
 if __name__ == "__main__":
     # Parse command-line arguments
