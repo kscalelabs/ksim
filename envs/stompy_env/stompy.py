@@ -9,14 +9,8 @@ from brax.mjx.base import State as mjxState
 from etils import epath
 from mujoco import mjx
 
-from .rewards import get_reward_fn
-
-DEFAULT_REWARD_PARAMS = {
-    "rew_forward": {"weight": 1.25},
-    "rew_healthy": {"weight": 5.0, "healthy_z_lower": 1.0, "healthy_z_upper": 2.0},
-    "rew_ctrl_cost": {"weight": 0.1},
-}
-
+from envs.stompy_env.rewards import DEFAULT_REWARD_PARAMS
+from envs.stompy_env.rewards import get_reward_fn
 
 class StompyEnv(PipelineEnv):
     """
@@ -55,12 +49,13 @@ class StompyEnv(PipelineEnv):
         self.reward_fn = get_reward_fn(self._reward_params, self.dt, include_reward_breakdown=True)
 
     def reset(self, rng: jp.ndarray) -> State:
-        """Resets the environment to an initial state.
+        """
+        Resets the environment to an initial state.
 
         Args:
-                rng: Random number generator seed.
+			rng: Random number generator seed.
         Returns:
-                The initial state of the environment.
+			The initial state of the environment.
         """
         rng, rng1, rng2 = jax.random.split(rng, 3)
 
@@ -86,13 +81,14 @@ class StompyEnv(PipelineEnv):
         return State(mjx_state, obs, reward, done, metrics)
 
     def step(self, state: State, action: jp.ndarray) -> State:
-        """Runs one timestep of the environment's dynamics.
+        """
+        Runs one timestep of the environment's dynamics.
 
         Args:
-                state: The current state of the environment.
-                action: The action to take.
+			state: The current state of the environment.
+			action: The action to take.
         Returns:
-                A tuple of the next state, the reward, whether the episode has ended, and additional information.
+			A tuple of the next state, the reward, whether the episode has ended, and additional information.
         """
         mjx_state = state.pipeline_state
         assert mjx_state, "state.pipeline_state was recorded as None"
@@ -131,13 +127,14 @@ class StompyEnv(PipelineEnv):
         )
 
     def _get_obs(self, data: mjxState, action: jp.ndarray) -> jp.ndarray:
-        """Observes humanoid body position, velocities, and angles.
+        """
+        Observes humanoid body position, velocities, and angles.
 
         Args:
-                data: The current state of the environment.
-                action: The current action.
+			data: The current state of the environment.
+			action: The current action.
         Returns:
-                Observations of the environment.
+			Observations of the environment.
         """
         position = data.qpos
         if self._exclude_current_positions_from_observation:

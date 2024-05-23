@@ -5,9 +5,9 @@ from brax.envs.base import PipelineEnv, State
 from brax.io import mjcf
 from brax.mjx.base import State as mjxState
 from etils import epath
-from utils.default import DEFAULT_REWARD_PARAMS
 
-from .rewards import get_reward_fn
+from envs.default_humanoid_env.rewards import DEFAULT_REWARD_PARAMS
+from envs.default_humanoid_env.rewards import get_reward_fn
 
 
 class DefaultHumanoidEnv(PipelineEnv):
