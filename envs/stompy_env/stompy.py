@@ -29,7 +29,7 @@ class StompyEnv(PipelineEnv):
 		log_reward_breakdown=True,
 		**kwargs,
 	):
-		path = os.getenv('MODEL_DIR', '') + "/stompy.xml"
+		path = os.getenv('MODEL_DIR', '') + "/robot_simplified.xml"
 		mj_model = mujoco.MjModel.from_xml_path(path) # type: ignore
 		mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG # type: ignore # TODO: not sure why typing is not working here
 		mj_model.opt.iterations = 6

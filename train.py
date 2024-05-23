@@ -33,7 +33,6 @@ reset_noise_scale = config.get('reset_noise_scale', 1e-2)
 exclude_current_positions_from_observation = config.get('exclude_current_positions_from_observation', True)
 log_reward_breakdown = config.get('log_reward_breakdown', True)
 
-print(f'env_name: {config.get("env_name", "stompy")}')
 print(f'reward_params: {reward_params}')
 print(f'training on {config["num_envs"]} environments')
 
@@ -45,6 +44,7 @@ env = get_env(
     exclude_current_positions_from_observation=exclude_current_positions_from_observation,
     log_reward_breakdown=log_reward_breakdown
 )
+print(f'Env loaded: {config.get("env_name", "could not find environment")}')
 
 train_fn = functools.partial(
     ppo.train,
@@ -65,13 +65,7 @@ train_fn = functools.partial(
     seed=config['seed']
 )
 
-x_data = []
-y_data = []
-ydataerr = []
 times = [datetime.now()]
-
-max_y, min_y = 13000, 0
-
 def progress(num_steps, metrics):
     times.append(datetime.now())
 
@@ -82,7 +76,7 @@ def progress(num_steps, metrics):
     })
 
 def save_model(current_step, make_policy, params):
-    model_path = "weights/ " + config.get('project_name', 'model') + ".pkl"
+    model_path = "weights/" + config.get('project_name', 'model') + ".pkl"
     model.save_params(model_path, params)
     print(f"Saved model at step {current_step} to {model_path}")
 
