@@ -1,5 +1,0 @@
-reward_params: {'rew_forward': {'weight': 1.25}, 'rew_healthy': {'weight': 5.0, 'healthy_z_lower': 5.0, 'healthy_z_upper': 2.0}, 'rew_ctrl_cost': {'weight': 0.1}}
-training on 512 environments
-Env loaded: stompy
-Saved model at step 7536640 to weights/ stompy_walk.pkl
-Saved model at step 15073280 to weights/ stompy_walk.pkl
