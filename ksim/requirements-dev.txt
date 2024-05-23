@@ -5,3 +5,14 @@ darglint
 mypy
 pytest
 ruff
+
+brax
+jax
+mediapy
+moviepy
+mujoco-mjx
+numpy
+torch
+tqdm
+imageio
+wandb

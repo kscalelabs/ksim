@@ -1,2 +1,12 @@
 # requirements.txt
 
+brax
+jax
+mediapy
+moviepy
+mujoco-mjx
+numpy
+torch
+tqdm
+imageio
+wandb

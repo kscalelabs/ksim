@@ -19,3 +19,6 @@ build/
 dist/
 *.so
 out*/
+
+# Training artifacts
+wandb/
