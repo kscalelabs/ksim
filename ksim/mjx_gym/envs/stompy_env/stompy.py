@@ -52,9 +52,9 @@ class StompyEnv(PipelineEnv):
         Resets the environment to an initial state.
 
         Args:
-                        rng: Random number generator seed.
+            rng: Random number generator seed.
         Returns:
-                        The initial state of the environment.
+            The initial state of the environment.
         """
         rng, rng1, rng2 = jax.random.split(rng, 3)
 
@@ -84,10 +84,10 @@ class StompyEnv(PipelineEnv):
         Runs one timestep of the environment's dynamics.
 
         Args:
-                        state: The current state of the environment.
-                        action: The action to take.
+            state: The current state of the environment.
+            action: The action to take.
         Returns:
-                        A tuple of the next state, the reward, whether the episode has ended, and additional information.
+            A tuple of the next state, the reward, whether the episode has ended, and additional information.
         """
         mjx_state = state.pipeline_state
         assert mjx_state, "state.pipeline_state was recorded as None"
@@ -130,10 +130,10 @@ class StompyEnv(PipelineEnv):
         Observes humanoid body position, velocities, and angles.
 
         Args:
-                        data: The current state of the environment.
-                        action: The current action.
+            data: The current state of the environment.
+            action: The current action.
         Returns:
-                        Observations of the environment.
+            Observations of the environment.
         """
         position = data.qpos
         if self._exclude_current_positions_from_observation:

@@ -28,7 +28,7 @@ setup(
     name="kscale-sim",
     version=version,
     description="K-Scale Simulation Library",
-    author="Benjamin Bolte",
+    author="Benjamin Bolte, Pawel Budzianowski, Michael Lutz",
     url="https://github.com/kscalelabs/ksim",
     long_description=long_description,
     long_description_content_type="text/markdown",
