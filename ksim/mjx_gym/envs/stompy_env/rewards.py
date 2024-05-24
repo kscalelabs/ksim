@@ -1,10 +1,14 @@
+"""Defines rewards for the Stompy environment."""
+
 from typing import Callable, Dict, Tuple
 
 import jax
 import jax.numpy as jp
 from brax.mjx.base import State as mjxState
 
-DEFAULT_REWARD_PARAMS = {
+from ksim.mjx_gym.envs.default_humanoid_env.rewards import RewardDict, RewardFunction, RewardParams
+
+DEFAULT_REWARD_PARAMS: RewardParams = {
     "rew_forward": {"weight": 1.25},
     "rew_healthy": {"weight": 5.0, "healthy_z_lower": 1.0, "healthy_z_upper": 2.0},
     "rew_ctrl_cost": {"weight": 0.1},
@@ -12,19 +16,27 @@ DEFAULT_REWARD_PARAMS = {
 
 
 def get_reward_fn(
-    reward_params: Dict[str, Dict[str, float]], dt, include_reward_breakdown
+    reward_params: RewardParams,
+    dt: jax.Array,
+    include_reward_breakdown: bool,
 ) -> Callable[[mjxState, jp.ndarray, mjxState], Tuple[jp.ndarray, jp.ndarray, Dict[str, jp.ndarray]]]:
     """Get a combined reward function.
 
     Args:
         reward_params: Dictionary of reward parameters.
         dt: Time step.
+        include_reward_breakdown: Whether to include a breakdown of the reward
+            into its components.
+
     Returns:
-        A reward function that takes in a state, action, and next state and returns a float wrapped in a jp.ndarray.
+        A reward function that takes in a state, action, and next state and
+        returns a float wrapped in a jp.ndarray.
     """
 
     def reward_fn(
-        state: mjxState, action: jp.ndarray, next_state: mjxState
+        state: mjxState,
+        action: jp.ndarray,
+        next_state: mjxState,
     ) -> Tuple[jp.ndarray, jp.ndarray, Dict[str, jp.ndarray]]:
         reward, is_healthy = jp.array(0.0), jp.array(1.0)
         rewards = {}
@@ -40,7 +52,11 @@ def get_reward_fn(
 
 
 def forward_reward_fn(
-    state: mjxState, action: jp.ndarray, next_state: mjxState, dt: jax.Array, params: Dict[str, float]
+    state: mjxState,
+    action: jp.ndarray,
+    next_state: mjxState,
+    dt: jax.Array,
+    params: RewardDict,
 ) -> Tuple[jp.ndarray, jp.ndarray]:
     """Reward function for moving forward.
 
@@ -50,6 +66,7 @@ def forward_reward_fn(
         next_state: Next state.
         dt: Time step.
         params: Reward parameters.
+
     Returns:
         A float wrapped in a jax array.
     """
@@ -62,7 +79,11 @@ def forward_reward_fn(
 
 
 def healthy_reward_fn(
-    state: mjxState, action: jp.ndarray, next_state: mjxState, dt: jax.Array, params: Dict[str, float]
+    state: mjxState,
+    action: jp.ndarray,
+    next_state: mjxState,
+    dt: jax.Array,
+    params: RewardDict,
 ) -> Tuple[jp.ndarray, jp.ndarray]:
     """Reward function for staying healthy.
 
@@ -72,6 +93,7 @@ def healthy_reward_fn(
         next_state: Next state.
         dt: Time step.
         params: Reward parameters.
+
     Returns:
         A float wrapped in a jax array.
     """
@@ -85,7 +107,11 @@ def healthy_reward_fn(
 
 
 def ctrl_cost_reward_fn(
-    state: mjxState, action: jp.ndarray, next_state: mjxState, dt: jax.Array, params: Dict[str, float]
+    state: mjxState,
+    action: jp.ndarray,
+    next_state: mjxState,
+    dt: jax.Array,
+    params: RewardDict,
 ) -> Tuple[jp.ndarray, jp.ndarray]:
     """Reward function for control cost.
 
@@ -95,6 +121,7 @@ def ctrl_cost_reward_fn(
         next_state: Next state.
         dt: Time step.
         params: Reward parameters.
+
     Returns:
         A float wrapped in a jax array.
     """
@@ -103,7 +130,7 @@ def ctrl_cost_reward_fn(
     return ctrl_cost, jp.array(1.0)
 
 
-reward_functions = {
+reward_functions: dict[str, RewardFunction] = {
     "rew_forward": forward_reward_fn,
     "rew_healthy": healthy_reward_fn,
     "rew_ctrl_cost": ctrl_cost_reward_fn,

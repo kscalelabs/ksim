@@ -38,6 +38,9 @@ module = [
     "brax.*",
     "etils.*",
     "mujoco.*",
+    "tqdm.*",
+    "jaxlib.cpu.*",
+    "jaxlib.mlir.*",
 ]
 
 ignore_missing_imports = true

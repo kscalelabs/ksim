@@ -40,8 +40,8 @@ class DefaultHumanoidEnv(PipelineEnv):
         **kwargs: Unpack[EnvKwargs],
     ) -> None:
         path = epath.Path(epath.resource_path("mujoco")) / ("mjx/test_data/humanoid")
-        mj_model = mujoco.MjModel.from_xml_path((path / "humanoid.xml").as_posix())  # type: ignore[no-untyped-def]
-        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG  # type: ignore # TODO: not sure why typing is not working here
+        mj_model = mujoco.MjModel.from_xml_path((path / "humanoid.xml").as_posix())
+        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.iterations = 6
         mj_model.opt.ls_iterations = 6
 

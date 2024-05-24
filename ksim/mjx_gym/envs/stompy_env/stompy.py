@@ -1,4 +1,7 @@
+"""Defines the Stompy MJX environment."""
+
 import os
+from typing import Unpack
 
 import jax
 import jax.numpy as jp
@@ -7,27 +10,25 @@ from brax.envs.base import PipelineEnv, State
 from brax.io import mjcf
 from brax.mjx.base import State as mjxState
 
-from envs.stompy_env.rewards import DEFAULT_REWARD_PARAMS
-from envs.stompy_env.rewards import get_reward_fn
+from ksim.mjx_gym.envs.default_humanoid_env.default_humanoid import EnvKwargs
+from ksim.mjx_gym.envs.default_humanoid_env.rewards import DEFAULT_REWARD_PARAMS, RewardParams, get_reward_fn
 
 
 class StompyEnv(PipelineEnv):
-    """
-    An environment for humanoid body position, velocities, and angles.
-    """
+    """An environment for humanoid body position, velocities, and angles."""
 
     def __init__(
         self,
-        reward_params=DEFAULT_REWARD_PARAMS,
-        terminate_when_unhealthy=True,
-        reset_noise_scale=1e-2,
-        exclude_current_positions_from_observation=True,
-        log_reward_breakdown=True,
-        **kwargs,
-    ):
+        reward_params: RewardParams = DEFAULT_REWARD_PARAMS,
+        terminate_when_unhealthy: bool = True,
+        reset_noise_scale: float = 1e-2,
+        exclude_current_positions_from_observation: bool = True,
+        log_reward_breakdown: bool = True,
+        **kwargs: Unpack[EnvKwargs],
+    ) -> None:
         path = os.getenv("MODEL_DIR", "") + "/robot_simplified.xml"
-        mj_model = mujoco.MjModel.from_xml_path(path)  # type: ignore
-        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG  # type: ignore # TODO: not sure why typing is not working here
+        mj_model = mujoco.MjModel.from_xml_path(path)
+        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.iterations = 6
         mj_model.opt.ls_iterations = 6
 
@@ -48,11 +49,11 @@ class StompyEnv(PipelineEnv):
         self.reward_fn = get_reward_fn(self._reward_params, self.dt, include_reward_breakdown=True)
 
     def reset(self, rng: jp.ndarray) -> State:
-        """
-        Resets the environment to an initial state.
+        """Resets the environment to an initial state.
 
         Args:
             rng: Random number generator seed.
+
         Returns:
             The initial state of the environment.
         """
@@ -80,12 +81,12 @@ class StompyEnv(PipelineEnv):
         return State(mjx_state, obs, reward, done, metrics)
 
     def step(self, state: State, action: jp.ndarray) -> State:
-        """
-        Runs one timestep of the environment's dynamics.
+        """Runs one timestep of the environment's dynamics.
 
         Args:
             state: The current state of the environment.
             action: The action to take.
+
         Returns:
             A tuple of the next state, the reward, whether the episode has ended, and additional information.
         """
@@ -97,9 +98,11 @@ class StompyEnv(PipelineEnv):
 
         assert type(next_mjx_state) == mjxState, f"next_mjx_state is of type {type(next_mjx_state)}"
         assert type(mjx_state) == mjxState, f"mjx_state is of type {type(mjx_state)}"
-        # mlutz: from what I've seen, .pipeline_state and .pipeline_step(...) actually return an brax.mjx.base.State object
-        # however, the type hinting suggests that it should return a brax.base.State object
-        # brax.mjx.base.State inherits from brax.base.State but also inherits from mjx.Data, which is needed for some rewards
+        # mlutz: from what I've seen, .pipeline_state and .pipeline_step(...)
+        # actually return an brax.mjx.base.State object however, the type
+        # hinting suggests that it should return a brax.base.State object
+        # brax.mjx.base.State inherits from brax.base.State but also inherits
+        # from mjx.Data, which is needed for some rewards
 
         obs = self._get_obs(mjx_state, action)
         reward, is_healthy, reward_breakdown = self.reward_fn(mjx_state, action, next_mjx_state)
@@ -121,17 +124,15 @@ class StompyEnv(PipelineEnv):
             for key, val in reward_breakdown.items():
                 state.metrics[key] = val
 
-        return state.replace(  # type: ignore # TODO: fix the type hinting...
-            pipeline_state=next_mjx_state, obs=obs, reward=reward, done=done
-        )
+        return state.replace(pipeline_state=next_mjx_state, obs=obs, reward=reward, done=done)
 
     def _get_obs(self, data: mjxState, action: jp.ndarray) -> jp.ndarray:
-        """
-        Observes humanoid body position, velocities, and angles.
+        """Observes humanoid body position, velocities, and angles.
 
         Args:
             data: The current state of the environment.
             action: The current action.
+
         Returns:
             Observations of the environment.
         """
@@ -149,3 +150,12 @@ class StompyEnv(PipelineEnv):
                 data.qfrc_actuator,
             ]
         )
+
+
+def adhoc_test() -> None:
+    print("hello, world!")
+
+
+if __name__ == "__main__":
+    # python -m ksim.mjx_gym.envs.stompy_env.stompy
+    adhoc_test()

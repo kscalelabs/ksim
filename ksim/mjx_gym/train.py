@@ -1,17 +1,20 @@
+"""Defines the training CLI."""
+
 import argparse
 import functools
 from datetime import datetime
+from typing import Any
 
 import wandb
 import yaml
 from brax.io import model
 from brax.training.agents.ppo import train as ppo
 
-from envs import get_env
-from envs.default_humanoid_env.default_humanoid import DEFAULT_REWARD_PARAMS
+from ksim.mjx_gym.envs import get_env
+from ksim.mjx_gym.envs.default_humanoid_env.default_humanoid import DEFAULT_REWARD_PARAMS
 
 
-def train(config):
+def train(config: dict[str, Any]) -> None:
     wandb.init(
         project=config.get("project_name", "robotic-locomotion-training"),
         name=config.get("experiment_name", "ppo-training"),
@@ -51,12 +54,12 @@ def train(config):
 
     times = [datetime.now()]
 
-    def progress(num_steps, metrics):
+    def progress(num_steps: int, metrics: dict[str, Any]) -> None:  # noqa: ANN401
         times.append(datetime.now())
 
         wandb.log({"steps": num_steps, "epoch_time": (times[-1] - times[-2]).total_seconds(), **metrics})
 
-    def save_model(current_step, make_policy, params):
+    def save_model(current_step: int, make_policy: str, params: dict[str, Any]) -> None:  # noqa: ANN401
         model_path = "weights/" + config.get("project_name", "model") + ".pkl"
         model.save_params(model_path, params)
         print(f"Saved model at step {current_step} to {model_path}")

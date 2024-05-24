@@ -1,4 +1,8 @@
+"""Defines the CLI for running PPO training with specified config file."""
+
 import argparse
+import logging
+from typing import Any
 
 import mediapy as media
 import numpy as np
@@ -7,12 +11,15 @@ import yaml
 from brax.io import model
 from brax.training.acme import running_statistics
 from brax.training.agents.ppo import networks as ppo_networks
-from envs import get_env
-from envs.default_humanoid_env.default_humanoid import DEFAULT_REWARD_PARAMS
-from utils.rollouts import render_mjx_rollout, render_mujoco_rollout
+
+from ksim.mjx_gym.envs import get_env
+from ksim.mjx_gym.envs.default_humanoid_env.default_humanoid import DEFAULT_REWARD_PARAMS
+from ksim.mjx_gym.utils.rollouts import render_mjx_rollout, render_mujoco_rollout
+
+logger = logging.getLogger(__name__)
 
 
-def train(config, n_steps, render_every):
+def train(config: dict[str, Any], n_steps: int, render_every: int) -> None:
     wandb.init(
         project=config.get("project_name", "robotic_locomotion_training") + "_test",
         name=config.get("experiment_name", "ppo-training") + "_test",
@@ -27,8 +34,12 @@ def train(config, n_steps, render_every):
         exclude_current_positions_from_observation=config.get("exclude_current_positions_from_observation", True),
         log_reward_breakdown=config.get("log_reward_breakdown", True),
     )
-    print(
-        f'Loaded environment {config.get("env_name", "")} with env.observation_size: {env.observation_size} and env.action_size: {env.action_size}'
+
+    logger.info(
+        "Loaded environment %s with env.observation_size: %s and env.action_size: %s",
+        config.get("env_name", ""),
+        env.observation_size,
+        env.action_size,
     )
 
     # Loading params
@@ -37,7 +48,10 @@ def train(config, n_steps, render_every):
     else:
         model_path = "weights/" + config.get("project_name", "model") + ".pkl"
     params = model.load_params(model_path)
-    normalize = lambda x, y: x
+
+    def normalize(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        return x
+
     if config.get("normalize_observations", False):
         normalize = (
             running_statistics.normalize
@@ -50,13 +64,12 @@ def train(config, n_steps, render_every):
 
     # rolling out a trajectory
     if args.use_mujoco:
-        images = render_mujoco_rollout(env, inference_fn, n_steps, render_every)
+        images_thwc = render_mujoco_rollout(env, inference_fn, n_steps, render_every)
     else:
-        images = render_mjx_rollout(env, inference_fn, n_steps, render_every)
-    print(f"Rolled out {len(images)} steps")
+        images_thwc = render_mjx_rollout(env, inference_fn, n_steps, render_every)
+    print(f"Rolled out {len(images_thwc)} steps")
 
     # render the trajectory
-    images_thwc = np.array(images)
     images_tchw = np.transpose(images_thwc, (0, 3, 1, 2))
 
     fps = 1 / env.dt
