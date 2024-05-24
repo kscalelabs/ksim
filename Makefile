@@ -49,8 +49,8 @@ clean:
 py-files := $(shell find . -name '*.py')
 
 format:
-	@black $(py-files)
-	@ruff format $(py-files)
+	@black ksim
+	@ruff format ksim
 .PHONY: format
 
 format-cpp:
@@ -59,13 +59,13 @@ format-cpp:
 .PHONY: format-cpp
 
 static-checks:
-	@black --diff --check $(py-files)
-	@ruff check $(py-files)
-	@mypy --install-types --non-interactive $(py-files)
+	@black --diff --check ksim
+	@ruff check ksim
+	@mypy --install-types --non-interactive ksim
 .PHONY: lint
 
 mypy-daemon:
-	@dmypy run -- $(py-files)
+	@dmypy run -- ksim
 .PHONY: mypy-daemon
 
 # ------------------------ #

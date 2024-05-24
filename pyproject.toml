@@ -30,10 +30,11 @@ warn_redundant_casts = true
 incremental = true
 namespace_packages = false
 
-# Uncomment to exclude modules from Mypy.
-# [[tool.mypy.overrides]]
-# module = []
-# ignore_missing_imports = true
+exclude = ["ksim/mjx_gym/"]
+
+[[tool.mypy.overrides]]
+module = []
+ignore_missing_imports = true
 
 [tool.isort]
 
@@ -43,6 +44,8 @@ profile = "black"
 
 line-length = 120
 target-version = "py310"
+
+exclude = ["ksim/mjx_gym"]
 
 [tool.ruff.lint]
 
