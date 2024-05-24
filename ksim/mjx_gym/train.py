@@ -11,7 +11,9 @@ from brax.io import model
 from brax.training.agents.ppo import train as ppo
 
 from ksim.mjx_gym.envs import get_env
-from ksim.mjx_gym.envs.default_humanoid_env.default_humanoid import DEFAULT_REWARD_PARAMS
+from ksim.mjx_gym.envs.default_humanoid_env.default_humanoid import (
+    DEFAULT_REWARD_PARAMS,
+)
 
 
 def train(config: dict[str, Any]) -> None:

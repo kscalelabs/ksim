@@ -11,7 +11,11 @@ from brax.io import mjcf
 from brax.mjx.base import State as mjxState
 from etils import epath
 
-from ksim.mjx_gym.envs.default_humanoid_env.rewards import DEFAULT_REWARD_PARAMS, RewardParams, get_reward_fn
+from ksim.mjx_gym.envs.default_humanoid_env.rewards import (
+    DEFAULT_REWARD_PARAMS,
+    RewardParams,
+    get_reward_fn,
+)
 
 
 class EnvKwargs(TypedDict):

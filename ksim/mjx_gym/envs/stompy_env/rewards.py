@@ -6,7 +6,11 @@ import jax
 import jax.numpy as jp
 from brax.mjx.base import State as mjxState
 
-from ksim.mjx_gym.envs.default_humanoid_env.rewards import RewardDict, RewardFunction, RewardParams
+from ksim.mjx_gym.envs.default_humanoid_env.rewards import (
+    RewardDict,
+    RewardFunction,
+    RewardParams,
+)
 
 DEFAULT_REWARD_PARAMS: RewardParams = {
     "rew_forward": {"weight": 1.25},
