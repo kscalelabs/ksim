@@ -30,7 +30,7 @@ warn_redundant_casts = true
 incremental = true
 namespace_packages = false
 
-exclude = ["ksim/mjx_gym/"]
+# exclude = ["ksim/mjx_gym/"]
 
 [[tool.mypy.overrides]]
 module = []
