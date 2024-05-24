@@ -30,10 +30,16 @@ warn_redundant_casts = true
 incremental = true
 namespace_packages = false
 
-# exclude = ["ksim/mjx_gym/"]
+enable_incomplete_feature = ["Unpack"]
 
 [[tool.mypy.overrides]]
-module = []
+
+module = [
+    "brax.*",
+    "etils.*",
+    "mujoco.*",
+]
+
 ignore_missing_imports = true
 
 [tool.isort]
@@ -44,8 +50,6 @@ profile = "black"
 
 line-length = 120
 target-version = "py310"
-
-exclude = ["ksim/mjx_gym"]
 
 [tool.ruff.lint]
 

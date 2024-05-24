@@ -1,18 +1,28 @@
+"""Defines the default humanoid environment."""
+
+from typing import NotRequired, TypedDict, Unpack
+
 import jax
 import jax.numpy as jp
 import mujoco
+from brax import base
 from brax.envs.base import PipelineEnv, State
 from brax.io import mjcf
 from brax.mjx.base import State as mjxState
 from etils import epath
 
-from envs.default_humanoid_env.rewards import DEFAULT_REWARD_PARAMS
-from envs.default_humanoid_env.rewards import get_reward_fn
+from ksim.mjx_gym.envs.default_humanoid_env.rewards import DEFAULT_REWARD_PARAMS, RewardParams, get_reward_fn
+
+
+class EnvKwargs(TypedDict):
+    sys: base.System
+    backend: NotRequired[str]
+    n_frames: NotRequired[int]
+    debug: NotRequired[bool]
 
 
 class DefaultHumanoidEnv(PipelineEnv):
-    """
-    An environment for humanoid body position, velocities, and angles.
+    """An environment for humanoid body position, velocities, and angles.
 
     Note: This environment is based on the default humanoid environment in the Brax library.
     https://github.com/google/brax/blob/main/brax/envs/humanoid.py
@@ -22,15 +32,15 @@ class DefaultHumanoidEnv(PipelineEnv):
 
     def __init__(
         self,
-        reward_params=DEFAULT_REWARD_PARAMS,
-        terminate_when_unhealthy=True,
-        reset_noise_scale=1e-2,
-        exclude_current_positions_from_observation=True,
-        log_reward_breakdown=True,
-        **kwargs,
-    ):
+        reward_params: RewardParams = DEFAULT_REWARD_PARAMS,
+        terminate_when_unhealthy: bool = True,
+        reset_noise_scale: float = 1e-2,
+        exclude_current_positions_from_observation: bool = True,
+        log_reward_breakdown: bool = True,
+        **kwargs: Unpack[EnvKwargs],
+    ) -> None:
         path = epath.Path(epath.resource_path("mujoco")) / ("mjx/test_data/humanoid")
-        mj_model = mujoco.MjModel.from_xml_path((path / "humanoid.xml").as_posix())  # type: ignore
+        mj_model = mujoco.MjModel.from_xml_path((path / "humanoid.xml").as_posix())  # type: ignore[no-untyped-def]
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG  # type: ignore # TODO: not sure why typing is not working here
         mj_model.opt.iterations = 6
         mj_model.opt.ls_iterations = 6
@@ -56,6 +66,7 @@ class DefaultHumanoidEnv(PipelineEnv):
 
         Args:
             rng: Random number generator seed.
+
         Returns:
             The initial state of the environment.
         """
@@ -88,6 +99,7 @@ class DefaultHumanoidEnv(PipelineEnv):
         Args:
             state: The current state of the environment.
             action: The action to take.
+
         Returns:
             A tuple of the next state, the reward, whether the episode has ended, and additional information.
         """
@@ -99,9 +111,11 @@ class DefaultHumanoidEnv(PipelineEnv):
 
         assert type(next_mjx_state) == mjxState, f"next_mjx_state is of type {type(next_mjx_state)}"
         assert type(mjx_state) == mjxState, f"mjx_state is of type {type(mjx_state)}"
-        # mlutz: from what I've seen, .pipeline_state and .pipeline_step(...) actually return an brax.mjx.base.State object
-        # however, the type hinting suggests that it should return a brax.base.State object
-        # brax.mjx.base.State inherits from brax.base.State but also inherits from mjx.Data, which is needed for some rewards
+        # mlutz: from what I've seen, .pipeline_state and .pipeline_step(...)
+        # actually return an brax.mjx.base.State object however, the type
+        # hinting suggests that it should return a brax.base.State object
+        # brax.mjx.base.State inherits from brax.base.State but also inherits
+        # from mjx.Data, which is needed for some rewards
 
         obs = self._get_obs(mjx_state, action)
         reward, is_healthy, reward_breakdown = self.reward_fn(mjx_state, action, next_mjx_state)
@@ -123,8 +137,12 @@ class DefaultHumanoidEnv(PipelineEnv):
             for key, val in reward_breakdown.items():
                 state.metrics[key] = val
 
-        return state.replace(  # type: ignore # TODO: fix the type hinting...
-            pipeline_state=next_mjx_state, obs=obs, reward=reward, done=done
+        # TODO: fix the type hinting...
+        return state.replace(
+            pipeline_state=next_mjx_state,
+            obs=obs,
+            reward=reward,
+            done=done,
         )
 
     def _get_obs(self, data: mjxState, action: jp.ndarray) -> jp.ndarray:
@@ -133,6 +151,7 @@ class DefaultHumanoidEnv(PipelineEnv):
         Args:
             data: The current state of the environment.
             action: The current action.
+
         Returns:
             Observations of the environment.
         """
