@@ -94,6 +94,15 @@ Here is an example of the trained model (in MJX) walking in the default humanoid
 
 While the model performs well in the MJX environment, it is important to note that the model's performance may vary when transferred to MuJoCo. This is due to slight differences in the simulators and the underlying physics engines. Evaluating the model in both simulators is helpful for determining whether the model will generalize well across different environments.
 
+### Running from SLURM Cluster
+To run from a SLURM cluster (e.g. the K-Scale Andromeda cluster), cd to /mjx_gym/ and run:
+
+```bash
+sbatch scripts/train.slurm
+```
+
+Training logs, errors, and gpu-utilization will be tracked in the /logs/ directory.
+
 ### Common Issues
 You might see the following error when running train.py:
 >An NVIDIA GPU may be present on this machine, but a CUDA-enabled jaxlib is not installed. Falling back to cpu.
