@@ -41,6 +41,12 @@ To install the dependencies, run the following command:
 make install-dev
 ```
 
+Finally, add your Weights & Biases API key via conda:
+
+```bash
+conda env config vars set WANDB_API_KEY=<your api key>
+```
+
 ## MJX Gym Usage
 MJX Gym is a library for training and evaluating reinforcement learning agents in MJX environments. It is built on top of the Brax library and provides a simple interface for running experiments with Stompy and other humanoid formfactors. Currently, we support walking but plan on adding more tasks and simulator environments in the future.
 
