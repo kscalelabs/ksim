@@ -1,12 +1,11 @@
 """Defines the default humanoid environment."""
 
 import os
-from typing import NotRequired, TypedDict, Unpack
+from typing import Unpack
 
 import jax
 import jax.numpy as jp
 import mujoco
-from brax import base
 from brax.envs.base import PipelineEnv, State
 from brax.io import mjcf
 from brax.mjx.base import State as mjxState
