@@ -1,11 +1,12 @@
-"""Defines the Stompy MJX environment."""
+"""Defines the default humanoid environment."""
 
 import os
-from typing import Unpack
+from typing import NotRequired, TypedDict, Unpack
 
 import jax
 import jax.numpy as jp
 import mujoco
+from brax import base
 from brax.envs.base import PipelineEnv, State
 from brax.io import mjcf
 from brax.mjx.base import State as mjxState
@@ -18,8 +19,14 @@ from ksim.mjx_gym.envs.default_humanoid_env.rewards import (
 )
 
 
-class StompyEnv(PipelineEnv):
-    """An environment for humanoid body position, velocities, and angles."""
+class UnitreeH1Env(PipelineEnv):
+    """An environment for humanoid body position, velocities, and angles.
+
+    Note: This environment is based on the default humanoid environment in the Brax library.
+    https://github.com/google/brax/blob/main/brax/envs/humanoid.py
+
+    However, this environment is designed to work with modular reward functions, allowing for quicker experimentation.
+    """
 
     def __init__(
         self,
@@ -30,7 +37,7 @@ class StompyEnv(PipelineEnv):
         log_reward_breakdown: bool = True,
         **kwargs: Unpack[EnvKwargs],
     ) -> None:
-        path = os.getenv("MODEL_DIR", "") + "/h1_scene.xml"
+        path = os.getenv("MODEL_DIR", "") + "/unitree_h1/scene.xml"
         mj_model = mujoco.MjModel.from_xml_path(path)
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.iterations = 6
@@ -128,7 +135,13 @@ class StompyEnv(PipelineEnv):
             for key, val in reward_breakdown.items():
                 state.metrics[key] = val
 
-        return state.replace(pipeline_state=next_mjx_state, obs=obs, reward=reward, done=done)
+        # TODO: fix the type hinting...
+        return state.replace(
+            pipeline_state=next_mjx_state,
+            obs=obs,
+            reward=reward,
+            done=done,
+        )
 
     def _get_obs(self, data: mjxState, action: jp.ndarray) -> jp.ndarray:
         """Observes humanoid body position, velocities, and angles.
@@ -154,12 +167,3 @@ class StompyEnv(PipelineEnv):
                 data.qfrc_actuator,
             ]
         )
-
-
-def adhoc_test() -> None:
-    print("hello, world!")
-
-
-if __name__ == "__main__":
-    # python -m ksim.mjx_gym.envs.stompy_env.stompy
-    adhoc_test()

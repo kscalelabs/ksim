@@ -107,6 +107,10 @@ class DefaultHumanoidEnv(PipelineEnv):
         Returns:
             A tuple of the next state, the reward, whether the episode has ended, and additional information.
         """
+        # Load available devices
+        logging.info(f"Available devices: {jax.devices()}")
+        print(f"Total devices: {jax.device_count()}, "f"Devices per task: {jax.local_device_count()}")
+
         mjx_state = state.pipeline_state
         assert mjx_state, "state.pipeline_state was recorded as None"
         # TODO: determine whether to raise an error or reset the environment
