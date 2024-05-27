@@ -19,7 +19,7 @@ CONFIG_PATH="experiments/default_humanoid_walk.yaml"
 
 # Log GPU utilization every 10 seconds
 while true; do
-    nvidia-smi --query-gpu=timestamp,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory --format=csv >> logs/gpu_utilization.log
+    nvidia-smi --query-gpu=timestamp,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory --format=csv > logs/gpu_utilization_temp.log
     sleep 10
 done &
 
