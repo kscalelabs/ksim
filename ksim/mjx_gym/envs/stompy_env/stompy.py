@@ -50,6 +50,7 @@ class StompyEnv(PipelineEnv):
         self._exclude_current_positions_from_observation = exclude_current_positions_from_observation
         self._log_reward_breakdown = log_reward_breakdown
 
+        self.initial_qpos = mj_model.keyframe('default').qpos
         self.reward_fn = get_reward_fn(self._reward_params, self.dt, include_reward_breakdown=True)
 
     def reset(self, rng: jp.ndarray) -> State:
@@ -64,7 +65,7 @@ class StompyEnv(PipelineEnv):
         rng, rng1, rng2 = jax.random.split(rng, 3)
 
         low, hi = -self._reset_noise_scale, self._reset_noise_scale
-        qpos = self.sys.qpos0 + jax.random.uniform(rng1, (self.sys.nq,), minval=low, maxval=hi)
+        qpos = self.initial_qpos + jax.random.uniform(rng1, (self.sys.nq,), minval=low, maxval=hi)
         qvel = jax.random.uniform(rng2, (self.sys.nv,), minval=low, maxval=hi)
 
         mjx_state = self.pipeline_init(qpos, qvel)
