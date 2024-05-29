@@ -22,7 +22,7 @@ def train(config: dict[str, Any]) -> None:
         name=config.get("experiment_name", "ppo-training"),
     )
 
-    print(f"reward_params: {config.get('reward_params', DEFAULT_REWARD_PARAMS)}")
+    print(f"config: {config}")
     print(f'training on {config["num_envs"]} environments')
 
     env = get_env(
