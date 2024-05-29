@@ -22,7 +22,7 @@ reward_params:
   rew_healthy:
     weight: 5.0
     healthy_z_lower: 0.4
-    healthy_z_upper: 10.0
+    healthy_z_upper: 4.0
   rew_ctrl_cost:
     weight: 0.1
 terminate_when_unhealthy: true

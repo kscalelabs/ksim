@@ -1,16 +1,16 @@
 <mujoco model="robot">
 	<compiler angle="radian" meshdir="meshes" />
-
+	<!-- If timestep is increased, iterations reduced, etc. PPO will find a 
+	    to exploit the simulation and farm the healthy reward. Simulation
+		stability matters a lot here. -->
 	<option timestep="0.005" iterations="20" solver="Newton" noslip_iterations="5" integrator="RK4">
 		<flag eulerdamp="enable" />
 	</option>
-
 	<default>
 		<motor ctrlrange="-1 1" ctrllimited="true" />
 		<default class="visual">
 			<geom type="mesh" condim="3" contype="0" conaffinity="0" group="2" />
 		</default>
-		
 		<default class="collision">
 			<geom type="capsule" mass="0" density="0" condim="3" contype="1" conaffinity="1" group="3" />
 		</default>
@@ -194,8 +194,7 @@
 		<body name="root" pos="0 0 1.3" quat="1 0 0 0">
 			<freejoint name="root" />
 			<body name="torso">
-        <site name="imu" size="0.01" pos="0 0 0"/>
-
+				<site name="imu" size="0.01" pos="0 0 0"/>
 				<geom type="mesh" class="visual" rgba="0.615686 0.811765 0.929412 1" mesh="torso_1_top_torso_1" />
 				<geom pos="0.0160579 0.0593235 0.0498109" quat="0 -2.32051e-08 1 -2.32051e-08" type="mesh" class="visual" rgba="0.972549 0.529412 0.00392157 1" mesh="head_1_x4_1_pcb_1" />
 				<geom pos="0.000148008 0.0434136 0.0633109" quat="2.32051e-08 0 -4.64102e-08 -1" type="mesh" class="visual" rgba="0.768627 0.886275 0.952941 1" mesh="head_1_x4_1_outer_1" />
@@ -329,6 +328,7 @@
 									<geom pos="0.0473754 -0.0147545 0.0019099" quat="0.32102 0.32102 -0.630037 -0.630037" type="mesh" class="visual" rgba="0.972549 0.529412 0.00392157 1" mesh="left_arm_2_hand_1_x4_2_pcb_1" />
 									<geom pos="0.0489455 -0.035561 -0.014" quat="-0.32102 0.32102 -0.630037 0.630037" type="mesh" class="visual" rgba="0.768627 0.886275 0.952941 1" mesh="left_arm_2_hand_1_x4_2_outer_1" />
 									<body name="link_left_arm_2_hand_1_slide_1" pos="0.139251 -0.00228616 -0.014" quat="-0.218508 -0.218508 -0.672498 -0.672499">s
+										
 										<joint name="joint_left_arm_2_hand_1_slider_1" pos="0 0 0" axis="0 0 1" type="slide" range="-0.034 0" actuatorfrcrange="-80 80" />
 										<geom type="mesh" class="visual" rgba="0.917647 0.917647 0.917647 1" mesh="left_arm_2_hand_1_slide_1" />
 										<geom pos="-0.00499 0.01 -0.033" quat="-1.64085e-08 -0.707107 1.64085e-08 -0.707107" type="mesh" class="visual" rgba="0.647059 0.647059 0.647059 1" mesh="left_arm_2_hand_1_rack_2" />
@@ -399,11 +399,9 @@
 									<geom pos="0.0645536 -0.0663036 0.00154071" quat="0.5 0.5 0.5 0.5" type="mesh" class="visual" rgba="0.972549 0.529412 0.00392157 1" mesh="legs_1_right_leg_1_x4_1_inner_1" />
 									<body name="link_legs_1_right_leg_1_x4_1_outer_1" pos="0.0990536 -0.070981 0.0120465" quat="0.707107 3.53553e-08 0.707107 1.64085e-08">
 										<joint name="joint_legs_1_right_leg_1_x4_1_dof_x4" pos="0 0 0" axis="0 0 -1" range="-0.785398 0.785398" actuatorfrcrange="-1.5 1.5" />
-										
-                    <geom class="collision" type="capsule" fromto="0 0.005 -.17 -.02 0.005 -.01" size="0.05" rgba="0.647059 0.647059 0.647059 1" />
-                    <geom class="collision" type="capsule" fromto="0 0.005 -.17 .02 0.005 -.01" size="0.05" rgba="0.647059 0.647059 0.647059 1" />
-                    
-                    <geom type="mesh" class="visual" rgba="0.768627 0.886275 0.952941 1" mesh="legs_1_right_leg_1_x4_1_outer_1" />
+										<geom class="collision" type="capsule" fromto="0 0.005 -.17 -.02 0.005 -.01" size="0.05" rgba="0.647059 0.647059 0.647059 1" />
+										<geom class="collision" type="capsule" fromto="0 0.005 -.17 .02 0.005 -.01" size="0.05" rgba="0.647059 0.647059 0.647059 1" />
+										<geom type="mesh" class="visual" rgba="0.768627 0.886275 0.952941 1" mesh="legs_1_right_leg_1_x4_1_outer_1" />
 										<geom quat="-2.32051e-08 1 0 0" type="mesh" class="visual" rgba="0.972549 0.529412 0.00392157 1" mesh="legs_1_right_leg_1_x4_1_pcb_1" />
 										<geom pos="-0.0159099 0.0159099 0.0135" quat="-1 -4.64102e-08 0 0" type="mesh" class="visual" rgba="0.615686 0.811765 0.929412 1" mesh="legs_1_right_leg_1_foot_1" />
 										<geom pos="2e-09 -0.037 -0.0853793" quat="1.64085e-08 1.64085e-08 -0.707107 -0.707107" type="mesh" class="visual" rgba="0.647059 0.647059 0.647059 1" mesh="legs_1_right_leg_1_rubber_1" />
@@ -448,11 +446,9 @@
 									<geom pos="0.0645536 0.0663036 0.0214593" quat="0.5 -0.5 0.5 -0.5" type="mesh" class="visual" rgba="0.972549 0.529412 0.00392157 1" mesh="legs_1_left_leg_1_x4_1_inner_1" />
 									<body name="link_legs_1_left_leg_1_x4_1_outer_1" pos="0.0990536 0.070981 0.0109535" quat="1.89469e-08 -0.707107 0 -0.707107">
 										<joint name="joint_legs_1_left_leg_1_x4_1_dof_x4" pos="0 0 0" axis="0 0 -1" range="-0.785398 0.785398" actuatorfrcrange="-1.5 1.5" />
-										
-                    <geom class="collision" type="capsule" fromto="0 0.005 -.17 -.02 0.005 -.01" size="0.05" rgba="0.647059 0.647059 0.647059 1" />
-                    <geom class="collision" type="capsule" fromto="0 0.005 -.17 .02 0.005 -.01" size="0.05" rgba="0.647059 0.647059 0.647059 1" />
-                    
-                    <geom type="mesh" class="visual" rgba="0.768627 0.886275 0.952941 1" mesh="legs_1_left_leg_1_x4_1_outer_1" />
+										<geom class="collision" type="capsule" fromto="0 0.005 -.17 -.02 0.005 -.01" size="0.05" rgba="0.647059 0.647059 0.647059 1" />
+										<geom class="collision" type="capsule" fromto="0 0.005 -.17 .02 0.005 -.01" size="0.05" rgba="0.647059 0.647059 0.647059 1" />
+										<geom type="mesh" class="visual" rgba="0.768627 0.886275 0.952941 1" mesh="legs_1_left_leg_1_x4_1_outer_1" />
 										<geom quat="-2.32051e-08 1 0 0" type="mesh" class="visual" rgba="0.972549 0.529412 0.00392157 1" mesh="legs_1_left_leg_1_x4_1_pcb_1" />
 										<geom pos="-0.0159099 0.0159099 0.0135" quat="-1 -4.64102e-08 0 0" type="mesh" class="visual" rgba="0.615686 0.811765 0.929412 1" mesh="legs_1_left_leg_1_foot_1" />
 										<geom pos="2e-09 -0.037 -0.0853793" quat="1.64085e-08 1.64085e-08 -0.707107 -0.707107" type="mesh" class="visual" rgba="0.647059 0.647059 0.647059 1" mesh="legs_1_left_leg_1_rubber_1" />
@@ -470,81 +466,24 @@
 			</body>
 		</body>
 	</worldbody>
-
-  <actuator>
-    <motor name="joint_head_1_x4_1_dof_x4" joint="joint_head_1_x4_1_dof_x4"/>
-    <motor name="joint_right_arm_1_x8_1_dof_x8" joint="joint_right_arm_1_x8_1_dof_x8"/>
-    <motor name="joint_left_arm_2_x8_1_dof_x8" joint="joint_left_arm_2_x8_1_dof_x8"/>
-    <motor name="joint_right_arm_1_x8_2_dof_x8" joint="joint_right_arm_1_x8_2_dof_x8"/>
-    <motor name="joint_left_arm_2_x8_2_dof_x8" joint="joint_left_arm_2_x8_2_dof_x8"/>
-    <motor name="joint_legs_1_x8_1_dof_x8" joint="joint_legs_1_x8_1_dof_x8"/>
-    <motor name="joint_legs_1_x8_2_dof_x8" joint="joint_legs_1_x8_2_dof_x8"/>
-    <motor name="joint_legs_1_right_leg_1_x8_1_dof_x8" joint="joint_legs_1_right_leg_1_x8_1_dof_x8"/>
-    <motor name="joint_legs_1_left_leg_1_x8_1_dof_x8" joint="joint_legs_1_left_leg_1_x8_1_dof_x8"/>
-    <motor name="joint_legs_1_right_leg_1_x10_2_dof_x10" joint="joint_legs_1_right_leg_1_x10_2_dof_x10"/>
-    <motor name="joint_legs_1_left_leg_1_x10_1_dof_x10" joint="joint_legs_1_left_leg_1_x10_1_dof_x10"/>
-    <motor name="joint_legs_1_right_leg_1_knee_revolute" joint="joint_legs_1_right_leg_1_knee_revolute"/>
-    <motor name="joint_legs_1_left_leg_1_knee_revolute" joint="joint_legs_1_left_leg_1_knee_revolute"/>
-    <motor name="joint_legs_1_right_leg_1_ankle_revolute" joint="joint_legs_1_right_leg_1_ankle_revolute"/>
-    <motor name="joint_legs_1_left_leg_1_ankle_revolute" joint="joint_legs_1_left_leg_1_ankle_revolute"/>
-    <motor name="joint_legs_1_right_leg_1_x4_1_dof_x4" joint="joint_legs_1_right_leg_1_x4_1_dof_x4"/>
-    <motor name="joint_legs_1_left_leg_1_x4_1_dof_x4" joint="joint_legs_1_left_leg_1_x4_1_dof_x4"/>
-  </actuator>
-  <!--<sensor>
-    <actuatorpos name="joint_head_1_x4_1_dof_x4_p" actuator="joint_head_1_x4_1_dof_x4" user="13"/>
-    <actuatorvel name="joint_head_1_x4_1_dof_x4_v" actuator="joint_head_1_x4_1_dof_x4" user="13"/>
-    <actuatorfrc name="joint_head_1_x4_1_dof_x4_f" actuator="joint_head_1_x4_1_dof_x4" user="13" noise="0.001"/>
-    <actuatorpos name="joint_right_arm_1_x8_1_dof_x8_p" actuator="joint_right_arm_1_x8_1_dof_x8" user="13"/>
-    <actuatorvel name="joint_right_arm_1_x8_1_dof_x8_v" actuator="joint_right_arm_1_x8_1_dof_x8" user="13"/>
-    <actuatorfrc name="joint_right_arm_1_x8_1_dof_x8_f" actuator="joint_right_arm_1_x8_1_dof_x8" user="13" noise="0.001"/>
-    <actuatorpos name="joint_left_arm_2_x8_1_dof_x8_p" actuator="joint_left_arm_2_x8_1_dof_x8" user="13"/>
-    <actuatorvel name="joint_left_arm_2_x8_1_dof_x8_v" actuator="joint_left_arm_2_x8_1_dof_x8" user="13"/>
-    <actuatorfrc name="joint_left_arm_2_x8_1_dof_x8_f" actuator="joint_left_arm_2_x8_1_dof_x8" user="13" noise="0.001"/>
-    <actuatorpos name="joint_right_arm_1_x8_2_dof_x8_p" actuator="joint_right_arm_1_x8_2_dof_x8" user="13"/>
-    <actuatorvel name="joint_right_arm_1_x8_2_dof_x8_v" actuator="joint_right_arm_1_x8_2_dof_x8" user="13"/>
-    <actuatorfrc name="joint_right_arm_1_x8_2_dof_x8_f" actuator="joint_right_arm_1_x8_2_dof_x8" user="13" noise="0.001"/>
-    <actuatorpos name="joint_left_arm_2_x8_2_dof_x8_p" actuator="joint_left_arm_2_x8_2_dof_x8" user="13"/>
-    <actuatorvel name="joint_left_arm_2_x8_2_dof_x8_v" actuator="joint_left_arm_2_x8_2_dof_x8" user="13"/>
-    <actuatorfrc name="joint_left_arm_2_x8_2_dof_x8_f" actuator="joint_left_arm_2_x8_2_dof_x8" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_x8_1_dof_x8_p" actuator="joint_legs_1_x8_1_dof_x8" user="13"/>
-    <actuatorvel name="joint_legs_1_x8_1_dof_x8_v" actuator="joint_legs_1_x8_1_dof_x8" user="13"/>
-    <actuatorfrc name="joint_legs_1_x8_1_dof_x8_f" actuator="joint_legs_1_x8_1_dof_x8" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_x8_2_dof_x8_p" actuator="joint_legs_1_x8_2_dof_x8" user="13"/>
-    <actuatorvel name="joint_legs_1_x8_2_dof_x8_v" actuator="joint_legs_1_x8_2_dof_x8" user="13"/>
-    <actuatorfrc name="joint_legs_1_x8_2_dof_x8_f" actuator="joint_legs_1_x8_2_dof_x8" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_right_leg_1_x8_1_dof_x8_p" actuator="joint_legs_1_right_leg_1_x8_1_dof_x8" user="13"/>
-    <actuatorvel name="joint_legs_1_right_leg_1_x8_1_dof_x8_v" actuator="joint_legs_1_right_leg_1_x8_1_dof_x8" user="13"/>
-    <actuatorfrc name="joint_legs_1_right_leg_1_x8_1_dof_x8_f" actuator="joint_legs_1_right_leg_1_x8_1_dof_x8" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_left_leg_1_x8_1_dof_x8_p" actuator="joint_legs_1_left_leg_1_x8_1_dof_x8" user="13"/>
-    <actuatorvel name="joint_legs_1_left_leg_1_x8_1_dof_x8_v" actuator="joint_legs_1_left_leg_1_x8_1_dof_x8" user="13"/>
-    <actuatorfrc name="joint_legs_1_left_leg_1_x8_1_dof_x8_f" actuator="joint_legs_1_left_leg_1_x8_1_dof_x8" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_right_leg_1_x10_2_dof_x10_p" actuator="joint_legs_1_right_leg_1_x10_2_dof_x10" user="13"/>
-    <actuatorvel name="joint_legs_1_right_leg_1_x10_2_dof_x10_v" actuator="joint_legs_1_right_leg_1_x10_2_dof_x10" user="13"/>
-    <actuatorfrc name="joint_legs_1_right_leg_1_x10_2_dof_x10_f" actuator="joint_legs_1_right_leg_1_x10_2_dof_x10" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_left_leg_1_x10_1_dof_x10_p" actuator="joint_legs_1_left_leg_1_x10_1_dof_x10" user="13"/>
-    <actuatorvel name="joint_legs_1_left_leg_1_x10_1_dof_x10_v" actuator="joint_legs_1_left_leg_1_x10_1_dof_x10" user="13"/>
-    <actuatorfrc name="joint_legs_1_left_leg_1_x10_1_dof_x10_f" actuator="joint_legs_1_left_leg_1_x10_1_dof_x10" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_right_leg_1_knee_revolute_p" actuator="joint_legs_1_right_leg_1_knee_revolute" user="13"/>
-    <actuatorvel name="joint_legs_1_right_leg_1_knee_revolute_v" actuator="joint_legs_1_right_leg_1_knee_revolute" user="13"/>
-    <actuatorfrc name="joint_legs_1_right_leg_1_knee_revolute_f" actuator="joint_legs_1_right_leg_1_knee_revolute" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_left_leg_1_knee_revolute_p" actuator="joint_legs_1_left_leg_1_knee_revolute" user="13"/>
-    <actuatorvel name="joint_legs_1_left_leg_1_knee_revolute_v" actuator="joint_legs_1_left_leg_1_knee_revolute" user="13"/>
-    <actuatorfrc name="joint_legs_1_left_leg_1_knee_revolute_f" actuator="joint_legs_1_left_leg_1_knee_revolute" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_right_leg_1_ankle_revolute_p" actuator="joint_legs_1_right_leg_1_ankle_revolute" user="13"/>
-    <actuatorvel name="joint_legs_1_right_leg_1_ankle_revolute_v" actuator="joint_legs_1_right_leg_1_ankle_revolute" user="13"/>
-    <actuatorfrc name="joint_legs_1_right_leg_1_ankle_revolute_f" actuator="joint_legs_1_right_leg_1_ankle_revolute" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_left_leg_1_ankle_revolute_p" actuator="joint_legs_1_left_leg_1_ankle_revolute" user="13"/>
-    <actuatorvel name="joint_legs_1_left_leg_1_ankle_revolute_v" actuator="joint_legs_1_left_leg_1_ankle_revolute" user="13"/>
-    <actuatorfrc name="joint_legs_1_left_leg_1_ankle_revolute_f" actuator="joint_legs_1_left_leg_1_ankle_revolute" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_right_leg_1_x4_1_dof_x4_p" actuator="joint_legs_1_right_leg_1_x4_1_dof_x4" user="13"/>
-    <actuatorvel name="joint_legs_1_right_leg_1_x4_1_dof_x4_v" actuator="joint_legs_1_right_leg_1_x4_1_dof_x4" user="13"/>
-    <actuatorfrc name="joint_legs_1_right_leg_1_x4_1_dof_x4_f" actuator="joint_legs_1_right_leg_1_x4_1_dof_x4" user="13" noise="0.001"/>
-    <actuatorpos name="joint_legs_1_left_leg_1_x4_1_dof_x4_p" actuator="joint_legs_1_left_leg_1_x4_1_dof_x4" user="13"/>
-    <actuatorvel name="joint_legs_1_left_leg_1_x4_1_dof_x4_v" actuator="joint_legs_1_left_leg_1_x4_1_dof_x4" user="13"/>
-    <actuatorfrc name="joint_legs_1_left_leg_1_x4_1_dof_x4_f" actuator="joint_legs_1_left_leg_1_x4_1_dof_x4" user="13" noise="0.001"/>
-    
-    <framequat name="orientation" objtype="site" noise="0.001" objname="imu"/>
-    <gyro name="angular-velocity" site="imu" noise="0.005" cutoff="34.9"/>
-  </sensor>-->
-
+	<actuator>
+		<motor name="joint_head_1_x4_1_dof_x4" joint="joint_head_1_x4_1_dof_x4"/>
+		<motor name="joint_right_arm_1_x8_1_dof_x8" joint="joint_right_arm_1_x8_1_dof_x8"/>
+		<motor name="joint_left_arm_2_x8_1_dof_x8" joint="joint_left_arm_2_x8_1_dof_x8"/>
+		<motor name="joint_right_arm_1_x8_2_dof_x8" joint="joint_right_arm_1_x8_2_dof_x8"/>
+		<motor name="joint_left_arm_2_x8_2_dof_x8" joint="joint_left_arm_2_x8_2_dof_x8"/>
+		<motor name="joint_legs_1_x8_1_dof_x8" joint="joint_legs_1_x8_1_dof_x8"/>
+		<motor name="joint_legs_1_x8_2_dof_x8" joint="joint_legs_1_x8_2_dof_x8"/>
+		<motor name="joint_legs_1_right_leg_1_x8_1_dof_x8" joint="joint_legs_1_right_leg_1_x8_1_dof_x8"/>
+		<motor name="joint_legs_1_left_leg_1_x8_1_dof_x8" joint="joint_legs_1_left_leg_1_x8_1_dof_x8"/>
+		<motor name="joint_legs_1_right_leg_1_x10_2_dof_x10" joint="joint_legs_1_right_leg_1_x10_2_dof_x10"/>
+		<motor name="joint_legs_1_left_leg_1_x10_1_dof_x10" joint="joint_legs_1_left_leg_1_x10_1_dof_x10"/>
+		<motor name="joint_legs_1_right_leg_1_knee_revolute" joint="joint_legs_1_right_leg_1_knee_revolute"/>
+		<motor name="joint_legs_1_left_leg_1_knee_revolute" joint="joint_legs_1_left_leg_1_knee_revolute"/>
+		<motor name="joint_legs_1_right_leg_1_ankle_revolute" joint="joint_legs_1_right_leg_1_ankle_revolute"/>
+		<motor name="joint_legs_1_left_leg_1_ankle_revolute" joint="joint_legs_1_left_leg_1_ankle_revolute"/>
+		<motor name="joint_legs_1_right_leg_1_x4_1_dof_x4" joint="joint_legs_1_right_leg_1_x4_1_dof_x4"/>
+		<motor name="joint_legs_1_left_leg_1_x4_1_dof_x4" joint="joint_legs_1_left_leg_1_x4_1_dof_x4"/>
+	</actuator>
+	<!--<sensor><actuatorpos name="joint_head_1_x4_1_dof_x4_p" actuator="joint_head_1_x4_1_dof_x4" user="13"/><actuatorvel name="joint_head_1_x4_1_dof_x4_v" actuator="joint_head_1_x4_1_dof_x4" user="13"/><actuatorfrc name="joint_head_1_x4_1_dof_x4_f" actuator="joint_head_1_x4_1_dof_x4" user="13" noise="0.001"/><actuatorpos name="joint_right_arm_1_x8_1_dof_x8_p" actuator="joint_right_arm_1_x8_1_dof_x8" user="13"/><actuatorvel name="joint_right_arm_1_x8_1_dof_x8_v" actuator="joint_right_arm_1_x8_1_dof_x8" user="13"/><actuatorfrc name="joint_right_arm_1_x8_1_dof_x8_f" actuator="joint_right_arm_1_x8_1_dof_x8" user="13" noise="0.001"/><actuatorpos name="joint_left_arm_2_x8_1_dof_x8_p" actuator="joint_left_arm_2_x8_1_dof_x8" user="13"/><actuatorvel name="joint_left_arm_2_x8_1_dof_x8_v" actuator="joint_left_arm_2_x8_1_dof_x8" user="13"/><actuatorfrc name="joint_left_arm_2_x8_1_dof_x8_f" actuator="joint_left_arm_2_x8_1_dof_x8" user="13" noise="0.001"/><actuatorpos name="joint_right_arm_1_x8_2_dof_x8_p" actuator="joint_right_arm_1_x8_2_dof_x8" user="13"/><actuatorvel name="joint_right_arm_1_x8_2_dof_x8_v" actuator="joint_right_arm_1_x8_2_dof_x8" user="13"/><actuatorfrc name="joint_right_arm_1_x8_2_dof_x8_f" actuator="joint_right_arm_1_x8_2_dof_x8" user="13" noise="0.001"/><actuatorpos name="joint_left_arm_2_x8_2_dof_x8_p" actuator="joint_left_arm_2_x8_2_dof_x8" user="13"/><actuatorvel name="joint_left_arm_2_x8_2_dof_x8_v" actuator="joint_left_arm_2_x8_2_dof_x8" user="13"/><actuatorfrc name="joint_left_arm_2_x8_2_dof_x8_f" actuator="joint_left_arm_2_x8_2_dof_x8" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_x8_1_dof_x8_p" actuator="joint_legs_1_x8_1_dof_x8" user="13"/><actuatorvel name="joint_legs_1_x8_1_dof_x8_v" actuator="joint_legs_1_x8_1_dof_x8" user="13"/><actuatorfrc name="joint_legs_1_x8_1_dof_x8_f" actuator="joint_legs_1_x8_1_dof_x8" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_x8_2_dof_x8_p" actuator="joint_legs_1_x8_2_dof_x8" user="13"/><actuatorvel name="joint_legs_1_x8_2_dof_x8_v" actuator="joint_legs_1_x8_2_dof_x8" user="13"/><actuatorfrc name="joint_legs_1_x8_2_dof_x8_f" actuator="joint_legs_1_x8_2_dof_x8" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_right_leg_1_x8_1_dof_x8_p" actuator="joint_legs_1_right_leg_1_x8_1_dof_x8" user="13"/><actuatorvel name="joint_legs_1_right_leg_1_x8_1_dof_x8_v" actuator="joint_legs_1_right_leg_1_x8_1_dof_x8" user="13"/><actuatorfrc name="joint_legs_1_right_leg_1_x8_1_dof_x8_f" actuator="joint_legs_1_right_leg_1_x8_1_dof_x8" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_left_leg_1_x8_1_dof_x8_p" actuator="joint_legs_1_left_leg_1_x8_1_dof_x8" user="13"/><actuatorvel name="joint_legs_1_left_leg_1_x8_1_dof_x8_v" actuator="joint_legs_1_left_leg_1_x8_1_dof_x8" user="13"/><actuatorfrc name="joint_legs_1_left_leg_1_x8_1_dof_x8_f" actuator="joint_legs_1_left_leg_1_x8_1_dof_x8" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_right_leg_1_x10_2_dof_x10_p" actuator="joint_legs_1_right_leg_1_x10_2_dof_x10" user="13"/><actuatorvel name="joint_legs_1_right_leg_1_x10_2_dof_x10_v" actuator="joint_legs_1_right_leg_1_x10_2_dof_x10" user="13"/><actuatorfrc name="joint_legs_1_right_leg_1_x10_2_dof_x10_f" actuator="joint_legs_1_right_leg_1_x10_2_dof_x10" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_left_leg_1_x10_1_dof_x10_p" actuator="joint_legs_1_left_leg_1_x10_1_dof_x10" user="13"/><actuatorvel name="joint_legs_1_left_leg_1_x10_1_dof_x10_v" actuator="joint_legs_1_left_leg_1_x10_1_dof_x10" user="13"/><actuatorfrc name="joint_legs_1_left_leg_1_x10_1_dof_x10_f" actuator="joint_legs_1_left_leg_1_x10_1_dof_x10" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_right_leg_1_knee_revolute_p" actuator="joint_legs_1_right_leg_1_knee_revolute" user="13"/><actuatorvel name="joint_legs_1_right_leg_1_knee_revolute_v" actuator="joint_legs_1_right_leg_1_knee_revolute" user="13"/><actuatorfrc name="joint_legs_1_right_leg_1_knee_revolute_f" actuator="joint_legs_1_right_leg_1_knee_revolute" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_left_leg_1_knee_revolute_p" actuator="joint_legs_1_left_leg_1_knee_revolute" user="13"/><actuatorvel name="joint_legs_1_left_leg_1_knee_revolute_v" actuator="joint_legs_1_left_leg_1_knee_revolute" user="13"/><actuatorfrc name="joint_legs_1_left_leg_1_knee_revolute_f" actuator="joint_legs_1_left_leg_1_knee_revolute" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_right_leg_1_ankle_revolute_p" actuator="joint_legs_1_right_leg_1_ankle_revolute" user="13"/><actuatorvel name="joint_legs_1_right_leg_1_ankle_revolute_v" actuator="joint_legs_1_right_leg_1_ankle_revolute" user="13"/><actuatorfrc name="joint_legs_1_right_leg_1_ankle_revolute_f" actuator="joint_legs_1_right_leg_1_ankle_revolute" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_left_leg_1_ankle_revolute_p" actuator="joint_legs_1_left_leg_1_ankle_revolute" user="13"/><actuatorvel name="joint_legs_1_left_leg_1_ankle_revolute_v" actuator="joint_legs_1_left_leg_1_ankle_revolute" user="13"/><actuatorfrc name="joint_legs_1_left_leg_1_ankle_revolute_f" actuator="joint_legs_1_left_leg_1_ankle_revolute" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_right_leg_1_x4_1_dof_x4_p" actuator="joint_legs_1_right_leg_1_x4_1_dof_x4" user="13"/><actuatorvel name="joint_legs_1_right_leg_1_x4_1_dof_x4_v" actuator="joint_legs_1_right_leg_1_x4_1_dof_x4" user="13"/><actuatorfrc name="joint_legs_1_right_leg_1_x4_1_dof_x4_f" actuator="joint_legs_1_right_leg_1_x4_1_dof_x4" user="13" noise="0.001"/><actuatorpos name="joint_legs_1_left_leg_1_x4_1_dof_x4_p" actuator="joint_legs_1_left_leg_1_x4_1_dof_x4" user="13"/><actuatorvel name="joint_legs_1_left_leg_1_x4_1_dof_x4_v" actuator="joint_legs_1_left_leg_1_x4_1_dof_x4" user="13"/><actuatorfrc name="joint_legs_1_left_leg_1_x4_1_dof_x4_f" actuator="joint_legs_1_left_leg_1_x4_1_dof_x4" user="13" noise="0.001"/><framequat name="orientation" objtype="site" noise="0.001" objname="imu"/><gyro name="angular-velocity" site="imu" noise="0.005" cutoff="34.9"/></sensor>-->
 </mujoco>
