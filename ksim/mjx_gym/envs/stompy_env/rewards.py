@@ -74,8 +74,8 @@ def forward_reward_fn(
     Returns:
         A float wrapped in a jax array.
     """
-    xpos = state.subtree_com[1][0]  # TODO: include stricter typing than mjxState to avoid this type error
-    next_xpos = next_state.subtree_com[1][0]
+    xpos = state.subtree_com[1][1]  # TODO: include stricter typing than mjxState to avoid this type error
+    next_xpos = next_state.subtree_com[1][1]
     velocity = (next_xpos - xpos) / dt
     forward_reward = params["weight"] * velocity
 
