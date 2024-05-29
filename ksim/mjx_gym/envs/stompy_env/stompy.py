@@ -50,7 +50,7 @@ class StompyEnv(PipelineEnv):
         self._exclude_current_positions_from_observation = exclude_current_positions_from_observation
         self._log_reward_breakdown = log_reward_breakdown
 
-        self.initial_qpos = mj_model.keyframe('default').qpos
+        self.initial_qpos = mj_model.keyframe("default").qpos
         self.reward_fn = get_reward_fn(self._reward_params, self.dt, include_reward_breakdown=True)
 
     def reset(self, rng: jp.ndarray) -> State:

@@ -1,5 +1,5 @@
 project_name: stompy_walk
-experiment_name: changing_x_pos_reward_to_dim_1_in_pos_dir
+experiment_name: test
 num_timesteps: 30000000
 num_evals: 5
 reward_scaling: 0.1

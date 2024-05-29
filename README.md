@@ -130,6 +130,14 @@ conda install cudnn
 
 Another common issue occurs when rendering on a headless server. For now, we recommend rendering locally or using a remote desktop connection to view the rendering.
 
+## MJCF Reference
+To visualize any MJCF file, you can run the following command:
+```bash
+python3 -m mujoco.viewer --mjcf <path-to-mjcf-file>
+```
+
+The command above loads MuJoCo's GUI, which allows you to simulate the model, manually specify joints, and 
+
 ## TODO
 - [ ] Get Stompy to load efficiently with MJX (currently, the meshes and collision detection are not loading correctly)
 - [ ] Add goal conditioning to the humanoid walk task
