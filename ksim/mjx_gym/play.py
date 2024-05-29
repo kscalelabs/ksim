@@ -80,6 +80,7 @@ def train(config: dict[str, Any], n_steps: int, render_every: int) -> None:
     video = wandb.Video(images_tchw, fps=fps, format="mp4")
     wandb.log({"video": video})
 
+
 if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Run PPO training with specified config file.")

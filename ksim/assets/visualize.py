@@ -1,9 +1,10 @@
-""" Visualization Script for KSim """
+"""Visualization Script for KSim"""
 
 import argparse
 import os
 
 import mujoco
+
 
 def visualize(path_to_xml):
     """Visualize a MuJoCo XML file.
@@ -14,12 +15,12 @@ def visualize(path_to_xml):
     m = mujoco.MjModel.from_xml_path(path_to_xml)
     d = mujoco.MjData(m)
 
-
     with mujoco.viewer.launch_passive(m, d) as viewer:
         viewer.sync()
 
         while viewer.is_running():
             pass
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize a MuJoCo XML file.")
