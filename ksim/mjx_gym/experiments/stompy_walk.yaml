@@ -1,6 +1,5 @@
 project_name: stompy_walk
-experiment_name: first_experiment
-cuda_visible_devices: 0,1,2,3
+experiment_name: standard_ctrl_full_body_ts_005_iter_20_ns_iter_5_Newton_ed
 num_timesteps: 30000000
 num_evals: 5
 reward_scaling: 0.1
@@ -13,8 +12,8 @@ num_updates_per_batch: 8
 discounting: 0.97
 learning_rate: 0.0003
 entropy_cost: 0.001
-num_envs: 512
-batch_size: 256
+num_envs: 1024
+batch_size: 512
 seed: 0
 env_name: stompy
 reward_params:
@@ -22,8 +21,8 @@ reward_params:
     weight: 1.25
   rew_healthy:
     weight: 5.0
-    healthy_z_lower: 0.5
-    healthy_z_upper: 2.0
+    healthy_z_lower: 0.4
+    healthy_z_upper: 10.0
   rew_ctrl_cost:
     weight: 0.1
 terminate_when_unhealthy: true

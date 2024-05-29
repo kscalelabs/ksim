@@ -2,7 +2,7 @@
 #SBATCH --job-name=robotic-locomotion-training    # Job name
 #SBATCH --output=logs/training_output_%j.log      # Output file
 #SBATCH --error=logs/training_error_%j.log        # Error file
-#SBATCH --time=24:00:00                           # Maximum execution time
+#SBATCH --time=72:00:00                           # Maximum execution time
 #SBATCH --partition=compute                       # Partition (queue) name
 #SBATCH --nodes=1                                 # Number of nodes
 #SBATCH --gres=gpu:8                              # Request 8 GPUs per node
@@ -17,7 +17,7 @@ conda activate ksim
 export MODEL_DIR="../assets"
 
 # Path to the configuration file
-CONFIG_PATH="experiments/default_humanoid_walk.yaml"
+CONFIG_PATH="experiments/stompy_walk.yaml"
 
 # Verify allocated GPUs
 echo "Nodes allocated:"
