@@ -1,7 +1,6 @@
-"""Defines the CLI for running PPO training with specified config file."""
-
 import argparse
 import logging
+import os
 from typing import Any
 
 import mediapy as media
@@ -13,15 +12,15 @@ from brax.training.acme import running_statistics
 from brax.training.agents.ppo import networks as ppo_networks
 
 from ksim.mjx_gym.envs import get_env
-from ksim.mjx_gym.envs.default_humanoid_env.default_humanoid import (
-    DEFAULT_REWARD_PARAMS,
-)
+from ksim.mjx_gym.envs.default_humanoid_env.default_humanoid import DEFAULT_REWARD_PARAMS
 from ksim.mjx_gym.utils.rollouts import render_mjx_rollout, render_mujoco_rollout
 
 logger = logging.getLogger(__name__)
 
+os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+os.environ["MESA_GL_VERSION_OVERRIDE"] = "3.3"
 
-def train(config: dict[str, Any], n_steps: int, render_every: int) -> None:
+def play(config: dict[str, Any], n_steps: int, render_every: int) -> None:   
     wandb.init(
         project=config.get("project_name", "robotic_locomotion_training") + "_test",
         name=config.get("experiment_name", "ppo-training") + "_test",
@@ -80,7 +79,6 @@ def train(config: dict[str, Any], n_steps: int, render_every: int) -> None:
     video = wandb.Video(images_tchw, fps=fps, format="mp4")
     wandb.log({"video": video})
 
-
 if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Run PPO training with specified config file.")
@@ -95,4 +93,4 @@ if __name__ == "__main__":
     with open(args.config, "r") as file:
         config = yaml.safe_load(file)
 
-    train(config, args.n_steps, args.render_every)
+    play(config, args.n_steps, args.render_every)
