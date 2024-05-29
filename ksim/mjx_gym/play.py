@@ -74,10 +74,11 @@ def train(config: dict[str, Any], n_steps: int, render_every: int) -> None:
     # render the trajectory
     images_tchw = np.transpose(images_thwc, (0, 3, 1, 2))
 
-    fps = 1 / env.dt
-    wandb.log({"training_rollouts": wandb.Video(images_tchw, fps=fps, format="mp4")})
+    fps = int(1 / env.dt)
+    print(f"Writing video to video.mp4 with fps={fps}")
     media.write_video("video.mp4", images_thwc, fps=fps)
-
+    video = wandb.Video(images_tchw, fps=fps, format="mp4")
+    wandb.log({"video": video})
 
 if __name__ == "__main__":
     # Parse command-line arguments

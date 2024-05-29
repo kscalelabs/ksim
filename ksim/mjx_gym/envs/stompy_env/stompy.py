@@ -154,12 +154,3 @@ class StompyEnv(PipelineEnv):
                 data.qfrc_actuator,
             ]
         )
-
-
-def adhoc_test() -> None:
-    print("hello, world!")
-
-
-if __name__ == "__main__":
-    # python -m ksim.mjx_gym.envs.stompy_env.stompy
-    adhoc_test()
