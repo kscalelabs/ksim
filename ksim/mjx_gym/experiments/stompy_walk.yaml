@@ -17,7 +17,7 @@ batch_size: 512
 seed: 0
 env_name: stompy
 reward_params:
-  rew_forward:d
+  rew_forward:
     weight: 1.25
   rew_healthy:
     weight: 5.0

@@ -77,7 +77,7 @@ def forward_reward_fn(
     xpos = state.subtree_com[1][1]  # TODO: include stricter typing than mjxState to avoid this type error
     next_xpos = next_state.subtree_com[1][1]
     velocity = (next_xpos - xpos) / dt
-    forward_reward = params["weight"] * velocity
+    forward_reward = params["weight"] * velocity * -1.0
 
     return forward_reward, jp.array(1.0)  # TODO: ensure everything is initialized in a size 2 array instead...
 
