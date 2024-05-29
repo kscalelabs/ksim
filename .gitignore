@@ -23,3 +23,6 @@ out*/
 # Training artifacts
 wandb/
 logs/
+
+# No DS Store
+.DS_Store
