@@ -8,8 +8,9 @@ from typing import Any
 import wandb
 import yaml
 from brax.io import model
-from brax.training.agents.ppo import train as ppo
+from brax.training.agents.ppo import networks as ppo_networks
 
+from ksim.mjx_gym.agents.ppo import train as ppo
 from ksim.mjx_gym.envs import get_env
 from ksim.mjx_gym.envs.default_humanoid_env.default_humanoid import (
     DEFAULT_REWARD_PARAMS,
@@ -36,7 +37,7 @@ def train(config: dict[str, Any]) -> None:
     print(f'Env loaded: {config.get("env_name", "could not find environment")}')
 
     train_fn = functools.partial(
-        ppo.train,
+        ppo,
         num_timesteps=config["num_timesteps"],
         num_evals=config["num_evals"],
         reward_scaling=config["reward_scaling"],
@@ -52,6 +53,8 @@ def train(config: dict[str, Any]) -> None:
         num_envs=config["num_envs"],
         batch_size=config["batch_size"],
         seed=config["seed"],
+        policy_hidden_layer_sizes=config["policy_hidden_layer_sizes"],
+        value_hidden_layer_sizes=config["value_hidden_layer_sizes"],
     )
 
     times = [datetime.now()]
@@ -62,7 +65,8 @@ def train(config: dict[str, Any]) -> None:
         wandb.log({"steps": num_steps, "epoch_time": (times[-1] - times[-2]).total_seconds(), **metrics})
 
     def save_model(current_step: int, make_policy: str, params: dict[str, Any]) -> None:  # noqa: ANN401
-        model_path = "weights/" + config.get("project_name", "model") + ".pkl"
+        model_path = "weights/" \
+            + config.get("project_name", "model") + config.get("experiment_name", "ppo-training") + ".pkl"
         model.save_params(model_path, params)
         print(f"Saved model at step {current_step} to {model_path}")
 

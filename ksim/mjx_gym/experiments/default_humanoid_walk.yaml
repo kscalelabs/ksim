@@ -1,5 +1,5 @@
 project_name: default_humanoid_walk
-experiment_name: constant_alive_reward_fixing
+experiment_name: defautlt_run
 num_timesteps: 100000000
 num_evals: 10
 reward_scaling: 0.1
@@ -25,6 +25,8 @@ reward_params:
     healthy_z_upper: 2.0
   rew_ctrl_cost:
     weight: 0.1
+policy_hidden_layer_sizes: [64, 64, 64, 64]
+value_hidden_layer_sizes: [256, 256, 256, 256, 256]
 terminate_when_unhealthy: true
 reset_noise_scale: 0.01
 exclude_current_positions_from_observation: true

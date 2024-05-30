@@ -11,7 +11,7 @@ from brax.io import mjcf
 from brax.mjx.base import State as mjxState
 
 from ksim.mjx_gym.envs.default_humanoid_env.default_humanoid import EnvKwargs
-from ksim.mjx_gym.envs.default_humanoid_env.rewards import (
+from ksim.mjx_gym.envs.stompy_env.rewards import (
     DEFAULT_REWARD_PARAMS,
     RewardParams,
     get_reward_fn,
