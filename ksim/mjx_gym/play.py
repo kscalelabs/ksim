@@ -57,8 +57,13 @@ def play(config: dict[str, Any], n_steps: int, render_every: int) -> None:
         normalize = (
             running_statistics.normalize
         )  # NOTE: very important to keep training & test normalization consistent
+
     policy_network = ppo_networks.make_ppo_networks(
-        env.observation_size, env.action_size, preprocess_observations_fn=normalize
+        env.observation_size, 
+        env.action_size, 
+        preprocess_observations_fn=normalize,
+        policy_hidden_layer_sizes=config["policy_hidden_layer_sizes"],
+        value_hidden_layer_sizes=config["value_hidden_layer_sizes"]
     )
     inference_fn = ppo_networks.make_inference_fn(policy_network)(params)
     print(f"Loaded params from {model_path}")
