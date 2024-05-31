@@ -65,8 +65,9 @@ def train(config: dict[str, Any]) -> None:
         wandb.log({"steps": num_steps, "epoch_time": (times[-1] - times[-2]).total_seconds(), **metrics})
 
     def save_model(current_step: int, make_policy: str, params: dict[str, Any]) -> None:  # noqa: ANN401
-        model_path = "weights/" \
-            + config.get("project_name", "model") + config.get("experiment_name", "ppo-training") + ".pkl"
+        model_path = (
+            "weights/" + config.get("project_name", "model") + config.get("experiment_name", "ppo-training") + ".pkl"
+        )
         model.save_params(model_path, params)
         print(f"Saved model at step {current_step} to {model_path}")
 

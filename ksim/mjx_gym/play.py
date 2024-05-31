@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 os.environ["PYOPENGL_PLATFORM"] = "osmesa"
 os.environ["MESA_GL_VERSION_OVERRIDE"] = "3.3"
 
-def play(config: dict[str, Any], n_steps: int, render_every: int) -> None:   
+
+def play(config: dict[str, Any], n_steps: int, render_every: int) -> None:
     wandb.init(
         project=config.get("project_name", "robotic_locomotion_training") + "_test",
         name=config.get("experiment_name", "ppo-training") + "_test",
@@ -60,8 +61,8 @@ def play(config: dict[str, Any], n_steps: int, render_every: int) -> None:
     print(env.observation_size)
     print(env.action_size)
     policy_network = ppo_networks.make_ppo_networks(
-        env.observation_size, 
-        env.action_size, 
+        env.observation_size,
+        env.action_size,
         preprocess_observations_fn=normalize,
         policy_hidden_layer_sizes=config["policy_hidden_layer_sizes"],
         value_hidden_layer_sizes=config["value_hidden_layer_sizes"],
@@ -87,6 +88,7 @@ def play(config: dict[str, Any], n_steps: int, render_every: int) -> None:
     media.write_video("video.mp4", images_thwc, fps=fps)
     video = wandb.Video(images_tchw, fps=fps, format="mp4")
     wandb.log({"video": video})
+
 
 if __name__ == "__main__":
     # Parse command-line arguments
