@@ -26,6 +26,8 @@ reward_params:
     healthy_z_upper: 2.0
   rew_ctrl_cost:
     weight: 0.1
+policy_hidden_layer_sizes: [64, 64, 64, 64, 64]
+value_hidden_layer_sizes: [256, 256, 256, 256, 256]
 terminate_when_unhealthy: true
 reset_noise_scale: 0.01
 exclude_current_positions_from_observation: true
