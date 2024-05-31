@@ -21,7 +21,7 @@
 
 # K-Scale Sim
 
-A library for simulating Stompy in MJX and MuJoCo.
+A library for training humanoid locomotion in MJX and MuJoCo.
 
 ## Installation
 1. Clone this repository:
@@ -82,7 +82,7 @@ python play.py --config experiments/default_humanoid_walk.yaml
 Here is an example of the trained model walking in the default humanoid environment after roughly 15 minutes of training on the K-Scale cluster.
 
 <video controls>
-  <source alt="K-Scale Open Source Robotics" src="https://github.com/kscalelabs/sim/assets/43460304/8e12b0e6-48ea-4af0-8283-1dc4880767b4" type="video/mp4">
+  <source alt="K-Scale Open Source Robotics" src="assets/333027934-8e12b0e6-48ea-4af0-8283-1dc4880767b4.mp4" type="video/mp4">
 </video>
 
 You may transfer the model (trained via MJX) to MuJoCo for CPU-based simulation via arguments to the play script. For example, to run the model in the default humanoid environment, use the following command:
@@ -95,10 +95,16 @@ It is important that the configuration file used for testing is the **same as th
 Here is an example of the trained model (in MJX) walking in the default humanoid environment in MuJoCo.
 
 <video controls>
-  <source alt="K-Scale Open Source Robotics" src="https://github.com/kscalelabs/sim/assets/43460304/7f158aeb-6bc9-4056-bd1d-12882adbd13c" type="video/mp4">
+  <source alt="K-Scale Open Source Robotics" src="assets/333027930-7f158aeb-6bc9-4056-bd1d-12882adbd13c.mp4" type="video/mp4">
 </video>
 
 While the model performs well in the MJX environment, it is important to note that the model's performance may vary when transferred to MuJoCo. This is due to slight differences in the simulators and the underlying physics engines. Evaluating the model in both simulators is helpful for determining whether the model will generalize well across different environments.
+
+Getting Stompy to walk in MJX is a challenging task, and we encourage the open source community to contribute toward training efforts. The most recent set of weights allows stompy (without upper body) to maintain balance in a stable environment. An example trajectory is included below:
+
+<video controls>
+  <source alt="Stompy Standing" src="assets/stompy_standing.mp4" type="video/mp4">
+</video>
 
 ### Running from SLURM Cluster
 To run from a SLURM cluster (e.g. the K-Scale Andromeda cluster), cd to /mjx_gym/ and run:
@@ -139,9 +145,8 @@ python3 -m mujoco.viewer --mjcf <path-to-mjcf-file>
 The command above loads MuJoCo's GUI, which allows you to simulate the model, manually specify joints, and 
 
 ## TODO
-- [ ] Get Stompy to load efficiently with MJX (currently, the meshes and collision detection are not loading correctly)
-- [ ] Add goal conditioning to the humanoid walk task
+- Boootstrap 
+- [ ] Get Stompy walking with PPO through bootstrapping
 - [ ] Implement imitation learning techniques for end-to-end walking and recovering tasks
-- [ ] Constantly iterate on the reward functions to improve training efficiency
 - [ ] Add CPU-based MuJoCo training platform for improved sim-to-sim support
 - [ ] Add sim-to-real transfer learning techniques during training
