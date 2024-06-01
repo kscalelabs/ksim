@@ -30,16 +30,30 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Restore cache
+        id: restore-cache
+        uses: actions/cache/restore@v3
+        with:
+          path: |
+            ${{ env.pythonLocation }}
+            .mypy_cache/
+          key: python-requirements-${{ env.pythonLocation }}-${{ github.event.pull_request.base.sha || github.sha }}
+          restore-keys: |
+            python-requirements-${{ env.pythonLocation }}
+            python-requirements-
+
       - name: Install dependencies
         run: |
-          pip install 'kscale-onshape-library @ git+https://github.com/kscalelabs/onshape.git@master'  # Bleeding edge
+          pip install -e '.[dev]'
 
       - name: Build package
         env:
           ONSHAPE_ACCESS_KEY: ${{ secrets.ONSHAPE_ACCESS_KEY }}
           ONSHAPE_SECRET_KEY: ${{ secrets.ONSHAPE_SECRET_KEY }}
           ONSHAPE_API: ${{ secrets.ONSHAPE_API }}
-        run: python -m ksim.scripts.update_stompy_s3
+        run: |
+          python -m ksim.scripts.update_stompy_s3
+          python -m ksim.scripts.update_stompy_arm_s3
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
@@ -55,3 +69,12 @@ jobs:
           for file in stompy/*.tar.gz; do
             aws s3 cp "$file" s3://${AWS_S3_BUCKET}/$(basename "$file")
           done
+
+      - name: Save cache
+        uses: actions/cache/save@v3
+        if: github.ref == 'refs/heads/master'
+        with:
+          path: |
+            ${{ env.pythonLocation }}
+            .mypy_cache/
+          key: ${{ steps.restore-cache.outputs.cache-primary-key }}

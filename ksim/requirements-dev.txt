@@ -1,18 +1,11 @@
 # requirements-dev.txt
 
+# Linting
 black
 darglint
 mypy
 pytest
 ruff
 
-brax
-jax
-mediapy
-moviepy
-mujoco-mjx
-numpy
-torch
-tqdm
-imageio
-wandb
+# OnShape to URDF
+kscale-onshape-library @ git+https://github.com/kscalelabs/onshape.git@master
