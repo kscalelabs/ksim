@@ -21,7 +21,7 @@
 
 # K-Scale Sim
 
-A library for training humanoid locomotion in MJX and MuJoCo.
+A simple and efficient library for training humanoid locomotion in MJX and MuJoCo.
 
 ## Installation
 1. Clone this repository:
@@ -145,7 +145,7 @@ python3 -m mujoco.viewer --mjcf <path-to-mjcf-file>
 The command above loads MuJoCo's GUI, which allows you to simulate the model, manually specify joints, and 
 
 ## TODO
-- Boootstrap 
+- Bootstrap 
 - [ ] Get Stompy walking with PPO through bootstrapping
 - [ ] Implement imitation learning techniques for end-to-end walking and recovering tasks
 - [ ] Add CPU-based MuJoCo training platform for improved sim-to-sim support
