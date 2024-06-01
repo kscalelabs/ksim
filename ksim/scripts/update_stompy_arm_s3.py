@@ -10,7 +10,11 @@ STOMPY_ARM_MODEL = (
 
 
 def main() -> None:
-    run_onshape_to_urdf(STOMPY_ARM_MODEL, "stompy_arm")
+    run_onshape_to_urdf(
+        model_url=STOMPY_ARM_MODEL,
+        output_dir="stompy_arm",
+        override_central_node="arm_part_1_1"
+    )
 
 
 if __name__ == "__main__":

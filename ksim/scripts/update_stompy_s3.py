@@ -10,7 +10,10 @@ STOMPY_MODEL = (
 
 
 def main() -> None:
-    run_onshape_to_urdf(STOMPY_MODEL, "stompy")
+    run_onshape_to_urdf(
+        model_url=STOMPY_MODEL,
+        output_dir="stompy",
+    )
 
 
 if __name__ == "__main__":
