@@ -58,8 +58,7 @@ def play(config: dict[str, Any], n_steps: int, render_every: int) -> None:
         normalize = (
             running_statistics.normalize
         )  # NOTE: very important to keep training & test normalization consistent
-    print(env.observation_size)
-    print(env.action_size)
+
     policy_network = ppo_networks.make_ppo_networks(
         env.observation_size,
         env.action_size,

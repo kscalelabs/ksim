@@ -3,6 +3,18 @@ import numpy as np
 import mediapy as media
 import scipy.linalg
 
+# Define the cost coefficients and parameters
+BALANCE_COST = 1000  # Balancing.
+BALANCE_JOINT_COST = 3  # Joints required for balancing.
+OTHER_JOINT_COST = 0.3  # Other joints.
+DURATION = 12  # seconds
+FRAMERATE = 60  # Hz
+TOTAL_ROTATION = 15  # degrees
+CTRL_RATE = 0.8  # seconds
+BALANCE_STD = 0.01  # actuator units
+OTHER_STD = 0.08  # actuator units
+
+
 model = mujoco.MjModel.from_xml_path("stompy.xml")
 data = mujoco.MjData(model)
 
@@ -11,11 +23,9 @@ qpos0 = model.keyframe("default").qpos
 ctrl0 = np.zeros(model.nu)
 dq = np.zeros(model.nv)
 
-### Intermediate
-nu = model.nu  # Alias for the number of actuators.
+nu = model.nu  # number of actuators.
 R = np.eye(nu)
-
-nv = model.nv  # Shortcut for the number of DoFs.
+nv = model.nv  # number of DoFs.
 
 # Get the Jacobian for the root body (torso) CoM.
 mujoco.mj_resetData(model, data)
@@ -46,11 +56,6 @@ left_leg_dofs = [
 balance_dofs = abdomen_dofs + left_leg_dofs
 other_dofs = np.setdiff1d(body_dofs, balance_dofs)
 
-# Cost coefficients.
-BALANCE_COST = 1000  # Balancing.
-BALANCE_JOINT_COST = 3  # Joints required for balancing.
-OTHER_JOINT_COST = 0.3  # Other joints.
-
 # Construct the Qjoint matrix.
 Qjoint = np.eye(nv)
 Qjoint[root_dofs, root_dofs] *= 0  # Don't penalize free joint directly.
@@ -62,7 +67,6 @@ Qpos = BALANCE_COST * Qbalance + Qjoint
 
 # No explicit penalty for velocities.
 Q = np.block([[Qpos, np.zeros((nv, nv))], [np.zeros((nv, 2 * nv))]])
-
 
 # Set the initial state and control.
 mujoco.mj_resetData(model, data)
@@ -79,17 +83,8 @@ mujoco.mjd_transitionFD(model, data, epsilon, flg_centered, A, B, None, None)
 
 # Solve discrete Riccati equation.
 P = scipy.linalg.solve_discrete_are(A, B, Q, R)
-
 # Compute the feedback gain matrix K.
 K = np.linalg.inv(R + B.T @ P @ B) @ B.T @ P @ A
-
-# Parameters.
-DURATION = 12  # seconds
-FRAMERATE = 60  # Hz
-TOTAL_ROTATION = 15  # degrees
-CTRL_RATE = 0.8  # seconds
-BALANCE_STD = 0.01  # actuator units
-OTHER_STD = 0.08  # actuator units
 
 # Make new camera, set distance.
 camera = mujoco.MjvCamera()
