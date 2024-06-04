@@ -32,7 +32,7 @@ namespace_packages = false
 
 enable_incomplete_feature = ["Unpack"]
 
-exclude = ["ksim/experimental/", "ksim/mjx_gym/agents/ppo.py"]
+exclude = ["ksim/experimental/", "ksim/mjx_gym/agents/"]
 
 [[tool.mypy.overrides]]
 
