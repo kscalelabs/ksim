@@ -4,7 +4,7 @@ on:
   release:
     types: [created]
   schedule:
-    - cron: "30 2 * * *"
+    - cron: "30 10 * * *"
   workflow_dispatch:
 
 permissions:
