@@ -7,30 +7,23 @@ See:
 
 import functools
 import time
-from typing import Callable, Optional, Protocol, Sequence, Tuple, Union
+from typing import Callable, Optional, Sequence, Tuple, Union
 
-from absl import logging
-from brax import base
-from brax import envs
-from brax.training import acting
-from brax.training import gradients
-from brax.training import pmap
-from brax.training import types
-from brax.training.acme import running_statistics
-from brax.training.acme import specs
-from brax.training.agents.ppo import losses as ppo_losses
-from brax.training.agents.ppo import networks as ppo_networks
-from brax.training.types import Params
-from brax.training.types import PRNGKey
-from brax.v1 import envs as envs_v1
-from etils import epath
 import flax
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+from absl import logging
+from brax import base, envs
+from brax.training import acting, gradients, pmap, types
+from brax.training.acme import running_statistics, specs
+from brax.training.agents.ppo import losses as ppo_losses
+from brax.training.agents.ppo import networks as ppo_networks
+from brax.training.types import Params, PRNGKey
+from brax.v1 import envs as envs_v1
+from etils import epath
 from orbax import checkpoint as ocp
-
 
 InferenceParams = Tuple[running_statistics.NestedMeanStd, Params]
 Metrics = types.Metrics
@@ -49,6 +42,12 @@ class TrainingState:
 
 
 def _unpmap(v):
+    """Unpmaps a value.
+    Args:
+        v: The value to unmap.
+    Returns:
+        The value with the leading pmap axis removed.
+    """
     return jax.tree_util.tree_map(lambda x: x[0], v)
 
 

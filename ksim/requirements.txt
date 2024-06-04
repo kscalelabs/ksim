@@ -10,3 +10,4 @@ torch
 tqdm
 imageio
 wandb
+isort

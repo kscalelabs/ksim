@@ -8,7 +8,6 @@ from typing import Any
 import wandb
 import yaml
 from brax.io import model
-from brax.training.agents.ppo import networks as ppo_networks
 
 from ksim.mjx_gym.agents.ppo import train as ppo
 from ksim.mjx_gym.envs import get_env

@@ -5,6 +5,7 @@ darglint
 mypy
 pytest
 ruff
+isort
 
 brax
 jax

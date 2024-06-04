@@ -1,6 +1,6 @@
+import mediapy as media
 import mujoco
 import numpy as np
-import mediapy as media
 import scipy.linalg
 
 # Define the cost coefficients and parameters

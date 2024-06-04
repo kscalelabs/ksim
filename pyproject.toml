@@ -32,6 +32,8 @@ namespace_packages = false
 
 enable_incomplete_feature = ["Unpack"]
 
+exclude = ["ksim/experimental/", "ksim/mjx_gym/agents/ppo.py"]
+
 [[tool.mypy.overrides]]
 
 module = [
@@ -53,6 +55,8 @@ profile = "black"
 
 line-length = 120
 target-version = "py310"
+
+exclude = ["ksim/experimental/", "ksim/mjx_gym/agents/ppo.py"]
 
 [tool.ruff.lint]
 
