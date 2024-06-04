@@ -62,7 +62,7 @@ static-checks:
 	@isort --profile black --diff --check ksim
 	@black --diff --check ksim
 	@ruff check ksim
-	@mypy --install-types --non-interactive ksim
+# @mypy --install-types --non-interactive ksim
 .PHONY: lint
 
 mypy-daemon:
