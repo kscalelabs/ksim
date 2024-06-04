@@ -4,8 +4,8 @@
 from ksim.scripts.run_onshape_to_urdf import run_onshape_to_urdf
 
 STOMPY_ARM_MODEL = (
-    "https://cad.onshape.com/documents/c18f0f88a92c5eb7fe8968b1/"
-    "w/db6d2ff05955edd31f39fda3/e/b6b0d3abb4be86fb66d3b701"
+    "https://cad.onshape.com/documents/afaee604f6ca311526a6aec8/"
+    "w/29af84cb974c2d825b71de39/e/4fef6bce7179a665e62b03ba"
 )
 
 
@@ -13,7 +13,7 @@ def main() -> None:
     run_onshape_to_urdf(
         model_url=STOMPY_ARM_MODEL,
         output_dir="stompy_arm",
-        override_central_node="arm_part_1_1",
+        override_central_node="left_arm_1_arm_part_1_1",
     )
 
 
