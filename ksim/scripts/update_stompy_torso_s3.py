@@ -3,7 +3,7 @@
 
 from ksim.scripts.run_onshape_to_urdf import run_onshape_to_urdf
 
-STOMPY_TORSO_MODEL = (
+STOMPY_TORSO_7DOF = (
     "https://cad.onshape.com/documents/77f178833017912bdc0eaaa8/w/"
     "958f1684049f1413f6dd7831/e/348cad65143f892a40e33206"
 )
@@ -16,8 +16,8 @@ STOMPY_TORSO_5DOF = (
 
 def main() -> None:
     run_onshape_to_urdf(
-        model_url=STOMPY_TORSO_MODEL,
-        output_dir="stompy_torso",
+        model_url=STOMPY_TORSO_7DOF,
+        output_dir="stompy_torso_7dof",
         override_central_node="torso_1_hip_mount_1",
     )
 
