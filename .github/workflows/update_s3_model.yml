@@ -54,6 +54,7 @@ jobs:
         run: |
           python -m ksim.scripts.update_stompy_s3
           python -m ksim.scripts.update_stompy_arm_s3
+          python -m ksim.scripts.update_stompy_torso_s3
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
