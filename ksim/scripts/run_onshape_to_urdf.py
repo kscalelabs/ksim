@@ -3,7 +3,7 @@
 
 import tarfile
 from pathlib import Path
-
+from typing import Dict
 from kol.logging import configure_logging as configure_kol_logging
 from kol.onshape.converter import Converter
 
@@ -16,6 +16,17 @@ SUFFIX_TO_JOINT_EFFORT = {
     "knee_revolute": 13.9,
     "ankle_revolute": 6,
 }
+
+
+JOINTS_MAP: Dict[str, str] = {
+    # torso
+    "joint_torso_1_rmd_x8_90_mock_1_dof_x8": "torsot",
+
+    # left arm (7dof)
+    "joint_full_arm_5_dof_1_upper_left_arm_1_rmd_x8_90_mock_1_dof_x8": "left_shoulder_yaw",
+    "joint_full_arm_5_dof_2_upper_left_arm_1_rmd_x8_90_mock_1_dof_x8": "right _shoulder_yaw",
+    # 33 more joints
+}   
 
 
 def run_onshape_to_urdf(model_url: str, output_dir: str | Path, override_central_node: str | None = None) -> None:
@@ -34,6 +45,7 @@ def run_onshape_to_urdf(model_url: str, output_dir: str | Path, override_central
         remove_inertia=True,
         merge_fixed_joints=True,
         simplify_meshes=True,
+        joints_remapping=JOINTS_MAP,
     )
     converter.save_urdf()
     latest_stl_urdf_path = converter.output_dir
