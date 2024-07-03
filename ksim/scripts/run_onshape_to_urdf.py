@@ -17,7 +17,7 @@ SUFFIX_TO_JOINT_EFFORT = {
     "ankle_revolute": 6,
 }
 
-update_dict = {
+UPDATE_NAMES = {
     "dof_2_upper_left_arm_1_rmd_x8_90_mock_1_dof_x8": "left shoulder pitch",
     "upper_left_arm_1_rmd_x8_90_mock_1_dof_x8": "shoulder pitch",
     "dof_1_upper_left_arm_1_rmd_x8_90_mock_1_dof_x8": "right shoulder pitch",
@@ -73,7 +73,7 @@ update_dict = {
     "full_arm_5_dof_2_upper_left_arm_1_rmd_x4_24_mock_1_dof_x4": "left shoulder roll",
 }
 
-override = [
+OVERRIDE = [
     "hand_1_rmd_x4_24_mock_1_dof_x4",
     "joint_lower_arm_3_dof_1_hand_1_rmd_x4_24_mock_1_dof_x4",
 ]
@@ -95,8 +95,8 @@ def run_onshape_to_urdf(model_url: str, output_dir: str | Path, override_central
         remove_inertia=True,
         merge_fixed_joints=True,
         simplify_meshes=True,
-        override_joint_names=update_dict,
-        override_nonfixed=override,
+        override_joint_names=UPDATE_NAMES,
+        override_nonfixed=OVERRIDE,
     )
     converter.save_mjcf()
     latest_stl_urdf_path = converter.output_dir
