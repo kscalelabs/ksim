@@ -1,5 +1,5 @@
 project_name: default_humanoid_walk
-experiment_name: defautlt_run
+experiment_name: default_run
 num_timesteps: 100000000
 num_evals: 10
 reward_scaling: 0.1
