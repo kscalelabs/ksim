@@ -1,0 +1,214 @@
+{
+  "jsonType": "metadata-part",
+  "isMesh": false,
+  "partId": "RbCD",
+  "isFlattenedBody": false,
+  "partType": "solid",
+  "meshState": 0,
+  "properties": [
+    {
+      "name": "Appearance",
+      "value": {
+        "color": {
+          "red": 157,
+          "green": 207,
+          "blue": 237
+        },
+        "isGenerated": true,
+        "opacity": 255
+      }
+    },
+    {
+      "name": "Name",
+      "value": "Ankle Half 2 Right"
+    },
+    {
+      "name": "Description",
+      "value": null
+    },
+    {
+      "name": "Category",
+      "value": [
+        {
+          "memberCategoryIds": [
+            "5877a03ebe4c21163b49dce2"
+          ],
+          "memberCategories": [
+            {
+              "ownerType": 2,
+              "description": "Category created by upgrade",
+              "ownerId": "556f3109e4b00b3fee9a3f4a",
+              "publishState": 1,
+              "defaultObjectType": 2,
+              "objectTypes": [
+                2
+              ],
+              "name": "Onshape Part",
+              "id": "5877a03ebe4c21163b49dce2",
+              "href": null
+            }
+          ],
+          "ownerType": 1,
+          "description": "Default category for object type Part",
+          "ownerId": "65a33ca766b95a21beacf364",
+          "publishState": 1,
+          "defaultObjectType": 2,
+          "objectTypes": [
+            2
+          ],
+          "name": "Part",
+          "id": "65a33ca866b95a21beacf3b3",
+          "href": null
+        }
+      ]
+    },
+    {
+      "name": "Part number",
+      "value": null
+    },
+    {
+      "name": "Revision",
+      "value": null
+    },
+    {
+      "name": "State",
+      "value": "0"
+    },
+    {
+      "name": "Vendor",
+      "value": null
+    },
+    {
+      "name": "Project",
+      "value": null
+    },
+    {
+      "name": "Product line",
+      "value": null
+    },
+    {
+      "name": "Material",
+      "value": {
+        "properties": [
+          {
+            "name": "COMPRESSIVE_YIELD_STRENGTH",
+            "value": "66800000",
+            "type": "REAL",
+            "displayName": "Compressive Yield Strength",
+            "units": "Pa",
+            "category": "Physical",
+            "description": "Compressive yield strength"
+          },
+          {
+            "name": "YOUNGS_MODULUS",
+            "value": "2950000000",
+            "type": "REAL",
+            "displayName": "Young's Modulus",
+            "units": "Pa",
+            "category": "Physical",
+            "description": "Young's modulus"
+          },
+          {
+            "name": "TENSILE_YIELD_STRENGTH",
+            "value": "71700000",
+            "type": "REAL",
+            "displayName": "Tensile Yield Strength",
+            "units": "Pa",
+            "category": "Physical",
+            "description": "Tensile yield strength"
+          },
+          {
+            "name": "DENS",
+            "value": "353.93813",
+            "type": "REAL",
+            "displayName": "Density",
+            "units": "kg/m^3",
+            "category": "Physical",
+            "description": "Density"
+          },
+          {
+            "name": "ULTIMATE_COMPRESSIVE_STRENGTH",
+            "value": "0",
+            "type": "REAL",
+            "displayName": "Ultimate Compressive Strength",
+            "units": "Pa",
+            "category": "Physical",
+            "description": "Ultimate compressive strength"
+          },
+          {
+            "name": "POISSONS_RATIO",
+            "value": "0.39",
+            "type": "REAL",
+            "displayName": "Poisson's Ratio",
+            "units": "",
+            "category": "Physical",
+            "description": "Poisson's ratio"
+          },
+          {
+            "name": "ULTIMATE_TENSILE_STRENGTH",
+            "value": "75200000",
+            "type": "REAL",
+            "displayName": "Ultimate Tensile Strength",
+            "units": "Pa",
+            "category": "Physical",
+            "description": "Ultimate tensile strength"
+          }
+        ],
+        "id": "ls4sVX1qEYZVTARJ",
+        "displayName": "Nylon thirty percent infil",
+        "libraryName": "KScale Materials",
+        "libraryReference": {
+          "versionId": "acae7e25659cd1db88cc9709",
+          "elementId": "cc4629a0098232051e7d5d8e",
+          "documentId": "d6fbcb292922ae0429e1f65b",
+          "elementMicroversionId": "acdcfd2e4bcc5828abf451b9"
+        }
+      }
+    },
+    {
+      "name": "Title 1",
+      "value": null
+    },
+    {
+      "name": "Title 2",
+      "value": null
+    },
+    {
+      "name": "Title 3",
+      "value": null
+    },
+    {
+      "name": "Not revision managed",
+      "value": false
+    },
+    {
+      "name": "Exclude from all BOMs",
+      "value": false
+    },
+    {
+      "name": "Unit of measure",
+      "value": "Each"
+    },
+    {
+      "name": "Mass",
+      "value": {
+        "formattedValue": "0.131 lb",
+        "computed": 0.05923903048770693,
+        "useOverride": false
+      }
+    },
+    {
+      "name": "Center of mass",
+      "value": null
+    },
+    {
+      "name": "Inertia",
+      "value": null
+    },
+    {
+      "name": "Tessellation quality",
+      "value": "0"
+    }
+  ],
+  "href": "https://cad.onshape.com/api/metadata/d/a01e5acf379b05469856114c/m/03b783dcc4c854d2f918ab97/e/b25cdf9c8b146c77faa2877b/p/RbCD?configuration=default"
+}
