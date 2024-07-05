@@ -54,9 +54,16 @@
     <mesh name="fused_component_upper_limb_assembly_7_dof_1_torso_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple" file="fused_component_upper_limb_assembly_7_dof_1_torso_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple.stl" />
     <mesh name="fused_component_upper_limb_assembly_7_dof_1_full_arm_7_dof_1_upper_left_arm_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple" file="fused_component_upper_limb_assembly_7_dof_1_full_arm_7_dof_1_upper_left_arm_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple.stl" />
     <mesh name="fused_component_upper_limb_assembly_7_dof_1_full_arm_7_dof_2_upper_left_arm_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple" file="fused_component_upper_limb_assembly_7_dof_1_full_arm_7_dof_2_upper_left_arm_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple.stl" />
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1=".1 .2 .3" rgb2=".2 .3 .4" />
+		<material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance=".2" />
   </asset>
   <worldbody>
-    <body name="root" pos="0 0 0" quat="1 0 0 0"><geom type="mesh" rgba="0.64455 0.742648 0.801487 1" mesh="fused_component_upper_limb_assembly_7_dof_1_torso_1_top_skeleton_2_simple" />
+    <geom name="floor" size="0 0 0.01" type="plane" material="grid" condim="3" />
+		<light name="spotlight" mode="targetbodycom" target="root" diffuse=".8 .8 .8" specular="0.3 0.3 0.3" pos="0 -6 4" cutoff="30" />
+    <body name="root" pos="0 0 10" quat="1 0 0 0"><geom type="mesh" rgba="0.64455 0.742648 0.801487 1" mesh="fused_component_upper_limb_assembly_7_dof_1_torso_1_top_skeleton_2_simple" />
+      <camera name="front" pos="0 -3 1" xyaxes="1 0 0 0 1 2" mode="trackcom"/>
+			<camera name="side" pos="-2.893 -1.330 1.257" xyaxes="0.405 -0.914 0.000 0.419 0.186 0.889" mode="trackcom"/>
+      <freejoint name="root" />
     <body name="fused_component_upper_limb_assembly_7_dof_1_full_arm_7_dof_2_upper_left_arm_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1" pos="0.151411 0.000437102 0.0219782" quat="0.566935 -0.422593 0.422593 -0.566935">
       <joint name="shoulder pitch" pos="0 0 0" axis="0 0 -1" range="-3.14159 3.14159" actuatorfrcrange="-80 80" />
       <geom type="mesh" rgba="0.71094 0.745901 0.822262 1" mesh="fused_component_upper_limb_assembly_7_dof_1_full_arm_7_dof_2_upper_left_arm_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple" />
@@ -200,7 +207,7 @@
     <motor name="right_ankle_roll_motor" joint="right ankle roll" />
   </actuator>
   <keyframe>
-    <key name="default" qpos='0.0 -0.126 2.12 1.89 -1.13 2.1 -1.23 0.0 0.0 0.0 0.0 -0.346 -0.251 0.377 -3.14 -0.437 0.911 -1.55 1.46 1.45 2.17 0.238 1.79 1.55 -1.67 1.04 2.01 0.44 1.79 0.0 0.0'/>
+    <key name="default" qpos='0.0 -0.126 2.12 1.89 -1.13 2.1 -1.23 0.0 0.0 0.0 0.0 -0.346 -0.251 0.377 -3.14 -0.437 0.911 -1.55 1.46 1.45 2.17 0.238 1.79 1.55 -1.67 1.04 2.01 0.44 1.79 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0'/>
   </keyframe>
 
 </mujoco>
