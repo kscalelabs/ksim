@@ -19,7 +19,7 @@ jobs:
   publish:
     name: Update Stompy S3 Model
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
 
     steps:
       - name: Checkout code
