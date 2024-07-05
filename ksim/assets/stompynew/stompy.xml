@@ -60,7 +60,7 @@
   <worldbody>
     <geom name="floor" size="0 0 0.01" type="plane" material="grid" condim="3" />
 		<light name="spotlight" mode="targetbodycom" target="root" diffuse=".8 .8 .8" specular="0.3 0.3 0.3" pos="0 -6 4" cutoff="30" />
-    <body name="root" pos="0 0 10" quat="1 0 0 0"><geom type="mesh" rgba="0.64455 0.742648 0.801487 1" mesh="fused_component_upper_limb_assembly_7_dof_1_torso_1_top_skeleton_2_simple" />
+    <body name="root" pos="0 0 1" quat="1 0 0 0"><geom type="mesh" rgba="0.64455 0.742648 0.801487 1" mesh="fused_component_upper_limb_assembly_7_dof_1_torso_1_top_skeleton_2_simple" />
       <camera name="front" pos="0 -3 1" xyaxes="1 0 0 0 1 2" mode="trackcom"/>
 			<camera name="side" pos="-2.893 -1.330 1.257" xyaxes="0.405 -0.914 0.000 0.419 0.186 0.889" mode="trackcom"/>
       <freejoint name="root" />
