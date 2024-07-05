@@ -96,8 +96,8 @@
             "type": "REAL",
             "displayName": "Compressive Yield Strength",
             "units": "Pa",
-            "category": "Physical",
-            "description": "Compressive yield strength"
+            "description": "Compressive yield strength",
+            "category": "Physical"
           },
           {
             "name": "YOUNGS_MODULUS",
@@ -105,8 +105,8 @@
             "type": "REAL",
             "displayName": "Young's Modulus",
             "units": "Pa",
-            "category": "Physical",
-            "description": "Young's modulus"
+            "description": "Young's modulus",
+            "category": "Physical"
           },
           {
             "name": "TENSILE_YIELD_STRENGTH",
@@ -114,8 +114,8 @@
             "type": "REAL",
             "displayName": "Tensile Yield Strength",
             "units": "Pa",
-            "category": "Physical",
-            "description": "Tensile yield strength"
+            "description": "Tensile yield strength",
+            "category": "Physical"
           },
           {
             "name": "DENS",
@@ -123,8 +123,8 @@
             "type": "REAL",
             "displayName": "Density",
             "units": "kg/m^3",
-            "category": "Physical",
-            "description": "Density"
+            "description": "Density",
+            "category": "Physical"
           },
           {
             "name": "ULTIMATE_COMPRESSIVE_STRENGTH",
@@ -132,8 +132,8 @@
             "type": "REAL",
             "displayName": "Ultimate Compressive Strength",
             "units": "Pa",
-            "category": "Physical",
-            "description": "Ultimate compressive strength"
+            "description": "Ultimate compressive strength",
+            "category": "Physical"
           },
           {
             "name": "POISSONS_RATIO",
@@ -141,8 +141,8 @@
             "type": "REAL",
             "displayName": "Poisson's Ratio",
             "units": "",
-            "category": "Physical",
-            "description": "Poisson's ratio"
+            "description": "Poisson's ratio",
+            "category": "Physical"
           },
           {
             "name": "ULTIMATE_TENSILE_STRENGTH",
@@ -150,19 +150,19 @@
             "type": "REAL",
             "displayName": "Ultimate Tensile Strength",
             "units": "Pa",
-            "category": "Physical",
-            "description": "Ultimate tensile strength"
+            "description": "Ultimate tensile strength",
+            "category": "Physical"
           }
         ],
         "id": "ls4sVX1qEYZVTARJ",
         "displayName": "Nylon thirty percent infil",
-        "libraryName": "KScale Materials",
         "libraryReference": {
-          "documentId": "d6fbcb292922ae0429e1f65b",
-          "elementId": "cc4629a0098232051e7d5d8e",
           "versionId": "acae7e25659cd1db88cc9709",
+          "elementId": "cc4629a0098232051e7d5d8e",
+          "documentId": "d6fbcb292922ae0429e1f65b",
           "elementMicroversionId": "acdcfd2e4bcc5828abf451b9"
-        }
+        },
+        "libraryName": "KScale Materials"
       }
     },
     {

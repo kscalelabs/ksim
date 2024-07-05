@@ -164,11 +164,11 @@ def render_random_rollout(
     ctrl = jp.zeros(model.nu)
 
     images: list[np.ndarray] = []
-    rng = jax.random.PRNGKey(seed)
+    seed = jax.random.PRNGKey(seed)
     for step in tqdm(range(n_steps)):
-        act_rng, seed = jax.random.split(rng)
         # collect random actions
         ctrl = jax.random.uniform(seed, (model.nu,), minval=-1, maxval=1)
+        print(ctrl)
         data.ctrl = ctrl
         for _ in range(env._n_frames):
             mujoco.mj_step(model, data)
