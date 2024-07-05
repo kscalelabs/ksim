@@ -30,7 +30,8 @@ class StompyEnv(PipelineEnv):
         log_reward_breakdown: bool = True,
         **kwargs: Unpack[EnvKwargs],
     ) -> None:
-        path = "/home/awu/ksim/ksim/assets/stompynew/stompy.xml"
+        # path = "/Users/allen/KScale/ksim/ksim/assets/stompy/stompy.xml"
+        path = "/Users/allen/KScale/ksim/ksim/assets/stompynew/stompy.xml"
         mj_model = mujoco.MjModel.from_xml_path(path)
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.iterations = 6

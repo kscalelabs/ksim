@@ -328,6 +328,8 @@ def train(
         t = time.time()
         training_state, env_state = _strip_weak_type((training_state, env_state))
         result = training_epoch(training_state, env_state, key)
+        print("training_epoch_with_timing")
+        print(result)
         training_state, env_state, metrics = _strip_weak_type(result)
 
         metrics = jax.tree_util.tree_map(jnp.mean, metrics)
@@ -394,6 +396,8 @@ def train(
         key=eval_key,
     )
 
+    print("initial eval")
+
     # Run initial eval
     metrics = {}
     if process_id == 0 and num_evals > 1:
@@ -407,17 +411,20 @@ def train(
     training_walltime = 0
     current_step = 0
     for it in range(num_evals_after_init):
+        print("iteration", it)
         logging.info("starting iteration %s %s", it, time.time() - xt)
 
         for _ in range(max(num_resets_per_eval, 1)):
+            print("resetting envs")
             # optimization
+            print(local_devices_to_use)
             epoch_key, local_key = jax.random.split(local_key)
             epoch_keys = jax.random.split(epoch_key, local_devices_to_use)
             (training_state, env_state, training_metrics) = training_epoch_with_timing(
                 training_state, env_state, epoch_keys
             )
             current_step = int(_unpmap(training_state.env_steps))
-
+            print("current_step", current_step)
             key_envs = jax.vmap(lambda x, s: jax.random.split(x[0], s), in_axes=(0, None))(key_envs, key_envs.shape[1])
             # TODO: move extra reset logic to the AutoResetWrapper.
             env_state = reset_fn(key_envs) if num_resets_per_eval > 0 else env_state

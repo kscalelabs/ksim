@@ -133,3 +133,48 @@ def render_mujoco_rollout(
             images.append(renderer.render())
 
     return np.array(images)
+
+
+def render_random_rollout(
+    env: mujoco.MjModel,
+    n_steps: int = 100,
+    render_every: int = 2,
+    seed: int = 0,
+    width: int = 320,
+    height: int = 240,
+) -> np.ndarray:
+    """Rollout a trajectory using MuJoCo.
+
+    Args:
+        env: Brax environment
+        inference_fn: Inference function
+        n_steps: Number of steps to rollout
+        render_every: Render every nth step
+        seed: Random seed
+        width: width of rendered frame in pixels
+        height: height of rendered frame in pixels
+
+    Returns:
+        A list of images of the policy rollout (T, H, W, C)
+    """
+    print(f"Rolling out {n_steps} steps with MuJoCo")
+    model = env.sys.mj_model
+    data = mujoco.MjData(model)
+    renderer = mujoco.Renderer(model, width=width, height=height)
+    ctrl = jp.zeros(model.nu)
+
+    images: list[np.ndarray] = []
+    rng = jax.random.PRNGKey(seed)
+    for step in tqdm(range(n_steps)):
+        act_rng, seed = jax.random.split(rng)
+        # collect random actions
+        ctrl = jax.random.uniform(seed, (model.nu,), minval=-1, maxval=1)
+        data.ctrl = ctrl
+        for _ in range(env._n_frames):
+            mujoco.mj_step(model, data)
+
+        if step % render_every == 0:
+            renderer.update_scene(data, camera="side")
+            images.append(renderer.render())
+
+    return np.array(images)
