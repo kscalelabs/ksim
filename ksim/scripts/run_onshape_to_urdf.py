@@ -75,8 +75,25 @@ UPDATE_NAMES = {
 
 OVERRIDE = [
     "hand_1_rmd_x4_24_mock_1_dof_x4",
-    "joint_lower_arm_3_dof_1_hand_1_rmd_x4_24_mock_1_dof_x4",
+    "lower_arm_3_dof_1_hand_1_rmd_x4_24_mock_1_dof_x4",
 ]
+
+JOINT_LIMITS = {
+    "ankle roll": (-2.26893, -1.22173),
+    "ankle pitch": (-1.5708, 2.18166),
+    "knee pitch": (-4.18879, 0),
+    "right hip roll": (0, 3.14159),
+    "left hip roll": (-3.14159, 0),
+    "right hip yaw": (-1.0472, 2.0944),
+    "left hip yaw": (-1.0472, 2.0944),
+    "hip pitch": (-4.712389, 4.712389),
+    "torso roll": (-4.36332, 4.36332),
+    "shoulder pitch": (-4.71239, 4.71239),
+    "shoulder yaw": (0.97738438, 5.3058009),
+    "shoulder roll": (-4.71239, 4.71239),
+    "wrist roll": (-4.71239, 4.71239),
+    "left wrist pitch": (-3.66519, -1.39626),
+}
 
 
 def run_onshape_to_urdf(model_url: str, output_dir: str | Path, override_central_node: str | None = None) -> None:
@@ -98,6 +115,7 @@ def run_onshape_to_urdf(model_url: str, output_dir: str | Path, override_central
         skip_small_parts=True,
         override_joint_names=UPDATE_NAMES,
         override_nonfixed=OVERRIDE,
+        override_limits=JOINT_LIMITS,
     )
     converter.save_mjcf()
     latest_stl_urdf_path = converter.output_dir
