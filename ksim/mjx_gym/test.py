@@ -6,22 +6,13 @@ import os
 from typing import Any
 
 import mediapy as media
-import numpy as np
-import wandb
 import yaml
-from brax.io import model
-from brax.training.acme import running_statistics
-from brax.training.agents.ppo import networks as ppo_networks
 
 from ksim.mjx_gym.envs import get_env
 from ksim.mjx_gym.envs.default_humanoid_env.default_humanoid import (
     DEFAULT_REWARD_PARAMS,
 )
-from ksim.mjx_gym.utils.rollouts import (
-    render_mjx_rollout,
-    render_mujoco_rollout,
-    render_random_rollout,
-)
+from ksim.mjx_gym.utils.rollouts import render_random_rollout
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +33,6 @@ def play(config: dict[str, Any], n_steps: int, render_every: int, width: int, he
     print(f"Env loaded: {config.get('env_name', 'could not find environment')}")
     images_thwc = render_random_rollout(env, 200, render_every, width, height)
     print(f"Rolled out {len(images_thwc) * render_every} steps")
-
-    # render the trajectory
-    images_tchw = np.transpose(images_thwc, (0, 3, 1, 2))
 
     fps = int(1 / env.dt)
     print(f"Writing video to video.mp4 with fps={fps}")
