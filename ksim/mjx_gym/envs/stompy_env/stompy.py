@@ -1,5 +1,6 @@
 """Defines the Stompy MJX environment."""
 
+import os
 from typing import Unpack
 
 import jax
@@ -29,7 +30,7 @@ class StompyEnv(PipelineEnv):
         log_reward_breakdown: bool = True,
         **kwargs: Unpack[EnvKwargs],
     ) -> None:
-        path = "/home/awu/ksim/ksim/assets/stompy/stompy.xml"  # Replace with actual path
+        path = os.getenv("MODEL_DIR", "") + "/stompy/stompy_armless.xml"
         mj_model = mujoco.MjModel.from_xml_path(path)
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.iterations = 6
