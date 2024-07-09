@@ -9,6 +9,11 @@ Todo:
     1. Armature damping setup for different parts of body
     2. Test control range limits?
     3. Add inertia in the first part of the body
+
+Important: To define the collision type, and use collision meshes, add the following config
+<default class="collision">
+    <geom type="capsule" mass="0" density="0" condim="3" contype="1" conaffinity="1" group="3" />
+</default>
 """
 
 import argparse
