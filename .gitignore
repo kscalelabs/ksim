@@ -23,6 +23,7 @@ out*/
 # Training artifacts
 wandb/
 logs/
+MUJOCO_LOG.TXT
 
 # No DS Store
 .DS_Store
