@@ -417,7 +417,6 @@ class Sim2SimRobot(mjcf.Robot):
 
         default_standing = DEFAULT_STANDING
         for joint in joints:
-            print("changing default position")
             if joint.get("name") in default_standing.keys():
                 joint.set("ref", str(default_standing[joint.get("name")]))
 

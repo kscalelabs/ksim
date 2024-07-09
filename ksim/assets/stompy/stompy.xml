@@ -2,7 +2,7 @@
 <mujoco model="robot_7dof_arm">
   <compiler angle="radian" meshdir="meshes" autolimits="true"/>
   <default>
-    <joint limited="true" damping="0.1" armature="0.01" frictionloss="0.01"/>
+    <joint limited="true" damping="0.1" armature="0.01" frictionloss="0.0"/>
     <geom condim="3" contype="1" conaffinity="0" friction="0.9 0.2 0.2" solref="0.001 2"/>
     <motor ctrllimited="true"/>
     <equality solref="0.001 2"/>

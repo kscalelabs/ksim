@@ -52,7 +52,7 @@ def play(config: dict[str, Any], n_steps: int, render_every: int, width: int, he
     if args.params_path is not None:
         model_path = args.params_path
     else:
-        model_path = "weights/" + config.get("project_name", "model") + ".pkl"
+        model_path = "weights/" + config.get("project_name", "model") + config.get("experiment_name", "model") + ".pkl"
     params = model.load_params(model_path)
 
     def normalize(x: np.ndarray, y: np.ndarray) -> np.ndarray:
