@@ -8,12 +8,17 @@ Todo:
     0. Add IMU to the right position
     1. Armature damping setup for different parts of body
     2. Test control range limits?
-    3. Add inertaia in the first part of the body
+    3. Add inertia in the first part of the body
 
 Important: To define the collision type, and use collision meshes, add the following config
 <default class="collision">
-    <geom type="capsule" mass="0" density="0" condim="3" contype="1" conaffinity="1" group="3" />
+<geom type="capsule" mass="0" density="0" condim="3" contype="1" conaffinity="1" group="3" />
 </default>
+
+We can then add collision meshes to parts as such:
+<geom class="collision" type="capsule" fromto="0 0.005 -.17 -.02 0.005 -.01" size="0.05" rgba="0.0 0.0 0.0 1" />
+<geom class="collision" type="capsule" fromto="0 0.005 -.17 .02 0.005 -.01" size="0.05" rgba="0.0 0.0 0.0 1" />
+</body>
 """
 
 import argparse
@@ -412,6 +417,7 @@ class Sim2SimRobot(mjcf.Robot):
 
         default_standing = DEFAULT_STANDING
         for joint in joints:
+            print("changing default position")
             if joint.get("name") in default_standing.keys():
                 joint.set("ref", str(default_standing[joint.get("name")]))
 
