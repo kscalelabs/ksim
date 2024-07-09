@@ -185,7 +185,6 @@ def train(
     key_policy, key_value = jax.random.split(global_key)
     del global_key
 
-
     assert num_envs % device_count == 0
 
     v_randomization_fn = None
