@@ -26,3 +26,6 @@ logs/
 
 # No DS Store
 .DS_Store
+
+# No Videos
+*.mp4
