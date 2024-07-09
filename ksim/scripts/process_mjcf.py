@@ -8,7 +8,7 @@ Todo:
     0. Add IMU to the right position
     1. Armature damping setup for different parts of body
     2. Test control range limits?
-    3. Add inertia in the first part of the body
+    3. Add inertaia in the first part of the body
 
 Important: To define the collision type, and use collision meshes, add the following config
 <default class="collision">
@@ -348,7 +348,7 @@ class Sim2SimRobot(mjcf.Robot):
         )
 
         visual_geom = ET.Element("default", {"class": "visualgeom"})
-        geom_attributes = {"material": "visualgeom", "condim": "1", "contype": "1", "conaffinity": "0"}
+        geom_attributes = {"material": "visualgeom", "condim": "3", "contype": "0", "conaffinity": "0"}
         ET.SubElement(visual_geom, "geom", geom_attributes)
 
         root.insert(
