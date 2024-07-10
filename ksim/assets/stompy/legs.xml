@@ -2,40 +2,40 @@
 <mujoco model="lower_limbs">
   <compiler angle="radian" meshdir="meshes" />
   <asset>
-    <mesh name="fused_component_leg_assembly_left_1_leg_part_1_2" file="fused_component_leg_assembly_left_1_leg_part_1_2.stl" />
-    <mesh name="fused_component_right_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1" file="fused_component_right_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1.stl" />
-    <mesh name="fused_component_left_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1" file="fused_component_left_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1.stl" />
-    <mesh name="fused_component_leg_assembly_right_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1" file="fused_component_leg_assembly_right_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1.stl" />
-    <mesh name="fused_component_leg_assembly_left_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1" file="fused_component_leg_assembly_left_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1.stl" />
-    <mesh name="fused_component_leg_assembly_right_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1" file="fused_component_leg_assembly_right_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1.stl" />
-    <mesh name="fused_component_leg_assembly_left_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1" file="fused_component_leg_assembly_left_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1.stl" />
-    <mesh name="fused_component_leg_assembly_right_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1" file="fused_component_leg_assembly_right_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1.stl" />
-    <mesh name="fused_component_leg_assembly_left_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1" file="fused_component_leg_assembly_left_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1.stl" />
-    <mesh name="fused_component_leg_assembly_right_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1" file="fused_component_leg_assembly_right_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1.stl" />
-    <mesh name="fused_component_leg_assembly_left_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1" file="fused_component_leg_assembly_left_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1.stl" />
-    <mesh name="fused_component_leg_assembly_right_1_rmd_x12_150_mock_1_inner_x12_150_1" file="fused_component_leg_assembly_right_1_rmd_x12_150_mock_1_inner_x12_150_1.stl" />
-    <mesh name="fused_component_leg_assembly_left_1_rmd_x12_150_mock_1_inner_x12_150_1" file="fused_component_leg_assembly_left_1_rmd_x12_150_mock_1_inner_x12_150_1.stl" />
+    <mesh name="fused_component_leg_assembly_left_1_leg_part_1_2_simple" file="fused_component_leg_assembly_left_1_leg_part_1_2_simple.stl" />
+    <mesh name="fused_component_right_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1_simple" file="fused_component_right_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1_simple.stl" />
+    <mesh name="fused_component_left_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1_simple" file="fused_component_left_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1_simple.stl" />
+    <mesh name="fused_component_leg_assembly_right_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1_simple" file="fused_component_leg_assembly_right_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1_simple.stl" />
+    <mesh name="fused_component_leg_assembly_left_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1_simple" file="fused_component_leg_assembly_left_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1_simple.stl" />
+    <mesh name="fused_component_leg_assembly_right_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1_simple" file="fused_component_leg_assembly_right_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1_simple.stl" />
+    <mesh name="fused_component_leg_assembly_left_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1_simple" file="fused_component_leg_assembly_left_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1_simple.stl" />
+    <mesh name="fused_component_leg_assembly_right_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1_simple" file="fused_component_leg_assembly_right_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1_simple.stl" />
+    <mesh name="fused_component_leg_assembly_left_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1_simple" file="fused_component_leg_assembly_left_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1_simple.stl" />
+    <mesh name="fused_component_leg_assembly_right_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple" file="fused_component_leg_assembly_right_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple.stl" />
+    <mesh name="fused_component_leg_assembly_left_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple" file="fused_component_leg_assembly_left_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple.stl" />
+    <mesh name="fused_component_leg_assembly_right_1_rmd_x12_150_mock_1_inner_x12_150_1_simple" file="fused_component_leg_assembly_right_1_rmd_x12_150_mock_1_inner_x12_150_1_simple.stl" />
+    <mesh name="fused_component_leg_assembly_left_1_rmd_x12_150_mock_1_inner_x12_150_1_simple" file="fused_component_leg_assembly_left_1_rmd_x12_150_mock_1_inner_x12_150_1_simple.stl" />
   </asset>
   <worldbody>
-    <body name="root" pos="0 0 0" quat="1 0 0 0"><geom type="mesh" rgba="0.639216 0.688235 0.717647 1" mesh="fused_component_leg_assembly_left_1_leg_part_1_2" />
+    <body name="root" pos="0 0 0" quat="1 0 0 0"><geom type="mesh" rgba="0.639216 0.688235 0.717647 1" mesh="fused_component_leg_assembly_left_1_leg_part_1_2_simple" />
     <body name="fused_component_leg_assembly_left_1_rmd_x12_150_mock_1_inner_x12_150_1" pos="0.0235013 -9.74565e-08 -0.0519759" quat="2.58819e-08 -0.707107 2.58819e-08 0.707107">
-      <joint name="joint_leg_assembly_left_1_rmd_x12_150_mock_1_dof_x12" pos="0 0 0" axis="0 0 -1" range="-4.71239 4.71239" actuatorfrcrange="-80 80" />
-      <geom type="mesh" rgba="0.468627 0.505882 0.587255 1" mesh="fused_component_leg_assembly_left_1_rmd_x12_150_mock_1_inner_x12_150_1" />
+      <joint name="left hip pitch" pos="0 0 0" axis="0 0 -1" range="-4.71239 4.71239" actuatorfrcrange="-80 80" />
+      <geom type="mesh" rgba="0.468627 0.505882 0.587255 1" mesh="fused_component_leg_assembly_left_1_rmd_x12_150_mock_1_inner_x12_150_1_simple" />
       <body name="fused_component_leg_assembly_left_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1" pos="-0.0244382 -0.000630373 -0.1015" quat="0.5 0.5 -0.5 -0.5">
-        <joint name="joint_leg_assembly_left_1_rmd_x8_90_mock_1_dof_x8" pos="0 0 0" axis="0 0 -1" range="-1.0472 2.0944" actuatorfrcrange="-80 80" />
-        <geom type="mesh" rgba="0.562255 0.547549 0.49951 1" mesh="fused_component_leg_assembly_left_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1" />
+        <joint name="left hip yaw" pos="0 0 0" axis="0 0 -1" range="-1.0472 2.0944" actuatorfrcrange="-80 80" />
+        <geom type="mesh" rgba="0.562255 0.547549 0.49951 1" mesh="fused_component_leg_assembly_left_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple" />
         <body name="fused_component_leg_assembly_left_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1" pos="-0.07875 -0.136399 -0.01965" quat="0.683013 0.683013 -0.183013 -0.183013">
-          <joint name="joint_leg_assembly_left_1_rmd_x8_90_mock_2_dof_x8" pos="0 0 0" axis="0 0 -1" range="-3.14159 0" actuatorfrcrange="-80 80" />
-          <geom type="mesh" rgba="0.655882 0.589216 0.411765 1" mesh="fused_component_leg_assembly_left_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1" />
+          <joint name="left hip roll" pos="0 0 0" axis="0 0 -1" range="-3.14159 0" actuatorfrcrange="-80 80" />
+          <geom type="mesh" rgba="0.655882 0.589216 0.411765 1" mesh="fused_component_leg_assembly_left_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1_simple" />
           <body name="fused_component_leg_assembly_left_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1" pos="0.02065 8.89452e-09 0.127" quat="0.707107 -1.64085e-08 0.707107 1.64085e-08">
-            <joint name="joint_leg_assembly_left_1_rmd_x8_90_mock_3_dof_x8" pos="0 0 0" axis="0 0 -1" range="-4.71239 4.71239" actuatorfrcrange="-80 80" />
-            <geom type="mesh" rgba="0.719118 0.715196 0.643137 1" mesh="fused_component_leg_assembly_left_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1" />
+            <joint name="left knee pitch" pos="0 0 0" axis="0 0 -1" range="-4.71239 4.71239" actuatorfrcrange="-80 80" />
+            <geom type="mesh" rgba="0.719118 0.715196 0.643137 1" mesh="fused_component_leg_assembly_left_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1_simple" />
             <body name="fused_component_leg_assembly_left_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1" pos="0.123 -0.213042 -0.0129" quat="2.60501e-08 -0.104528 0.994522 -3.67176e-08">
-              <joint name="joint_leg_assembly_left_1_rmd_x4_24_mock_1_dof_x4" pos="0 0 0" axis="0 0 -1" range="-1.5708 2.18166" actuatorfrcrange="-80 80" />
-              <geom type="mesh" rgba="0.728922 0.851471 0.925 1" mesh="fused_component_leg_assembly_left_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1" />
+              <joint name="left ankle pitch" pos="0 0 0" axis="0 0 -1" range="-1.5708 2.18166" actuatorfrcrange="-80 80" />
+              <geom type="mesh" rgba="0.728922 0.851471 0.925 1" mesh="fused_component_leg_assembly_left_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1_simple" />
               <body name="fused_component_left_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1" pos="0.0135 -0.07155 0.01055" quat="0.5 -0.5 -0.5 0.5">
-                <joint name="joint_left_foot_1_rmd_x4_24_mock_1_dof_x4" pos="0 0 0" axis="0 0 -1" range="-3.14159 3.14159" actuatorfrcrange="-80 80" />
-                <geom type="mesh" rgba="0.669608 0.748039 0.794118 1" mesh="fused_component_left_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1" />
+                <joint name="left ankle roll" pos="0 0 0" axis="0 0 -1" range="-3.14159 3.14159" actuatorfrcrange="-80 80" />
+                <geom type="mesh" rgba="0.669608 0.748039 0.794118 1" mesh="fused_component_left_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1_simple" />
               </body>
             </body>
           </body>
@@ -43,23 +43,23 @@
       </body>
     </body>
     <body name="fused_component_leg_assembly_right_1_rmd_x12_150_mock_1_inner_x12_150_1" pos="-0.0654987 -9.85788e-08 -0.0519759" quat="0.707107 2.58819e-08 0.707107 -2.58819e-08">
-      <joint name="joint_leg_assembly_right_1_rmd_x12_150_mock_1_dof_x12" pos="0 0 0" axis="0 0 -1" range="-4.71239 4.71239" actuatorfrcrange="-80 80" />
-      <geom type="mesh" rgba="0.468627 0.505882 0.587255 1" mesh="fused_component_leg_assembly_right_1_rmd_x12_150_mock_1_inner_x12_150_1" />
+      <joint name="right hip pitch" pos="0 0 0" axis="0 0 -1" range="-4.71239 4.71239" actuatorfrcrange="-80 80" />
+      <geom type="mesh" rgba="0.468627 0.505882 0.587255 1" mesh="fused_component_leg_assembly_right_1_rmd_x12_150_mock_1_inner_x12_150_1_simple" />
       <body name="fused_component_leg_assembly_right_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1" pos="7.46238e-10 -0.01965 -0.1015" quat="0.707107 0.707107 0 0">
-        <joint name="joint_leg_assembly_right_1_rmd_x8_90_mock_1_dof_x8" pos="0 0 0" axis="0 0 -1" range="-4.71239 4.71239" actuatorfrcrange="-80 80" />
-        <geom type="mesh" rgba="0.562255 0.547549 0.49951 1" mesh="fused_component_leg_assembly_right_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1" />
+        <joint name="right hip yaw" pos="0 0 0" axis="0 0 -1" range="-4.71239 4.71239" actuatorfrcrange="-80 80" />
+        <geom type="mesh" rgba="0.562255 0.547549 0.49951 1" mesh="fused_component_leg_assembly_right_1_rmd_x8_90_mock_1_inner_rmd_x8_90_1_simple" />
         <body name="fused_component_leg_assembly_right_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1" pos="-0.07875 -0.136399 -0.01965" quat="0.683013 0.683013 -0.183013 -0.183013">
-          <joint name="joint_leg_assembly_right_1_rmd_x8_90_mock_2_dof_x8" pos="0 0 0" axis="0 0 -1" range="-3.14159 3.14159" actuatorfrcrange="-80 80" />
-          <geom type="mesh" rgba="0.655882 0.589216 0.411765 1" mesh="fused_component_leg_assembly_right_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1" />
+          <joint name="right hip roll" pos="0 0 0" axis="0 0 -1" range="-3.14159 3.14159" actuatorfrcrange="-80 80" />
+          <geom type="mesh" rgba="0.655882 0.589216 0.411765 1" mesh="fused_component_leg_assembly_right_1_rmd_x8_90_mock_2_inner_rmd_x8_90_1_simple" />
           <body name="fused_component_leg_assembly_right_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1" pos="6.61991e-09 0.02065 0.127" quat="0.5 -0.5 0.5 0.5">
-            <joint name="joint_leg_assembly_right_1_rmd_x8_90_mock_3_dof_x8" pos="0 0 0" axis="0 0 -1" range="-4.71239 4.71239" actuatorfrcrange="-80 80" />
-            <geom type="mesh" rgba="0.719118 0.715196 0.643137 1" mesh="fused_component_leg_assembly_right_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1" />
+            <joint name="right knee pitch" pos="0 0 0" axis="0 0 -1" range="-4.71239 4.71239" actuatorfrcrange="-80 80" />
+            <geom type="mesh" rgba="0.719118 0.715196 0.643137 1" mesh="fused_component_leg_assembly_right_1_rmd_x8_90_mock_3_inner_rmd_x8_90_1_simple" />
             <body name="fused_component_leg_assembly_right_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1" pos="0.123 -0.213042 -0.0129" quat="2.60501e-08 -0.104528 0.994522 -3.67176e-08">
-              <joint name="joint_leg_assembly_right_1_rmd_x4_24_mock_1_dof_x4" pos="0 0 0" axis="0 0 -1" range="-1.5708 2.18166" actuatorfrcrange="-80 80" />
-              <geom type="mesh" rgba="0.804412 0.877941 0.922059 1" mesh="fused_component_leg_assembly_right_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1" />
+              <joint name="right ankle pitch" pos="0 0 0" axis="0 0 -1" range="-1.5708 2.18166" actuatorfrcrange="-80 80" />
+              <geom type="mesh" rgba="0.804412 0.877941 0.922059 1" mesh="fused_component_leg_assembly_right_1_rmd_x4_24_mock_1_outer_rmd_x4_24_1_simple" />
               <body name="fused_component_right_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1" pos="-0.0135 -0.07155 0.01055" quat="0.5 0.5 0.5 0.5">
-                <joint name="joint_right_foot_1_rmd_x4_24_mock_1_dof_x4" pos="0 0 0" axis="0 0 -1" range="-3.14159 3.14159" actuatorfrcrange="-80 80" />
-                <geom type="mesh" rgba="0.669608 0.748039 0.794118 1" mesh="fused_component_right_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1" />
+                <joint name="right ankle roll" pos="0 0 0" axis="0 0 -1" range="-3.14159 3.14159" actuatorfrcrange="-80 80" />
+                <geom type="mesh" rgba="0.669608 0.748039 0.794118 1" mesh="fused_component_right_foot_1_rmd_x4_24_mock_1_inner_rmd_x4_24_1_simple" />
               </body>
             </body>
           </body>
