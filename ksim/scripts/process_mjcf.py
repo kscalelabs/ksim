@@ -2,7 +2,7 @@
 """Defines common types and functions for exporting MJCF files.
 
 Run:
-    python ksim/scripts/process_mjcf.py /Users/allen/KScale/ksim/ksim/assets/newnew/robot_7dof_arm_merged_simplified.xml
+    python ksim/scripts/process_mjcf.py /Path/tp/
 
 Todo:
     0. Add IMU to the right position
@@ -34,28 +34,29 @@ logger = logging.getLogger(__name__)
 
 STOMPY_HEIGHT = 1.0
 
+# Comment out the joints that are not needed
 DEFAULT_STANDING = {
-    "torso roll": 2.58,
-    # arms
-    "left shoulder pitch": -0.534,
-    "left shoulder yaw": 2.54,
-    "left shoulder roll": -0.0314,
-    "right shoulder pitch": 2.45,
-    "right shoulder yaw": 3.77,
-    "right shoulder roll": -0.0314,
-    "left elbow pitch": 2.35,
-    "right elbow pitch": 2.65,
-    # hands
-    "left hand left finger": 0.0,
-    "left hand right finger": 0.0,
-    "right hand left finger": 0.0,
-    "right hand right finger": 0.0,
-    "left wrist roll": 1.79,
-    "left wrist pitch": 1.35,
-    "left wrist yaw": 1.07,
-    "right wrist roll": -2.13,
-    "right wrist pitch": 1.79,
-    "right wrist yaw": -0.251,
+    # "torso roll": 2.58,
+    # # arms
+    # "left shoulder pitch": -0.534,
+    # "left shoulder yaw": 2.54,
+    # "left shoulder roll": -0.0314,
+    # "right shoulder pitch": 2.45,
+    # "right shoulder yaw": 3.77,
+    # "right shoulder roll": -0.0314,
+    # "left elbow pitch": 2.35,
+    # "right elbow pitch": 2.65,
+    # # hands
+    # "left hand left finger": 0.0,
+    # "left hand right finger": 0.0,
+    # "right hand left finger": 0.0,
+    # "right hand right finger": 0.0,
+    # "left wrist roll": 1.79,
+    # "left wrist pitch": 1.35,
+    # "left wrist yaw": 1.07,
+    # "right wrist roll": -2.13,
+    # "right wrist pitch": 1.79,
+    # "right wrist yaw": -0.251,
     # legs
     "left hip pitch": -1.6,
     "left hip roll": 1.41,
@@ -71,59 +72,60 @@ DEFAULT_STANDING = {
     "right ankle roll": 1.92,
 }
 
+# Comment out the joints that are not needed
 DEFAULT_LIMITS = {
-    "torso roll": {
-        "lower": -4.36332,
-        "upper": 4.36332,
-    },
-    "left shoulder pitch": {
-        "lower": -0.0,
-        "upper": 0.2,
-    },
-    "left shoulder yaw": {
-        "lower": 0.97738438,
-        "upper": 5.3058009,
-    },
-    "left shoulder roll": {
-        "lower": -4.71239,
-        "upper": 4.71239,
-    },
-    "right shoulder pitch": {
-        "lower": -4.71239,
-        "upper": 4.71239,
-    },
-    "right shoulder yaw": {
-        "lower": 0.97738438,
-        "upper": 5.3058009,
-    },
-    "right shoulder roll": {
-        "lower": -4.71239,
-        "upper": 4.71239,
-    },
-    "left wrist roll": {
-        "lower": -4.71239,
-        "upper": 4.71239,
-    },
-    "left wrist pitch": {
-        "lower": -3.66519,
-        "upper": -1.39626,
-    },
-    "left wrist yaw": {
-        "lower": 0,
-        "upper": 1.5708,
-    },
-    "right wrist roll": {
-        "lower": -4.71239,
-        "upper": 4.71239,
-    },
-    "right wrist pitch": {
-        "lower": -1.5708,
-        "upper": 0.523599,
-    },
-    "right wrist yaw": {
-        "lower": -1.5708,
-        "upper": 0,
-    },
+    # "torso roll": {
+    #     "lower": -4.36332,
+    #     "upper": 4.36332,
+    # },
+    # "left shoulder pitch": {
+    #     "lower": -0.0,
+    #     "upper": 0.2,
+    # },
+    # "left shoulder yaw": {
+    #     "lower": 0.97738438,
+    #     "upper": 5.3058009,
+    # },
+    # "left shoulder roll": {
+    #     "lower": -4.71239,
+    #     "upper": 4.71239,
+    # },
+    # "right shoulder pitch": {
+    #     "lower": -4.71239,
+    #     "upper": 4.71239,
+    # },
+    # "right shoulder yaw": {
+    #     "lower": 0.97738438,
+    #     "upper": 5.3058009,
+    # },
+    # "right shoulder roll": {
+    #     "lower": -4.71239,
+    #     "upper": 4.71239,
+    # },
+    # "left wrist roll": {
+    #     "lower": -4.71239,
+    #     "upper": 4.71239,
+    # },
+    # "left wrist pitch": {
+    #     "lower": -3.66519,
+    #     "upper": -1.39626,
+    # },
+    # "left wrist yaw": {
+    #     "lower": 0,
+    #     "upper": 1.5708,
+    # },
+    # "right wrist roll": {
+    #     "lower": -4.71239,
+    #     "upper": 4.71239,
+    # },
+    # "right wrist pitch": {
+    #     "lower": -1.5708,
+    #     "upper": 0.523599,
+    # },
+    # "right wrist yaw": {
+    #     "lower": -1.5708,
+    #     "upper": 0,
+    # },
     "left hip pitch": {
         "lower": -4.712389,
         "upper": 4.712389,
@@ -172,30 +174,30 @@ DEFAULT_LIMITS = {
         "lower": -2.26893,
         "upper": -1.22173,
     },
-    "left elbow pitch": {
-        "lower": 1.4486233,
-        "higher": 5.4454273,
-    },
-    "right elbow pitch": {
-        "lower": 1.4486233,
-        "higher": 5.4454273,
-    },
-    "left hand left finger": {
-        "lower": -0.051,
-        "upper": 0.0,
-    },
-    "left hand right finger": {
-        "lower": 0,
-        "upper": 0.051,
-    },
-    "right hand left finger": {
-        "lower": -0.051,
-        "upper": 0.0,
-    },
-    "right hand right finger": {
-        "lower": 0,
-        "upper": 0.051,
-    },
+    # "left elbow pitch": {
+    #     "lower": 1.4486233,
+    #     "higher": 5.4454273,
+    # },
+    # "right elbow pitch": {
+    #     "lower": 1.4486233,
+    #     "higher": 5.4454273,
+    # },
+    # "left hand left finger": {
+    #     "lower": -0.051,
+    #     "upper": 0.0,
+    # },
+    # "left hand right finger": {
+    #     "lower": 0,
+    #     "upper": 0.051,
+    # },
+    # "right hand left finger": {
+    #     "lower": -0.051,
+    #     "upper": 0.0,
+    # },
+    # "right hand right finger": {
+    #     "lower": 0,
+    #     "upper": 0.051,
+    # },
 }
 
 
@@ -250,23 +252,14 @@ class Sim2SimRobot(mjcf.Robot):
         for element in worldbody:
             items_to_move.append(element)
 
-        new_root_body = mjcf.Body(name="root", pos=(0, 0, STOMPY_HEIGHT), quat=(1, 0, 0, 0)).to_xml()
-        # Add joints to all the movement of the base
-        new_root_body.extend(
-            [
-                mjcf.Joint(name="root_x", type="slide", axis=(1, 0, 0), limited=False).to_xml(),
-                mjcf.Joint(name="root_y", type="slide", axis=(0, 1, 0), limited=False).to_xml(),
-                mjcf.Joint(name="root_z", type="slide", axis=(0, 0, 1), limited=False).to_xml(),
-                mjcf.Joint(name="root_ball", type="ball", limited=False).to_xml(),
-            ]
-        )
+        # new_root_body = mjcf.Body(name="root", pos=(0, 0, STOMPY_HEIGHT), quat=(1, 0, 0, 0)).to_xml()
 
-        # Add imu site to the body - relative position to the body
-        # check at what stage we use this
-        new_root_body.append(mjcf.Site(name="imu", size=0.01, pos=(0, 0, 0)).to_xml())
+        # # Add imu site to the body - relative position to the body
+        # # check at what stage we use this
+        root.append(mjcf.Site(name="imu", size=0.01, pos=(0, 0, 0)).to_xml())
 
-        # Add the new root body to the worldbody
-        worldbody.append(new_root_body)
+        # # Add the new root body to the worldbody
+        # worldbody.append(new_root_body)
         worldbody.insert(
             0,
             mjcf.Light(
@@ -321,24 +314,24 @@ class Sim2SimRobot(mjcf.Robot):
                 sensor_vel.append(mjcf.Actuatorvel(name=joint + "_v", actuator=joint, user="13"))
                 sensor_frc.append(mjcf.Actuatorfrc(name=joint + "_f", actuator=joint, user="13", noise=0.001))
 
-        # root = self.add_joint_limits(root, fixed=False)
+        root = self.add_joint_limits(root, fixed=False)
 
         # Add motors and sensors
         root.append(mjcf.Actuator(motors).to_xml())
         root.append(mjcf.Sensor(sensor_pos, sensor_vel, sensor_frc).to_xml())
 
         # Add imus
-        sensors = root.find("sensor")
-        sensors.extend(
-            [
-                ET.Element("framequat", name="orientation", objtype="site", noise="0.001", objname="imu"),
-                ET.Element("gyro", name="angular-velocity", site="imu", noise="0.005", cutoff="34.9"),
-                # ET.Element("framepos", name="position", objtype="site", noise="0.001", objname="imu"),
-                # ET.Element("velocimeter", name="linear-velocity", site="imu", noise="0.001", cutoff="30"),
-                # ET.Element("accelerometer", name="linear-acceleration", site="imu", noise="0.005", cutoff="157"),
-                # ET.Element("magnetometer", name="magnetometer", site="imu"),
-            ]
-        )
+        # sensors = root.find("sensor")
+        # sensors.extend(
+        #     [
+        #         ET.Element("framequat", name="orientation", objtype="site", noise="0.001", objname="imu"),
+        #         ET.Element("gyro", name="angular-velocity", site="imu", noise="0.005", cutoff="34.9"),
+        #         # ET.Element("framepos", name="position", objtype="site", noise="0.001", objname="imu"),
+        #         # ET.Element("velocimeter", name="linear-velocity", site="imu", noise="0.001", cutoff="30"),
+        #         # ET.Element("accelerometer", name="linear-acceleration", site="imu", noise="0.005", cutoff="157"),
+        #         # ET.Element("magnetometer", name="magnetometer", site="imu"),
+        #     ]
+        # )
 
         root.insert(
             1,
@@ -355,6 +348,19 @@ class Sim2SimRobot(mjcf.Robot):
         visual_geom = ET.Element("default", {"class": "visualgeom"})
         geom_attributes = {"material": "visualgeom", "condim": "3", "contype": "0", "conaffinity": "0"}
         ET.SubElement(visual_geom, "geom", geom_attributes)
+
+        # TODO: Find a way to make this work without updating KOL library
+        # collision = ET.Element("default", {"class": "collision"})
+        # geom_attributes = {
+        #     "type": "capsule",
+        #     "mass": "0",
+        #     "density": "0",
+        #     "condim": "3",
+        #     "contype": "1",
+        #     "conaffinity": "1",
+        #     "group": "3",
+        # }
+        # ET.SubElement(collision, "geom", geom_attributes)
 
         root.insert(
             1,
@@ -373,13 +379,23 @@ class Sim2SimRobot(mjcf.Robot):
             ).to_xml(),
         )
 
+        # Locate actual root body inside of worldbody
+        root_body = worldbody.find(".//body")
+        # # Add joints to all the movement of the base
+        # Define the joints as individual elements
+        joints = [
+            ET.Element("joint", name="root_x", type="slide", axis="1 0 0", limited="false"),
+            ET.Element("joint", name="root_y", type="slide", axis="0 1 0", limited="false"),
+            ET.Element("joint", name="root_z", type="slide", axis="0 0 1", limited="false"),
+            ET.Element("joint", name="root_ball", type="ball", limited="false"),
+        ]
+
+        # Insert each joint at the front of the root element
+        for joint in reversed(joints):
+            root_body.insert(0, joint)
+
         if add_reference_position:
             root = self.add_reference_position(root)
-
-        # Move gathered elements to the new root body
-        for item in items_to_move:
-            worldbody.remove(item)
-            new_root_body.append(item)
 
         # add visual geom logic
         for body in root.findall(".//body"):
@@ -422,18 +438,18 @@ class Sim2SimRobot(mjcf.Robot):
 
         return root
 
-    # def add_joint_limits(self, root: ET.Element, fixed: bool = False) -> None:
-    #     joint_limits = MjcfStompy.default_limits()
+    def add_joint_limits(self, root: ET.Element, fixed: bool = False) -> None:
+        joint_limits = DEFAULT_LIMITS
 
-    #     for joint in root.findall(".//joint"):
-    #         joint_name = joint.get("name")
-    #         if joint_name in joint_limits:
-    #             limits = joint_limits.get(joint_name)
-    #             lower = str(limits.get("lower", 0.0))
-    #             upper = str(limits.get("upper", 0.0))
-    #             joint.set("range", f"{lower} {upper}")
+        for joint in root.findall(".//joint"):
+            joint_name = joint.get("name")
+            if joint_name in joint_limits:
+                limits = joint_limits.get(joint_name)
+                lower = str(limits.get("lower", 0.0))
+                upper = str(limits.get("upper", 0.0))
+                joint.set("range", f"{lower} {upper}")
 
-    #     return root
+        return root
 
     def save(self, path: Union[str, Path]) -> None:
         rough_string = ET.tostring(self.tree.getroot(), "utf-8")
