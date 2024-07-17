@@ -74,7 +74,7 @@ class UnitreeH1Env(PipelineEnv):
         qvel = jax.random.uniform(rng2, (self.sys.nv,), minval=low, maxval=hi)
 
         mjx_state = self.pipeline_init(qpos, qvel)
-        assert type(mjx_state) == mjxState, f"mjx_state is of type {type(mjx_state)}"
+        assert isinstance(mjx_state, mjxState), f"mjx_state is of type {type(mjx_state)}"
 
         obs = self._get_obs(mjx_state, jp.zeros(self.sys.nu))
         reward, done, zero = jp.zeros(3)
@@ -106,8 +106,8 @@ class UnitreeH1Env(PipelineEnv):
 
         next_mjx_state = self.pipeline_step(mjx_state, action)
 
-        assert type(next_mjx_state) == mjxState, f"next_mjx_state is of type {type(next_mjx_state)}"
-        assert type(mjx_state) == mjxState, f"mjx_state is of type {type(mjx_state)}"
+        assert isinstance(next_mjx_state, mjxState), f"next_mjx_state is of type {type(next_mjx_state)}"
+        assert isinstance(mjx_state, mjxState), f"mjx_state is of type {type(mjx_state)}"
         # mlutz: from what I've seen, .pipeline_state and .pipeline_step(...)
         # actually return an brax.mjx.base.State object however, the type
         # hinting suggests that it should return a brax.base.State object
