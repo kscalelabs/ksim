@@ -11,3 +11,4 @@ tqdm
 imageio
 wandb
 isort
+opencv-python

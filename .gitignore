@@ -30,3 +30,4 @@ MUJOCO_LOG.TXT
 
 # No Videos
 *.mp4
+.env

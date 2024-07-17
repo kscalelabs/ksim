@@ -36,7 +36,7 @@ class UnitreeH1Env(PipelineEnv):
         log_reward_breakdown: bool = True,
         **kwargs: Unpack[EnvKwargs],
     ) -> None:
-        path = os.getenv("MODEL_DIR", "") + "/unitree_h1/scene.xml"
+        path = os.getenv("MODEL_DIR", "") + "/assets/stompy/stompy_armless.xml"
         mj_model = mujoco.MjModel.from_xml_path(path)
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.iterations = 6

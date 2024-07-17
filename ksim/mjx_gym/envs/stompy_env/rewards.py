@@ -108,6 +108,10 @@ def healthy_reward_fn(
     is_healthy = jp.where(state.q[2] > max_z, 0.0, is_healthy)
     healthy_reward = jp.array(params["weight"]) * is_healthy
 
+    # jax.debug.breakpoint()
+    # print(state.q[2].to_py())
+    # print(healthy_reward, is_healthy)
+    # breakpoint()
     return healthy_reward, is_healthy
 
 

@@ -2,7 +2,7 @@
   <picture>
     <img alt="K-Scale Open Source Robotics" src="https://media.kscale.dev/kscale-open-source-header.png" style="max-width: 100%;">
   </picture>
-</p>
+</p>  
 
 <div align="center">
 
@@ -56,10 +56,12 @@ MJX Gym is a library for training and evaluating reinforcement learning agents i
 ### Training
 For quick experimentation, you may specify all relevant training configurations via YAML files, and simply run train.py with the desired configuration. Our configurations allow for rapid reward function prototyping, environment specification, and hyperparameter tuning. Additionally, all training results are tracked and logged using Weights & Biases.
 
-We recommend starting with the default humanoid environment to get a feel for the simulator. To train the default humanoid environment, first navigate to the /mjx_gym directory:
+We recommend starting with the default humanoid environment to get a feel for the simulator. To train the default humanoid environment, first navigate to the /mjx_gym directory and define the paths of your model:
 ```bash
 cd ksim/mjx_gym
+export MODEL_DIR=path/to/your/robot/model
 ```
+
 Then, run the following command:
 ```bash
 python train.py --config experiments/default_humanoid_walk.yaml
@@ -106,6 +108,18 @@ Getting Stompy to walk in MJX is a challenging task, and we encourage the open s
 <video controls>
   <source alt="Stompy Standing" src="assets/stompy_standing.mp4" type="video/mp4">
 </video>
+
+# Headless livestreaming
+
+For setting up headless streaming, export the following setup variables and install `xvfb`:
+```bash
+export DISPLAY=:0
+export MUJOCO_GL=egl
+install xvfb
+Xvfb :0 -screen 0 1024x768x24 &
+```
+
+For simplication, refer to `run.sh` in mjx_gym.
 
 ### Running from SLURM Cluster
 To run from a SLURM cluster (e.g. the K-Scale Andromeda cluster), cd to /mjx_gym/ and run:

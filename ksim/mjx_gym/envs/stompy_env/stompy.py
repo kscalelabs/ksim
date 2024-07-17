@@ -30,7 +30,7 @@ class StompyEnv(PipelineEnv):
         log_reward_breakdown: bool = True,
         **kwargs: Unpack[EnvKwargs],
     ) -> None:
-        path = os.getenv("MODEL_DIR", "") + "/stompy/stompy_armless.xml"
+        path = os.getenv("MODEL_DIR", "") + "/assets/inertia_legs/legs.xml"
         mj_model = mujoco.MjModel.from_xml_path(path)
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.iterations = 6
@@ -50,6 +50,7 @@ class StompyEnv(PipelineEnv):
         self._exclude_current_positions_from_observation = exclude_current_positions_from_observation
         self._log_reward_breakdown = log_reward_breakdown
 
+        print("initial_qpos", mj_model.keyframe("default").qpos)
         self.initial_qpos = mj_model.keyframe("default").qpos
         self.reward_fn = get_reward_fn(self._reward_params, self.dt, include_reward_breakdown=True)
 

@@ -12,7 +12,7 @@ num_updates_per_batch: 8
 discounting: 0.97
 learning_rate: 0.0003
 entropy_cost: 0.001
-num_envs: 1024
+num_envs: 1
 batch_size: 512
 seed: 0
 env_name: stompy
@@ -21,8 +21,8 @@ reward_params:
     weight: 1.25
   rew_healthy:
     weight: 5.0
-    healthy_z_lower: 0.4
-    healthy_z_upper: 4.0
+    healthy_z_lower: -1.0
+    healthy_z_upper: 0.0
   rew_height:
     weight: 0.8
   rew_ctrl_cost:

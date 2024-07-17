@@ -5,6 +5,7 @@ import logging
 import os
 from typing import Any
 
+import jax as j
 import mediapy as media
 import yaml
 
@@ -30,6 +31,8 @@ def play(config: dict[str, Any], n_steps: int, render_every: int, width: int, he
         exclude_current_positions_from_observation=config.get("exclude_current_positions_from_observation", True),
         log_reward_breakdown=config.get("log_reward_breakdown", True),
     )
+    rng = j.random.PRNGKey(0)
+    env.reset(rng)
     print(f"Env loaded: {config.get('env_name', 'could not find environment')}")
     images_thwc = render_random_rollout(env, 200, render_every, width, height)
     print(f"Rolled out {len(images_thwc) * render_every} steps")

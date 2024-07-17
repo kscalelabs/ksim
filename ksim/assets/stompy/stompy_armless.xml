@@ -58,6 +58,8 @@
     <light directional="true" diffuse="0.6 0.6 0.6" specular="0.2 0.2 0.2" pos="0 0 4" dir="0 0 -1"/>
     <light directional="true" diffuse="0.4 0.4 0.4" specular="0.1 0.1 0.1" pos="0 0 5.0" dir="0 0 -1" castshadow="false"/>
     <body name="root" pos="0 0 1.0" quat="1 0 0 0">
+			<camera name="front" pos="0 -3 1" xyaxes="1 0 0 0 1 2" mode="trackcom"/>
+			<camera name="side" pos="-2.893 -1.330 1.257" xyaxes="0.405 -0.914 0.000 0.419 0.186 0.889" mode="trackcom"/>
       <joint name="root_x" type="slide" axis="1 0 0" limited="false"/>
       <joint name="root_y" type="slide" axis="0 1 0" limited="false"/>
       <joint name="root_z" type="slide" axis="0 0 1" limited="false"/>
