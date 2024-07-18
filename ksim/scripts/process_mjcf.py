@@ -252,14 +252,10 @@ class Sim2SimRobot(mjcf.Robot):
         for element in worldbody:
             items_to_move.append(element)
 
-        # new_root_body = mjcf.Body(name="root", pos=(0, 0, STOMPY_HEIGHT), quat=(1, 0, 0, 0)).to_xml()
-
         # # Add imu site to the body - relative position to the body
         # # check at what stage we use this
         root.append(mjcf.Site(name="imu", size=0.01, pos=(0, 0, 0)).to_xml())
 
-        # # Add the new root body to the worldbody
-        # worldbody.append(new_root_body)
         worldbody.insert(
             0,
             mjcf.Light(
@@ -320,7 +316,7 @@ class Sim2SimRobot(mjcf.Robot):
         root.append(mjcf.Actuator(motors).to_xml())
         root.append(mjcf.Sensor(sensor_pos, sensor_vel, sensor_frc).to_xml())
 
-        # Add imus
+        # TODO: Add imus when necessary
         # sensors = root.find("sensor")
         # sensors.extend(
         #     [
