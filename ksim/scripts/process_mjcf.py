@@ -2,7 +2,7 @@
 """Defines common types and functions for exporting MJCF files.
 
 Run:
-    python ksim/scripts/process_mjcf.py /Path/tp/
+    python ksim/scripts/process_mjcf.py /path/to/stompy.xml
 
 Todo:
     0. Add IMU to the right position

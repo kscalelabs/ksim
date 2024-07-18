@@ -84,7 +84,6 @@ class StompyEnv(PipelineEnv):
         for key in self._reward_params.keys():
             metrics[key] = zero
 
-        # jax.debug.breakpoint()
         return State(mjx_state, obs, reward, done, metrics)
 
     def step(self, state: State, action: jp.ndarray) -> State:
