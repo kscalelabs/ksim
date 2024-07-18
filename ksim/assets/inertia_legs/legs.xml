@@ -2,7 +2,6 @@
 <mujoco model="lower_limbs">
   <compiler angle="radian" meshdir="meshes" autolimits="true" eulerseq="zyx"/>
   <default>
-      <!-- <joint limited="true" damping="1" armature="0.01" frictionloss="0.0"/> is2ac -->
     <joint limited="true" damping="0.01" frictionloss="0.01" armature="0.01"/>
     <motor ctrllimited="true"/>
 
@@ -151,8 +150,6 @@
                   <geom type="mesh" rgba="0.615686 0.811765 0.929412 1" mesh="left_foot_1_foot_1_simple" pos="0.00275746 -0.0127042 -0.025" quat="0.994522 0 0 0.104528" contype="0" conaffinity="0" group="1" density="0"/>
                   <geom pos="0.0103956 -0.0489074 -0.0147699" quat="0.703233 -0.703233 -0.0739128 0.0739128" type="mesh" rgba="0.647059 0.647059 0.647059 1" mesh="left_foot_1_rubber_grip_1_simple" class="visualgeom"/>
                   <geom type="mesh" rgba="0.647059 0.647059 0.647059 1" mesh="left_foot_1_rubber_grip_1_simple" pos="0.0103956 -0.0489074 -0.0147699" quat="0.703233 -0.703233 -0.0739128 0.0739128"/>
-                  <!-- <geom class="collision" type="capsule" fromto="0 0.005 -.17 -.02 0.005 -.01" size="0.05" rgba="0.647059 0.647059 0.647059 1" /> -->
-                  <!-- <geom class="collision" type="capsule" fromto="0 0.005 -.17 .02 0.005 -.01" size="0.05" rgba="0.647059 0.647059 0.647059 1" /> -->
                 </body>
               </body>
             </body>
@@ -220,8 +217,6 @@
                   <geom type="mesh" rgba="0.615686 0.811765 0.929412 1" mesh="right_foot_1_foot_1_simple" pos="0.00275746 -0.0127042 -0.025" quat="0.994522 0 0 0.104528" contype="0" conaffinity="0" group="1" density="0"/>
                   <geom pos="0.0103956 -0.0489074 -0.0147699" quat="-0.0739128 -0.0739128 0.703233 0.703233" type="mesh" rgba="0.647059 0.647059 0.647059 1" mesh="right_foot_1_rubber_grip_3_simple" class="visualgeom"/>
                   <geom type="mesh" rgba="0.647059 0.647059 0.647059 1" mesh="right_foot_1_rubber_grip_3_simple" pos="0.0103956 -0.0489074 -0.0147699" quat="-0.0739128 -0.0739128 0.703233 0.703233"/>
-                  <!-- <geom class="collision" type="capsule" fromto="0 0.005 -.17 -.02 0.005 -.01" size="0.01" rgba="0.647059 0.647059 0.647059 1" />
-                  <geom class="collision" type="capsule" fromto="0 0.005 -.17 .02 0.005 -.01" size="0.01" rgba="0.647059 0.647059 0.647059 1" /> -->
                 </body>
               </body>
             </body>
