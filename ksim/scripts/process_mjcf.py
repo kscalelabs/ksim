@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 STOMPY_HEIGHT = 1.0
 
+# Joints to be added to final xml, with their default values
 # Comment out the joints that are not needed
 DEFAULT_STANDING = {
     # "torso roll": 2.58,
@@ -72,6 +73,7 @@ DEFAULT_STANDING = {
     "right ankle roll": 1.92,
 }
 
+# Joints to be added to final xml, with their default limits
 # Comment out the joints that are not needed
 DEFAULT_LIMITS = {
     # "torso roll": {
@@ -200,6 +202,12 @@ DEFAULT_LIMITS = {
     # },
 }
 
+# Links that will have collision with the floor
+COLLISION_LINKS = [
+    "right_foot_1_rubber_grip_3_simple",
+    "left_foot_1_rubber_grip_1_simple",
+]
+
 
 def _pretty_print_xml(xml_string: str) -> str:
     """Formats the provided XML string into a pretty-printed version."""
@@ -246,14 +254,8 @@ class Sim2SimRobot(mjcf.Robot):
             compiler = self.compiler.to_xml(compiler)
 
         worldbody = root.find("worldbody")
-        # List to store items to be moved to the new root body
-        items_to_move = []
-        # Gather all children (geoms and bodies) that need to be moved under the new root body
-        for element in worldbody:
-            items_to_move.append(element)
 
         # # Add imu site to the body - relative position to the body
-        # # check at what stage we use this
         root.append(mjcf.Site(name="imu", size=0.01, pos=(0, 0, 0)).to_xml())
 
         worldbody.insert(
@@ -316,7 +318,7 @@ class Sim2SimRobot(mjcf.Robot):
         root.append(mjcf.Actuator(motors).to_xml())
         root.append(mjcf.Sensor(sensor_pos, sensor_vel, sensor_frc).to_xml())
 
-        # TODO: Add imus when necessary
+        # TODO: Add additional sensors when necessary
         # sensors = root.find("sensor")
         # sensors.extend(
         #     [
