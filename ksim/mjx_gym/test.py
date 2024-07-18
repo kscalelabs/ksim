@@ -34,7 +34,7 @@ def play(config: dict[str, Any], n_steps: int, render_every: int, width: int, he
     rng = j.random.PRNGKey(0)
     env.reset(rng)
     print(f"Env loaded: {config.get('env_name', 'could not find environment')}")
-    images_thwc = render_random_rollout(env, 200, render_every, width, height)
+    images_thwc = render_random_rollout(env, 1000, render_every, width, height)
     print(f"Rolled out {len(images_thwc) * render_every} steps")
 
     fps = int(1 / env.dt)
