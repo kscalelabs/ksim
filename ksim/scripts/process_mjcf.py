@@ -212,7 +212,12 @@ COLLISION_LINKS = [
 def _pretty_print_xml(xml_string: str) -> str:
     """Formats the provided XML string into a pretty-printed version."""
     parsed_xml = xml.dom.minidom.parseString(xml_string)
-    return parsed_xml.toprettyxml(indent="  ")
+    pretty_xml = parsed_xml.toprettyxml(indent="  ")
+
+    # Split the pretty-printed XML into lines and filter out empty lines
+    lines = pretty_xml.split("\n")
+    non_empty_lines = [line for line in lines if line.strip() != ""]
+    return "\n".join(non_empty_lines)
 
 
 class Sim2SimRobot(mjcf.Robot):
