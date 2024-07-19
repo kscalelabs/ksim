@@ -129,52 +129,52 @@ DEFAULT_LIMITS = {
     #     "upper": 0,
     # },
     "left hip pitch": {
-        "lower": -4.712389,
-        "upper": 4.712389,
+        "lower": 0.5,
+        "upper": 2.69,
     },
     "left hip roll": {
-        "lower": -3.14159,
-        "upper": 0,
+        "lower": -0.5,
+        "upper": 0.5,
     },
     "left hip yaw": {
-        "lower": -1.0472,
-        "upper": 2.0944,
+        "lower": 0.5,
+        "upper": 1.19,
     },
     "left knee pitch": {
-        "lower": -4.18879,
-        "upper": 0,
+        "lower": 1,
+        "upper": 3.1,
     },
     "left ankle pitch": {
-        "lower": -1.5708,
-        "upper": 2.18166,
+        "lower": -0.3,
+        "upper": 1.13,
     },
     "left ankle roll": {
-        "lower": -2.26893,
-        "upper": -1.22173,
+        "lower": 1,
+        "upper": 5,
     },
     "right hip pitch": {
-        "lower": -4.712389,
-        "upper": 4.712389,
+        "lower": -1,
+        "upper": 1,
     },
     "right hip roll": {
-        "lower": 0,
-        "upper": 3.14159,
+        "lower": -2.39,
+        "upper": -1,
     },
     "right hip yaw": {
-        "lower": -1.0472,
-        "upper": 2.0944,
+        "lower": -2.2,
+        "upper": -1,
     },
     "right knee pitch": {
-        "lower": -4.18879,
-        "upper": 0,
+        "lower": 1.54,
+        "upper": 3,
     },
     "right ankle pitch": {
-        "lower": -1.5708,
-        "upper": 2.18166,
+        "lower": -0.5,
+        "upper": 0.94,
     },
     "right ankle roll": {
-        "lower": -2.26893,
-        "upper": -1.22173,
+        "lower": 1,
+        "upper": 2.3,
     },
     # "left elbow pitch": {
     #     "lower": 1.4486233,
@@ -207,6 +207,9 @@ COLLISION_LINKS = [
     "right_foot_1_rubber_grip_3_simple",
     "left_foot_1_rubber_grip_1_simple",
 ]
+
+# How high the root should be set above the ground
+ROOT_HEIGHT = "0.72"
 
 
 def _pretty_print_xml(xml_string: str) -> str:
@@ -259,10 +262,6 @@ class Sim2SimRobot(mjcf.Robot):
             compiler = self.compiler.to_xml(compiler)
 
         worldbody = root.find("worldbody")
-
-        # # Add imu site to the body - relative position to the body
-        root.append(mjcf.Site(name="imu", size=0.01, pos=(0, 0, 0)).to_xml())
-
         worldbody.insert(
             0,
             mjcf.Light(
@@ -290,9 +289,8 @@ class Sim2SimRobot(mjcf.Robot):
                     pos=(0.001, 0, 0),
                     quat=(1, 0, 0, 0),
                     material="matplane",
-                    condim=3,
-                    conaffinity=1,
-                    contype=0,
+                    condim=1,
+                    conaffinity=15,
                 ).to_xml(),
             )
 
@@ -324,59 +322,44 @@ class Sim2SimRobot(mjcf.Robot):
         root.append(mjcf.Sensor(sensor_pos, sensor_vel, sensor_frc).to_xml())
 
         # TODO: Add additional sensors when necessary
-        # sensors = root.find("sensor")
-        # sensors.extend(
-        #     [
-        #         ET.Element("framequat", name="orientation", objtype="site", noise="0.001", objname="imu"),
-        #         ET.Element("gyro", name="angular-velocity", site="imu", noise="0.005", cutoff="34.9"),
-        #         # ET.Element("framepos", name="position", objtype="site", noise="0.001", objname="imu"),
-        #         # ET.Element("velocimeter", name="linear-velocity", site="imu", noise="0.001", cutoff="30"),
-        #         # ET.Element("accelerometer", name="linear-acceleration", site="imu", noise="0.005", cutoff="157"),
-        #         # ET.Element("magnetometer", name="magnetometer", site="imu"),
-        #     ]
-        # )
+        sensors = root.find("sensor")
+        sensors.extend(
+            [
+                ET.Element("framequat", name="orientation", objtype="site", noise="0.001", objname="imu"),
+                ET.Element("gyro", name="angular-velocity", site="imu", noise="0.005", cutoff="34.9"),
+                #         # ET.Element("framepos", name="position", objtype="site", noise="0.001", objname="imu"),
+                #         # ET.Element("velocimeter", name="linear-velocity", site="imu", noise="0.001", cutoff="30"),
+                #         # ET.Element("accelerometer", name="linear-acceleration", site="imu", noise="0.005", cutoff="157"),
+                #         # ET.Element("magnetometer", name="magnetometer", site="imu"),
+            ]
+        )
 
         root.insert(
             1,
             mjcf.Option(
                 timestep=0.001,
-                viscosity=1e-6,
                 iterations=50,
                 solver="PGS",
                 gravity=(0, 0, -9.81),
-                flag=mjcf.Flag(frictionloss="enable"),
             ).to_xml(),
         )
 
         visual_geom = ET.Element("default", {"class": "visualgeom"})
-        geom_attributes = {"material": "visualgeom", "condim": "3", "contype": "0", "conaffinity": "0"}
+        geom_attributes = {"material": "visualgeom", "condim": "1", "contype": "0", "conaffinity": "0"}
         ET.SubElement(visual_geom, "geom", geom_attributes)
-
-        # TODO: Find a way to make this work without updating KOL library
-        # collision = ET.Element("default", {"class": "collision"})
-        # geom_attributes = {
-        #     "type": "capsule",
-        #     "mass": "0",
-        #     "density": "0",
-        #     "condim": "3",
-        #     "contype": "1",
-        #     "conaffinity": "1",
-        #     "group": "3",
-        # }
-        # ET.SubElement(collision, "geom", geom_attributes)
 
         root.insert(
             1,
             mjcf.Default(
-                joint=mjcf.Joint(armature=0.01, damping=0.1, limited=True, frictionloss=0.00),
+                joint=mjcf.Joint(armature=0.01, damping=0.01, limited=True, frictionloss=0.01),
                 motor=mjcf.Motor(ctrllimited=True),
                 equality=mjcf.Equality(solref=(0.001, 2)),
                 geom=mjcf.Geom(
                     solref=(0.001, 2),
                     friction=(0.9, 0.2, 0.2),
-                    condim=3,
+                    condim=4,
                     contype=1,
-                    conaffinity=0,
+                    conaffinity=15,
                 ),
                 visual_geom=visual_geom,
             ).to_xml(),
@@ -384,6 +367,24 @@ class Sim2SimRobot(mjcf.Robot):
 
         # Locate actual root body inside of worldbody
         root_body = worldbody.find(".//body")
+        # Make position and orientation of the root body
+        root_body.set("pos", "0 0 " + ROOT_HEIGHT)
+        root_body.set("quat", "1 0 0 0")
+
+        # Add cameras and imu
+        root_body.insert(0, ET.Element("camera", name="front", pos="0 -3 1", xyaxes="1 0 0 0 1 2", mode="trackcom"))
+        root_body.insert(
+            1,
+            ET.Element(
+                "camera",
+                name="side",
+                pos="-2.893 -1.330 0.757",
+                xyaxes="0.405 -0.914 0.000 0.419 0.186 0.889",
+                mode="trackcom",
+            ),
+        )
+        root_body.insert(2, ET.Element("site", name="imu", size="0.01", pos="0 0 0"))
+
         # # Add joints to all the movement of the base
         # Define the joints as individual elements
         joints = [
@@ -397,8 +398,8 @@ class Sim2SimRobot(mjcf.Robot):
         for joint in reversed(joints):
             root_body.insert(0, joint)
 
-        if add_reference_position:
-            root = self.add_reference_position(root)
+        # if add_reference_position:
+        #     root = self.add_reference_position(root)
 
         # add visual geom logic
         for body in root.findall(".//body"):
@@ -414,10 +415,12 @@ class Sim2SimRobot(mjcf.Robot):
                     new_geom.set("pos", geom.get("pos"))
                 if geom.get("quat"):
                     new_geom.set("quat", geom.get("quat"))
-                new_geom.set("contype", "0")
-                new_geom.set("conaffinity", "0")
-                new_geom.set("group", "1")
-                new_geom.set("density", "0")
+                # Exclude collision meshes
+                if geom.get("mesh") not in COLLISION_LINKS:
+                    new_geom.set("contype", "0")
+                    new_geom.set("conaffinity", "0")
+                    new_geom.set("group", "1")
+                    new_geom.set("density", "0")
 
                 # Append the new geom to the body
                 index = list(body).index(geom)
@@ -474,7 +477,7 @@ if __name__ == "__main__":
     robot = Sim2SimRobot(
         robot_name,
         path,
-        mjcf.Compiler(angle="radian", meshdir="meshes", autolimits=True),
+        mjcf.Compiler(angle="radian", meshdir="meshes", autolimits=True, eulerseq="zyx"),
     )
     robot.adapt_world(add_reference_position=True)
     robot.save(path / f"{robot_name}_updated.xml")
