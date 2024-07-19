@@ -141,12 +141,12 @@ DEFAULT_LIMITS = {
         "upper": 1.19,
     },
     "left knee pitch": {
-        "lower": 1,
-        "upper": 3.1,
+        "lower": 0.5,
+        "upper": 2.5,
     },
     "left ankle pitch": {
-        "lower": -0.3,
-        "upper": 1.13,
+        "lower": -0.8,
+        "upper": 0.6,
     },
     "left ankle roll": {
         "lower": 1,
@@ -166,11 +166,11 @@ DEFAULT_LIMITS = {
     },
     "right knee pitch": {
         "lower": 1.54,
-        "upper": 3,
+        "upper": 3.5,
     },
     "right ankle pitch": {
-        "lower": -0.5,
-        "upper": 0.94,
+        "lower": 0,
+        "upper": 1.5,
     },
     "right ankle roll": {
         "lower": 1,
