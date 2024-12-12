@@ -1,9 +1,3 @@
-<p align="center">
-  <picture>
-    <img alt="K-Scale Open Source Robotics" src="https://media.kscale.dev/kscale-open-source-header.png" style="max-width: 100%;">
-  </picture>
-</p>
-
 <div align="center">
 
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/kscalelabs/ksim/blob/main/LICENSE)
