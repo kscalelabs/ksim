@@ -20,8 +20,8 @@ class XYPositionReset(Reset[MjcfState]):
         dx = jax.random.uniform(key, (1,), minval=self.x_range[0], maxval=self.x_range[1])
         dy = jax.random.uniform(key, (1,), minval=self.y_range[0], maxval=self.y_range[1])
         qpos_j = state.data.qpos
-        qpos_j = qpos_j.at[0].set(qpos_j[0] + dx)
-        qpos_j = qpos_j.at[1].set(qpos_j[1] + dy)
+        qpos_j = qpos_j.at[0:1].set(qpos_j[0:1] + dx)
+        qpos_j = qpos_j.at[1:2].set(qpos_j[1:2] + dy)
         return MjcfState(
             rng=rng,
             model=state.model,

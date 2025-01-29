@@ -46,6 +46,7 @@ def init(
     Returns:
         The initialized MJX data.
     """
+    logger.debug("Initializing MJX data")
     data = mjx.make_data(model)
     if qpos_j is not None:
         data = data.replace(qpos=qpos_j)
@@ -60,9 +61,9 @@ def init(
     if mocap_quat_m4 is not None:
         data = data.replace(mocap_quat=mocap_quat_m4.reshape(model.nmocap, -1))
 
-    logger.info("Initializing MJX data on device %s", jax.devices()[0])
+    logger.debug("Forwarding MJX data")
     data = mjx.forward(model, data)
-
+    logger.debug("MJX data initialized")
     return data
 
 
@@ -157,7 +158,6 @@ def get_qpos_ids(model: mujoco.MjModel, joint_names: list[str]) -> np.ndarray:
         jnt_type = model.jnt_type[jnt]
         qadr = model.jnt_dofadr[jnt]
         qdim = qpos_width(jnt_type)
-        print(jnt_name, qadr, qdim)
         index_list.extend(range(qadr, qadr + qdim))
     return np.array(index_list)
 

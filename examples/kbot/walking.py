@@ -151,4 +151,3 @@ def main() -> None:
 if __name__ == "__main__":
     # python -m examples.kbot.walking train
     main()
-    main()

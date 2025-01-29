@@ -13,10 +13,13 @@ from dataclasses import dataclass
 from threading import Thread
 from typing import Generic, Literal, TypeVar
 
+import jax
 import xax
 from dpshdl.dataset import Dataset
 
 from ksim.env.base import Environment
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(kw_only=True)
@@ -41,12 +44,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_environment(self) -> Environment: ...
 
     @classmethod
-    def run_environment(cls, *cfgs: xax.RawConfigType, num_steps: int, use_cli: bool | list[str] = True) -> None:
+    def run_environment(
+        cls,
+        *cfgs: xax.RawConfigType,
+        num_steps: int,
+        use_cli: bool | list[str] = True,
+    ) -> None:
         xax.configure_logging()
-        cfg = cls.get_config(*cfgs, use_cli=use_cli)
-        task_obj = cls(cfg)
-        env = task_obj.get_environment()
-        env.test_run(num_steps)
+        with contextlib.ExitStack() as ctx:
+            cfg = cls.get_config(*cfgs, use_cli=use_cli)
+            task_obj = cls(cfg)
+            env = task_obj.get_environment()
+            env.test_run(num_steps)
 
     def get_dataset(self, phase: Literal["train", "valid"]) -> Dataset:
         raise NotImplementedError("Reinforcement learning tasks do not require datasets.")

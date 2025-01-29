@@ -3,6 +3,7 @@
 import jax
 import jax.numpy as jnp
 from flax import struct
+from jaxtyping import PRNGKeyArray
 from mujoco import mjx
 
 from ksim.state.base import State
@@ -18,7 +19,7 @@ class MjcfState(State):
     - j: number of degrees of freedom (joints)
     """
 
-    rng: jax.random.PRNGKeyArray
+    rng: PRNGKeyArray
     model: mjx.Model
     data: mjx.Data
     done: jnp.ndarray
