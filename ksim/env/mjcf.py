@@ -11,6 +11,7 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import xax
+from brax.envs.base import PipelineEnv, State
 from mujoco import mjx
 
 from ksim.action.mjcf import MjcfAction
