@@ -35,6 +35,6 @@ class KScaleEnvironment(MjcfEnvironment[Tconfig, Tstate, Taction], Generic[Tconf
         try:
             urdf_path = next(urdf_dir.glob("*.mjcf"))
         except StopIteration:
-            raise ValueError(f"No MJCF file found in {urdf_dir}")
+            raise ValueError(f"No MJCF file found for {self.config.model_name} (in {urdf_dir})")
 
         return urdf_path

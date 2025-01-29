@@ -5,7 +5,7 @@ import logging
 from abc import ABC
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Collection, Generic, TypeVar
+from typing import Callable, Collection, Generic, TypeVar
 
 import jax
 import jax.numpy as jnp
@@ -43,16 +43,6 @@ class MjcfEnvironmentConfig(EnvironmentConfig):
     seed: int = xax.field(
         value=1337,
         help="Random seed for the environment.",
-    )
-
-    # Action configuration options.
-    action_scale: float = xax.field(
-        value=1.0,
-        help="Action scaling factor.",
-    )
-    action_range: tuple[float, float] | None = xax.field(
-        value=(-1.0, 1.0),
-        help="Action range.",
     )
 
     # Robot configuration options.
@@ -109,8 +99,9 @@ class MjcfEnvironment(Environment[Tconfig, Tstate, Taction], ABC, Generic[Tconfi
         config: Tconfig,
         terminations: Collection[Termination[MjcfState]],
         resets: Collection[Reset[MjcfState]],
+        model: Callable[[MjcfState], Taction] | None = None,
     ) -> None:
-        super().__init__(config)
+        super().__init__(config, model=model)
 
         self.terminations = terminations
         self.resets = resets
@@ -244,11 +235,8 @@ class MjcfEnvironment(Environment[Tconfig, Tstate, Taction], ABC, Generic[Tconfi
     def get_model_path(self) -> Path:
         raise NotImplementedError("Override get_model_path to return the path to your model file.")
 
-    def _process_actions(self, actions: jnp.ndarray) -> jnp.ndarray:
-        """Scale and clip actions."""
-        if self.config.action_range is not None:
-            actions = jnp.clip(actions, *self.config.action_range)
-        return actions * self.config.action_scale
+    def process_actions(self, actions: Taction) -> Taction:
+        return actions
 
     def check_termination(self, state: Tstate) -> jnp.ndarray:
         """Check if the state is terminal.
@@ -268,8 +256,8 @@ class MjcfEnvironment(Environment[Tconfig, Tstate, Taction], ABC, Generic[Tconfi
             return jnp.zeros((), dtype=jnp.bool_)
         return jnp.stack(term_flags, axis=0)
 
-    def step(self, state: Tstate, actions: Taction) -> Tstate:
-        scaled_actions = self._process_actions(actions)
+    def step(self, actions: Taction, state: Tstate) -> Tstate:
+        scaled_actions = self.process_actions(actions)
         next_data = step(
             self._mjx_model,
             state.data,

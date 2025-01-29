@@ -107,6 +107,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 XYPositionReset(x_range=(-0.5, 0.5), y_range=(-0.5, 0.5)),
                 RandomYawReset(),
             ],
+            model=lambda state: jnp.zeros_like(state.data.ctrl),
         )
 
     def get_model(self) -> Model:

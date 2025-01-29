@@ -6,7 +6,7 @@ An environment defines some interaction between the agent and the world.
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
 import xax
 from omegaconf import MISSING
@@ -33,9 +33,14 @@ Taction = TypeVar("Taction", bound=Action)
 
 
 class Environment(ABC, Generic[Tconfig, Tstate, Taction]):
-    def __init__(self, config: Tconfig) -> None:
-
+    def __init__(
+        self,
+        config: Tconfig,
+        *,
+        model: Callable[[Tstate], Taction] | None = None,
+    ) -> None:
         self.config = config
+        self.model = model
 
     @property
     def num_envs(self) -> int:
@@ -51,9 +56,13 @@ class Environment(ABC, Generic[Tconfig, Tstate, Taction]):
     def reset(self, state: Tstate) -> Tstate: ...
 
     def get_test_action(self, state: Tstate) -> Taction:
+        if self.model is not None:
+            return self.model(state)
+
         raise NotImplementedError(
-            "If you want to use the `test_run` method to test your environment, you must implement "
-            "the `get_test_action` method to return a sample action for a given state."
+            "If you want to use the `test_run` method to test your environment, you must either "
+            "implement the `get_test_action` method to return a sample action for a given state, or "
+            "pass a model to the environment constructor."
         )
 
     def test_run(self, num_steps: int) -> None:
