@@ -1,13 +1,12 @@
 """Defines actions for MuJoCo environments."""
 
-from dataclasses import dataclass
-
 import jax.numpy as jnp
+from flax import struct
 
 from ksim.action.base import Action
 
 
-@dataclass
+@struct.dataclass
 class MjcfAction(Action):
     """Defines an action for a MuJoCo environment."""
 

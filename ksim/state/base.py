@@ -1,8 +1,8 @@
 """Defines the base observation class."""
 
-from dataclasses import dataclass
+from flax import struct
 
 
-@dataclass
+@struct.dataclass
 class State:
     pass

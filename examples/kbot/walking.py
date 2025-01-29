@@ -6,14 +6,20 @@ from dataclasses import dataclass
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import mujoco
 import optax
 import xax
 
 from ksim.action.mjcf import MjcfAction
 from ksim.env.kscale import KScaleEnvironment, KScaleEnvironmentConfig
+from ksim.resets.mjcf import RandomYawReset, XYPositionReset
 from ksim.state.mjcf import MjcfState
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations.urdf import EpisodeLengthTermination, PitchTooGreatTermination, RollToGreatTermination
+from ksim.terminations.mjcf import (
+    EpisodeLengthTermination,
+    PitchTooGreatTermination,
+    RollToGreatTermination,
+)
 
 
 class Model(eqx.Module):
@@ -50,7 +56,9 @@ class Model(eqx.Module):
 @dataclass
 class KBotWalkingConfig(PPOConfig, KScaleEnvironmentConfig):
     # Robot model name to use.
-    model_name: str = xax.field(value="kbot-v1-naked")
+    model_name: str = xax.field(value="kbot-v1")
+    kp: float = xax.field(value=100.0)
+    kd: float = xax.field(value=10.0)
 
     # ML model parameters.
     actor_hidden_dims: list[int] = xax.field(value=[512, 256, 128])
@@ -67,6 +75,18 @@ class KBotWalkingConfig(PPOConfig, KScaleEnvironmentConfig):
 
 
 class KBotEnvironment(KScaleEnvironment[KBotWalkingConfig, MjcfState, MjcfAction]):
+    def configure_mj_model(self, model: mujoco.MjModel, joint_names: list[str]) -> mujoco.MjModel:
+        # Modify PD gains.
+        model.dof_damping[:] = self.config.kp
+        model.actuator_gainprm[:, 0] = self.config.kd
+        model.actuator_biasprm[:, 0] = -self.config.kp
+
+        # Increase offscreen framebuffer size to render at higher resolution.
+        model.vis.global_.offwidth = 3840
+        model.vis.global_.offheight = 2160
+
+        return model
+
     def check_termination(self, state: MjcfState) -> jnp.ndarray:
         raise NotImplementedError
 
@@ -76,13 +96,18 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         super().__init__(config)
 
     def get_environment(self) -> KScaleEnvironment:
-        terminations = [
-            EpisodeLengthTermination(max_episode_length_seconds=self.config.max_episode_length, dt=self.config.dt),
-            PitchTooGreatTermination(max_pitch=self.config.max_pitch),
-            RollToGreatTermination(max_roll=self.config.max_roll),
-        ]
-
-        return KScaleEnvironment(self.config, terminations)
+        return KScaleEnvironment(
+            self.config,
+            terminations=[
+                EpisodeLengthTermination(max_episode_length_seconds=self.config.max_episode_length, dt=self.config.dt),
+                PitchTooGreatTermination(max_pitch=self.config.max_pitch),
+                RollToGreatTermination(max_roll=self.config.max_roll),
+            ],
+            resets=[
+                XYPositionReset(x_range=(-0.5, 0.5), y_range=(-0.5, 0.5)),
+                RandomYawReset(),
+            ],
+        )
 
     def get_model(self) -> Model:
         return Model(self.prng_key())
@@ -125,4 +150,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     # python -m examples.kbot.walking train
+    main()
     main()

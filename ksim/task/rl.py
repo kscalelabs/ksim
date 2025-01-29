@@ -2,6 +2,7 @@
 
 import contextlib
 import datetime
+import logging
 import signal
 import sys
 import textwrap
@@ -41,6 +42,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     @classmethod
     def run_environment(cls, *cfgs: xax.RawConfigType, num_steps: int, use_cli: bool | list[str] = True) -> None:
+        xax.configure_logging()
         cfg = cls.get_config(*cfgs, use_cli=use_cli)
         task_obj = cls(cfg)
         env = task_obj.get_environment()

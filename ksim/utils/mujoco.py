@@ -3,6 +3,7 @@
 Much of this is referenced from Mujoco Playground.
 """
 
+import logging
 from typing import Sequence, Union
 
 import jax
@@ -11,15 +12,17 @@ import mujoco
 import numpy as np
 from mujoco import mjx
 
+logger = logging.getLogger(__name__)
+
 
 def init(
     model: mjx.Model,
-    qpos_nj: jnp.ndarray | None = None,
-    qvel_nj: jnp.ndarray | None = None,
-    ctrl_nj: jnp.ndarray | None = None,
-    act_nj: jnp.ndarray | None = None,
-    mocap_pos_nm3: jnp.ndarray | None = None,
-    mocap_quat_nm4: jnp.ndarray | None = None,
+    qpos_j: jnp.ndarray | None = None,
+    qvel_j: jnp.ndarray | None = None,
+    ctrl_j: jnp.ndarray | None = None,
+    act_j: jnp.ndarray | None = None,
+    mocap_pos_m3: jnp.ndarray | None = None,
+    mocap_quat_m4: jnp.ndarray | None = None,
 ) -> mjx.Data:
     """Initialize MJX data.
 
@@ -31,32 +34,35 @@ def init(
 
     Args:
         model: The MuJoCo model.
-        qpos_nj: The initial joint positions, of shape (n, j).
-        qvel_nj: The initial joint velocities, of shape (n, j).
-        ctrl_nj: The initial joint controls, of shape (n, j).
-        act_nj: The initial actions, of shape (n, j).
-        mocap_pos_nm3: The initial mocap positions, of shape (n, m, 3).
+        qpos_j: The initial joint positions, of shape (n, j).
+        qvel_j: The initial joint velocities, of shape (n, j).
+        ctrl_j: The initial joint controls, of shape (n, j).
+        act_j: The initial actions, of shape (n, j).
+        mocap_pos_m3: The initial mocap positions, of shape (n, m, 3).
             Mocap is a special type of joint that allows for arbitrary
             3D positions.
-        mocap_quat_nm4: The initial mocap quaternions, of shape (n, m, 4).
+        mocap_quat_m4: The initial mocap quaternions, of shape (n, m, 4).
 
     Returns:
         The initialized MJX data.
     """
     data = mjx.make_data(model)
-    if qpos_nj is not None:
-        data = data.replace(qpos=qpos_nj)
-    if qvel_nj is not None:
-        data = data.replace(qvel=qvel_nj)
-    if ctrl_nj is not None:
-        data = data.replace(ctrl=ctrl_nj)
-    if act_nj is not None:
-        data = data.replace(act=act_nj)
-    if mocap_pos_nm3 is not None:
-        data = data.replace(mocap_pos=mocap_pos_nm3.reshape(model.nmocap, -1))
-    if mocap_quat_nm4 is not None:
-        data = data.replace(mocap_quat=mocap_quat_nm4.reshape(model.nmocap, -1))
+    if qpos_j is not None:
+        data = data.replace(qpos=qpos_j)
+    if qvel_j is not None:
+        data = data.replace(qvel=qvel_j)
+    if ctrl_j is not None:
+        data = data.replace(ctrl=ctrl_j)
+    if act_j is not None:
+        data = data.replace(act=act_j)
+    if mocap_pos_m3 is not None:
+        data = data.replace(mocap_pos=mocap_pos_m3.reshape(model.nmocap, -1))
+    if mocap_quat_m4 is not None:
+        data = data.replace(mocap_quat=mocap_quat_m4.reshape(model.nmocap, -1))
+
+    logger.info("Initializing MJX data on device %s", jax.devices()[0])
     data = mjx.forward(model, data)
+
     return data
 
 
@@ -151,6 +157,7 @@ def get_qpos_ids(model: mujoco.MjModel, joint_names: list[str]) -> np.ndarray:
         jnt_type = model.jnt_type[jnt]
         qadr = model.jnt_dofadr[jnt]
         qdim = qpos_width(jnt_type)
+        print(jnt_name, qadr, qdim)
         index_list.extend(range(qadr, qadr + qdim))
     return np.array(index_list)
 

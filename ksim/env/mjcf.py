@@ -5,7 +5,7 @@ import logging
 from abc import ABC
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Collection, Generic, TypeVar
 
 import jax
 import jax.numpy as jnp
@@ -15,6 +15,7 @@ from mujoco import mjx
 
 from ksim.action.mjcf import MjcfAction
 from ksim.env.base import Environment, EnvironmentConfig
+from ksim.resets.base import Reset
 from ksim.state.mjcf import MjcfState
 from ksim.terminations.base import Termination
 from ksim.utils.mujoco import get_qpos_ids, get_qvel_ids, init, step
@@ -37,7 +38,11 @@ class MjcfEnvironmentConfig(EnvironmentConfig):
     )
     num_substeps: int = xax.field(
         value=1,
-        help="Number of substeps to take per step.",
+        help="Number of substeps to take per control step.",
+    )
+    seed: int = xax.field(
+        value=1337,
+        help="Random seed for the environment.",
     )
 
     # Action configuration options.
@@ -61,11 +66,15 @@ class MjcfEnvironmentConfig(EnvironmentConfig):
     )
     default_qpos: list[float] | None = xax.field(
         value=None,
-        help="Default joint positions.",
+        help="Default positions for each joint, in radians.",
     )
     default_qvel: list[float] | None = xax.field(
         value=None,
-        help="Default joint velocities.",
+        help="Default velocities for each joint, in radians per second.",
+    )
+    default_ctrl: list[float] | None = xax.field(
+        value=None,
+        help="Default joint controls.",
     )
 
     # Solver configuration options.
@@ -95,24 +104,34 @@ Taction = TypeVar("Taction", bound=MjcfAction)
 
 
 class MjcfEnvironment(Environment[Tconfig, Tstate, Taction], ABC, Generic[Tconfig, Tstate, Taction]):
-    def __init__(self, config: Tconfig, terminations: list[Termination]) -> None:
+    def __init__(
+        self,
+        config: Tconfig,
+        terminations: Collection[Termination[MjcfState]],
+        resets: Collection[Reset[MjcfState]],
+    ) -> None:
         super().__init__(config)
+
         self.terminations = terminations
+        self.resets = resets
 
-        # Load and compile the MJCF model
-        self.mj_model = self._load_mj_model()
-        self.mjx_model = mjx.put_model(self.mj_model)
-
-        # Get joint info
-        self.joint_names = [
-            self.mj_model.names[adr:].split(b"\x00", 1)[0].decode("utf-8") for adr in self.mj_model.name_jntadr
+        # Load the Mujoco model and get some common information about it.
+        self._mj_model = self.load_mj_model()
+        self._joint_names: list[str] = [
+            self._mj_model.names[adr:].split(b"\x00", 1)[0].decode("utf-8") for adr in self._mj_model.name_jntadr
         ]
+        self._qpos_ids = get_qpos_ids(self._mj_model, self._joint_names)
+        self._qvel_ids = get_qvel_ids(self._mj_model, self._joint_names)
+        self._mj_model = self.configure_mj_model(self._mj_model, self._joint_names)
+        self._default_qpos_j = self.get_default_qpos(len(self._qpos_ids))
+        self._default_qvel_j = self.get_default_qvel(len(self._qvel_ids))
+        self._default_pose = self._default_qpos_j[7:]
+        self._lower_bounds, self._upper_bounds = self.mj_model.jnt_range[1:].T  # Skip the root joint.
 
-        # Get joint IDs for qpos and qvel
-        self.qpos_ids = get_qpos_ids(self.mj_model, self.joint_names)
-        self.qvel_ids = get_qvel_ids(self.mj_model, self.joint_names)
+        # Moves the model into MJX.
+        self._mjx_model = mjx.put_model(self._mj_model)
 
-    def _load_mj_model(self) -> mujoco.MjModel:
+    def load_mj_model(self) -> mujoco.MjModel:
         """Load the MuJoCo model."""
         model_path = asyncio.run(self.get_model_path())
 
@@ -141,78 +160,132 @@ class MjcfEnvironment(Environment[Tconfig, Tstate, Taction], ABC, Generic[Tconfi
         except Exception as e:
             raise ValueError(f"Failed to load model from {model_path}") from e
 
+    def configure_mj_model(self, model: mujoco.MjModel, joint_names: list[str]) -> mujoco.MjModel:
+        # We can provide additional configuration options by overriding this method.
+        return model
+
+    def get_default_qpos(self, num_joints: int) -> jnp.ndarray:
+        qpos = jnp.zeros(num_joints)
+        if self.config.default_qpos is not None:
+            qpos = qpos.at[self._qpos_ids].set(jnp.array(self.config.default_qpos))
+        qpos = qpos.at[0:3].set(jnp.array(self.config.base_init_pos))
+        qpos = qpos.at[3:7].set(jnp.array(self.config.base_init_quat))
+        return qpos
+
+    def get_default_qvel(self, num_joints: int) -> jnp.ndarray:
+        qvel = jnp.zeros(num_joints)
+        if self.config.default_qvel is not None:
+            qvel = qvel.at[self._qvel_ids].set(jnp.array(self.config.default_qvel))
+        return qvel
+
     @property
     def num_actions(self) -> int:
-        return len(self.joint_names)
+        return self._mjx_model.nu
 
     @property
     def dt(self) -> float:
         return self.config.dt
 
+    @property
+    def joint_names(self) -> list[str]:
+        return self._joint_names
+
+    @property
+    def qpos_ids(self) -> jnp.ndarray:
+        return self._qpos_ids
+
+    @property
+    def qvel_ids(self) -> jnp.ndarray:
+        return self._qvel_ids
+
+    @property
+    def mj_model(self) -> mujoco.MjModel:
+        return self._mj_model
+
+    @property
+    def mjx_model(self) -> mjx.Model:
+        return self._mjx_model
+
+    @property
+    def num_substeps(self) -> int:
+        """Defines the number of substeps to take per control step."""
+        return self.config.num_substeps
+
+    @property
+    def ctrl_dt(self) -> float:
+        """Defines the time step of the controller."""
+        return self.config.dt * self.config.num_substeps
+
+    @property
+    def lower_bounds(self) -> jnp.ndarray:
+        """Defines the lower bounds for each joint, in radians."""
+        return self._lower_bounds
+
+    @property
+    def upper_bounds(self) -> jnp.ndarray:
+        """Defines the upper bounds for each joint, in radians."""
+        return self._upper_bounds
+
     def get_initial_state(self) -> Tstate:
-        # Initialize state arrays with zeros/defaults
-        qpos = jnp.zeros(self.mjx_model.nq)
-        qvel = jnp.zeros(self.mjx_model.nv)
-
-        # Set default positions if provided
-        if self.config.default_qpos is not None:
-            qpos = qpos.at[self.qpos_ids].set(jnp.array(self.config.default_qpos))
-        if self.config.default_qvel is not None:
-            qvel = qvel.at[self.qvel_ids].set(jnp.array(self.config.default_qvel))
-
-        # Set initial base position and orientation
-        qpos = qpos.at[0:3].set(jnp.array(self.config.base_init_pos))
-        qpos = qpos.at[3:7].set(jnp.array(self.config.base_init_quat))
-
-        # Initialize MJX data
         data = init(
-            self.mjx_model,
-            qpos_nj=qpos,
-            qvel_nj=qvel,
-            ctrl_nj=jnp.zeros(self.mjx_model.nu),
+            self._mjx_model,
+            qpos_j=self._default_qpos_j,
+            qvel_j=self._default_qvel_j,
+            ctrl_j=self._default_qpos_j[7:],
         )
 
         return MjcfState(
+            rng=jax.random.PRNGKey(self.config.seed),
+            model=self._mjx_model,
             data=data,
-            obs=self._get_obs(data),
-            done=jnp.array(False),
-            metrics={},
-            info={},
+            done=jnp.zeros((), dtype=jnp.bool_),
         )
 
     def get_model_path(self) -> Path:
-        """Return path to the MJCF/URDF model file."""
         raise NotImplementedError("Override get_model_path to return the path to your model file.")
 
-    def step(self, state: Tstate, actions: Taction) -> Tstate:
-        # Process actions
-        scaled_actions = self._process_actions(actions)
-
-        # Step physics
-        next_data = step(
-            self.mjx_model,
-            state.data,
-            scaled_actions,
-            num_substeps=self.config.num_substeps,
-        )
-
-        # Get observation and reward
-        obs = self._get_obs(next_data)
-
-        # Check termination
-        done = self.check_termination(next_data)
-
-        return MjcfState(data=next_data, obs=obs, done=done)
-
-    def _process_actions(self, actions: jax.Array) -> jax.Array:
+    def _process_actions(self, actions: jnp.ndarray) -> jnp.ndarray:
         """Scale and clip actions."""
         if self.config.action_range is not None:
             actions = jnp.clip(actions, *self.config.action_range)
         return actions * self.config.action_scale
 
-    def check_termination(self, data: mjx.Data) -> jax.Array:
-        """Check termination conditions."""
-        term_flags = [term(data) for term in self.terminations]
+    def check_termination(self, state: Tstate) -> jnp.ndarray:
+        """Check if the state is terminal.
+
+        We provide a small abstraction here by defining termination condition
+        classes that wrap some common functionality.
+
+        Args:
+            state: The current state.
+
+        Returns:
+            The termination flags array as (termination_conditions, num_envs).
+            This can be used to determine which termination conditions are met.
+        """
+        term_flags = [term(state.data) for term in self.terminations]
         if not term_flags:
             return jnp.zeros((), dtype=jnp.bool_)
-        return jnp.any(jnp.stack(term_flags))
+        return jnp.stack(term_flags, axis=0)
+
+    def step(self, state: Tstate, actions: Taction) -> Tstate:
+        scaled_actions = self._process_actions(actions)
+        next_data = step(
+            self._mjx_model,
+            state.data,
+            scaled_actions,
+            num_substeps=self.config.num_substeps,
+        )
+        done = self.check_termination(next_data)
+        return MjcfState(model=self._mjx_model, data=next_data, done=done)
+
+    def reset(self, state: Tstate) -> Tstate:
+        for reset in self.resets:
+            state = reset(state)
+        data = init(
+            self._mjx_model,
+            qpos_j=self._default_qpos_j,
+            qvel_j=self._default_qvel_j,
+            ctrl_j=self._default_qpos_j[7:],
+        )
+        return state.replace(data=data)

@@ -1,8 +1,8 @@
 """Defines the base action class."""
 
-from dataclasses import dataclass
+from flax import struct
 
 
-@dataclass
+@struct.dataclass
 class Action:
     pass
