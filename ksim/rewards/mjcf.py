@@ -4,24 +4,20 @@ from typing import Generic, TypeVar
 
 import jax.numpy as jnp
 
-from ksim.env.base import Environment
 from ksim.rewards.base import Reward
-from ksim.state.mjcf import MjcfState
+from ksim.state.base import State
 
-Tstate = TypeVar("Tstate", bound=MjcfState)
-Tenv = TypeVar("Tenv", bound=Environment)
+Tstate = TypeVar("Tstate", bound=State)
 
 
-class LinearVelocityZPenalty(Reward[Tstate, Tenv], Generic[Tstate, Tenv]):
+class LinearVelocityZPenalty(Reward[Tstate], Generic[Tstate,]):
     """Penalty for how fast the robot is moving in the z-direction."""
 
-    scale: float
-
-    def __call__(self, state: Tstate, env: Tenv) -> jnp.ndarray:
+    def __call__(self, state: Tstate) -> jnp.ndarray:
         return jnp.square(state.base_lin_vel_n3[..., 2])
 
 
-class ActionRatePenalty(Reward[Tstate, Tenv], Generic[Tstate, Tenv]):
+class ActionRatePenalty(Reward[Tstate], Generic[Tstate]):
     """Penalty for how fast the robot is changing its actions.
 
     This discourages the robot from changing it's actions too rapidly, making
@@ -30,14 +26,13 @@ class ActionRatePenalty(Reward[Tstate, Tenv], Generic[Tstate, Tenv]):
 
     scale: float
 
-    def __call__(self, state: Tstate, env: Tenv) -> jnp.ndarray:
+    def __call__(self, state: Tstate) -> jnp.ndarray:
         return jnp.square(state.actions_nj - state.last_actions_nj)
 
 
-class GaitSymmetryReward(Reward[Tstate, Tenv], Generic[Tstate, Tenv]):
+class GaitSymmetryReward(Reward[Tstate], Generic[Tstate]):
     """Reward function for how symmetrical the robot's gait is."""
 
-    scale: float
     left_hip_pitch_index: int
     right_hip_pitch_index: int
     left_knee_index: int
@@ -57,7 +52,7 @@ class GaitSymmetryReward(Reward[Tstate, Tenv], Generic[Tstate, Tenv]):
         self.left_knee_index = left_knee_index
         self.right_knee_index = right_knee_index
 
-    def __call__(self, state: Tstate, env: Tenv) -> jnp.ndarray:
+    def __call__(self, state: Tstate) -> jnp.ndarray:
         left_hip = state.dof_pos_nj[:, self.left_hip_pitch_index]
         right_hip = state.dof_pos_nj[:, self.right_hip_pitch_index]
         left_knee = state.dof_pos_nj[:, self.left_knee_index]
@@ -67,24 +62,21 @@ class GaitSymmetryReward(Reward[Tstate, Tenv], Generic[Tstate, Tenv]):
         return jnp.exp(-(hip_symmetry + knee_symmetry))
 
 
-class SimilarityToDefaultPenalty(Reward[Tstate, Tenv], Generic[Tstate, Tenv]):
+class SimilarityToDefaultPenalty(Reward[Tstate], Generic[Tstate]):
     """Penalty for how similar the robot's current state is to the default state."""
 
-    scale: float
-
-    def __call__(self, state: Tstate, env: Tenv) -> jnp.ndarray:
+    def __call__(self, state: Tstate) -> jnp.ndarray:
         return jnp.sum(jnp.abs(state.dof_pos_nj - state.default_dof_pos_nj), axis=1)
 
 
-class BaseHeightPenalty(Reward[Tstate, Tenv], Generic[Tstate, Tenv]):
+class BaseHeightPenalty(Reward[Tstate], Generic[Tstate]):
     """Penalty for how high the robot's base is."""
 
-    scale: float
     base_height_target: float
 
     def __init__(self, scale: float, base_height_target: float) -> None:
         super().__init__(scale)
         self.base_height_target = base_height_target
 
-    def __call__(self, state: Tstate, env: Tenv) -> jnp.ndarray:
+    def __call__(self, state: Tstate) -> jnp.ndarray:
         return jnp.square(state.base_pos_n3[..., 2] - self.base_height_target)

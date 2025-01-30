@@ -5,11 +5,10 @@ from typing import Generic, TypeVar
 
 import jax.numpy as jnp
 
-from ksim.env.mjcf import MjcfState
-from ksim.resets.mjcf import XYPositionReset
+from ksim.state.base import State
 from ksim.terminations.base import Termination
 
-Tstate = TypeVar("Tstate", bound=MjcfState)
+Tstate = TypeVar("Tstate", bound=State)
 
 
 class EpisodeLengthTermination(Termination[Tstate], Generic[Tstate]):

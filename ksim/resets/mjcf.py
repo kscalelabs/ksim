@@ -5,24 +5,24 @@ import jax.numpy as jnp
 from mujoco.mjx._src import math
 
 from ksim.resets.base import Reset
-from ksim.state.mjcf import MjcfState
+from ksim.state.base import State
 
 
-class XYPositionReset(Reset[MjcfState]):
+class XYPositionReset(Reset[State]):
     def __init__(self, x_range: tuple[float, float], y_range: tuple[float, float]) -> None:
         super().__init__()
 
         self.x_range = x_range
         self.y_range = y_range
 
-    def __call__(self, state: MjcfState) -> MjcfState:
+    def __call__(self, state: State) -> State:
         rng, key = jax.random.split(state.rng)
         dx = jax.random.uniform(key, (1,), minval=self.x_range[0], maxval=self.x_range[1])
         dy = jax.random.uniform(key, (1,), minval=self.y_range[0], maxval=self.y_range[1])
         qpos_j = state.data.qpos
         qpos_j = qpos_j.at[0:1].set(qpos_j[0:1] + dx)
         qpos_j = qpos_j.at[1:2].set(qpos_j[1:2] + dy)
-        return MjcfState(
+        return State(
             rng=rng,
             model=state.model,
             data=state.data.replace(qpos=qpos_j),
@@ -30,20 +30,20 @@ class XYPositionReset(Reset[MjcfState]):
         )
 
 
-class RandomYawReset(Reset[MjcfState]):
+class RandomYawReset(Reset[State]):
     def __init__(self, yaw_range: tuple[float, float] = (-jnp.pi, jnp.pi)) -> None:
         super().__init__()
 
         self.yaw_range = yaw_range
 
-    def __call__(self, state: MjcfState) -> MjcfState:
+    def __call__(self, state: State) -> State:
         rng, key = jax.random.split(state.rng)
         yaw = jax.random.uniform(key, (1,), minval=self.yaw_range[0], maxval=self.yaw_range[1])
         quat = math.axis_angle_to_quat(jnp.array([0, 0, 1]), yaw)
         qpos = state.data.qpos
         new_quat = math.quat_mul(qpos[3:7], quat)
         qpos = qpos.at[3:7].set(new_quat)
-        return MjcfState(
+        return State(
             rng=rng,
             model=state.model,
             data=state.data.replace(qpos=qpos),
@@ -51,19 +51,19 @@ class RandomYawReset(Reset[MjcfState]):
         )
 
 
-class VelocityReset(Reset[MjcfState]):
+class VelocityReset(Reset[State]):
     def __init__(self, velocity_range: tuple[float, float] = (-0.5, 0.5)) -> None:
         super().__init__()
         self.velocity_range = velocity_range
 
-    def __call__(self, state: MjcfState) -> MjcfState:
+    def __call__(self, state: State) -> State:
         rng, key = jax.random.split(state.rng)
         qvel = state.data.qvel
         qvel = qvel.at[0:6].set(
             jax.random.uniform(key, (6,), minval=self.velocity_range[0], maxval=self.velocity_range[1])
         )
         state.data.replace(qvel=qvel)
-        return MjcfState(
+        return State(
             rng=rng,
             model=state.model,
             data=state.data.replace(qvel=qvel),
@@ -71,7 +71,7 @@ class VelocityReset(Reset[MjcfState]):
         )
 
 
-class PerturbationReset(Reset[MjcfState]):
+class PerturbationReset(Reset[State]):
     def __init__(
         self,
         kick_wait_time_range: tuple[float, float],
@@ -86,7 +86,7 @@ class PerturbationReset(Reset[MjcfState]):
         self.velocity_kick_range = velocity_kick_range
         self.dt = dt
 
-    def __call__(self, state: MjcfState) -> MjcfState:
+    def __call__(self, state: State) -> State:
         rng, key1, key2, key3 = jax.random.split(state.rng, 4)
 
         # Time until next perturbation
@@ -112,7 +112,7 @@ class PerturbationReset(Reset[MjcfState]):
             maxval=self.velocity_kick_range[1],
         )
 
-        return MjcfState(
+        return State(
             rng=rng,
             model=state.model,
             data=state.data.replace(
@@ -124,7 +124,7 @@ class PerturbationReset(Reset[MjcfState]):
         )
 
 
-class CommandReset(Reset[MjcfState]):
+class CommandReset(Reset[State]):
     def __init__(self, command_range: tuple[float, float], dt: float, mean_time: float = 5.0) -> None:
         super().__init__()
 
@@ -132,7 +132,7 @@ class CommandReset(Reset[MjcfState]):
         self.dt = dt
         self.mean_time = mean_time
 
-    def __call__(self, state: MjcfState) -> MjcfState:
+    def __call__(self, state: State) -> State:
         rng, key1, key2 = jax.random.split(state.rng, 3)
 
         # Time until next command

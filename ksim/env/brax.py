@@ -2,27 +2,30 @@
 
 import asyncio
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Unpack
+from typing import Collection
 
 import jax
-import jax.numpy as jp
+import jax.numpy as jnp
 import mujoco
 import xax
 from brax.envs.base import PipelineEnv
 from brax.io import mjcf
-from brax.mjx.base import State as MjxState
 from kscale import K
+
+from ksim.resets.base import Reset
+from ksim.rewards.base import Reward
+from ksim.state.base import State
+from ksim.terminations.base import Termination
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class Config:
+class KScaleEnvConfig:
     backend: str = xax.field(
-        default="mjx",
+        value="mjx",
         help="The physics backend to use.",
     )
     gravity: tuple[float, float, float] = xax.field(
@@ -34,45 +37,60 @@ class Config:
         help="Simulation time step.",
     )
     frames_per_env_step: int = xax.field(
-        default=1,
+        value=1,
         help="The number of frames to simulate per environment step.",
     )
     debug_env: bool = xax.field(
-        default=False,
+        value=False,
         help="Whether to enable debug mode for the environment.",
     )
     solver: str = xax.field(
-        default="CG",
+        value="CG",
         help="MuJoCo solver type ('CG' or 'Newton').",
     )
 
     # Solver configuration options.
     solver_iterations: int = xax.field(
-        default=6,
+        value=6,
         help="Number of main solver iterations.",
     )
     solver_ls_iterations: int = xax.field(
-        default=6,
+        value=6,
         help="Number of line search iterations.",
     )
     solver_tolerance: float = xax.field(
-        default=1e-5,
+        value=1e-5,
         help="Solver tolerance.",
+    )
+
+    # Simulation artifact options.
+    ignore_cached_urdf: bool = xax.field(
+        value=False,
+        help="Whether to ignore the cached URDF.",
     )
 
 
 class KScaleEnv(PipelineEnv):
     """Defines a generic environment for interacting with K-Scale models."""
 
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        config: KScaleEnvConfig,
+        terminations: Collection[Termination[State]],
+        resets: Collection[Reset[State]],
+        rewards: Collection[Reward[State]],
+    ) -> None:
         self.config = config
+        self.terminations = terminations
+        self.resets = resets
 
-        model_path = asyncio.run(self.get_model_path())
+        model_path = str(asyncio.run(self.get_model_path()))
 
+        logger.info("Initializing model from %s", model_path)
         mj_model = mujoco.MjModel.from_xml_path(model_path)
 
         # Configure model parameters
-        match self.config.solver:
+        match self.config.solver.lower():
             case "cg":
                 mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
             case "newton":
@@ -88,8 +106,10 @@ class KScaleEnv(PipelineEnv):
         mj_model.opt.gravity = self.config.gravity
         mj_model.opt.timestep = self.config.dt
 
+        logger.info("Loading model %s", model_path)
         sys = mjcf.load_model(mj_model)
 
+        logger.info("Initializing pipeline")
         super().__init__(
             sys=sys,
             backend=self.config.backend,
@@ -111,19 +131,66 @@ class KScaleEnv(PipelineEnv):
 
         return urdf_path
 
-    def reset(self, rng: jp.ndarray) -> MjxState:
-        rng, rng1, rng2 = jax.random.split(rng, 3)
-        low, hi = -self._reset_noise_scale, self._reset_noise_scale
-        qpos = self.sys.qpos0 + jax.random.uniform(rng1, (self.sys.nq,), minval=low, maxval=hi)
-        qvel = jax.random.uniform(rng2, (self.sys.nv,), minval=low, maxval=hi)
-        mjx_state = self.pipeline_init(qpos, qvel)
-        assert isinstance(mjx_state, MjxState), f"mjx_state is of type {type(mjx_state)}"
-        return mjx_state
+    def reset(self, rng: jnp.ndarray) -> State:
+        # Initialize pipeline state with default positions and velocities
+        q = jnp.zeros(self.sys.q_size())
+        qd = jnp.zeros(self.sys.qd_size())
+        pipeline_state = self.pipeline_init(q, qd)
 
-    def step(self, state: MjxState, action: jp.ndarray) -> MjxState:
-        mjx_state = state.pipeline_state
-        assert mjx_state is not None, "state.pipeline_state was recorded as None"
-        next_mjx_state = self.pipeline_step(mjx_state, action)
-        assert isinstance(next_mjx_state, MjxState), f"next_mjx_state is of type {type(next_mjx_state)}"
-        assert isinstance(mjx_state, MjxState), f"mjx_state is of type {type(mjx_state)}"
-        return next_mjx_state
+        # Create initial observation (you may want to customize this)
+        obs = self._get_obs(pipeline_state)
+
+        # Return initial state
+        return State(
+            pipeline_state=pipeline_state,
+            obs=obs,
+            reward=jnp.zeros(()),
+            done=jnp.zeros((), dtype=bool),
+        )
+
+    def step(self, state: State, action: jnp.ndarray) -> State:
+        # Step the physics simulation
+        pipeline_state = self.pipeline_step(state.pipeline_state, action)
+
+        # Get observation from new state
+        obs = self._get_obs(pipeline_state)
+
+        # Calculate reward (you should implement your own reward function)
+        reward = self._get_reward(pipeline_state)
+
+        # Determine if episode is done (implement your own termination conditions)
+        done = self._get_done(pipeline_state)
+
+        return State(
+            pipeline_state=pipeline_state,
+            obs=obs,
+            reward=reward,
+            done=done,
+        )
+
+    def test_run(self, num_steps: int, render: bool = True) -> None:
+        with jax.disable_jit():
+            # Initialize environment
+            rng = jax.random.PRNGKey(0)
+            state = self.reset(rng)
+
+            # Store trajectory for rendering
+            trajectory = [state.pipeline_state]
+
+            # Run simulation
+            for _ in range(num_steps):
+                # Generate random action (replace with your control policy)
+                rng, subkey = jax.random.split(rng)
+                action = jax.random.uniform(subkey, shape=(self.action_size,), minval=-1, maxval=1)
+
+                # Step environment
+                state = self.step(state, action)
+                trajectory.append(state.pipeline_state)
+
+                if state.done.all():
+                    break
+
+            # Render if requested
+            if render:
+                breakpoint()
+                frames = self.render(trajectory)

@@ -10,10 +10,10 @@ import mujoco
 import optax
 import xax
 
-from ksim.action.mjcf import MjcfAction
-from ksim.env.kscale import KScaleEnvironment, KScaleEnvironmentConfig
+from ksim.env.brax import KScaleEnv, KScaleEnvConfig
 from ksim.resets.mjcf import RandomYawReset, XYPositionReset
-from ksim.state.mjcf import MjcfState
+from ksim.rewards.mjcf import ActionRatePenalty, GaitSymmetryReward, LinearVelocityZPenalty
+from ksim.state.base import State
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations.mjcf import (
     EpisodeLengthTermination,
@@ -54,7 +54,7 @@ class Model(eqx.Module):
 
 
 @dataclass
-class KBotWalkingConfig(PPOConfig, KScaleEnvironmentConfig):
+class KBotWalkingConfig(PPOConfig, KScaleEnvConfig):
     # Robot model name to use.
     model_name: str = xax.field(value="kbot-v1")
     kp: float = xax.field(value=100.0)
@@ -74,7 +74,7 @@ class KBotWalkingConfig(PPOConfig, KScaleEnvironmentConfig):
     max_roll: float = xax.field(value=0.1)
 
 
-class KBotEnvironment(KScaleEnvironment[KBotWalkingConfig, MjcfState, MjcfAction]):
+class KBotEnvironment(KScaleEnv):
     def configure_mj_model(self, model: mujoco.MjModel, joint_names: list[str]) -> mujoco.MjModel:
         # Modify PD gains.
         model.dof_damping[:] = self.config.kp
@@ -87,7 +87,7 @@ class KBotEnvironment(KScaleEnvironment[KBotWalkingConfig, MjcfState, MjcfAction
 
         return model
 
-    def check_termination(self, state: MjcfState) -> jnp.ndarray:
+    def check_termination(self, state: State) -> jnp.ndarray:
         raise NotImplementedError
 
 
@@ -95,8 +95,8 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
     def __init__(self, config: KBotWalkingConfig) -> None:
         super().__init__(config)
 
-    def get_environment(self) -> KScaleEnvironment:
-        return KScaleEnvironment(
+    def get_environment(self) -> KScaleEnv:
+        return KScaleEnv(
             self.config,
             terminations=[
                 EpisodeLengthTermination(max_episode_length_seconds=self.config.max_episode_length, dt=self.config.dt),
@@ -107,7 +107,17 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 XYPositionReset(x_range=(-0.5, 0.5), y_range=(-0.5, 0.5)),
                 RandomYawReset(),
             ],
-            model=lambda state: jnp.zeros_like(state.data.ctrl),
+            rewards=[
+                GaitSymmetryReward(
+                    scale=1.0,
+                    left_hip_index=0,
+                    right_hip_index=1,
+                    left_knee_index=2,
+                    right_knee_index=3,
+                ),
+                ActionRatePenalty(scale=-1.0),
+                LinearVelocityZPenalty(scale=-1.0),
+            ],
         )
 
     def get_model(self) -> Model:
@@ -128,7 +138,6 @@ def main() -> None:
 
     config = KBotWalkingConfig(
         # Training parameters.
-        num_environments=1,
         batch_size=32,
         # Learning rate.
         learning_rate=1e-3,

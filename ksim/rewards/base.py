@@ -9,16 +9,14 @@ import equinox as eqx
 import jax.numpy as jnp
 import xax
 
-from ksim.env.base import Environment
 from ksim.state.base import State
 
 logger = logging.getLogger(__name__)
 
 Tstate = TypeVar("Tstate", bound=State)
-Tenv = TypeVar("Tenv", bound=Environment)
 
 
-class Reward(eqx.Module, Generic[Tstate, Tenv]):
+class Reward(eqx.Module, Generic[Tstate]):
     """Base class for defining reward functions."""
 
     scale: float
@@ -39,7 +37,7 @@ class Reward(eqx.Module, Generic[Tstate, Tenv]):
             logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale)
 
     @abstractmethod
-    def __call__(self, state: Tstate, env: Tenv) -> jnp.ndarray: ...
+    def __call__(self, state: Tstate) -> jnp.ndarray: ...
 
     @classmethod
     def get_name(cls) -> str:
