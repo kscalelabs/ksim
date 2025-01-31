@@ -11,8 +11,18 @@ import optax
 import xax
 
 from ksim.env.brax import KScaleEnv, KScaleEnvConfig
+from ksim.observation.mjcf import (
+    BaseOrientationObservation,
+    BasePositionObservation,
+    JointPositionObservation,
+    JointVelocityObservation,
+)
 from ksim.resets.mjcf import RandomYawReset, XYPositionReset
-from ksim.rewards.mjcf import ActionRatePenalty, GaitSymmetryReward, LinearVelocityZPenalty
+from ksim.rewards.mjcf import (
+    ActionRatePenalty,
+    GaitSymmetryReward,
+    LinearVelocityZPenalty,
+)
 from ksim.state.base import State
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations.mjcf import (
@@ -117,6 +127,12 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 ),
                 ActionRatePenalty(scale=-1.0),
                 LinearVelocityZPenalty(scale=-1.0),
+            ],
+            observations=[
+                BasePositionObservation(),
+                BaseOrientationObservation(),
+                JointPositionObservation(),
+                JointVelocityObservation(),
             ],
         )
 

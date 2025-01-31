@@ -9,11 +9,14 @@ from typing import Collection
 import jax
 import jax.numpy as jnp
 import mujoco
+import tqdm
 import xax
 from brax.envs.base import PipelineEnv
 from brax.io import mjcf
 from kscale import K
+from omegaconf import MISSING
 
+from ksim.observation.base import Observation
 from ksim.resets.base import Reset
 from ksim.rewards.base import Reward
 from ksim.state.base import State
@@ -22,8 +25,27 @@ from ksim.terminations.base import Termination
 logger = logging.getLogger(__name__)
 
 
+async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
+    async with K() as api:
+        urdf_dir = await api.download_and_extract_urdf(model_name, cache=cache)
+
+    try:
+        urdf_path = next(urdf_dir.glob("*.mjcf"))
+    except StopIteration:
+        raise ValueError(f"No MJCF file found for {model_name} (in {urdf_dir})")
+
+    return urdf_path
+
+
 @dataclass
 class KScaleEnvConfig:
+    # Model configuration options.
+    model_name: str = xax.field(
+        value=MISSING,
+        help="The name of the model to use.",
+    )
+
+    # Environment configuration options.
     backend: str = xax.field(
         value="mjx",
         help="The physics backend to use.",
@@ -79,12 +101,22 @@ class KScaleEnv(PipelineEnv):
         terminations: Collection[Termination[State]],
         resets: Collection[Reset[State]],
         rewards: Collection[Reward[State]],
+        observations: Collection[Observation[State]],
     ) -> None:
         self.config = config
         self.terminations = terminations
         self.resets = resets
+        self.rewards = rewards
 
-        model_path = str(asyncio.run(self.get_model_path()))
+        # Downloads the model from the K-Scale API and loads it into MuJoCo.
+        model_path = str(
+            asyncio.run(
+                get_model_path(
+                    model_name=self.config.model_name,
+                    cache=not self.config.ignore_cached_urdf,
+                )
+            )
+        )
 
         logger.info("Initializing model from %s", model_path)
         mj_model = mujoco.MjModel.from_xml_path(model_path)
@@ -117,20 +149,6 @@ class KScaleEnv(PipelineEnv):
             debug=self.config.debug_env,
         )
 
-    async def get_model_path(self) -> str | Path:
-        async with K() as api:
-            urdf_dir = await api.download_and_extract_urdf(
-                self.config.model_name,
-                cache=not self.config.ignore_cached_urdf,
-            )
-
-        try:
-            urdf_path = next(urdf_dir.glob("*.mjcf"))
-        except StopIteration:
-            raise ValueError(f"No MJCF file found for {self.config.model_name} (in {urdf_dir})")
-
-        return urdf_path
-
     def reset(self, rng: jnp.ndarray) -> State:
         # Initialize pipeline state with default positions and velocities
         q = jnp.zeros(self.sys.q_size())
@@ -138,7 +156,7 @@ class KScaleEnv(PipelineEnv):
         pipeline_state = self.pipeline_init(q, qd)
 
         # Create initial observation (you may want to customize this)
-        obs = self._get_obs(pipeline_state)
+        obs = self.get_observation(pipeline_state)
 
         # Return initial state
         return State(
@@ -168,29 +186,40 @@ class KScaleEnv(PipelineEnv):
             done=done,
         )
 
+    def get_observation(self, pipeline_state: State) -> jnp.ndarray:
+        return pipeline_state
+
     def test_run(self, num_steps: int, render: bool = True) -> None:
-        with jax.disable_jit():
-            # Initialize environment
-            rng = jax.random.PRNGKey(0)
-            state = self.reset(rng)
+        logger.info("Jitting reset")
+        reset = jax.jit(self.reset)
+        logger.info("Jitting step")
+        step = jax.jit(self.step)
 
-            # Store trajectory for rendering
-            trajectory = [state.pipeline_state]
+        # Initialize environment
+        rng = jax.random.PRNGKey(0)
+        logger.info("Running test run")
+        state = reset(rng)
 
-            # Run simulation
-            for _ in range(num_steps):
-                # Generate random action (replace with your control policy)
-                rng, subkey = jax.random.split(rng)
-                action = jax.random.uniform(subkey, shape=(self.action_size,), minval=-1, maxval=1)
+        # Store trajectory for rendering
+        logger.info("Storing initial state")
+        trajectory = [state.pipeline_state]
 
-                # Step environment
-                state = self.step(state, action)
-                trajectory.append(state.pipeline_state)
+        # Run simulation
+        for _ in tqdm.trange(num_steps):
+            # Generate random action (replace with your control policy)
+            rng, subkey = jax.random.split(rng)
+            action = jax.random.uniform(subkey, shape=(self.action_size,), minval=-1, maxval=1)
 
-                if state.done.all():
-                    break
+            # Step environment
+            state = step(state, action)
+            trajectory.append(state.pipeline_state)
 
-            # Render if requested
-            if render:
-                breakpoint()
-                frames = self.render(trajectory)
+            logger.info("Stepping environment")
+
+            if state.done.all():
+                break
+
+        # Render if requested
+        if render:
+            breakpoint()
+            frames = self.render(trajectory)
