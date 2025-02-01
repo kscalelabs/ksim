@@ -149,49 +149,35 @@ class KScaleEnv(PipelineEnv):
             debug=self.config.debug_env,
         )
 
+    def _pipeline_state_to_state(self, pipeline_state: State) -> State:
+        obs = self.get_observation(pipeline_state)
+        reward = self.get_reward(pipeline_state)
+        done = self.get_done(pipeline_state)
+        return State(pipeline_state=pipeline_state, obs=obs, reward=reward, done=done)
+
     def reset(self, rng: jnp.ndarray) -> State:
-        # Initialize pipeline state with default positions and velocities
         q = jnp.zeros(self.sys.q_size())
         qd = jnp.zeros(self.sys.qd_size())
         pipeline_state = self.pipeline_init(q, qd)
-
-        # Create initial observation (you may want to customize this)
-        obs = self.get_observation(pipeline_state)
-
-        # Return initial state
-        return State(
-            pipeline_state=pipeline_state,
-            obs=obs,
-            reward=jnp.zeros(()),
-            done=jnp.zeros((), dtype=bool),
-        )
+        return self._pipeline_state_to_state(pipeline_state)
 
     def step(self, state: State, action: jnp.ndarray) -> State:
-        # Step the physics simulation
         pipeline_state = self.pipeline_step(state.pipeline_state, action)
-
-        # Get observation from new state
-        obs = self._get_obs(pipeline_state)
-
-        # Calculate reward (you should implement your own reward function)
-        reward = self._get_reward(pipeline_state)
-
-        # Determine if episode is done (implement your own termination conditions)
-        done = self._get_done(pipeline_state)
-
-        return State(
-            pipeline_state=pipeline_state,
-            obs=obs,
-            reward=reward,
-            done=done,
-        )
+        return self._pipeline_state_to_state(pipeline_state)
 
     def get_observation(self, pipeline_state: State) -> jnp.ndarray:
         return pipeline_state
 
+    def get_reward(self, pipeline_state: State) -> jnp.ndarray:
+        return jnp.zeros(())
+
+    def get_done(self, pipeline_state: State) -> jnp.ndarray:
+        return jnp.zeros((), dtype=bool)
+
     def test_run(self, num_steps: int, render: bool = True) -> None:
         logger.info("Jitting reset")
         reset = jax.jit(self.reset)
+
         logger.info("Jitting step")
         step = jax.jit(self.step)
 
