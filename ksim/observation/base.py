@@ -6,8 +6,7 @@ from typing import Generic, TypeVar
 
 import jax.numpy as jnp
 import xax
-
-from ksim.state.base import State
+from brax.mjx.base import State
 
 Tstate = TypeVar("Tstate", bound=State)
 

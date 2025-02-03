@@ -2,18 +2,14 @@
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
 
 import xax
-
-from ksim.state.base import State
-
-Tstate = TypeVar("Tstate", bound=State)
+from brax.envs.base import State as BraxState
 
 
-class Reset(ABC, Generic[Tstate]):
+class Reset(ABC):
     @abstractmethod
-    def __call__(self, state: Tstate) -> Tstate:
+    def __call__(self, state: BraxState) -> BraxState:
         """Resets the environment."""
 
     @classmethod

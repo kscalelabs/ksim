@@ -6,12 +6,13 @@ from dataclasses import dataclass
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import mujoco
 import optax
 import xax
 
 from ksim.env.brax import KScaleEnv, KScaleEnvConfig
 from ksim.observation.mjcf import (
+    BaseAngularVelocityObservation,
+    BaseLinearVelocityObservation,
     BaseOrientationObservation,
     BasePositionObservation,
     JointPositionObservation,
@@ -23,7 +24,6 @@ from ksim.rewards.mjcf import (
     GaitSymmetryReward,
     LinearVelocityZPenalty,
 )
-from ksim.state.base import State
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations.mjcf import (
     EpisodeLengthTermination,
@@ -66,7 +66,7 @@ class Model(eqx.Module):
 @dataclass
 class KBotWalkingConfig(PPOConfig, KScaleEnvConfig):
     # Robot model name to use.
-    model_name: str = xax.field(value="kbot-v1")
+    model_name: str = xax.field(value="kbot-v1-min")
     kp: float = xax.field(value=100.0)
     kd: float = xax.field(value=10.0)
 
@@ -82,23 +82,6 @@ class KBotWalkingConfig(PPOConfig, KScaleEnvConfig):
     max_episode_length: float = xax.field(value=20.0)
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
-
-
-class KBotEnvironment(KScaleEnv):
-    def configure_mj_model(self, model: mujoco.MjModel, joint_names: list[str]) -> mujoco.MjModel:
-        # Modify PD gains.
-        model.dof_damping[:] = self.config.kp
-        model.actuator_gainprm[:, 0] = self.config.kd
-        model.actuator_biasprm[:, 0] = -self.config.kp
-
-        # Increase offscreen framebuffer size to render at higher resolution.
-        model.vis.global_.offwidth = 3840
-        model.vis.global_.offheight = 2160
-
-        return model
-
-    def check_termination(self, state: State) -> jnp.ndarray:
-        raise NotImplementedError
 
 
 class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
@@ -131,6 +114,8 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             observations=[
                 BasePositionObservation(),
                 BaseOrientationObservation(),
+                BaseLinearVelocityObservation(),
+                BaseAngularVelocityObservation(),
                 JointPositionObservation(),
                 JointVelocityObservation(),
             ],

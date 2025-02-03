@@ -15,3 +15,7 @@ Then, install the dependencies:
 ```bash
 pip install -e .
 ```
+
+### Notes
+
+- `jax-metal` does not work with Mujoco environments, because some operations are not supported.

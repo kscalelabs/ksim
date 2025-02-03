@@ -3,20 +3,16 @@
 import functools
 import logging
 from abc import abstractmethod
-from typing import Generic, TypeVar
 
 import equinox as eqx
 import jax.numpy as jnp
 import xax
-
-from ksim.state.base import State
+from brax.envs.base import State as BraxState
 
 logger = logging.getLogger(__name__)
 
-Tstate = TypeVar("Tstate", bound=State)
 
-
-class Reward(eqx.Module, Generic[Tstate]):
+class Reward(eqx.Module):
     """Base class for defining reward functions."""
 
     scale: float
@@ -37,7 +33,7 @@ class Reward(eqx.Module, Generic[Tstate]):
             logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale)
 
     @abstractmethod
-    def __call__(self, state: Tstate) -> jnp.ndarray: ...
+    def __call__(self, state: BraxState) -> jnp.ndarray: ...
 
     @classmethod
     def get_name(cls) -> str:

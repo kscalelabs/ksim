@@ -1,28 +1,40 @@
 """Defines some useful resets for MJCF environments."""
 
-import jax
+from typing import Generic, TypeVar
+
 import jax.numpy as jnp
-from mujoco.mjx._src import math
+from brax.mjx.base import State
 
 from ksim.observation.base import Observation
-from ksim.state.base import State
+
+Tstate = TypeVar("Tstate", bound=State)
 
 
-class BasePositionObservation(Observation[State]):
-    def __call__(self, state: State) -> jnp.ndarray:
-        return state.data.qpos[0:2]
+class BasePositionObservation(Observation[Tstate], Generic[Tstate]):
+    def __call__(self, state: Tstate) -> jnp.ndarray:
+        return state.qpos[0:3]  # x, y, z
 
 
-class BaseOrientationObservation(Observation[State]):
-    def __call__(self, state: State) -> jnp.ndarray:
-        return state.data.qvel[0:2]
+class BaseOrientationObservation(Observation[Tstate], Generic[Tstate]):
+    def __call__(self, state: Tstate) -> jnp.ndarray:
+        return state.qpos[3:7]  # qw, qx, qy, qz
 
 
-class JointPositionObservation(Observation[State]):
-    def __call__(self, state: State) -> jnp.ndarray:
-        return state.data.qpos[2:]
+class BaseLinearVelocityObservation(Observation[Tstate], Generic[Tstate]):
+    def __call__(self, state: Tstate) -> jnp.ndarray:
+        return state.qvel[0:3]  # x, y, z
 
 
-class JointVelocityObservation(Observation[State]):
-    def __call__(self, state: State) -> jnp.ndarray:
-        return state.data.qvel[2:]
+class BaseAngularVelocityObservation(Observation[Tstate], Generic[Tstate]):
+    def __call__(self, state: Tstate) -> jnp.ndarray:
+        return state.qvel[3:6]  # wx, wy, wz
+
+
+class JointPositionObservation(Observation[Tstate], Generic[Tstate]):
+    def __call__(self, state: Tstate) -> jnp.ndarray:
+        return state.qpos[7:]
+
+
+class JointVelocityObservation(Observation[Tstate], Generic[Tstate]):
+    def __call__(self, state: Tstate) -> jnp.ndarray:
+        return state.qvel[6:]

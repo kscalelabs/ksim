@@ -2,19 +2,15 @@
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
 
 import jax.numpy as jnp
 import xax
-
-from ksim.state.base import State
-
-Tstate = TypeVar("Tstate", bound=State)
+from brax.envs.base import State as BraxState
 
 
-class Termination(ABC, Generic[Tstate]):
+class Termination(ABC):
     @abstractmethod
-    def __call__(self, state: Tstate) -> jnp.ndarray:
+    def __call__(self, state: BraxState) -> jnp.ndarray:
         """Checks if the environment has terminated.
 
         Args:
