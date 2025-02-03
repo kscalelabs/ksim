@@ -2,18 +2,16 @@
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
 
+import equinox as eqx
 import jax.numpy as jnp
 import xax
-from brax.mjx.base import State
-
-Tstate = TypeVar("Tstate", bound=State)
+from brax.mjx.base import State as MjxState
 
 
-class Observation(ABC, Generic[Tstate]):
+class Observation(eqx.Module, ABC):
     @abstractmethod
-    def __call__(self, state: Tstate) -> jnp.ndarray:
+    def __call__(self, state: MjxState) -> jnp.ndarray:
         """Resets the environment."""
 
     @classmethod

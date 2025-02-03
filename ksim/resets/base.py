@@ -3,13 +3,22 @@
 import functools
 from abc import ABC, abstractmethod
 
+import equinox as eqx
 import xax
-from brax.envs.base import State as BraxState
+from brax.mjx.base import State as MjxState
+from flax import struct
+from jaxtyping import PRNGKeyArray
 
 
-class Reset(ABC):
+@struct.dataclass
+class ResetData:
+    rng: PRNGKeyArray
+    state: MjxState
+
+
+class Reset(eqx.Module, ABC):
     @abstractmethod
-    def __call__(self, state: BraxState) -> BraxState:
+    def __call__(self, data: ResetData) -> ResetData:
         """Resets the environment."""
 
     @classmethod

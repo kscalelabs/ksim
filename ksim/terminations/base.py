@@ -3,14 +3,15 @@
 import functools
 from abc import ABC, abstractmethod
 
+import equinox as eqx
 import jax.numpy as jnp
 import xax
-from brax.envs.base import State as BraxState
+from brax.mjx.base import State as MjxState
 
 
-class Termination(ABC):
+class Termination(eqx.Module, ABC):
     @abstractmethod
-    def __call__(self, state: BraxState) -> jnp.ndarray:
+    def __call__(self, state: MjxState) -> jnp.ndarray:
         """Checks if the environment has terminated.
 
         Args:

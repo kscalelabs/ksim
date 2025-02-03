@@ -18,18 +18,10 @@ from ksim.observation.mjcf import (
     JointPositionObservation,
     JointVelocityObservation,
 )
-from ksim.resets.mjcf import RandomYawReset, XYPositionReset
-from ksim.rewards.mjcf import (
-    ActionRatePenalty,
-    GaitSymmetryReward,
-    LinearVelocityZPenalty,
-)
+from ksim.resets.mjcf import XYPositionReset
+from ksim.rewards.mjcf import LinearVelocityZPenalty
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations.mjcf import (
-    EpisodeLengthTermination,
-    PitchTooGreatTermination,
-    RollToGreatTermination,
-)
+from ksim.terminations.mjcf import PitchTooGreatTermination, RollTooGreatTermination
 
 
 class Model(eqx.Module):
@@ -92,23 +84,13 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         return KScaleEnv(
             self.config,
             terminations=[
-                EpisodeLengthTermination(max_episode_length_seconds=self.config.max_episode_length, dt=self.config.dt),
                 PitchTooGreatTermination(max_pitch=self.config.max_pitch),
-                RollToGreatTermination(max_roll=self.config.max_roll),
+                RollTooGreatTermination(max_roll=self.config.max_roll),
             ],
             resets=[
                 XYPositionReset(x_range=(-0.5, 0.5), y_range=(-0.5, 0.5)),
-                RandomYawReset(),
             ],
             rewards=[
-                GaitSymmetryReward(
-                    scale=1.0,
-                    left_hip_index=0,
-                    right_hip_index=1,
-                    left_knee_index=2,
-                    right_knee_index=3,
-                ),
-                ActionRatePenalty(scale=-1.0),
                 LinearVelocityZPenalty(scale=-1.0),
             ],
             observations=[

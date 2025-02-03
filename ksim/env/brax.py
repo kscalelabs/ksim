@@ -4,14 +4,15 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Collection, Generic, TypeVar
+from typing import Collection, Generic, TypeVar, cast
 
 import jax
 import jax.numpy as jnp
 import mujoco
 import tqdm
 import xax
-from brax.envs.base import PipelineEnv, State as BraxState
+from brax.envs.base import PipelineEnv
+from brax.envs.base import State as BraxState
 from brax.io import mjcf
 from brax.mjx.base import State as MjxState
 from kscale import K
@@ -25,7 +26,6 @@ from ksim.terminations.base import Termination
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-Tstate = TypeVar("Tstate", bound=MjxState)
 
 
 async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
@@ -56,10 +56,6 @@ class KScaleEnvConfig:
     )
 
     # Environment configuration options.
-    backend: str = xax.field(
-        value="mjx",
-        help="The physics backend to use.",
-    )
     gravity: tuple[float, float, float] = xax.field(
         value=(0.0, 0.0, -9.81),
         help="Gravity vector.",
@@ -102,16 +98,16 @@ class KScaleEnvConfig:
     )
 
 
-class KScaleEnv(PipelineEnv, Generic[Tstate]):
+class KScaleEnv(PipelineEnv):
     """Defines a generic environment for interacting with K-Scale models."""
 
     def __init__(
         self,
         config: KScaleEnvConfig,
-        terminations: Collection[Termination[Tstate]],
-        resets: Collection[Reset[Tstate]],
-        rewards: Collection[Reward[Tstate]],
-        observations: Collection[Observation[Tstate]],
+        terminations: Collection[Termination],
+        resets: Collection[Reset],
+        rewards: Collection[Reward],
+        observations: Collection[Observation],
     ) -> None:
         self.config = config
         self.terminations = _unique_dict([(term.termination_name, term) for term in terminations], "termination")
@@ -155,12 +151,12 @@ class KScaleEnv(PipelineEnv, Generic[Tstate]):
         logger.info("Initializing pipeline")
         super().__init__(
             sys=sys,
-            backend=self.config.backend,
+            backend="mjx",
             n_frames=self.config.frames_per_env_step,
             debug=self.config.debug_env,
         )
 
-    def _pipeline_state_to_state(self, pipeline_state: Tstate) -> BraxState:
+    def _pipeline_state_to_state(self, pipeline_state: MjxState) -> BraxState:
         obs = self.get_observation(pipeline_state)
         reward = self.get_reward(pipeline_state)
         done = self.get_done(pipeline_state)
@@ -174,23 +170,23 @@ class KScaleEnv(PipelineEnv, Generic[Tstate]):
     def reset(self, rng: jnp.ndarray) -> BraxState:
         q = jnp.zeros(self.sys.q_size())
         qd = jnp.zeros(self.sys.qd_size())
-        pipeline_state = self.pipeline_init(q, qd)
+        pipeline_state = cast(MjxState, self.pipeline_init(q, qd))
         return self._pipeline_state_to_state(pipeline_state)
 
     def step(self, state: BraxState, action: jnp.ndarray) -> BraxState:
-        pipeline_state = self.pipeline_step(state.pipeline_state, action)
+        pipeline_state = cast(MjxState, self.pipeline_step(state.pipeline_state, action))
         return self._pipeline_state_to_state(pipeline_state)
 
-    def get_observation(self, pipeline_state: Tstate) -> dict[str, jnp.ndarray]:
+    def get_observation(self, pipeline_state: MjxState) -> dict[str, jnp.ndarray]:
         observations = {}
         for observation_name, observation in self.observations.items():
             observations[observation_name] = observation(pipeline_state)
         return observations
 
-    def get_reward(self, pipeline_state: Tstate) -> jnp.ndarray:
+    def get_reward(self, pipeline_state: MjxState) -> jnp.ndarray:
         return jnp.zeros(())
 
-    def get_done(self, pipeline_state: Tstate) -> jnp.ndarray:
+    def get_done(self, pipeline_state: MjxState) -> jnp.ndarray:
         return jnp.zeros((), dtype=bool)
 
     def test_run(self, num_steps: int, render: bool = True, seed: int = 0) -> None:

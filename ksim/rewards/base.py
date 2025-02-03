@@ -2,17 +2,17 @@
 
 import functools
 import logging
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import equinox as eqx
 import jax.numpy as jnp
 import xax
-from brax.envs.base import State as BraxState
+from brax.mjx.base import State as MjxState
 
 logger = logging.getLogger(__name__)
 
 
-class Reward(eqx.Module):
+class Reward(eqx.Module, ABC):
     """Base class for defining reward functions."""
 
     scale: float
@@ -33,7 +33,7 @@ class Reward(eqx.Module):
             logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale)
 
     @abstractmethod
-    def __call__(self, state: BraxState) -> jnp.ndarray: ...
+    def __call__(self, state: MjxState) -> jnp.ndarray: ...
 
     @classmethod
     def get_name(cls) -> str:
