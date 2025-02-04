@@ -56,10 +56,6 @@ class KScaleEnvConfig:
     )
 
     # Environment configuration options.
-    gravity: tuple[float, float, float] = xax.field(
-        value=(0.0, 0.0, -9.81),
-        help="Gravity vector.",
-    )
     dt: float = xax.field(
         value=0.02,
         help="Simulation time step.",
@@ -85,10 +81,6 @@ class KScaleEnvConfig:
     solver_ls_iterations: int = xax.field(
         value=6,
         help="Number of line search iterations.",
-    )
-    solver_tolerance: float = xax.field(
-        value=1e-5,
-        help="Solver tolerance.",
     )
 
     # Simulation artifact options.
@@ -126,27 +118,28 @@ class KScaleEnv(PipelineEnv):
         )
 
         logger.info("Initializing model from %s", model_path)
-        mj_model = mujoco.MjModel.from_xml_path(model_path)
 
         # Configure model parameters
         match self.config.solver.lower():
             case "cg":
-                mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
+                solver = mujoco.mjtSolver.mjSOL_CG
             case "newton":
-                mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
+                solver = mujoco.mjtSolver.mjSOL_NEWTON
             case "sparse":
-                mj_model.opt.solver = mujoco.mjtSolver.mjSOL_SPARSE
+                solver = mujoco.mjtSolver.mjSOL_SPARSE
             case _:
                 raise ValueError(f"Invalid solver: {self.config.solver}")
 
-        mj_model.opt.iterations = self.config.solver_iterations
-        mj_model.opt.ls_iterations = self.config.solver_ls_iterations
-        mj_model.opt.tolerance = self.config.solver_tolerance
-        mj_model.opt.gravity = self.config.gravity
-        mj_model.opt.timestep = self.config.dt
-
         logger.info("Loading model %s", model_path)
-        sys = mjcf.load_model(mj_model)
+        sys = mjcf.load(model_path)
+        sys = sys.tree_replace(
+            {
+                "opt.timestep": self.config.dt,
+                "opt.solver": solver,
+                "opt.iterations": self.config.solver_iterations,
+                "opt.ls_iterations": self.config.solver_ls_iterations,
+            }
+        )
 
         logger.info("Initializing pipeline")
         super().__init__(
