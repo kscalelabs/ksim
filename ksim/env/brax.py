@@ -4,15 +4,14 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Collection, Generic, TypeVar, cast
+from typing import Collection, TypeVar, cast
 
 import jax
 import jax.numpy as jnp
 import mujoco
 import tqdm
 import xax
-from brax.envs.base import PipelineEnv
-from brax.envs.base import State as BraxState
+from brax.envs.base import PipelineEnv, State as BraxState
 from brax.io import mjcf
 from brax.mjx.base import State as MjxState
 from kscale import K
