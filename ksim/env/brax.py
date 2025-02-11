@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Collection, TypeVar, cast
 
@@ -32,11 +33,11 @@ async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
         urdf_dir = await api.download_and_extract_urdf(model_name, cache=cache)
 
     try:
-        urdf_path = next(urdf_dir.glob("*.mjcf"))
+        mjcf_path = next(urdf_dir.glob("*.mjcf"))
     except StopIteration:
         raise ValueError(f"No MJCF file found for {model_name} (in {urdf_dir})")
 
-    return urdf_path
+    return mjcf_path
 
 
 def _unique_dict(things: list[tuple[str, T]], name: str) -> dict[str, T]:
@@ -159,25 +160,30 @@ class KScaleEnv(PipelineEnv):
             done=done,
         )
 
+    @partial(jax.jit, static_argnums=(0,))
     def reset(self, rng: jnp.ndarray) -> BraxState:
         q = jnp.zeros(self.sys.q_size())
         qd = jnp.zeros(self.sys.qd_size())
         pipeline_state = cast(MjxState, self.pipeline_init(q, qd))
         return self._pipeline_state_to_state(pipeline_state)
 
+    @partial(jax.jit, static_argnums=(0,))
     def step(self, state: BraxState, action: jnp.ndarray) -> BraxState:
         pipeline_state = cast(MjxState, self.pipeline_step(state.pipeline_state, action))
         return self._pipeline_state_to_state(pipeline_state)
 
+    @partial(jax.jit, static_argnums=(0,))
     def get_observation(self, pipeline_state: MjxState) -> dict[str, jnp.ndarray]:
         observations = {}
         for observation_name, observation in self.observations.items():
             observations[observation_name] = observation(pipeline_state)
         return observations
 
+    @partial(jax.jit, static_argnums=(0,))
     def get_reward(self, pipeline_state: MjxState) -> jnp.ndarray:
         return jnp.zeros(())
 
+    @partial(jax.jit, static_argnums=(0,))
     def get_done(self, pipeline_state: MjxState) -> jnp.ndarray:
         return jnp.zeros((), dtype=bool)
 
