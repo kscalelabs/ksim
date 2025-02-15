@@ -3,11 +3,13 @@
 import argparse
 from dataclasses import dataclass
 
+import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
 import xax
+from jaxtyping import PRNGKeyArray
 
 from ksim.env.brax import KScaleEnv, KScaleEnvConfig
 from ksim.observation.mjcf import (
@@ -25,34 +27,53 @@ from ksim.terminations.mjcf import PitchTooGreatTermination, RollTooGreatTermina
 
 
 class Model(eqx.Module):
-    layers: list
+    input_layer: eqx.nn.Linear
+    rnn: eqx.nn.GRUCell
+    output_layer: eqx.nn.Linear
 
-    def __init__(self, rng_key: jnp.ndarray) -> None:
+    def __init__(
+        self,
+        num_inputs: int,
+        num_outputs: int,
+        num_hidden: int,
+        *,
+        key: PRNGKeyArray,
+    ) -> None:
         super().__init__()
 
         # Split the PRNG key into four keys for the four layers.
-        key1, key2, key3, key4 = jax.random.split(rng_key, 4)
+        key1, key2, key3 = jax.random.split(key, 3)
 
-        self.layers = [
-            eqx.nn.Conv2d(1, 3, kernel_size=4, key=key1),
-            eqx.nn.MaxPool2d(kernel_size=2),
-            jax.nn.relu,
-            jnp.ravel,
-            eqx.nn.Linear(1728, 512, key=key2),
-            jax.nn.sigmoid,
-            eqx.nn.Linear(512, 64, key=key3),
-            jax.nn.relu,
-            eqx.nn.Linear(64, 10, key=key4),
-            jax.nn.log_softmax,
-        ]
+        self.input_layer = eqx.nn.Linear(
+            in_features=num_inputs,
+            out_features=num_hidden,
+            use_bias=True,
+            key=key1,
+        )
 
-    def forward(self, x: jnp.ndarray) -> jnp.ndarray:
-        for layer in self.layers:
-            x = layer(x)
-        return x
+        self.rnn = eqx.nn.GRUCell(
+            input_size=num_hidden,
+            hidden_size=num_hidden,
+            use_bias=True,
+            key=key2,
+        )
 
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
-        return jax.vmap(self.forward)(x)
+        self.output_layer = eqx.nn.Linear(
+            in_features=num_hidden,
+            out_features=num_outputs,
+            use_bias=True,
+            key=key3,
+        )
+
+    def forward(self, x_tn: jnp.ndarray) -> jnp.ndarray:
+        x_tn = self.input_layer(x_tn)
+        scan_fn = lambda state, x: (self.rnn(x, state), None)
+        init_state = jnp.zeros(self.rnn.hidden_size)
+        final_state, _ = jax.lax.scan(scan_fn, init_state, x_tn)
+        return self.output_layer(final_state)
+
+    def __call__(self, x_tn: jnp.ndarray) -> jnp.ndarray:
+        return jax.vmap(self.forward)(x_tn)
 
 
 @dataclass
