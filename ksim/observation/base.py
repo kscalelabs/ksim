@@ -6,13 +6,13 @@ from abc import ABC, abstractmethod
 import equinox as eqx
 import jax.numpy as jnp
 import xax
-from brax.mjx.base import State as MjxState
+from brax.base import State
 
 
 class Observation(eqx.Module, ABC):
     @abstractmethod
-    def __call__(self, state: MjxState) -> jnp.ndarray:
-        """Resets the environment."""
+    def __call__(self, state: State) -> jnp.ndarray:
+        """Gets the observation from the state."""
 
     @classmethod
     def get_name(cls) -> str:

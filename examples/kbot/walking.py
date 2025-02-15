@@ -58,7 +58,7 @@ class Model(eqx.Module):
 @dataclass
 class KBotWalkingConfig(PPOConfig, KScaleEnvConfig):
     # Robot model name to use.
-    model_name: str = xax.field(value="kbot-v1-min")
+    model_name: str = xax.field(value="kbot-v1")
     kp: float = xax.field(value=100.0)
     kd: float = xax.field(value=10.0)
 
@@ -129,7 +129,13 @@ def main() -> None:
     match args.action:
         case "env":
             config.show_viewer = True
-            KBotWalkingTask.run_environment(config, *rest, num_steps=args.num_steps, use_cli=False)
+            KBotWalkingTask.run_environment(
+                config,
+                *rest,
+                num_steps=args.num_steps,
+                render_path="kbot-walking.mp4",
+                use_cli=False,
+            )
 
         case "train":
             KBotWalkingTask.launch(config, *rest, use_cli=False)

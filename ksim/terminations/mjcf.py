@@ -1,7 +1,7 @@
 """Defines some useful termination conditions for MJCF environments."""
 
 import jax.numpy as jnp
-from brax.mjx.base import State as MjxState
+from brax.base import State
 
 from ksim.terminations.base import Termination
 
@@ -16,8 +16,8 @@ class PitchTooGreatTermination(Termination):
 
         self.max_pitch = max_pitch
 
-    def __call__(self, state: MjxState) -> jnp.ndarray:
-        quat = state.qpos[3:7]
+    def __call__(self, state: State) -> jnp.ndarray:
+        quat = state.q[3:7]
         pitch = jnp.arctan2(2 * quat[1] * quat[2] - 2 * quat[0] * quat[3], 1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2)
         return jnp.abs(pitch) > self.max_pitch
 
@@ -32,7 +32,7 @@ class RollTooGreatTermination(Termination):
 
         self.max_roll = max_roll
 
-    def __call__(self, state: MjxState) -> jnp.ndarray:
-        quat = state.qpos[3:7]
+    def __call__(self, state: State) -> jnp.ndarray:
+        quat = state.q[3:7]
         roll = jnp.arctan2(2 * quat[0] * quat[3] - 2 * quat[1] * quat[2], 1 - 2 * quat[0] ** 2 - 2 * quat[3] ** 2)
         return jnp.abs(roll) > self.max_roll

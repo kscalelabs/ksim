@@ -1,20 +1,21 @@
 """Defines the default humanoid environment."""
 
 import asyncio
+import enum
 import logging
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Collection, TypeVar, cast
+from typing import Collection, TypeVar
 
 import jax
 import jax.numpy as jnp
 import mujoco
 import tqdm
 import xax
+from brax.base import State
 from brax.envs.base import PipelineEnv, State as BraxState
 from brax.io import mjcf
-from brax.mjx.base import State as MjxState
 from kscale import K
 from omegaconf import MISSING
 
@@ -47,6 +48,34 @@ def _unique_dict(things: list[tuple[str, T]], name: str) -> dict[str, T]:
     return return_dict
 
 
+class SolverType(enum.Enum):
+    PGS = "PGS"
+    CG = "CG"
+    NEWTON = "Newton"
+
+    def to_mujoco(self) -> mujoco.mjtSolver:
+        return {
+            "PGS": mujoco.mjtSolver.mjSOL_PGS,
+            "CG": mujoco.mjtSolver.mjSOL_CG,
+            "Newton": mujoco.mjtSolver.mjSOL_NEWTON,
+        }[self.value]
+
+
+class IntegratorType(enum.Enum):
+    EULER = "Euler"
+    RK4 = "RK4"
+    IMPLICIT = "Implicit"
+    IMPLICITFAST = "ImplicitFast"
+
+    def to_mujoco(self) -> mujoco.mjtIntegrator:
+        return {
+            "Euler": mujoco.mjtIntegrator.mjINT_EULER,
+            "RK4": mujoco.mjtIntegrator.mjINT_RK4,
+            "Implicit": mujoco.mjtIntegrator.mjINT_IMPLICIT,
+            "ImplicitFast": mujoco.mjtIntegrator.mjINT_IMPLICITFAST,
+        }[self.value]
+
+
 @dataclass
 class KScaleEnvConfig:
     # Model configuration options.
@@ -68,9 +97,9 @@ class KScaleEnvConfig:
         value=False,
         help="Whether to enable debug mode for the environment.",
     )
-    solver: str = xax.field(
-        value="CG",
-        help="MuJoCo solver type ('CG' or 'Newton').",
+    backend: str = xax.field(
+        value="spring",
+        help="The backend to use for the environment.",
     )
 
     # Solver configuration options.
@@ -119,23 +148,12 @@ class KScaleEnv(PipelineEnv):
 
         logger.info("Initializing model from %s", model_path)
 
-        # Configure model parameters
-        match self.config.solver.lower():
-            case "cg":
-                solver = mujoco.mjtSolver.mjSOL_CG
-            case "newton":
-                solver = mujoco.mjtSolver.mjSOL_NEWTON
-            case "sparse":
-                solver = mujoco.mjtSolver.mjSOL_SPARSE
-            case _:
-                raise ValueError(f"Invalid solver: {self.config.solver}")
-
         logger.info("Loading model %s", model_path)
         sys = mjcf.load(model_path)
+
         sys = sys.tree_replace(
             {
                 "opt.timestep": self.config.dt,
-                "opt.solver": solver,
                 "opt.iterations": self.config.solver_iterations,
                 "opt.ls_iterations": self.config.solver_ls_iterations,
             }
@@ -144,12 +162,12 @@ class KScaleEnv(PipelineEnv):
         logger.info("Initializing pipeline")
         super().__init__(
             sys=sys,
-            backend="mjx",
+            backend=self.config.backend,
             n_frames=self.config.frames_per_env_step,
             debug=self.config.debug_env,
         )
 
-    def _pipeline_state_to_state(self, pipeline_state: MjxState) -> BraxState:
+    def _pipeline_state_to_state(self, pipeline_state: State) -> BraxState:
         obs = self.get_observation(pipeline_state)
         reward = self.get_reward(pipeline_state)
         done = self.get_done(pipeline_state)
@@ -164,38 +182,47 @@ class KScaleEnv(PipelineEnv):
     def reset(self, rng: jnp.ndarray) -> BraxState:
         q = jnp.zeros(self.sys.q_size())
         qd = jnp.zeros(self.sys.qd_size())
-        pipeline_state = cast(MjxState, self.pipeline_init(q, qd))
+        pipeline_state = self.pipeline_init(q, qd)
         return self._pipeline_state_to_state(pipeline_state)
 
     @partial(jax.jit, static_argnums=(0,))
     def step(self, state: BraxState, action: jnp.ndarray) -> BraxState:
-        pipeline_state = cast(MjxState, self.pipeline_step(state.pipeline_state, action))
+        pipeline_state = self.pipeline_step(state.pipeline_state, action)
         return self._pipeline_state_to_state(pipeline_state)
 
     @partial(jax.jit, static_argnums=(0,))
-    def get_observation(self, pipeline_state: MjxState) -> dict[str, jnp.ndarray]:
+    def get_observation(self, pipeline_state: State) -> dict[str, jnp.ndarray]:
         observations = {}
         for observation_name, observation in self.observations.items():
             observations[observation_name] = observation(pipeline_state)
         return observations
 
     @partial(jax.jit, static_argnums=(0,))
-    def get_reward(self, pipeline_state: MjxState) -> jnp.ndarray:
+    def get_reward(self, pipeline_state: State) -> jnp.ndarray:
         return jnp.zeros(())
 
     @partial(jax.jit, static_argnums=(0,))
-    def get_done(self, pipeline_state: MjxState) -> jnp.ndarray:
+    def get_done(self, pipeline_state: State) -> jnp.ndarray:
         return jnp.zeros((), dtype=bool)
 
-    def test_run(self, num_steps: int, render: bool = True, seed: int = 0) -> None:
+    def test_run(self, num_steps: int, render_path: str | Path, seed: int = 0) -> None:
         logger.info("Running test run for %d steps", num_steps)
+
+        if render_path is None:
+            mediapy = None
+
+        else:
+            try:
+                import mediapy
+            except ImportError:
+                raise ImportError("Please install `mediapy` to run this script")
 
         reset = jax.jit(self.reset)
         step = jax.jit(self.step)
 
         rng = jax.random.PRNGKey(seed)
         state: BraxState = reset(rng)
-        trajectory = [state.pipeline_state]
+        trajectory: list[State] = [state.pipeline_state]
 
         # Run simulation
         logger.info("Got initial state")
@@ -212,6 +239,6 @@ class KScaleEnv(PipelineEnv):
                 break
 
         # Render if requested
-        if render:
-            breakpoint()
+        if render_path is not None and mediapy is not None:
             frames = self.render(trajectory)
+            mediapy.write_video(render_path, frames, fps=30)

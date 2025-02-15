@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 
 import equinox as eqx
 import xax
-from brax.mjx.base import State as MjxState
+from brax.base import State
 from flax import struct
 from jaxtyping import PRNGKeyArray
 
@@ -13,7 +13,7 @@ from jaxtyping import PRNGKeyArray
 @struct.dataclass
 class ResetData:
     rng: PRNGKeyArray
-    state: MjxState
+    state: State
 
 
 class Reset(eqx.Module, ABC):

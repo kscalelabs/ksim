@@ -1,36 +1,43 @@
 """Defines some useful resets for MJCF environments."""
 
+import equinox as eqx
 import jax.numpy as jnp
-from brax.mjx.base import State as MjxState
+from brax.base import State
 
 from ksim.observation.base import Observation
 
 
 class BasePositionObservation(Observation):
-    def __call__(self, state: MjxState) -> jnp.ndarray:
-        return state.qpos[0:3]  # x, y, z
+    @eqx.filter_jit
+    def __call__(self, state: State) -> jnp.ndarray:
+        return state.q[0:3]  # (3,)
 
 
 class BaseOrientationObservation(Observation):
-    def __call__(self, state: MjxState) -> jnp.ndarray:
-        return state.qpos[3:7]  # qw, qx, qy, qz
+    @eqx.filter_jit
+    def __call__(self, state: State) -> jnp.ndarray:
+        return state.q[3:7]  # (4,)
 
 
 class BaseLinearVelocityObservation(Observation):
-    def __call__(self, state: MjxState) -> jnp.ndarray:
-        return state.qvel[0:3]  # x, y, z
+    @eqx.filter_jit
+    def __call__(self, state: State) -> jnp.ndarray:
+        return state.xd.vel[0]  # (3,)
 
 
 class BaseAngularVelocityObservation(Observation):
-    def __call__(self, state: MjxState) -> jnp.ndarray:
-        return state.qvel[3:6]  # wx, wy, wz
+    @eqx.filter_jit
+    def __call__(self, state: State) -> jnp.ndarray:
+        return state.xd.ang[0]  # (3,)
 
 
 class JointPositionObservation(Observation):
-    def __call__(self, state: MjxState) -> jnp.ndarray:
-        return state.qpos[7:]
+    @eqx.filter_jit
+    def __call__(self, state: State) -> jnp.ndarray:
+        return state.q[7:]  # (N,)
 
 
 class JointVelocityObservation(Observation):
-    def __call__(self, state: MjxState) -> jnp.ndarray:
-        return state.qvel[6:]
+    @eqx.filter_jit
+    def __call__(self, state: State) -> jnp.ndarray:
+        return state.qd  # (N,)

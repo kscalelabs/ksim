@@ -6,12 +6,12 @@ from abc import ABC, abstractmethod
 import equinox as eqx
 import jax.numpy as jnp
 import xax
-from brax.mjx.base import State as MjxState
+from brax.base import State
 
 
 class Termination(eqx.Module, ABC):
     @abstractmethod
-    def __call__(self, state: MjxState) -> jnp.ndarray:
+    def __call__(self, state: State) -> jnp.ndarray:
         """Checks if the environment has terminated.
 
         Args:

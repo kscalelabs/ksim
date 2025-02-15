@@ -21,10 +21,10 @@ class XYPositionReset(Reset):
         rng, keyx, keyy = jax.random.split(data.rng, 3)
         dx = jax.random.uniform(keyx, (1,), minval=self.x_range[0], maxval=self.x_range[1])
         dy = jax.random.uniform(keyy, (1,), minval=self.y_range[0], maxval=self.y_range[1])
-        qpos_j = data.state.qpos
+        qpos_j = data.state.q
         qpos_j = qpos_j.at[0:1].set(qpos_j[0:1] + dx)
         qpos_j = qpos_j.at[1:2].set(qpos_j[1:2] + dy)
         return ResetData(
             rng=rng,
-            state=data.state.replace(qpos=qpos_j),
+            state=data.state.replace(q=qpos_j),
         )

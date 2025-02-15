@@ -10,6 +10,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Thread
 from typing import Generic, Literal, TypeVar
 
@@ -47,13 +48,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         cls,
         *cfgs: xax.RawConfigType,
         num_steps: int,
+        render_path: str | Path,
+        seed: int = 0,
         use_cli: bool | list[str] = True,
     ) -> None:
         xax.configure_logging()
         cfg = cls.get_config(*cfgs, use_cli=use_cli)
         task_obj = cls(cfg)
         env = task_obj.get_environment()
-        env.test_run(num_steps)
+        env.test_run(num_steps, render_path, seed)
 
     def get_dataset(self, phase: Literal["train", "valid"]) -> Dataset:
         raise NotImplementedError("Reinforcement learning tasks do not require datasets.")
