@@ -18,7 +18,7 @@ import xax
 from dpshdl.dataset import Dataset
 from omegaconf import MISSING
 
-from ksim.env.brax import KScaleEnv, KScaleEnvConfig
+from ksim.env.brax import ActionModel, KScaleEnv, KScaleEnvConfig, cast_action_type
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,18 @@ logger = logging.getLogger(__name__)
 @jax.tree_util.register_dataclass
 @dataclass
 class RLConfig(KScaleEnvConfig, xax.Config):
-    action: str = xax.field(value="train", help="The action to take; should be either `train` or `env`.")
-    max_episode_length: float = xax.field(value=MISSING, help="The maximum episode length, in seconds.")
+    action: str = xax.field(
+        value="train",
+        help="The action to take; should be either `train` or `env`.",
+    )
+    max_episode_length: float = xax.field(
+        value=MISSING,
+        help="The maximum episode length, in seconds.",
+    )
+    default_action_model: str = xax.field(
+        value="zero",
+        help="The default action model to use if `actions` is not specified.",
+    )
 
 
 Config = TypeVar("Config", bound=RLConfig)
@@ -50,12 +60,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return f"render_{time_string}"
         return f"render_{state.num_steps}_{time_string}"
 
-    def run_environment(self, state: xax.State | None = None) -> None:
+    def run_environment(
+        self,
+        state: xax.State | None = None,
+        actions: Literal["random", "zero", "midpoint"] | ActionModel | None = None,
+    ) -> None:
         env = self.get_environment()
         render_name = self.get_render_name(state)
         render_dir = self.exp_dir / "renders" / render_name
         logger.log(xax.LOG_STATUS, "Rendering to %s", render_dir)
-        env.test_run(self.max_steps_per_trajectory, render_dir, seed=self.config.random_seed)
+        if actions is None:
+            actions = cast_action_type(self.config.default_action_model)
+        env.unroll_trajectory_and_render(
+            self.max_steps_per_trajectory,
+            render_dir,
+            seed=self.config.random_seed,
+            actions=actions,
+        )
 
     def run_training(self) -> None:
         """Runs the main PPO training loop."""

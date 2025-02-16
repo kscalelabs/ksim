@@ -7,7 +7,7 @@ import pickle as pkl
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Collection, Literal, TypeVar
+from typing import Collection, Literal, Protocol, TypeVar, cast, get_args
 
 import equinox as eqx
 import jax
@@ -15,9 +15,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import mediapy
 import numpy as np
-import tqdm
 import xax
-from brax.base import State
+from brax.base import State, System
 from brax.envs.base import PipelineEnv, State as BraxState
 from jaxtyping import PRNGKeyArray
 from kscale import K
@@ -58,6 +57,46 @@ def _unique_dict(things: list[tuple[str, T]]) -> OrderedDict[str, T]:
             name = f"{base_name}_{idx}"
         return_dict[name] = thing
     return return_dict
+
+
+class ActionModel(Protocol):
+    def __call__(
+        self,
+        sys: System,
+        state: BraxState,
+        rng: PRNGKeyArray,
+        carry: T | None,
+    ) -> tuple[jnp.ndarray, T]: ...
+
+
+def get_random_action(sys: System, state: BraxState, rng: PRNGKeyArray, carry: None) -> tuple[jnp.ndarray, None]:
+    ctrl_range = sys.actuator.ctrl_range
+    ctrl_min, ctrl_max = ctrl_range.T
+    action_scale = jax.random.uniform(rng, shape=ctrl_min.shape, dtype=ctrl_min.dtype)
+    ctrl = ctrl_min + (ctrl_max - ctrl_min) * action_scale
+    return ctrl, None
+
+
+def get_midpoint_action(sys: System, state: BraxState, rng: PRNGKeyArray, carry: None) -> tuple[jnp.ndarray, None]:
+    ctrl_range = sys.actuator.ctrl_range
+    ctrl_min, ctrl_max = ctrl_range.T
+    ctrl = (ctrl_min + ctrl_max) / 2
+    return ctrl, None
+
+
+def get_zero_action(sys: System, state: BraxState, rng: PRNGKeyArray, carry: None) -> tuple[jnp.ndarray, None]:
+    ctrl = jnp.zeros_like(sys.actuator.ctrl_range[..., 0])
+    return ctrl, None
+
+
+ActionModelType = Literal["random", "zero", "midpoint"]
+
+
+def cast_action_type(action_type: str) -> ActionModelType:
+    options = get_args(ActionModelType)
+    if action_type not in options:
+        raise ValueError(f"Invalid action type: {action_type} Choices are {options}")
+    return cast(ActionModelType, action_type)
 
 
 @jax.tree_util.register_dataclass
@@ -220,70 +259,101 @@ class KScaleEnv(PipelineEnv):
             terminations[termination_name] = termination(pipeline_state)
         return terminations
 
-    def test_run(
+    @eqx.filter_jit
+    def unroll_trajectory(
+        self,
+        num_steps: int,
+        rng: PRNGKeyArray,
+        model: ActionModel,
+    ) -> BraxState:
+        """Unrolls a trajectory for num_steps steps.
+
+        Returns:
+            A tuple of (initial_state, trajectory_states) where trajectory_states
+            contains the states for steps 1 to num_steps.
+        """
+        init_state: BraxState = self.reset(rng)
+
+        def identity_fn(state: BraxState, rng: PRNGKeyArray, carry_model: T | None) -> tuple[BraxState, T | None]:
+            return state, rng, carry_model
+
+        def step_fn(state: BraxState, rng: PRNGKeyArray, carry_model: T | None) -> tuple[BraxState, T | None]:
+            rng, step_rng = jax.random.split(rng)
+            action, carry_model = model(self.sys, state, step_rng, carry_model)
+            next_state = self.step(state, action)
+            return next_state, rng, carry_model
+
+        def scan_fn(
+            carry: tuple[BraxState, PRNGKeyArray, T | None],
+            _: None,
+        ) -> tuple[tuple[BraxState, PRNGKeyArray, T | None], BraxState]:
+            state, rng, carry_model = carry
+            next_state, rng, carry_model = jax.lax.cond(state.done.all(), identity_fn, step_fn, state, rng, carry_model)
+            return (next_state, rng, carry_model), next_state
+
+        # Initialize carry tuple with initial state, RNG, and None for model carry
+        init_carry = (init_state, rng, None)
+
+        # Runs the scan function.
+        _, states = jax.lax.scan(scan_fn, init_carry, length=num_steps)
+
+        return states
+
+    def unroll_trajectory_and_render(
         self,
         num_steps: int,
         render_dir: str | Path | None = None,
         seed: int = 0,
         camera: str | None = DEFAULT_CAMERA,
-        actions: Literal["random", "zero", "midpoint"] = "zero",
-    ) -> list[State]:
+        actions: ActionModelType | ActionModel = "zero",
+    ) -> list[BraxState]:
         logger.info("Running test run for %d steps", num_steps)
 
-        rng = jax.random.PRNGKey(seed)
-        state: BraxState = self.reset(rng)
-        trajectory: list[BraxState] = [state]
-
-        # Run simulation
-        logger.info("Got initial state")
-        for _ in tqdm.trange(num_steps):
+        # Converts the shorthand function names to callable functions.
+        if isinstance(actions, str):
             match actions:
                 case "random":
-                    rng, subkey = jax.random.split(rng)
-                    ctrl_range = self.sys.actuator.ctrl_range
-                    ctrl_min, ctrl_max = ctrl_range.T
-                    action_scale = jax.random.uniform(subkey, shape=ctrl_min.shape, dtype=ctrl_min.dtype)
-                    ctrl = ctrl_min + (ctrl_max - ctrl_min) * action_scale
-
-                case "midpoint":
-                    ctrl_range = self.sys.actuator.ctrl_range
-                    ctrl_min, ctrl_max = ctrl_range.T
-                    ctrl = (ctrl_min + ctrl_max) / 2
-
+                    actions = get_random_action
                 case "zero":
-                    ctrl = jnp.zeros_like(self.sys.actuator.ctrl_range[..., 0])
-
+                    actions = get_zero_action
+                case "midpoint":
+                    actions = get_midpoint_action
                 case _:
                     raise ValueError(f"Invalid action type: {actions}")
+        elif not isinstance(actions, ActionModel):
+            raise ValueError(f"Invalid action type: {type(actions)}")
 
-            # Step environment
-            state = self.step(state, ctrl)
-            trajectory.append(state)
+        # Run simulation
+        rng = jax.random.PRNGKey(seed)
+        trajectory = self.unroll_trajectory(num_steps, rng, actions)
 
-            if state.done.all():
-                break
+        # Remove all the trajectory states after the episode finished.
+        done = trajectory.done
+        done = jnp.pad(done[:-1], (1, 0), mode="constant", constant_values=False)
+        trajectory = jax.tree.map(lambda x: x[~done], trajectory)
 
         # Render if requested
         if render_dir is not None:
             (render_dir := Path(render_dir)).mkdir(parents=True, exist_ok=True)
+            raw_trajectory = jax.tree.map(lambda x: np.array(x) if isinstance(x, jnp.ndarray) else x, trajectory)
 
             # Dumps the raw trajectory.
-            raw_trajectory = jax.tree.map(lambda x: np.array(x) if isinstance(x, jnp.ndarray) else x, trajectory)
             with open(render_dir / "trajectory.pkl", "wb") as f:
                 pkl.dump(raw_trajectory, f)
 
-            metrics = {
-                key: jnp.array([state.metrics[key] for state in raw_trajectory], dtype=jnp.float32)
+            metrics: dict[str, np.ndarray] = {
+                key: raw_trajectory.metrics[key]
                 for key in itertools.chain(self.terminations.keys(), self.rewards.keys())
             }
 
             # Plot against real-time.
-            t = np.arange(len(trajectory)) * self.config.ctrl_dt
+            num_steps = len(raw_trajectory.done)
+            t = np.arange(num_steps) * self.config.ctrl_dt
 
             # Plots the metrics.
             for key, metric in metrics.items():
                 plt.figure()
-                plt.plot(t, metric)
+                plt.plot(t, metric.astype(np.float32))
                 plt.title(key)
                 plt.xlabel("Time (s)")
                 plt.ylabel(key)
@@ -295,7 +365,8 @@ class KScaleEnv(PipelineEnv):
             # Renders a video of the trajectory.
             render_path = render_dir / "render.mp4"
             fps = round(1 / self.config.ctrl_dt)
-            frames = np.stack(self.render([state.pipeline_state for state in trajectory], camera=camera), axis=0)
+            pipeline_states = [jax.tree.map(lambda arr: arr[i], trajectory.pipeline_state) for i in range(num_steps)]
+            frames = np.stack(self.render(pipeline_states, camera=camera), axis=0)
             mediapy.write_video(render_path, frames, fps=fps)
 
         return trajectory
