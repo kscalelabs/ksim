@@ -13,5 +13,5 @@ mujoco-scenes
 optax
 xax
 
-# OpenCV
-opencv-python
+# Rendering
+mediapy

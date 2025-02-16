@@ -9,11 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Collection, Literal, TypeVar
 
-import cv2
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import mediapy
 import numpy as np
 import tqdm
 import xax
@@ -292,21 +292,9 @@ class KScaleEnv(PipelineEnv):
                 logger.info("Saved %s", render_path)
 
             # Renders a video of the trajectory.
+            render_path = render_dir / "render.mp4"
             fps = round(1 / self.config.ctrl_dt)
-            frames = self.render([state.pipeline_state for state in trajectory], camera=camera)
-
-            # Convert frames to uint8 and BGR format for OpenCV
-            frames = (frames * 255).astype(np.uint8)
-            frames = frames[..., ::-1]  # RGB to BGR
-
-            # Initialize video writer
-            height, width = frames[0].shape[:2]
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            out = cv2.VideoWriter(str(render_dir / "render.mp4"), fourcc, fps, (width, height))
-
-            # Write frames
-            for frame in frames:
-                out.write(frame)
-            out.release()
+            frames = np.stack(self.render([state.pipeline_state for state in trajectory], camera=camera), axis=0)
+            mediapy.write_video(render_path, frames, fps=fps)
 
         return trajectory
