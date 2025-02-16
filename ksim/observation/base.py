@@ -2,20 +2,46 @@
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 import xax
 from brax.base import State
+from jaxtyping import PRNGKeyArray
 
 from ksim.utils.data import BuilderData
 
+NoiseType = Literal["gaussian", "uniform"]
+
 
 class Observation(eqx.Module, ABC):
+    noise: float
+    noise_type: NoiseType
+
+    def __init__(
+        self,
+        noise: float = 0.0,
+        noise_type: NoiseType = "gaussian",
+    ) -> None:
+        super().__init__()
+
+        self.noise = noise
+        self.noise_type = noise_type
+
     @abstractmethod
     def __call__(self, state: State) -> jnp.ndarray:
         """Gets the observation from the state."""
+
+    def add_noise(self, observation: jnp.ndarray, rng: PRNGKeyArray) -> jnp.ndarray:
+        match self.noise_type:
+            case "gaussian":
+                return observation + jax.random.normal(rng, observation.shape) * self.noise
+            case "uniform":
+                return observation + jax.random.uniform(rng, observation.shape, minval=-self.noise, maxval=self.noise)
+            case _:
+                raise ValueError(f"Invalid noise type: {self.noise_type}")
 
     @classmethod
     def get_name(cls) -> str:

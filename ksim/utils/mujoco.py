@@ -4,7 +4,7 @@ Much of this is referenced from Mujoco Playground.
 """
 
 import logging
-from typing import Collection, Sequence, Union
+from typing import Collection, Hashable, Sequence, TypeVar, Union
 
 import jax
 import jax.numpy as jnp
@@ -93,14 +93,18 @@ def step(
     return jax.lax.scan(single_step, data, (), num_substeps)[0]
 
 
-def link_names_to_ids(link_names: Collection[str], model: mujoco.MjModel) -> list[int]:
-    link_names_to_ids = {model.body(i).name: i for i in range(model.nbody)}
-    missing_links = [name for name in link_names if name not in link_names_to_ids]
-    if missing_links:
-        available_link_str = "\n".join(link_names_to_ids.keys())
-        raise ValueError(f"Links not found in model: {missing_links}\nAvailable links:\n{available_link_str}")
-    link_ids = [link_names_to_ids[name] for name in link_names]
-    return sorted(link_ids)
+Tk = TypeVar("Tk", bound=Hashable)
+Tv = TypeVar("Tv")
+
+
+def lookup_in_dict(names: Collection[Tk], mapping: dict[Tk, Tv], names_type: str) -> list[Tv]:
+    missing_names = [name for name in names if name not in mapping]
+    if missing_names:
+        available_names_str = "\n".join(str(name) for name in mapping.keys())
+        raise ValueError(
+            f"{names_type} not found in model: {missing_names}\nAvailable {names_type}s:\n{available_names_str}"
+        )
+    return [mapping[name] for name in names]
 
 
 def get_sensor_data(

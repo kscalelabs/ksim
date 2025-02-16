@@ -7,6 +7,7 @@ from typing import Any, Generic, TypeVar
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import optax
 import xax
 
 from ksim.task.rl import RLConfig, RLTask
@@ -32,6 +33,7 @@ class PPOConfig(RLConfig):
 @dataclass
 class PPOBatch:
     """A batch of PPO training data."""
+
     observations: jnp.ndarray
     next_observations: jnp.ndarray
     actions: jnp.ndarray
@@ -64,32 +66,21 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
         # Compute value targets using GAE
         truncation_mask = 1 - batch.truncation
-        values_t_plus_1 = jnp.concatenate(
-            [batch.values[1:], jnp.expand_dims(bootstrap_value, 0)], axis=0
-        )
+        values_t_plus_1 = jnp.concatenate([batch.values[1:], jnp.expand_dims(bootstrap_value, 0)], axis=0)
 
         # Compute TD errors
-        deltas = (
-            batch.rewards
-            + self.config.gamma * (1 - batch.termination) * values_t_plus_1
-            - batch.values
-        )
+        deltas = batch.rewards + self.config.gamma * (1 - batch.termination) * values_t_plus_1 - batch.values
         deltas *= truncation_mask
 
         # Initialize accumulator for GAE computation
         acc = jnp.zeros_like(bootstrap_value)
 
-        def compute_vs_minus_v_xs(carry: tuple[float, jnp.ndarray], target_t: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]) -> tuple[tuple[float, jnp.ndarray], jnp.ndarray]:
+        def compute_vs_minus_v_xs(
+            carry: tuple[float, jnp.ndarray], target_t: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]
+        ) -> tuple[tuple[float, jnp.ndarray], jnp.ndarray]:
             lambda_, acc = carry
             truncation_mask, delta, termination = target_t
-            acc = (
-                delta
-                + self.config.gamma
-                * (1 - termination)
-                * truncation_mask
-                * lambda_
-                * acc
-            )
+            acc = delta + self.config.gamma * (1 - termination) * truncation_mask * lambda_ * acc
             return (lambda_, acc), acc
 
         # Compute advantages using scan
@@ -104,10 +95,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # Compute value targets
         values = advantages + batch.values
 
-        return (
-            jax.lax.stop_gradient(values),
-            jax.lax.stop_gradient(advantages)
-        )
+        return (jax.lax.stop_gradient(values), jax.lax.stop_gradient(advantages))
 
     def compute_loss(
         self,
@@ -167,19 +155,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             value_loss = 0.5 * jnp.mean(jnp.square(output.values - values))
 
         # Compute entropy loss
-        entropy = -jnp.mean(jnp.sum(
-            jax.nn.softmax(output.policy_logits) *
-            jax.nn.log_softmax(output.policy_logits),
-            axis=-1
-        ))
+        entropy = -jnp.mean(
+            jnp.sum(jax.nn.softmax(output.policy_logits) * jax.nn.log_softmax(output.policy_logits), axis=-1)
+        )
         entropy_loss = -self.config.entropy_coef * entropy
 
         # Compute total loss
-        total_loss = (
-            policy_loss
-            + self.config.value_loss_coef * value_loss
-            + entropy_loss
-        )
+        total_loss = policy_loss + self.config.value_loss_coef * value_loss + entropy_loss
 
         metrics = {
             "total_loss": total_loss,
@@ -191,3 +173,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         }
 
         return total_loss, metrics
+
+    def get_optimizer(self) -> optax.GradientTransformation:
+        return optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.adam(1e-3),
+        )

@@ -21,7 +21,7 @@ from jaxtyping import PRNGKeyArray
 from kscale import K
 from mujoco_scenes.brax import load_model
 from mujoco_scenes.mjcf import load_mjmodel
-from omegaconf import MISSING
+from omegaconf import MISSING, DictConfig, OmegaConf
 
 from ksim.commands import Command, CommandBuilder
 from ksim.observation.base import Observation, ObservationBuilder
@@ -162,6 +162,17 @@ class KScaleEnvConfig(xax.Config):
         help="Whether to ignore the cached URDF.",
     )
 
+    # Additional environment information. This is populated by the environment
+    # when it is created and is only kept here for logging purposes.
+    body_name_to_idx: dict[str, int] | None = xax.field(
+        value=None,
+        help="A mapping from body names to indices.",
+    )
+    joint_name_to_idx: dict[str, int] | None = xax.field(
+        value=None,
+        help="A mapping from joint names to indices.",
+    )
+
 
 class KScaleEnv(PipelineEnv):
     """Defines a generic environment for interacting with K-Scale models."""
@@ -176,7 +187,6 @@ class KScaleEnv(PipelineEnv):
         commands: Collection[Command | CommandBuilder] = (),
     ) -> None:
         self.config = config
-        # self.ctrl_dt = jnp.array([self.config.ctrl_dt])
 
         # Downloads the model from the K-Scale API and loads it into MuJoCo.
         model_path = str(
@@ -191,11 +201,17 @@ class KScaleEnv(PipelineEnv):
         logger.info("Loading model %s", model_path)
         mj_model = load_mjmodel(model_path, self.config.model_scene)
 
+        # Populates configuration joint information.
+        self.body_name_to_idx = {mj_model.body(i).name: i for i in range(mj_model.nbody)}
+        self.joint_name_to_idx = {mj_model.joint(i).name: i for i in range(mj_model.njnt)}
+
         # Gets the relevant data for building the components of the environment.
         data = BuilderData(
             model=mj_model,
             dt=self.config.dt,
             ctrl_dt=self.config.ctrl_dt,
+            body_name_to_idx=self.body_name_to_idx,
+            joint_name_to_idx=self.joint_name_to_idx,
         )
 
         # Builds the terminations, resets, rewards, and observations.
@@ -230,6 +246,14 @@ class KScaleEnv(PipelineEnv):
             debug=self.config.debug_env,
         )
 
+    def get_state(self) -> DictConfig:
+        return OmegaConf.create(
+            {
+                "body_name_to_idx": self.body_name_to_idx,
+                "joint_name_to_idx": self.joint_name_to_idx,
+            },
+        )
+
     @eqx.filter_jit
     def reset(self, rng: PRNGKeyArray) -> BraxState:
         q = self.sys.init_q
@@ -239,39 +263,51 @@ class KScaleEnv(PipelineEnv):
         for reset_func in self.resets.values():
             reset_data = reset_func(reset_data)
 
-        obs = self.get_observation(pipeline_state)
+        rng, obs_rng = jax.random.split(rng)
+        obs = self.get_observation(pipeline_state, rng)
         all_dones = self.get_terminations(pipeline_state)
         all_rewards = OrderedDict([(key, jnp.zeros(())) for key in self.rewards.keys()])
 
         done = jnp.stack(list(all_dones.values()), axis=-1).any(axis=-1)
         reward = jnp.stack(list(all_rewards.values()), axis=-1)
 
+        metrics = {
+            "time": jnp.zeros(()),
+            "rng": rng,
+        }
+
+        for cmd_name, cmd in self.commands.items():
+            obs[cmd_name] = metrics[cmd_name] = cmd(rng)
+
         return BraxState(
             pipeline_state=pipeline_state,
             obs=obs,
             reward=reward,
             done=done,
-            metrics={
-                "time": jnp.zeros(()),
-                "rng": rng,
-            }
-            | {cmd_name: cmd(rng) for cmd_name, cmd in self.commands.items()},
+            metrics=metrics,
         )
 
     @eqx.filter_jit
-    def step(
-        self,
-        prev_state: BraxState,
-        action: jnp.ndarray,
-    ) -> BraxState:
+    def step(self, prev_state: BraxState, action: jnp.ndarray) -> BraxState:
         pipeline_state = self.pipeline_step(prev_state.pipeline_state, action)
 
-        obs = self.get_observation(pipeline_state)
+        # Update the metrics.
+        time = prev_state.metrics["time"]
+        rng = prev_state.metrics["rng"]
+
+        rng, obs_rng = jax.random.split(rng)
+        obs = self.get_observation(pipeline_state, obs_rng)
         all_dones = self.get_terminations(pipeline_state)
         all_rewards = self.get_rewards(prev_state, action, pipeline_state)
 
         done = jnp.stack(list(all_dones.values()), axis=-1).any(axis=-1)
         reward = jnp.stack(list(all_rewards.values()), axis=-1)
+
+        for cmd_name, cmd in self.commands.items():
+            rng, cmd_rng = jax.random.split(rng)
+            prev_cmd = prev_state.metrics[cmd_name]
+            next_cmd = cmd.update(prev_cmd, cmd_rng, time)
+            obs[cmd_name] = prev_state.metrics[cmd_name] = next_cmd
 
         # Update with the new state.
         next_state = prev_state.tree_replace(
@@ -283,26 +319,23 @@ class KScaleEnv(PipelineEnv):
             },
         )
 
-        # Update the metrics.
-        time = prev_state.metrics["time"]
-        rng = prev_state.metrics["rng"]
-
-        for cmd_name, cmd in self.commands.items():
-            rng, cmd_rng = jax.random.split(rng)
-            prev_cmd = prev_state.metrics[cmd_name]
-            next_cmd = cmd.update(prev_cmd, cmd_rng, time)
-            next_state.metrics[cmd_name] = next_cmd
-
         next_state.metrics["time"] = time + self.config.ctrl_dt
         next_state.metrics["rng"] = rng
 
         return next_state
 
     @eqx.filter_jit
-    def get_observation(self, pipeline_state: State) -> OrderedDict[str, jnp.ndarray]:
+    def get_observation(
+        self,
+        pipeline_state: State,
+        rng: PRNGKeyArray,
+    ) -> OrderedDict[str, jnp.ndarray]:
         observations: OrderedDict[str, jnp.ndarray] = OrderedDict()
         for observation_name, observation in self.observations.items():
-            observations[observation_name] = observation(pipeline_state)
+            rng, obs_rng = jax.random.split(rng)
+            observation_value = observation(pipeline_state)
+            observation_value = observation.add_noise(observation_value, obs_rng)
+            observations[observation_name] = observation_value
         return observations
 
     @eqx.filter_jit
@@ -334,13 +367,14 @@ class KScaleEnv(PipelineEnv):
         rng: PRNGKeyArray,
         model: ActionModel,
     ) -> BraxState:
-        """Unrolls a trajectory for num_steps steps.
+        """Unrolls a trajectory for num_st eps steps.
 
         Returns:
             A tuple of (initial_state, trajectory_states) where trajectory_states
             contains the states for steps 1 to num_steps.
         """
-        init_state = self.reset(rng)
+        rng, init_rng = jax.random.split(rng)
+        init_state = self.reset(init_rng)
 
         def identity_fn(
             state: BraxState,
@@ -356,7 +390,7 @@ class KScaleEnv(PipelineEnv):
             carry_model: T | None,
         ) -> tuple[BraxState, PRNGKeyArray, T | None]:
             rng, step_rng = jax.random.split(rng)
-            action, carry_model = model(self.sys, state, step_rng, carry_model)
+            action, carry_model = model(sys=self.sys, state=state, rng=step_rng, carry=carry_model)
             next_state = self.step(state, action)
             return (next_state, rng, carry_model)  # Explicitly wrap in tuple
 
@@ -400,6 +434,7 @@ class KScaleEnv(PipelineEnv):
         seed: int = 0,
         camera: str | None = DEFAULT_CAMERA,
         actions: ActionModelType | ActionModel = "zero",
+        figsize: tuple[int, int] = (12, 12),
     ) -> list[BraxState]:
         logger.info("Running test run for %d steps", num_steps)
 
@@ -417,7 +452,7 @@ class KScaleEnv(PipelineEnv):
         elif not isinstance(actions, ActionModel):
             raise ValueError(f"Invalid action type: {type(actions)}")
 
-        # Run simulation
+        # Run simulation.
         rng = jax.random.PRNGKey(seed)
         trajectory = self.unroll_trajectory(num_steps, rng, actions)
 
@@ -426,7 +461,7 @@ class KScaleEnv(PipelineEnv):
         done = jnp.pad(done[:-1], (1, 0), mode="constant", constant_values=False)
         trajectory = jax.tree.map(lambda x: x[~done], trajectory)
 
-        # Render if requested
+        # Render if requested.
         if render_dir is not None:
             (render_dir := Path(render_dir)).mkdir(parents=True, exist_ok=True)
             raw_trajectory = jax.tree.map(lambda x: np.array(x) if isinstance(x, jnp.ndarray) else x, trajectory)
@@ -441,28 +476,46 @@ class KScaleEnv(PipelineEnv):
 
             # Plots the commands.
             for i, key in enumerate(self.commands.keys()):
-                plt.figure()
+                plt.figure(figsize=figsize)
                 metric = raw_trajectory.metrics[key]
-                for i, value in enumerate(metric.reshape(metric.shape[0], -1).T):
-                    plt.plot(t, value, label=f"Command {i}")
+                for j, value in enumerate(metric.reshape(metric.shape[0], -1).T):
+                    plt.plot(t, value, label=f"Command {j}")
                 plt.title(key)
                 plt.xlabel("Time (s)")
                 plt.ylabel(key)
                 plt.legend()
                 (render_path := render_dir / "commands" / f"{key}.png").parent.mkdir(parents=True, exist_ok=True)
                 plt.savefig(render_path)
+                plt.tight_layout()
                 plt.close()
                 logger.info("Saved %s", render_path)
 
             # Plots the rewards.
             for i, key in enumerate(self.rewards.keys()):
-                plt.figure()
+                plt.figure(figsize=figsize)
                 plt.plot(t, raw_trajectory.reward[:, i].astype(np.float32))
                 plt.title(key)
                 plt.xlabel("Time (s)")
                 plt.ylabel(key)
                 (render_path := render_dir / "rewards" / f"{key}.png").parent.mkdir(parents=True, exist_ok=True)
                 plt.savefig(render_path)
+                plt.tight_layout()
+                plt.close()
+                logger.info("Saved %s", render_path)
+
+            # Plots the observations.
+            for i, key in enumerate(self.observations.keys()):
+                plt.figure(figsize=figsize)
+                obs = raw_trajectory.obs[key]
+                for j, value in enumerate(obs.reshape(obs.shape[0], -1).T):
+                    plt.plot(t, value, label=f"Observation {j}")
+                plt.title(key)
+                plt.xlabel("Time (s)")
+                plt.ylabel(key)
+                plt.legend()
+                (render_path := render_dir / "observations" / f"{key}.png").parent.mkdir(parents=True, exist_ok=True)
+                plt.savefig(render_path)
+                plt.tight_layout()
                 plt.close()
                 logger.info("Saved %s", render_path)
 

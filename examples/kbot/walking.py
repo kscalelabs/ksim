@@ -5,9 +5,10 @@ from dataclasses import dataclass
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import optax
 import xax
-from jaxtyping import PRNGKeyArray
+from brax.base import System
+from brax.envs.base import State as BraxState
+from jaxtyping import PRNGKeyArray, PyTree
 
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.env.brax import KScaleEnv
@@ -64,7 +65,7 @@ class Model(eqx.Module):
             key=key3,
         )
 
-    def forward(self, x_tn: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, x_tn: jnp.ndarray) -> jnp.ndarray:
         x_tn = self.input_layer(x_tn)
 
         def scan_fn(state_n: jnp.ndarray, x_n: jnp.ndarray) -> tuple[jnp.ndarray, None]:
@@ -77,8 +78,29 @@ class Model(eqx.Module):
         x_tn = self.output_layer(x_tn)
         return x_tn
 
-    def __call__(self, x_tn: jnp.ndarray) -> jnp.ndarray:
-        return jax.vmap(self.forward)(x_tn)
+
+class ActorCriticModel(eqx.Module):
+    actor: Model
+    critic: Model
+
+    def __init__(self, num_hidden: int = 512, *, key: PRNGKeyArray) -> None:
+        super().__init__()
+
+        actor_key, critic_key = jax.random.split(key, 2)
+
+        self.actor = Model(
+            num_inputs=32,
+            num_outputs=32,
+            num_hidden=num_hidden,
+            key=actor_key,
+        )
+
+        self.critic = Model(
+            num_inputs=32,
+            num_outputs=1,
+            num_hidden=num_hidden,
+            key=critic_key,
+        )
 
 
 @dataclass
@@ -100,15 +122,12 @@ class KBotWalkingConfig(PPOConfig):
 
 
 class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
-    def __init__(self, config: KBotWalkingConfig) -> None:
-        super().__init__(config)
-
     def get_environment(self) -> KScaleEnv:
         return KScaleEnv(
             self.config,
             terminations=[
                 IllegalContactTerminationBuilder(
-                    link_names=[
+                    body_names=[
                         "shoulder",
                         "shoulder_2",
                         "hand_shell",
@@ -125,12 +144,12 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 LinearVelocityZPenalty(scale=-1.0),
             ],
             observations=[
-                BasePositionObservation(),
-                BaseOrientationObservation(),
-                BaseLinearVelocityObservation(),
-                BaseAngularVelocityObservation(),
-                JointPositionObservation(),
-                JointVelocityObservation(),
+                BasePositionObservation(noise=0.01),
+                BaseOrientationObservation(noise=0.01),
+                BaseLinearVelocityObservation(noise=0.01),
+                BaseAngularVelocityObservation(noise=0.01),
+                JointPositionObservation(noise=0.01),
+                JointVelocityObservation(noise=0.01),
             ],
             commands=[
                 LinearVelocityCommand(
@@ -147,18 +166,34 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             ],
         )
 
-    def get_model(self) -> Model:
-        return Model(self.prng_key())
+    def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
+        return ActorCriticModel(key=key)
 
-    def get_optimizer(self) -> optax.GradientTransformation:
-        return optax.adam(1e-3)
+    def get_actor_output(
+        self,
+        model: ActorCriticModel,
+        sys: System,
+        state: BraxState,
+        rng: PRNGKeyArray,
+        carry: jnp.ndarray | None,
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        pos = state.obs['base_position_observation']
+        ori = state.obs['base_orientation_observation']
+        lin_vel = state.obs['base_linear_velocity_observation']
+        ang_vel = state.obs['base_angular_velocity_observation']
+        joint_pos = state.obs['joint_position_observation']
+        joint_vel = state.obs['joint_velocity_observation']
 
-    def get_output(self, model: Model, batch: jnp.ndarray) -> jnp.ndarray:
-        return model(batch)
+        breakpoint()
+
+        raise NotImplementedError
 
 
 if __name__ == "__main__":
     # python -m examples.kbot.walking train
     KBotWalkingTask.launch(
-        KBotWalkingConfig(),
+        KBotWalkingConfig(
+            num_envs=32,
+            max_trajectory_seconds=10.0,
+        ),
     )

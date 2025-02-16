@@ -12,3 +12,5 @@ class BuilderData:
     model: mujoco.MjModel
     dt: float
     ctrl_dt: float
+    joint_name_to_idx: dict[str, int]
+    body_name_to_idx: dict[str, int]

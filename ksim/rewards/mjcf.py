@@ -10,7 +10,7 @@ from brax.mjx.base import State as MjxState
 
 from ksim.rewards.base import Reward, RewardBuilder
 from ksim.utils.data import BuilderData
-from ksim.utils.mujoco import link_names_to_ids
+from ksim.utils.mujoco import lookup_in_dict
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +34,13 @@ class FootContactPenalty(Reward):
     for `wait_steps` steps.
     """
 
-    link_ids: jnp.ndarray
+    body_ids: jnp.ndarray
     max_allowed_contact: int
     wait_steps: int
 
     def __init__(
         self,
-        link_ids: Collection[int],
+        body_ids: Collection[int],
         scale: float,
         max_allowed_contact: int | None = None,
         wait_steps: int = 0,
@@ -48,9 +48,9 @@ class FootContactPenalty(Reward):
         super().__init__(scale)
 
         if max_allowed_contact is None:
-            max_allowed_contact = len(link_ids) - 1
+            max_allowed_contact = len(body_ids) - 1
 
-        self.link_ids = jnp.array(sorted(link_ids))
+        self.body_ids = jnp.array(sorted(body_ids))
         self.max_allowed_contact = max_allowed_contact
         self.wait_steps = wait_steps
 
@@ -61,7 +61,7 @@ class FootContactPenalty(Reward):
         contact = state.contact
 
         if isinstance(state, MjxState):
-            has_contact = jnp.any(contact.geom[:, :, None] == self.link_ids[None, None, :], axis=(1, 2))
+            has_contact = jnp.any(contact.geom[:, :, None] == self.body_ids[None, None, :], axis=(1, 2))
             return jnp.where(has_contact, contact.dist, 1e4).min() <= self.contact_eps
 
         else:
@@ -74,19 +74,19 @@ class FootContactPenalty(Reward):
 class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     def __init__(
         self,
-        link_names: Collection[str],
+        body_names: Collection[str],
         scale: float,
         max_allowed_contact: int | None = None,
         wait_seconds: float = 0.0,
     ) -> None:
         super().__init__()
 
-        self.link_names = link_names
+        self.body_names = body_names
         self.scale = scale
         self.max_allowed_contact = max_allowed_contact
         self.wait_seconds = wait_seconds
 
     def __call__(self, data: BuilderData) -> FootContactPenalty:
-        link_ids = link_names_to_ids(self.link_names, data.model)
+        body_ids = lookup_in_dict(self.body_names, data.body_name_to_idx, "Body")
         wait_steps = int(self.wait_seconds / data.ctrl_dt)
-        return FootContactPenalty(link_ids, self.scale, self.max_allowed_contact, wait_steps)
+        return FootContactPenalty(body_ids, self.scale, self.max_allowed_contact, wait_steps)
