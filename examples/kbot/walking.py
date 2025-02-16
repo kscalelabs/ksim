@@ -1,9 +1,7 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
-import argparse
 from dataclasses import dataclass
 
-import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -23,12 +21,7 @@ from ksim.observation.mjcf import (
 from ksim.resets.mjcf import XYPositionReset
 from ksim.rewards.mjcf import LinearVelocityZPenalty
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations.mjcf import (
-    IllegalContactTerminationBuilder,
-    MinimumHeightTermination,
-    PitchTooGreatTermination,
-    RollTooGreatTermination,
-)
+from ksim.terminations import IllegalContactTerminationBuilder
 
 
 class Model(eqx.Module):
@@ -104,16 +97,9 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         super().__init__(config)
 
     def get_environment(self) -> KScaleEnv:
-        # TODO: Remove this later.
-        # self.config.backend = "spring"
-        self.config.debug_env = True
-
         return KScaleEnv(
             self.config,
             terminations=[
-                # PitchTooGreatTermination(max_pitch=self.config.max_pitch),
-                # RollTooGreatTermination(max_roll=self.config.max_roll),
-                # MinimumHeightTermination(min_height=0.2),
                 IllegalContactTerminationBuilder(
                     link_names=[
                         "shoulder",
@@ -151,40 +137,8 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         return model(batch)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["env", "train", "test"])
-    parser.add_argument("--num-steps", type=int, default=1000)
-    args, rest = parser.parse_known_args()
-
-    config = KBotWalkingConfig(
-        # Training parameters.
-        batch_size=32,
-        # Learning rate.
-        learning_rate=1e-3,
-    )
-
-    match args.action:
-        case "env":
-            config.show_viewer = True
-            KBotWalkingTask.run_environment(
-                config,
-                *rest,
-                num_steps=args.num_steps,
-                render_path="kbot-walking.mp4",
-                use_cli=False,
-            )
-
-        case "train":
-            KBotWalkingTask.launch(config, *rest, use_cli=False)
-
-        case "test":
-            raise NotImplementedError("Test mode not implemented.")
-
-        case _:
-            raise ValueError(f"Invalid action: {args.action}")
-
-
 if __name__ == "__main__":
     # python -m examples.kbot.walking train
-    main()
+    KBotWalkingTask.launch(
+        KBotWalkingConfig(),
+    )

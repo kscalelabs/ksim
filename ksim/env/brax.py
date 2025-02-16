@@ -1,22 +1,24 @@
 """Defines the default humanoid environment."""
 
 import asyncio
-import enum
+import itertools
 import logging
+import pickle as pkl
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Collection, Literal, TypeVar
 
+import cv2
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import mujoco
+import matplotlib.pyplot as plt
+import numpy as np
 import tqdm
 import xax
 from brax.base import State
-from brax.envs.base import PipelineEnv
-from brax.envs.base import State as BraxState
+from brax.envs.base import PipelineEnv, State as BraxState
 from jaxtyping import PRNGKeyArray
 from kscale import K
 from mujoco_scenes.brax import load_model
@@ -220,25 +222,16 @@ class KScaleEnv(PipelineEnv):
     def test_run(
         self,
         num_steps: int,
-        render_path: str | Path | None = None,
+        render_dir: str | Path | None = None,
         seed: int = 0,
         camera: str | None = DEFAULT_CAMERA,
         actions: Literal["random", "zero", "midpoint"] = "zero",
     ) -> list[State]:
         logger.info("Running test run for %d steps", num_steps)
 
-        if render_path is None:
-            mediapy = None
-
-        else:
-            try:
-                import mediapy
-            except ImportError:
-                raise ImportError("Please install `mediapy` to run this script")
-
         rng = jax.random.PRNGKey(seed)
         state: BraxState = self.reset(rng)
-        trajectory: list[State] = [state.pipeline_state]
+        trajectory: list[BraxState] = [state]
 
         # Run simulation
         logger.info("Got initial state")
@@ -264,16 +257,56 @@ class KScaleEnv(PipelineEnv):
 
             # Step environment
             state = self.step(state, ctrl)
-            trajectory.append(state.pipeline_state)
+            trajectory.append(state)
 
             if state.done.all():
                 break
 
         # Render if requested
-        if render_path is not None:
-            assert mediapy is not None, "Please install `mediapy` to run this script"
+        if render_dir is not None:
+            (render_dir := Path(render_dir)).mkdir(parents=True, exist_ok=True)
+
+            # Dumps the raw trajectory.
+            raw_trajectory = jax.tree.map(lambda x: np.array(x) if isinstance(x, jnp.ndarray) else x, trajectory)
+            with open(render_dir / "trajectory.pkl", "wb") as f:
+                pkl.dump(raw_trajectory, f)
+
+            metrics = {
+                key: jnp.array([state.metrics[key] for state in raw_trajectory], dtype=jnp.float32)
+                for key in itertools.chain(self.terminations.keys(), self.rewards.keys())
+            }
+
+            # Plot against real-time.
+            t = np.arange(len(trajectory)) * self.config.ctrl_dt
+
+            # Plots the metrics.
+            for key, metric in metrics.items():
+                plt.figure()
+                plt.plot(t, metric)
+                plt.title(key)
+                plt.xlabel("Time (s)")
+                plt.ylabel(key)
+                render_path = render_dir / f"{key}.png"
+                plt.savefig(render_path)
+                plt.close()
+                logger.info("Saved %s", render_path)
+
+            # Renders a video of the trajectory.
             fps = round(1 / self.config.ctrl_dt)
-            frames = self.render(trajectory, camera=camera)
-            mediapy.write_video(render_path, frames, fps=fps)
+            frames = self.render([state.pipeline_state for state in trajectory], camera=camera)
+
+            # Convert frames to uint8 and BGR format for OpenCV
+            frames = (frames * 255).astype(np.uint8)
+            frames = frames[..., ::-1]  # RGB to BGR
+
+            # Initialize video writer
+            height, width = frames[0].shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            out = cv2.VideoWriter(str(render_dir / "render.mp4"), fourcc, fps, (width, height))
+
+            # Write frames
+            for frame in frames:
+                out.write(frame)
+            out.release()
 
         return trajectory

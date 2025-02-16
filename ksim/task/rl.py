@@ -10,13 +10,12 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from pathlib import Path
 from threading import Thread
 from typing import Generic, Literal, TypeVar
 
-import jax
 import xax
 from dpshdl.dataset import Dataset
+from omegaconf import MISSING
 
 from ksim.env.brax import KScaleEnv
 
@@ -25,16 +24,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(kw_only=True)
 class RLConfig(xax.Config):
-    clip_param: float = xax.field(value=0.2, help="Clipping parameter for PPO.")
-    gamma: float = xax.field(value=0.998, help="Discount factor for PPO.")
-    lam: float = xax.field(value=0.95, help="Lambda parameter for PPO.")
-    value_loss_coef: float = xax.field(value=1.0, help="Value loss coefficient for PPO.")
-    entropy_coef: float = xax.field(value=0.0, help="Entropy coefficient for PPO.")
-    learning_rate: float = xax.field(value=1e-3, help="Learning rate for PPO.")
-    max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for PPO.")
-    use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss for PPO.")
-    schedule: str = xax.field(value="fixed", help="Schedule for PPO.")
-    desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for PPO.")
+    action: str = xax.field(value=MISSING, help="The action to take; should be either `train` or `env`.")
+    max_episode_length: float = xax.field(value=MISSING, help="The maximum episode length, in seconds.")
 
 
 Config = TypeVar("Config", bound=RLConfig)
@@ -44,25 +35,24 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @abstractmethod
     def get_environment(self) -> KScaleEnv: ...
 
-    @classmethod
-    def run_environment(
-        cls,
-        *cfgs: xax.RawConfigType,
-        num_steps: int,
-        render_path: str | Path,
-        seed: int = 0,
-        use_cli: bool | list[str] = True,
-    ) -> None:
-        xax.configure_logging()
-        cfg = cls.get_config(*cfgs, use_cli=use_cli)
-        task_obj = cls(cfg)
-        env = task_obj.get_environment()
-        env.test_run(num_steps, render_path, seed)
-
     def get_dataset(self, phase: Literal["train", "valid"]) -> Dataset:
         raise NotImplementedError("Reinforcement learning tasks do not require datasets.")
 
-    def run(self) -> None:
+    def get_render_name(self, state: xax.State | None = None) -> str:
+        time_string = time.strftime("%Y%m%d_%H%M%S")
+        if state is None:
+            return f"render_{time_string}"
+        return f"render_{state.num_steps}_{time_string}"
+
+    def run_environment(self, state: xax.State | None = None) -> None:
+        env = self.get_environment()
+        num_steps = int(self.config.max_episode_length / env.config.ctrl_dt)
+        render_name = self.get_render_name(state)
+        render_dir = self.exp_dir / "renders" / render_name
+        logger.log(xax.LOG_STATUS, "Rendering to %s", render_dir)
+        env.test_run(num_steps, render_dir, seed=self.config.random_seed)
+
+    def run_training(self) -> None:
         """Runs the main PPO training loop."""
         with contextlib.ExitStack() as ctx:
             self.set_loggers()
@@ -145,3 +135,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             finally:
                 self.on_training_end(state)
+
+    def run(self) -> None:
+        match self.config.action:
+            case "train":
+                self.run_training()
+
+            case "env":
+                self.run_environment()
+
+            case _:
+                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")

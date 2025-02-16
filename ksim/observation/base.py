@@ -25,12 +25,12 @@ class Observation(eqx.Module, ABC):
         return self.get_name()
 
 
-O = TypeVar("O", bound=Observation)
+T = TypeVar("T", bound=Observation)
 
 
-class ObservationBuilder(ABC, Generic[O]):
+class ObservationBuilder(ABC, Generic[T]):
     @abstractmethod
-    def __call__(self, mj_model: mujoco.MjModel) -> O:
+    def __call__(self, mj_model: mujoco.MjModel) -> T:
         """Builds an observation from a MuJoCo model.
 
         Args:
