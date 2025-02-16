@@ -439,6 +439,21 @@ class KScaleEnv(PipelineEnv):
             num_steps = len(raw_trajectory.done)
             t = np.arange(num_steps) * self.config.ctrl_dt
 
+            # Plots the commands.
+            for i, key in enumerate(self.commands.keys()):
+                plt.figure()
+                metric = raw_trajectory.metrics[key]
+                for i, value in enumerate(metric.reshape(metric.shape[0], -1).T):
+                    plt.plot(t, value, label=f"Command {i}")
+                plt.title(key)
+                plt.xlabel("Time (s)")
+                plt.ylabel(key)
+                plt.legend()
+                (render_path := render_dir / "commands" / f"{key}.png").parent.mkdir(parents=True, exist_ok=True)
+                plt.savefig(render_path)
+                plt.close()
+                logger.info("Saved %s", render_path)
+
             # Plots the rewards.
             for i, key in enumerate(self.rewards.keys()):
                 plt.figure()
@@ -446,7 +461,7 @@ class KScaleEnv(PipelineEnv):
                 plt.title(key)
                 plt.xlabel("Time (s)")
                 plt.ylabel(key)
-                render_path = render_dir / f"{key}.png"
+                (render_path := render_dir / "rewards" / f"{key}.png").parent.mkdir(parents=True, exist_ok=True)
                 plt.savefig(render_path)
                 plt.close()
                 logger.info("Saved %s", render_path)
