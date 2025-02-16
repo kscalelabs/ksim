@@ -60,8 +60,9 @@ def _unique_dict(things: list[tuple[str, T]]) -> OrderedDict[str, T]:
     return return_dict
 
 
+@jax.tree_util.register_dataclass
 @dataclass
-class KScaleEnvConfig:
+class KScaleEnvConfig(xax.Config):
     # Model configuration options.
     model_name: str = xax.field(
         value=MISSING,

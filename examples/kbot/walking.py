@@ -9,7 +9,7 @@ import optax
 import xax
 from jaxtyping import PRNGKeyArray
 
-from ksim.env.brax import KScaleEnv, KScaleEnvConfig
+from ksim.env.brax import KScaleEnv
 from ksim.observation.mjcf import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
@@ -65,17 +65,23 @@ class Model(eqx.Module):
 
     def forward(self, x_tn: jnp.ndarray) -> jnp.ndarray:
         x_tn = self.input_layer(x_tn)
-        scan_fn = lambda state, x: (self.rnn(x, state), None)
-        init_state = jnp.zeros(self.rnn.hidden_size)
-        final_state, _ = jax.lax.scan(scan_fn, init_state, x_tn)
-        return self.output_layer(final_state)
+
+        def scan_fn(state_n: jnp.ndarray, x_n: jnp.ndarray) -> tuple[jnp.ndarray, None]:
+            state_n = self.rnn(x_n, state_n)
+            return state_n, None
+
+        init_state_n = jnp.zeros(self.rnn.hidden_size)
+        x_tn, _ = jax.lax.scan(scan_fn, init_state_n, x_tn)
+
+        x_tn = self.output_layer(x_tn)
+        return x_tn
 
     def __call__(self, x_tn: jnp.ndarray) -> jnp.ndarray:
         return jax.vmap(self.forward)(x_tn)
 
 
 @dataclass
-class KBotWalkingConfig(PPOConfig, KScaleEnvConfig):
+class KBotWalkingConfig(PPOConfig):
     # Robot model name to use.
     model_name: str = xax.field(value="kbot-v1")
     kp: float = xax.field(value=100.0)

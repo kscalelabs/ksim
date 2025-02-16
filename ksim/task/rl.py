@@ -13,18 +13,20 @@ from dataclasses import dataclass
 from threading import Thread
 from typing import Generic, Literal, TypeVar
 
+import jax
 import xax
 from dpshdl.dataset import Dataset
 from omegaconf import MISSING
 
-from ksim.env.brax import KScaleEnv
+from ksim.env.brax import KScaleEnv, KScaleEnvConfig
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(kw_only=True)
-class RLConfig(xax.Config):
-    action: str = xax.field(value=MISSING, help="The action to take; should be either `train` or `env`.")
+@jax.tree_util.register_dataclass
+@dataclass
+class RLConfig(KScaleEnvConfig, xax.Config):
+    action: str = xax.field(value="train", help="The action to take; should be either `train` or `env`.")
     max_episode_length: float = xax.field(value=MISSING, help="The maximum episode length, in seconds.")
 
 
@@ -38,6 +40,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_dataset(self, phase: Literal["train", "valid"]) -> Dataset:
         raise NotImplementedError("Reinforcement learning tasks do not require datasets.")
 
+    @property
+    def max_steps_per_trajectory(self) -> int:
+        return round(self.config.max_episode_length / self.config.ctrl_dt)
+
     def get_render_name(self, state: xax.State | None = None) -> str:
         time_string = time.strftime("%Y%m%d_%H%M%S")
         if state is None:
@@ -46,11 +52,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run_environment(self, state: xax.State | None = None) -> None:
         env = self.get_environment()
-        num_steps = int(self.config.max_episode_length / env.config.ctrl_dt)
         render_name = self.get_render_name(state)
         render_dir = self.exp_dir / "renders" / render_name
         logger.log(xax.LOG_STATUS, "Rendering to %s", render_dir)
-        env.test_run(num_steps, render_dir, seed=self.config.random_seed)
+        env.test_run(self.max_steps_per_trajectory, render_dir, seed=self.config.random_seed)
 
     def run_training(self) -> None:
         """Runs the main PPO training loop."""
