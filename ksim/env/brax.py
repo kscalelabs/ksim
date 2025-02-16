@@ -3,30 +3,36 @@
 import asyncio
 import enum
 import logging
+from collections import OrderedDict
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
-from typing import Collection, TypeVar
+from typing import Collection, Literal, TypeVar
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mujoco
 import tqdm
 import xax
 from brax.base import State
-from brax.envs.base import PipelineEnv, State as BraxState
-from brax.io import mjcf
+from brax.envs.base import PipelineEnv
+from brax.envs.base import State as BraxState
+from jaxtyping import PRNGKeyArray
 from kscale import K
+from mujoco_scenes.brax import load_model
+from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING
 
-from ksim.observation.base import Observation
-from ksim.resets.base import Reset
-from ksim.rewards.base import Reward
-from ksim.terminations.base import Termination
+from ksim.observation.base import Observation, ObservationBuilder
+from ksim.resets.base import Reset, ResetBuilder, ResetData
+from ksim.rewards.base import Reward, RewardBuilder
+from ksim.terminations.base import Termination, TerminationBuilder
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+DEFAULT_CAMERA = "tracking_camera"
 
 
 async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
@@ -41,39 +47,15 @@ async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
     return mjcf_path
 
 
-def _unique_dict(things: list[tuple[str, T]], name: str) -> dict[str, T]:
-    return_dict = {k: v for k, v in things}
-    if len(return_dict) != len(things):
-        raise ValueError(f"Found duplicate {name} names!")
+def _unique_dict(things: list[tuple[str, T]]) -> OrderedDict[str, T]:
+    return_dict = OrderedDict()
+    for base_name, thing in things:
+        name, idx = base_name, 1
+        while name in return_dict:
+            idx += 1
+            name = f"{base_name}_{idx}"
+        return_dict[name] = thing
     return return_dict
-
-
-class SolverType(enum.Enum):
-    PGS = "PGS"
-    CG = "CG"
-    NEWTON = "Newton"
-
-    def to_mujoco(self) -> mujoco.mjtSolver:
-        return {
-            "PGS": mujoco.mjtSolver.mjSOL_PGS,
-            "CG": mujoco.mjtSolver.mjSOL_CG,
-            "Newton": mujoco.mjtSolver.mjSOL_NEWTON,
-        }[self.value]
-
-
-class IntegratorType(enum.Enum):
-    EULER = "Euler"
-    RK4 = "RK4"
-    IMPLICIT = "Implicit"
-    IMPLICITFAST = "ImplicitFast"
-
-    def to_mujoco(self) -> mujoco.mjtIntegrator:
-        return {
-            "Euler": mujoco.mjtIntegrator.mjINT_EULER,
-            "RK4": mujoco.mjtIntegrator.mjINT_RK4,
-            "Implicit": mujoco.mjtIntegrator.mjINT_IMPLICIT,
-            "ImplicitFast": mujoco.mjtIntegrator.mjINT_IMPLICITFAST,
-        }[self.value]
 
 
 @dataclass
@@ -83,22 +65,26 @@ class KScaleEnvConfig:
         value=MISSING,
         help="The name of the model to use.",
     )
+    model_scene: str = xax.field(
+        value="smooth",
+        help="The scene to use for the model.",
+    )
 
     # Environment configuration options.
     dt: float = xax.field(
-        value=0.02,
+        value=0.004,
         help="Simulation time step.",
     )
-    frames_per_env_step: int = xax.field(
-        value=1,
-        help="The number of frames to simulate per environment step.",
+    ctrl_dt: float = xax.field(
+        value=0.02,
+        help="Control time step.",
     )
     debug_env: bool = xax.field(
         value=False,
         help="Whether to enable debug mode for the environment.",
     )
     backend: str = xax.field(
-        value="spring",
+        value="mjx",
         help="The backend to use for the environment.",
     )
 
@@ -125,16 +111,12 @@ class KScaleEnv(PipelineEnv):
     def __init__(
         self,
         config: KScaleEnvConfig,
-        terminations: Collection[Termination],
-        resets: Collection[Reset],
-        rewards: Collection[Reward],
-        observations: Collection[Observation],
+        terminations: Collection[Termination | TerminationBuilder],
+        resets: Collection[Reset | ResetBuilder],
+        rewards: Collection[Reward | RewardBuilder],
+        observations: Collection[Observation | ObservationBuilder],
     ) -> None:
         self.config = config
-        self.terminations = _unique_dict([(term.termination_name, term) for term in terminations], "termination")
-        self.resets = _unique_dict([(reset.reset_name, reset) for reset in resets], "reset")
-        self.rewards = _unique_dict([(reward.reward_name, reward) for reward in rewards], "reward")
-        self.observations = _unique_dict([(obs.observation_name, obs) for obs in observations], "observation")
 
         # Downloads the model from the K-Scale API and loads it into MuJoCo.
         model_path = str(
@@ -146,10 +128,23 @@ class KScaleEnv(PipelineEnv):
             )
         )
 
-        logger.info("Initializing model from %s", model_path)
-
         logger.info("Loading model %s", model_path)
-        sys = mjcf.load(model_path)
+        mj_model = load_mjmodel(model_path, self.config.model_scene)
+
+        # Builds the terminations, resets, rewards, and observations.
+        terminations_impl = [t(mj_model) if isinstance(t, TerminationBuilder) else t for t in terminations]
+        resets_impl = [r(mj_model) if isinstance(r, ResetBuilder) else r for r in resets]
+        rewards_impl = [r(mj_model) if isinstance(r, RewardBuilder) else r for r in rewards]
+        observations_impl = [o(mj_model) if isinstance(o, ObservationBuilder) else o for o in observations]
+
+        # Creates dictionaries of the unique terminations, resets, rewards, and observations.
+        self.terminations = _unique_dict([(term.termination_name, term) for term in terminations_impl])
+        self.resets = _unique_dict([(reset.reset_name, reset) for reset in resets_impl])
+        self.rewards = _unique_dict([(reward.reward_name, reward) for reward in rewards_impl])
+        self.observations = _unique_dict([(obs.observation_name, obs) for obs in observations_impl])
+
+        logger.info("Converting model to Brax system")
+        sys = load_model(mj_model)
 
         sys = sys.tree_replace(
             {
@@ -163,49 +158,73 @@ class KScaleEnv(PipelineEnv):
         super().__init__(
             sys=sys,
             backend=self.config.backend,
-            n_frames=self.config.frames_per_env_step,
+            n_frames=round(self.config.ctrl_dt / self.config.dt),
             debug=self.config.debug_env,
         )
 
     def _pipeline_state_to_state(self, pipeline_state: State) -> BraxState:
         obs = self.get_observation(pipeline_state)
-        reward = self.get_reward(pipeline_state)
-        done = self.get_done(pipeline_state)
+        all_rewards = self.get_rewards(pipeline_state)
+        all_dones = self.get_terminations(pipeline_state)
+
+        done = jnp.stack(list(all_dones.values()), axis=-1).any(axis=-1)
+        reward = jnp.stack(list(all_rewards.values()), axis=-1).sum(axis=-1)
+
+        # Keep track of all rewards separately.
+        metrics = {**all_rewards, **all_dones}
+
         return BraxState(
             pipeline_state=pipeline_state,
             obs=obs,
             reward=reward,
             done=done,
+            metrics=metrics,
         )
 
-    @partial(jax.jit, static_argnums=(0,))
-    def reset(self, rng: jnp.ndarray) -> BraxState:
-        q = jnp.zeros(self.sys.q_size())
+    @eqx.filter_jit
+    def reset(self, rng: PRNGKeyArray) -> BraxState:
+        q = self.sys.init_q
         qd = jnp.zeros(self.sys.qd_size())
         pipeline_state = self.pipeline_init(q, qd)
-        return self._pipeline_state_to_state(pipeline_state)
+        reset_data = ResetData(rng=rng, state=pipeline_state)
+        for reset_func in self.resets.values():
+            reset_data = reset_func(reset_data)
+        return self._pipeline_state_to_state(reset_data.state)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @eqx.filter_jit
     def step(self, state: BraxState, action: jnp.ndarray) -> BraxState:
         pipeline_state = self.pipeline_step(state.pipeline_state, action)
         return self._pipeline_state_to_state(pipeline_state)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @eqx.filter_jit
     def get_observation(self, pipeline_state: State) -> dict[str, jnp.ndarray]:
-        observations = {}
+        observations: dict[str, jnp.ndarray] = {}
         for observation_name, observation in self.observations.items():
             observations[observation_name] = observation(pipeline_state)
         return observations
 
-    @partial(jax.jit, static_argnums=(0,))
-    def get_reward(self, pipeline_state: State) -> jnp.ndarray:
-        return jnp.zeros(())
+    @eqx.filter_jit
+    def get_rewards(self, pipeline_state: State) -> dict[str, jnp.ndarray]:
+        rewards: dict[str, jnp.ndarray] = {}
+        for reward_name, reward in self.rewards.items():
+            rewards[reward_name] = reward(pipeline_state)
+        return rewards
 
-    @partial(jax.jit, static_argnums=(0,))
-    def get_done(self, pipeline_state: State) -> jnp.ndarray:
-        return jnp.zeros((), dtype=bool)
+    @eqx.filter_jit
+    def get_terminations(self, pipeline_state: State) -> dict[str, jnp.ndarray]:
+        terminations: dict[str, jnp.ndarray] = {}
+        for termination_name, termination in self.terminations.items():
+            terminations[termination_name] = termination(pipeline_state)
+        return terminations
 
-    def test_run(self, num_steps: int, render_path: str | Path, seed: int = 0) -> None:
+    def test_run(
+        self,
+        num_steps: int,
+        render_path: str | Path | None = None,
+        seed: int = 0,
+        camera: str | None = DEFAULT_CAMERA,
+        actions: Literal["random", "zero", "midpoint"] = "zero",
+    ) -> list[State]:
         logger.info("Running test run for %d steps", num_steps)
 
         if render_path is None:
@@ -217,28 +236,44 @@ class KScaleEnv(PipelineEnv):
             except ImportError:
                 raise ImportError("Please install `mediapy` to run this script")
 
-        reset = jax.jit(self.reset)
-        step = jax.jit(self.step)
-
         rng = jax.random.PRNGKey(seed)
-        state: BraxState = reset(rng)
+        state: BraxState = self.reset(rng)
         trajectory: list[State] = [state.pipeline_state]
 
         # Run simulation
         logger.info("Got initial state")
         for _ in tqdm.trange(num_steps):
-            # Generate random action (replace with your control policy)
-            rng, subkey = jax.random.split(rng)
-            action = jax.random.uniform(subkey, shape=(self.action_size,), minval=-1, maxval=1)
+            match actions:
+                case "random":
+                    rng, subkey = jax.random.split(rng)
+                    ctrl_range = self.sys.actuator.ctrl_range
+                    ctrl_min, ctrl_max = ctrl_range.T
+                    action_scale = jax.random.uniform(subkey, shape=ctrl_min.shape, dtype=ctrl_min.dtype)
+                    ctrl = ctrl_min + (ctrl_max - ctrl_min) * action_scale
+
+                case "midpoint":
+                    ctrl_range = self.sys.actuator.ctrl_range
+                    ctrl_min, ctrl_max = ctrl_range.T
+                    ctrl = (ctrl_min + ctrl_max) / 2
+
+                case "zero":
+                    ctrl = jnp.zeros_like(self.sys.actuator.ctrl_range[..., 0])
+
+                case _:
+                    raise ValueError(f"Invalid action type: {actions}")
 
             # Step environment
-            state = step(state, action)
+            state = self.step(state, ctrl)
             trajectory.append(state.pipeline_state)
 
             if state.done.all():
                 break
 
         # Render if requested
-        if render_path is not None and mediapy is not None:
-            frames = self.render(trajectory)
-            mediapy.write_video(render_path, frames, fps=30)
+        if render_path is not None:
+            assert mediapy is not None, "Please install `mediapy` to run this script"
+            fps = round(1 / self.config.ctrl_dt)
+            frames = self.render(trajectory, camera=camera)
+            mediapy.write_video(render_path, frames, fps=fps)
+
+        return trajectory

@@ -20,5 +20,8 @@ dist/
 *.so
 out*/
 
+# Training artifacts.
+*.mp4
+
 # Other caching.
 .jaxcache/

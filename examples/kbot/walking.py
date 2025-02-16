@@ -23,7 +23,12 @@ from ksim.observation.mjcf import (
 from ksim.resets.mjcf import XYPositionReset
 from ksim.rewards.mjcf import LinearVelocityZPenalty
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations.mjcf import PitchTooGreatTermination, RollTooGreatTermination
+from ksim.terminations.mjcf import (
+    IllegalContactTerminationBuilder,
+    MinimumHeightTermination,
+    PitchTooGreatTermination,
+    RollTooGreatTermination,
+)
 
 
 class Model(eqx.Module):
@@ -88,9 +93,6 @@ class KBotWalkingConfig(PPOConfig, KScaleEnvConfig):
     critic_hidden_dims: list[int] = xax.field(value=[512, 256, 128])
     init_noise_std: float = xax.field(value=1.0)
 
-    # Environment configuration options.
-    base_init_pos: tuple[float, float, float] = xax.field(value=(0.0, 0.0, 0.5))
-
     # Termination conditions.
     max_episode_length: float = xax.field(value=20.0)
     max_pitch: float = xax.field(value=0.1)
@@ -102,11 +104,26 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         super().__init__(config)
 
     def get_environment(self) -> KScaleEnv:
+        # TODO: Remove this later.
+        # self.config.backend = "spring"
+        self.config.debug_env = True
+
         return KScaleEnv(
             self.config,
             terminations=[
-                PitchTooGreatTermination(max_pitch=self.config.max_pitch),
-                RollTooGreatTermination(max_roll=self.config.max_roll),
+                # PitchTooGreatTermination(max_pitch=self.config.max_pitch),
+                # RollTooGreatTermination(max_roll=self.config.max_roll),
+                # MinimumHeightTermination(min_height=0.2),
+                IllegalContactTerminationBuilder(
+                    link_names=[
+                        "shoulder",
+                        "shoulder_2",
+                        "hand_shell",
+                        "hand_shell_2",
+                        "leg0_shell",
+                        "leg0_shell_2",
+                    ],
+                ),
             ],
             resets=[
                 XYPositionReset(x_range=(-0.5, 0.5), y_range=(-0.5, 0.5)),

@@ -9,6 +9,7 @@ distrax
 jax
 mujoco
 mujoco-mjx
+mujoco-scenes
 optax
 xax
 playground

@@ -14,6 +14,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Generic, Literal, TypeVar
 
+import jax
 import xax
 from dpshdl.dataset import Dataset
 
