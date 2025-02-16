@@ -5,11 +5,12 @@ from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
 import equinox as eqx
-import mujoco
 import xax
 from brax.base import State
 from flax import struct
 from jaxtyping import PRNGKeyArray
+
+from ksim.utils.data import BuilderData
 
 
 @struct.dataclass
@@ -37,11 +38,11 @@ T = TypeVar("T", bound=Reset)
 
 class ResetBuilder(ABC, Generic[T]):
     @abstractmethod
-    def __call__(self, mj_model: mujoco.MjModel) -> T:
+    def __call__(self, data: BuilderData) -> T:
         """Builds a reset from a MuJoCo model.
 
         Args:
-            mj_model: The MuJoCo model to build the reset from.
+            data: The data to build the reset from.
 
         Returns:
             A reset that can be applied to a state.

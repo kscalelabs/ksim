@@ -2,13 +2,13 @@
 
 from typing import Collection
 
-import jax
 import jax.numpy as jnp
-import mujoco
 from brax.base import State
 from brax.mjx.base import State as MjxState
 
 from ksim.terminations.base import Termination, TerminationBuilder
+from ksim.utils.data import BuilderData
+from ksim.utils.mujoco import link_names_to_ids
 
 
 class PitchTooGreatTermination(Termination):
@@ -73,8 +73,9 @@ class IllegalContactTermination(Termination):
         if state.contact is None:
             return jnp.zeros_like(state.q[0])
 
+        contact = state.contact
+
         if isinstance(state, MjxState):
-            contact = state.contact
             has_contact = jnp.any(contact.geom[:, :, None] == self.link_ids[None, None, :], axis=(1, 2))
             return jnp.where(has_contact, contact.dist, 1e4).min() <= self.contact_eps
 
@@ -88,11 +89,6 @@ class IllegalContactTerminationBuilder(TerminationBuilder[IllegalContactTerminat
 
         self.link_names = link_names
 
-    def __call__(self, mj_model: mujoco.MjModel) -> IllegalContactTermination:
-        link_names_to_ids = {mj_model.body(i).name: i for i in range(mj_model.nbody)}
-        missing_links = [name for name in self.link_names if name not in link_names_to_ids]
-        if missing_links:
-            available_link_str = "\n".join(link_names_to_ids.keys())
-            raise ValueError(f"Links not found in model: {missing_links}\nAvailable links:\n{available_link_str}")
-        link_ids = jnp.array([link_names_to_ids[name] for name in self.link_names])
+    def __call__(self, data: BuilderData) -> IllegalContactTermination:
+        link_ids = link_names_to_ids(self.link_names, data.model)
         return IllegalContactTermination(link_ids)

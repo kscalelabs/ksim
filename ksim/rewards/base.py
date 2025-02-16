@@ -7,9 +7,11 @@ from typing import Generic, TypeVar
 
 import equinox as eqx
 import jax.numpy as jnp
-import mujoco
 import xax
 from brax.base import State
+from brax.envs.base import State as BraxState
+
+from ksim.utils.data import BuilderData
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +36,22 @@ class Reward(eqx.Module, ABC):
         else:
             logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale)
 
+    def post_accumulate(self, reward: jnp.ndarray) -> jnp.ndarray:
+        """Runs a post-epoch accumulation step.
+
+        This function is called after the reward has been accumulated over the
+        entire epoch. It can be used to normalize the reward, or apply some
+        accumulation function - for example, you might might want to only
+        start providing the reward or penalty after a certain number of steps
+        have passed.
+
+        Args:
+            reward: The accumulated reward over the epoch.
+        """
+        return reward
+
     @abstractmethod
-    def __call__(self, state: State) -> jnp.ndarray: ...
+    def __call__(self, prev_state: BraxState, action: jnp.ndarray, next_state: State) -> jnp.ndarray: ...
 
     @classmethod
     def get_name(cls) -> str:
@@ -51,11 +67,11 @@ T = TypeVar("T", bound=Reward)
 
 class RewardBuilder(ABC, Generic[T]):
     @abstractmethod
-    def __call__(self, mj_model: mujoco.MjModel) -> T:
+    def __call__(self, data: BuilderData) -> T:
         """Builds a reward from a MuJoCo model.
 
         Args:
-            mj_model: The MuJoCo model to build the reward from.
+            data: The data to build the reward from.
 
         Returns:
             A reward that can be applied to a state.

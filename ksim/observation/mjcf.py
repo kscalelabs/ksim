@@ -1,4 +1,4 @@
-"""Defines some useful resets for MJCF environments."""
+"""Defines some useful reset functions for MJCF environments."""
 
 import equinox as eqx
 import jax.numpy as jnp

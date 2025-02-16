@@ -4,7 +4,7 @@ Much of this is referenced from Mujoco Playground.
 """
 
 import logging
-from typing import Sequence, Union
+from typing import Collection, Sequence, Union
 
 import jax
 import jax.numpy as jnp
@@ -91,6 +91,16 @@ def step(
         return data, None
 
     return jax.lax.scan(single_step, data, (), num_substeps)[0]
+
+
+def link_names_to_ids(link_names: Collection[str], model: mujoco.MjModel) -> list[int]:
+    link_names_to_ids = {model.body(i).name: i for i in range(model.nbody)}
+    missing_links = [name for name in link_names if name not in link_names_to_ids]
+    if missing_links:
+        available_link_str = "\n".join(link_names_to_ids.keys())
+        raise ValueError(f"Links not found in model: {missing_links}\nAvailable links:\n{available_link_str}")
+    link_ids = [link_names_to_ids[name] for name in link_names]
+    return sorted(link_ids)
 
 
 def get_sensor_data(

@@ -18,7 +18,7 @@ import xax
 from dpshdl.dataset import Dataset
 from omegaconf import MISSING
 
-from ksim.env.brax import ActionModel, KScaleEnv, KScaleEnvConfig, cast_action_type
+from ksim.env.brax import ActionModel, ActionModelType, KScaleEnv, KScaleEnvConfig, cast_action_type
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +63,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run_environment(
         self,
         state: xax.State | None = None,
-        actions: Literal["random", "zero", "midpoint"] | ActionModel | None = None,
+        actions: ActionModelType | ActionModel | None = None,
     ) -> None:
+        if actions is None:
+            actions = cast_action_type(self.config.default_action_model)
         env = self.get_environment()
         render_name = self.get_render_name(state)
         render_dir = self.exp_dir / "renders" / render_name
         logger.log(xax.LOG_STATUS, "Rendering to %s", render_dir)
-        if actions is None:
-            actions = cast_action_type(self.config.default_action_model)
         env.unroll_trajectory_and_render(
             self.max_steps_per_trajectory,
             render_dir,

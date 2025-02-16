@@ -9,6 +9,7 @@ import optax
 import xax
 from jaxtyping import PRNGKeyArray
 
+from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.env.brax import KScaleEnv
 from ksim.observation.mjcf import (
     BaseAngularVelocityObservation,
@@ -130,6 +131,10 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 BaseAngularVelocityObservation(),
                 JointPositionObservation(),
                 JointVelocityObservation(),
+            ],
+            commands=[
+                LinearVelocityCommand(x_scale=1.0, y_scale=0.0),
+                AngularVelocityCommand(scale=0.0),
             ],
         )
 
