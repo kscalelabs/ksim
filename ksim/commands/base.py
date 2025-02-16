@@ -17,6 +17,7 @@ class Command(eqx.Module, ABC):
     def __call__(self, rng: PRNGKeyArray) -> jnp.ndarray:
         """Gets the command to perform."""
 
+    @eqx.filter_jit
     def update(self, prev_command: jnp.ndarray, rng: PRNGKeyArray, time: jnp.ndarray) -> jnp.ndarray:
         return prev_command
 

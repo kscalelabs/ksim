@@ -133,8 +133,17 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 JointVelocityObservation(),
             ],
             commands=[
-                LinearVelocityCommand(x_scale=1.0, y_scale=0.0, switch_prob=0.2),
-                AngularVelocityCommand(scale=0.0, switch_prob=0.2),
+                LinearVelocityCommand(
+                    x_scale=1.0,
+                    y_scale=0.0,
+                    switch_prob=0.02,
+                    zero_prob=0.3,
+                ),
+                AngularVelocityCommand(
+                    scale=1.0,
+                    switch_prob=0.02,
+                    zero_prob=0.8,
+                ),
             ],
         )
 

@@ -294,7 +294,7 @@ class KScaleEnv(PipelineEnv):
             next_state.metrics[cmd_name] = next_cmd
 
         next_state.metrics["time"] = time + self.config.ctrl_dt
-        next_state.metrics["rng"].at[:].set(rng)
+        next_state.metrics["rng"] = rng
 
         return next_state
 
