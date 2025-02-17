@@ -134,21 +134,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def log_trajectory(self, env: KScaleEnv, trajectory: BraxState) -> None:
         for plot_key, img in env.generate_trajectory_plots(trajectory):
-            self.logger.log_image(plot_key, img, namespace="🤖 traj")
+            self.logger.log_image(plot_key, img, namespace="traj")
 
         frames, fps = env.render_trajectory_video(trajectory)
-        self.logger.log_video("trajectory", frames, fps=fps, namespace="🤖 traj")
+        self.logger.log_video("trajectory", frames, fps=fps, namespace="video")
 
     @eqx.filter_jit
     def get_reward_stats(self, trajectory: BraxState, env: KScaleEnv) -> dict[str, jnp.ndarray]:
         reward_stats: dict[str, jnp.ndarray] = {}
 
-        # Gets the mean rewards.
+        # Gets the reward statistics.
         reward = jnp.where(trajectory.done[..., None], jnp.nan, trajectory.reward)
         for i, key in enumerate(env.rewards.keys()):
             reward_values = reward[..., i : i + 1].astype(jnp.float32)
-            reward_stats[f"{key}/min"] = jnp.nanmin(reward_values)
-            reward_stats[f"{key}/max"] = jnp.nanmax(reward_values)
             reward_stats[f"{key}/mean"] = jnp.nanmean(reward_values)
             reward_stats[f"{key}/std"] = jnp.nanstd(reward_values)
 
@@ -157,7 +155,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def log_trajectory_stats(self, env: KScaleEnv, trajectory: BraxState) -> None:
         stats = self.get_reward_stats(trajectory, env)
         for key, value in stats.items():
-            self.logger.log_scalar(key, value, namespace="🤖 reward")
+            self.logger.log_scalar(key, value, namespace="reward")
 
     @abstractmethod
     def model_update(

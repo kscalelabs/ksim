@@ -468,8 +468,11 @@ class KScaleEnv(PipelineEnv):
         Returns:
             An iterator of (name, image) pairs.
         """
-        raw_trajectory = jax.tree.map(lambda x: np.array(x) if isinstance(x, jnp.ndarray) else x, trajectory)
-        num_steps = len(raw_trajectory.done)
+        num_steps = (~trajectory.done).sum()
+        raw_trajectory = jax.tree.map(
+            lambda x: np.array(x[:num_steps]) if isinstance(x, jnp.ndarray) else x,
+            trajectory,
+        )
         t = np.arange(num_steps) * self.config.ctrl_dt
 
         # Generate command plots
@@ -506,7 +509,7 @@ class KScaleEnv(PipelineEnv):
 
     def render_trajectory_video(self, trajectory: BraxState) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
-        num_steps = len(trajectory.done)
+        num_steps = (~trajectory.done).sum()
         fps = round(1 / self.config.ctrl_dt)
         pipeline_states = [jax.tree.map(lambda arr: arr[i], trajectory.pipeline_state) for i in range(num_steps)]
         frames = np.stack(self.render(pipeline_states, camera=self.config.render_camera), axis=0)
