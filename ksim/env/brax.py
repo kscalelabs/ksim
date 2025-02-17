@@ -61,7 +61,13 @@ def _unique_dict(things: list[tuple[str, T]]) -> OrderedDict[str, T]:
 
 
 class ActionModel(Protocol):
-    def __call__(self, sys: System, state: BraxState, rng: PRNGKeyArray, carry: T) -> tuple[jnp.ndarray, T]: ...
+    def __call__(
+        self,
+        sys: System,
+        state: BraxState,
+        rng: PRNGKeyArray,
+        carry: T,
+    ) -> tuple[jnp.ndarray, T]: ...
 
 
 def get_random_action(
@@ -251,11 +257,11 @@ class KScaleEnv(PipelineEnv):
             reset_data = reset_func(reset_data)
 
         rng, obs_rng = jax.random.split(rng)
-        obs = self.get_observation(pipeline_state, rng)
+        obs = self.get_observation(pipeline_state, obs_rng)
         all_dones = self.get_terminations(pipeline_state)
         all_rewards = OrderedDict([(key, jnp.zeros(())) for key in self.rewards.keys()])
 
-        done = jnp.stack(list(all_dones.values()), axis=-1).any(axis=-1)
+        done = jnp.stack(list(all_dones.values()), axis=-1)
         reward = jnp.stack(list(all_rewards.values()), axis=-1)
 
         metrics = {
@@ -287,7 +293,7 @@ class KScaleEnv(PipelineEnv):
         all_dones = self.get_terminations(pipeline_state)
         all_rewards = self.get_rewards(prev_state, action, pipeline_state)
 
-        done = jnp.stack(list(all_dones.values()), axis=-1).any(axis=-1)
+        done = jnp.stack(list(all_dones.values()), axis=-1)
         reward = jnp.stack(list(all_rewards.values()), axis=-1)
 
         for cmd_name, cmd in self.commands.items():
