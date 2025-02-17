@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import xax
 from brax.base import System
 from brax.envs.base import State as BraxState
-from jaxtyping import PRNGKeyArray, PyTree
+from jaxtyping import PRNGKeyArray
 
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.env.brax import KScaleEnv
@@ -26,81 +26,173 @@ from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import IllegalContactTerminationBuilder
 
 
-class Model(eqx.Module):
-    input_layer: eqx.nn.Linear
-    rnn: eqx.nn.GRUCell
+class RNNCell(eqx.Module):
+    num_inputs: int
+    num_hidden: int
+    num_layers: int
+    num_outputs: int
+
+    rnns: list[eqx.nn.GRUCell]
     output_layer: eqx.nn.Linear
 
     def __init__(
         self,
         num_inputs: int,
-        num_outputs: int,
         num_hidden: int,
+        num_layers: int,
+        num_outputs: int,
         *,
         key: PRNGKeyArray,
     ) -> None:
         super().__init__()
 
-        # Split the PRNG key into four keys for the four layers.
-        key1, key2, key3 = jax.random.split(key, 3)
+        self.num_inputs = num_inputs
+        self.num_hidden = num_hidden
+        self.num_layers = num_layers
+        self.num_outputs = num_outputs
 
-        self.input_layer = eqx.nn.Linear(
-            in_features=num_inputs,
-            out_features=num_hidden,
-            use_bias=True,
-            key=key1,
-        )
+        keys = jax.random.split(key, num_layers + 1)
 
-        self.rnn = eqx.nn.GRUCell(
-            input_size=num_hidden,
-            hidden_size=num_hidden,
-            use_bias=True,
-            key=key2,
-        )
+        self.rnns = [
+            eqx.nn.GRUCell(
+                input_size=num_inputs if i == 0 else num_hidden,
+                hidden_size=num_hidden,
+                use_bias=True,
+                key=keys[i],
+            )
+            for i in range(num_layers)
+        ]
 
         self.output_layer = eqx.nn.Linear(
             in_features=num_hidden,
             out_features=num_outputs,
             use_bias=True,
-            key=key3,
+            key=keys[-1],
         )
 
-    def __call__(self, x_tn: jnp.ndarray) -> jnp.ndarray:
-        x_tn = self.input_layer(x_tn)
+    def __call__(
+        self,
+        x_n: jnp.ndarray,
+        state_ln: jnp.ndarray | None = None,
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        next_state_n_list = []
+        if state_ln is None:
+            state_ln = jnp.zeros((self.num_layers, self.num_hidden))
+        for i, rnn in enumerate(self.rnns):
+            x_n = rnn(x_n, state_ln[i])
+            next_state_n_list.append(x_n)
+        x_n = self.output_layer(x_n)
+        next_state_ln = jnp.stack(next_state_n_list, axis=0)
+        return x_n, next_state_ln
 
-        def scan_fn(state_n: jnp.ndarray, x_n: jnp.ndarray) -> tuple[jnp.ndarray, None]:
-            state_n = self.rnn(x_n, state_n)
-            return state_n, None
 
-        init_state_n = jnp.zeros(self.rnn.hidden_size)
-        x_tn, _ = jax.lax.scan(scan_fn, init_state_n, x_tn)
+class ActorModel(eqx.Module):
+    rnn: RNNCell
 
-        x_tn = self.output_layer(x_tn)
-        return x_tn
+    def __init__(
+        self,
+        num_hidden: int,
+        num_layers: int,
+        *,
+        key: PRNGKeyArray,
+    ) -> None:
+        super().__init__()
+
+        num_joints = 20
+        num_inputs = 2 + 1 + 3 + num_joints + num_joints
+        num_outputs = num_joints
+
+        self.rnn = RNNCell(
+            num_inputs=num_inputs,
+            num_hidden=num_hidden,
+            num_layers=num_layers,
+            num_outputs=num_outputs,
+            key=key,
+        )
+
+    def __call__(
+        self,
+        lin_vel_cmd_2: jnp.ndarray,  # The XY linear velocity command.
+        ang_vel_cmd_1: jnp.ndarray,  # The Z angular velocity command.
+        proj_grav_3: jnp.ndarray,  # The projected gravity vector.
+        joint_pos_j: jnp.ndarray,  # The joint angular positions.
+        joint_vel_j: jnp.ndarray,  # The joint angular velocities.
+        state_ln: jnp.ndarray | None = None,  # The state of the RNN.
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        x_n = jnp.concatenate(
+            [
+                lin_vel_cmd_2,
+                ang_vel_cmd_1,
+                proj_grav_3,
+                joint_pos_j,
+                joint_vel_j,
+            ],
+            axis=-1,
+        )
+
+        x_n, next_state_ln = self.rnn(x_n, state_ln)
+
+        return x_n, next_state_ln
+
+
+class CriticModel(eqx.Module):
+    rnn: RNNCell
+
+    def __init__(
+        self,
+        num_hidden: int,
+        num_layers: int,
+        *,
+        key: PRNGKeyArray,
+    ) -> None:
+        super().__init__()
+
+        num_joints = 20
+        num_inputs = 2 + 1 + 3 + num_joints + num_joints
+        num_outputs = num_joints
+
+        self.rnn = RNNCell(
+            num_inputs=num_inputs,
+            num_hidden=num_hidden,
+            num_layers=num_layers,
+            num_outputs=num_outputs,
+            key=key,
+        )
+
+    def __call__(
+        self,
+        lin_vel_cmd_2: jnp.ndarray,  # The XY linear velocity command.
+        ang_vel_cmd_1: jnp.ndarray,  # The Z angular velocity command.
+        proj_grav_3: jnp.ndarray,  # The projected gravity vector.
+        joint_pos_j: jnp.ndarray,  # The joint angular positions.
+        joint_vel_j: jnp.ndarray,  # The joint angular velocities.
+        state_ln: jnp.ndarray | None = None,  # The state of the RNN.
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        x_n = jnp.concatenate(
+            [
+                lin_vel_cmd_2,
+                ang_vel_cmd_1,
+                proj_grav_3,
+                joint_pos_j,
+                joint_vel_j,
+            ],
+            axis=-1,
+        )
+
+        x_n, next_state_ln = self.rnn(x_n, state_ln)
+
+        return x_n, next_state_ln
 
 
 class ActorCriticModel(eqx.Module):
-    actor: Model
-    critic: Model
+    actor: ActorModel
+    critic: CriticModel
 
-    def __init__(self, num_hidden: int = 512, *, key: PRNGKeyArray) -> None:
+    def __init__(self, actor: ActorModel, critic: CriticModel) -> None:
         super().__init__()
 
-        actor_key, critic_key = jax.random.split(key, 2)
-
-        self.actor = Model(
-            num_inputs=32,
-            num_outputs=32,
-            num_hidden=num_hidden,
-            key=actor_key,
-        )
-
-        self.critic = Model(
-            num_inputs=32,
-            num_outputs=1,
-            num_hidden=num_hidden,
-            key=critic_key,
-        )
+        self.actor = actor
+        self.critic = critic
 
 
 @dataclass
@@ -111,8 +203,10 @@ class KBotWalkingConfig(PPOConfig):
     kd: float = xax.field(value=10.0)
 
     # ML model parameters.
-    actor_hidden_dims: list[int] = xax.field(value=[512, 256, 128])
-    critic_hidden_dims: list[int] = xax.field(value=[512, 256, 128])
+    actor_hidden_dims: int = xax.field(value=512)
+    actor_num_layers: int = xax.field(value=2)
+    critic_hidden_dims: int = xax.field(value=512)
+    critic_num_layers: int = xax.field(value=2)
     init_noise_std: float = xax.field(value=1.0)
 
     # Termination conditions.
@@ -167,7 +261,21 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         )
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
-        return ActorCriticModel(key=key)
+        return ActorCriticModel(
+            actor=ActorModel(
+                num_hidden=self.config.actor_hidden_dims,
+                num_layers=self.config.actor_num_layers,
+                key=key,
+            ),
+            critic=CriticModel(
+                num_hidden=self.config.critic_hidden_dims,
+                num_layers=self.config.critic_num_layers,
+                key=key,
+            ),
+        )
+
+    def get_init_carry(self) -> jnp.ndarray:
+        return jnp.zeros((self.config.actor_num_layers, self.config.actor_hidden_dims))
 
     def get_actor_output(
         self,
@@ -175,18 +283,23 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         sys: System,
         state: BraxState,
         rng: PRNGKeyArray,
-        carry: jnp.ndarray | None,
+        carry: jnp.ndarray,
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        pos = state.obs['base_position_observation']
-        ori = state.obs['base_orientation_observation']
-        lin_vel = state.obs['base_linear_velocity_observation']
-        ang_vel = state.obs['base_angular_velocity_observation']
-        joint_pos = state.obs['joint_position_observation']
-        joint_vel = state.obs['joint_velocity_observation']
+        lin_vel_cmd_2 = state.obs["linear_velocity_command"]
+        ang_vel_cmd_1 = state.obs["angular_velocity_command"]
+        joint_pos_j = state.obs["joint_position_observation"]
+        joint_vel_j = state.obs["joint_velocity_observation"]
 
-        breakpoint()
+        actions_n, next_carry = model.actor(
+            lin_vel_cmd_2=lin_vel_cmd_2,
+            ang_vel_cmd_1=ang_vel_cmd_1,
+            proj_grav_3=jnp.array([0.0, 0.0, -9.81]),
+            joint_pos_j=joint_pos_j,
+            joint_vel_j=joint_vel_j,
+            state_ln=carry,
+        )
 
-        raise NotImplementedError
+        return actions_n, next_carry
 
 
 if __name__ == "__main__":

@@ -1,12 +1,13 @@
 """Defines the default humanoid environment."""
 
 import asyncio
+import io
 import logging
 import pickle as pkl
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Collection, Literal, Protocol, TypeVar, cast, get_args
+from typing import Collection, Iterator, Literal, Protocol, TypeVar, cast, get_args
 
 import equinox as eqx
 import jax
@@ -22,6 +23,7 @@ from kscale import K
 from mujoco_scenes.brax import load_model
 from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING, DictConfig, OmegaConf
+from PIL import Image
 
 from ksim.commands import Command, CommandBuilder
 from ksim.observation.base import Observation, ObservationBuilder
@@ -61,13 +63,7 @@ def _unique_dict(things: list[tuple[str, T]]) -> OrderedDict[str, T]:
 
 
 class ActionModel(Protocol):
-    def __call__(
-        self,
-        sys: System,
-        state: BraxState,
-        rng: PRNGKeyArray,
-        carry: T | None,
-    ) -> tuple[jnp.ndarray, T]: ...
+    def __call__(self, sys: System, state: BraxState, rng: PRNGKeyArray, carry: T) -> tuple[jnp.ndarray, T]: ...
 
 
 def get_random_action(
@@ -365,6 +361,7 @@ class KScaleEnv(PipelineEnv):
         self,
         num_steps: int,
         rng: PRNGKeyArray,
+        init_carry: T,
         model: ActionModel,
     ) -> BraxState:
         """Unrolls a trajectory for num_st eps steps.
@@ -379,25 +376,31 @@ class KScaleEnv(PipelineEnv):
         def identity_fn(
             state: BraxState,
             rng: PRNGKeyArray,
-            carry_model: T | None,
-        ) -> tuple[BraxState, PRNGKeyArray, T | None]:
+            carry_model: T,
+        ) -> tuple[BraxState, PRNGKeyArray, T]:
             # Ensure we return the exact same structure as step_fn
             return (state, rng, carry_model)
 
         def step_fn(
             state: BraxState,
             rng: PRNGKeyArray,
-            carry_model: T | None,
-        ) -> tuple[BraxState, PRNGKeyArray, T | None]:
+            carry_model: T,
+        ) -> tuple[BraxState, PRNGKeyArray, T]:
             rng, step_rng = jax.random.split(rng)
             action, carry_model = model(sys=self.sys, state=state, rng=step_rng, carry=carry_model)
+
+            # Clamps the action to the range of the action space.
+            ctrl_range = self.sys.actuator.ctrl_range
+            ctrl_min, ctrl_max = ctrl_range.T
+            action = jnp.clip(action, ctrl_min, ctrl_max)
+
             next_state = self.step(state, action)
             return (next_state, rng, carry_model)  # Explicitly wrap in tuple
 
         def scan_fn(
-            carry: tuple[BraxState, PRNGKeyArray, T | None],
+            carry: tuple[BraxState, PRNGKeyArray, T],
             _: None,
-        ) -> tuple[tuple[BraxState, PRNGKeyArray, T | None], BraxState]:
+        ) -> tuple[tuple[BraxState, PRNGKeyArray, T], BraxState]:
             state, rng, carry_model = carry
             # Check if done is a scalar or array
             done_condition = state.done.all()
@@ -410,7 +413,7 @@ class KScaleEnv(PipelineEnv):
             return (next_state, rng, carry_model), next_state
 
         # Initialize carry tuple with initial state, RNG, and None for model carry
-        init_carry = (init_state, rng, None)
+        init_carry = (init_state, rng, init_carry)
 
         # Runs the scan function.
         _, states = jax.lax.scan(scan_fn, init_carry, length=num_steps)
@@ -427,6 +430,101 @@ class KScaleEnv(PipelineEnv):
 
         return states
 
+    def _plot_trajectory_data(
+        self,
+        t: np.ndarray,
+        data: np.ndarray,
+        title: str,
+        ylabel: str,
+        labels: list[str] | None = None,
+        figsize: tuple[int, int] = (12, 12),
+    ) -> Image.Image:
+        """Helper function to create a plot and return it as a PIL Image."""
+        plt.figure(figsize=figsize)
+        data_2d = data.reshape(data.shape[0], -1)
+        for j, value in enumerate(data_2d.T):
+            label = labels[j] if labels is not None else f"Component {j}"
+            plt.plot(t, value, label=label)
+        plt.title(title)
+        plt.xlabel("Time (s)")
+        plt.ylabel(ylabel)
+        if labels is not None:
+            plt.legend()
+        plt.tight_layout()
+
+        # Convert to PIL image
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png")
+        plt.close()
+        buf.seek(0)
+        return Image.open(buf)
+
+    def generate_trajectory_plots(
+        self,
+        trajectory: BraxState,
+        figsize: tuple[int, int] = (12, 12),
+    ) -> Iterator[tuple[str, Image.Image]]:
+        """Generate plots for trajectory data and yield (path, image) pairs.
+
+        Args:
+            trajectory: The trajectory to plot.
+            dt: The time step of the trajectory.
+            commands: The commands to plot.
+            rewards: The rewards to plot.
+            observations: The observations to plot.
+            figsize: The size of the figure to plot.
+
+        Returns:
+            An iterator of (name, image) pairs.
+        """
+        raw_trajectory = jax.tree.map(lambda x: np.array(x) if isinstance(x, jnp.ndarray) else x, trajectory)
+        num_steps = len(raw_trajectory.done)
+        t = np.arange(num_steps) * self.config.ctrl_dt
+
+        # Generate command plots
+        for key in self.commands.keys():
+            metric = raw_trajectory.metrics[key]
+            img = self._plot_trajectory_data(
+                t,
+                metric,
+                title=key,
+                ylabel=key,
+                labels=[f"Command {j}" for j in range(metric.shape[-1])],
+                figsize=figsize,
+            )
+            yield f"commands/{key}.png", img
+
+        # Generate reward plots
+        for i, key in enumerate(self.rewards.keys()):
+            reward_data = raw_trajectory.reward[:, i : i + 1].astype(np.float32)
+            img = self._plot_trajectory_data(t, reward_data, title=key, ylabel=key, figsize=figsize)
+            yield f"rewards/{key}.png", img
+
+        # Generate observation plots
+        for key in self.observations.keys():
+            obs = raw_trajectory.obs[key]
+            img = self._plot_trajectory_data(
+                t,
+                obs,
+                title=key,
+                ylabel=key,
+                labels=[f"Observation {j}" for j in range(obs.shape[-1])],
+                figsize=figsize,
+            )
+            yield f"observations/{key}.png", img
+
+    def render_trajectory_video(
+        self,
+        trajectory: BraxState,
+        camera: str | None,
+    ) -> tuple[np.ndarray, int]:
+        """Render trajectory as video frames with computed FPS."""
+        num_steps = len(trajectory.done)
+        fps = round(1 / self.config.ctrl_dt)
+        pipeline_states = [jax.tree.map(lambda arr: arr[i], trajectory.pipeline_state) for i in range(num_steps)]
+        frames = np.stack(self.render(pipeline_states, camera=camera), axis=0)
+        return frames, fps
+
     def unroll_trajectory_and_render(
         self,
         num_steps: int,
@@ -434,96 +532,54 @@ class KScaleEnv(PipelineEnv):
         seed: int = 0,
         camera: str | None = DEFAULT_CAMERA,
         actions: ActionModelType | ActionModel = "zero",
+        init_carry: T | None = None,
         figsize: tuple[int, int] = (12, 12),
     ) -> list[BraxState]:
+        """Main function to unroll trajectory and optionally render results."""
         logger.info("Running test run for %d steps", num_steps)
 
-        # Converts the shorthand function names to callable functions.
+        # Convert action type and run simulation
         if isinstance(actions, str):
             match actions:
                 case "random":
-                    actions = get_random_action
+                    actions, init_carry = get_random_action, None
                 case "zero":
-                    actions = get_zero_action
+                    actions, init_carry = get_zero_action, None
                 case "midpoint":
-                    actions = get_midpoint_action
+                    actions, init_carry = get_midpoint_action, None
                 case _:
                     raise ValueError(f"Invalid action type: {actions}")
         elif not isinstance(actions, ActionModel):
             raise ValueError(f"Invalid action type: {type(actions)}")
 
-        # Run simulation.
+        # Run simulation
         rng = jax.random.PRNGKey(seed)
-        trajectory = self.unroll_trajectory(num_steps, rng, actions)
+        trajectory = self.unroll_trajectory(num_steps, rng, init_carry, actions)
 
-        # Remove all the trajectory states after the episode finished.
+        # Remove states after episode finished
         done = trajectory.done
         done = jnp.pad(done[:-1], (1, 0), mode="constant", constant_values=False)
         trajectory = jax.tree.map(lambda x: x[~done], trajectory)
 
-        # Render if requested.
+        # Handle rendering if requested
         if render_dir is not None:
-            (render_dir := Path(render_dir)).mkdir(parents=True, exist_ok=True)
-            raw_trajectory = jax.tree.map(lambda x: np.array(x) if isinstance(x, jnp.ndarray) else x, trajectory)
+            render_dir = Path(render_dir)
 
-            # Dumps the raw trajectory.
+            # Save raw trajectory
+            render_dir.mkdir(parents=True, exist_ok=True)
             with open(render_dir / "trajectory.pkl", "wb") as f:
+                raw_trajectory = jax.tree.map(lambda x: np.array(x) if isinstance(x, jnp.ndarray) else x, trajectory)
                 pkl.dump(raw_trajectory, f)
 
-            # Plot against real-time.
-            num_steps = len(raw_trajectory.done)
-            t = np.arange(num_steps) * self.config.ctrl_dt
+            # Generate and save plots
+            for plot_key, img in self.generate_trajectory_plots(trajectory, figsize):
+                (full_path := render_dir / plot_key).parent.mkdir(parents=True, exist_ok=True)
+                img.save(full_path)
+                logger.info("Saved %s", full_path)
 
-            # Plots the commands.
-            for i, key in enumerate(self.commands.keys()):
-                plt.figure(figsize=figsize)
-                metric = raw_trajectory.metrics[key]
-                for j, value in enumerate(metric.reshape(metric.shape[0], -1).T):
-                    plt.plot(t, value, label=f"Command {j}")
-                plt.title(key)
-                plt.xlabel("Time (s)")
-                plt.ylabel(key)
-                plt.legend()
-                (render_path := render_dir / "commands" / f"{key}.png").parent.mkdir(parents=True, exist_ok=True)
-                plt.savefig(render_path)
-                plt.tight_layout()
-                plt.close()
-                logger.info("Saved %s", render_path)
-
-            # Plots the rewards.
-            for i, key in enumerate(self.rewards.keys()):
-                plt.figure(figsize=figsize)
-                plt.plot(t, raw_trajectory.reward[:, i].astype(np.float32))
-                plt.title(key)
-                plt.xlabel("Time (s)")
-                plt.ylabel(key)
-                (render_path := render_dir / "rewards" / f"{key}.png").parent.mkdir(parents=True, exist_ok=True)
-                plt.savefig(render_path)
-                plt.tight_layout()
-                plt.close()
-                logger.info("Saved %s", render_path)
-
-            # Plots the observations.
-            for i, key in enumerate(self.observations.keys()):
-                plt.figure(figsize=figsize)
-                obs = raw_trajectory.obs[key]
-                for j, value in enumerate(obs.reshape(obs.shape[0], -1).T):
-                    plt.plot(t, value, label=f"Observation {j}")
-                plt.title(key)
-                plt.xlabel("Time (s)")
-                plt.ylabel(key)
-                plt.legend()
-                (render_path := render_dir / "observations" / f"{key}.png").parent.mkdir(parents=True, exist_ok=True)
-                plt.savefig(render_path)
-                plt.tight_layout()
-                plt.close()
-                logger.info("Saved %s", render_path)
-
-            # Renders a video of the trajectory.
-            render_path = render_dir / "render.mp4"
-            fps = round(1 / self.config.ctrl_dt)
-            pipeline_states = [jax.tree.map(lambda arr: arr[i], trajectory.pipeline_state) for i in range(num_steps)]
-            frames = np.stack(self.render(pipeline_states, camera=camera), axis=0)
-            mediapy.write_video(render_path, frames, fps=fps)
+            # Generate and save video
+            frames, fps = self.render_trajectory_video(trajectory, camera)
+            video_path = render_dir / "render.mp4"
+            mediapy.write_video(video_path, frames, fps=fps)
 
         return trajectory

@@ -16,6 +16,7 @@ from typing import Generic, Literal, TypeVar
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 import xax
 from brax.base import System
@@ -102,13 +103,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
     @eqx.filter_jit
+    def get_init_carry(self) -> T: ...
+
+    @eqx.filter_jit
     def get_actor_output(
         self,
         model: PyTree,
         sys: System,
         state: BraxState,
         rng: PRNGKeyArray,
-        carry: T | None,
+        carry: T,
     ) -> tuple[jnp.ndarray, T]:
         """Runs the model on the given inputs.
 
@@ -129,6 +133,37 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
 
+    def log_trajectory(self, env: KScaleEnv, trajectory: BraxState) -> None:
+        for plot_key, img in env.generate_trajectory_plots(trajectory):
+            self.logger.log_image(plot_key, img, namespace="🤖")
+
+    @eqx.filter_jit
+    def get_trajectory_stats(self, env: KScaleEnv, trajectory: BraxState) -> dict[str, jnp.ndarray]:
+        trajectory_stats: dict[str, jnp.ndarray] = {}
+
+        breakpoint()
+
+        for i, key in enumerate(env.rewards.keys()):
+            reward_data = trajectory.reward[:, i : i + 1].astype(np.float32)
+            reward_data = reward_data[~trajectory.done]
+            trajectory_stats[f"reward/{key}"] = reward_data
+
+        return trajectory_stats
+
+    def log_trajectory_stats(self, env: KScaleEnv, trajectory: BraxState) -> None:
+        stats = self.get_trajectory_stats(env, trajectory)
+        for key, value in stats.items():
+            self.logger.log_scalar(key, value, namespace="🤖")
+
+    @abstractmethod
+    def model_update(
+        self,
+        model: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        trajectory: BraxState,
+    ) -> tuple[PyTree, optax.OptState]: ...
+
     def train_loop(
         self,
         model: PyTree,
@@ -147,38 +182,45 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 trajectory = env.unroll_trajectory(
                     num_steps=self.max_trajectory_steps,
                     rng=step_val_rng,
+                    init_carry=self.get_init_carry(),
                     model=functools.partial(self.get_actor_output, model=model),
                 )
-
-                breakpoint()
 
                 # Perform logging.
                 with self.step_context("write_logs"):
                     state.phase = "valid"
-                    self.log_step(model, valid_batch, output, loss, state)
+                    self.log_state_timers(state)
+                    self.log_trajectory(env, trajectory)
+                    self.log_trajectory_stats(env, trajectory)
+                    self.logger.write(state)
                     state.num_valid_samples += 1
 
             with self.step_context("on_step_start"):
                 state = self.on_step_start(state)
 
+            # Unrolls a trajectory.
             train_rng, step_rng = jax.random.split(train_rng)
             step_rngs = jax.random.split(step_rng, self.config.num_envs)
             trajectories = jax.vmap(
                 functools.partial(
                     env.unroll_trajectory,
                     num_steps=self.max_trajectory_steps,
+                    init_carry=self.get_init_carry(),
                     model=functools.partial(self.get_actor_output, model=model),
                 )
             )(step_rngs)
 
-            breakpoint()
+            # Updates the model on the collected trajectories.
+            with self.step_context("update_state"):
+                model, opt_state = self.model_update(model, optimizer, opt_state, trajectories)
 
-            # Perform logging.
+            # Logs the trajectory statistics.
             with self.step_context("write_logs"):
                 state.phase = "train"
-                self.log_step(model, train_batch, output, loss, state)
+                self.log_state_timers(state)
+                self.log_trajectory_stats(env, trajectories)
+                self.logger.write(state)
                 state.num_steps += 1
-                state.num_samples += self.get_size_of_batch(train_batch) or 0
 
             with self.step_context("on_step_end"):
                 state = self.on_step_end(state)

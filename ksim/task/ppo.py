@@ -9,6 +9,8 @@ import jax
 import jax.numpy as jnp
 import optax
 import xax
+from brax.base import State as BraxState
+from jaxtyping import PyTree
 
 from ksim.task.rl import RLConfig, RLTask
 
@@ -179,3 +181,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             optax.clip_by_global_norm(self.config.max_grad_norm),
             optax.adam(1e-3),
         )
+
+    @eqx.filter_jit
+    def model_update(
+        self,
+        model: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        trajectory: BraxState,
+    ) -> tuple[PyTree, optax.OptState]:
+        # TODO: Implement PPO training.
+        return model, opt_state
