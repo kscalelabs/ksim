@@ -144,7 +144,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         reward_stats: dict[str, jnp.ndarray] = {}
 
         # Gets the reward statistics.
-        reward = jnp.where(trajectory.done.any(axis=-1)[..., None], jnp.nan, trajectory.reward)
+        reward = jnp.where(trajectory.done[..., None], jnp.nan, trajectory.metrics["all_rewards"])
         for i, key in enumerate(env.rewards.keys()):
             reward_values = reward[..., i : i + 1].astype(jnp.float32)
             reward_stats[f"{key}/mean"] = jnp.nanmean(reward_values)
@@ -156,7 +156,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         termination_stats: dict[str, jnp.ndarray] = {}
 
         # Gets the termination statistics.
-        termination = trajectory.done.max(axis=-2).astype(jnp.float32)
+        termination = trajectory.metrics["all_dones"].max(axis=-2).astype(jnp.float32)
         termination = termination.reshape(-1, termination.shape[-1])
         max_ids = termination.argmax(axis=-1)
         for i, key in enumerate(env.terminations.keys()):
@@ -171,8 +171,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_scalar(key, value, namespace="termination")
 
         # Logs the mean episode length.
-        mean_episode_length = (~trajectory.done.any(axis=-1)).sum().astype(jnp.float32).mean()
-        self.logger.log_scalar("mean_episode_length", mean_episode_length, namespace="stats")
+        mean_episode_length_steps = (~trajectory.done).sum(axis=-1).astype(jnp.float32).mean()
+        mean_episode_length_seconds = mean_episode_length_steps * self.config.ctrl_dt
+        self.logger.log_scalar("mean_episode_length", mean_episode_length_seconds, namespace="stats")
 
     @abstractmethod
     def model_update(
@@ -193,7 +194,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
     @eqx.filter_jit
-    def _vmapped_unroll(self, rng: PRNGKeyArray, env: KScaleEnv, model: PyTree, num_envs: int) -> list[BraxState]:
+    def _vmapped_unroll(self, rng: PRNGKeyArray, env: KScaleEnv, model: PyTree, num_envs: int) -> BraxState:
         rngs = jax.random.split(rng, num_envs)
         return jax.vmap(self._single_unroll, in_axes=(0, None, None))(rngs, env, model)
 

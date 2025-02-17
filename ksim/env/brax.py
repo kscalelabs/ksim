@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+STATE_KEY = "state"
+
 
 async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
     async with K() as api:
@@ -268,16 +270,21 @@ class KScaleEnv(PipelineEnv):
         all_dones = self.get_terminations(pipeline_state)
         all_rewards = OrderedDict([(key, jnp.zeros(())) for key in self.rewards.keys()])
 
-        done = jnp.stack(list(all_dones.values()), axis=-1)
-        reward = jnp.stack(list(all_rewards.values()), axis=-1)
+        done = jnp.stack(list(all_dones.values()), axis=-1).any(axis=-1)
+        reward = jnp.stack(list(all_rewards.values()), axis=-1).any(axis=-1)
 
         metrics = {
             "time": jnp.zeros(()),
             "rng": rng,
+            "all_dones": all_dones,
+            "all_rewards": all_rewards,
         }
 
         for cmd_name, cmd in self.commands.items():
             obs[cmd_name] = metrics[cmd_name] = cmd(rng)
+
+        # Concatenate the observations into a single array, for convenience.
+        obs[STATE_KEY] = jnp.concatenate([o.reshape(-1) for o in obs.values()], axis=-1)
 
         return BraxState(
             pipeline_state=pipeline_state,
@@ -308,6 +315,9 @@ class KScaleEnv(PipelineEnv):
             prev_cmd = prev_state.metrics[cmd_name]
             next_cmd = cmd.update(prev_cmd, cmd_rng, time)
             obs[cmd_name] = prev_state.metrics[cmd_name] = next_cmd
+
+        # Concatenate the observations into a single state vector, for convenience.
+        obs[STATE_KEY] = jnp.concatenate([o.reshape(-1) for o in obs.values()], axis=-1)
 
         # Update with the new state.
         next_state = prev_state.tree_replace(
@@ -407,7 +417,7 @@ class KScaleEnv(PipelineEnv):
         ) -> tuple[tuple[BraxState, PRNGKeyArray, T], BraxState]:
             state, rng, carry_model = carry
             # Check if done is a scalar or array
-            done_condition = state.done.any()
+            done_condition = state.done
             next_state, rng, carry_model = jax.lax.cond(
                 done_condition,
                 lambda x: identity_fn(*x),  # Unpack arguments
@@ -563,7 +573,7 @@ class KScaleEnv(PipelineEnv):
         )
 
         # Remove states after episode finished
-        done = trajectory.done.any(axis=-1)
+        done = trajectory.done
         done = jnp.pad(done[:-1], (1, 0), mode="constant", constant_values=False)
         trajectory = jax.tree.map(lambda x: x[~done], trajectory)
 

@@ -12,7 +12,7 @@ from jaxtyping import PRNGKeyArray
 
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.env.brax import KScaleEnv
-from ksim.observation.mjcf import (
+from ksim.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,
@@ -20,8 +20,8 @@ from ksim.observation.mjcf import (
     JointPositionObservation,
     JointVelocityObservation,
 )
-from ksim.resets.mjcf import XYPositionResetBuilder
-from ksim.rewards.mjcf import LinearVelocityZPenalty
+from ksim.resets import XYPositionResetBuilder
+from ksim.rewards import LinearVelocityZPenalty
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import IllegalContactTerminationBuilder
 
@@ -199,8 +199,6 @@ class ActorCriticModel(eqx.Module):
 class KBotWalkingConfig(PPOConfig):
     # Robot model name to use.
     model_name: str = xax.field(value="kbot-v1")
-    kp: float = xax.field(value=100.0)
-    kd: float = xax.field(value=10.0)
 
     # ML model parameters.
     actor_hidden_dims: int = xax.field(value=512)
@@ -210,7 +208,7 @@ class KBotWalkingConfig(PPOConfig):
     init_noise_std: float = xax.field(value=1.0)
 
     # Termination conditions.
-    max_episode_length: float = xax.field(value=20.0)
+    max_episode_length: float = xax.field(value=10.0)
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
 
