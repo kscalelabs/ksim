@@ -133,11 +133,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
 
     def log_trajectory(self, env: KScaleEnv, trajectory: BraxState) -> None:
-        logger.debug("Logging trajectory plots")
         for plot_key, img in env.generate_trajectory_plots(trajectory):
             self.logger.log_image(plot_key, img, namespace="traj")
 
-        logger.debug("Logging trajectory video")
         frames, fps = env.render_trajectory_video(trajectory)
         self.logger.log_video("trajectory", frames, fps=fps, namespace="video")
 
@@ -145,7 +143,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         reward_stats: dict[str, jnp.ndarray] = {}
 
         # Gets the reward statistics.
-        reward = jnp.where(trajectory.done[..., None], jnp.nan, trajectory.reward)
+        reward = jnp.where(trajectory.done.any(axis=-1)[..., None], jnp.nan, trajectory.reward)
         for i, key in enumerate(env.rewards.keys()):
             reward_values = reward[..., i : i + 1].astype(jnp.float32)
             reward_stats[f"{key}/mean"] = jnp.nanmean(reward_values)
@@ -170,6 +168,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_scalar(key, value, namespace="reward")
         for key, value in self.get_termination_stats(trajectory, env).items():
             self.logger.log_scalar(key, value, namespace="termination")
+
+        # Logs the mean episode length.
+        mean_episode_length = (~trajectory.done.any(axis=-1)).sum().astype(jnp.float32).mean()
+        self.logger.log_scalar("mean_episode_length", mean_episode_length, namespace="stats")
 
     @abstractmethod
     def model_update(
@@ -208,56 +210,41 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         while not self.is_training_over(state):
             if self.valid_step_timer.is_valid_step(state):
-                logger.debug("Starting validation step")
                 val_rng, step_val_rng = jax.random.split(val_rng)
                 trajectory = self._single_unroll(step_val_rng, env, model)
 
                 # Perform logging.
-                logger.debug("Finished unrolling validation trajectory, logging trajectory")
                 with self.step_context("write_logs"):
                     state.phase = "valid"
-                    logger.debug("Logging state timers")
                     self.log_state_timers(state)
-                    logger.debug("Logging trajectory")
                     self.log_trajectory(env, trajectory)
-                    logger.debug("Logging trajectory stats")
                     self.log_trajectory_stats(env, trajectory)
-                    logger.debug("Writing state")
                     self.logger.write(state)
                     state.num_valid_samples += 1
 
-            logger.debug("Starting on_step_start")
             with self.step_context("on_step_start"):
                 state = self.on_step_start(state)
 
             # Unrolls a trajectory.
-            logger.debug("Unrolling training trajectory")
             train_rng, step_rng = jax.random.split(train_rng)
             trajectories = self._vmapped_unroll(step_rng, env, model, self.config.num_envs)
 
             # Updates the model on the collected trajectories.
-            # logger.debug("Finished unrolling training trajectory, running model update")
             # with self.step_context("update_state"):
             #     model, opt_state = self.model_update(model, optimizer, opt_state, trajectories)
 
             # Logs the trajectory statistics.
-            logger.debug("Finished model update, logging trajectory stats")
             with self.step_context("write_logs"):
                 state.phase = "train"
-                logger.debug("Logging state timers")
                 self.log_state_timers(state)
-                logger.debug("Logging trajectory stats")
                 self.log_trajectory_stats(env, trajectories)
-                logger.debug("Writing state")
                 self.logger.write(state)
                 state.num_steps += 1
 
-            logger.debug("Starting on_step_end")
             with self.step_context("on_step_end"):
                 state = self.on_step_end(state)
 
             if self.should_checkpoint(state):
-                logger.debug("Saving checkpoint")
                 self.save_checkpoint(model, optimizer, opt_state, state)
 
     def run_training(self) -> None:

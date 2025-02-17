@@ -124,7 +124,7 @@ class KScaleEnvConfig(xax.Config):
         help="The name of the model to use.",
     )
     model_scene: str = xax.field(
-        value="smooth",
+        value="patch",
         help="The scene to use for the model.",
     )
     render_camera: str = xax.field(
@@ -400,7 +400,7 @@ class KScaleEnv(PipelineEnv):
         ) -> tuple[tuple[BraxState, PRNGKeyArray, T], BraxState]:
             state, rng, carry_model = carry
             # Check if done is a scalar or array
-            done_condition = state.done.all()
+            done_condition = state.done.any()
             next_state, rng, carry_model = jax.lax.cond(
                 done_condition,
                 lambda x: identity_fn(*x),  # Unpack arguments
