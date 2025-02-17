@@ -4,7 +4,6 @@ import asyncio
 import io
 import logging
 import pickle as pkl
-from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Collection, Iterator, Literal, Protocol, TypeVar, cast, get_args
@@ -51,8 +50,8 @@ async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
     return mjcf_path
 
 
-def _unique_dict(things: list[tuple[str, T]]) -> OrderedDict[str, T]:
-    return_dict = OrderedDict()
+def _unique_dict(things: list[tuple[str, T]]) -> dict[str, T]:
+    return_dict = {}
     for base_name, thing in things:
         name, idx = base_name, 1
         while name in return_dict:
@@ -268,7 +267,7 @@ class KScaleEnv(PipelineEnv):
         rng, obs_rng = jax.random.split(rng)
         obs = self.get_observation(pipeline_state, obs_rng)
         all_dones = self.get_terminations(pipeline_state)
-        all_rewards = OrderedDict([(key, jnp.zeros(())) for key in self.rewards.keys()])
+        all_rewards = {key: jnp.zeros(()) for key in self.rewards.keys()}
 
         done = jnp.stack(list(all_dones.values()), axis=-1).any(axis=-1)
         reward = jnp.stack(list(all_rewards.values()), axis=-1).any(axis=-1)
@@ -339,8 +338,8 @@ class KScaleEnv(PipelineEnv):
         self,
         pipeline_state: State,
         rng: PRNGKeyArray,
-    ) -> OrderedDict[str, jnp.ndarray]:
-        observations: OrderedDict[str, jnp.ndarray] = OrderedDict()
+    ) -> dict[str, jnp.ndarray]:
+        observations: dict[str, jnp.ndarray] = {}
         for observation_name, observation in self.observations.items():
             rng, obs_rng = jax.random.split(rng)
             observation_value = observation(pipeline_state)
@@ -354,16 +353,16 @@ class KScaleEnv(PipelineEnv):
         prev_state: BraxState,
         action: jnp.ndarray,
         pipeline_state: State,
-    ) -> OrderedDict[str, jnp.ndarray]:
-        rewards: OrderedDict[str, jnp.ndarray] = OrderedDict()
+    ) -> dict[str, jnp.ndarray]:
+        rewards: dict[str, jnp.ndarray] = {}
         for reward_name, reward in self.rewards.items():
             reward_val = reward(prev_state, action, pipeline_state)
             rewards[reward_name] = reward_val
         return rewards
 
     @eqx.filter_jit
-    def get_terminations(self, pipeline_state: State) -> OrderedDict[str, jnp.ndarray]:
-        terminations: OrderedDict[str, jnp.ndarray] = OrderedDict()
+    def get_terminations(self, pipeline_state: State) -> dict[str, jnp.ndarray]:
+        terminations: dict[str, jnp.ndarray] = {}
         for termination_name, termination in self.terminations.items():
             term_val = termination(pipeline_state)
             assert term_val.shape == (), f"Termination {termination_name} must be a scalar, got {term_val.shape}"
