@@ -33,17 +33,15 @@ class XYPositionReset(Reset):
         self.hfield_data = jnp.array(hfield_data)
 
     def __call__(self, data: ResetData) -> ResetData:
-        x, y, _, _ = self.bounds
+        x, y, ztop, _ = self.bounds
 
-        minx = x * -0.5 * (1.0 - self.padding_prct)
-        maxx = x * 0.5 * (1.0 - self.padding_prct)
-        miny = y * -0.5 * (1.0 - self.padding_prct)
-        maxy = y * 0.5 * (1.0 - self.padding_prct)
+        prct = 1.0 - self.padding_prct
+        x, y = x * prct, y * prct
 
         # Generate random position
         rng, keyx, keyy = jax.random.split(data.rng, 3)
-        dx = jax.random.uniform(keyx, (1,), minval=minx, maxval=maxx)
-        dy = jax.random.uniform(keyy, (1,), minval=miny, maxval=maxy)
+        dx = jax.random.uniform(keyx, (1,), minval=-x, maxval=x)
+        dy = jax.random.uniform(keyy, (1,), minval=-y, maxval=y)
 
         # Update position while maintaining small height above ground
         qpos_j = data.state.q
@@ -52,12 +50,11 @@ class XYPositionReset(Reset):
 
         # Make sure the Z position is above the ground.
         z = self.hfield_data[dx.astype(int), dy.astype(int)]
-        qpos_j = qpos_j.at[2:3].set(z)
+        qpos_j = qpos_j.at[2:3].set(z + ztop)
 
-        return ResetData(
-            rng=rng,
-            state=data.state.replace(q=qpos_j),
-        )
+        data.state = data.state.replace(q=qpos_j)
+        data.rng = rng
+        return data
 
 
 class XYPositionResetBuilder(ResetBuilder[XYPositionReset]):

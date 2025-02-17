@@ -255,10 +255,14 @@ class KScaleEnv(PipelineEnv):
         q = self.sys.init_q
         qd = jnp.zeros(self.sys.qd_size())
         pipeline_state = self.pipeline_init(q, qd)
+
+        # Applies resets to the pipeline state.
         reset_data = ResetData(rng=rng, state=pipeline_state)
         for reset_func in self.resets.values():
             reset_data = reset_func(reset_data)
+        pipeline_state = reset_data.state
 
+        # Gets the observations, rewards, and terminations.
         rng, obs_rng = jax.random.split(rng)
         obs = self.get_observation(pipeline_state, obs_rng)
         all_dones = self.get_terminations(pipeline_state)
