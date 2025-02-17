@@ -13,8 +13,8 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-import mediapy
 import numpy as np
+import PIL.Image
 import xax
 from brax.base import State, System
 from brax.envs.base import PipelineEnv, State as BraxState
@@ -23,7 +23,7 @@ from kscale import K
 from mujoco_scenes.brax import load_model
 from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING, DictConfig, OmegaConf
-from PIL import Image
+from PIL.Image import Image as PILImage
 
 from ksim.commands import Command, CommandBuilder
 from ksim.observation.base import Observation, ObservationBuilder
@@ -35,8 +35,6 @@ from ksim.utils.data import BuilderData
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-DEFAULT_CAMERA = "tracking_camera"
 
 
 async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
@@ -123,6 +121,10 @@ class KScaleEnvConfig(xax.Config):
         value="smooth",
         help="The scene to use for the model.",
     )
+    render_camera: str = xax.field(
+        value="tracking_camera",
+        help="The camera to use for rendering.",
+    )
 
     # Environment configuration options.
     dt: float = xax.field(
@@ -156,17 +158,6 @@ class KScaleEnvConfig(xax.Config):
     ignore_cached_urdf: bool = xax.field(
         value=False,
         help="Whether to ignore the cached URDF.",
-    )
-
-    # Additional environment information. This is populated by the environment
-    # when it is created and is only kept here for logging purposes.
-    body_name_to_idx: dict[str, int] | None = xax.field(
-        value=None,
-        help="A mapping from body names to indices.",
-    )
-    joint_name_to_idx: dict[str, int] | None = xax.field(
-        value=None,
-        help="A mapping from joint names to indices.",
     )
 
 
@@ -359,8 +350,8 @@ class KScaleEnv(PipelineEnv):
     @eqx.filter_jit
     def unroll_trajectory(
         self,
-        num_steps: int,
         rng: PRNGKeyArray,
+        num_steps: int,
         init_carry: T,
         model: ActionModel,
     ) -> BraxState:
@@ -438,7 +429,7 @@ class KScaleEnv(PipelineEnv):
         ylabel: str,
         labels: list[str] | None = None,
         figsize: tuple[int, int] = (12, 12),
-    ) -> Image.Image:
+    ) -> PILImage:
         """Helper function to create a plot and return it as a PIL Image."""
         plt.figure(figsize=figsize)
         data_2d = data.reshape(data.shape[0], -1)
@@ -457,13 +448,13 @@ class KScaleEnv(PipelineEnv):
         plt.savefig(buf, format="png")
         plt.close()
         buf.seek(0)
-        return Image.open(buf)
+        return PIL.Image.open(buf)
 
     def generate_trajectory_plots(
         self,
         trajectory: BraxState,
         figsize: tuple[int, int] = (12, 12),
-    ) -> Iterator[tuple[str, Image.Image]]:
+    ) -> Iterator[tuple[str, PILImage]]:
         """Generate plots for trajectory data and yield (path, image) pairs.
 
         Args:
@@ -513,16 +504,12 @@ class KScaleEnv(PipelineEnv):
             )
             yield f"observations/{key}.png", img
 
-    def render_trajectory_video(
-        self,
-        trajectory: BraxState,
-        camera: str | None,
-    ) -> tuple[np.ndarray, int]:
+    def render_trajectory_video(self, trajectory: BraxState) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
         num_steps = len(trajectory.done)
         fps = round(1 / self.config.ctrl_dt)
         pipeline_states = [jax.tree.map(lambda arr: arr[i], trajectory.pipeline_state) for i in range(num_steps)]
-        frames = np.stack(self.render(pipeline_states, camera=camera), axis=0)
+        frames = np.stack(self.render(pipeline_states, camera=self.config.render_camera), axis=0)
         return frames, fps
 
     def unroll_trajectory_and_render(
@@ -530,7 +517,6 @@ class KScaleEnv(PipelineEnv):
         num_steps: int,
         render_dir: str | Path | None = None,
         seed: int = 0,
-        camera: str | None = DEFAULT_CAMERA,
         actions: ActionModelType | ActionModel = "zero",
         init_carry: T | None = None,
         figsize: tuple[int, int] = (12, 12),
@@ -554,7 +540,7 @@ class KScaleEnv(PipelineEnv):
 
         # Run simulation
         rng = jax.random.PRNGKey(seed)
-        trajectory = self.unroll_trajectory(num_steps, rng, init_carry, actions)
+        trajectory = self.unroll_trajectory(rng, num_steps, init_carry, actions)
 
         # Remove states after episode finished
         done = trajectory.done
@@ -578,8 +564,10 @@ class KScaleEnv(PipelineEnv):
                 logger.info("Saved %s", full_path)
 
             # Generate and save video
-            frames, fps = self.render_trajectory_video(trajectory, camera)
-            video_path = render_dir / "render.mp4"
-            mediapy.write_video(video_path, frames, fps=fps)
+            frames, fps = self.render_trajectory_video(trajectory)
+            video_path = render_dir / "render.gif"
+            images = [PIL.Image.fromarray(frame) for frame in frames]
+            images[0].save(video_path, save_all=True, append_images=images[1:], duration=int(1000 / fps), loop=0)
+            logger.info("Saved video to %s", video_path)
 
         return trajectory

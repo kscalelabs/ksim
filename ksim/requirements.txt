@@ -12,6 +12,3 @@ mujoco-mjx
 mujoco-scenes
 optax
 xax
-
-# Rendering
-mediapy

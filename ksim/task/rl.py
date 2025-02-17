@@ -16,7 +16,6 @@ from typing import Generic, Literal, TypeVar
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
 import xax
 from brax.base import System
@@ -137,21 +136,31 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         for plot_key, img in env.generate_trajectory_plots(trajectory):
             self.logger.log_image(plot_key, img, namespace="🤖")
 
+        frames, fps = env.render_trajectory_video(trajectory)
+        self.logger.log_video("trajectory", frames, fps=fps, namespace="🤖")
+
     @eqx.filter_jit
-    def get_trajectory_stats(self, env: KScaleEnv, trajectory: BraxState) -> dict[str, jnp.ndarray]:
+    def get_trajectory_stats(self, trajectory: BraxState, env: KScaleEnv) -> dict[str, jnp.ndarray]:
         trajectory_stats: dict[str, jnp.ndarray] = {}
 
-        breakpoint()
-
+        # Gets the mean rewards.
+        reward = jnp.where(trajectory.done[:, None], jnp.nan, trajectory.reward)
         for i, key in enumerate(env.rewards.keys()):
-            reward_data = trajectory.reward[:, i : i + 1].astype(np.float32)
-            reward_data = reward_data[~trajectory.done]
-            trajectory_stats[f"reward/{key}"] = reward_data
+            reward_values = reward[:, i : i + 1].astype(jnp.float32)
+            trajectory_stats[f"reward/{key}/min"] = jnp.nanmin(reward_values)
+            trajectory_stats[f"reward/{key}/max"] = jnp.nanmax(reward_values)
+            trajectory_stats[f"reward/{key}/mean"] = jnp.nanmean(reward_values)
+            trajectory_stats[f"reward/{key}/std"] = jnp.nanstd(reward_values)
 
         return trajectory_stats
 
     def log_trajectory_stats(self, env: KScaleEnv, trajectory: BraxState) -> None:
-        stats = self.get_trajectory_stats(env, trajectory)
+        stats = self.get_trajectory_stats(trajectory, env)
+        for key, value in stats.items():
+            self.logger.log_scalar(key, value, namespace="🤖")
+
+    def log_trajectories_stats(self, env: KScaleEnv, trajectories: BraxState) -> None:
+        stats = jax.vmap(functools.partial(self.get_trajectory_stats, env=env))(trajectories)
         for key, value in stats.items():
             self.logger.log_scalar(key, value, namespace="🤖")
 
@@ -218,7 +227,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             with self.step_context("write_logs"):
                 state.phase = "train"
                 self.log_state_timers(state)
-                self.log_trajectory_stats(env, trajectories)
+                self.log_trajectories_stats(env, trajectories)
                 self.logger.write(state)
                 state.num_steps += 1
 
