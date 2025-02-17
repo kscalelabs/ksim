@@ -50,15 +50,17 @@ async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
     return mjcf_path
 
 
-def _unique_dict(things: list[tuple[str, T]]) -> dict[str, T]:
-    return_dict = {}
+def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
+    names: set[str] = set()
+    return_list: list[tuple[str, T]] = []
     for base_name, thing in things:
         name, idx = base_name, 1
-        while name in return_dict:
+        while name in names:
             idx += 1
             name = f"{base_name}_{idx}"
-        return_dict[name] = thing
-    return return_dict
+        names.add(name)
+        return_list.append((name, thing))
+    return return_list
 
 
 class ActionModel(Protocol):
@@ -219,11 +221,11 @@ class KScaleEnv(PipelineEnv):
         commands_impl = [c(data) if isinstance(c, CommandBuilder) else c for c in commands]
 
         # Creates dictionaries of the unique terminations, resets, rewards, and observations.
-        self.terminations = _unique_dict([(term.termination_name, term) for term in terminations_impl])
-        self.resets = _unique_dict([(reset.reset_name, reset) for reset in resets_impl])
-        self.rewards = _unique_dict([(reward.reward_name, reward) for reward in rewards_impl])
-        self.observations = _unique_dict([(obs.observation_name, obs) for obs in observations_impl])
-        self.commands = _unique_dict([(cmd.command_name, cmd) for cmd in commands_impl])
+        self.terminations = _unique_list([(term.termination_name, term) for term in terminations_impl])
+        self.resets = _unique_list([(reset.reset_name, reset) for reset in resets_impl])
+        self.rewards = _unique_list([(reward.reward_name, reward) for reward in rewards_impl])
+        self.observations = _unique_list([(obs.observation_name, obs) for obs in observations_impl])
+        self.commands = _unique_list([(cmd.command_name, cmd) for cmd in commands_impl])
 
         logger.info("Converting model to Brax system")
         sys = load_model(mj_model)
@@ -259,18 +261,20 @@ class KScaleEnv(PipelineEnv):
 
         # Applies resets to the pipeline state.
         reset_data = ResetData(rng=rng, state=pipeline_state)
-        for reset_func in self.resets.values():
+        for _, reset_func in self.resets:
             reset_data = reset_func(reset_data)
         pipeline_state = reset_data.state
 
         # Gets the observations, rewards, and terminations.
         rng, obs_rng = jax.random.split(rng)
         obs = self.get_observation(pipeline_state, obs_rng)
-        all_dones = self.get_terminations(pipeline_state)
-        all_rewards = {key: jnp.zeros(()) for key in self.rewards.keys()}
+        all_dones_with_names = self.get_terminations(pipeline_state)
+        all_rewards_with_names = [(key, jnp.zeros(())) for key, _ in self.rewards]
 
-        done = jnp.stack(list(all_dones.values()), axis=-1).any(axis=-1)
-        reward = jnp.stack(list(all_rewards.values()), axis=-1).any(axis=-1)
+        all_dones = jnp.stack([v for _, v in all_dones_with_names], axis=-1)
+        all_rewards = jnp.stack([v for _, v in all_rewards_with_names], axis=-1)
+        done = all_dones.any(axis=-1)
+        reward = all_rewards.sum(axis=-1)
 
         metrics = {
             "time": jnp.zeros(()),
@@ -279,15 +283,17 @@ class KScaleEnv(PipelineEnv):
             "all_rewards": all_rewards,
         }
 
-        for cmd_name, cmd in self.commands.items():
-            obs[cmd_name] = metrics[cmd_name] = cmd(rng)
+        for cmd_name, cmd in self.commands:
+            cmd_val = cmd(rng)
+            obs.append((cmd_name, cmd_val))
+            metrics[cmd_name] = cmd_val
 
         # Concatenate the observations into a single array, for convenience.
-        obs[STATE_KEY] = jnp.concatenate([o.reshape(-1) for o in obs.values()], axis=-1)
+        obs.append((STATE_KEY, jnp.concatenate([o.reshape(-1) for _, o in obs], axis=-1)))
 
         return BraxState(
             pipeline_state=pipeline_state,
-            obs=obs,
+            obs={k: v for k, v in obs},
             reward=reward,
             done=done,
             metrics=metrics,
@@ -303,26 +309,29 @@ class KScaleEnv(PipelineEnv):
 
         rng, obs_rng = jax.random.split(rng)
         obs = self.get_observation(pipeline_state, obs_rng)
-        all_dones = self.get_terminations(pipeline_state)
-        all_rewards = self.get_rewards(prev_state, action, pipeline_state)
+        all_dones_with_names = self.get_terminations(pipeline_state)
+        all_rewards_with_names = self.get_rewards(prev_state, action, pipeline_state)
 
-        done = jnp.stack(list(all_dones.values()), axis=-1)
-        reward = jnp.stack(list(all_rewards.values()), axis=-1)
+        all_dones = jnp.stack([v for _, v in all_dones_with_names], axis=-1)
+        all_rewards = jnp.stack([v for _, v in all_rewards_with_names], axis=-1)
+        done = all_dones.any(axis=-1)
+        reward = all_rewards.sum(axis=-1)
 
-        for cmd_name, cmd in self.commands.items():
+        for cmd_name, cmd in self.commands:
             rng, cmd_rng = jax.random.split(rng)
             prev_cmd = prev_state.metrics[cmd_name]
             next_cmd = cmd.update(prev_cmd, cmd_rng, time)
-            obs[cmd_name] = prev_state.metrics[cmd_name] = next_cmd
+            obs.append((cmd_name, next_cmd))
+            prev_state.metrics[cmd_name] = next_cmd
 
         # Concatenate the observations into a single state vector, for convenience.
-        obs[STATE_KEY] = jnp.concatenate([o.reshape(-1) for o in obs.values()], axis=-1)
+        obs.append((STATE_KEY, jnp.concatenate([o.reshape(-1) for _, o in obs], axis=-1)))
 
         # Update with the new state.
         next_state = prev_state.tree_replace(
             {
                 "pipeline_state": pipeline_state,
-                "obs": obs,
+                "obs": {k: v for k, v in obs},
                 "reward": reward,
                 "done": done,
             },
@@ -330,6 +339,8 @@ class KScaleEnv(PipelineEnv):
 
         next_state.metrics["time"] = time + self.config.ctrl_dt
         next_state.metrics["rng"] = rng
+        next_state.metrics["all_dones"] = all_dones
+        next_state.metrics["all_rewards"] = all_rewards
 
         return next_state
 
@@ -338,13 +349,13 @@ class KScaleEnv(PipelineEnv):
         self,
         pipeline_state: State,
         rng: PRNGKeyArray,
-    ) -> dict[str, jnp.ndarray]:
-        observations: dict[str, jnp.ndarray] = {}
-        for observation_name, observation in self.observations.items():
+    ) -> list[tuple[str, jnp.ndarray]]:
+        observations: list[tuple[str, jnp.ndarray]] = []
+        for observation_name, observation in self.observations:
             rng, obs_rng = jax.random.split(rng)
             observation_value = observation(pipeline_state)
             observation_value = observation.add_noise(observation_value, obs_rng)
-            observations[observation_name] = observation_value
+            observations.append((observation_name, observation_value))
         return observations
 
     @eqx.filter_jit
@@ -353,20 +364,20 @@ class KScaleEnv(PipelineEnv):
         prev_state: BraxState,
         action: jnp.ndarray,
         pipeline_state: State,
-    ) -> dict[str, jnp.ndarray]:
-        rewards: dict[str, jnp.ndarray] = {}
-        for reward_name, reward in self.rewards.items():
-            reward_val = reward(prev_state, action, pipeline_state)
-            rewards[reward_name] = reward_val
+    ) -> list[tuple[str, jnp.ndarray]]:
+        rewards: list[tuple[str, jnp.ndarray]] = []
+        for reward_name, reward in self.rewards:
+            reward_val = reward(prev_state, action, pipeline_state) * reward.scale
+            rewards.append((reward_name, reward_val))
         return rewards
 
     @eqx.filter_jit
-    def get_terminations(self, pipeline_state: State) -> dict[str, jnp.ndarray]:
-        terminations: dict[str, jnp.ndarray] = {}
-        for termination_name, termination in self.terminations.items():
+    def get_terminations(self, pipeline_state: State) -> list[tuple[str, jnp.ndarray]]:
+        terminations: list[tuple[str, jnp.ndarray]] = []
+        for termination_name, termination in self.terminations:
             term_val = termination(pipeline_state)
             assert term_val.shape == (), f"Termination {termination_name} must be a scalar, got {term_val.shape}"
-            terminations[termination_name] = term_val
+            terminations.append((termination_name, term_val))
         return terminations
 
     @eqx.filter_jit
@@ -432,13 +443,9 @@ class KScaleEnv(PipelineEnv):
         _, states = jax.lax.scan(scan_fn, init_carry, length=num_steps)
 
         # Apply post_accumulate and scale to rewards more efficiently
-        rewards = jnp.stack(
-            [
-                reward_fn.post_accumulate(states.reward[:, i]) * reward_fn.scale
-                for i, reward_fn in enumerate(self.rewards.values())
-            ],
-            axis=1,
-        )
+        all_rewards = states.metrics["all_rewards"]
+        reward_list = [reward_fn.post_accumulate(all_rewards[:, i]) for i, (_, reward_fn) in enumerate(self.rewards)]
+        rewards = jnp.stack(reward_list, axis=1)
         states = states.tree_replace({"reward": rewards})
 
         return states
@@ -498,7 +505,7 @@ class KScaleEnv(PipelineEnv):
         t = np.arange(num_steps) * self.config.ctrl_dt
 
         # Generate command plots
-        for key in self.commands.keys():
+        for key, _ in self.commands:
             metric = raw_trajectory.metrics[key]
             img = self._plot_trajectory_data(
                 t,
@@ -511,13 +518,13 @@ class KScaleEnv(PipelineEnv):
             yield f"commands/{key}.png", img
 
         # Generate reward plots
-        for i, key in enumerate(self.rewards.keys()):
+        for i, (key, _) in enumerate(self.rewards):
             reward_data = raw_trajectory.reward[:, i : i + 1].astype(np.float32)
             img = self._plot_trajectory_data(t, reward_data, title=key, ylabel=key, figsize=figsize)
             yield f"rewards/{key}.png", img
 
         # Generate observation plots
-        for key in self.observations.keys():
+        for key, _ in self.observations:
             obs = raw_trajectory.obs[key]
             img = self._plot_trajectory_data(
                 t,
