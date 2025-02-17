@@ -20,7 +20,7 @@ from ksim.observation.mjcf import (
     JointPositionObservation,
     JointVelocityObservation,
 )
-from ksim.resets.mjcf import XYPositionReset
+from ksim.resets.mjcf import XYPositionResetBuilder
 from ksim.rewards.mjcf import LinearVelocityZPenalty
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import IllegalContactTerminationBuilder
@@ -232,7 +232,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 ),
             ],
             resets=[
-                XYPositionReset(x_range=(-0.5, 0.5), y_range=(-0.5, 0.5)),
+                XYPositionResetBuilder(),
             ],
             rewards=[
                 LinearVelocityZPenalty(scale=-1.0),

@@ -70,6 +70,7 @@ class ActionModel(Protocol):
     ) -> tuple[jnp.ndarray, T]: ...
 
 
+@eqx.filter_jit
 def get_random_action(
     sys: System,
     state: BraxState,
@@ -83,6 +84,7 @@ def get_random_action(
     return ctrl, None
 
 
+@eqx.filter_jit
 def get_midpoint_action(
     sys: System,
     state: BraxState,
@@ -95,6 +97,7 @@ def get_midpoint_action(
     return ctrl, None
 
 
+@eqx.filter_jit
 def get_zero_action(
     sys: System,
     state: BraxState,
@@ -523,9 +526,9 @@ class KScaleEnv(PipelineEnv):
 
     def unroll_trajectory_and_render(
         self,
+        rng: PRNGKeyArray,
         num_steps: int,
         render_dir: str | Path | None = None,
-        seed: int = 0,
         actions: ActionModelType | ActionModel = "zero",
         init_carry: T | None = None,
         figsize: tuple[int, int] = (12, 12),
@@ -548,11 +551,15 @@ class KScaleEnv(PipelineEnv):
             raise ValueError(f"Invalid action type: {type(actions)}")
 
         # Run simulation
-        rng = jax.random.PRNGKey(seed)
-        trajectory = self.unroll_trajectory(rng, num_steps, init_carry, actions)
+        trajectory = self.unroll_trajectory(
+            rng=rng,
+            num_steps=num_steps,
+            init_carry=init_carry,
+            model=actions,
+        )
 
         # Remove states after episode finished
-        done = trajectory.done
+        done = trajectory.done.any(axis=-1)
         done = jnp.pad(done[:-1], (1, 0), mode="constant", constant_values=False)
         trajectory = jax.tree.map(lambda x: x[~done], trajectory)
 

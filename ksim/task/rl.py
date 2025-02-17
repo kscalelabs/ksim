@@ -90,14 +90,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> None:
         if actions is None:
             actions = cast_action_type(self.config.default_action_model)
+        rng = self.prng_key()
         env = self.get_environment()
         render_name = self.get_render_name(state)
         render_dir = self.exp_dir / "renders" / render_name
         logger.log(xax.LOG_STATUS, "Rendering to %s", render_dir)
         env.unroll_trajectory_and_render(
-            self.max_steps_per_trajectory,
-            render_dir,
-            seed=self.config.random_seed,
+            rng=rng,
+            num_steps=self.max_steps_per_trajectory,
+            render_dir=render_dir,
             actions=actions,
         )
 

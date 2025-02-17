@@ -2,18 +2,20 @@
 
 import functools
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 import equinox as eqx
+import jax
 import xax
 from brax.base import State
-from flax import struct
 from jaxtyping import PRNGKeyArray
 
 from ksim.utils.data import BuilderData
 
 
-@struct.dataclass
+@jax.tree_util.register_dataclass
+@dataclass
 class ResetData:
     rng: PRNGKeyArray
     state: State

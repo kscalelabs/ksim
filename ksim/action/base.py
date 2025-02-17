@@ -1,8 +1,11 @@
 """Defines the base action class."""
 
-from flax import struct
+from dataclasses import dataclass
+
+import jax
 
 
-@struct.dataclass
+@jax.tree_util.register_dataclass
+@dataclass
 class Action:
     pass
