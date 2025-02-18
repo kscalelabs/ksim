@@ -280,18 +280,18 @@ class KScaleEnv(PipelineEnv):
         )
 
         # Builds the terminations, resets, rewards, and observations.
-        terminations_impl = [t(data) if isinstance(t, TerminationBuilder) else t for t in terminations]
-        resets_impl = [r(data) if isinstance(r, ResetBuilder) else r for r in resets]
-        rewards_impl = [r(data) if isinstance(r, RewardBuilder) else r for r in rewards]
-        observations_impl = [o(data) if isinstance(o, ObservationBuilder) else o for o in observations]
-        commands_impl = [c(data) if isinstance(c, CommandBuilder) else c for c in commands]
+        terminations_v: list[Termination] = [t(data) if isinstance(t, TerminationBuilder) else t for t in terminations]
+        resets_v: list[Reset] = [r(data) if isinstance(r, ResetBuilder) else r for r in resets]
+        rewards_v: list[Reward] = [r(data) if isinstance(r, RewardBuilder) else r for r in rewards]
+        observations_v: list[Observation] = [o(data) if isinstance(o, ObservationBuilder) else o for o in observations]
+        commands_v: list[Command] = [c(data) if isinstance(c, CommandBuilder) else c for c in commands]
 
         # Creates dictionaries of the unique terminations, resets, rewards, and observations.
-        self.terminations = _unique_list([(term.termination_name, term) for term in terminations_impl])
-        self.resets = _unique_list([(reset.reset_name, reset) for reset in resets_impl])
-        self.rewards = _unique_list([(reward.reward_name, reward) for reward in rewards_impl])
-        self.observations = _unique_list([(obs.observation_name, obs) for obs in observations_impl])
-        self.commands = _unique_list([(cmd.command_name, cmd) for cmd in commands_impl])
+        self.terminations = _unique_list([(term.termination_name, term) for term in terminations_v])
+        self.resets = _unique_list([(reset.reset_name, reset) for reset in resets_v])
+        self.rewards = _unique_list([(reward.reward_name, reward) for reward in rewards_v])
+        self.observations = _unique_list([(obs.observation_name, obs) for obs in observations_v])
+        self.commands = _unique_list([(cmd.command_name, cmd) for cmd in commands_v])
 
         logger.info("Converting model to Brax system")
         sys = load_model(mj_model)
@@ -444,8 +444,8 @@ class KScaleEnv(PipelineEnv):
 
         next_state.info["time"] = time + self.config.ctrl_dt
         next_state.info["rng"] = rng
-        next_state.info["all_dones"] = all_dones
-        next_state.info["all_rewards"] = all_rewards
+        next_state.info["all_dones"] = {k: v for k, v in all_dones}
+        next_state.info["all_rewards"] = {k: v for k, v in all_rewards}
 
         return next_state
 
@@ -551,7 +551,7 @@ class KScaleEnv(PipelineEnv):
 
         # Apply post_accumulate and scale to rewards more efficiently
         all_rewards = states.info["all_rewards"]
-        reward_list = [reward_fn.post_accumulate(all_rewards[:, i]) for i, (_, reward_fn) in enumerate(self.rewards)]
+        reward_list = [reward_fn.post_accumulate(all_rewards[name]) for name, reward_fn in self.rewards]
         rewards = jnp.stack(reward_list, axis=1)
         states = states.tree_replace({"reward": rewards})
 
