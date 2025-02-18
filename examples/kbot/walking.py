@@ -198,7 +198,7 @@ class ActorCriticModel(eqx.Module):
 @dataclass
 class KBotWalkingConfig(PPOConfig):
     # Robot model name to use.
-    model_name: str = xax.field(value="kbot-v1")
+    model_name: str = xax.field(value="kbot-v1-feet")
 
     # ML model parameters.
     actor_hidden_dims: int = xax.field(value=512)

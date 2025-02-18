@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Collection, Iterator, Literal, Protocol, TypeVar, cast, get_args
 
+import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -19,6 +20,7 @@ from brax.base import State, System
 from brax.envs.base import PipelineEnv, State as BraxState
 from jaxtyping import PRNGKeyArray
 from kscale import K
+from kscale.web.utils import get_robots_dir, should_refresh_file
 from mujoco_scenes.brax import load_model
 from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING, DictConfig, OmegaConf
@@ -38,6 +40,18 @@ T = TypeVar("T")
 STATE_KEY = "state"
 
 
+@dataclass
+class ActuatorMetadata:
+    kp: float
+    kd: float
+
+
+@dataclass
+class ModelMetadata:
+    actuators: dict[str, ActuatorMetadata]
+    control_frequency: float
+
+
 async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
     async with K() as api:
         urdf_dir = await api.download_and_extract_urdf(model_name, cache=cache)
@@ -48,6 +62,41 @@ async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
         raise ValueError(f"No MJCF file found for {model_name} (in {urdf_dir})")
 
     return mjcf_path
+
+
+async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetadata:
+    metadata_path = get_robots_dir() / model_name / "metadata.yaml"
+
+    # Downloads and caches the metadata if it doesn't exist.
+    if not cache or not (metadata_path.exists() and not should_refresh_file(metadata_path)):
+        async with K() as api:
+            robot_class = await api.get_robot_class(model_name)
+            if (metadata := robot_class.metadata) is None:
+                raise ValueError(f"No metadata found for {model_name}")
+
+        if (control_frequency := metadata.control_frequency) is None:
+            raise ValueError(f"No control frequency found for {model_name}")
+        if (actuators := metadata.joint_name_to_metadata) is None:
+            raise ValueError(f"No actuators found for {model_name}")
+        actuator_metadata = {k: ActuatorMetadata(kp=v.kp, kd=v.kd) for k, v in actuators.items()}
+        model_metadata = ModelMetadata(actuators=actuator_metadata, control_frequency=control_frequency)
+        OmegaConf.save(model_metadata, metadata_path)
+
+    config = OmegaConf.structured(ModelMetadata)
+    return cast(ModelMetadata, OmegaConf.merge(config, OmegaConf.load(metadata_path)))
+
+
+async def get_model_and_metadata(model_name: str, cache: bool = True) -> tuple[str, ModelMetadata]:
+    return await asyncio.gather(
+        get_model_path(
+            model_name=model_name,
+            cache=not cache,
+        ),
+        get_model_metadata(
+            model_name=model_name,
+            cache=not cache,
+        ),
+    )
 
 
 def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
@@ -188,12 +237,10 @@ class KScaleEnv(PipelineEnv):
         self.config = config
 
         # Downloads the model from the K-Scale API and loads it into MuJoCo.
-        model_path = str(
-            asyncio.run(
-                get_model_path(
-                    model_name=self.config.model_name,
-                    cache=not self.config.ignore_cached_urdf,
-                )
+        model_path, model_metadata = asyncio.run(
+            get_model_and_metadata(
+                self.config.model_name,
+                cache=not self.config.ignore_cached_urdf,
             )
         )
 
@@ -203,6 +250,25 @@ class KScaleEnv(PipelineEnv):
         # Populates configuration joint information.
         self.body_name_to_idx = {mj_model.body(i).name: i for i in range(mj_model.nbody)}
         self.joint_name_to_idx = {mj_model.joint(i).name: i for i in range(mj_model.njnt)}
+
+        # Populates the Kp and Kd values.
+        id_to_kp = {
+            i: model_metadata.actuators[name].kp
+            for name, i in self.joint_name_to_idx.items()
+            if name in model_metadata.actuators
+        }
+        id_to_kd = {
+            i: model_metadata.actuators[name].kd
+            for name, i in self.joint_name_to_idx.items()
+            if name in model_metadata.actuators
+        }
+
+        # Convert to list, skipping the root joint.
+        kps = [id_to_kp[i] for i in range(1, mj_model.njnt)]
+        kds = [id_to_kd[i] for i in range(1, mj_model.njnt)]
+
+        self.kps = jnp.array(kps)
+        self.kds = jnp.array(kds)
 
         # Gets the relevant data for building the components of the environment.
         data = BuilderData(
@@ -268,25 +334,24 @@ class KScaleEnv(PipelineEnv):
         # Gets the observations, rewards, and terminations.
         rng, obs_rng = jax.random.split(rng)
         obs = self.get_observation(pipeline_state, obs_rng)
-        all_dones_with_names = self.get_terminations(pipeline_state)
-        all_rewards_with_names = [(key, jnp.zeros(())) for key, _ in self.rewards]
+        all_dones = self.get_terminations(pipeline_state)
+        all_rewards = [(key, jnp.zeros(())) for key, _ in self.rewards]
 
-        all_dones = jnp.stack([v for _, v in all_dones_with_names], axis=-1)
-        all_rewards = jnp.stack([v for _, v in all_rewards_with_names], axis=-1)
-        done = all_dones.any(axis=-1)
-        reward = all_rewards.sum(axis=-1)
+        done = jnp.stack([v for _, v in all_dones], axis=-1).any(axis=-1)
+        reward = jnp.stack([v for _, v in all_rewards], axis=-1).sum(axis=-1)
 
-        metrics = {
+        info = {
             "time": jnp.zeros(()),
             "rng": rng,
-            "all_dones": all_dones,
-            "all_rewards": all_rewards,
+            "all_dones": {k: v for k, v in all_dones},
+            "all_rewards": {k: v for k, v in all_rewards},
+            "commands": {},
         }
 
         for cmd_name, cmd in self.commands:
             cmd_val = cmd(rng)
             obs.append((cmd_name, cmd_val))
-            metrics[cmd_name] = cmd_val
+            info["commands"][cmd_name] = cmd_val
 
         # Concatenate the observations into a single array, for convenience.
         obs.append((STATE_KEY, jnp.concatenate([o.reshape(-1) for _, o in obs], axis=-1)))
@@ -295,34 +360,74 @@ class KScaleEnv(PipelineEnv):
             pipeline_state=pipeline_state,
             obs={k: v for k, v in obs},
             reward=reward,
-            done=done,
-            metrics=metrics,
+            done=done.astype(reward.dtype),
+            info=info,
         )
+
+    def actuator_model(self, pipeline_state: BraxState, actions: jnp.ndarray) -> BraxState:
+        """Defines the actuator model, converting from actions to torques.
+
+        K-Scale's MJCF files expect torque inputs, but our models provide
+        position and velocity commands. This function specifies our own actuator
+        model, taking the target position and velocity and computing the necessary
+        torque to achieve that.
+
+        Args:
+            pipeline_state: The current state of the pipeline.
+            actions: The actions to convert to torques.
+
+        Returns:
+            The updated pipeline state.
+        """
+        pipeline_num_actions = self.sys.actuator.ctrl_range.shape[0]
+
+        if pipeline_num_actions == actions.shape[0]:
+            # Position control.
+            cur_pos, tar_pos = pipeline_state.q[7:], actions
+            ctrl = self.kps * (tar_pos - cur_pos)
+            return ctrl
+
+        elif pipeline_num_actions == actions.shape[0] * 2:
+            # Position and velocity control.
+            cur_pos, tar_pos = pipeline_state.q[7:], actions[:pipeline_num_actions]
+            cur_vel, tar_vel = pipeline_state.qd[6:], actions[pipeline_num_actions:]
+            ctrl = self.kps * (tar_pos - cur_pos) + self.kds * (tar_vel - cur_vel)
+            return ctrl
+
+        else:
+            raise ValueError(f"Invalid number of actions: {actions.shape[0]}")
+
+    def pipeline_step(self, pipeline_state: BraxState, actions: jnp.ndarray) -> BraxState:
+        """Takes a physics step using the physics pipeline."""
+
+        def f(state: BraxState, _) -> tuple[BraxState, None]:
+            torques = self.actuator_model(state, actions)
+            return self._pipeline.step(self.sys, state, torques, self._debug), None
+
+        return jax.lax.scan(f, pipeline_state, (), self._n_frames)[0]
 
     @eqx.filter_jit
     def step(self, prev_state: BraxState, action: jnp.ndarray) -> BraxState:
         pipeline_state = self.pipeline_step(prev_state.pipeline_state, action)
 
         # Update the metrics.
-        time = prev_state.metrics["time"]
-        rng = prev_state.metrics["rng"]
+        time = prev_state.info["time"]
+        rng = prev_state.info["rng"]
 
         rng, obs_rng = jax.random.split(rng)
         obs = self.get_observation(pipeline_state, obs_rng)
-        all_dones_with_names = self.get_terminations(pipeline_state)
-        all_rewards_with_names = self.get_rewards(prev_state, action, pipeline_state)
+        all_dones = self.get_terminations(pipeline_state)
+        all_rewards = self.get_rewards(prev_state, action, pipeline_state)
 
-        all_dones = jnp.stack([v for _, v in all_dones_with_names], axis=-1)
-        all_rewards = jnp.stack([v for _, v in all_rewards_with_names], axis=-1)
-        done = all_dones.any(axis=-1)
-        reward = all_rewards.sum(axis=-1)
+        done = jnp.stack([v for _, v in all_dones], axis=-1).any(axis=-1)
+        reward = jnp.stack([v for _, v in all_rewards], axis=-1).sum(axis=-1)
 
         for cmd_name, cmd in self.commands:
             rng, cmd_rng = jax.random.split(rng)
-            prev_cmd = prev_state.metrics[cmd_name]
+            prev_cmd = prev_state.info["commands"][cmd_name]
             next_cmd = cmd.update(prev_cmd, cmd_rng, time)
             obs.append((cmd_name, next_cmd))
-            prev_state.metrics[cmd_name] = next_cmd
+            prev_state.info["commands"][cmd_name] = next_cmd
 
         # Concatenate the observations into a single state vector, for convenience.
         obs.append((STATE_KEY, jnp.concatenate([o.reshape(-1) for _, o in obs], axis=-1)))
@@ -333,14 +438,14 @@ class KScaleEnv(PipelineEnv):
                 "pipeline_state": pipeline_state,
                 "obs": {k: v for k, v in obs},
                 "reward": reward,
-                "done": done,
+                "done": done.astype(reward.dtype),
             },
         )
 
-        next_state.metrics["time"] = time + self.config.ctrl_dt
-        next_state.metrics["rng"] = rng
-        next_state.metrics["all_dones"] = all_dones
-        next_state.metrics["all_rewards"] = all_rewards
+        next_state.info["time"] = time + self.config.ctrl_dt
+        next_state.info["rng"] = rng
+        next_state.info["all_dones"] = all_dones
+        next_state.info["all_rewards"] = all_rewards
 
         return next_state
 
@@ -368,6 +473,7 @@ class KScaleEnv(PipelineEnv):
         rewards: list[tuple[str, jnp.ndarray]] = []
         for reward_name, reward in self.rewards:
             reward_val = reward(prev_state, action, pipeline_state) * reward.scale
+            chex.assert_shape(reward_val, ())
             rewards.append((reward_name, reward_val))
         return rewards
 
@@ -377,6 +483,7 @@ class KScaleEnv(PipelineEnv):
         for termination_name, termination in self.terminations:
             term_val = termination(pipeline_state)
             assert term_val.shape == (), f"Termination {termination_name} must be a scalar, got {term_val.shape}"
+            chex.assert_shape(term_val, ())
             terminations.append((termination_name, term_val))
         return terminations
 
@@ -427,7 +534,7 @@ class KScaleEnv(PipelineEnv):
         ) -> tuple[tuple[BraxState, PRNGKeyArray, T], BraxState]:
             state, rng, carry_model = carry
             # Check if done is a scalar or array
-            done_condition = state.done
+            done_condition = state.done.astype(bool)
             next_state, rng, carry_model = jax.lax.cond(
                 done_condition,
                 lambda x: identity_fn(*x),  # Unpack arguments
@@ -443,7 +550,7 @@ class KScaleEnv(PipelineEnv):
         _, states = jax.lax.scan(scan_fn, init_carry, length=num_steps)
 
         # Apply post_accumulate and scale to rewards more efficiently
-        all_rewards = states.metrics["all_rewards"]
+        all_rewards = states.info["all_rewards"]
         reward_list = [reward_fn.post_accumulate(all_rewards[:, i]) for i, (_, reward_fn) in enumerate(self.rewards)]
         rewards = jnp.stack(reward_list, axis=1)
         states = states.tree_replace({"reward": rewards})
@@ -497,7 +604,7 @@ class KScaleEnv(PipelineEnv):
         Returns:
             An iterator of (name, image) pairs.
         """
-        num_steps = (~trajectory.done).sum()
+        num_steps = (~trajectory.done.astype(bool)).sum()
         raw_trajectory = jax.tree.map(
             lambda x: np.array(x[:num_steps]) if isinstance(x, jnp.ndarray) else x,
             trajectory,
@@ -505,7 +612,7 @@ class KScaleEnv(PipelineEnv):
         t = np.arange(num_steps) * self.config.ctrl_dt
 
         # Generate command plots
-        for key, _ in self.commands:
+        for i, (key, _) in enumerate(self.commands):
             metric = raw_trajectory.metrics[key]
             img = self._plot_trajectory_data(
                 t,
@@ -538,7 +645,7 @@ class KScaleEnv(PipelineEnv):
 
     def render_trajectory_video(self, trajectory: BraxState) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
-        num_steps = (~trajectory.done).sum()
+        num_steps = (~trajectory.done.astype(bool)).sum()
         fps = round(1 / self.config.ctrl_dt)
         pipeline_states = [jax.tree.map(lambda arr: arr[i], trajectory.pipeline_state) for i in range(num_steps)]
         frames = np.stack(self.render(pipeline_states, camera=self.config.render_camera), axis=0)
@@ -579,7 +686,7 @@ class KScaleEnv(PipelineEnv):
         )
 
         # Remove states after episode finished
-        done = trajectory.done
+        done = trajectory.done.astype(bool)
         done = jnp.pad(done[:-1], (1, 0), mode="constant", constant_values=False)
         trajectory = jax.tree.map(lambda x: x[~done], trajectory)
 

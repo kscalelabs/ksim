@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class Config(KScaleEnvConfig):
     """Configuration for PPO training."""
 
-    model_name: str = xax.field(value="kbot-v1")
+    model_name: str = xax.field(value="kbot-v1-feet")
 
     output_dir: str = xax.field("walking_brax", help="The directory to save the training results.")
     num_timesteps: int = xax.field(50_000_000, help="The number of timesteps to train for.")
@@ -122,7 +122,8 @@ def main() -> None:
         plt.xlabel("# environment steps")
         plt.ylabel("reward per episode")
         plt.plot(xdata, ydata)
-        plt.savefig(Path(config.output_dir) / "training_progress.png")
+        (output_dir := Path(config.output_dir)).mkdir(parents=True, exist_ok=True)
+        plt.savefig(output_dir / "training_progress.png")
 
     # Configure PPO training
     train_fn = functools.partial(

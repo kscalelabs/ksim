@@ -144,7 +144,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         reward_stats: dict[str, jnp.ndarray] = {}
 
         # Gets the reward statistics.
-        reward = jnp.where(trajectory.done[..., None], jnp.nan, trajectory.metrics["all_rewards"])
+        reward = jnp.where(trajectory.done[..., None], jnp.nan, trajectory.info["all_rewards"])
         for i, key in enumerate(env.rewards.keys()):
             reward_values = reward[..., i : i + 1].astype(jnp.float32)
             reward_stats[f"{key}/mean"] = jnp.nanmean(reward_values)
@@ -156,7 +156,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         termination_stats: dict[str, jnp.ndarray] = {}
 
         # Gets the termination statistics.
-        termination = trajectory.metrics["all_dones"].max(axis=-2).astype(jnp.float32)
+        termination = trajectory.info["all_dones"].max(axis=-2).astype(jnp.float32)
         termination = termination.reshape(-1, termination.shape[-1])
         max_ids = termination.argmax(axis=-1)
         for i, key in enumerate(env.terminations.keys()):
