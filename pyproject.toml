@@ -35,7 +35,9 @@ namespace_packages = false
 module = [
     "brax.*",
     "distrax.*",
+    "equinox.*",
     "mujoco.*",
+    "optax.*",
 ]
 ignore_missing_imports = true
 
