@@ -204,6 +204,16 @@ class KScaleEnvConfig(xax.Config):
         help="The backend to use for the environment.",
     )
 
+    # Action configuration options.
+    min_action_latency: float = xax.field(
+        value=0.0,
+        help="The minimum action latency.",
+    )
+    max_action_latency: float = xax.field(
+        value=0.0,
+        help="The maximum action latency.",
+    )
+
     # Solver configuration options.
     solver_iterations: int = xax.field(
         value=6,
@@ -234,6 +244,18 @@ class KScaleEnv(PipelineEnv):
         commands: Collection[Command | CommandBuilder] = (),
     ) -> None:
         self.config = config
+
+        # Defines some parameters used for simulation.
+        if self.config.max_action_latency < self.config.min_action_latency:
+            raise ValueError(
+                f"Maximum action latency ({self.config.max_action_latency}) must be greater than "
+                f"minimum action latency ({self.config.min_action_latency})"
+            )
+        if self.config.min_action_latency < 0:
+            raise ValueError(f"Action latency ({self.config.min_action_latency}) must be non-negative")
+
+        self.min_action_latency_step = round(self.config.min_action_latency / self.config.dt)
+        self.max_action_latency_step = round(self.config.max_action_latency / self.config.dt)
 
         # Downloads the model from the K-Scale API and loads it into MuJoCo.
         model_path, model_metadata = asyncio.run(
@@ -350,6 +372,8 @@ class KScaleEnv(PipelineEnv):
         info = {
             "time": jnp.zeros(()),
             "rng": rng,
+            "last_action": jnp.zeros_like(self.sys.actuator.ctrl_range[..., 0]),
+            "last_last_action": jnp.zeros_like(self.sys.actuator.ctrl_range[..., 0]),
             "all_dones": {k: v for k, v in all_dones},
             "all_rewards": {k: v for k, v in all_rewards},
             "commands": {},
@@ -400,24 +424,47 @@ class KScaleEnv(PipelineEnv):
         else:
             raise ValueError(f"Invalid number of actions: {actions.shape[0]}")
 
-    def pipeline_step(self, pipeline_state: BraxState, actions: jnp.ndarray) -> BraxState:
-        """Takes a physics step using the physics pipeline."""
+    def pipeline_step(
+        self,
+        pipeline_state: State,
+        actions: jnp.ndarray,
+        prev_actions: jnp.ndarray,
+        key: PRNGKeyArray,
+    ) -> State:
+        """Takes a physics step using the physics pipeline.
 
-        def f(state: BraxState, _) -> tuple[BraxState, None]:
-            torques = self.actuator_model(state, actions)
-            return self._pipeline.step(self.sys, state, torques, self._debug), None
+        We define our own actuator model which takes the actions and outputs
+        some torques. We additionally introduce some random latency into the
+        action pipeline to simulate the latency of the controller.
+        """
+        action_step = jax.random.randint(
+            key=key,
+            shape=actions.shape,
+            minval=self.min_action_latency_step,
+            maxval=self.max_action_latency_step,
+        )
 
-        return jax.lax.scan(f, pipeline_state, (), self._n_frames)[0]
+        def f(carry: tuple[State, int], _: None) -> tuple[tuple[State, int], None]:
+            state, step = carry
+            action = jax.lax.select(step >= action_step, actions, prev_actions)
+            torques = self.actuator_model(state, action)
+            state = self._pipeline.step(self.sys, state, torques, self._debug)
+            return (state, step + 1), None
+
+        (state, _), _ = jax.lax.scan(f, (pipeline_state, 0), (), self._n_frames)
+        return state
 
     @eqx.filter_jit
     def step(self, prev_state: BraxState, action: jnp.ndarray) -> BraxState:
-        pipeline_state = self.pipeline_step(prev_state.pipeline_state, action)
-
         # Update the metrics.
         time = prev_state.info["time"]
         rng = prev_state.info["rng"]
 
-        rng, obs_rng = jax.random.split(rng)
+        # Runs the pipeline step.
+        rng, step_rng, obs_rng = jax.random.split(rng, 3)
+        prev_action = prev_state.info["last_action"]
+        pipeline_state = self.pipeline_step(prev_state.pipeline_state, action, prev_action, step_rng)
+
         obs = self.get_observation(pipeline_state, obs_rng)
         all_dones = self.get_terminations(pipeline_state)
         all_rewards = self.get_rewards(prev_state, action, pipeline_state)
