@@ -255,8 +255,8 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 BaseAngularVelocityObservation(noise=0.01),
                 JointPositionObservation(noise=0.01),
                 JointVelocityObservation(noise=0.01),
-                SensorObservationBuilder(sensor_name="imu_acc", noise=0.01),
-                SensorObservationBuilder(sensor_name="imu_gyro", noise=0.01),
+                SensorObservationBuilder(sensor_name="imu_acc"),  # Sensor has noise already.
+                SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
             ],
             commands=[
                 LinearVelocityCommand(
