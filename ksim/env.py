@@ -27,17 +27,15 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 from PIL.Image import Image as PILImage
 
 from ksim.commands import Command, CommandBuilder
-from ksim.observation.base import Observation, ObservationBuilder
-from ksim.resets.base import Reset, ResetBuilder, ResetData
-from ksim.rewards.base import Reward, RewardBuilder
-from ksim.terminations.base import Termination, TerminationBuilder
+from ksim.observation import Observation, ObservationBuilder
+from ksim.resets import Reset, ResetBuilder, ResetData
+from ksim.rewards import Reward, RewardBuilder
+from ksim.terminations import Termination, TerminationBuilder
 from ksim.utils.data import BuilderData
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-STATE_KEY = "state"
 
 
 @dataclass
@@ -359,11 +357,7 @@ class KScaleEnv(PipelineEnv):
 
         for cmd_name, cmd in self.commands:
             cmd_val = cmd(rng)
-            obs.append((cmd_name, cmd_val))
             info["commands"][cmd_name] = cmd_val
-
-        # Concatenate the observations into a single array, for convenience.
-        obs.append((STATE_KEY, jnp.concatenate([o.reshape(-1) for _, o in obs], axis=-1)))
 
         return BraxState(
             pipeline_state=pipeline_state,
@@ -435,11 +429,7 @@ class KScaleEnv(PipelineEnv):
             rng, cmd_rng = jax.random.split(rng)
             prev_cmd = prev_state.info["commands"][cmd_name]
             next_cmd = cmd.update(prev_cmd, cmd_rng, time)
-            obs.append((cmd_name, next_cmd))
             prev_state.info["commands"][cmd_name] = next_cmd
-
-        # Concatenate the observations into a single state vector, for convenience.
-        obs.append((STATE_KEY, jnp.concatenate([o.reshape(-1) for _, o in obs], axis=-1)))
 
         # Update with the new state.
         next_state = prev_state.tree_replace(

@@ -11,7 +11,7 @@ from brax.envs.base import State as BraxState
 from jaxtyping import PRNGKeyArray
 
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.env.brax import KScaleEnv
+from ksim.env import KScaleEnv
 from ksim.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
@@ -304,6 +304,13 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         ang_vel_cmd_1 = state.info["commands"]["angular_velocity_command"]
         joint_pos_j = state.obs["joint_position_observation"]
         joint_vel_j = state.obs["joint_velocity_observation"]
+
+        base_pos_3 = state.obs["base_position_observation"]
+        base_ang_vel_3 = state.obs["base_angular_velocity_observation"]
+        base_lin_vel_3 = state.obs["base_linear_velocity_observation"]
+        base_quat_4 = state.obs["base_orientation_observation"]
+        base_imu_acc_3 = state.obs["imu_acc_sensor_observation"]
+        base_imu_gyro_3 = state.obs["imu_gyro_sensor_observation"]
 
         actions_n, next_carry = model.actor(
             lin_vel_cmd_2=lin_vel_cmd_2,

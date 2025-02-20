@@ -24,7 +24,7 @@ from dpshdl.dataset import Dataset
 from jaxtyping import PRNGKeyArray, PyTree
 from omegaconf import MISSING, OmegaConf
 
-from ksim.env.brax import ActionModel, ActionModelType, KScaleEnv, KScaleEnvConfig, cast_action_type
+from ksim.env import ActionModel, ActionModelType, KScaleEnv, KScaleEnvConfig, cast_action_type
 
 logger = logging.getLogger(__name__)
 
