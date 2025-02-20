@@ -359,7 +359,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             ),
         )
 
-    def get_init_carry(self) -> jnp.ndarray:
+    def get_init_actor_carry(self) -> jnp.ndarray:
         return jnp.zeros((self.config.actor_num_layers, self.config.actor_hidden_dims))
 
     @eqx.filter_jit
@@ -390,6 +390,9 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         )
 
         return actions_n, next_action_carry
+
+    def get_init_critic_carry(self) -> None:
+        return None
 
     @eqx.filter_jit
     def get_critic_output(

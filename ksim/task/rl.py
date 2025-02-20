@@ -100,18 +100,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             actions=actions,
         )
 
-    @eqx.filter_jit
-    def get_init_carry(self) -> ActorCarryType: ...
+    @abstractmethod
+    def get_init_actor_carry(self) -> jnp.ndarray | None: ...
 
-    @eqx.filter_jit
+    @abstractmethod
     def get_actor_output(
         self,
         model: PyTree,
         sys: System,
         state: BraxState,
         rng: PRNGKeyArray,
-        carry: ActorCarryType,
-    ) -> tuple[jnp.ndarray, ActorCarryType]:
+        carry: jnp.ndarray | None,
+    ) -> tuple[jnp.ndarray, jnp.ndarray | None]:
         """Runs the model on the given inputs.
 
         Args:
@@ -187,7 +187,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return env.unroll_trajectory(
             num_steps=self.max_trajectory_steps,
             rng=rng,
-            init_carry=self.get_init_carry(),
+            init_carry=self.get_init_actor_carry(),
             model=functools.partial(self.get_actor_output, model=model),
         )
 

@@ -57,7 +57,7 @@ class PPOOutput(NamedTuple):
 Config = TypeVar("Config", bound=PPOConfig)
 
 
-class PPOTask(RLTask[Config, ActorCarryType], Generic[Config], ABC):
+class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
 
     def compute_gae(
@@ -172,14 +172,17 @@ class PPOTask(RLTask[Config, ActorCarryType], Generic[Config], ABC):
         )
 
     @abstractmethod
+    def get_init_critic_carry(self) -> jnp.ndarray | None: ...
+
+    @abstractmethod
     def get_critic_output(
         self,
         model: PyTree,
         sys: System,
         state: BraxState,
         rng: PRNGKeyArray,
-        carry: CriticCarryType,
-    ) -> tuple[jnp.ndarray, CriticCarryType]: ...
+        carry: jnp.ndarray | None,
+    ) -> tuple[jnp.ndarray, jnp.ndarray | None]: ...
 
     @eqx.filter_jit
     def model_update(
