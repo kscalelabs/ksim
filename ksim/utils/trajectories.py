@@ -42,9 +42,9 @@ def split_and_pad_trajectories(
     trajectory_masks = jnp.zeros((max_trajectory_length, num_trajectories), dtype=jnp.bool_)
 
     def scan_fn(
-        carry: tuple[int, int, jnp.ndarray, jnp.ndarray],
+        carry: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
         x: jnp.ndarray,
-    ) -> tuple[tuple[int, int, jnp.ndarray, jnp.ndarray], None]:
+    ) -> tuple[tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray], None]:
         start_idx, traj_idx, padded_trajectories, trajectory_masks = carry
         length = x
 
@@ -59,7 +59,7 @@ def split_and_pad_trajectories(
 
         return (start_idx + length, traj_idx + 1, padded_trajectories, trajectory_masks), None
 
-    init_carry = (0, 0, padded_trajectories, trajectory_masks)
+    init_carry = (jnp.zeros((), dtype=jnp.int32), jnp.zeros((), dtype=jnp.int32), padded_trajectories, trajectory_masks)
     (_, _, padded_trajectories, trajectory_masks), _ = jax.lax.scan(scan_fn, init_carry, trajectory_lengths)
 
     return padded_trajectories, trajectory_masks

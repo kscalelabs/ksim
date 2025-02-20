@@ -60,8 +60,6 @@ Config = TypeVar("Config", bound=RLConfig)
 class RLTask(xax.Task[Config], Generic[Config], ABC):
     max_trajectory_steps: int
 
-    ActorCarryType = jnp.ndarray
-
     def __init__(self, config: Config) -> None:
         super().__init__(config)
 

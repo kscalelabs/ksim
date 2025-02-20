@@ -57,10 +57,8 @@ class PPOOutput(NamedTuple):
 Config = TypeVar("Config", bound=PPOConfig)
 
 
-class PPOTask(RLTask[Config], Generic[Config], ABC):
+class PPOTask(RLTask[Config, ActorCarryType], Generic[Config], ABC):
     """Base class for PPO tasks."""
-
-    CriticCarryType = jnp.ndarray
 
     def compute_gae(
         self,
