@@ -472,7 +472,7 @@ class KScaleEnv(PipelineEnv):
         rewards: list[tuple[str, jnp.ndarray]] = []
         for reward_name, reward in self.rewards:
             reward_val = reward(prev_state, action, pipeline_state) * reward.scale
-            chex.assert_shape(reward_val, ())
+            chex.assert_shape(reward_val, (), custom_message=f"Reward {reward_name} must be a scalar")
             rewards.append((reward_name, reward_val))
         return rewards
 
@@ -481,8 +481,7 @@ class KScaleEnv(PipelineEnv):
         terminations: list[tuple[str, jnp.ndarray]] = []
         for termination_name, termination in self.terminations:
             term_val = termination(pipeline_state)
-            assert term_val.shape == (), f"Termination {termination_name} must be a scalar, got {term_val.shape}"
-            chex.assert_shape(term_val, ())
+            chex.assert_shape(term_val, (), custom_message=f"Termination {termination_name} must be a scalar")
             terminations.append((termination_name, term_val))
         return terminations
 

@@ -118,23 +118,7 @@ class AngularVelocityXYPenalty(Reward):
 
     def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
         ang_vel_xy = state.xd.ang[..., 0, :2]
-        return get_norm(ang_vel_xy, self.norm)
-
-
-class TrackLinearVelocityXYReward(Reward):
-    """Reward for how well the robot is tracking the linear velocity command."""
-
-    cmd_name: str = eqx.field(static=True)
-
-    def __init__(self, scale: float, cmd_name: str = "linear_velocity_command") -> None:
-        super().__init__(scale)
-
-        self.cmd_name = cmd_name
-
-    def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
-        lin_vel_cmd_2 = prev_state.info["commands"][self.cmd_name]
-        lin_vel_xy_2 = state.xd.vel[..., 0, :2]
-        return get_norm(lin_vel_xy_2 * lin_vel_cmd_2, self.norm).sum(axis=-1)
+        return get_norm(ang_vel_xy, self.norm).sum(axis=-1)
 
 
 class TrackAngularVelocityZReward(Reward):
@@ -151,6 +135,22 @@ class TrackAngularVelocityZReward(Reward):
         ang_vel_cmd_1 = state.info["commands"][self.cmd_name][..., 0]
         ang_vel_z = state.xd.vel[..., 0, 1]
         return get_norm(ang_vel_z * ang_vel_cmd_1, self.norm)
+
+
+class TrackLinearVelocityXYReward(Reward):
+    """Reward for how well the robot is tracking the linear velocity command."""
+
+    cmd_name: str = eqx.field(static=True)
+
+    def __init__(self, scale: float, cmd_name: str = "linear_velocity_command") -> None:
+        super().__init__(scale)
+
+        self.cmd_name = cmd_name
+
+    def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
+        lin_vel_cmd_2 = prev_state.info["commands"][self.cmd_name]
+        lin_vel_xy_2 = state.xd.vel[..., 0, :2]
+        return get_norm(lin_vel_xy_2 * lin_vel_cmd_2, self.norm).sum(axis=-1)
 
 
 class FootSlipPenalty(Reward):
