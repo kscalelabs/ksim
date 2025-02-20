@@ -139,7 +139,7 @@ class TrackAngularVelocityZReward(Reward):
         self.norm = norm
 
     def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
-        ang_vel_cmd_1 = state.info["commands"][self.cmd_name][..., 0]
+        ang_vel_cmd_1 = prev_state.info["commands"][self.cmd_name][..., 0]
         ang_vel_z = state.xd.vel[..., 0, 1]
         return get_norm(ang_vel_z * ang_vel_cmd_1, self.norm)
 
