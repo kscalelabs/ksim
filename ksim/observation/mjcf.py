@@ -103,10 +103,10 @@ class SensorObservationBuilder(ObservationBuilder[SensorObservation]):
         sensor_id = data.sensor_name_to_idx[self.sensor_name]
         sensor_adr = data.model.sensor_adr[sensor_id]
         sensor_dim = data.model.sensor_dim[sensor_id]
-        sensor_adrs = list(range(sensor_adr, sensor_adr + sensor_dim))
 
         return SensorObservation(
-            sensor_adrs,
+            sensor_adr=sensor_adr,
+            sensor_dim=sensor_dim,
             noise=self.noise,
             noise_type=self.noise_type,
             sensor_name=self.sensor_name,
