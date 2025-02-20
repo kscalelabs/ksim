@@ -185,6 +185,14 @@ class KScaleEnvConfig(xax.Config):
         value="tracking_camera",
         help="The camera to use for rendering.",
     )
+    render_width: int = xax.field(
+        value=640,
+        help="The width of the rendered image.",
+    )
+    render_height: int = xax.field(
+        value=480,
+        help="The height of the rendered image.",
+    )
 
     # Environment configuration options.
     dt: float = xax.field(
@@ -693,7 +701,15 @@ class KScaleEnv(PipelineEnv):
         num_steps = (~trajectory.done.astype(bool)).sum()
         fps = round(1 / self.config.ctrl_dt)
         pipeline_states = [jax.tree.map(lambda arr: arr[i], trajectory.pipeline_state) for i in range(num_steps)]
-        frames = np.stack(self.render(pipeline_states, camera=self.config.render_camera), axis=0)
+        frames = np.stack(
+            self.render(
+                pipeline_states,
+                camera=self.config.render_camera,
+                width=self.config.render_width,
+                height=self.config.render_height,
+            ),
+            axis=0,
+        )
         return frames, fps
 
     def unroll_trajectory_and_render(

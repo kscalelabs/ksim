@@ -1,8 +1,8 @@
 """Defines a standard task interface for training a policy."""
 
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Dict, Generic, NamedTuple, Tuple, TypeVar
 
 import equinox as eqx
 import jax
@@ -10,11 +10,9 @@ import jax.numpy as jnp
 import optax
 import xax
 from brax.base import State as BraxState, System
-from jaxtyping import PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.task.rl import RLConfig, RLTask
-
-T = TypeVar("T")
 
 
 @jax.tree_util.register_dataclass
@@ -33,41 +31,42 @@ class PPOConfig(RLConfig):
     normalize_advantage: bool = xax.field(value=True, help="Whether to normalize advantages.")
 
 
-@jax.tree_util.register_dataclass
 @dataclass
-class PPOBatch:
+class PPOBatch(NamedTuple):
     """A batch of PPO training data."""
 
-    observations: jnp.ndarray
-    next_observations: jnp.ndarray
-    actions: jnp.ndarray
-    rewards: jnp.ndarray
-    truncation: jnp.ndarray
-    termination: jnp.ndarray
-    log_probs: jnp.ndarray
-    values: jnp.ndarray
+    observations: Array
+    next_observations: Array
+    actions: Array
+    rewards: Array
+    truncation: Array
+    termination: Array
+    log_probs: Array
+    values: Array
 
 
+@dataclass
+class PPOOutput(NamedTuple):
+    """Output from PPO model forward pass."""
+
+    policy_logits: Array
+    values: Array
+    action_log_probs: Array
+
+
+T = TypeVar("T")
 Config = TypeVar("Config", bound=PPOConfig)
 
 
-class PPOTask(RLTask[Config], Generic[Config], ABC):
+class PPOTask(RLTask[Config], Generic[Config, T], ABC):
     """Base class for PPO tasks."""
 
     def compute_gae(
         self,
         batch: PPOBatch,
-        bootstrap_value: jnp.ndarray,
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        """Compute generalized advantage estimation (GAE).
-
-        Args:
-            batch: The batch of training data.
-            bootstrap_value: Value estimate for the final state.
-
-        Returns:
-            A tuple of (values, advantages).
-        """
+        bootstrap_value: Array,
+    ) -> Tuple[Array, Array]:
+        """Compute generalized advantage estimation (GAE)."""
         # Compute value targets using GAE
         truncation_mask = 1 - batch.truncation
         values_t_plus_1 = jnp.concatenate([batch.values[1:], jnp.expand_dims(bootstrap_value, 0)], axis=0)
@@ -80,8 +79,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         acc = jnp.zeros_like(bootstrap_value)
 
         def compute_vs_minus_v_xs(
-            carry: tuple[float, jnp.ndarray], target_t: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]
-        ) -> tuple[tuple[float, jnp.ndarray], jnp.ndarray]:
+            carry: Tuple[float, Array], target_t: Tuple[Array, Array, Array]
+        ) -> Tuple[Tuple[float, Array], Array]:
             lambda_, acc = carry
             truncation_mask, delta, termination = target_t
             acc = delta + self.config.gamma * (1 - termination) * truncation_mask * lambda_ * acc
@@ -99,26 +98,16 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # Compute value targets
         values = advantages + batch.values
 
-        return (jax.lax.stop_gradient(values), jax.lax.stop_gradient(advantages))
+        return jax.lax.stop_gradient(values), jax.lax.stop_gradient(advantages)
 
     def compute_loss(
         self,
-        model: eqx.Module,
+        model: PyTree,
         batch: PPOBatch,
-        output: Any,
+        output: PPOOutput,
         state: xax.State,
-    ) -> tuple[jnp.ndarray, dict[str, jnp.ndarray]]:
-        """Compute PPO losses.
-
-        Args:
-            model: The policy model.
-            batch: Training data batch.
-            output: Model outputs containing policy_logits and values.
-            state: Current training state.
-
-        Returns:
-            A tuple of (total_loss, metrics).
-        """
+    ) -> Tuple[Array, Dict[str, Array]]:
+        """Compute PPO losses."""
         # Get bootstrap value for final state
         bootstrap_value = output.values[-1]
 
@@ -130,8 +119,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # Compute probability ratio
-        log_probs = output.action_log_probs
-        ratio = jnp.exp(log_probs - batch.log_probs)
+        ratio = jnp.exp(output.action_log_probs - batch.log_probs)
 
         # Compute surrogate losses
         surrogate1 = ratio * advantages
@@ -184,7 +172,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             optax.adam(1e-3),
         )
 
-    @eqx.filter_jit
+    @abstractmethod
     def get_critic_output(
         self,
         model: PyTree,
@@ -208,6 +196,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         clip_eps = self.config.clip_param
         value_coef = self.config.value_loss_coef
         entropy_coef = self.config.entropy_coef
+
+        breakpoint()
 
         def flatten(x: jnp.ndarray) -> jnp.ndarray:
             if isinstance(x, jnp.ndarray) and x.ndim >= 2:

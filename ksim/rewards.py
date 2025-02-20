@@ -3,7 +3,7 @@
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Generic, Literal, TypeVar
+from typing import Generic, Literal, TypeVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -38,9 +38,9 @@ class Reward(eqx.Module, ABC):
     def __init__(self, scale: float) -> None:
         self.scale = scale
 
-        # Reward functions should end with either "Reward" or "Penalty", which
-        # we use here to check if the scale is positive or negative.
-        name = self.reward_name
+        # Reward function classes should end with either "Reward" or "Penalty",
+        # which we use here to check if the scale is positive or negative.
+        name = self.__class__.__name__.lower()
         if name.lower().endswith("reward"):
             if self.scale < 0:
                 logger.warning("Reward function %s has a negative scale: %f", name, self.scale)
@@ -167,72 +167,60 @@ class TrackLinearVelocityXYReward(Reward):
         return get_norm(lin_vel_xy_2 * lin_vel_cmd_2, self.norm).sum(axis=-1)
 
 
-class FootSlipPenalty(Reward):
-    """Penalty for how much the robot's foot is slipping."""
-
-    foot_ids: jnp.ndarray = eqx.field(static=True)
-
-    def __init__(self, scale: float, foot_ids: Collection[int]) -> None:
-        super().__init__(scale)
-
-        self.foot_ids = jnp.array(sorted(foot_ids))
-
-    def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
-        breakpoint()
-        foot_vel_xy = state.xd.vel[..., 0, :2]
-        return jnp.sum(foot_vel_xy, axis=-1)
-
-
-class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
-    def __init__(self, scale: float, foot_names: Collection[str]) -> None:
-        super().__init__()
-
-        self.foot_names = foot_names
-        self.scale = scale
-
-    def __call__(self, data: BuilderData) -> FootSlipPenalty:
-        foot_ids = lookup_in_dict(self.foot_names, data.body_name_to_idx, "Foot")
-        return FootSlipPenalty(self.scale, foot_ids)
-
-
 class ActionSmoothnessPenalty(Reward):
     """Penalty for how smooth the robot's action is."""
 
+    norm: NormType = eqx.field(static=True)
+
+    def __init__(self, scale: float, norm: NormType = "l2") -> None:
+        super().__init__(scale)
+
+        self.norm = norm
+
     def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
-        breakpoint()
-        return jnp.sum(jnp.square(action[..., 1:] - action[..., :-1]), axis=-1)
+        last_action = prev_state.info["last_action"]
+        return get_norm(action - last_action, self.norm).sum(axis=-1)
 
 
 class FootContactPenalty(Reward):
     """Penalty for how much the robot's foot is in contact with the ground.
 
-    This penalty pushes the robot to keep at most `max_allowed_contact` feet
-    on the ground at any given time.
+    If the robot's foot is on the ground for more than `allowed_contact_prct`
+    percent of the time, the penalty will be applied.
 
-    If `wait_steps` is greater than 0, the penalty will only be applied after
-    more than `max_allowed_contact` feet have been in contact with the ground
-    for `wait_steps` steps.
+    We additionally specify a list of commands which, if set to zero, will
+    cause the penalty to be ignored. This is to avoid penalizing foot contact
+    if the robot is being commanded to stay still.
     """
 
-    foot_ids: jnp.ndarray = eqx.field(static=True)
-    max_allowed_contact: int = eqx.field(static=True)
-    wait_steps: int = eqx.field(static=True)
+    foot_id: int = eqx.field(static=True)
+    allowed_contact_prct: float = eqx.field(static=True)
+    contact_eps: float = eqx.field(static=True)
+    foot_name: str | None = eqx.field(static=True)
+    skip_if_zero_command: list[str] = eqx.field(static=True)
+    eps: float = eqx.field(static=True)
 
     def __init__(
         self,
-        foot_ids: Collection[int],
         scale: float,
-        max_allowed_contact: int | None = None,
-        wait_steps: int = 0,
+        foot_id: int,
+        allowed_contact_prct: float,
+        contact_eps: float = 1e-2,
+        foot_name: str | None = None,
+        skip_if_zero_command: list[str] | None = None,
+        eps: float = 1e-6,
     ) -> None:
         super().__init__(scale)
 
-        if max_allowed_contact is None:
-            max_allowed_contact = len(foot_ids) - 1
+        assert 0 <= allowed_contact_prct <= 1
+        assert skip_if_zero_command is None or len(skip_if_zero_command) > 0
 
-        self.foot_ids = jnp.array(sorted(foot_ids))
-        self.max_allowed_contact = max_allowed_contact
-        self.wait_steps = wait_steps
+        self.foot_id = foot_id
+        self.allowed_contact_prct = allowed_contact_prct
+        self.contact_eps = contact_eps
+        self.foot_name = foot_name
+        self.skip_if_zero_command = skip_if_zero_command
+        self.eps = eps
 
     def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
         if state.contact is None:
@@ -241,32 +229,60 @@ class FootContactPenalty(Reward):
         contact = state.contact
 
         if isinstance(state, MjxState):
-            has_contact = jnp.any(contact.geom[:, :, None] == self.foot_ids[None, None, :], axis=(1, 2))
-            return jnp.where(has_contact, contact.dist, 1e4).min() <= self.contact_eps
+            has_contact = (contact.geom == self.foot_id).any(axis=-1)
+            penalty = jnp.where(has_contact, contact.dist, 1e4).min() <= self.contact_eps
+            if self.skip_if_zero_command is not None:
+                commands_are_zero = jnp.all(
+                    jnp.stack(
+                        [(prev_state.info["commands"][cmd] < self.eps).all() for cmd in self.skip_if_zero_command],
+                        axis=-1,
+                    ),
+                    axis=-1,
+                )
+                penalty = jnp.where(commands_are_zero, 0, penalty)
+
+            return penalty
 
         else:
             raise NotImplementedError(f"IllegalContactTermination is not implemented for {type(state)}")
 
     def post_accumulate(self, reward: jnp.ndarray) -> jnp.ndarray:
-        return reward
+        # We only want to apply the penalty if the total contact time is more
+        # than ``self.allowed_contact_prct`` percent of the time. Since the
+        # reward tensor will be an array of zeros and ones, we can adjust by
+        # the difference between the mean and ``self.allowed_contact_prct``.
+        mean_contact = reward.mean()
+        return (reward - (mean_contact + self.allowed_contact_prct)).clip(min=0)
+
+    def get_name(self) -> str:
+        base_name = super().get_name()
+        return base_name if self.foot_name is None else f"{base_name}_{self.foot_name}"
 
 
 class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     def __init__(
         self,
-        foot_names: Collection[str],
         scale: float,
-        max_allowed_contact: int | None = None,
-        wait_seconds: float = 0.0,
+        foot_name: str,
+        allowed_contact_prct: float,
+        contact_eps: float = 1e-2,
+        skip_if_zero_command: list[str] | None = None,
     ) -> None:
         super().__init__()
 
-        self.foot_names = foot_names
         self.scale = scale
-        self.max_allowed_contact = max_allowed_contact
-        self.wait_seconds = wait_seconds
+        self.foot_name = foot_name
+        self.allowed_contact_prct = allowed_contact_prct
+        self.contact_eps = contact_eps
+        self.skip_if_zero_command = skip_if_zero_command
 
     def __call__(self, data: BuilderData) -> FootContactPenalty:
-        foot_ids = lookup_in_dict(self.foot_names, data.body_name_to_idx, "Foot")
-        wait_steps = int(self.wait_seconds / data.ctrl_dt)
-        return FootContactPenalty(foot_ids, self.scale, self.max_allowed_contact, wait_steps)
+        foot_id = lookup_in_dict([self.foot_name], data.body_name_to_idx, "Foot")[0]
+        return FootContactPenalty(
+            scale=self.scale,
+            foot_id=foot_id,
+            allowed_contact_prct=self.allowed_contact_prct,
+            contact_eps=self.contact_eps,
+            foot_name=self.foot_name,
+            skip_if_zero_command=self.skip_if_zero_command,
+        )

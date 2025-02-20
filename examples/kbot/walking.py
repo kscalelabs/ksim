@@ -23,9 +23,9 @@ from ksim.observation import (
 )
 from ksim.resets import XYPositionResetBuilder
 from ksim.rewards import (
+    ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
     FootContactPenaltyBuilder,
-    FootSlipPenaltyBuilder,
     LinearVelocityZPenalty,
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
@@ -78,6 +78,7 @@ class RNNCell(eqx.Module):
             key=keys[-1],
         )
 
+    @eqx.filter_jit
     def __call__(
         self,
         x_n: jnp.ndarray,
@@ -130,6 +131,7 @@ class MLPCell(eqx.Module):
             for i in range(num_hidden)
         ]
 
+    @eqx.filter_jit
     def __call__(self, x_n: jnp.ndarray) -> jnp.ndarray:
         for layer in self.layers:
             x_n = layer(x_n)
@@ -160,6 +162,7 @@ class ActorModel(eqx.Module):
             key=key,
         )
 
+    @eqx.filter_jit
     def __call__(
         self,
         lin_vel_cmd_2: jnp.ndarray,  # The XY linear velocity command.
@@ -211,6 +214,7 @@ class CriticModel(eqx.Module):
             key=key,
         )
 
+    @eqx.filter_jit
     def __call__(
         self,
         lin_vel_cmd_2: jnp.ndarray,  # The XY linear velocity command.
@@ -223,7 +227,7 @@ class CriticModel(eqx.Module):
         base_quat_4: jnp.ndarray,  # The base orientation.
         joint_pos_j: jnp.ndarray,  # The joint angular positions.
         joint_vel_j: jnp.ndarray,  # The joint angular velocities.
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+    ) -> jnp.ndarray:
         x_n = jnp.concatenate(
             [
                 lin_vel_cmd_2,
@@ -272,7 +276,7 @@ class KBotWalkingConfig(PPOConfig):
     max_roll: float = xax.field(value=0.1)
 
 
-class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
+class KBotWalkingTask(PPOTask[KBotWalkingConfig, jnp.ndarray]):
     def get_environment(self) -> KScaleEnv:
         return KScaleEnv(
             self.config,
@@ -296,8 +300,25 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 AngularVelocityXYPenalty(scale=-0.1),
                 TrackLinearVelocityXYReward(scale=0.1),
                 TrackAngularVelocityZReward(scale=0.1),
-                FootSlipPenaltyBuilder(scale=-0.1, foot_names=["foot1", "foot3"]),
-                FootContactPenaltyBuilder(scale=-0.1, foot_names=["foot1", "foot3"]),
+                ActionSmoothnessPenalty(scale=-0.1),
+                FootContactPenaltyBuilder(
+                    scale=-0.1,
+                    foot_name="foot1",
+                    allowed_contact_prct=0.7,
+                    skip_if_zero_command=[
+                        "linear_velocity_command",
+                        "angular_velocity_command",
+                    ],
+                ),
+                FootContactPenaltyBuilder(
+                    scale=-0.1,
+                    foot_name="foot3",
+                    allowed_contact_prct=0.7,
+                    skip_if_zero_command=[
+                        "linear_velocity_command",
+                        "angular_velocity_command",
+                    ],
+                ),
             ],
             observations=[
                 BasePositionObservation(noise=0.01),
@@ -341,6 +362,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
     def get_init_carry(self) -> jnp.ndarray:
         return jnp.zeros((self.config.actor_num_layers, self.config.actor_hidden_dims))
 
+    @eqx.filter_jit
     def get_actor_output(
         self,
         model: ActorCriticModel,
@@ -369,14 +391,15 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
 
         return actions_n, next_action_carry
 
+    @eqx.filter_jit
     def get_critic_output(
         self,
         model: ActorCriticModel,
         sys: System,
         state: BraxState,
         rng: PRNGKeyArray,
-        carry: jnp.ndarray,
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        carry: None,
+    ) -> tuple[jnp.ndarray, None]:
         lin_vel_cmd_2 = state.info["commands"]["linear_velocity_command"]
         ang_vel_cmd_1 = state.info["commands"]["angular_velocity_command"]
         joint_pos_j = state.obs["joint_position_observation"]
@@ -389,7 +412,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         imu_acc_3 = state.obs["imu_acc_sensor_observation"]
         imu_gyro_3 = state.obs["imu_gyro_sensor_observation"]
 
-        critic_1, next_critic_carry = model.critic(
+        critic_1 = model.critic(
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd_1=ang_vel_cmd_1,
             imu_acc_3=imu_acc_3,
@@ -400,10 +423,9 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             base_quat_4=base_quat_4,
             joint_pos_j=joint_pos_j,
             joint_vel_j=joint_vel_j,
-            state_ln=carry,
         )
 
-        return critic_1, next_critic_carry
+        return critic_1, None
 
 
 if __name__ == "__main__":

@@ -232,8 +232,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             trajectories = self._vmapped_unroll(step_rng, env, model, self.config.num_envs)
 
             # Updates the model on the collected trajectories.
-            # with self.step_context("update_state"):
-            #     model, opt_state = self.model_update(model, optimizer, opt_state, trajectories)
+            with self.step_context("update_state"):
+                model, opt_state = self.model_update(model, optimizer, opt_state, trajectories)
 
             # Logs the trajectory statistics.
             with self.step_context("write_logs"):
