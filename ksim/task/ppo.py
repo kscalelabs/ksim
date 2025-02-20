@@ -9,10 +9,12 @@ import jax
 import jax.numpy as jnp
 import optax
 import xax
-from brax.base import State as BraxState
-from jaxtyping import PyTree
+from brax.base import State as BraxState, System
+from jaxtyping import PRNGKeyArray, PyTree
 
 from ksim.task.rl import RLConfig, RLTask
+
+T = TypeVar("T")
 
 
 @jax.tree_util.register_dataclass
@@ -181,6 +183,17 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             optax.clip_by_global_norm(self.config.max_grad_norm),
             optax.adam(1e-3),
         )
+
+    @eqx.filter_jit
+    def get_critic_output(
+        self,
+        model: PyTree,
+        sys: System,
+        state: BraxState,
+        rng: PRNGKeyArray,
+        carry: T,
+    ) -> tuple[jnp.ndarray, T]:
+        raise NotImplementedError("`get_critic_output` must be implemented by the subclass")
 
     @eqx.filter_jit
     def model_update(

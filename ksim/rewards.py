@@ -3,7 +3,7 @@
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Generic, TypeVar
+from typing import Collection, Generic, Literal, TypeVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -17,11 +17,23 @@ from ksim.utils.mujoco import lookup_in_dict
 
 logger = logging.getLogger(__name__)
 
+NormType = Literal["l1", "l2"]
+
+
+def get_norm(x: jnp.ndarray, norm: NormType) -> jnp.ndarray:
+    match norm:
+        case "l1":
+            return jnp.abs(x)
+        case "l2":
+            return jnp.square(x)
+        case _:
+            raise ValueError(f"Invalid norm: {norm}")
+
 
 class Reward(eqx.Module, ABC):
     """Base class for defining reward functions."""
 
-    scale: float
+    scale: float = eqx.field(static=True)
 
     def __init__(self, scale: float) -> None:
         self.scale = scale
@@ -82,18 +94,31 @@ class RewardBuilder(ABC, Generic[T]):
 class LinearVelocityZPenalty(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
+    norm: NormType = eqx.field(static=True)
+
+    def __init__(self, scale: float, norm: NormType = "l2") -> None:
+        super().__init__(scale)
+
+        self.norm = norm
+
     def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
         lin_vel_z = state.xd.vel[..., 0, 2]
-        return jnp.square(lin_vel_z)
+        return get_norm(lin_vel_z, self.norm)
 
 
 class AngularVelocityXYPenalty(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
+    norm: NormType = eqx.field(static=True)
+
+    def __init__(self, scale: float, norm: NormType = "l2") -> None:
+        super().__init__(scale)
+
+        self.norm = norm
+
     def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
-        breakpoint()
-        ang_vel_xy = state.xd.vel[..., 0, :2]
-        return jnp.square(ang_vel_xy).sum(axis=-1)
+        ang_vel_xy = state.xd.ang[..., 0, :2]
+        return get_norm(ang_vel_xy, self.norm)
 
 
 class TrackLinearVelocityXYReward(Reward):
@@ -107,10 +132,9 @@ class TrackLinearVelocityXYReward(Reward):
         self.cmd_name = cmd_name
 
     def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
-        breakpoint()
-        lin_vel_cmd_2 = state.info["commands"][self.cmd_name]
-        lin_vel_xy = state.xd.vel[..., 0, :2]
-        return jnp.sum(lin_vel_xy * lin_vel_cmd_2, axis=-1)
+        lin_vel_cmd_2 = prev_state.info["commands"][self.cmd_name]
+        lin_vel_xy_2 = state.xd.vel[..., 0, :2]
+        return get_norm(lin_vel_xy_2 * lin_vel_cmd_2, self.norm).sum(axis=-1)
 
 
 class TrackAngularVelocityZReward(Reward):
@@ -124,10 +148,9 @@ class TrackAngularVelocityZReward(Reward):
         self.cmd_name = cmd_name
 
     def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
-        breakpoint()
-        ang_vel_cmd_1 = state.info["commands"][self.cmd_name]
+        ang_vel_cmd_1 = state.info["commands"][self.cmd_name][..., 0]
         ang_vel_z = state.xd.vel[..., 0, 1]
-        return jnp.sum(ang_vel_z * ang_vel_cmd_1, axis=-1)
+        return get_norm(ang_vel_z * ang_vel_cmd_1, self.norm)
 
 
 class FootSlipPenalty(Reward):

@@ -107,7 +107,7 @@ class ActorModel(eqx.Module):
         super().__init__()
 
         num_joints = 20
-        num_inputs = 2 + 1 + 3 + num_joints + num_joints
+        num_inputs = 2 + 1 + 3 + 3 + num_joints + num_joints
         num_outputs = num_joints
 
         self.rnn = RNNCell(
@@ -122,7 +122,8 @@ class ActorModel(eqx.Module):
         self,
         lin_vel_cmd_2: jnp.ndarray,  # The XY linear velocity command.
         ang_vel_cmd_1: jnp.ndarray,  # The Z angular velocity command.
-        proj_grav_3: jnp.ndarray,  # The projected gravity vector.
+        imu_acc_3: jnp.ndarray,  # The IMU acceleration.
+        imu_gyro_3: jnp.ndarray,  # The IMU gyroscope.
         joint_pos_j: jnp.ndarray,  # The joint angular positions.
         joint_vel_j: jnp.ndarray,  # The joint angular velocities.
         state_ln: jnp.ndarray | None = None,  # The state of the RNN.
@@ -131,7 +132,8 @@ class ActorModel(eqx.Module):
             [
                 lin_vel_cmd_2,
                 ang_vel_cmd_1,
-                proj_grav_3,
+                imu_acc_3,
+                imu_gyro_3,
                 joint_pos_j,
                 joint_vel_j,
             ],
@@ -156,8 +158,8 @@ class CriticModel(eqx.Module):
         super().__init__()
 
         num_joints = 20
-        num_inputs = 2 + 1 + 3 + num_joints + num_joints
-        num_outputs = num_joints
+        num_inputs = 2 + 1 + 3 + 3 + 3 + 3 + 3 + 4 + num_joints + num_joints
+        num_outputs = 1
 
         self.rnn = RNNCell(
             num_inputs=num_inputs,
@@ -171,7 +173,12 @@ class CriticModel(eqx.Module):
         self,
         lin_vel_cmd_2: jnp.ndarray,  # The XY linear velocity command.
         ang_vel_cmd_1: jnp.ndarray,  # The Z angular velocity command.
-        proj_grav_3: jnp.ndarray,  # The projected gravity vector.
+        imu_acc_3: jnp.ndarray,  # The IMU acceleration.
+        imu_gyro_3: jnp.ndarray,  # The IMU gyroscope.
+        base_pos_3: jnp.ndarray,  # The base position.
+        base_ang_vel_3: jnp.ndarray,  # The base angular velocity.
+        base_lin_vel_3: jnp.ndarray,  # The base linear velocity.
+        base_quat_4: jnp.ndarray,  # The base orientation.
         joint_pos_j: jnp.ndarray,  # The joint angular positions.
         joint_vel_j: jnp.ndarray,  # The joint angular velocities.
         state_ln: jnp.ndarray | None = None,  # The state of the RNN.
@@ -180,7 +187,12 @@ class CriticModel(eqx.Module):
             [
                 lin_vel_cmd_2,
                 ang_vel_cmd_1,
-                proj_grav_3,
+                imu_acc_3,
+                imu_gyro_3,
+                base_pos_3,
+                base_ang_vel_3,
+                base_lin_vel_3,
+                base_quat_4,
                 joint_pos_j,
                 joint_vel_j,
             ],
@@ -245,8 +257,8 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 AngularVelocityXYPenalty(scale=-0.1),
                 TrackLinearVelocityXYReward(scale=0.1),
                 TrackAngularVelocityZReward(scale=0.1),
-                FootSlipPenaltyBuilder(scale=0.1, foot_names=["foot1", "foot3"]),
-                FootContactPenaltyBuilder(scale=0.1, foot_names=["foot1", "foot3"]),
+                FootSlipPenaltyBuilder(scale=-0.1, foot_names=["foot1", "foot3"]),
+                FootContactPenaltyBuilder(scale=-0.1, foot_names=["foot1", "foot3"]),
             ],
             observations=[
                 BasePositionObservation(noise=0.01),
@@ -298,8 +310,34 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         rng: PRNGKeyArray,
         carry: jnp.ndarray,
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        breakpoint()
+        lin_vel_cmd_2 = state.info["commands"]["linear_velocity_command"]
+        ang_vel_cmd_1 = state.info["commands"]["angular_velocity_command"]
+        joint_pos_j = state.obs["joint_position_observation"]
+        joint_vel_j = state.obs["joint_velocity_observation"]
 
+        imu_acc_3 = state.obs["imu_acc_sensor_observation"]
+        imu_gyro_3 = state.obs["imu_gyro_sensor_observation"]
+
+        actions_n, next_action_carry = model.actor(
+            lin_vel_cmd_2=lin_vel_cmd_2,
+            ang_vel_cmd_1=ang_vel_cmd_1,
+            imu_acc_3=imu_acc_3,
+            imu_gyro_3=imu_gyro_3,
+            joint_pos_j=joint_pos_j,
+            joint_vel_j=joint_vel_j,
+            state_ln=carry,
+        )
+
+        return actions_n, next_action_carry
+
+    def get_critic_output(
+        self,
+        model: ActorCriticModel,
+        sys: System,
+        state: BraxState,
+        rng: PRNGKeyArray,
+        carry: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
         lin_vel_cmd_2 = state.info["commands"]["linear_velocity_command"]
         ang_vel_cmd_1 = state.info["commands"]["angular_velocity_command"]
         joint_pos_j = state.obs["joint_position_observation"]
@@ -309,19 +347,24 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         base_ang_vel_3 = state.obs["base_angular_velocity_observation"]
         base_lin_vel_3 = state.obs["base_linear_velocity_observation"]
         base_quat_4 = state.obs["base_orientation_observation"]
-        base_imu_acc_3 = state.obs["imu_acc_sensor_observation"]
-        base_imu_gyro_3 = state.obs["imu_gyro_sensor_observation"]
+        imu_acc_3 = state.obs["imu_acc_sensor_observation"]
+        imu_gyro_3 = state.obs["imu_gyro_sensor_observation"]
 
-        actions_n, next_carry = model.actor(
+        critic_1, next_critic_carry = model.critic(
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd_1=ang_vel_cmd_1,
-            proj_grav_3=jnp.array([0.0, 0.0, -9.81]),
+            imu_acc_3=imu_acc_3,
+            imu_gyro_3=imu_gyro_3,
+            base_pos_3=base_pos_3,
+            base_ang_vel_3=base_ang_vel_3,
+            base_lin_vel_3=base_lin_vel_3,
+            base_quat_4=base_quat_4,
             joint_pos_j=joint_pos_j,
             joint_vel_j=joint_vel_j,
             state_ln=carry,
         )
 
-        return actions_n, next_carry
+        return critic_1, next_critic_carry
 
 
 if __name__ == "__main__":
