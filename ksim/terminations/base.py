@@ -25,9 +25,8 @@ class Termination(eqx.Module, ABC):
             This tensor should usually be of shape (num_envs).
         """
 
-    @classmethod
-    def get_name(cls) -> str:
-        return xax.camelcase_to_snakecase(cls.__name__)
+    def get_name(self) -> str:
+        return xax.camelcase_to_snakecase(self.__class__.__name__)
 
     @functools.cached_property
     def termination_name(self) -> str:

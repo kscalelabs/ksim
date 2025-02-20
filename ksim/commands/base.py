@@ -19,11 +19,11 @@ class Command(eqx.Module, ABC):
 
     @eqx.filter_jit
     def update(self, prev_command: jnp.ndarray, rng: PRNGKeyArray, time: jnp.ndarray) -> jnp.ndarray:
+        """Optionally updates the command to a new command."""
         return prev_command
 
-    @classmethod
-    def get_name(cls) -> str:
-        return xax.camelcase_to_snakecase(cls.__name__)
+    def get_name(self) -> str:
+        return xax.camelcase_to_snakecase(self.__class__.__name__)
 
     @functools.cached_property
     def command_name(self) -> str:

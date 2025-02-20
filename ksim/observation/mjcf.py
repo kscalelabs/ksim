@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from brax.base import State
 
 from ksim.observation.base import NoiseType, Observation, ObservationBuilder
+from ksim.utils.data import BuilderData
 
 
 class BasePositionObservation(Observation):
@@ -43,31 +44,45 @@ class JointVelocityObservation(Observation):
         return state.qd[6:]  # (N,)
 
 
-class IMUOrientationObservation(Observation):
-    imu_name: str
+class SensorObservation(Observation):
+    sensor_id: int
+    sensor_name: str | None
 
     def __init__(
         self,
-        imu_name: str,
+        sensor_id: int,
         noise: float = 0.0,
         noise_type: NoiseType = "gaussian",
+        sensor_name: str | None = None,
     ) -> None:
         super().__init__(noise, noise_type)
 
-        self.imu_name = imu_name
+        self.sensor_id = sensor_id
+        self.sensor_name = sensor_name
 
     @eqx.filter_jit
     def __call__(self, state: State) -> jnp.ndarray:
+        breakpoint()
         raise NotImplementedError
 
+    def get_name(self) -> str:
+        base_name = super().get_name()
+        return base_name if self.sensor_name is None else f"{self.sensor_name}_{base_name}"
 
-class IMUOrientationObservationBuilder(ObservationBuilder[IMUOrientationObservation]):
-    imu_name: str
 
-    def __init__(self, imu_name: str) -> None:
+class SensorObservationBuilder(ObservationBuilder[SensorObservation]):
+    sensor_name: int
+
+    def __init__(self, sensor_name: str) -> None:
         super().__init__()
 
-        self.imu_name = imu_name
+        self.sensor_name = sensor_name
 
-    def build(self) -> IMUOrientationObservation:
-        return IMUOrientationObservation(self.imu_name)
+    def __call__(self, data: BuilderData) -> SensorObservation:
+        if self.sensor_name not in data.sensor_name_to_idx:
+            options = "\n".join(sorted(data.sensor_name_to_idx.keys()))
+            raise ValueError(f"IMU {self.sensor_name} not found in model. Available:\n{options}")
+        return SensorObservation(
+            data.sensor_name_to_idx[self.sensor_name],
+            sensor_name=self.sensor_name,
+        )

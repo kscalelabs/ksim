@@ -8,4 +8,6 @@ from .mjcf import (
     BasePositionObservation,
     JointPositionObservation,
     JointVelocityObservation,
+    SensorObservation,
+    SensorObservationBuilder,
 )

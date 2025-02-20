@@ -53,9 +53,8 @@ class Reward(eqx.Module, ABC):
     @abstractmethod
     def __call__(self, prev_state: BraxState, action: jnp.ndarray, next_state: State) -> jnp.ndarray: ...
 
-    @classmethod
-    def get_name(cls) -> str:
-        return xax.camelcase_to_snakecase(cls.__name__)
+    def get_name(self) -> str:
+        return xax.camelcase_to_snakecase(self.__class__.__name__)
 
     @functools.cached_property
     def reward_name(self) -> str:

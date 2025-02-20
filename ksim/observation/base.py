@@ -43,9 +43,8 @@ class Observation(eqx.Module, ABC):
             case _:
                 raise ValueError(f"Invalid noise type: {self.noise_type}")
 
-    @classmethod
-    def get_name(cls) -> str:
-        return xax.camelcase_to_snakecase(cls.__name__)
+    def get_name(self) -> str:
+        return xax.camelcase_to_snakecase(self.__class__.__name__)
 
     @functools.cached_property
     def observation_name(self) -> str:

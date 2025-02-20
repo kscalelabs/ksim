@@ -251,6 +251,10 @@ class KScaleEnv(PipelineEnv):
         # Populates configuration joint information.
         self.body_name_to_idx = {mj_model.body(i).name: i for i in range(mj_model.nbody)}
         self.joint_name_to_idx = {mj_model.joint(i).name: i for i in range(mj_model.njnt)}
+        self.actuator_name_to_idx = {mj_model.actuator(i).name: i for i in range(mj_model.nu)}
+        self.geom_name_to_idx = {mj_model.geom(i).name: i for i in range(mj_model.ngeom)}
+        self.site_name_to_idx = {mj_model.site(i).name: i for i in range(mj_model.nsite)}
+        self.sensor_name_to_idx = {mj_model.sensor(i).name: i for i in range(mj_model.nsensor)}
 
         # Populates the Kp and Kd values.
         id_to_kp = {
@@ -278,6 +282,10 @@ class KScaleEnv(PipelineEnv):
             ctrl_dt=self.config.ctrl_dt,
             body_name_to_idx=self.body_name_to_idx,
             joint_name_to_idx=self.joint_name_to_idx,
+            actuator_name_to_idx=self.actuator_name_to_idx,
+            geom_name_to_idx=self.geom_name_to_idx,
+            site_name_to_idx=self.site_name_to_idx,
+            sensor_name_to_idx=self.sensor_name_to_idx,
         )
 
         # Builds the terminations, resets, rewards, and observations.
@@ -614,7 +622,7 @@ class KScaleEnv(PipelineEnv):
 
         # Generate command plots
         for i, (key, _) in enumerate(self.commands):
-            metric = raw_trajectory.metrics[key]
+            metric = raw_trajectory.info["commands"][key]
             img = self._plot_trajectory_data(
                 t,
                 metric,

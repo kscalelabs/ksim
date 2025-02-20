@@ -14,3 +14,7 @@ class BuilderData:
     ctrl_dt: float
     joint_name_to_idx: dict[str, int]
     body_name_to_idx: dict[str, int]
+    actuator_name_to_idx: dict[str, int]
+    geom_name_to_idx: dict[str, int]
+    site_name_to_idx: dict[str, int]
+    sensor_name_to_idx: dict[str, int]

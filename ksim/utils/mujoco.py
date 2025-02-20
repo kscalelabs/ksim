@@ -100,9 +100,9 @@ Tv = TypeVar("Tv")
 def lookup_in_dict(names: Collection[Tk], mapping: dict[Tk, Tv], names_type: str) -> list[Tv]:
     missing_names = [name for name in names if name not in mapping]
     if missing_names:
-        available_names_str = "\n".join(str(name) for name in mapping.keys())
+        available_names_str = "\n".join(str(name) for name in sorted(mapping.keys()))
         raise ValueError(
-            f"{names_type} not found in model: {missing_names}\nAvailable {names_type}s:\n{available_names_str}"
+            f"{names_type} not found in model: {missing_names}\nAvailable:\n{available_names_str}"
         )
     return [mapping[name] for name in names]
 

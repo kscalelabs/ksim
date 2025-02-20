@@ -19,9 +19,17 @@ from ksim.observation import (
     BasePositionObservation,
     JointPositionObservation,
     JointVelocityObservation,
+    SensorObservationBuilder,
 )
 from ksim.resets import XYPositionResetBuilder
-from ksim.rewards import LinearVelocityZPenalty
+from ksim.rewards import (
+    AngularVelocityXYPenalty,
+    FootContactPenaltyBuilder,
+    FootSlipPenaltyBuilder,
+    LinearVelocityZPenalty,
+    TrackAngularVelocityZReward,
+    TrackLinearVelocityXYReward,
+)
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import IllegalContactTerminationBuilder
 
@@ -233,7 +241,12 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 XYPositionResetBuilder(),
             ],
             rewards=[
-                LinearVelocityZPenalty(scale=-1.0),
+                LinearVelocityZPenalty(scale=-0.1),
+                AngularVelocityXYPenalty(scale=-0.1),
+                TrackLinearVelocityXYReward(scale=0.1),
+                TrackAngularVelocityZReward(scale=0.1),
+                FootSlipPenaltyBuilder(scale=0.1, foot_names=["foot1", "foot3"]),
+                FootContactPenaltyBuilder(scale=0.1, foot_names=["foot1", "foot3"]),
             ],
             observations=[
                 BasePositionObservation(noise=0.01),
@@ -242,6 +255,8 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 BaseAngularVelocityObservation(noise=0.01),
                 JointPositionObservation(noise=0.01),
                 JointVelocityObservation(noise=0.01),
+                SensorObservationBuilder(sensor_name="imu_acc", noise=0.01),
+                SensorObservationBuilder(sensor_name="imu_gyro", noise=0.01),
             ],
             commands=[
                 LinearVelocityCommand(
@@ -283,8 +298,10 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         rng: PRNGKeyArray,
         carry: jnp.ndarray,
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        lin_vel_cmd_2 = state.obs["linear_velocity_command"]
-        ang_vel_cmd_1 = state.obs["angular_velocity_command"]
+        breakpoint()
+
+        lin_vel_cmd_2 = state.info["commands"]["linear_velocity_command"]
+        ang_vel_cmd_1 = state.info["commands"]["angular_velocity_command"]
         joint_pos_j = state.obs["joint_position_observation"]
         joint_vel_j = state.obs["joint_velocity_observation"]
 

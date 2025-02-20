@@ -23,6 +23,85 @@ class LinearVelocityZPenalty(Reward):
         return jnp.square(lin_vel_z)
 
 
+class AngularVelocityXYPenalty(Reward):
+    """Penalty for how fast the robot is rotating in the xy-plane."""
+
+    def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
+        breakpoint()
+        ang_vel_xy = state.xd.vel[..., 0, :2]
+        return jnp.square(ang_vel_xy).sum(axis=-1)
+
+
+class TrackLinearVelocityXYReward(Reward):
+    """Reward for how well the robot is tracking the linear velocity command."""
+
+    cmd_name: str
+
+    def __init__(self, scale: float, cmd_name: str = "linear_velocity_command") -> None:
+        super().__init__(scale)
+
+        self.cmd_name = cmd_name
+
+    def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
+        breakpoint()
+        lin_vel_cmd_2 = state.info["commands"][self.cmd_name]
+        lin_vel_xy = state.xd.vel[..., 0, :2]
+        return jnp.sum(lin_vel_xy * lin_vel_cmd_2, axis=-1)
+
+
+class TrackAngularVelocityZReward(Reward):
+    """Reward for how well the robot is tracking the angular velocity command."""
+
+    cmd_name: str
+
+    def __init__(self, scale: float, cmd_name: str = "angular_velocity_command") -> None:
+        super().__init__(scale)
+
+        self.cmd_name = cmd_name
+
+    def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
+        breakpoint()
+        ang_vel_cmd_1 = state.info["commands"][self.cmd_name]
+        ang_vel_z = state.xd.vel[..., 0, 1]
+        return jnp.sum(ang_vel_z * ang_vel_cmd_1, axis=-1)
+
+
+class FootSlipPenalty(Reward):
+    """Penalty for how much the robot's foot is slipping."""
+
+    foot_ids: jnp.ndarray
+
+    def __init__(self, scale: float, foot_ids: Collection[int]) -> None:
+        super().__init__(scale)
+
+        self.foot_ids = jnp.array(sorted(foot_ids))
+
+    def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
+        breakpoint()
+        foot_vel_xy = state.xd.vel[..., 0, :2]
+        return jnp.sum(foot_vel_xy, axis=-1)
+
+
+class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
+    def __init__(self, scale: float, foot_names: Collection[str]) -> None:
+        super().__init__()
+
+        self.foot_names = foot_names
+        self.scale = scale
+
+    def __call__(self, data: BuilderData) -> FootSlipPenalty:
+        foot_ids = lookup_in_dict(self.foot_names, data.body_name_to_idx, "Foot")
+        return FootSlipPenalty(self.scale, foot_ids)
+
+
+class ActionSmoothnessPenalty(Reward):
+    """Penalty for how smooth the robot's action is."""
+
+    def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
+        breakpoint()
+        return jnp.sum(jnp.square(action[..., 1:] - action[..., :-1]), axis=-1)
+
+
 class FootContactPenalty(Reward):
     """Penalty for how much the robot's foot is in contact with the ground.
 
@@ -34,13 +113,13 @@ class FootContactPenalty(Reward):
     for `wait_steps` steps.
     """
 
-    body_ids: jnp.ndarray
+    foot_ids: jnp.ndarray
     max_allowed_contact: int
     wait_steps: int
 
     def __init__(
         self,
-        body_ids: Collection[int],
+        foot_ids: Collection[int],
         scale: float,
         max_allowed_contact: int | None = None,
         wait_steps: int = 0,
@@ -48,9 +127,9 @@ class FootContactPenalty(Reward):
         super().__init__(scale)
 
         if max_allowed_contact is None:
-            max_allowed_contact = len(body_ids) - 1
+            max_allowed_contact = len(foot_ids) - 1
 
-        self.body_ids = jnp.array(sorted(body_ids))
+        self.foot_ids = jnp.array(sorted(foot_ids))
         self.max_allowed_contact = max_allowed_contact
         self.wait_steps = wait_steps
 
@@ -61,7 +140,7 @@ class FootContactPenalty(Reward):
         contact = state.contact
 
         if isinstance(state, MjxState):
-            has_contact = jnp.any(contact.geom[:, :, None] == self.body_ids[None, None, :], axis=(1, 2))
+            has_contact = jnp.any(contact.geom[:, :, None] == self.foot_ids[None, None, :], axis=(1, 2))
             return jnp.where(has_contact, contact.dist, 1e4).min() <= self.contact_eps
 
         else:
@@ -74,19 +153,19 @@ class FootContactPenalty(Reward):
 class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     def __init__(
         self,
-        body_names: Collection[str],
+        foot_names: Collection[str],
         scale: float,
         max_allowed_contact: int | None = None,
         wait_seconds: float = 0.0,
     ) -> None:
         super().__init__()
 
-        self.body_names = body_names
+        self.foot_names = foot_names
         self.scale = scale
         self.max_allowed_contact = max_allowed_contact
         self.wait_seconds = wait_seconds
 
     def __call__(self, data: BuilderData) -> FootContactPenalty:
-        body_ids = lookup_in_dict(self.body_names, data.body_name_to_idx, "Body")
+        foot_ids = lookup_in_dict(self.foot_names, data.body_name_to_idx, "Foot")
         wait_steps = int(self.wait_seconds / data.ctrl_dt)
-        return FootContactPenalty(body_ids, self.scale, self.max_allowed_contact, wait_steps)
+        return FootContactPenalty(foot_ids, self.scale, self.max_allowed_contact, wait_steps)
