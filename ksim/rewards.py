@@ -35,7 +35,7 @@ class Reward(eqx.Module, ABC):
 
     scale: float = eqx.field(static=True)
 
-    def __init__(self, scale: float) -> None:
+    def __init__(self, *, scale: float) -> None:
         self.scale = scale
 
         # Reward function classes should end with either "Reward" or "Penalty",
@@ -94,9 +94,14 @@ class RewardBuilder(ABC, Generic[T]):
 class LinearVelocityZPenalty(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
-    norm: NormType = eqx.field(static=True)
+    norm: NormType = eqx.field(default="l2", static=True)
 
-    def __init__(self, scale: float, norm: NormType = "l2") -> None:
+    def __init__(
+        self,
+        *,
+        scale: float,
+        norm: NormType = "l2",
+    ) -> None:
         super().__init__(scale)
 
         self.norm = norm
@@ -109,9 +114,14 @@ class LinearVelocityZPenalty(Reward):
 class AngularVelocityXYPenalty(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
-    norm: NormType = eqx.field(static=True)
+    norm: NormType = eqx.field(default="l2", static=True)
 
-    def __init__(self, scale: float, norm: NormType = "l2") -> None:
+    def __init__(
+        self,
+        *,
+        scale: float,
+        norm: NormType = "l2",
+    ) -> None:
         super().__init__(scale)
 
         self.norm = norm
@@ -125,10 +135,11 @@ class TrackAngularVelocityZReward(Reward):
     """Reward for how well the robot is tracking the angular velocity command."""
 
     cmd_name: str = eqx.field(static=True)
-    norm: NormType = eqx.field(static=True)
+    norm: NormType = eqx.field(default="l2", static=True)
 
     def __init__(
         self,
+        *,
         scale: float,
         cmd_name: str = "angular_velocity_command",
         norm: NormType = "l2",
@@ -147,11 +158,12 @@ class TrackAngularVelocityZReward(Reward):
 class TrackLinearVelocityXYReward(Reward):
     """Reward for how well the robot is tracking the linear velocity command."""
 
-    cmd_name: str = eqx.field(static=True)
-    norm: NormType = eqx.field(static=True)
+    cmd_name: str = eqx.field(default="linear_velocity_command", static=True)
+    norm: NormType = eqx.field(default="l2", static=True)
 
     def __init__(
         self,
+        *,
         scale: float,
         cmd_name: str = "linear_velocity_command",
         norm: NormType = "l2",
@@ -170,9 +182,14 @@ class TrackLinearVelocityXYReward(Reward):
 class ActionSmoothnessPenalty(Reward):
     """Penalty for how smooth the robot's action is."""
 
-    norm: NormType = eqx.field(static=True)
+    norm: NormType = eqx.field(default="l2", static=True)
 
-    def __init__(self, scale: float, norm: NormType = "l2") -> None:
+    def __init__(
+        self,
+        *,
+        scale: float,
+        norm: NormType = "l2",
+    ) -> None:
         super().__init__(scale)
 
         self.norm = norm
@@ -195,13 +212,14 @@ class FootContactPenalty(Reward):
 
     foot_id: int = eqx.field(static=True)
     allowed_contact_prct: float = eqx.field(static=True)
-    contact_eps: float = eqx.field(static=True)
-    foot_name: str | None = eqx.field(static=True)
-    skip_if_zero_command: list[str] = eqx.field(static=True)
-    eps: float = eqx.field(static=True)
+    contact_eps: float = eqx.field(default=1e-2, static=True)
+    foot_name: str | None = eqx.field(default=None, static=True)
+    skip_if_zero_command: list[str] = eqx.field(default_factory=lambda: [], static=True)
+    eps: float = eqx.field(default=1e-6, static=True)
 
     def __init__(
         self,
+        *,
         scale: float,
         foot_id: int,
         allowed_contact_prct: float,
@@ -262,6 +280,7 @@ class FootContactPenalty(Reward):
 class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     def __init__(
         self,
+        *,
         scale: float,
         foot_name: str,
         allowed_contact_prct: float,

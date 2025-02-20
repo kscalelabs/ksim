@@ -18,11 +18,12 @@ NoiseType = Literal["gaussian", "uniform"]
 
 
 class Observation(eqx.Module, ABC):
-    noise: float
-    noise_type: NoiseType
+    noise: float = eqx.field(default=0.0, static=True)
+    noise_type: NoiseType = eqx.field(default="gaussian", static=True)
 
     def __init__(
         self,
+        *,
         noise: float = 0.0,
         noise_type: NoiseType = "gaussian",
     ) -> None:
@@ -107,10 +108,11 @@ class JointVelocityObservation(Observation):
 class SensorObservation(Observation):
     sensor_adr: int = eqx.field(static=True)
     sensor_dim: int = eqx.field(static=True)
-    sensor_name: str | None = eqx.field(static=True)
+    sensor_name: str | None = eqx.field(default=None, static=True)
 
     def __init__(
         self,
+        *,
         sensor_adr: int,
         sensor_dim: int,
         noise: float = 0.0,
@@ -136,12 +138,9 @@ class SensorObservation(Observation):
 
 
 class SensorObservationBuilder(ObservationBuilder[SensorObservation]):
-    sensor_name: str
-    noise: float
-    noise_type: NoiseType
-
     def __init__(
         self,
+        *,
         sensor_name: str,
         noise: float = 0.0,
         noise_type: NoiseType = "gaussian",

@@ -276,7 +276,7 @@ class KBotWalkingConfig(PPOConfig):
     max_roll: float = xax.field(value=0.1)
 
 
-class KBotWalkingTask(PPOTask[KBotWalkingConfig, jnp.ndarray]):
+class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
     def get_environment(self) -> KScaleEnv:
         return KScaleEnv(
             self.config,
@@ -321,12 +321,12 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig, jnp.ndarray]):
                 ),
             ],
             observations=[
-                BasePositionObservation(noise=0.01),
-                BaseOrientationObservation(noise=0.01),
-                BaseLinearVelocityObservation(noise=0.01),
-                BaseAngularVelocityObservation(noise=0.01),
-                JointPositionObservation(noise=0.01),
-                JointVelocityObservation(noise=0.01),
+                BasePositionObservation(noise_type="gaussian", noise=0.01),
+                BaseOrientationObservation(noise_type="gaussian", noise=0.01),
+                BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
+                BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
+                JointPositionObservation(noise_type="gaussian", noise=0.01),
+                JointVelocityObservation(noise_type="gaussian", noise=0.01),
                 SensorObservationBuilder(sensor_name="imu_acc"),  # Sensor has noise already.
                 SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
             ],

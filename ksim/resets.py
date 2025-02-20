@@ -59,6 +59,7 @@ class XYPositionReset(Reset):
 
     def __init__(
         self,
+        *,
         bounds: tuple[float, float, float, float],
         hfield_data: np.ndarray,
         padding_prct: float = 0.1,
@@ -102,7 +103,11 @@ class XYPositionReset(Reset):
 
 
 class XYPositionResetBuilder(ResetBuilder[XYPositionReset]):
-    def __init__(self, padding_prct: float = 0.1) -> None:
+    def __init__(
+        self,
+        *,
+        padding_prct: float = 0.1,
+    ) -> None:
         super().__init__()
 
         self.padding_prct = padding_prct

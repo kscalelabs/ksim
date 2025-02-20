@@ -748,7 +748,8 @@ class KScaleEnv(PipelineEnv):
 
         # Remove states after episode finished
         done = trajectory.done.astype(bool)
-        done = jnp.pad(done[:-1], (1, 0), mode="constant", constant_values=False)
+        # Include the state after the episode finished.
+        # done = jnp.pad(done[:-1], (1, 0), mode="constant", constant_values=False)
         trajectory = jax.tree.map(lambda x: x[~done], trajectory)
 
         # Handle rendering if requested

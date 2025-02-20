@@ -56,7 +56,7 @@ class PitchTooGreatTermination(Termination):
 
     max_pitch: float
 
-    def __init__(self, max_pitch: float) -> None:
+    def __init__(self, *, max_pitch: float) -> None:
         super().__init__()
 
         self.max_pitch = max_pitch
@@ -72,7 +72,7 @@ class RollTooGreatTermination(Termination):
 
     max_roll: float
 
-    def __init__(self, max_roll: float) -> None:
+    def __init__(self, *, max_roll: float) -> None:
         super().__init__()
 
         self.max_roll = max_roll
@@ -88,7 +88,7 @@ class MinimumHeightTermination(Termination):
 
     min_height: float
 
-    def __init__(self, min_height: float) -> None:
+    def __init__(self, *, min_height: float) -> None:
         super().__init__()
 
         self.min_height = min_height
@@ -103,7 +103,7 @@ class IllegalContactTermination(Termination):
     body_ids: jnp.ndarray
     contact_eps: float
 
-    def __init__(self, body_ids: Collection[int], contact_eps: float = -1e-3) -> None:
+    def __init__(self, *, body_ids: Collection[int], contact_eps: float = -1e-3) -> None:
         super().__init__()
 
         self.body_ids = jnp.array(sorted(body_ids))
@@ -124,11 +124,11 @@ class IllegalContactTermination(Termination):
 
 
 class IllegalContactTerminationBuilder(TerminationBuilder[IllegalContactTermination]):
-    def __init__(self, body_names: Collection[str]) -> None:
+    def __init__(self, *, body_names: Collection[str]) -> None:
         super().__init__()
 
         self.body_names = body_names
 
     def __call__(self, data: BuilderData) -> IllegalContactTermination:
         body_ids = lookup_in_dict(self.body_names, data.body_name_to_idx, "Body")
-        return IllegalContactTermination(body_ids)
+        return IllegalContactTermination(body_ids=body_ids)

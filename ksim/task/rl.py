@@ -28,8 +28,6 @@ from ksim.env import ActionModel, ActionModelType, KScaleEnv, KScaleEnvConfig, c
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
-
 
 @jax.tree_util.register_dataclass
 @dataclass
@@ -61,6 +59,8 @@ Config = TypeVar("Config", bound=RLConfig)
 
 class RLTask(xax.Task[Config], Generic[Config], ABC):
     max_trajectory_steps: int
+
+    ActorCarryType = jnp.ndarray
 
     def __init__(self, config: Config) -> None:
         super().__init__(config)
@@ -103,7 +103,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
     @eqx.filter_jit
-    def get_init_carry(self) -> T: ...
+    def get_init_carry(self) -> ActorCarryType: ...
 
     @eqx.filter_jit
     def get_actor_output(
@@ -112,8 +112,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         sys: System,
         state: BraxState,
         rng: PRNGKeyArray,
-        carry: T,
-    ) -> tuple[jnp.ndarray, T]:
+        carry: ActorCarryType,
+    ) -> tuple[jnp.ndarray, ActorCarryType]:
         """Runs the model on the given inputs.
 
         Args:
@@ -145,7 +145,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Gets the reward statistics.
         reward = jnp.where(trajectory.done[..., None], jnp.nan, trajectory.info["all_rewards"])
-        for i, key in enumerate(env.rewards.keys()):
+        for i, (key, _) in enumerate(env.rewards):
             reward_values = reward[..., i : i + 1].astype(jnp.float32)
             reward_stats[f"{key}/mean"] = jnp.nanmean(reward_values)
             reward_stats[f"{key}/std"] = jnp.nanstd(reward_values)
@@ -159,7 +159,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         termination = trajectory.info["all_dones"].max(axis=-2).astype(jnp.float32)
         termination = termination.reshape(-1, termination.shape[-1])
         max_ids = termination.argmax(axis=-1)
-        for i, key in enumerate(env.terminations.keys()):
+        for i, (key, _) in enumerate(env.terminations):
             termination_stats[key] = (max_ids == i).astype(jnp.float32).mean()
 
         return termination_stats

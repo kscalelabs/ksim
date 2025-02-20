@@ -43,7 +43,7 @@ def split_and_pad_trajectories(
 
     def scan_fn(
         carry: tuple[int, int, jnp.ndarray, jnp.ndarray],
-        x: int,
+        x: jnp.ndarray,
     ) -> tuple[tuple[int, int, jnp.ndarray, jnp.ndarray], None]:
         start_idx, traj_idx, padded_trajectories, trajectory_masks = carry
         length = x
@@ -77,6 +77,6 @@ def unpad_trajectories(trajectories_tne: jnp.ndarray, masks_tn: jnp.ndarray) -> 
     """
     return (
         trajectories_tne.transpose(1, 0)[masks_tn.transpose(1, 0)]
-        .view(-1, trajectories_tne.shape[0], trajectories_tne.shape[-1])
+        .reshape(-1, trajectories_tne.shape[0], trajectories_tne.shape[-1])
         .transpose(1, 0)
     )

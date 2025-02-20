@@ -56,13 +56,14 @@ class LinearVelocityCommand(Command):
     any command.
     """
 
-    x_scale: float
-    y_scale: float
-    switch_prob: float
-    zero_prob: float
+    x_scale: float = eqx.field(default=1.0, static=True)
+    y_scale: float = eqx.field(default=1.0, static=True)
+    switch_prob: float = eqx.field(default=0.0, static=True)
+    zero_prob: float = eqx.field(default=0.0, static=True)
 
     def __init__(
         self,
+        *,
         x_scale: float = 1.0,
         y_scale: float = 1.0,
         switch_prob: float = 0.0,
@@ -108,6 +109,7 @@ class AngularVelocityCommand(Command):
 
     def __init__(
         self,
+        *,
         scale: float = 1.0,
         switch_prob: float = 0.0,
         zero_prob: float = 0.0,

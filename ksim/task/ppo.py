@@ -54,12 +54,13 @@ class PPOOutput(NamedTuple):
     action_log_probs: Array
 
 
-T = TypeVar("T")
 Config = TypeVar("Config", bound=PPOConfig)
 
 
-class PPOTask(RLTask[Config], Generic[Config, T], ABC):
+class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
+
+    CriticCarryType = jnp.ndarray
 
     def compute_gae(
         self,
@@ -179,9 +180,8 @@ class PPOTask(RLTask[Config], Generic[Config, T], ABC):
         sys: System,
         state: BraxState,
         rng: PRNGKeyArray,
-        carry: T,
-    ) -> tuple[jnp.ndarray, T]:
-        raise NotImplementedError("`get_critic_output` must be implemented by the subclass")
+        carry: CriticCarryType,
+    ) -> tuple[jnp.ndarray, CriticCarryType]: ...
 
     @eqx.filter_jit
     def model_update(
@@ -196,8 +196,6 @@ class PPOTask(RLTask[Config], Generic[Config, T], ABC):
         clip_eps = self.config.clip_param
         value_coef = self.config.value_loss_coef
         entropy_coef = self.config.entropy_coef
-
-        breakpoint()
 
         def flatten(x: jnp.ndarray) -> jnp.ndarray:
             if isinstance(x, jnp.ndarray) and x.ndim >= 2:
