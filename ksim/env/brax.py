@@ -80,6 +80,7 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
             raise ValueError(f"No actuators found for {model_name}")
         actuator_metadata = {k: ActuatorMetadata(kp=v.kp, kd=v.kd) for k, v in actuators.items()}
         model_metadata = ModelMetadata(actuators=actuator_metadata, control_frequency=control_frequency)
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
         OmegaConf.save(model_metadata, metadata_path)
 
     config = OmegaConf.structured(ModelMetadata)
