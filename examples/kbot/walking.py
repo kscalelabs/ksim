@@ -122,8 +122,8 @@ class MLPCell(eqx.Module):
 
         self.layers = [
             eqx.nn.Linear(
-                input_size=num_inputs if i == 0 else num_hidden,
-                output_size=num_outputs if i == num_layers else num_hidden,
+                in_features=num_inputs if i == 0 else num_hidden,
+                out_features=num_outputs if i == num_layers else num_hidden,
                 use_bias=True,
                 key=keys[i],
             )
