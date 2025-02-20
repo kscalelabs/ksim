@@ -71,12 +71,21 @@ class SensorObservation(Observation):
 
 
 class SensorObservationBuilder(ObservationBuilder[SensorObservation]):
-    sensor_name: int
+    sensor_name: str
+    noise: float
+    noise_type: NoiseType
 
-    def __init__(self, sensor_name: str) -> None:
+    def __init__(
+        self,
+        sensor_name: str,
+        noise: float = 0.0,
+        noise_type: NoiseType = "gaussian",
+    ) -> None:
         super().__init__()
 
         self.sensor_name = sensor_name
+        self.noise = noise
+        self.noise_type = noise_type
 
     def __call__(self, data: BuilderData) -> SensorObservation:
         if self.sensor_name not in data.sensor_name_to_idx:
@@ -84,5 +93,7 @@ class SensorObservationBuilder(ObservationBuilder[SensorObservation]):
             raise ValueError(f"IMU {self.sensor_name} not found in model. Available:\n{options}")
         return SensorObservation(
             data.sensor_name_to_idx[self.sensor_name],
+            noise=self.noise,
+            noise_type=self.noise_type,
             sensor_name=self.sensor_name,
         )
