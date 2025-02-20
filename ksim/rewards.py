@@ -125,11 +125,18 @@ class TrackAngularVelocityZReward(Reward):
     """Reward for how well the robot is tracking the angular velocity command."""
 
     cmd_name: str = eqx.field(static=True)
+    norm: NormType = eqx.field(static=True)
 
-    def __init__(self, scale: float, cmd_name: str = "angular_velocity_command") -> None:
+    def __init__(
+        self,
+        scale: float,
+        cmd_name: str = "angular_velocity_command",
+        norm: NormType = "l2",
+    ) -> None:
         super().__init__(scale)
 
         self.cmd_name = cmd_name
+        self.norm = norm
 
     def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
         ang_vel_cmd_1 = state.info["commands"][self.cmd_name][..., 0]
@@ -141,11 +148,18 @@ class TrackLinearVelocityXYReward(Reward):
     """Reward for how well the robot is tracking the linear velocity command."""
 
     cmd_name: str = eqx.field(static=True)
+    norm: NormType = eqx.field(static=True)
 
-    def __init__(self, scale: float, cmd_name: str = "linear_velocity_command") -> None:
+    def __init__(
+        self,
+        scale: float,
+        cmd_name: str = "linear_velocity_command",
+        norm: NormType = "l2",
+    ) -> None:
         super().__init__(scale)
 
         self.cmd_name = cmd_name
+        self.norm = norm
 
     def __call__(self, prev_state: BraxState, action: jnp.ndarray, state: State) -> jnp.ndarray:
         lin_vel_cmd_2 = prev_state.info["commands"][self.cmd_name]

@@ -94,6 +94,48 @@ class RNNCell(eqx.Module):
         return x_n, next_state_ln
 
 
+class MLPCell(eqx.Module):
+    num_inputs: int
+    num_hidden: int
+    num_layers: int
+    num_outputs: int
+
+    layers: list[eqx.nn.Linear]
+
+    def __init__(
+        self,
+        num_inputs: int,
+        num_hidden: int,
+        num_layers: int,
+        num_outputs: int,
+        *,
+        key: PRNGKeyArray,
+    ) -> None:
+        super().__init__()
+
+        self.num_inputs = num_inputs
+        self.num_hidden = num_hidden
+        self.num_layers = num_layers
+        self.num_outputs = num_outputs
+
+        keys = jax.random.split(key, num_layers)
+
+        self.layers = [
+            eqx.nn.Linear(
+                input_size=num_inputs if i == 0 else num_hidden,
+                output_size=num_outputs if i == num_layers else num_hidden,
+                use_bias=True,
+                key=keys[i],
+            )
+            for i in range(num_hidden)
+        ]
+
+    def __call__(self, x_n: jnp.ndarray) -> jnp.ndarray:
+        for layer in self.layers:
+            x_n = layer(x_n)
+        return x_n
+
+
 class ActorModel(eqx.Module):
     rnn: RNNCell
 
@@ -146,7 +188,7 @@ class ActorModel(eqx.Module):
 
 
 class CriticModel(eqx.Module):
-    rnn: RNNCell
+    mlp: MLPCell
 
     def __init__(
         self,
@@ -161,7 +203,7 @@ class CriticModel(eqx.Module):
         num_inputs = 2 + 1 + 3 + 3 + 3 + 3 + 3 + 4 + num_joints + num_joints
         num_outputs = 1
 
-        self.rnn = RNNCell(
+        self.mlp = MLPCell(
             num_inputs=num_inputs,
             num_hidden=num_hidden,
             num_layers=num_layers,
@@ -181,7 +223,6 @@ class CriticModel(eqx.Module):
         base_quat_4: jnp.ndarray,  # The base orientation.
         joint_pos_j: jnp.ndarray,  # The joint angular positions.
         joint_vel_j: jnp.ndarray,  # The joint angular velocities.
-        state_ln: jnp.ndarray | None = None,  # The state of the RNN.
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
         x_n = jnp.concatenate(
             [
@@ -198,10 +239,8 @@ class CriticModel(eqx.Module):
             ],
             axis=-1,
         )
-
-        x_n, next_state_ln = self.rnn(x_n, state_ln)
-
-        return x_n, next_state_ln
+        x_n = self.mlp(x_n)
+        return x_n
 
 
 class ActorCriticModel(eqx.Module):
@@ -224,7 +263,7 @@ class KBotWalkingConfig(PPOConfig):
     actor_hidden_dims: int = xax.field(value=512)
     actor_num_layers: int = xax.field(value=2)
     critic_hidden_dims: int = xax.field(value=512)
-    critic_num_layers: int = xax.field(value=2)
+    critic_num_layers: int = xax.field(value=4)
     init_noise_std: float = xax.field(value=1.0)
 
     # Termination conditions.
