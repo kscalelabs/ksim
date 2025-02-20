@@ -1,2 +1,14 @@
 # requirements.txt
 
+# K-Scale CLI
+kscale
+
+# Jax
+brax
+distrax
+jax
+mujoco
+mujoco-mjx
+mujoco-scenes
+optax
+xax
