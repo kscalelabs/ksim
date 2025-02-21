@@ -119,7 +119,7 @@ class SensorObservation(Observation):
         noise_type: NoiseType = "gaussian",
         sensor_name: str | None = None,
     ) -> None:
-        super().__init__(noise, noise_type)
+        super().__init__(noise=noise, noise_type=noise_type)
 
         self.sensor_adr = sensor_adr
         self.sensor_dim = sensor_dim
