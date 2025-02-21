@@ -102,7 +102,7 @@ class LinearVelocityZPenalty(Reward):
         scale: float,
         norm: NormType = "l2",
     ) -> None:
-        super().__init__(scale)
+        super().__init__(scale=scale)
 
         self.norm = norm
 
@@ -122,7 +122,7 @@ class AngularVelocityXYPenalty(Reward):
         scale: float,
         norm: NormType = "l2",
     ) -> None:
-        super().__init__(scale)
+        super().__init__(scale=scale)
 
         self.norm = norm
 
@@ -144,7 +144,7 @@ class TrackAngularVelocityZReward(Reward):
         cmd_name: str = "angular_velocity_command",
         norm: NormType = "l2",
     ) -> None:
-        super().__init__(scale)
+        super().__init__(scale=scale)
 
         self.cmd_name = cmd_name
         self.norm = norm
@@ -168,7 +168,7 @@ class TrackLinearVelocityXYReward(Reward):
         cmd_name: str = "linear_velocity_command",
         norm: NormType = "l2",
     ) -> None:
-        super().__init__(scale)
+        super().__init__(scale=scale)
 
         self.cmd_name = cmd_name
         self.norm = norm
@@ -190,7 +190,7 @@ class ActionSmoothnessPenalty(Reward):
         scale: float,
         norm: NormType = "l2",
     ) -> None:
-        super().__init__(scale)
+        super().__init__(scale=scale)
 
         self.norm = norm
 
@@ -228,7 +228,7 @@ class FootContactPenalty(Reward):
         skip_if_zero_command: list[str] | None = None,
         eps: float = 1e-6,
     ) -> None:
-        super().__init__(scale)
+        super().__init__(scale=scale)
 
         assert 0 <= allowed_contact_prct <= 1
         assert skip_if_zero_command is None or len(skip_if_zero_command) > 0
