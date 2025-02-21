@@ -58,6 +58,13 @@ Config = TypeVar("Config", bound=RLConfig)
 
 
 class RLTask(xax.Task[Config], Generic[Config], ABC):
+    """Base class for reinforcement learning tasks.
+
+    Attributes:
+        config: The RL configuration.
+        max_trajectory_steps: The maximum number of steps in a trajectory.
+    """
+
     max_trajectory_steps: int
 
     def __init__(self, config: Config) -> None:
@@ -150,7 +157,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return reward_stats
 
-    def get_termination_stats(self, trajectory: BraxState, env: KScaleEnv) -> dict[str, jnp.ndarray]:
+    def get_termination_stats(
+        self, trajectory: BraxState, env: KScaleEnv
+    ) -> dict[str, jnp.ndarray]:
         termination_stats: dict[str, jnp.ndarray] = {}
 
         # Gets the termination statistics.
@@ -171,7 +180,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Logs the mean episode length.
         mean_episode_length_steps = (~trajectory.done).sum(axis=-1).astype(jnp.float32).mean()
         mean_episode_length_seconds = mean_episode_length_steps * self.config.ctrl_dt
-        self.logger.log_scalar("mean_episode_length", mean_episode_length_seconds, namespace="stats")
+        self.logger.log_scalar(
+            "mean_episode_length", mean_episode_length_seconds, namespace="stats"
+        )
 
     @abstractmethod
     def model_update(
@@ -192,7 +203,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
     @eqx.filter_jit
-    def _vmapped_unroll(self, rng: PRNGKeyArray, env: KScaleEnv, model: PyTree, num_envs: int) -> BraxState:
+    def _multiple_unroll(
+        self, rng: PRNGKeyArray, env: KScaleEnv, model: PyTree, num_envs: int
+    ) -> BraxState:
         rngs = jax.random.split(rng, num_envs)
         return jax.vmap(self._single_unroll, in_axes=(0, None, None))(rngs, env, model)
 
@@ -227,7 +240,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Unrolls a trajectory.
             train_rng, step_rng = jax.random.split(train_rng)
-            trajectories = self._vmapped_unroll(step_rng, env, model, self.config.num_envs)
+            trajectories = self._multiple_unroll(step_rng, env, model, self.config.num_envs)
 
             # Updates the model on the collected trajectories.
             with self.step_context("update_state"):
@@ -291,7 +304,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
+                exception_tb = textwrap.indent(
+                    xax.highlight_exception_message(traceback.format_exc()), "  "
+                )
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(model, optimizer, opt_state, state)
@@ -308,4 +323,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.run_environment()
 
             case _:
-                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
+                raise ValueError(
+                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
+                )

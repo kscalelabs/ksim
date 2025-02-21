@@ -18,38 +18,50 @@ from ksim.task.rl import RLConfig, RLTask
 @jax.tree_util.register_dataclass
 @dataclass
 class PPOConfig(RLConfig):
+    # For the CLIP term (see Schulman et al. 2017)
     clip_param: float = xax.field(value=0.2, help="Clipping parameter for PPO.")
-    gamma: float = xax.field(value=0.998, help="Discount factor for PPO.")
-    lam: float = xax.field(value=0.95, help="Lambda parameter for PPO.")
-    value_loss_coef: float = xax.field(value=0.5, help="Value loss coefficient for PPO.")
-    entropy_coef: float = xax.field(value=0.01, help="Entropy coefficient for PPO.")
-    learning_rate: float = xax.field(value=1e-3, help="Learning rate for PPO.")
-    max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for PPO.")
-    use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss for PPO.")
-    schedule: str = xax.field(value="fixed", help="Schedule for PPO.")
-    desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for PPO.")
     normalize_advantage: bool = xax.field(value=True, help="Whether to normalize advantages.")
 
+    # For the Value Function (VF) term
+    value_loss_coef: float = xax.field(value=1.0, help="Value loss coefficient for PPO.")
+    use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss.")
 
-@dataclass
+    # For the entropy bonus term
+    entropy_coef: float = xax.field(value=0.008, help="Entropy coefficient for PPO.")
+
+    # For the GAE computation
+    gamma: float = xax.field(value=0.99, help="Discount factor for PPO")
+    lam: float = xax.field(value=0.95, help="Lambda for GAE: high = more bias; low = more variance")
+
+    # General training parameters
+    # TODO: none of these except `max_grad_norm` are actually used in the training script
+    num_learning_epochs: int = xax.field(value=5, help="Number of learning epochs per PPO update.")
+    num_mini_batches: int = xax.field(value=4, help="Number of mini-batches per PPO epoch.")
+    learning_rate: float = xax.field(value=1e-3, help="Learning rate for PPO.")
+    schedule: str = xax.field(
+        value="adaptive", help="Learning rate schedule for PPO ('fixed' or 'adaptive')."
+    )
+    desired_kl: float = xax.field(
+        value=0.01, help="Desired KL divergence for adaptive learning rate."
+    )
+    max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
+
+
 class PPOBatch(NamedTuple):
     """A batch of PPO training data."""
 
-    observations: Array
-    next_observations: Array
+    observations: PyTree
+    next_observations: PyTree
     actions: Array
     rewards: Array
-    truncation: Array
-    termination: Array
-    log_probs: Array
-    values: Array
+    done: Array
+    action_log_probs: Array
 
 
 @dataclass
 class PPOOutput(NamedTuple):
     """Output from PPO model forward pass."""
 
-    policy_logits: Array
     values: Array
     action_log_probs: Array
 
@@ -58,112 +70,16 @@ Config = TypeVar("Config", bound=PPOConfig)
 
 
 class PPOTask(RLTask[Config], Generic[Config], ABC):
-    """Base class for PPO tasks."""
+    """Base class for PPO tasks.
 
-    def compute_gae(
-        self,
-        batch: PPOBatch,
-        bootstrap_value: Array,
-    ) -> Tuple[Array, Array]:
-        """Compute generalized advantage estimation (GAE)."""
-        # Compute value targets using GAE
-        truncation_mask = 1 - batch.truncation
-        values_t_plus_1 = jnp.concatenate([batch.values[1:], jnp.expand_dims(bootstrap_value, 0)], axis=0)
-
-        # Compute TD errors
-        deltas = batch.rewards + self.config.gamma * (1 - batch.termination) * values_t_plus_1 - batch.values
-        deltas *= truncation_mask
-
-        # Initialize accumulator for GAE computation
-        acc = jnp.zeros_like(bootstrap_value)
-
-        def compute_vs_minus_v_xs(
-            carry: Tuple[float, Array], target_t: Tuple[Array, Array, Array]
-        ) -> Tuple[Tuple[float, Array], Array]:
-            lambda_, acc = carry
-            truncation_mask, delta, termination = target_t
-            acc = delta + self.config.gamma * (1 - termination) * truncation_mask * lambda_ * acc
-            return (lambda_, acc), acc
-
-        # Compute advantages using scan
-        (_, _), advantages = jax.lax.scan(
-            compute_vs_minus_v_xs,
-            (self.config.lam, acc),
-            (truncation_mask, deltas, batch.termination),
-            length=int(truncation_mask.shape[0]),
-            reverse=True,
-        )
-
-        # Compute value targets
-        values = advantages + batch.values
-
-        return jax.lax.stop_gradient(values), jax.lax.stop_gradient(advantages)
-
-    def compute_loss(
-        self,
-        model: PyTree,
-        batch: PPOBatch,
-        output: PPOOutput,
-        state: xax.State,
-    ) -> Tuple[Array, Dict[str, Array]]:
-        """Compute PPO losses."""
-        # Get bootstrap value for final state
-        bootstrap_value = output.values[-1]
-
-        # Compute advantages and value targets
-        values, advantages = self.compute_gae(batch, bootstrap_value)
-
-        # Normalize advantages if configured
-        if self.config.normalize_advantage:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
-        # Compute probability ratio
-        ratio = jnp.exp(output.action_log_probs - batch.log_probs)
-
-        # Compute surrogate losses
-        surrogate1 = ratio * advantages
-        surrogate2 = (
-            jnp.clip(
-                ratio,
-                1 - self.config.clip_param,
-                1 + self.config.clip_param,
-            )
-            * advantages
-        )
-        policy_loss = -jnp.mean(jnp.minimum(surrogate1, surrogate2))
-
-        # Compute value loss
-        if self.config.use_clipped_value_loss:
-            value_pred_clipped = batch.values + jnp.clip(
-                output.values - batch.values,
-                -self.config.clip_param,
-                self.config.clip_param,
-            )
-            value_losses = jnp.square(output.values - values)
-            value_losses_clipped = jnp.square(value_pred_clipped - values)
-            value_loss = 0.5 * jnp.mean(jnp.maximum(value_losses, value_losses_clipped))
-        else:
-            value_loss = 0.5 * jnp.mean(jnp.square(output.values - values))
-
-        # Compute entropy loss
-        entropy = -jnp.mean(
-            jnp.sum(jax.nn.softmax(output.policy_logits) * jax.nn.log_softmax(output.policy_logits), axis=-1)
-        )
-        entropy_loss = -self.config.entropy_coef * entropy
-
-        # Compute total loss
-        total_loss = policy_loss + self.config.value_loss_coef * value_loss + entropy_loss
-
-        metrics = {
-            "total_loss": total_loss,
-            "policy_loss": policy_loss,
-            "value_loss": value_loss,
-            "entropy_loss": entropy_loss,
-            "entropy": entropy,
-            "approx_kl": jnp.mean((ratio - 1) - jnp.log(ratio)),
-        }
-
-        return total_loss, metrics
+    Attributes:
+        config: The PPO configuration.
+        model: The PPO model.
+        optimizer: The PPO optimizer.
+        state: The PPO state.
+        dataset: The PPO dataset.
+        max_trajectory_steps: The maximum number of steps in a trajectory.
+    """
 
     def get_optimizer(self) -> optax.GradientTransformation:
         return optax.chain(
@@ -210,7 +126,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         flat_done = flatten(trajectory.done)
 
         def discount_cumsum(rewards: jnp.ndarray, dones: jnp.ndarray, gamma: float) -> jnp.ndarray:
-            def scan_fn(carry: jnp.ndarray, elem: tuple[jnp.ndarray, jnp.ndarray]) -> tuple[jnp.ndarray, jnp.ndarray]:
+            def scan_fn(
+                carry: jnp.ndarray, elem: tuple[jnp.ndarray, jnp.ndarray]
+            ) -> tuple[jnp.ndarray, jnp.ndarray]:
                 r, d = elem
                 new_carry = r + gamma * carry * (1.0 - d)
                 return new_carry, new_carry
@@ -220,9 +138,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         flat_returns = discount_cumsum(flat_rewards, flat_done, gamma)
 
-        def gaussian_log_prob(mean: jnp.ndarray, log_std: jnp.ndarray, action: jnp.ndarray) -> jnp.ndarray:
+        def gaussian_log_prob(
+            mean: jnp.ndarray, log_std: jnp.ndarray, action: jnp.ndarray
+        ) -> jnp.ndarray:
             var = jnp.exp(2 * log_std)
-            logp = -0.5 * (((action - mean) ** 2) / (var + 1e-8) + 2 * log_std + jnp.log(2 * jnp.pi))
+            logp = -0.5 * (
+                ((action - mean) ** 2) / (var + 1e-8) + 2 * log_std + jnp.log(2 * jnp.pi)
+            )
             return jnp.sum(logp, axis=-1)
 
         def gaussian_entropy(log_std: jnp.ndarray) -> jnp.ndarray:
