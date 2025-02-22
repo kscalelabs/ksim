@@ -115,8 +115,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         env = self.get_environment()
         render_name = self.get_render_name(state)
         render_dir = self.exp_dir / "renders" / render_name
-        logger.log(xax.LOG_STATUS, "Rendering to %s", render_dir)
-        env.unroll_trajectory_and_render(
+        # logger.log(xax.LOG_STATUS, "Rendering to %s", render_dir)
+        env.unroll_trajectories_and_render(
             rng=rng,
             num_steps=self.max_steps_per_trajectory,
             render_dir=render_dir,
@@ -127,27 +127,31 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_init_actor_carry(self) -> jnp.ndarray | None: ...
 
     @abstractmethod
-    def get_actor_output(
-        self,
-        model: PyTree,
-        sys: System,
-        state: BraxState,
-        rng: PRNGKeyArray,
-        carry: jnp.ndarray | None,
-    ) -> tuple[jnp.ndarray, jnp.ndarray | None]:
-        """Runs the model on the given inputs.
+    def get_model_obs_from_state(self, state: BraxState) -> PyTree: ...
 
-        Args:
-            model: The current model.
-            sys: The system to run the model on.
-            state: The current state of the environment.
-            rng: The current RNG key.
-            carry: The carry for the model.
+    # @abstractmethod
+    # def get_actor_output(
+    #     self,
+    #     model: PyTree,
+    #     sys: System,
+    #     state: BraxState,
+    #     rng: PRNGKeyArray,
+    #     carry: jnp.ndarray | None,
+    # ) -> tuple[jnp.ndarray, jnp.ndarray | None]:
+    #     """Get the actor output.
 
-        Returns:
-            A tuple of the output and the new carry.
-        """
-        raise NotImplementedError("`get_output` must be implemented by the subclass")
+    #     Args:
+    #         model: The linen-based neural network model.
+    #         params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
+    #         sys: The system (see Brax)
+    #         state: The state (see Brax)
+    #         rng: The random key.
+    #         carry: The carry state for recurrent models (not used here)
+
+    #     Returns:
+    #         The actor output and the carry state (keeping for consistency)
+    #     """
+    #     raise NotImplementedError("`get_output` must be implemented by the subclass")
 
     def log_state(self, env: KScaleEnv) -> None:
         super().log_state()
@@ -181,15 +185,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Returns:
             The initial parameters.
         """
+        env = self.get_environment()
+        state = env.reset(key)
+
         if pretrained is not None:
             # TODO: implement pretrained model loading.
             raise NotImplementedError("Pretrained models are not yet implemented.")
 
         # Provide a dummy observation (of appropriate shape) for initialization.
-        dummy_obs = jnp.zeros(
-            (self.max_trajectory_steps, self.config.num_envs, self.config.observation_size)
-        )
-        return self.get_model(key).init(key, dummy_obs)
+        return self.get_model(key).init(key, self.get_model_obs_from_state(state))
 
     def get_termination_stats(
         self, trajectory: BraxState, env: KScaleEnv
@@ -228,22 +232,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         batch: NamedTuple,
     ) -> tuple[PyTree, optax.OptState]: ...
 
-    @eqx.filter_jit
-    def _single_unroll(self, rng: PRNGKeyArray, env: KScaleEnv, model: PyTree) -> BraxState:
-        return env.unroll_trajectory(
-            num_steps=self.max_trajectory_steps,
-            rng=rng,
-            init_carry=self.get_init_actor_carry(),
-            model=functools.partial(self.get_actor_output, model=model),
-        )
-
-    @eqx.filter_jit
-    def _multiple_unroll(
-        self, rng: PRNGKeyArray, env: KScaleEnv, model: PyTree, num_envs: int
-    ) -> BraxState:
-        rngs = jax.random.split(rng, num_envs)
-        return jax.vmap(self._single_unroll, in_axes=(0, None, None))(rngs, env, model)
-
     @abstractmethod
     def get_trajectory_batch(
         self,
@@ -271,13 +259,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         env: BaseEnv,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        state: xax.State,
+        training_state: xax.State,
     ) -> None:
         rng = self.prng_key()
         rng, train_rng, val_rng = jax.random.split(rng, 3)
 
-        while not self.is_training_over(state):
-            if self.valid_step_timer.is_valid_step(state):
+        while not self.is_training_over(training_state):
+            if self.valid_step_timer.is_valid_step(training_state):
                 val_rng, step_val_rng = jax.random.split(val_rng)
                 trajectory = self.get_trajectory_batch(model, params, env, step_val_rng)
                 assert hasattr(trajectory, "done"), "Trajectory must contain a `done` field."
@@ -295,7 +283,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             #         state.num_valid_samples += 1
 
             with self.step_context("on_step_start"):
-                state = self.on_step_start(state)
+                training_state = self.on_step_start(training_state)
 
             # Unrolls a trajectory.
             train_rng, step_rng = jax.random.split(train_rng)
@@ -313,14 +301,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 #     self.log_state_timers(state)
                 #     self.log_trajectory_stats(env, trajectories)
                 #     self.logger.write(state)
-                state.num_steps += 1
+                training_state.num_steps += 1
 
             with self.step_context("on_step_end"):
-                state = self.on_step_end(state)
+                training_state = self.on_step_end(training_state)
 
-            if self.should_checkpoint(state):
+            if self.should_checkpoint(training_state):
                 self.save_checkpoint(
-                    model=params, optimizer=optimizer, opt_state=opt_state, state=state
+                    model=params, optimizer=optimizer, opt_state=opt_state, state=training_state
                 )  # Update XAX to be Flax supportive...
 
     def run_training(self) -> None:
@@ -336,12 +324,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 Thread(target=self.log_state, daemon=True, args=(env,)).start()
 
             key, model_key = jax.random.split(key)
-            model, optimizer, opt_state, state = self.load_initial_state(model_key)
+            model, optimizer, opt_state, training_state = self.load_initial_state(model_key)
 
-            state = self.on_training_start(state)
+            training_state = self.on_training_start(training_state)
 
             def on_exit() -> None:
-                self.save_checkpoint(model, optimizer, opt_state, state)
+                self.save_checkpoint(model, optimizer, opt_state, training_state)
 
             # Handle user-defined interrupts during the training loop.
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
@@ -356,16 +344,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     env=env,
                     optimizer=optimizer,
                     opt_state=opt_state,
-                    state=state,
+                    training_state=training_state,
                 )
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
                     xax.show_info(
-                        f"Finished training after {state.num_steps} steps, {state.num_samples} samples",
+                        f"Finished training after {training_state.num_steps} steps, {training_state.num_samples} samples",
                         important=True,
                     )
-                self.save_checkpoint(model, optimizer, opt_state, state)
+                self.save_checkpoint(model, optimizer, opt_state, training_state)
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 if xax.is_master():
@@ -377,10 +365,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
-                self.save_checkpoint(model, optimizer, opt_state, state)
+                self.save_checkpoint(model, optimizer, opt_state, training_state)
 
             finally:
-                state = self.on_training_end(state)
+                training_state = self.on_training_end(training_state)
+
+    def get_batch_size(self) -> int:
+        """Get the batch size for the current task."""
+        # TODO: this is a hack... need to implement mini batching properly later.
+        return 1
 
     def run(self) -> None:
         match self.config.action:

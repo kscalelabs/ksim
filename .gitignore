@@ -20,8 +20,12 @@ dist/
 *.so
 out*/
 
+# Development related files.
+scratch/
+
 # Training artifacts.
 *.mp4
+run_*/
 
 # Other caching.
 .jaxcache/

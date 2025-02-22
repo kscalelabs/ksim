@@ -1,6 +1,6 @@
 """CartPole environment."""
 
-from typing import Callable
+from typing import Any, Callable, Tuple
 
 import gym
 import jax
@@ -64,9 +64,11 @@ class CartPoleEnv(BaseEnv):
 
     def unroll_trajectories(
         self,
-        action_fn: Callable[[Array], Array],
+        action_log_prob_fn: Callable[[BraxState, PRNGKeyArray], Tuple[Array, Array]],
         rng: PRNGKeyArray,
-        max_trajectory_steps: int,
+        num_steps: int,
+        num_envs: int,
+        **kwargs: Any,
     ) -> BraxState:
         """Rollout the model for a given number of steps.
         Args:
@@ -77,6 +79,7 @@ class CartPoleEnv(BaseEnv):
         Returns:
             A BraxState containing trajectories with shape (num_steps, ...) in leaves.
         """
+        assert num_envs == 1, "CartPoleEnv only supports a single environment"
         observations = []
         actions = []
         rewards = []
@@ -85,18 +88,14 @@ class CartPoleEnv(BaseEnv):
 
         state = self.reset(rng)
         rng, _ = jax.random.split(rng)
-        for _ in range(max_trajectory_steps):
-            logits = action_fn(state.obs["observations"])
-            assert isinstance(logits, Array)
-            sampled_actions = jax.random.categorical(rng, logits)
-            # Calculate log probabilities from logits
-            log_probs = jax.nn.log_softmax(logits)
-            action_log_prob = log_probs[jnp.arange(logits.shape[0]), sampled_actions]
+        for _ in range(num_steps):
+            rng, action_rng = jax.random.split(rng)
+            action, log_probs = action_log_prob_fn(state, action_rng)
 
             observations.append(state.obs)
             done.append(state.done)
-            actions.append(sampled_actions)
-            action_log_probs.append(action_log_prob)
+            actions.append(action)
+            action_log_probs.append(log_probs)
             rewards.append(state.reward)
             # NOTE: need to be careful about when the reward updates... this works for survival
             # related tasks, but not those that directly depend on the action.
@@ -105,7 +104,7 @@ class CartPoleEnv(BaseEnv):
                 state = self.reset(rng)
                 rng, _ = jax.random.split(rng)
             else:
-                state = self.step(state, sampled_actions)
+                state = self.step(state, action)
 
         observations = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *observations)
         actions = jnp.stack(actions)
@@ -128,8 +127,4 @@ class CartPoleEnv(BaseEnv):
 
     @property
     def action_size(self) -> int:
-        return 1
-
-    @property
-    def num_envs(self) -> int:
         return 1

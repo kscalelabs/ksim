@@ -1,24 +1,85 @@
 """High Level Formulations of RL Models."""
 
+from abc import ABC, abstractmethod
+from typing import Tuple
+
 import flax.linen as nn
-import jax
+from jaxtyping import Array, PRNGKeyArray
+
+from ksim.types import ModelObs, ModelOut
+
+
+class ActionModel(nn.Module, ABC):
+    """Action model."""
+
+    @abstractmethod
+    def __call__(self, obs: ModelObs) -> ModelOut:
+        """Forward pass of the model."""
+        ...
+
+    @abstractmethod
+    def calc_log_prob(self, prediction: ModelOut, action: ModelOut) -> Array:
+        """Calculate the log probability of the action."""
+        ...
+
+    @abstractmethod
+    def sample_and_log_prob(self, obs: ModelObs, rng: PRNGKeyArray) -> Tuple[Array, Array]:
+        """Sample and calculate the log probability of the action."""
+        ...
+
+
+class GaussianActionModel(ActionModel, ABC):
+    """Gaussian action model."""
+
+    @abstractmethod
+    def get_variance(self) -> Array:
+        """Get the variance of the action model."""
+        ...
+
+
+class CategoricalActionModel(ActionModel, ABC):
+    """Categorical action model."""
+
+    sampling_temperature: float
 
 
 class ActorCriticModel(nn.Module):
     """Actor-Critic model."""
 
-    actor_module: nn.Module
+    actor_module: ActionModel
     critic_module: nn.Module
 
     @nn.compact
-    def __call__(self, x: jax.Array) -> tuple[jax.Array, jax.Array]:
+    def __call__(self, obs: ModelObs) -> Tuple[ModelOut, ModelOut]:
         """Forward pass of the model."""
-        return self.actor_module(x), self.critic_module(x)
+        return self.actor(obs), self.critic(obs)
 
-    def actor(self, x: jax.Array) -> jax.Array:
+    def actor(self, obs: ModelObs) -> ModelOut:
         """Actor forward pass."""
-        return self.actor_module(x)
+        return self.actor_module(obs)
 
-    def critic(self, x: jax.Array) -> jax.Array:
+    def critic(self, obs: ModelObs) -> ModelOut:
         """Critic forward pass."""
-        return self.critic_module(x)
+        return self.critic_module(obs)
+
+    def actor_calc_log_prob(self, prediction: ModelOut, action: ModelOut) -> Array:
+        """Calculate the log probability of the action."""
+        return self.actor_module.calc_log_prob(prediction, action)
+
+    def actor_sample_and_log_prob(self, obs: ModelObs, rng: PRNGKeyArray) -> Tuple[Array, Array]:
+        """Sample and calculate the log probability of the action."""
+        return self.actor_module.sample_and_log_prob(obs, rng)
+
+
+class GaussianActorCriticModel(ActorCriticModel):
+    """Gaussian actor-critic model."""
+
+    actor_module: GaussianActionModel
+    critic_module: nn.Module
+
+
+class CategoricalActorCriticModel(ActorCriticModel):
+    """Categorical actor-critic model."""
+
+    actor_module: CategoricalActionModel
+    critic_module: nn.Module

@@ -1,40 +1,59 @@
-import bdb
-import functools
-import signal
-import sys
-import textwrap
-import traceback
 from dataclasses import dataclass
-from threading import Thread
-from typing import Dict, Literal, NamedTuple
+from typing import Tuple
 
 import equinox as eqx
-import gymnasium as gym
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import numpy as np
-import optax
 import xax
-from brax.base import System
 from brax.envs.base import State as BraxState
-from dpshdl.dataset import Dataset
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray
 
-from ksim.env.base_env import BaseEnv
 from ksim.env.cartpole_env import CartPoleEnv
-from ksim.model.formulations import ActorCriticModel
+from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.mlp import MLP
-from ksim.task.ppo import PPOBatch, PPOConfig, PPOTask
-from ksim.task.rl import RLTask
+from ksim.task.ppo import PPOConfig, PPOTask
+
+
+class CartPoleActionModel(ActionModel):
+    """Action model for CartPole."""
+
+    mlp: MLP
+
+    @nn.compact
+    def __call__(self, state: Array) -> Array:
+        return self.mlp(state)
+
+    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
+        logits = prediction
+        log_probs = jax.nn.log_softmax(logits)
+        action_log_prob = log_probs[
+            jnp.arange(log_probs.shape[0])[:, None], jnp.arange(log_probs.shape[1]), action
+        ]
+        # NOTE: assumes two batching dimensions
+        return action_log_prob
+
+    def sample_and_log_prob(self, obs: Array, rng: PRNGKeyArray) -> Tuple[Array, Array]:
+        logits = self(obs)
+        log_probs = jax.nn.log_softmax(logits)
+        sampled_actions = jax.random.categorical(rng, log_probs)
+        action_log_prob = log_probs[jnp.arange(log_probs.shape[0]), sampled_actions]
+        return sampled_actions, action_log_prob
+
+
+class CartPoleCriticModel(nn.Module):
+    """Critic model for CartPole."""
+
+    mlp: MLP
+
+    @nn.compact
+    def __call__(self, state: Array) -> Array:
+        return self.mlp(state)
 
 
 @dataclass
 class CartPoleConfig(PPOConfig):
     """Configuration for CartPole training."""
-
-    # Env parameters.
-    sutton_barto_reward: bool = xax.field(value=False, help="Use Sutton and Barto reward function.")
-    batch_size: int = xax.field(value=16, help="Batch size.")
 
     # ML model parameters.
     actor_hidden_dims: int = xax.field(value=128, help="Hidden dimensions for the actor.")
@@ -57,6 +76,10 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
         """
         return CartPoleEnv()
 
+    def get_model_obs_from_state(self, state: BraxState) -> Array:
+        """Get the observation from the state."""
+        return state.obs["observations"]
+
     def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
         """Get the model.
         Args:
@@ -66,15 +89,19 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
             The model.
         """
         return ActorCriticModel(
-            actor_module=MLP(
-                num_hidden_layers=self.config.actor_num_layers,
-                hidden_features=self.config.actor_hidden_dims,
-                out_features=2,  # two discrete actions for CartPole
+            actor_module=CartPoleActionModel(
+                mlp=MLP(
+                    num_hidden_layers=self.config.actor_num_layers,
+                    hidden_features=self.config.actor_hidden_dims,
+                    out_features=2,  # two discrete actions for CartPole
+                ),
             ),
-            critic_module=MLP(
-                num_hidden_layers=self.config.critic_num_layers,
-                hidden_features=self.config.critic_hidden_dims,
-                out_features=1,
+            critic_module=CartPoleCriticModel(
+                mlp=MLP(
+                    num_hidden_layers=self.config.critic_num_layers,
+                    hidden_features=self.config.critic_hidden_dims,
+                    out_features=1,
+                ),
             ),
         )
 
@@ -84,8 +111,8 @@ if __name__ == "__main__":
     CartPoleTask.launch(
         CartPoleConfig(
             num_envs=1,
-            batch_size=16,
             max_trajectory_seconds=10.0,
             valid_every_n_steps=5,
+            learning_rate=1e-3,
         ),
     )

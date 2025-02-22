@@ -1,7 +1,7 @@
 """Base JAX centric environment class."""
 
 from abc import ABC, abstractmethod
-from typing import Callable
+from typing import Any, Callable, Tuple
 
 from brax.envs.base import State as BraxState
 from jaxtyping import Array, PRNGKeyArray
@@ -19,9 +19,11 @@ class BaseEnv(ABC):
     @abstractmethod
     def unroll_trajectories(
         self,
-        action_fn: Callable[[Array], Array],
+        action_log_prob_fn: Callable[[BraxState, PRNGKeyArray], Tuple[Array, Array]],
         rng: PRNGKeyArray,
-        max_trajectory_steps: int,
+        num_steps: int,
+        num_envs: int,
+        **kwargs: Any,
     ) -> BraxState: ...
 
     """Unroll the model for a given number of steps.
@@ -42,7 +44,3 @@ class BaseEnv(ABC):
     @property
     @abstractmethod
     def action_size(self) -> int: ...
-
-    @property
-    @abstractmethod
-    def num_envs(self) -> int: ...

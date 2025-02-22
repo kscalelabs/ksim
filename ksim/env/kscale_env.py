@@ -6,7 +6,17 @@ import logging
 import pickle as pkl
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Collection, Iterator, Literal, Protocol, TypeVar, cast, get_args
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Iterator,
+    Literal,
+    Protocol,
+    TypeVar,
+    cast,
+    get_args,
+)
 
 import chex
 import equinox as eqx
@@ -19,7 +29,7 @@ import xax
 from brax.base import State, System
 from brax.envs.base import PipelineEnv
 from brax.envs.base import State as BraxState
-from jaxtyping import PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray
 from kscale import K
 from kscale.web.utils import get_robots_dir, should_refresh_file
 from mujoco_scenes.brax import load_model
@@ -390,6 +400,7 @@ class KScaleEnv(PipelineEnv, BaseEnv):
         reward = jnp.stack([v for _, v in all_rewards], axis=-1).sum(axis=-1)
 
         info = {
+            "action": jnp.zeros_like(self.sys.actuator.ctrl_range[..., 0]),  # Gets overrided
             "time": jnp.zeros(()),
             "rng": rng,
             "last_action": jnp.zeros_like(self.sys.actuator.ctrl_range[..., 0]),
@@ -559,12 +570,109 @@ class KScaleEnv(PipelineEnv, BaseEnv):
         return terminations
 
     @eqx.filter_jit
-    def unroll_trajectory(
+    def unroll_trajectories(
         self,
+        action_log_prob_fn: Callable[..., tuple[Array, Array]],
         rng: PRNGKeyArray,
         num_steps: int,
-        init_carry: T,
-        model: KScaleActionModel,
+        num_envs: int,
+        init_carry: T | None = None,
+    ) -> BraxState:
+        """
+        Batched unroll of trajectories across num_envs environments.
+
+        At every time step the action computed from the current state is stored
+        in state.info['action'] (so you don't have to shift by one), and the dynamics
+        are only updated for environments that are not yet 'done'. This function works
+        properly for a single environment (num_envs=1) as well as many.
+        """
+        # Initialize the batched state. We assume self.reset is written to accept batched RNGs.
+        if num_envs == 1:
+            init_state = self.reset(rng)
+        else:
+            # vmap over the reset function.
+            rngs = jax.random.split(rng, num_envs)
+            init_state = jax.vmap(self.reset)(rngs)
+            rng = jax.random.split(rng, num_envs)[0]
+
+        # Get control limits (assuming these can broadcast with the batched action).
+        ctrl_min, ctrl_max = self.sys.actuator.ctrl_range.T
+
+        def batched_scan_fn(carry, _):
+            state, rng, carry_model = carry  # [num_envs, ...]
+            rng, action_rng = jax.random.split(rng)
+            action, log_probs = action_log_prob_fn(state, action_rng)
+            action = jnp.clip(action, ctrl_min, ctrl_max)
+
+            # Save the computed action directly into the current state's info.
+            state.info["actions"] = action
+            state.info["action_log_probs"] = log_probs
+
+            # Compute the candidate next state using the updated state.
+            if num_envs == 1:
+                candidate_next_state = self.step(state, action)
+            else:
+                candidate_next_state = jax.vmap(self.step)(state, action)
+
+            # NOTE we only reset if any environments are done
+            def do_resets(args):
+                state, candidate_next_state, rng = args
+                # Generate new RNG keys for resets
+                rng, reset_rng = jax.random.split(rng)
+                reset_rngs = jax.random.split(reset_rng, num_envs)
+
+                # Reset any environments that are done
+                if num_envs == 1:
+                    reset_state = self.reset(reset_rngs)
+                else:
+                    reset_state = jax.vmap(self.reset)(reset_rngs)
+
+                # Select between the candidate next state and reset state based on done flag
+
+                def broadcast_done(new):
+                    # Expand state.done so that it has as many dimensions as new
+                    extra_dims = new.ndim - state.done.ndim
+                    if extra_dims > 0:
+                        return state.done.reshape(state.done.shape + (1,) * extra_dims)
+                    return state.done
+
+                next_state = jax.tree_map(
+                    lambda new, reset, old: jnp.where(broadcast_done(new), reset, new),
+                    candidate_next_state,
+                    reset_state,
+                    state,
+                )
+                return next_state, rng
+
+            # Only perform resets if any environments are done
+            # NOTE: sacrifices some speed for simplicity (assumes resets are fast)
+            any_done = jnp.any(state.done)
+            next_state, new_rng = jax.lax.cond(
+                any_done,
+                do_resets,
+                lambda x: (x[1], x[2]),  # If no resets needed, just return candidate state
+                (state, candidate_next_state, rng),
+            )
+
+            new_carry = (next_state, new_rng, carry_model)
+            # We output the current state (with the action saved) as the step's record.
+            return new_carry, state
+
+        # Initialize the scan’s carry with the batched state, batched RNGs, and any carry_model.
+        carry_init = (init_state, rng, init_carry)
+        # Run the batched scan over the specified number of steps.
+        # traj will have shape [num_steps, num_envs, ...]
+        _, traj = jax.lax.scan(batched_scan_fn, carry_init, None, length=num_steps)
+
+        return traj
+
+    @eqx.filter_jit
+    def unroll_trajectory(
+        self,
+        action_fn: Callable[..., Array],
+        rng: PRNGKeyArray,
+        max_trajectory_steps: int,
+        init_carry: T | None = None,
     ) -> BraxState:
         """Unrolls a trajectory for num_st eps steps.
 
@@ -589,7 +697,8 @@ class KScaleEnv(PipelineEnv, BaseEnv):
             carry_model: T,
         ) -> tuple[BraxState, PRNGKeyArray, T]:
             rng, step_rng = jax.random.split(rng)
-            action, carry_model = model(sys=self.sys, state=state, rng=step_rng, carry=carry_model)
+            action = action_fn(state)
+            # TODO: implement recurrence properly
 
             # Clamps the action to the range of the action space.
             ctrl_range = self.sys.actuator.ctrl_range
@@ -618,7 +727,7 @@ class KScaleEnv(PipelineEnv, BaseEnv):
         init_carry = (init_state, rng, init_carry)
 
         # Runs the scan function.
-        _, states = jax.lax.scan(scan_fn, init_carry, length=num_steps)
+        _, states = jax.lax.scan(scan_fn, init_carry, length=max_trajectory_steps)
 
         # Apply post_accumulate and scale to rewards more efficiently
         all_rewards = states.info["all_rewards"]
@@ -627,6 +736,38 @@ class KScaleEnv(PipelineEnv, BaseEnv):
         ]
         rewards = jnp.stack(reward_list, axis=1)
         states = states.tree_replace({"reward": rewards})
+
+        import pdb
+
+        pdb.set_trace()
+
+        return states
+
+    @eqx.filter_jit
+    def unroll_trajectories_old(
+        self,
+        action_fn: Callable[..., Array],
+        rng: PRNGKeyArray,
+        num_steps: int,
+        num_envs: int,
+        **kwargs: Any,
+    ) -> BraxState:
+        """Unrolls a trajectory for num_steps steps.
+
+        Returns:
+            A tuple of (initial_state, trajectory_states) where trajectory_states
+            contains the states for steps 1 to num_steps.
+        """
+        rngs = jax.random.split(rng, num_envs)
+        init_carry = kwargs.get("init_carry", None)
+        states = jax.vmap(self.unroll_trajectory, in_axes=(None, 0, None, None))(
+            action_fn, rngs, num_steps, init_carry
+        )
+
+        def transpose_if_multidim(x):
+            return jnp.transpose(x, (1, 0, *range(2, x.ndim))) if x.ndim > 1 else x
+
+        states = jax.tree_map(transpose_if_multidim, states)
 
         return states
 
@@ -734,7 +875,7 @@ class KScaleEnv(PipelineEnv, BaseEnv):
         )
         return frames, fps
 
-    def unroll_trajectory_and_render(
+    def unroll_trajectories_and_render(
         self,
         rng: PRNGKeyArray,
         num_steps: int,
@@ -762,10 +903,10 @@ class KScaleEnv(PipelineEnv, BaseEnv):
 
         # Run simulation
         trajectory = self.unroll_trajectory(
+            action_fn=actions,
             rng=rng,
-            num_steps=num_steps,
+            max_trajectory_steps=num_steps,
             init_carry=init_carry,
-            model=actions,
         )
 
         # Remove states after episode finished
