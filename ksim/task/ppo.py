@@ -1,5 +1,6 @@
 """Defines a standard task interface for training a policy."""
 
+import functools
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, Generic, NamedTuple, Tuple, TypeVar
@@ -9,9 +10,12 @@ import jax
 import jax.numpy as jnp
 import optax
 import xax
-from brax.base import State as BraxState, System
+from brax.base import System
+from brax.envs.base import State as BraxState
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+from ksim.env.base_env import BaseEnv
+from ksim.model.formulations import ActorCriticModel
 from ksim.task.rl import RLConfig, RLTask
 
 
@@ -82,89 +86,275 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     """
 
     def get_optimizer(self) -> optax.GradientTransformation:
+        """Get the optimizer."""
         return optax.chain(
             optax.clip_by_global_norm(self.config.max_grad_norm),
             optax.adam(1e-3),
         )
 
-    @abstractmethod
-    def get_init_critic_carry(self) -> jnp.ndarray | None: ...
+    def get_init_actor_carry(self) -> Array:
+        """Get the actor carry state."""
+        raise NotImplementedError("Not implemented at the base PPO class.")
 
-    @abstractmethod
-    def get_critic_output(
+    def get_init_critic_carry(self) -> Array:
+        """Get the critic carry state."""
+        raise NotImplementedError("Not implemented at the base PPO class.")
+
+    @staticmethod
+    @eqx.filter_jit
+    def apply_actor(model: ActorCriticModel, params: PyTree, x: Array) -> Array:
+        """Apply the actor model to inputs.
+
+        Args:
+            model: The linen-based neural network model.
+            params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
+            x: The input to the model (max_steps, num_envs, observation_size)
+
+        Returns:
+            The output of the actor model.
+        """
+        res = model.apply(params, method="actor", x=x)
+        assert isinstance(res, Array)
+        return res
+
+    @staticmethod
+    @eqx.filter_jit
+    def apply_critic(model: ActorCriticModel, params: PyTree, x: Array) -> Array:
+        """Apply the critic model to inputs.
+
+        Args:
+            model: The linen-based neural network model.
+            params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
+            x: The input to the model (max_steps, num_envs, observation_size)
+
+        Returns:
+            The output of the critic model.
+        """
+        res = model.apply(params, method="critic", x=x)
+        assert isinstance(res, Array)
+        return res
+
+    @eqx.filter_jit
+    def get_actor_output(
         self,
-        model: PyTree,
+        model: ActorCriticModel,
+        params: PyTree,
         sys: System,
         state: BraxState,
         rng: PRNGKeyArray,
-        carry: jnp.ndarray | None,
-    ) -> tuple[jnp.ndarray, jnp.ndarray | None]: ...
+        carry: Array | None,
+    ) -> tuple[Array, None]:
+        """Get the actor output.
+        Args:
+            model: The linen-based neural network model.
+            params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
+            sys: The system (see Brax)
+            state: The state (see Brax)
+            rng: The random key.
+            carry: The carry state for recurrent models (not used here)
+
+        Returns:
+            The actor output and no carry state (keeping for consistency)
+        """
+        if carry is not None:
+            # TODO: support recurrent models
+            raise ValueError("Carry state is not supported yet.")
+
+        model_out = self.apply_actor(model, params, state.obs["observations"])
+        assert isinstance(model_out, Array)
+        return model_out, None
 
     @eqx.filter_jit
+    def get_critic_output(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        sys: System,
+        state: BraxState,
+        rng: PRNGKeyArray,
+        carry: Array | None,
+    ) -> tuple[Array, None]:
+        """Get the critic output.
+        Args:
+            model: The linen-based neural network model.
+            params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
+            sys: The system (see Brax)
+            state: The state (see Brax)
+            rng: The random key.
+            carry: The carry state for recurrent models (not used here)
+
+        Returns:
+            The critic output and no carry state (keeping for consistency)
+        """
+        if carry is not None:
+            # TODO: support recurrent models
+            raise ValueError("Carry state is not supported yet.")
+
+        model_out = self.apply_critic(model, params, state.obs["observations"])
+        assert isinstance(model_out, Array)
+        return model_out, None
+
+    def get_trajectory_batch(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        env: BaseEnv,
+        rng: PRNGKeyArray,
+    ) -> NamedTuple:
+        """Rollout the model for a given number of steps.
+        Args:
+            model: The model (see `apply_actor`)
+            params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
+            env: The environment (see `unroll_trajectories`)
+            rng: The random key.
+
+        Returns:
+            A PPOBatch containing trajectories with shape (num_steps, ...).
+        """
+        trajectory = env.unroll_trajectories(
+            action_fn=lambda x: self.apply_actor(model, params, x),
+            rng=rng,
+            max_trajectory_steps=self.max_trajectory_steps,
+        )
+        observations = trajectory.obs
+        next_observations = jax.tree_util.tree_map(
+            lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs
+        )
+        actions = trajectory.info["actions"]
+        rewards = trajectory.reward
+        done = trajectory.done
+        action_log_probs = trajectory.info["action_log_probs"]
+
+        return PPOBatch(
+            observations=observations,
+            next_observations=next_observations,
+            actions=actions,
+            rewards=rewards,
+            done=done,
+            action_log_probs=action_log_probs,
+        )
+
+    # @eqx.filter_jit
+    def compute_advantages(
+        self,
+        values: Array,
+        batch: PPOBatch,
+    ) -> Array:
+        """Computes the advantages using Generalized Advantage Estimation (GAE).
+
+        Args:
+            values: The value estimates for observations, (num_envs, num_steps, ...).
+            batch: The batch containing rewards and termination signals, (num_envs, num_steps, ...).
+
+        Returns:
+            Advantages with the same shape as values.
+        """
+
+        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+            d, m = x
+            new_carry = d + self.config.gamma * self.config.lam * m * carry
+            return new_carry, new_carry
+
+        next_values = jnp.roll(values, shift=-1, axis=0)
+        mask = jnp.where(batch.done, 0.0, 1.0)
+
+        # getting td residuals
+        deltas = batch.rewards + self.config.gamma * next_values * mask - values
+
+        _, advantages = jax.lax.scan(
+            scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1])
+        )
+        return advantages[::-1]
+
+    # @eqx.filter_jit
+    def compute_loss(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        batch: PPOBatch,
+    ) -> tuple[Array, Dict[str, Array]]:
+        """Compute the PPO loss.
+
+        Args:
+            model: The model.
+            params: The parameters.
+            mini_batch: The mini-batch containing trajectories.
+
+        Returns:
+            A tuple of (loss, metrics).
+        """
+        # get the log probs of the current model
+        actions = self.apply_actor(model, params, batch.observations["observations"])
+        assert isinstance(actions, Array)
+        log_probs = jax.nn.log_softmax(actions)
+        log_prob = log_probs[
+            jnp.arange(log_probs.shape[0])[:, None], jnp.arange(log_probs.shape[1]), batch.actions
+        ]
+        ratio = jnp.exp(log_prob - batch.action_log_probs)
+
+        # get the state-value estimates
+        values = self.apply_critic(model, params, batch.observations["observations"])
+        assert isinstance(values, Array)
+        values = values.squeeze(axis=-1)  # values is (time, env)
+        advantages = self.compute_advantages(values, batch)  # (time, env)
+
+        returns = advantages + values
+        # normalizing advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        # policy loss with clipping
+        policy_loss = -jnp.mean(
+            jnp.minimum(
+                ratio * advantages,
+                jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param)
+                * advantages,
+            )
+        )
+
+        # value loss term
+        # TODO: add clipping
+        value_pred = self.apply_critic(model, params, batch.observations["observations"])
+        value_pred = value_pred.squeeze(axis=-1)  # (time, env)
+        value_loss = 0.5 * jnp.mean((returns - value_pred) ** 2)
+
+        # entropy bonus term
+        probs = jax.nn.softmax(actions)
+        entropy = -jnp.mean(jnp.sum(probs * log_probs, axis=-1))
+        entropy_loss = -self.config.entropy_coef * entropy
+
+        total_loss = policy_loss + self.config.value_loss_coef * value_loss + entropy_loss
+
+        metrics = {
+            "policy_loss": policy_loss,
+            "value_loss": value_loss,
+            "entropy": entropy,
+            "total_loss": total_loss,
+        }
+        return total_loss, metrics
+
+    # @eqx.filter_jit
+    def _jitted_value_and_grad(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        batch: PPOBatch,
+    ) -> tuple[Array, PyTree]:
+        """Jitted version of value_and_grad computation."""
+        loss_fn = lambda p: self.compute_loss(model, p, batch)[0]
+        return jax.value_and_grad(loss_fn)(params)
+
+    # @eqx.filter_jit
     def model_update(
         self,
-        model: PyTree,
+        model: ActorCriticModel,
+        params: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        trajectory: BraxState,
-    ) -> tuple[PyTree, optax.OptState, jnp.ndarray]:
-        # PPO hyperparameters
-        gamma = self.config.gamma
-        clip_eps = self.config.clip_param
-        value_coef = self.config.value_loss_coef
-        entropy_coef = self.config.entropy_coef
-
-        def flatten(x: jnp.ndarray) -> jnp.ndarray:
-            if isinstance(x, jnp.ndarray) and x.ndim >= 2:
-                return x.reshape((-1,) + x.shape[2:])
-            return x
-
-        flat_obs = jax.tree_util.tree_map(flatten, trajectory.obs)
-        flat_actions = flatten(trajectory.actions)
-        flat_old_logp = flatten(trajectory.logp)
-        flat_rewards = flatten(trajectory.reward)
-        flat_done = flatten(trajectory.done)
-
-        def discount_cumsum(rewards: jnp.ndarray, dones: jnp.ndarray, gamma: float) -> jnp.ndarray:
-            def scan_fn(
-                carry: jnp.ndarray, elem: tuple[jnp.ndarray, jnp.ndarray]
-            ) -> tuple[jnp.ndarray, jnp.ndarray]:
-                r, d = elem
-                new_carry = r + gamma * carry * (1.0 - d)
-                return new_carry, new_carry
-
-            _, out = jax.lax.scan(scan_fn, 0.0, (rewards[::-1], dones[::-1]))
-            return out[::-1]
-
-        flat_returns = discount_cumsum(flat_rewards, flat_done, gamma)
-
-        def gaussian_log_prob(
-            mean: jnp.ndarray, log_std: jnp.ndarray, action: jnp.ndarray
-        ) -> jnp.ndarray:
-            var = jnp.exp(2 * log_std)
-            logp = -0.5 * (
-                ((action - mean) ** 2) / (var + 1e-8) + 2 * log_std + jnp.log(2 * jnp.pi)
-            )
-            return jnp.sum(logp, axis=-1)
-
-        def gaussian_entropy(log_std: jnp.ndarray) -> jnp.ndarray:
-            return jnp.sum(log_std + 0.5 * jnp.log(2 * jnp.pi * jnp.e), axis=-1)
-
-        def loss_fn(model: PyTree) -> jnp.ndarray:
-            policy_mean, policy_log_std, value = model(flat_obs)
-            new_logp = gaussian_log_prob(policy_mean, policy_log_std, flat_actions)
-            ratio = jnp.exp(new_logp - flat_old_logp)
-            advantages = flat_returns - value
-            advantages = (advantages - jnp.mean(advantages)) / (jnp.std(advantages) + 1e-8)
-            surrogate1 = ratio * advantages
-            surrogate2 = jnp.clip(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * advantages
-            actor_loss = -jnp.mean(jnp.minimum(surrogate1, surrogate2))
-            critic_loss = jnp.mean((flat_returns - value) ** 2)
-            entropy_bonus = jnp.mean(gaussian_entropy(policy_log_std))
-            total_loss = actor_loss + value_coef * critic_loss - entropy_coef * entropy_bonus
-            return total_loss
-
-        loss, grads = eqx.filter_value_and_grad(loss_fn)(model)
-        updates, opt_state = optimizer.update(grads, opt_state, model)
-        model = eqx.apply_updates(model, updates)
-        return model, opt_state, loss
+        batch: PPOBatch,
+    ) -> tuple[PyTree, optax.OptState]:
+        """Update the model parameters."""
+        loss_val, grads = self._jitted_value_and_grad(model, params, batch)
+        print(f"Loss: {loss_val}")
+        updates, new_opt_state = optimizer.update(grads, opt_state, params)
+        new_params = optax.apply_updates(params, updates)
+        return new_params, new_opt_state

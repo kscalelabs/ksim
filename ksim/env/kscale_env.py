@@ -17,7 +17,8 @@ import numpy as np
 import PIL.Image
 import xax
 from brax.base import State, System
-from brax.envs.base import PipelineEnv, State as BraxState
+from brax.envs.base import PipelineEnv
+from brax.envs.base import State as BraxState
 from jaxtyping import PRNGKeyArray
 from kscale import K
 from kscale.web.utils import get_robots_dir, should_refresh_file
@@ -27,6 +28,7 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 from PIL.Image import Image as PILImage
 
 from ksim.commands import Command, CommandBuilder
+from ksim.env.base_env import BaseEnv
 from ksim.observation import Observation, ObservationBuilder
 from ksim.resets import Reset, ResetBuilder, ResetData
 from ksim.rewards import Reward, RewardBuilder
@@ -77,7 +79,9 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
         if (actuators := metadata.joint_name_to_metadata) is None:
             raise ValueError(f"No actuators found for {model_name}")
         actuator_metadata = {k: ActuatorMetadata(kp=v.kp, kd=v.kd) for k, v in actuators.items()}
-        model_metadata = ModelMetadata(actuators=actuator_metadata, control_frequency=control_frequency)
+        model_metadata = ModelMetadata(
+            actuators=actuator_metadata, control_frequency=control_frequency
+        )
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
         OmegaConf.save(model_metadata, metadata_path)
 
@@ -111,7 +115,7 @@ def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
     return return_list
 
 
-class ActionModel(Protocol):
+class KScaleActionModel(Protocol):
     def __call__(
         self,
         sys: System,
@@ -159,14 +163,14 @@ def get_zero_action(
     return ctrl, None
 
 
-ActionModelType = Literal["random", "zero", "midpoint"]
+KScaleActionModelType = Literal["random", "zero", "midpoint"]
 
 
-def cast_action_type(action_type: str) -> ActionModelType:
-    options = get_args(ActionModelType)
+def cast_action_type(action_type: str) -> KScaleActionModelType:
+    options = get_args(KScaleActionModelType)
     if action_type not in options:
         raise ValueError(f"Invalid action type: {action_type} Choices are {options}")
-    return cast(ActionModelType, action_type)
+    return cast(KScaleActionModelType, action_type)
 
 
 @jax.tree_util.register_dataclass
@@ -239,7 +243,7 @@ class KScaleEnvConfig(xax.Config):
     )
 
 
-class KScaleEnv(PipelineEnv):
+class KScaleEnv(PipelineEnv, BaseEnv):
     """Defines a generic environment for interacting with K-Scale models."""
 
     def __init__(
@@ -260,7 +264,9 @@ class KScaleEnv(PipelineEnv):
                 f"minimum action latency ({self.config.min_action_latency})"
             )
         if self.config.min_action_latency < 0:
-            raise ValueError(f"Action latency ({self.config.min_action_latency}) must be non-negative")
+            raise ValueError(
+                f"Action latency ({self.config.min_action_latency}) must be non-negative"
+            )
 
         self.min_action_latency_step = round(self.config.min_action_latency / self.config.dt)
         self.max_action_latency_step = round(self.config.max_action_latency / self.config.dt)
@@ -317,11 +323,17 @@ class KScaleEnv(PipelineEnv):
         )
 
         # Builds the terminations, resets, rewards, and observations.
-        terminations_v: list[Termination] = [t(data) if isinstance(t, TerminationBuilder) else t for t in terminations]
+        terminations_v: list[Termination] = [
+            t(data) if isinstance(t, TerminationBuilder) else t for t in terminations
+        ]
         resets_v: list[Reset] = [r(data) if isinstance(r, ResetBuilder) else r for r in resets]
         rewards_v: list[Reward] = [r(data) if isinstance(r, RewardBuilder) else r for r in rewards]
-        observations_v: list[Observation] = [o(data) if isinstance(o, ObservationBuilder) else o for o in observations]
-        commands_v: list[Command] = [c(data) if isinstance(c, CommandBuilder) else c for c in commands]
+        observations_v: list[Observation] = [
+            o(data) if isinstance(o, ObservationBuilder) else o for o in observations
+        ]
+        commands_v: list[Command] = [
+            c(data) if isinstance(c, CommandBuilder) else c for c in commands
+        ]
 
         # Creates dictionaries of the unique terminations, resets, rewards, and observations.
         self.terminations = _unique_list([(term.termination_name, term) for term in terminations_v])
@@ -471,7 +483,9 @@ class KScaleEnv(PipelineEnv):
         # Runs the pipeline step.
         rng, step_rng, obs_rng = jax.random.split(rng, 3)
         prev_action = prev_state.info["last_action"]
-        pipeline_state = self.pipeline_step(prev_state.pipeline_state, action, prev_action, step_rng)
+        pipeline_state = self.pipeline_step(
+            prev_state.pipeline_state, action, prev_action, step_rng
+        )
 
         obs = self.get_observation(pipeline_state, obs_rng)
         all_dones = self.get_terminations(pipeline_state)
@@ -527,7 +541,9 @@ class KScaleEnv(PipelineEnv):
         rewards: list[tuple[str, jnp.ndarray]] = []
         for reward_name, reward in self.rewards:
             reward_val = reward(prev_state, action, pipeline_state) * reward.scale
-            chex.assert_shape(reward_val, (), custom_message=f"Reward {reward_name} must be a scalar")
+            chex.assert_shape(
+                reward_val, (), custom_message=f"Reward {reward_name} must be a scalar"
+            )
             rewards.append((reward_name, reward_val))
         return rewards
 
@@ -536,7 +552,9 @@ class KScaleEnv(PipelineEnv):
         terminations: list[tuple[str, jnp.ndarray]] = []
         for termination_name, termination in self.terminations:
             term_val = termination(pipeline_state)
-            chex.assert_shape(term_val, (), custom_message=f"Termination {termination_name} must be a scalar")
+            chex.assert_shape(
+                term_val, (), custom_message=f"Termination {termination_name} must be a scalar"
+            )
             terminations.append((termination_name, term_val))
         return terminations
 
@@ -546,7 +564,7 @@ class KScaleEnv(PipelineEnv):
         rng: PRNGKeyArray,
         num_steps: int,
         init_carry: T,
-        model: ActionModel,
+        model: KScaleActionModel,
     ) -> BraxState:
         """Unrolls a trajectory for num_st eps steps.
 
@@ -604,7 +622,9 @@ class KScaleEnv(PipelineEnv):
 
         # Apply post_accumulate and scale to rewards more efficiently
         all_rewards = states.info["all_rewards"]
-        reward_list = [reward_fn.post_accumulate(all_rewards[name]) for name, reward_fn in self.rewards]
+        reward_list = [
+            reward_fn.post_accumulate(all_rewards[name]) for name, reward_fn in self.rewards
+        ]
         rewards = jnp.stack(reward_list, axis=1)
         states = states.tree_replace({"reward": rewards})
 
@@ -700,7 +720,9 @@ class KScaleEnv(PipelineEnv):
         """Render trajectory as video frames with computed FPS."""
         num_steps = (~trajectory.done.astype(bool)).sum()
         fps = round(1 / self.config.ctrl_dt)
-        pipeline_states = [jax.tree.map(lambda arr: arr[i], trajectory.pipeline_state) for i in range(num_steps)]
+        pipeline_states = [
+            jax.tree.map(lambda arr: arr[i], trajectory.pipeline_state) for i in range(num_steps)
+        ]
         frames = np.stack(
             self.render(
                 pipeline_states,
@@ -717,7 +739,7 @@ class KScaleEnv(PipelineEnv):
         rng: PRNGKeyArray,
         num_steps: int,
         render_dir: str | Path | None = None,
-        actions: ActionModelType | ActionModel = "zero",
+        actions: KScaleActionModelType | KScaleActionModel = "zero",
         init_carry: T | None = None,
         figsize: tuple[int, int] = (12, 12),
     ) -> list[BraxState]:
@@ -735,7 +757,7 @@ class KScaleEnv(PipelineEnv):
                     actions, init_carry = get_midpoint_action, None
                 case _:
                     raise ValueError(f"Invalid action type: {actions}")
-        elif not isinstance(actions, ActionModel):
+        elif not isinstance(actions, KScaleActionModel):
             raise ValueError(f"Invalid action type: {type(actions)}")
 
         # Run simulation
@@ -759,7 +781,9 @@ class KScaleEnv(PipelineEnv):
             # Save raw trajectory
             render_dir.mkdir(parents=True, exist_ok=True)
             with open(render_dir / "trajectory.pkl", "wb") as f:
-                raw_trajectory = jax.tree.map(lambda x: np.array(x) if isinstance(x, jnp.ndarray) else x, trajectory)
+                raw_trajectory = jax.tree.map(
+                    lambda x: np.array(x) if isinstance(x, jnp.ndarray) else x, trajectory
+                )
                 pkl.dump(raw_trajectory, f)
 
             # Generate and save plots
@@ -772,7 +796,13 @@ class KScaleEnv(PipelineEnv):
             frames, fps = self.render_trajectory_video(trajectory)
             video_path = render_dir / "render.gif"
             images = [PIL.Image.fromarray(frame) for frame in frames]
-            images[0].save(video_path, save_all=True, append_images=images[1:], duration=int(1000 / fps), loop=0)
+            images[0].save(
+                video_path,
+                save_all=True,
+                append_images=images[1:],
+                duration=int(1000 / fps),
+                loop=0,
+            )
             logger.info("Saved video to %s", video_path)
 
         return trajectory

@@ -11,7 +11,7 @@ import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from threading import Thread
-from typing import Generic, Literal, TypeVar
+from typing import Generic, Literal, NamedTuple, TypeVar
 
 import equinox as eqx
 import jax
@@ -24,7 +24,15 @@ from dpshdl.dataset import Dataset
 from jaxtyping import PRNGKeyArray, PyTree
 from omegaconf import MISSING, OmegaConf
 
-from ksim.env import ActionModel, ActionModelType, KScaleEnv, KScaleEnvConfig, cast_action_type
+from ksim.env.base_env import BaseEnv
+from ksim.env.kscale_env import (
+    KScaleActionModel,
+    KScaleActionModelType,
+    KScaleEnv,
+    KScaleEnvConfig,
+    cast_action_type,
+)
+from ksim.model.formulations import ActorCriticModel
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +59,14 @@ class RLConfig(KScaleEnvConfig, xax.Config):
     max_trajectory_seconds: float = xax.field(
         value=MISSING,
         help="The maximum trajectory length, in seconds.",
+    )
+    observation_size: int = xax.field(
+        value=MISSING,
+        help="The size of the observation space.",
+    )
+    action_size: int = xax.field(
+        value=MISSING,
+        help="The size of the action space.",
     )
 
 
@@ -91,7 +107,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run_environment(
         self,
         state: xax.State | None = None,
-        actions: ActionModelType | ActionModel | None = None,
+        actions: KScaleActionModelType | KScaleActionModel | None = None,
     ) -> None:
         if actions is None:
             actions = cast_action_type(self.config.default_action_model)
@@ -157,6 +173,24 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return reward_stats
 
+    def get_init_params(self, key: PRNGKeyArray, pretrained: str | None = None) -> PyTree:
+        """Get the initial parameters.
+        Args:
+            key: The random key.
+
+        Returns:
+            The initial parameters.
+        """
+        if pretrained is not None:
+            # TODO: implement pretrained model loading.
+            raise NotImplementedError("Pretrained models are not yet implemented.")
+
+        # Provide a dummy observation (of appropriate shape) for initialization.
+        dummy_obs = jnp.zeros(
+            (self.max_trajectory_steps, self.config.num_envs, self.config.observation_size)
+        )
+        return self.get_model(key).init(key, dummy_obs)
+
     def get_termination_stats(
         self, trajectory: BraxState, env: KScaleEnv
     ) -> dict[str, jnp.ndarray]:
@@ -187,10 +221,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @abstractmethod
     def model_update(
         self,
-        model: PyTree,
+        model: ActorCriticModel,
+        params: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        trajectory: BraxState,
+        batch: NamedTuple,
     ) -> tuple[PyTree, optax.OptState]: ...
 
     @eqx.filter_jit
@@ -209,56 +244,84 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rngs = jax.random.split(rng, num_envs)
         return jax.vmap(self._single_unroll, in_axes=(0, None, None))(rngs, env, model)
 
+    @abstractmethod
+    def get_trajectory_batch(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        env: BaseEnv,
+        rng: PRNGKeyArray,
+    ) -> NamedTuple:
+        """Rollout the model for a given number of steps.
+        Args:
+            model: The model (see `apply_actor`)
+            params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
+            env: The environment (see `unroll_trajectories`)
+            rng: The random key.
+
+        Returns:
+            A NamedTuple containing the trajectories.
+        """
+        ...
+
     def train_loop(
         self,
-        model: PyTree,
-        env: KScaleEnv,
+        model: ActorCriticModel,
+        params: PyTree,
+        env: BaseEnv,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         state: xax.State,
     ) -> None:
-        # Gets the training RNGs.
         rng = self.prng_key()
         rng, train_rng, val_rng = jax.random.split(rng, 3)
 
         while not self.is_training_over(state):
             if self.valid_step_timer.is_valid_step(state):
                 val_rng, step_val_rng = jax.random.split(val_rng)
-                trajectory = self._single_unroll(step_val_rng, env, model)
+                trajectory = self.get_trajectory_batch(model, params, env, step_val_rng)
+                assert hasattr(trajectory, "done"), "Trajectory must contain a `done` field."
+                # Calculate episode length by counting steps until done
+                episode_lengths = jnp.sum(~trajectory.done) / jnp.sum(trajectory.done)  # type: ignore
+                print(f"Average episode length: {episode_lengths}")
 
-                # Perform logging.
-                with self.step_context("write_logs"):
-                    state.phase = "valid"
-                    self.log_state_timers(state)
-                    self.log_trajectory(env, trajectory)
-                    self.log_trajectory_stats(env, trajectory)
-                    self.logger.write(state)
-                    state.num_valid_samples += 1
+            #     # Perform logging.
+            #     with self.step_context("write_logs"):
+            #         state.raw_phase = "valid"
+            #         # self.log_state_timers(state)
+            #         # self.log_trajectory(env, trajectory)
+            #         # self.log_trajectory_stats(env, trajectory)
+            #         self.logger.write(state)
+            #         state.num_valid_samples += 1
 
             with self.step_context("on_step_start"):
                 state = self.on_step_start(state)
 
             # Unrolls a trajectory.
             train_rng, step_rng = jax.random.split(train_rng)
-            trajectories = self._multiple_unroll(step_rng, env, model, self.config.num_envs)
+            trajectories = self.get_trajectory_batch(model, params, env, step_rng)
 
             # Updates the model on the collected trajectories.
             with self.step_context("update_state"):
-                model, opt_state = self.model_update(model, optimizer, opt_state, trajectories)
+                params, opt_state = self.model_update(
+                    model, params, optimizer, opt_state, trajectories
+                )
 
-            # Logs the trajectory statistics.
+            # # Logs the trajectory statistics.
             with self.step_context("write_logs"):
-                state.phase = "train"
-                self.log_state_timers(state)
-                self.log_trajectory_stats(env, trajectories)
-                self.logger.write(state)
+                #     state.phase = "train"
+                #     self.log_state_timers(state)
+                #     self.log_trajectory_stats(env, trajectories)
+                #     self.logger.write(state)
                 state.num_steps += 1
 
             with self.step_context("on_step_end"):
                 state = self.on_step_end(state)
 
             if self.should_checkpoint(state):
-                self.save_checkpoint(model, optimizer, opt_state, state)
+                self.save_checkpoint(
+                    model=params, optimizer=optimizer, opt_state=opt_state, state=state
+                )  # Update XAX to be Flax supportive...
 
     def run_training(self) -> None:
         """Runs the main PPO training loop."""
@@ -274,6 +337,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             key, model_key = jax.random.split(key)
             model, optimizer, opt_state, state = self.load_initial_state(model_key)
+
             state = self.on_training_start(state)
 
             def on_exit() -> None:
@@ -282,9 +346,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Handle user-defined interrupts during the training loop.
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
 
+            params = self.get_init_params(key)
+            opt_state = optimizer.init(params)
+
             try:
                 self.train_loop(
                     model=model,
+                    params=params,
                     env=env,
                     optimizer=optimizer,
                     opt_state=opt_state,

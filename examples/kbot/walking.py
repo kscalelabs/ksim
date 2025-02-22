@@ -11,7 +11,7 @@ from brax.envs.base import State as BraxState
 from jaxtyping import PRNGKeyArray
 
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.env import KScaleEnv
+from ksim.env.kscale_env import KScaleEnv
 from ksim.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
