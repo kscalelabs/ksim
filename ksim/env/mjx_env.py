@@ -527,15 +527,19 @@ class MjxEnv(BaseEnv):
 
         def env_step(env_state: EnvState, rng: Array):
             action = action_fn(env_state)
-            new_state = self.step(env_state, action, rng)
+            new_state = jax.lax.cond(
+                env_state.done,
+                lambda _: self.reset(env_state, rng),
+                lambda _: self.step(env_state, action, rng),
+                operand=None,
+            )
             return new_state
 
         def scan_fn(carry: Tuple[EnvState, Array], _):
             states, rng = carry
-            rng, step_rng = jax.random.split(rng)
-            rngs = jax.random.split(step_rng, num_envs)
-            new_states = jax.vmap(env_step)(states, rngs)
-            return (new_states, rng), new_states
+            rngs = jax.random.split(rng, num_envs + 1)
+            new_states = jax.vmap(env_step)(states, rngs[1:])
+            return (new_states, rngs[0]), new_states
 
         (final_states, _), traj = jax.lax.scan(
             f=scan_fn,
