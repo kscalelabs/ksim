@@ -2,9 +2,11 @@
 
 from dataclasses import dataclass
 from typing import Any
+
 from jaxtyping import Array
-from ksim.env.base_env import EnvState
 from mujoco import mjx
+
+from ksim.env.base_env import EnvState
 
 
 @dataclass

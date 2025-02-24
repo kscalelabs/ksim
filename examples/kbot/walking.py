@@ -3,23 +3,14 @@
 from dataclasses import dataclass
 from typing import Tuple
 
-import equinox as eqx
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import xax
-from brax.base import System
 from brax.envs.base import State as BraxState
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.builders.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.env.mjx.mjx_env import MjxEnv
-from ksim.model.formulations import (
-    ActionModel,
-    ActorCriticModel,
-    GaussianActorCriticModel,
-)
-from ksim.model.mlp import MLP
 from ksim.env.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
@@ -38,8 +29,15 @@ from ksim.env.builders.rewards import (
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.env.builders.terminations import IllegalContactTerminationBuilder
+from ksim.env.mjx.mjx_env import MjxEnv
+from ksim.model.formulations import (
+    ActionModel,
+    ActorCriticModel,
+    GaussianActorCriticModel,
+)
+from ksim.model.mlp import MLP
+from ksim.task.ppo import PPOConfig, PPOTask
 
 NUM_INPUTS = 49
 NUM_OUTPUTS = 20

@@ -150,6 +150,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def get_init_params(self, key: PRNGKeyArray, pretrained: str | None = None) -> PyTree:
         """Get the initial parameters.
+
         Args:
             key: The random key.
 
@@ -208,6 +209,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
     ) -> NamedTuple:
         """Rollout the model for a given number of steps.
+
         Args:
             model: The model (see `apply_actor`)
             params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}

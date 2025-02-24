@@ -26,23 +26,22 @@ import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from ksim.env.mjx.types import MjxEnvState
-from ksim.utils.robot_model import get_model_and_metadata
 import xax
-from mujoco import mjx
 from jaxtyping import Array, PRNGKeyArray
+from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING
 
-from ksim.env.builders.commands import Command, CommandBuilder
 from ksim.env.base_env import BaseEnv, EnvState
+from ksim.env.builders.commands import Command, CommandBuilder
 from ksim.env.builders.observation import Observation, ObservationBuilder
 from ksim.env.builders.resets import Reset, ResetBuilder, ResetData
 from ksim.env.builders.rewards import Reward, RewardBuilder
 from ksim.env.builders.terminations import Termination, TerminationBuilder
-from ksim.utils.data import BuilderData
-from ksim.utils.mujoco import make_mujoco_mappings
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
+from ksim.env.mjx.types import MjxEnvState
+from ksim.utils.mujoco import make_mujoco_mappings
+from ksim.utils.robot_model import get_model_and_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -421,8 +420,7 @@ class MjxEnv(BaseEnv):
         num_envs: int,
         action_fn: Callable[[MjxEnvState], Array],
     ) -> MjxEnvState:
-        """
-        Vectorized rollout of trajectories.
+        """Vectorized rollout of trajectories.
 
         1. The batched reset (using vmap) initializes a state for each environment.
         2. A vectorized (vmap-ed) env_step function is defined that calls step.

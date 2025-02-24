@@ -3,14 +3,12 @@
 Much of this is referenced from Mujoco Playground.
 """
 
-from dataclasses import dataclass
 import logging
-from typing import Collection, Dict, Hashable, Sequence, Tuple, TypeVar, Union
+from dataclasses import dataclass
+from typing import Collection, Dict, Hashable, Tuple, TypeVar
 
 import jax
 import jax.numpy as jnp
-import mujoco
-import numpy as np
 from mujoco import mjx
 
 logger = logging.getLogger(__name__)

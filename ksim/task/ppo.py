@@ -135,6 +135,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
     ) -> NamedTuple:
         """Rollout the model for a given number of steps.
+
         Args:
             model: The model (see `apply_actor`)
             params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}

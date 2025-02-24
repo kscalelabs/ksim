@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
+
 from kscale import K
 from kscale.web.utils import get_robots_dir, should_refresh_file
 from omegaconf import OmegaConf

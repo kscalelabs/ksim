@@ -68,6 +68,7 @@ class CartPoleEnv(BaseEnv):
         **kwargs: Any,
     ) -> EnvState:
         """Rollout the model for a given number of steps.
+
         Args:
             model: The model.
             params: The parameters (really a variable dictionary).

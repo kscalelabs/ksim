@@ -1,3 +1,5 @@
+"""Cartpole example task."""
+
 from dataclasses import dataclass
 from typing import Tuple
 
@@ -79,6 +81,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
         """Get the model.
+
         Args:
             key: The random key.
 
