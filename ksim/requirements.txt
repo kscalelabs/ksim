@@ -1,7 +1,7 @@
 # requirements.txt
 
 # Utilities
-numpy==1.23.5
+# numpy==1.23.5
 matplotlib
 
 # K-Scale CLI
