@@ -35,12 +35,12 @@ from jaxtyping import Array, PRNGKeyArray
 from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING
 
-from ksim.commands import Command, CommandBuilder
+from ksim.env.builders.commands import Command, CommandBuilder
 from ksim.env.base_env import BaseEnv, EnvState
-from ksim.observation import Observation, ObservationBuilder
-from ksim.resets import Reset, ResetBuilder, ResetData
-from ksim.rewards import Reward, RewardBuilder
-from ksim.terminations import Termination, TerminationBuilder
+from ksim.env.builders.observation import Observation, ObservationBuilder
+from ksim.env.builders.resets import Reset, ResetBuilder, ResetData
+from ksim.env.builders.rewards import Reward, RewardBuilder
+from ksim.env.builders.terminations import Termination, TerminationBuilder
 from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import make_mujoco_mappings
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators

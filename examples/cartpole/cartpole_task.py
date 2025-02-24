@@ -8,7 +8,7 @@ import xax
 from brax.envs.base import State as BraxState
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.env.cartpole_env import CartPoleEnv
+from ksim.env.toy.cartpole_env import CartPoleEnv
 from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask

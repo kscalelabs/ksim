@@ -12,15 +12,15 @@ from brax.base import System
 from brax.envs.base import State as BraxState
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.env.mjx_env import KScaleEnv
+from ksim.env.builders.commands import AngularVelocityCommand, LinearVelocityCommand
+from ksim.env.mjx.mjx_env import MjxEnv
 from ksim.model.formulations import (
     ActionModel,
     ActorCriticModel,
     GaussianActorCriticModel,
 )
 from ksim.model.mlp import MLP
-from ksim.observation import (
+from ksim.env.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,
@@ -29,8 +29,8 @@ from ksim.observation import (
     JointVelocityObservation,
     SensorObservationBuilder,
 )
-from ksim.resets import XYPositionResetBuilder
-from ksim.rewards import (
+from ksim.env.builders.resets import XYPositionResetBuilder
+from ksim.env.builders.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
     FootContactPenaltyBuilder,
@@ -39,7 +39,7 @@ from ksim.rewards import (
     TrackLinearVelocityXYReward,
 )
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations import IllegalContactTerminationBuilder
+from ksim.env.builders.terminations import IllegalContactTerminationBuilder
 
 NUM_INPUTS = 49
 NUM_OUTPUTS = 20
@@ -383,8 +383,8 @@ class KBotWalkingConfig(PPOConfig):
 
 
 class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
-    def get_environment(self) -> KScaleEnv:
-        return KScaleEnv(
+    def get_environment(self) -> MjxEnv:
+        return MjxEnv(
             self.config,
             terminations=[
                 IllegalContactTerminationBuilder(
