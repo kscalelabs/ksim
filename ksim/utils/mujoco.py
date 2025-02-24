@@ -129,7 +129,7 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
             sensordata_end = mjx_model.sensor_adr[i + 1]
 
         name_start = mjx_model.name_actuatoradr[i]
-        name = bytes(mjx_model.names[name_start:]).decode('utf-8').split('\x00')[0]
+        name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
 
         name_to_sensordata[name] = (sensordata_start, sensordata_end)
 
@@ -143,7 +143,7 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
             qpos_end = mjx_model.jnt_qposadr[i + 1]
 
         name_start = mjx_model.name_jntadr[i]
-        name = bytes(mjx_model.names[name_start:]).decode('utf-8').split('\x00')[0]
+        name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
         name_to_qpos[name] = (qpos_start, qpos_end)
 
     # doing the same for qvel
@@ -156,7 +156,7 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
             dof_end = mjx_model.jnt_dofadr[i + 1]
 
         name_start = mjx_model.name_jntadr[i]
-        name = bytes(mjx_model.names[name_start:]).decode('utf-8').split('\x00')[0]
+        name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
 
         name_to_qvelacc[name] = (dof_start, dof_end)
 
@@ -164,7 +164,7 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
     name_to_ctrl = {}
     for i in range(len(mjx_model.name_actuatoradr)):
         name_start = mjx_model.name_actuatoradr[i]
-        name = bytes(mjx_model.names[name_start:]).decode('utf-8').split('\x00')[0]
+        name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
         name_to_ctrl[name] = i
 
     # doing the same for geom_id_to_body_name
@@ -173,7 +173,7 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
         body_id = mjx_model.geom_bodyid[i]
 
         name_start = mjx_model.name_bodyadr[body_id]
-        name = bytes(mjx_model.names[name_start:]).decode('utf-8').split('\x00')[0]
+        name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
         geom_id_to_body_name[i] = name
 
     return MujocoMappings(
@@ -184,21 +184,26 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
         geom_id_to_body_name,
     )
 
+
 def get_qpos_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
     """Get the qpos from a name."""
     return data.qpos[mujoco_mappings.name_to_qpos[name]]
+
 
 def get_qvel_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
     """Get the qvel from a name."""
     return data.qvel[mujoco_mappings.name_to_qvelacc[name]]
 
+
 def get_ctrl_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
     """Get the ctrl from a name."""
     return data.ctrl[mujoco_mappings.name_to_ctrl[name]]
 
+
 def get_sensordata_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
     """Get the sensordata from a name."""
     return data.sensordata[mujoco_mappings.name_to_sensordata[name]]
+
 
 def is_body_in_contact(
     body_name: str,

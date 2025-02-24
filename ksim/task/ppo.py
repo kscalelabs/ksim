@@ -41,12 +41,8 @@ class PPOConfig(RLConfig):
     num_learning_epochs: int = xax.field(value=5, help="Number of learning epochs per PPO update.")
     num_mini_batches: int = xax.field(value=4, help="Number of mini-batches per PPO epoch.")
     learning_rate: float = xax.field(value=1e-3, help="Learning rate for PPO.")
-    schedule: str = xax.field(
-        value="adaptive", help="Learning rate schedule for PPO ('fixed' or 'adaptive')."
-    )
-    desired_kl: float = xax.field(
-        value=0.01, help="Desired KL divergence for adaptive learning rate."
-    )
+    schedule: str = xax.field(value="adaptive", help="Learning rate schedule for PPO ('fixed' or 'adaptive').")
+    desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive learning rate.")
     max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
 
 
@@ -162,9 +158,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
         observations = self.get_model_obs_from_state(trajectory)
-        next_observations = jax.tree_util.tree_map(
-            lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs
-        )
+        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs)
         actions = trajectory.info["actions"]
         rewards = trajectory.reward
         done = trajectory.done
@@ -206,9 +200,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # getting td residuals
         deltas = batch.rewards + self.config.gamma * next_values * mask - values
 
-        _, advantages = jax.lax.scan(
-            scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1])
-        )
+        _, advantages = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1]))
         return advantages[::-1]
 
     @eqx.filter_jit
@@ -231,9 +223,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # get the log probs of the current model
         predictions = self.apply_actor(model, params, batch.observations)
         assert isinstance(predictions, Array)
-        log_probs = model.apply(
-            params, predictions, method="actor_calc_log_prob", action=batch.actions
-        )
+        log_probs = model.apply(params, predictions, method="actor_calc_log_prob", action=batch.actions)
         ratio = jnp.exp(log_probs - batch.action_log_probs)
 
         # get the state-value estimates
@@ -250,8 +240,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         policy_loss = -jnp.mean(
             jnp.minimum(
                 ratio * advantages,
-                jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param)
-                * advantages,
+                jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param) * advantages,
             )
         )
 

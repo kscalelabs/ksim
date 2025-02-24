@@ -1,5 +1,3 @@
-
-
 import asyncio
 import logging
 from dataclasses import dataclass
@@ -19,6 +17,7 @@ logger = logging.getLogger(__name__)
 class ModelMetadata:
     actuators: dict[str, BaseActuatorMetadata]
     control_frequency: float
+
 
 async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
     """Downloads and caches the model URDF."""
@@ -60,10 +59,8 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
             else:
                 raise ValueError(f"Unknown actuator metadata: {metadata}")
 
-        assert isinstance(control_frequency, float) # NOTE: currently typed as str... need to change
-        model_metadata = ModelMetadata(
-            actuators=actuator_metadata, control_frequency=control_frequency
-        )
+        assert isinstance(control_frequency, float)  # NOTE: currently typed as str... need to change
+        model_metadata = ModelMetadata(actuators=actuator_metadata, control_frequency=control_frequency)
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
         OmegaConf.save(model_metadata, metadata_path)
 

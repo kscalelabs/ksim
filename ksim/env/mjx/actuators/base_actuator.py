@@ -9,9 +9,11 @@ from jaxtyping import Array
 from ksim.env.mjx.mjx_env import MjxEnvState
 from ksim.utils.mujoco import MujocoMappings
 
+
 @dataclass
 class BaseActuatorMetadata(ABC):
     """Base class for actuator metadata."""
+
 
 class Actuators(ABC):
     """Collection of actuators."""
@@ -22,8 +24,7 @@ class Actuators(ABC):
         actuators_metadata: Dict[str, BaseActuatorMetadata],
         mujoco_mappings: MujocoMappings,
         **kwargs: Any,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @abstractmethod
     def get_ctrl(self, env_state: MjxEnvState, action: Array) -> Array:

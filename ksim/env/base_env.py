@@ -7,6 +7,7 @@ from typing import Any, Callable, Tuple
 import jax
 from jaxtyping import Array, PRNGKeyArray
 
+
 @jax.tree_util.register_dataclass
 @dataclass
 class EnvState:
@@ -44,6 +45,3 @@ class BaseEnv(ABC):
     @property
     @abstractmethod
     def action_size(self) -> int: ...
-
-
-

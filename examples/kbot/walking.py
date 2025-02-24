@@ -311,9 +311,7 @@ class KBotActorModel(ActionModel):
         mean = prediction
         std = jnp.exp(self.log_std)
 
-        log_prob = (
-            -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
-        )
+        log_prob = -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
         return jnp.sum(log_prob, axis=-1)
 
     def sample_and_log_prob(self, obs: Array, rng: PRNGKeyArray) -> Tuple[Array, Array]:

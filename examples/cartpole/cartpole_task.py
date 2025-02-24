@@ -26,9 +26,7 @@ class CartPoleActionModel(ActionModel):
     def calc_log_prob(self, prediction: Array, action: Array) -> Array:
         logits = prediction
         log_probs = jax.nn.log_softmax(logits)
-        action_log_prob = log_probs[
-            jnp.arange(log_probs.shape[0])[:, None], jnp.arange(log_probs.shape[1]), action
-        ]
+        action_log_prob = log_probs[jnp.arange(log_probs.shape[0])[:, None], jnp.arange(log_probs.shape[1]), action]
         # NOTE: assumes two batching dimensions
         return action_log_prob
 

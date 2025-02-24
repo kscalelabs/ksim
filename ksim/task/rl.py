@@ -166,9 +166,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Provide a dummy observation (of appropriate shape) for initialization.
         return self.get_model(key).init(key, self.get_model_obs_from_state(state))
 
-    def get_termination_stats(
-        self, trajectory: EnvState, env: BaseEnv
-    ) -> dict[str, jnp.ndarray]:
+    def get_termination_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
         termination_stats: dict[str, jnp.ndarray] = {}
 
         # Gets the termination statistics.
@@ -189,9 +187,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Logs the mean episode length.
         mean_episode_length_steps = (~trajectory.done).sum(axis=-1).astype(jnp.float32).mean()
         mean_episode_length_seconds = mean_episode_length_steps * self.config.ctrl_dt
-        self.logger.log_scalar(
-            "mean_episode_length", mean_episode_length_seconds, namespace="stats"
-        )
+        self.logger.log_scalar("mean_episode_length", mean_episode_length_seconds, namespace="stats")
 
     @abstractmethod
     def model_update(
@@ -262,9 +258,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Updates the model on the collected trajectories.
             with self.step_context("update_state"):
-                params, opt_state = self.model_update(
-                    model, params, optimizer, opt_state, trajectories
-                )
+                params, opt_state = self.model_update(model, params, optimizer, opt_state, trajectories)
 
             # # Logs the trajectory statistics.
             with self.step_context("write_logs"):
@@ -331,9 +325,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(
-                    xax.highlight_exception_message(traceback.format_exc()), "  "
-                )
+                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
@@ -355,6 +347,4 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.run_environment()
 
             case _:
-                raise ValueError(
-                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
-                )
+                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")

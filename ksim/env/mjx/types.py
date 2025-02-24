@@ -6,10 +6,11 @@ from jaxtyping import Array
 from ksim.env.base_env import EnvState
 from mujoco import mjx
 
+
 @dataclass
 class MjxEnvState(EnvState):
     """The state of the environment.
-    
+
     Attributes (inheriteds):
         model: Handles physics and model definition (latter shouldn't be touched).
         data: Includes current state of the robot.
@@ -20,7 +21,7 @@ class MjxEnvState(EnvState):
     """
 
     mjx_model: mjx.Model
-    mjx_data: mjx.Data # making this non-optional.
+    mjx_data: mjx.Data  # making this non-optional.
     obs: dict[str, Array]
     reward: Array
     done: Array

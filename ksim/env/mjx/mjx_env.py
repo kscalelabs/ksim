@@ -8,7 +8,6 @@ Philosophy:
 Rollouts return a trajectory of shape (time, num_envs, ).
 """
 
-
 import asyncio
 import logging
 from dataclasses import dataclass
@@ -44,10 +43,10 @@ from ksim.env.builders.terminations import Termination, TerminationBuilder
 from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import make_mujoco_mappings
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
 
 
 def step_mjx(
@@ -61,6 +60,7 @@ def step_mjx(
     mjx.step(mjx_model, data_with_ctrl)
     return data_with_ctrl
 
+
 def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
     """Ensures that all names are unique."""
     names: set[str] = set()
@@ -73,6 +73,7 @@ def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
         names.add(name)
         return_list.append((name, thing))
     return return_list
+
 
 # TODO: add these back in.
 @eqx.filter_jit
@@ -154,7 +155,7 @@ class KScaleEnvConfig(xax.Config):
 # The new stateless environment – note that we do not call any stateful methods.
 class MjxEnv(BaseEnv):
     """An environment for massively parallel rollouts, stateless to obj state and system parameters.
-    
+
     In this design:
       - All state (a BraxState) is passed in and returned by reset and step.
       - The underlying Brax system (here referred to as `brax_sys`) is provided to step/reset.
@@ -180,9 +181,7 @@ class MjxEnv(BaseEnv):
                 f"minimum action latency ({self.config.min_action_latency})"
             )
         if self.config.min_action_latency < 0:
-            raise ValueError(
-                f"Action latency ({self.config.min_action_latency}) must be non-negative"
-            )
+            raise ValueError(f"Action latency ({self.config.min_action_latency}) must be non-negative")
 
         self.min_action_latency_step = round(self.config.min_action_latency / self.config.dt)
         self.max_action_latency_step = round(self.config.max_action_latency / self.config.dt)
@@ -280,9 +279,7 @@ class MjxEnv(BaseEnv):
         rewards = []
         for reward_name, reward in self.rewards:
             reward_val = reward(prev_state, action, new_mjx_data) * reward.scale
-            chex.assert_shape(
-                reward_val, (), custom_message=f"Reward {reward_name} must be a scalar"
-            )
+            chex.assert_shape(reward_val, (), custom_message=f"Reward {reward_name} must be a scalar")
             rewards.append((reward_name, reward_val))
         return rewards
 
@@ -291,9 +288,7 @@ class MjxEnv(BaseEnv):
         terminations = []
         for termination_name, termination in self.terminations:
             term_val = termination(new_mjx_data)
-            chex.assert_shape(
-                term_val, (), custom_message=f"Termination {termination_name} must be a scalar"
-            )
+            chex.assert_shape(term_val, (), custom_message=f"Termination {termination_name} must be a scalar")
             terminations.append((termination_name, term_val))
         return terminations
 
@@ -333,7 +328,7 @@ class MjxEnv(BaseEnv):
             done=done,
             info=info,
         )
-    
+
     def _apply_physics_steps(
         self,
         env_state: MjxEnvState,
@@ -342,11 +337,11 @@ class MjxEnv(BaseEnv):
         num_latency_steps: int,
     ) -> mjx.Data:
         """A 'step' of the environment on a state composes multiple steps of the actual physics.
-        
+
         We take num_latency_steps (applying the previous action), then apply the control signal for
         the remainder of the physics steps.
         """
-        n_steps = self._expected_dt_per_ctrl_dt # total number of pipeline steps to take.
+        n_steps = self._expected_dt_per_ctrl_dt  # total number of pipeline steps to take.
         mjx_data = env_state.mjx_data
 
         def f(carry: Tuple[mjx.Data, int], _: Any) -> Tuple[Tuple[mjx.Data, int], None]:
@@ -354,16 +349,13 @@ class MjxEnv(BaseEnv):
             torques = jax.lax.select(step_num >= num_latency_steps, ctrl, prev_ctrl)
 
             # NOTE: can extend state to include anything from `mjx.Data` here...
-            new_state = step_mjx(env_state.mjx_model, state, torques) # type: ignore
+            new_state = step_mjx(env_state.mjx_model, state, torques)  # type: ignore
             return (new_state, step_num + 1), None
 
         (state, _), _ = jax.lax.scan(f, (mjx_data, 0), None, n_steps)
         return state
 
-
-    def step(
-        self, env_state: MjxEnvState, action: Array, rng: Array
-    ) -> MjxEnvState:
+    def step(self, env_state: MjxEnvState, action: Array, rng: Array) -> MjxEnvState:
         """Stepping the environment in a consistent, JIT-able manner.
 
         At t=t_0:
@@ -374,7 +366,7 @@ class MjxEnv(BaseEnv):
             - If i < latency_steps, apply the previous action. Otherwise, apply the current action.
             - Physics step is taken.
             - TODO: State perturbations are applied.
-        
+
         At t=t_f:
             - The final state is returned.
             - Observations are computed.
@@ -392,7 +384,10 @@ class MjxEnv(BaseEnv):
         torque_ctrl = self.actuators.get_ctrl(env_state, action)
 
         new_mjx_data = self._apply_physics_steps(
-            env_state, torque_ctrl, prev_ctrl, latency_steps.item(),
+            env_state,
+            torque_ctrl,
+            prev_ctrl,
+            latency_steps.item(),
         )
 
         obs = self.get_observation(new_mjx_data, obs_rng)
@@ -415,7 +410,7 @@ class MjxEnv(BaseEnv):
             done=done,
             info=new_info,
         )
-        
+
         return new_state
 
     def rollout_trajectories(
@@ -428,7 +423,7 @@ class MjxEnv(BaseEnv):
     ) -> MjxEnvState:
         """
         Vectorized rollout of trajectories.
-        
+
         1. The batched reset (using vmap) initializes a state for each environment.
         2. A vectorized (vmap-ed) env_step function is defined that calls step.
         3. A jax.lax.scan unrolls the trajectory for num_steps.
@@ -462,4 +457,3 @@ class MjxEnv(BaseEnv):
             length=num_steps,
         )
         return traj  # Shape: (num_steps, num_envs, ...)
-
