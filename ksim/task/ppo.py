@@ -103,7 +103,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Args:
             model: The linen-based neural network model.
             params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
-            x: The input to the model (max_steps, num_envs, observation_size)
+            obs: The input to the model (max_steps, num_envs, observation_size)
 
         Returns:
             The output of the actor model.
@@ -216,7 +216,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Args:
             model: The model.
             params: The parameters.
-            mini_batch: The mini-batch containing trajectories.
+            batch: The mini-batch containing trajectories.
 
         Returns:
             A tuple of (loss, metrics).

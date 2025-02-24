@@ -273,7 +273,12 @@ class MjxEnv(BaseEnv):
             observations.append((observation_name, observation_value))
         return {k: v for k, v in observations}
 
-    def get_rewards(self, prev_state: MjxEnvState, action: jnp.ndarray, new_mjx_data: mjx.Data):
+    def get_rewards(
+        self,
+        prev_state: MjxEnvState,
+        action: jnp.ndarray,
+        new_mjx_data: mjx.Data,
+    ) -> list[tuple[str, float]]:
         """Compute rewards (each as a scalar) from the state transition."""
         rewards = []
         for reward_name, reward in self.rewards:
@@ -282,7 +287,7 @@ class MjxEnv(BaseEnv):
             rewards.append((reward_name, reward_val))
         return rewards
 
-    def get_terminations(self, new_mjx_data: mjx.Data):
+    def get_terminations(self, new_mjx_data: mjx.Data) -> list[tuple[str, float]]:
         """Compute termination conditions (each as a scalar) from the pipeline state."""
         terminations = []
         for termination_name, termination in self.terminations:
@@ -432,7 +437,7 @@ class MjxEnv(BaseEnv):
         init_states = jax.vmap(lambda key: self.reset(env_state, key))(init_rngs)
         rng, _ = jax.random.split(rng)
 
-        def env_step(env_state: MjxEnvState, rng: Array):
+        def env_step(env_state: MjxEnvState, rng: Array) -> MjxEnvState:
             action = action_fn(env_state)
             new_state = jax.lax.cond(
                 env_state.done,
@@ -442,7 +447,7 @@ class MjxEnv(BaseEnv):
             )
             return new_state
 
-        def scan_fn(carry: Tuple[MjxEnvState, Array], _):
+        def scan_fn(carry: Tuple[MjxEnvState, Array], _: Any) -> Tuple[Tuple[MjxEnvState, Array], MjxEnvState]:
             states, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
             new_states = jax.vmap(env_step)(states, rngs[1:])

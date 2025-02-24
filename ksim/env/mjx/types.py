@@ -1,4 +1,4 @@
-"""MJX Utils"""
+"""MJX Utils."""
 
 from dataclasses import dataclass
 from typing import Any

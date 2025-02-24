@@ -106,10 +106,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> None:
         if actions is None:
             actions = cast_action_type(self.config.default_action_model)
-        rng = self.prng_key()
-        env = self.get_environment()
-        render_name = self.get_render_name(state)
-        render_dir = self.exp_dir / "renders" / render_name
+        # rng = self.prng_key()
+        # env = self.get_environment()
+        # render_name = self.get_render_name(state)
+        # render_dir = self.exp_dir / "renders" / render_name
         # logger.log(xax.LOG_STATUS, "Rendering to %s", render_dir)
         # env.unroll_trajectories_and_render(
         #     rng=rng,
@@ -153,6 +153,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         Args:
             key: The random key.
+            pretrained: The path to a pretrained model to load.
 
         Returns:
             The initial parameters.
@@ -239,7 +240,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 trajectory = self.get_trajectory_batch(model, params, env, step_val_rng)
                 assert hasattr(trajectory, "done"), "Trajectory must contain a `done` field."
                 # Calculate episode length by counting steps until done
-                episode_lengths = jnp.sum(~trajectory.done) / jnp.sum(trajectory.done)  # type: ignore
+                episode_lengths = jnp.sum(~trajectory.done) / jnp.sum(trajectory.done)
                 print(f"Average episode length: {episode_lengths}")
 
             #     # Perform logging.
@@ -317,7 +318,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             except xax.TrainingFinishedError:
                 if xax.is_master():
                     xax.show_info(
-                        f"Finished training after {training_state.num_steps} steps, {training_state.num_samples} samples",
+                        f"Finished training after{training_state.num_steps} steps{training_state.num_samples} samples",
                         important=True,
                     )
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
