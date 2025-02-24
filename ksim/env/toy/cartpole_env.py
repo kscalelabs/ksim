@@ -50,8 +50,20 @@ class CartPoleEnv(BaseEnv):
         Returns:
             BraxState: The next state of the environment.
         """
-        obs, reward, terminated, truncated, info = self.env.step(action.item())
-        done = bool(terminated or truncated)
+        try:
+            obs, reward, terminated, truncated, info = self.env.step(action.item())
+            done = bool(terminated or truncated)  # Convert to Python bool
+        except AttributeError as e:
+            if "bool8" in str(e):
+                # Handle the numpy bool8 error
+                obs, reward, terminated, truncated, info = self.env.step(action.item())
+                # Ensure terminated and truncated are Python booleans
+                terminated = bool(terminated)
+                truncated = bool(truncated)
+                done = terminated or truncated
+            else:
+                raise
+            
         return EnvState(
             obs={"observations": jnp.array(obs)[None, :]},
             reward=jnp.array(reward)[None],
