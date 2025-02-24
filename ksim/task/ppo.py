@@ -1,7 +1,6 @@
 """Defines a standard task interface for training a policy."""
 
-import functools
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass
 from typing import Dict, Generic, NamedTuple, Tuple, TypeVar
 
@@ -10,7 +9,6 @@ import jax
 import jax.numpy as jnp
 import optax
 import xax
-from brax.base import System
 from brax.envs.base import State as BraxState
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
@@ -133,37 +131,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         res = model.apply(params, method="critic", obs=obs)
         return res
 
-    # @abstractmethod
-    # def get_critic_output(
-    #     self,
-    #     model: ActorCriticModel,
-    #     params: PyTree,
-    #     state: BraxState,
-    #     rng: PRNGKeyArray,
-    #     sys: System | None,
-    #     carry: Array | None,
-    # ) -> tuple[Array, None]:
-    #     """Get the critic output.
-    #     Args:
-    #         model: The linen-based neural network model.
-    #         params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
-    #         sys: The system (see Brax)
-    #         state: The state (see Brax)
-    #         rng: The random key.
-    #         carry: The carry state for recurrent models (not used here)
-
-    #     Returns:
-    #         The critic output and no carry state (keeping for consistency)
-    #     """
-    #     ...
-
-    # @abstractmethod
-    # def get_action_log_prob(
-    #     self, model: ActorCriticModel, params: PyTree, state: BraxState, rng: PRNGKeyArray
-    # ) -> Tuple[Array, Array]:
-    #     """Get the action log probability."""
-    #     ...
-
     def get_trajectory_batch(
         self,
         model: ActorCriticModel,
@@ -264,7 +231,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # get the log probs of the current model
         predictions = self.apply_actor(model, params, batch.observations)
         assert isinstance(predictions, Array)
-        log_probs = model.actor_calc_log_prob(predictions, batch.actions)
+        log_probs = model.apply(
+            params, predictions, method="actor_calc_log_prob", action=batch.actions
+        )
         ratio = jnp.exp(log_probs - batch.action_log_probs)
 
         # get the state-value estimates

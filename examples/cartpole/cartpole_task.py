@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Tuple
 
-import equinox as eqx
 import flax.linen as nn
 import jax
 import jax.numpy as jnp

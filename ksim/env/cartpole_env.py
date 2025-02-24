@@ -5,10 +5,9 @@ from typing import Any, Callable, Tuple
 import gym
 import jax
 import jax.numpy as jnp
-from brax.envs.base import State as BraxState
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.env.base_env import BaseEnv
+from ksim.env.base_env import BaseEnv, EnvState
 
 
 class CartPoleEnv(BaseEnv):
@@ -19,7 +18,7 @@ class CartPoleEnv(BaseEnv):
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
 
-    def reset(self, rng: PRNGKeyArray) -> BraxState:
+    def reset(self, rng: PRNGKeyArray) -> EnvState:
         """Reset the environment.
 
         Args:
@@ -31,15 +30,14 @@ class CartPoleEnv(BaseEnv):
         # TODO: probably want to use RNG properly
         obs, info = self.env.reset()
 
-        return BraxState(
-            pipeline_state=None,  # CartPole doesn't use pipeline state
+        return EnvState(
             obs={"observations": jnp.array(obs)[None, :]},
             reward=jnp.array(1.0)[None],
             done=jnp.array(False)[None],
             info={"rng": rng, **info},
         )
 
-    def step(self, prev_state: BraxState, action: Array) -> BraxState:
+    def step(self, prev_state: EnvState, action: Array) -> EnvState:
         """Step the environment.
 
         NOTE: for simplicity, this environment is stateful and doesn't actually use prev_state in
@@ -54,8 +52,7 @@ class CartPoleEnv(BaseEnv):
         """
         obs, reward, terminated, truncated, info = self.env.step(action.item())
         done = bool(terminated or truncated)
-        return BraxState(
-            pipeline_state=None,
+        return EnvState(
             obs={"observations": jnp.array(obs)[None, :]},
             reward=jnp.array(reward)[None],
             done=jnp.array(done)[None],
@@ -64,12 +61,12 @@ class CartPoleEnv(BaseEnv):
 
     def unroll_trajectories(
         self,
-        action_log_prob_fn: Callable[[BraxState, PRNGKeyArray], Tuple[Array, Array]],
+        action_log_prob_fn: Callable[[EnvState, PRNGKeyArray], Tuple[Array, Array]],
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
         **kwargs: Any,
-    ) -> BraxState:
+    ) -> EnvState:
         """Rollout the model for a given number of steps.
         Args:
             model: The model.
@@ -112,12 +109,10 @@ class CartPoleEnv(BaseEnv):
         done = jnp.stack(done)
         action_log_probs = jnp.stack(action_log_probs)
 
-        return BraxState(
-            pipeline_state=None,
+        return EnvState(
             obs=observations,
             reward=rewards,
             done=done,
-            metrics={},
             info={"rng": rng, "actions": actions, "action_log_probs": action_log_probs},
         )
 

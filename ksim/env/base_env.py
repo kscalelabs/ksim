@@ -1,41 +1,41 @@
 """Base JAX centric environment class."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Callable, Tuple
 
-from brax.envs.base import State as BraxState
+import jax
 from jaxtyping import Array, PRNGKeyArray
+
+@jax.tree_util.register_dataclass
+@dataclass
+class EnvState:
+    """Base environment state class."""
+
+    obs: dict[str, Array]
+    reward: Array
+    done: Array
+    info: dict[str, Any]
 
 
 class BaseEnv(ABC):
     """Base environment class."""
 
     @abstractmethod
-    def reset(self, rng: PRNGKeyArray) -> BraxState: ...
+    def reset(self, rng: PRNGKeyArray) -> EnvState: ...
 
     @abstractmethod
-    def step(self, prev_state: BraxState, action: Array) -> BraxState: ...
+    def step(self, prev_state: EnvState, action: Array) -> EnvState: ...
 
     @abstractmethod
     def unroll_trajectories(
         self,
-        action_log_prob_fn: Callable[[BraxState, PRNGKeyArray], Tuple[Array, Array]],
+        action_log_prob_fn: Callable[[EnvState, PRNGKeyArray], Tuple[Array, Array]],
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
         **kwargs: Any,
-    ) -> BraxState: ...
-
-    """Unroll the model for a given number of steps.
-
-    Args:
-        action_fn: The action function to unroll.
-        rng: The random key.
-        max_trajectory_steps: The maximum number of steps to unroll.
-
-    Returns:
-        The unrolled trajectories (num_steps, num_envs, ...).
-    """
+    ) -> EnvState: ...
 
     @property
     @abstractmethod
@@ -44,3 +44,6 @@ class BaseEnv(ABC):
     @property
     @abstractmethod
     def action_size(self) -> int: ...
+
+
+

@@ -1,7 +1,6 @@
 """Defines a standard task interface for training reinforcement learning agents."""
 
 import bdb
-import functools
 import logging
 import signal
 import sys
@@ -13,26 +12,22 @@ from dataclasses import dataclass
 from threading import Thread
 from typing import Generic, Literal, NamedTuple, TypeVar
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
 import xax
-from brax.base import System
 from brax.envs.base import State as BraxState
 from dpshdl.dataset import Dataset
 from jaxtyping import PRNGKeyArray, PyTree
 from omegaconf import MISSING, OmegaConf
 
-from ksim.env.base_env import BaseEnv
-from ksim.env.kscale_env import (
-    KScaleActionModel,
+from ksim.env.base_env import BaseEnv, EnvState
+from ksim.env.mjx.mjx_env import (
     KScaleActionModelType,
-    KScaleEnv,
     KScaleEnvConfig,
     cast_action_type,
 )
-from ksim.model.formulations import ActorCriticModel
+from ksim.model.formulations import ActionModel, ActorCriticModel
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +84,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self.max_trajectory_steps = round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
 
     @abstractmethod
-    def get_environment(self) -> KScaleEnv: ...
+    def get_environment(self) -> BaseEnv: ...
 
     def get_dataset(self, phase: Literal["train", "valid"]) -> Dataset:
         raise NotImplementedError("Reinforcement learning tasks do not require datasets.")
@@ -107,7 +102,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run_environment(
         self,
         state: xax.State | None = None,
-        actions: KScaleActionModelType | KScaleActionModel | None = None,
+        actions: KScaleActionModelType | ActionModel | None = None,
     ) -> None:
         if actions is None:
             actions = cast_action_type(self.config.default_action_model)
@@ -116,12 +111,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         render_name = self.get_render_name(state)
         render_dir = self.exp_dir / "renders" / render_name
         # logger.log(xax.LOG_STATUS, "Rendering to %s", render_dir)
-        env.unroll_trajectories_and_render(
-            rng=rng,
-            num_steps=self.max_steps_per_trajectory,
-            render_dir=render_dir,
-            actions=actions,
-        )
+        # env.unroll_trajectories_and_render(
+        #     rng=rng,
+        #     num_steps=self.max_steps_per_trajectory,
+        #     render_dir=render_dir,
+        #     actions=actions,
+        # ) # TODO: implement unrolling trajectories and rendering in environment class.
 
     @abstractmethod
     def get_init_actor_carry(self) -> jnp.ndarray | None: ...
@@ -129,43 +124,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @abstractmethod
     def get_model_obs_from_state(self, state: BraxState) -> PyTree: ...
 
-    # @abstractmethod
-    # def get_actor_output(
-    #     self,
-    #     model: PyTree,
-    #     sys: System,
-    #     state: BraxState,
-    #     rng: PRNGKeyArray,
-    #     carry: jnp.ndarray | None,
-    # ) -> tuple[jnp.ndarray, jnp.ndarray | None]:
-    #     """Get the actor output.
-
-    #     Args:
-    #         model: The linen-based neural network model.
-    #         params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
-    #         sys: The system (see Brax)
-    #         state: The state (see Brax)
-    #         rng: The random key.
-    #         carry: The carry state for recurrent models (not used here)
-
-    #     Returns:
-    #         The actor output and the carry state (keeping for consistency)
-    #     """
-    #     raise NotImplementedError("`get_output` must be implemented by the subclass")
-
-    def log_state(self, env: KScaleEnv) -> None:
+    def log_state(self, env: BaseEnv) -> None:
         super().log_state()
 
         self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
 
-    def log_trajectory(self, env: KScaleEnv, trajectory: BraxState) -> None:
+    def log_trajectory(self, env: BaseEnv, trajectory: EnvState) -> None:
         for plot_key, img in env.generate_trajectory_plots(trajectory):
             self.logger.log_image(plot_key, img, namespace="traj")
 
         frames, fps = env.render_trajectory_video(trajectory)
         self.logger.log_video("trajectory", frames, fps=fps, namespace="video")
 
-    def get_reward_stats(self, trajectory: BraxState, env: KScaleEnv) -> dict[str, jnp.ndarray]:
+    def get_reward_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
         reward_stats: dict[str, jnp.ndarray] = {}
 
         # Gets the reward statistics.
@@ -196,7 +167,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return self.get_model(key).init(key, self.get_model_obs_from_state(state))
 
     def get_termination_stats(
-        self, trajectory: BraxState, env: KScaleEnv
+        self, trajectory: EnvState, env: BaseEnv
     ) -> dict[str, jnp.ndarray]:
         termination_stats: dict[str, jnp.ndarray] = {}
 
@@ -209,7 +180,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return termination_stats
 
-    def log_trajectory_stats(self, env: KScaleEnv, trajectory: BraxState) -> None:
+    def log_trajectory_stats(self, env: BaseEnv, trajectory: EnvState) -> None:
         for key, value in self.get_reward_stats(trajectory, env).items():
             self.logger.log_scalar(key, value, namespace="reward")
         for key, value in self.get_termination_stats(trajectory, env).items():

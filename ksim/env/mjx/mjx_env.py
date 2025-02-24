@@ -12,7 +12,6 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 import asyncio
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -28,59 +27,27 @@ import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from ksim.env.mjx.types import MjxEnvState
+from ksim.utils.robot_model import get_model_and_metadata
 import xax
 from mujoco import mjx
 from jaxtyping import Array, PRNGKeyArray
-from kscale import K
-from kscale.web.utils import get_robots_dir, should_refresh_file
 from mujoco_scenes.mjcf import load_mjmodel
-from omegaconf import MISSING, OmegaConf
+from omegaconf import MISSING
 
 from ksim.commands import Command, CommandBuilder
-from ksim.env.base_env import BaseEnv
+from ksim.env.base_env import BaseEnv, EnvState
 from ksim.observation import Observation, ObservationBuilder
 from ksim.resets import Reset, ResetBuilder, ResetData
 from ksim.rewards import Reward, RewardBuilder
 from ksim.terminations import Termination, TerminationBuilder
 from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import make_mujoco_mappings
-from ksim.env.actuators.mit_controller import MITPositionActuators
+from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-
-@dataclass
-class ActuatorMetadata:
-    kp: float
-    kd: float
-
-
-@dataclass
-class ModelMetadata:
-    actuators: dict[str, ActuatorMetadata]
-    control_frequency: float
-
-
-@dataclass
-class EnvState:
-    """The state of the environment.
-    
-    Attributes (inheriteds):
-        model: Handles physics and model definition (latter shouldn't be touched).
-        data: Includes current state of the robot.
-        obs: The post-processed observations of the environment.
-        reward: The reward of the environment.
-        done: Whether the episode is done.
-        info: Additional information about the environment.
-    """
-
-    mjx_model: mjx.Model
-    mjx_data: mjx.Data # making this non-optional.
-    obs: dict[str, Array]
-    reward: Array
-    done: Array
-    info: dict[str, Any]
 
 
 def step_mjx(
@@ -93,59 +60,6 @@ def step_mjx(
     # more logic if needed...
     mjx.step(mjx_model, data_with_ctrl)
     return data_with_ctrl
-
-async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
-    """Downloads and caches the model URDF."""
-    async with K() as api:
-        urdf_dir = await api.download_and_extract_urdf(model_name, cache=cache)
-
-    try:
-        mjcf_path = next(urdf_dir.glob("*.mjcf"))
-    except StopIteration:
-        raise ValueError(f"No MJCF file found for {model_name} (in {urdf_dir})")
-
-    return mjcf_path
-
-
-async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetadata:
-    """Downloads and caches the model metadata."""
-    metadata_path = get_robots_dir() / model_name / "metadata.yaml"
-
-    # Downloads and caches the metadata if it doesn't exist.
-    if not cache or not (metadata_path.exists() and not should_refresh_file(metadata_path)):
-        async with K() as api:
-            robot_class = await api.get_robot_class(model_name)
-            if (metadata := robot_class.metadata) is None:
-                raise ValueError(f"No metadata found for {model_name}")
-
-        if (control_frequency := metadata.control_frequency) is None:
-            raise ValueError(f"No control frequency found for {model_name}")
-        if (actuators := metadata.joint_name_to_metadata) is None:
-            raise ValueError(f"No actuators found for {model_name}")
-        actuator_metadata = {k: ActuatorMetadata(kp=v.kp, kd=v.kd) for k, v in actuators.items()}
-        model_metadata = ModelMetadata(
-            actuators=actuator_metadata, control_frequency=control_frequency
-        )
-        metadata_path.parent.mkdir(parents=True, exist_ok=True)
-        OmegaConf.save(model_metadata, metadata_path)
-
-    config = OmegaConf.structured(ModelMetadata)
-    return cast(ModelMetadata, OmegaConf.merge(config, OmegaConf.load(metadata_path)))
-
-
-async def get_model_and_metadata(model_name: str, cache: bool = True) -> tuple[str, ModelMetadata]:
-    """Downloads and caches the model URDF and metadata."""
-    return await asyncio.gather(
-        get_model_path(
-            model_name=model_name,
-            cache=not cache,
-        ),
-        get_model_metadata(
-            model_name=model_name,
-            cache=not cache,
-        ),
-    )
-
 
 def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
     """Ensures that all names are unique."""
@@ -160,11 +74,10 @@ def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
         return_list.append((name, thing))
     return return_list
 
-
 # TODO: add these back in.
 @eqx.filter_jit
 def get_random_action(
-    env_state: EnvState,
+    env_state: MjxEnvState,
     rng: PRNGKeyArray,
     carry: None,
 ) -> tuple[jnp.ndarray, None]:
@@ -178,7 +91,7 @@ def get_random_action(
 
 @eqx.filter_jit
 def get_midpoint_action(
-    env_state: EnvState,
+    env_state: MjxEnvState,
     rng: PRNGKeyArray,
     carry: None,
 ) -> tuple[jnp.ndarray, None]:
@@ -191,7 +104,7 @@ def get_midpoint_action(
 
 @eqx.filter_jit
 def get_zero_action(
-    env_state: EnvState,
+    env_state: MjxEnvState,
     rng: PRNGKeyArray,
     carry: None,
 ) -> tuple[jnp.ndarray, None]:
@@ -362,7 +275,7 @@ class MjxEnv(BaseEnv):
             observations.append((observation_name, observation_value))
         return {k: v for k, v in observations}
 
-    def get_rewards(self, prev_state: EnvState, action: jnp.ndarray, new_mjx_data: mjx.Data):
+    def get_rewards(self, prev_state: MjxEnvState, action: jnp.ndarray, new_mjx_data: mjx.Data):
         """Compute rewards (each as a scalar) from the state transition."""
         rewards = []
         for reward_name, reward in self.rewards:
@@ -388,7 +301,7 @@ class MjxEnv(BaseEnv):
     # Main API Implementation #
     ###########################
 
-    def reset(self, env_state: EnvState, rng: jax.Array) -> EnvState:
+    def reset(self, env_state: MjxEnvState, rng: jax.Array) -> MjxEnvState:
         """Pure reset function: returns an initial state computed solely from the inputs."""
         # Apply any reset functions.
         reset_data = ResetData(rng=rng, state=env_state)
@@ -412,7 +325,7 @@ class MjxEnv(BaseEnv):
             "prev_ctrl": jnp.zeros_like(new_data.ctrl),
         }
         obs = self.get_observation(new_data, obs_rng)
-        return EnvState(
+        return MjxEnvState(
             mjx_model=updated_state.mjx_model,
             mjx_data=new_data,
             obs=obs,
@@ -423,7 +336,7 @@ class MjxEnv(BaseEnv):
     
     def _apply_physics_steps(
         self,
-        env_state: EnvState,
+        env_state: MjxEnvState,
         ctrl: Array,
         prev_ctrl: Array,
         num_latency_steps: int,
@@ -449,8 +362,8 @@ class MjxEnv(BaseEnv):
 
 
     def step(
-        self, env_state: EnvState, action: Array, rng: Array
-    ) -> EnvState:
+        self, env_state: MjxEnvState, action: Array, rng: Array
+    ) -> MjxEnvState:
         """Stepping the environment in a consistent, JIT-able manner.
 
         At t=t_0:
@@ -494,7 +407,7 @@ class MjxEnv(BaseEnv):
             prev_ctrl=new_mjx_data.ctrl,
         )
 
-        new_state = EnvState(
+        new_state = MjxEnvState(
             mjx_model=env_state.mjx_model,
             mjx_data=new_mjx_data,
             obs=obs,
@@ -511,8 +424,8 @@ class MjxEnv(BaseEnv):
         rng: Array,
         num_steps: int,
         num_envs: int,
-        action_fn: Callable[[EnvState], Array],
-    ) -> EnvState:
+        action_fn: Callable[[MjxEnvState], Array],
+    ) -> MjxEnvState:
         """
         Vectorized rollout of trajectories.
         
@@ -521,11 +434,12 @@ class MjxEnv(BaseEnv):
         3. A jax.lax.scan unrolls the trajectory for num_steps.
         4. The resulting trajectory has shape (num_steps, num_envs, ...).
         """
+        assert isinstance(env_state, MjxEnvState)
         init_rngs = jax.random.split(rng, num_envs)
         init_states = jax.vmap(lambda key: self.reset(env_state, key))(init_rngs)
         rng, _ = jax.random.split(rng)
 
-        def env_step(env_state: EnvState, rng: Array):
+        def env_step(env_state: MjxEnvState, rng: Array):
             action = action_fn(env_state)
             new_state = jax.lax.cond(
                 env_state.done,
@@ -535,7 +449,7 @@ class MjxEnv(BaseEnv):
             )
             return new_state
 
-        def scan_fn(carry: Tuple[EnvState, Array], _):
+        def scan_fn(carry: Tuple[MjxEnvState, Array], _):
             states, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
             new_states = jax.vmap(env_step)(states, rngs[1:])

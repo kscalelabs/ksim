@@ -13,8 +13,12 @@ from brax.envs.base import State as BraxState
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.env.kscale_env import KScaleEnv
-from ksim.model.formulations import ActorCriticModel, GaussianActorCriticModel
+from ksim.env.mjx_env import KScaleEnv
+from ksim.model.formulations import (
+    ActionModel,
+    ActorCriticModel,
+    GaussianActorCriticModel,
+)
 from ksim.model.mlp import MLP
 from ksim.observation import (
     BaseAngularVelocityObservation,
@@ -40,6 +44,7 @@ from ksim.terminations import IllegalContactTerminationBuilder
 NUM_INPUTS = 49
 NUM_OUTPUTS = 20
 
+# NOTE: implement after MLP is working.
 # class RNNCell(eqx.Module):
 #     num_inputs: int
 #     num_hidden: int
@@ -264,11 +269,13 @@ NUM_OUTPUTS = 20
 #         self.critic = critic
 
 
-class KBotActorModel(nn.Module):
+class KBotActorModel(ActionModel):
     mlp: MLP
 
-    @nn.compact
-    def __call__(self, state: PyTree) -> jax.Array:
+    def setup(self) -> None:
+        self.log_std = self.param("log_std", nn.initializers.constant(-0.7), (NUM_OUTPUTS,))
+
+    def input_vec_from_state(self, state: PyTree) -> jax.Array:
         lin_vel_cmd_2 = state["info"]["commands"]["linear_velocity_command"]
         ang_vel_cmd_1 = state["info"]["commands"]["angular_velocity_command"]
         joint_pos_j = state["obs"]["joint_position_observation"]
@@ -288,10 +295,36 @@ class KBotActorModel(nn.Module):
             ],
             axis=-1,
         )
+        return x_n
 
+    def out_from_input_vec(self, x_n: jax.Array) -> jax.Array:
         actions_n = self.mlp(x_n)
+        return actions_n
+
+    def __call__(self, state: PyTree) -> jax.Array:
+        x_n = self.input_vec_from_state(state)
+        actions_n = self.out_from_input_vec(x_n)
 
         return actions_n
+
+    def calc_log_prob(self, prediction: jax.Array, action: jax.Array) -> jax.Array:
+        mean = prediction
+        std = jnp.exp(self.log_std)
+
+        log_prob = (
+            -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
+        )
+        return jnp.sum(log_prob, axis=-1)
+
+    def sample_and_log_prob(self, obs: Array, rng: PRNGKeyArray) -> Tuple[Array, Array]:
+        mean = self(obs)
+        std = jnp.exp(self.log_std)
+
+        noise = jax.random.normal(rng, mean.shape)
+        action = mean + noise * std
+        log_prob = self.calc_log_prob(mean, action)
+
+        return action, log_prob
 
 
 class KBotCriticModel(nn.Module):
@@ -433,7 +466,6 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         action_var = model.actor_module.get_variance()
 
         probs = jax.random.normal(rng)
-        
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
         return ActorCriticModel(

@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import xax
-from ksim.env.mjx_env import EnvState
+from ksim.env.mjx.mjx_env import EnvState
 from jaxtyping import PRNGKeyArray
 
 from ksim.utils.data import BuilderData
