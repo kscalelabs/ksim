@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import xax
-from brax.base import State
+from ksim.env.mjx_env import EnvState
 from jaxtyping import PRNGKeyArray
 
 from ksim.utils.data import BuilderData
@@ -20,7 +20,7 @@ from ksim.utils.data import BuilderData
 @dataclass
 class ResetData:
     rng: PRNGKeyArray
-    state: State
+    state: EnvState
 
 
 class Reset(eqx.Module, ABC):

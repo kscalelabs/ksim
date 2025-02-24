@@ -3,8 +3,9 @@
 Much of this is referenced from Mujoco Playground.
 """
 
+from dataclasses import dataclass
 import logging
-from typing import Collection, Hashable, Sequence, TypeVar, Union
+from typing import Collection, Dict, Hashable, Sequence, Tuple, TypeVar, Union
 
 import jax
 import jax.numpy as jnp
@@ -105,90 +106,105 @@ def lookup_in_dict(names: Collection[Tk], mapping: dict[Tk, Tv], names_type: str
     return [mapping[name] for name in names]
 
 
-def get_sensor_data(
-    model: mujoco.MjModel,
+@dataclass
+class MujocoMappings:
+    """A minimal set of mappings helpful for constructing rewards, terminations, etc."""
+
+    name_to_sensordata: Dict[str, Tuple[int, int | None]]
+    name_to_qpos: Dict[str, Tuple[int, int | None]]
+    name_to_qvelacc: Dict[str, Tuple[int, int | None]]
+    name_to_ctrl: Dict[str, int]
+    geom_id_to_body_name: Dict[int, str]
+
+
+def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
+    """Make a MujocoMappings object from a MuJoCo model."""
+    # creating sensor mappings
+    name_to_sensordata = {}
+    for i in range(len(mjx_model.sensor_adr)):
+        sensordata_start = mjx_model.sensor_adr[i]
+        if i == len(mjx_model.sensor_adr) - 1:
+            sensordata_end = None
+        else:
+            sensordata_end = mjx_model.sensor_adr[i + 1]
+
+        name_start = mjx_model.name_actuatoradr[i]
+        name = bytes(mjx_model.names[name_start:]).decode('utf-8').split('\x00')[0]
+
+        name_to_sensordata[name] = (sensordata_start, sensordata_end)
+
+    # doing the same for qpos
+    name_to_qpos = {}
+    for i in range(len(mjx_model.jnt_qposadr)):
+        qpos_start = mjx_model.jnt_qposadr[i]
+        if i == len(mjx_model.jnt_qposadr) - 1:
+            qpos_end = None
+        else:
+            qpos_end = mjx_model.jnt_qposadr[i + 1]
+
+        name_start = mjx_model.name_jntadr[i]
+        name = bytes(mjx_model.names[name_start:]).decode('utf-8').split('\x00')[0]
+        name_to_qpos[name] = (qpos_start, qpos_end)
+
+    # doing the same for qvel
+    name_to_qvelacc = {}
+    for i in range(len(mjx_model.jnt_dofadr)):
+        dof_start = mjx_model.jnt_dofadr[i]
+        if i == len(mjx_model.jnt_dofadr) - 1:
+            dof_end = None
+        else:
+            dof_end = mjx_model.jnt_dofadr[i + 1]
+
+        name_start = mjx_model.name_jntadr[i]
+        name = bytes(mjx_model.names[name_start:]).decode('utf-8').split('\x00')[0]
+
+        name_to_qvelacc[name] = (dof_start, dof_end)
+
+    # doing the same for ctrl
+    name_to_ctrl = {}
+    for i in range(len(mjx_model.name_actuatoradr)):
+        name_start = mjx_model.name_actuatoradr[i]
+        name = bytes(mjx_model.names[name_start:]).decode('utf-8').split('\x00')[0]
+        name_to_ctrl[name] = i
+
+    # doing the same for geom_id_to_body_name
+    geom_id_to_body_name = {}
+    for i in range(len(mjx_model.geom_bodyid)):
+        body_id = mjx_model.geom_bodyid[i]
+
+        name_start = mjx_model.name_bodyadr[body_id]
+        name = bytes(mjx_model.names[name_start:]).decode('utf-8').split('\x00')[0]
+        geom_id_to_body_name[i] = name
+
+    return MujocoMappings(
+        name_to_sensordata,
+        name_to_qpos,
+        name_to_qvelacc,
+        name_to_ctrl,
+        geom_id_to_body_name,
+    )
+
+def get_qpos_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
+    """Get the qpos from a name."""
+    return data.qpos[mujoco_mappings.name_to_qpos[name]]
+
+def get_qvel_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
+    """Get the qvel from a name."""
+    return data.qvel[mujoco_mappings.name_to_qvelacc[name]]
+
+def get_ctrl_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
+    """Get the ctrl from a name."""
+    return data.ctrl[mujoco_mappings.name_to_ctrl[name]]
+
+def get_sensordata_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
+    """Get the sensordata from a name."""
+    return data.sensordata[mujoco_mappings.name_to_sensordata[name]]
+
+def is_body_in_contact(
+    body_name: str,
+    mujoco_mappings: MujocoMappings,
     data: mjx.Data,
-    sensor_name: str,
-) -> jnp.ndarray:
-    """Gets sensor data given sensor name.
-
-    Args:
-        model: The MuJoCo model.
-        data: The MuJoCo data.
-        sensor_name: The name of the sensor to get data from.
-
-    Returns:
-        The sensor data.
-    """
-    sensor_id = model.sensor(sensor_name).id
-    sensor_adr = model.sensor_adr[sensor_id]
-    sensor_dim = model.sensor_dim[sensor_id]
-    return data.sensordata[sensor_adr : sensor_adr + sensor_dim]
-
-
-def dof_width(joint_type: Union[int, mujoco.mjtJoint]) -> int:
-    """Get the dimensionality of the joint in qvel.
-
-    Args:
-        joint_type: The type of the joint.
-
-    Returns:
-        The dimensionality of the joint in qvel.
-    """
-    if isinstance(joint_type, mujoco.mjtJoint):
-        joint_type = joint_type.value
-    return {0: 6, 1: 3, 2: 1, 3: 1}[joint_type]
-
-
-def qpos_width(joint_type: Union[int, mujoco.mjtJoint]) -> int:
-    """Get the dimensionality of the joint in qpos.
-
-    Args:
-        joint_type: The type of the joint.
-
-    Returns:
-        The dimensionality of the joint in qpos.
-    """
-    if isinstance(joint_type, mujoco.mjtJoint):
-        joint_type = joint_type.value
-    return {0: 7, 1: 4, 2: 1, 3: 1}[joint_type]
-
-
-def get_qpos_ids(model: mujoco.MjModel, joint_names: list[str]) -> np.ndarray:
-    """Get the indices of the qpos for a list of joints.
-
-    Args:
-        model: The MuJoCo model.
-        joint_names: The names of the joints.
-
-    Returns:
-        The indices of the qpos for the joints.
-    """
-    index_list: list[int] = []
-    for jnt_name in joint_names:
-        jnt = model.joint(jnt_name).id
-        jnt_type = model.jnt_type[jnt]
-        qadr = model.jnt_dofadr[jnt]
-        qdim = qpos_width(jnt_type)
-        index_list.extend(range(qadr, qadr + qdim))
-    return np.array(index_list)
-
-
-def get_qvel_ids(model: mujoco.MjModel, joint_names: Sequence[str]) -> np.ndarray:
-    """Get the indices of the qvel for a list of joints.
-
-    Args:
-        model: The MuJoCo model.
-        joint_names: The names of the joints.
-
-    Returns:
-        The indices of the qvel for the joints.
-    """
-    index_list: list[int] = []
-    for jnt_name in joint_names:
-        jnt = model.joint(jnt_name).id
-        jnt_type = model.jnt_type[jnt]
-        vadr = model.jnt_dofadr[jnt]
-        vdim = dof_width(jnt_type)
-        index_list.extend(range(vadr, vadr + vdim))
-    return np.array(index_list)
+) -> bool:
+    """Check if a body is in contact."""
+    # TODO: implement this properly...
+    return False
