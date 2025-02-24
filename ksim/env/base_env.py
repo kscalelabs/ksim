@@ -26,7 +26,18 @@ class BaseEnv(ABC):
     def reset(self, rng: PRNGKeyArray) -> EnvState: ...
 
     @abstractmethod
-    def step(self, prev_state: EnvState, action: Array) -> EnvState: ...
+    def step(self, prev_state: EnvState, action: Array, rng: Array | None = None) -> EnvState:
+        """Step the environment.
+
+        Args:
+            prev_state: The previous state of the environment.
+            action: The action to take.
+            rng: Optional random key for stochastic environments.
+
+        Returns:
+            The next state of the environment.
+        """
+        ...
 
     @abstractmethod
     def unroll_trajectories(

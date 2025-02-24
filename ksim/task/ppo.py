@@ -274,7 +274,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         batch: PPOBatch,
     ) -> tuple[Array, PyTree]:
         """Jitted version of value_and_grad computation."""
-        loss_fn = lambda p: self.compute_loss(model, p, batch)[0]
+
+        def loss_fn(p: PyTree) -> Array:
+            return self.compute_loss(model, p, batch)[0]
+
         return jax.value_and_grad(loss_fn)(params)
 
     @eqx.filter_jit

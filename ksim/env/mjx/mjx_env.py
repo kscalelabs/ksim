@@ -353,13 +353,13 @@ class MjxEnv(BaseEnv):
             torques = jax.lax.select(step_num >= num_latency_steps, ctrl, prev_ctrl)
 
             # NOTE: can extend state to include anything from `mjx.Data` here...
-            new_state = step_mjx(env_state.mjx_model, state, torques)  # type: ignore
+            new_state = step_mjx(env_state.mjx_model, state, torques)
             return (new_state, step_num + 1), None
 
         (state, _), _ = jax.lax.scan(f, (mjx_data, 0), None, n_steps)
         return state
 
-    def step(self, env_state: MjxEnvState, action: Array, rng: Array) -> MjxEnvState:
+    def step(self, env_state: MjxEnvState, action: Array, rng: Array | None = None) -> MjxEnvState:
         """Stepping the environment in a consistent, JIT-able manner.
 
         At t=t_0:
@@ -377,6 +377,8 @@ class MjxEnv(BaseEnv):
             - Rewards are computed.
             - Terminations are computed.
         """
+        if rng is None:
+            rng = env_state.info["rng"]
         rng, latency_rng, obs_rng = jax.random.split(rng, 3)
         latency_steps = jax.random.randint(
             key=latency_rng,

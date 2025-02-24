@@ -463,6 +463,9 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
 
         probs = jax.random.normal(rng)
 
+        # TODO: Fix this.
+        return Array(jnp.zeros((NUM_OUTPUTS,))), Array(jnp.zeros((1,)))
+
     def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
         return ActorCriticModel(
             actor_module=KBotActorModel(

@@ -63,7 +63,7 @@ class CartPoleEnv(BaseEnv):
                 done = terminated or truncated
             else:
                 raise
-            
+
         return EnvState(
             obs={"observations": jnp.array(obs)[None, :]},
             reward=jnp.array(reward)[None],

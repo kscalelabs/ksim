@@ -82,10 +82,10 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
 
     def get_output(self, model_out: ModelOut) -> Array:
         """Get the output from the model's output.
-        
+
         Args:
             model_out: The output from the model.
-            
+
         Returns:
             The processed output.
         """
