@@ -318,7 +318,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             except xax.TrainingFinishedError:
                 if xax.is_master():
                     xax.show_info(
-                        f"Finished training after{training_state.num_steps} steps{training_state.num_samples} samples",
+                        f"Finished training after {training_state.num_steps} steps {training_state.num_samples} samples",
                         important=True,
                     )
                 self.save_checkpoint(model, optimizer, opt_state, training_state)

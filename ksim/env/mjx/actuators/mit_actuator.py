@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jaxtyping import Array
 
 from ksim.env.mjx.actuators.base_actuator import Actuators, BaseActuatorMetadata
-from ksim.env.mjx.mjx_env import MjxEnvState
+from ksim.env.mjx.types import MjxEnvState
 from ksim.utils.mujoco import MujocoMappings
 
 

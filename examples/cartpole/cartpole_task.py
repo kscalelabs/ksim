@@ -14,6 +14,7 @@ from ksim.env.toy.cartpole_env import CartPoleEnv
 from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
+from ksim.types import ModelOut
 
 
 class CartPoleActionModel(ActionModel):
@@ -79,6 +80,17 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
         """Get the observation from the state."""
         return state.obs["observations"]
 
+    def get_output(self, model_out: ModelOut) -> Array:
+        """Get the output from the model's output.
+        
+        Args:
+            model_out: The output from the model.
+            
+        Returns:
+            The processed output.
+        """
+        return model_out.action
+
     def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
         """Get the model.
 
@@ -107,7 +119,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.cartpole.cartpole_task train
+    # python -m examples.cartpole.cartpole_task action=train
     CartPoleTask.launch(
         CartPoleConfig(
             num_envs=1,
