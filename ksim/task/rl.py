@@ -99,6 +99,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return f"render_{time_string}"
         return f"render_{state.num_steps}_{time_string}"
 
+    @abstractmethod
+    def viz_environment(self) -> None: ...
+
     def run_environment(
         self,
         state: xax.State | None = None,
@@ -348,6 +351,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             case "env":
                 self.run_environment()
+
+            case "viz":
+                self.viz_environment()
 
             case _:
                 raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")

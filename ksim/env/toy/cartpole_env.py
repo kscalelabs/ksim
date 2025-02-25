@@ -13,8 +13,13 @@ from ksim.env.base_env import BaseEnv, EnvState
 class CartPoleEnv(BaseEnv):
     """CartPole environment wrapper to match the BraxState interface."""
 
-    def __init__(self) -> None:
-        self.env = gym.make("CartPole-v1")
+    def __init__(self, render_mode: str | None = None) -> None:
+        """Initialize the CartPole environment.
+
+        Args:
+            render_mode: The render mode for the environment. Options: 'human', 'rgb_array', None
+        """
+        self.env = gym.make("CartPole-v1", render_mode=render_mode)
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
 
