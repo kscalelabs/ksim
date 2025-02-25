@@ -336,6 +336,85 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             finally:
                 training_state = self.on_training_end(training_state)
 
+    def run_visualization(
+        self,
+    ) -> None:
+        """Run the environment with visualization.
+
+        Uses trained policy from latest checkpoint if available, otherwise uses a randomly initialized policy.
+        """
+        rng = self.prng_key()
+        env = self.get_environment()
+        model = self.get_model(rng)
+        params = None
+
+        # Load checkpoint if available, otherwise use random initialization
+        ckpt_path = self.get_ckpt_path()
+        if ckpt_path.exists():
+            try:
+                logger.info("Loading checkpoint: %s", ckpt_path)
+                params = self.load_checkpoint(ckpt_path, part="model")
+            except Exception as e:
+                logger.error("Failed loading checkpoint: %s", e)
+
+        if params is None:
+            logger.warning("Using randomly initialized policy")
+            params = self.get_init_params(rng)
+
+        # Initialize environment and renderer
+        env_state = env.reset(rng)
+
+        if hasattr(env, "init_renderer"):
+            renderer = env.init_renderer(env_state)
+        else:
+            logger.warning("No renderer found for environment. Skipping visualization.")
+            return
+
+        episode_count = 0
+        try:
+            while True:  # Keep running episodes until interrupted
+                logger.info("Starting Episode %d", episode_count)
+                total_reward = 0
+                env_state = env.reset(rng)
+                episode_length = 0
+
+                while True:
+                    # Render the current state
+                    renderer.render(env_state)
+
+                    # Get observations and use policy
+                    obs = self.get_model_obs_from_state(env_state)
+                    rng, action_rng = jax.random.split(rng)
+                    action, _ = model.apply(params, obs, action_rng, method="actor_sample_and_log_prob")
+
+                    # Take step
+                    env_state = env.step(env_state, action)
+                    reward = env_state.reward.item()
+                    done = env_state.done.item()
+                    total_reward += reward
+
+                    episode_length += 1
+
+                    if done:
+                        logger.info(
+                            "Episode %d finished after %d steps with total reward: %f",
+                            episode_count,
+                            episode_length,
+                            total_reward,
+                        )
+                        episode_count += 1
+                        time.sleep(1.0)  # Pause briefly between episodes
+                        break
+
+        except KeyboardInterrupt:
+            logger.info("Stopping episodes - cleaning up...")
+        finally:
+            # Clean up renderer resources
+            if hasattr(renderer, "close"):
+                renderer.close()
+            elif hasattr(env, "cleanup_renderer"):
+                env.cleanup_renderer()
+
     def get_batch_size(self) -> int:
         """Get the batch size for the current task."""
         # TODO: this is a hack... need to implement mini batching properly later.
@@ -348,6 +427,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             case "env":
                 self.run_environment()
+
+            case "viz":
+                self.run_visualization()
 
             case _:
                 raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")

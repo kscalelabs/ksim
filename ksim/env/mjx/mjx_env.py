@@ -31,6 +31,8 @@ from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING
+from mujoco.renderer import Renderer
+import numpy as np
 
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.env.builders.commands import Command, CommandBuilder
@@ -462,3 +464,23 @@ class MjxEnv(BaseEnv):
             length=num_steps,
         )
         return traj  # Shape: (num_steps, num_envs, ...)
+
+    def render_frame(self, env_state: MjxEnvState, renderer: Renderer) -> np.ndarray:
+        """Render a single frame from the environment state."""
+        # We need to render using CPU MuJoCo, so we convert from MJX state
+        # This requires moving data from device (GPU/TPU) to host (CPU)
+
+        # Copy state from JAX arrays to numpy for rendering
+        np_qpos = np.array(env_state.mjx_data.qpos)
+        np_qvel = np.array(env_state.mjx_data.qvel)
+        
+        # Update the render data with the current state
+        render_data = env_state.mjx_data
+        render_data.qpos[:] = np_qpos
+        render_data.qvel[:] = np_qvel
+
+        # Render the scene
+        renderer.update_scene(render_data, camera=self.config.render_camera)
+        frame = renderer.render()
+
+        return frame
