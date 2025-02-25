@@ -9,10 +9,9 @@ import jax
 import jax.numpy as jnp
 import optax
 import xax
-from brax.envs.base import State as BraxState
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.base_env import BaseEnv
+from ksim.env.base_env import BaseEnv, EnvState
 from ksim.model.formulations import ActorCriticModel
 from ksim.task.rl import RLConfig, RLTask
 from ksim.types import ModelObs, ModelOut
@@ -41,8 +40,8 @@ class PPOConfig(RLConfig):
     num_learning_epochs: int = xax.field(value=5, help="Number of learning epochs per PPO update.")
     num_mini_batches: int = xax.field(value=4, help="Number of mini-batches per PPO epoch.")
     learning_rate: float = xax.field(value=1e-3, help="Learning rate for PPO.")
-    schedule: str = xax.field(value="adaptive", help="Learning rate schedule for PPO ('fixed' or 'adaptive').")
-    desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive learning rate.")
+    schedule: str = xax.field(value="adaptive", help="Learning rate schedule 'fixed' | 'adaptive'")
+    desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive LR.")
     max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
 
 
@@ -54,14 +53,6 @@ class PPOBatch(NamedTuple):
     actions: Array
     rewards: Array
     done: Array
-    action_log_probs: Array
-
-
-@dataclass
-class PPOOutput(NamedTuple):
-    """Output from PPO model forward pass."""
-
-    values: Array
     action_log_probs: Array
 
 
@@ -80,13 +71,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         max_trajectory_steps: The maximum number of steps in a trajectory.
     """
 
-    def get_optimizer(self) -> optax.GradientTransformation:
-        """Get the optimizer."""
-        return optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            optax.adam(self.config.learning_rate),
-        )
+    ########################
+    # Implementing RL Task #
+    ########################
 
+    # TODO from ML eventually we should create
     def get_init_actor_carry(self) -> Array:
         """Get the actor carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
@@ -95,38 +84,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Get the critic carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
 
-    @staticmethod
-    @eqx.filter_jit
-    def apply_actor(model: ActorCriticModel, params: PyTree, obs: ModelObs) -> ModelOut:
-        """Apply the actor model to inputs.
-
-        Args:
-            model: The linen-based neural network model.
-            params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
-            obs: The input to the model (max_steps, num_envs, observation_size)
-
-        Returns:
-            The output of the actor model.
-        """
-        res = model.apply(params, method="actor", obs=obs)
-        return res
-
-    @staticmethod
-    @eqx.filter_jit
-    def apply_critic(model: ActorCriticModel, params: PyTree, obs: ModelObs) -> ModelOut:
-        """Apply the critic model to inputs.
-
-        Args:
-            model: The linen-based neural network model.
-            params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
-            obs: The input to the model (max_steps, num_envs, observation_size)
-
-        Returns:
-            The output of the critic model.
-        """
-        res = model.apply(params, method="critic", obs=obs)
-        return res
-
     def get_trajectory_batch(
         self,
         model: ActorCriticModel,
@@ -134,22 +91,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         env: BaseEnv,
         rng: PRNGKeyArray,
     ) -> NamedTuple:
-        """Rollout the model for a given number of steps.
-
-        Args:
-            model: The model (see `apply_actor`)
-            params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
-            env: The environment (see `unroll_trajectories`)
-            rng: The random key.
-
-        Returns:
-            A PPOBatch containing trajectories with shape (num_steps, ...).
-        """
+        """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)"""
 
         @jax.jit
-        def action_log_prob_fn(state: BraxState, rng: PRNGKeyArray) -> Tuple[Array, Array]:
+        def action_log_prob_fn(state: EnvState, rng: PRNGKeyArray) -> Tuple[Array, Array]:
             obs = self.get_model_obs_from_state(state)
             actions, log_probs = model.apply(params, obs, rng, method="actor_sample_and_log_prob")
+            assert isinstance(actions, Array)
+            assert isinstance(log_probs, Array)
             return actions, log_probs
 
         trajectory = env.unroll_trajectories(
@@ -159,7 +108,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
         observations = self.get_model_obs_from_state(trajectory)
-        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs)
+        next_observations = jax.tree_util.tree_map(
+            lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs
+        )
         actions = trajectory.info["actions"]
         rewards = trajectory.reward
         done = trajectory.done
@@ -175,34 +126,44 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
     @eqx.filter_jit
-    def compute_advantages(
+    def model_update(
         self,
-        values: Array,
-        batch: PPOBatch,
-    ) -> Array:
-        """Computes the advantages using Generalized Advantage Estimation (GAE).
+        model: ActorCriticModel,
+        params: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        batch: NamedTuple,
+    ) -> tuple[PyTree, optax.OptState]:
+        """Update the model parameters."""
+        assert isinstance(batch, PPOBatch)
+        loss_val, grads = self._jitted_value_and_grad(model, params, batch)
+        print(f"Loss: {loss_val}")
+        updates, new_opt_state = optimizer.update(grads, opt_state, params)
+        new_params = optax.apply_updates(params, updates)
+        return new_params, new_opt_state
 
-        Args:
-            values: The value estimates for observations, (num_envs, num_steps, ...).
-            batch: The batch containing rewards and termination signals, (num_envs, num_steps, ...).
+    def get_optimizer(self) -> optax.GradientTransformation:
+        """Get the optimizer: handled by XAX."""
+        return optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.adam(self.config.learning_rate),
+        )
 
-        Returns:
-            Advantages with the same shape as values.
+    # Pass-through abstract methods:
+    # `get_environment`, `get_model_obs_from_state`, `viz_environment`
+
+    ######################
+    # Training Utilities #
+    ######################
+
+    @eqx.filter_jit
+    def apply_critic(self, model: ActorCriticModel, params: PyTree, obs: ModelObs) -> ModelOut:
+        """Apply the critic model to inputs. Used by all actor-critic tasks.
+
+        TODO: it might be worth creating another Task abstraction that requires `apply_critic`
         """
-
-        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
-            d, m = x
-            new_carry = d + self.config.gamma * self.config.lam * m * carry
-            return new_carry, new_carry
-
-        next_values = jnp.roll(values, shift=-1, axis=0)
-        mask = jnp.where(batch.done, 0.0, 1.0)
-
-        # getting td residuals
-        deltas = batch.rewards + self.config.gamma * next_values * mask - values
-
-        _, advantages = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1]))
-        return advantages[::-1]
+        res = model.apply(params, method="critic", obs=obs)
+        return res
 
     @eqx.filter_jit
     def compute_loss(
@@ -211,7 +172,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         params: PyTree,
         batch: PPOBatch,
     ) -> tuple[Array, Dict[str, Array]]:
-        """Compute the PPO loss.
+        """Compute the PPO loss (required by XAX).
 
         Args:
             model: The model.
@@ -224,14 +185,16 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # get the log probs of the current model
         predictions = self.apply_actor(model, params, batch.observations)
         assert isinstance(predictions, Array)
-        log_probs = model.apply(params, predictions, method="actor_calc_log_prob", action=batch.actions)
+        log_probs = model.apply(
+            params, predictions, method="actor_calc_log_prob", action=batch.actions
+        )
         ratio = jnp.exp(log_probs - batch.action_log_probs)
 
         # get the state-value estimates
         values = self.apply_critic(model, params, batch.observations)
         assert isinstance(values, Array)
         values = values.squeeze(axis=-1)  # values is (time, env)
-        advantages = self.compute_advantages(values, batch)  # (time, env)
+        advantages = self._compute_advantages(values, batch)  # (time, env)
 
         returns = advantages + values
         # normalizing advantages
@@ -267,6 +230,28 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         return total_loss, metrics
 
     @eqx.filter_jit
+    def _compute_advantages(
+        self,
+        values: Array,
+        batch: PPOBatch,
+    ) -> Array:
+        """Computes the advantages using Generalized Advantage Estimation (GAE)."""
+
+        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+            d, m = x
+            new_carry = d + self.config.gamma * self.config.lam * m * carry
+            return new_carry, new_carry
+
+        next_values = jnp.roll(values, shift=-1, axis=0)
+        mask = jnp.where(batch.done, 0.0, 1.0)
+
+        # getting td residuals
+        deltas = batch.rewards + self.config.gamma * next_values * mask - values
+
+        _, advantages = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1]))
+        return advantages[::-1]
+
+    @eqx.filter_jit
     def _jitted_value_and_grad(
         self,
         model: ActorCriticModel,
@@ -279,19 +264,3 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             return self.compute_loss(model, p, batch)[0]
 
         return jax.value_and_grad(loss_fn)(params)
-
-    @eqx.filter_jit
-    def model_update(
-        self,
-        model: ActorCriticModel,
-        params: PyTree,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
-        batch: PPOBatch,
-    ) -> tuple[PyTree, optax.OptState]:
-        """Update the model parameters."""
-        loss_val, grads = self._jitted_value_and_grad(model, params, batch)
-        print(f"Loss: {loss_val}")
-        updates, new_opt_state = optimizer.update(grads, opt_state, params)
-        new_params = optax.apply_updates(params, updates)
-        return new_params, new_opt_state
