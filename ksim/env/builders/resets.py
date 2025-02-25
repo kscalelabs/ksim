@@ -12,7 +12,7 @@ import numpy as np
 import xax
 from jaxtyping import PRNGKeyArray
 
-from ksim.env.mjx.mjx_env import EnvState
+from ksim.env.base_env import EnvState
 from ksim.utils.data import BuilderData
 
 
