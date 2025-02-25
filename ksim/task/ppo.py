@@ -17,6 +17,8 @@ from ksim.model.formulations import ActorCriticModel
 from ksim.task.rl import RLConfig, RLTask
 from ksim.types import ModelObs, ModelOut
 
+_EPS = 1e-8
+
 
 @jax.tree_util.register_dataclass
 @dataclass
@@ -27,7 +29,7 @@ class PPOConfig(RLConfig):
 
     # For the Value Function (VF) term
     value_loss_coef: float = xax.field(value=1.0, help="Value loss coefficient for PPO.")
-    use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss.")
+    use_clipped_value_loss: bool = xax.field(value=False, help="Whether to use clipped value loss.")
 
     # For the entropy bonus term
     entropy_coef: float = xax.field(value=0.008, help="Entropy coefficient for PPO.")
@@ -200,7 +202,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # getting td residuals
         deltas = batch.rewards + self.config.gamma * next_values * mask - values
-
         _, advantages = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1]))
         return advantages[::-1]
 
@@ -235,8 +236,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         returns = advantages + values
         # normalizing advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
+        advantages = (advantages - advantages.mean()) / (advantages.std() + _EPS)
         # policy loss with clipping
         policy_loss = -jnp.mean(
             jnp.minimum(
@@ -244,12 +244,24 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param) * advantages,
             )
         )
-
-        # value loss term
-        # TODO: add clipping
         value_pred = self.apply_critic(model, params, batch.observations)
         value_pred = value_pred.squeeze(axis=-1)  # (time, env)
-        value_loss = 0.5 * jnp.mean((returns - value_pred) ** 2)
+
+        value_loss = jax.lax.cond(
+            self.config.use_clipped_value_loss,
+            lambda: jnp.mean(
+                jnp.maximum(
+                    (value_pred - returns) ** 2,
+                    (
+                        returns
+                        + jnp.clip(value_pred - returns, -self.config.clip_param, self.config.clip_param)
+                        - returns
+                    )
+                    ** 2,
+                )
+            ),
+            lambda: 0.5 * jnp.mean((returns - value_pred) ** 2),
+        )
 
         # entropy bonus term
         probs = jax.nn.softmax(predictions)  # TODO: make this live in the model
@@ -264,6 +276,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "entropy": entropy,
             "total_loss": total_loss,
         }
+
         return total_loss, metrics
 
     @eqx.filter_jit
