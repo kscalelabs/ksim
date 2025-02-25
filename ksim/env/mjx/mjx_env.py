@@ -11,16 +11,7 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Literal,
-    Tuple,
-    TypeVar,
-    cast,
-    get_args,
-)
+from typing import Any, Callable, Collection, Literal, Tuple, TypeVar, cast, get_args
 
 import chex
 import equinox as eqx
@@ -137,7 +128,7 @@ class KScaleEnvConfig(xax.Config):
     # environment configuration options
     dt: float = xax.field(value=0.004, help="Simulation time step.")
     ctrl_dt: float = xax.field(value=0.02, help="Control time step.")
-    debug_env: bool = xax.field(value=False, help="Whether to enable debug mode for the environment.")
+    debug_env: bool = xax.field(value=False, help="Whether to enable debug mode for the env.")
 
     # action configuration options
     min_action_latency: float = xax.field(value=0.0, help="The minimum action latency.")
@@ -156,8 +147,8 @@ class MjxEnv(BaseEnv):
     """An environment for massively parallel rollouts, stateless to obj state and system parameters.
 
     In this design:
-      - All state (a BraxState) is passed in and returned by reset and step.
-      - The underlying Brax system (here referred to as `brax_sys`) is provided to step/reset.
+      - All state (a MjxEnvState) is passed in and returned by reset and step.
+      - The underlying Mujoco model (here referred to as `mjx_model`) is provided to step/reset.
       - Rollouts are performed by vectorizing (vmap) the reset and step functions,
         with a final trajectory of shape (time, num_envs, ...).
       - The step wrapper only computes a reset (via jax.lax.cond) if the done flag is True.
@@ -180,7 +171,9 @@ class MjxEnv(BaseEnv):
                 f"minimum action latency ({self.config.min_action_latency})"
             )
         if self.config.min_action_latency < 0:
-            raise ValueError(f"Action latency ({self.config.min_action_latency}) must be non-negative")
+            raise ValueError(
+                f"Action latency ({self.config.min_action_latency}) must be non-negative"
+            )
 
         self.min_action_latency_step = round(self.config.min_action_latency / self.config.dt)
         self.max_action_latency_step = round(self.config.max_action_latency / self.config.dt)
@@ -201,34 +194,7 @@ class MjxEnv(BaseEnv):
             mujoco_mappings=self.mujoco_mappings,
         )
 
-        # building mappings from mj_model parts to indices
-        # self.body_name_to_idx = {mj_model.body(i).name: i for i in range(mj_model.nbody)}
-        # self.joint_name_to_idx = {mj_model.joint(i).name: i for i in range(mj_model.njnt)}
-        # self.actuator_name_to_idx = {mj_model.actuator(i).name: i for i in range(mj_model.nu)}
-        # self.geom_name_to_idx = {mj_model.geom(i).name: i for i in range(mj_model.ngeom)}
-        # self.site_name_to_idx = {mj_model.site(i).name: i for i in range(mj_model.nsite)}
-        # self.sensor_name_to_idx = {mj_model.sensor(i).name: i for i in range(mj_model.nsensor)}
-
-        # populating KP and KD.
-        # id_to_kp = {
-        #     i: robot_model_metadata.actuators[name].kp
-        #     for name, i in self.joint_name_to_idx.items()
-        #     if name in robot_model_metadata.actuators
-        # }
-        # id_to_kd = {
-        #     i: robot_model_metadata.actuators[name].kd
-        #     for name, i in self.joint_name_to_idx.items()
-        #     if name in robot_model_metadata.actuators
-        # }
-
-        # skipping the root joint.
-        # kps = [id_to_kp[i] for i in range(1, mj_model.njnt)]
-        # kds = [id_to_kd[i] for i in range(1, mj_model.njnt)]
-        # self.kps = jnp.array(kps)
-        # self.kds = jnp.array(kds)
-
-        # preparing builder data.
-        # data = BuilderData(
+        # preparing builder data.        # data = BuilderData(
         #     model=mj_model,
         #     dt=self.config.dt,
         #     ctrl_dt=self.config.ctrl_dt,
@@ -252,8 +218,6 @@ class MjxEnv(BaseEnv):
         # self.rewards = _unique_list([(reward.reward_name, reward) for reward in rewards_v])
         # self.observations = _unique_list([(obs.observation_name, obs) for obs in observations_v])
         # self.commands = _unique_list([(cmd.command_name, cmd) for cmd in commands_v])
-
-        logger.info("Converting model to Brax system")
 
         # For simplicity, assume integer (increase granularity if needed).
         assert self.config.ctrl_dt % self.config.dt == 0, "ctrl_dt must be a multiple of dt"
@@ -283,7 +247,9 @@ class MjxEnv(BaseEnv):
         rewards = []
         for reward_name, reward in self.rewards:
             reward_val = reward(prev_state, action, new_mjx_data) * reward.scale
-            chex.assert_shape(reward_val, (), custom_message=f"Reward {reward_name} must be a scalar")
+            chex.assert_shape(
+                reward_val, (), custom_message=f"Reward {reward_name} must be a scalar"
+            )
             rewards.append((reward_name, reward_val))
         return rewards
 
@@ -292,7 +258,9 @@ class MjxEnv(BaseEnv):
         terminations = []
         for termination_name, termination in self.terminations:
             term_val = termination(new_mjx_data)
-            chex.assert_shape(term_val, (), custom_message=f"Termination {termination_name} must be a scalar")
+            chex.assert_shape(
+                term_val, (), custom_message=f"Termination {termination_name} must be a scalar"
+            )
             terminations.append((termination_name, term_val))
         return terminations
 
@@ -449,13 +417,15 @@ class MjxEnv(BaseEnv):
             )
             return new_state
 
-        def scan_fn(carry: Tuple[MjxEnvState, Array], _: Any) -> Tuple[Tuple[MjxEnvState, Array], MjxEnvState]:
+        def scan_fn(
+            carry: Tuple[MjxEnvState, Array], _: Any
+        ) -> Tuple[Tuple[MjxEnvState, Array], MjxEnvState]:
             states, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
             new_states = jax.vmap(env_step)(states, rngs[1:])
             return (new_states, rngs[0]), new_states
 
-        (final_states, _), traj = jax.lax.scan(
+        (_, _), traj = jax.lax.scan(
             f=scan_fn,
             init=(init_states, rng),
             xs=None,

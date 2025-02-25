@@ -12,12 +12,13 @@ from dataclasses import dataclass
 from threading import Thread
 from typing import Generic, Literal, NamedTuple, TypeVar
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
 import xax
-from brax.envs.base import State as BraxState
 from dpshdl.dataset import Dataset
+from flax import linen as nn
 from jaxtyping import PRNGKeyArray, PyTree
 from omegaconf import MISSING, OmegaConf
 
@@ -28,6 +29,7 @@ from ksim.env.mjx.mjx_env import (
     cast_action_type,
 )
 from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.types import ModelObs, ModelOut
 
 logger = logging.getLogger(__name__)
 
@@ -83,24 +85,89 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         self.max_trajectory_steps = round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
 
+    ####################
+    # Abstract methods #
+    ####################
+
     @abstractmethod
     def get_environment(self) -> BaseEnv: ...
 
-    def get_dataset(self, phase: Literal["train", "valid"]) -> Dataset:
-        raise NotImplementedError("Reinforcement learning tasks do not require datasets.")
+    @abstractmethod
+    def get_model_obs_from_state(self, state: EnvState) -> PyTree: ...
+
+    @abstractmethod
+    def viz_environment(self) -> None: ...
+
+    @abstractmethod
+    def get_trajectory_batch(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        env: BaseEnv,
+        rng: PRNGKeyArray,
+    ) -> NamedTuple: ...
+
+    @abstractmethod
+    def get_init_actor_carry(self) -> jnp.ndarray | None: ...
+
+    @abstractmethod
+    def model_update(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        batch: NamedTuple,
+    ) -> tuple[PyTree, optax.OptState]: ...
+
+    ##############
+    # Properties #
+    ##############
 
     @property
     def max_steps_per_trajectory(self) -> int:
+        """Max episode length (in seconds) divided by control time step."""
         return round(self.config.max_episode_length / self.config.ctrl_dt)
+
+    ########################
+    # XAX-specific methods #
+    ########################
+
+    def get_dataset(self, phase: Literal["train", "valid"]) -> Dataset:
+        """Get the dataset for the current task."""
+        raise NotImplementedError("Reinforcement learning tasks do not require datasets.")
+
+    def get_batch_size(self) -> int:
+        """Get the batch size for the current task."""
+        # TODO: this is a hack for xax... need to implement mini batching properly later.
+        return 1
+
+    def run(self) -> None:
+        """Highest level entry point for RL tasks, determines what to run."""
+        match self.config.action:
+            case "train":
+                self.run_training()
+
+            case "env":
+                self.run_environment()
+
+            case "viz":
+                self.viz_environment()
+
+            case _:
+                raise ValueError(
+                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
+                )
+
+    #########################
+    # Logging and Rendering #
+    #########################
 
     def get_render_name(self, state: xax.State | None = None) -> str:
         time_string = time.strftime("%Y%m%d_%H%M%S")
         if state is None:
             return f"render_{time_string}"
         return f"render_{state.num_steps}_{time_string}"
-
-    @abstractmethod
-    def viz_environment(self) -> None: ...
 
     def run_environment(
         self,
@@ -120,12 +187,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         #     render_dir=render_dir,
         #     actions=actions,
         # ) # TODO: implement unrolling trajectories and rendering in environment class.
-
-    @abstractmethod
-    def get_init_actor_carry(self) -> jnp.ndarray | None: ...
-
-    @abstractmethod
-    def get_model_obs_from_state(self, state: BraxState) -> PyTree: ...
 
     def log_state(self, env: BaseEnv) -> None:
         super().log_state()
@@ -151,26 +212,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return reward_stats
 
-    def get_init_params(self, key: PRNGKeyArray, pretrained: str | None = None) -> PyTree:
-        """Get the initial parameters.
-
-        Args:
-            key: The random key.
-            pretrained: The path to a pretrained model to load.
-
-        Returns:
-            The initial parameters.
-        """
-        env = self.get_environment()
-        state = env.reset(key)
-
-        if pretrained is not None:
-            # TODO: implement pretrained model loading.
-            raise NotImplementedError("Pretrained models are not yet implemented.")
-
-        # Provide a dummy observation (of appropriate shape) for initialization.
-        return self.get_model(key).init(key, self.get_model_obs_from_state(state))
-
     def get_termination_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
         termination_stats: dict[str, jnp.ndarray] = {}
 
@@ -194,36 +235,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         mean_episode_length_seconds = mean_episode_length_steps * self.config.ctrl_dt
         self.logger.log_scalar("mean_episode_length", mean_episode_length_seconds, namespace="stats")
 
-    @abstractmethod
-    def model_update(
-        self,
-        model: ActorCriticModel,
-        params: PyTree,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
-        batch: NamedTuple,
-    ) -> tuple[PyTree, optax.OptState]: ...
+    ########################
+    # Training and Running #
+    ########################
 
-    @abstractmethod
-    def get_trajectory_batch(
-        self,
-        model: ActorCriticModel,
-        params: PyTree,
-        env: BaseEnv,
-        rng: PRNGKeyArray,
-    ) -> NamedTuple:
-        """Rollout the model for a given number of steps.
+    def get_init_params(self, key: PRNGKeyArray, pretrained: str | None = None) -> PyTree:
+        """Get the initial parameters as a PyTree: assumes flax-compatible model."""
+        env = self.get_environment()
+        state = env.reset(key)
 
-        Args:
-            model: The model (see `apply_actor`)
-            params: The variable dictionary of the model {"params": {...}, "other_vars": {...}}
-            env: The environment (see `unroll_trajectories`)
-            rng: The random key.
+        if pretrained is not None:
+            # TODO: implement pretrained model loading.
+            raise NotImplementedError("Pretrained models are not yet implemented.")
 
-        Returns:
-            A NamedTuple containing the trajectories.
-        """
-        ...
+        model = self.get_model(key)
+        assert isinstance(model, nn.Module), "Model must be an Flax linen module."
+        return model.init(key, self.get_model_obs_from_state(state))
+
+    @eqx.filter_jit
+    def apply_actor(self, model: ActorCriticModel, params: PyTree, obs: ModelObs) -> ModelOut:
+        """Apply the actor model to inputs."""
+        res = model.apply(params, method="actor", obs=obs)
+        return res
 
     def train_loop(
         self,
@@ -234,6 +267,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         training_state: xax.State,
     ) -> None:
+        """Runs the main RL training loop."""
         rng = self.prng_key()
         rng, train_rng, val_rng = jax.random.split(rng, 3)
 
@@ -264,7 +298,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Updates the model on the collected trajectories.
             with self.step_context("update_state"):
-                params, opt_state = self.model_update(model, params, optimizer, opt_state, trajectories)
+                params, opt_state = self.model_update(
+                    model, params, optimizer, opt_state, trajectories
+                )
 
             # # Logs the trajectory statistics.
             with self.step_context("write_logs"):
@@ -283,12 +319,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )  # Update XAX to be Flax supportive...
 
     def run_training(self) -> None:
-        """Runs the main PPO training loop."""
+        """Wraps the training loop and provides clean XAX integration."""
         with self:
             key = self.prng_key()
-
             self.set_loggers()
-
             env = self.get_environment()
 
             if xax.is_master():
@@ -320,9 +354,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
-                    msg = (
-                        f"Finished training after {training_state.num_steps} steps {training_state.num_samples} samples"
-                    )
+                    msg = f"Finished training after {training_state.num_steps} steps {training_state.num_samples} samples"
                     xax.show_info(msg, important=True)
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
 
@@ -331,29 +363,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
+                exception_tb = textwrap.indent(
+                    xax.highlight_exception_message(traceback.format_exc()), "  "
+                )
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
 
             finally:
                 training_state = self.on_training_end(training_state)
-
-    def get_batch_size(self) -> int:
-        """Get the batch size for the current task."""
-        # TODO: this is a hack... need to implement mini batching properly later.
-        return 1
-
-    def run(self) -> None:
-        match self.config.action:
-            case "train":
-                self.run_training()
-
-            case "env":
-                self.run_environment()
-
-            case "viz":
-                self.viz_environment()
-
-            case _:
-                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
