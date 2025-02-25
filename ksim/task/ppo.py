@@ -229,6 +229,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         ratio = jnp.exp(log_probs - batch.action_log_probs)
 
         # get the state-value estimates
+        # FIXME
         values = self.apply_critic(model, params, batch.observations)
         assert isinstance(values, Array)
         values = values.squeeze(axis=-1)  # values is (time, env)
@@ -247,21 +248,19 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         value_pred = self.apply_critic(model, params, batch.observations)
         value_pred = value_pred.squeeze(axis=-1)  # (time, env)
 
+        @eqx.filter_jit
+        def _clipped_value_loss(value_pred: Array, values: Array, returns: Array) -> Array:
+            value_clipped = value_pred + jnp.clip(values - value_pred, -self.config.clip_param, self.config.clip_param)
+            clipped_error = value_clipped - returns
+            error = value_pred - returns
+            return 0.5 * jnp.mean(jnp.maximum(error**2, clipped_error**2))
+
         value_loss = jax.lax.cond(
             self.config.use_clipped_value_loss,
-            lambda: jnp.mean(
-                jnp.maximum(
-                    (value_pred - returns) ** 2,
-                    (
-                        returns
-                        + jnp.clip(value_pred - returns, -self.config.clip_param, self.config.clip_param)
-                        - returns
-                    )
-                    ** 2,
-                )
-            ),
+            lambda: _clipped_value_loss(value_pred, values, returns),
             lambda: 0.5 * jnp.mean((returns - value_pred) ** 2),
         )
+        breakpoint()
 
         # entropy bonus term
         probs = jax.nn.softmax(predictions)  # TODO: make this live in the model
