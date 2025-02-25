@@ -8,14 +8,13 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import xax
-from brax.envs.base import State as BraxState
 from jaxtyping import Array, PRNGKeyArray
 
+from ksim.env.base_env import EnvState
 from ksim.env.toy.cartpole_env import CartPoleEnv
 from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.types import ModelOut
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,9 @@ class CartPoleActionModel(ActionModel):
     def calc_log_prob(self, prediction: Array, action: Array) -> Array:
         logits = prediction
         log_probs = jax.nn.log_softmax(logits)
-        action_log_prob = log_probs[jnp.arange(log_probs.shape[0])[:, None], jnp.arange(log_probs.shape[1]), action]
+        action_log_prob = log_probs[
+            jnp.arange(log_probs.shape[0])[:, None], jnp.arange(log_probs.shape[1]), action
+        ]
         # NOTE: assumes two batching dimensions
         return action_log_prob
 
@@ -76,34 +77,38 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
     """Task for CartPole training."""
 
     def get_environment(self) -> CartPoleEnv:
-        """Get the environment.
-
-        Returns:
-            The environment.
-        """
+        """Get the environment."""
         return CartPoleEnv(render_mode=self.config.render_mode)
 
-    def get_model_obs_from_state(self, state: BraxState) -> Array:
+    def get_model_obs_from_state(self, state: EnvState) -> Array:
         """Get the observation from the state."""
         return state.obs["observations"]
 
-    def get_output(self, model_out: ModelOut) -> Array:
-        """Get the output from the model's output.
-
-        Args:
-            model_out: The output from the model.
-
-        Returns:
-            The processed output.
-        """
-        return model_out.action
+    def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
+        """Get the model."""
+        return ActorCriticModel(
+            actor_module=CartPoleActionModel(
+                mlp=MLP(
+                    num_hidden_layers=self.config.actor_num_layers,
+                    hidden_features=self.config.actor_hidden_dims,
+                    out_features=2,  # two discrete actions for CartPole
+                ),
+            ),
+            critic_module=CartPoleCriticModel(
+                mlp=MLP(
+                    num_hidden_layers=self.config.critic_num_layers,
+                    hidden_features=self.config.critic_hidden_dims,
+                    out_features=1,
+                ),
+            ),
+        )
 
     def viz_environment(
         self,
     ) -> None:
         """Run the environment with visualization.
 
-        Uses trained policy from latest checkpoint if available, otherwise uses a randomly initialized policy.
+        Uses trained policy from latest checkpoint, otherwise uses a randomly initialized policy.
         """
         rng = self.prng_key()
         env = self.get_environment()
@@ -135,7 +140,9 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
                     # Get observations and use policy
                     obs = self.get_model_obs_from_state(env_state)
                     rng, action_rng = jax.random.split(rng)
-                    action, _ = model.apply(params, obs, action_rng, method="actor_sample_and_log_prob")
+                    action, _ = model.apply(
+                        params, obs, action_rng, method="actor_sample_and_log_prob"
+                    )
 
                     # Take step
                     env_state = env.step(env_state, action)
@@ -160,32 +167,6 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
             logger.info("Stopping episodes - cleaning up...")
         finally:
             env.env.close()
-
-    def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
-        """Get the model.
-
-        Args:
-            key: The random key.
-
-        Returns:
-            The model.
-        """
-        return ActorCriticModel(
-            actor_module=CartPoleActionModel(
-                mlp=MLP(
-                    num_hidden_layers=self.config.actor_num_layers,
-                    hidden_features=self.config.actor_hidden_dims,
-                    out_features=2,  # two discrete actions for CartPole
-                ),
-            ),
-            critic_module=CartPoleCriticModel(
-                mlp=MLP(
-                    num_hidden_layers=self.config.critic_num_layers,
-                    hidden_features=self.config.critic_hidden_dims,
-                    out_features=1,
-                ),
-            ),
-        )
 
 
 if __name__ == "__main__":

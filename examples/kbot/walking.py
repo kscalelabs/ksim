@@ -7,9 +7,9 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import xax
-from brax.envs.base import State as BraxState
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+from ksim.env.base_env import EnvState
 from ksim.env.builders.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.env.builders.observation import (
     BaseAngularVelocityObservation,
@@ -309,7 +309,9 @@ class KBotActorModel(ActionModel):
         mean = prediction
         std = jnp.exp(self.log_std)
 
-        log_prob = -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
+        log_prob = (
+            -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
+        )
         return jnp.sum(log_prob, axis=-1)
 
     def sample_and_log_prob(self, obs: Array, rng: PRNGKeyArray) -> Tuple[Array, Array]:
@@ -447,24 +449,11 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             ],
         )
 
-    def get_model_obs_from_state(self, state: BraxState) -> PyTree:
+    def get_model_obs_from_state(self, state: EnvState) -> PyTree:
         return {
             "obs": state.obs,
             "info": state.info,
         }
-
-    def get_action_log_prob(
-        self, model: ActorCriticModel, params: PyTree, state: BraxState, rng: PRNGKeyArray
-    ) -> Tuple[Array, Array]:
-        assert isinstance(model, GaussianActorCriticModel)
-        obs = self.get_model_obs_from_state(state)
-        action_mu = self.apply_actor(model, params, obs)
-        action_var = model.actor_module.get_variance()
-
-        probs = jax.random.normal(rng)
-
-        # TODO: Fix this.
-        return Array(jnp.zeros((NUM_OUTPUTS,))), Array(jnp.zeros((1,)))
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
         return ActorCriticModel(
