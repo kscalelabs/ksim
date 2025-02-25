@@ -100,7 +100,9 @@ def lookup_in_dict(names: Collection[Tk], mapping: dict[Tk, Tv], names_type: str
     missing_names = [name for name in names if name not in mapping]
     if missing_names:
         available_names_str = "\n".join(str(name) for name in sorted(mapping.keys()))
-        raise ValueError(f"{names_type} not found in model: {missing_names}\nAvailable:\n{available_names_str}")
+        raise ValueError(
+            f"{names_type} not found in model: {missing_names}\nAvailable:\n{available_names_str}"
+        )
     return [mapping[name] for name in names]
 
 
@@ -108,17 +110,17 @@ def lookup_in_dict(names: Collection[Tk], mapping: dict[Tk, Tv], names_type: str
 class MujocoMappings:
     """A minimal set of mappings helpful for constructing rewards, terminations, etc."""
 
-    name_to_sensordata: Dict[str, Tuple[int, int | None]]
-    name_to_qpos: Dict[str, Tuple[int, int | None]]
-    name_to_qvelacc: Dict[str, Tuple[int, int | None]]
-    name_to_ctrl: Dict[str, int]
-    geom_id_to_body_name: Dict[int, str]
+    sensor_name_to_idx_range: Dict[str, Tuple[int, int | None]]
+    qpos_name_to_idx_range: Dict[str, Tuple[int, int | None]]
+    qvelacc_name_to_idx_range: Dict[str, Tuple[int, int | None]]
+    ctrl_name_to_idx: Dict[str, int]
+    geom_idx_to_body_name: Dict[int, str]
 
 
 def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
     """Make a MujocoMappings object from a MuJoCo model."""
     # creating sensor mappings
-    name_to_sensordata = {}
+    sensor_name_to_idx_range = {}
     for i in range(len(mjx_model.sensor_adr)):
         sensordata_start = mjx_model.sensor_adr[i]
         if i == len(mjx_model.sensor_adr) - 1:
@@ -129,10 +131,10 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
         name_start = mjx_model.name_actuatoradr[i]
         name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
 
-        name_to_sensordata[name] = (sensordata_start, sensordata_end)
+        sensor_name_to_idx_range[name] = (sensordata_start, sensordata_end)
 
     # doing the same for qpos
-    name_to_qpos = {}
+    qpos_name_to_idx_range = {}
     for i in range(len(mjx_model.jnt_qposadr)):
         qpos_start = mjx_model.jnt_qposadr[i]
         if i == len(mjx_model.jnt_qposadr) - 1:
@@ -142,10 +144,10 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
 
         name_start = mjx_model.name_jntadr[i]
         name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
-        name_to_qpos[name] = (qpos_start, qpos_end)
+        qpos_name_to_idx_range[name] = (qpos_start, qpos_end)
 
-    # doing the same for qvel
-    name_to_qvelacc = {}
+    # doing the same for qvel/acc
+    qvelacc_name_to_idx_range = {}
     for i in range(len(mjx_model.jnt_dofadr)):
         dof_start = mjx_model.jnt_dofadr[i]
         if i == len(mjx_model.jnt_dofadr) - 1:
@@ -156,51 +158,53 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
         name_start = mjx_model.name_jntadr[i]
         name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
 
-        name_to_qvelacc[name] = (dof_start, dof_end)
+        qvelacc_name_to_idx_range[name] = (dof_start, dof_end)
 
     # doing the same for ctrl
-    name_to_ctrl = {}
+    ctrl_name_to_idx = {}
     for i in range(len(mjx_model.name_actuatoradr)):
         name_start = mjx_model.name_actuatoradr[i]
         name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
-        name_to_ctrl[name] = i
+        ctrl_name_to_idx[name] = i
 
     # doing the same for geom_id_to_body_name
-    geom_id_to_body_name = {}
+    geom_idx_to_body_name = {}
     for i in range(len(mjx_model.geom_bodyid)):
         body_id = mjx_model.geom_bodyid[i]
 
         name_start = mjx_model.name_bodyadr[body_id]
         name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
-        geom_id_to_body_name[i] = name
+        geom_idx_to_body_name[i] = name
 
     return MujocoMappings(
-        name_to_sensordata,
-        name_to_qpos,
-        name_to_qvelacc,
-        name_to_ctrl,
-        geom_id_to_body_name,
+        sensor_name_to_idx_range,
+        qpos_name_to_idx_range,
+        qvelacc_name_to_idx_range,
+        ctrl_name_to_idx,
+        geom_idx_to_body_name,
     )
 
 
 def get_qpos_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
     """Get the qpos from a name."""
-    return data.qpos[mujoco_mappings.name_to_qpos[name]]
+    return data.qpos[mujoco_mappings.qpos_name_to_idx_range[name]]
 
 
 def get_qvel_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
     """Get the qvel from a name."""
-    return data.qvel[mujoco_mappings.name_to_qvelacc[name]]
+    return data.qvel[mujoco_mappings.qvelacc_name_to_idx_range[name]]
 
 
 def get_ctrl_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
     """Get the ctrl from a name."""
-    return data.ctrl[mujoco_mappings.name_to_ctrl[name]]
+    return data.ctrl[mujoco_mappings.ctrl_name_to_idx[name]]
 
 
-def get_sensordata_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
+def get_sensordata_from_name(
+    name: str, mujoco_mappings: MujocoMappings, data: mjx.Data
+) -> jnp.ndarray:
     """Get the sensordata from a name."""
-    return data.sensordata[mujoco_mappings.name_to_sensordata[name]]
+    return data.sensordata[mujoco_mappings.sensor_name_to_idx_range[name]]
 
 
 def is_body_in_contact(

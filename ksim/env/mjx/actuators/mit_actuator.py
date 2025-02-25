@@ -27,12 +27,12 @@ class MITPositionActuators(Actuators):
         **kwargs: Any,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
-        self.kps = jnp.zeros(len(mujoco_mappings.name_to_ctrl))
-        self.kds = jnp.zeros(len(mujoco_mappings.name_to_ctrl))
+        self.kps = jnp.zeros(len(mujoco_mappings.ctrl_name_to_idx))
+        self.kds = jnp.zeros(len(mujoco_mappings.ctrl_name_to_idx))
 
         for actuator_name, actuator_metadata in actuators_metadata.items():
             assert isinstance(actuator_metadata, MITPositionActuatorMetadata)
-            actuator_idx = mujoco_mappings.name_to_ctrl[actuator_name]
+            actuator_idx = mujoco_mappings.ctrl_name_to_idx[actuator_name]
             self.kps[actuator_idx] = actuator_metadata.kp
             self.kds[actuator_idx] = actuator_metadata.kd
 
