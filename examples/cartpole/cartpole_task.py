@@ -1,7 +1,8 @@
 """Cartpole example task."""
 
+import logging
+import time
 from dataclasses import dataclass
-from typing import Tuple
 
 import flax.linen as nn
 import jax
@@ -15,6 +16,8 @@ from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.types import ModelOut
+
+logger = logging.getLogger(__name__)
 
 
 class CartPoleActionModel(ActionModel):
@@ -33,7 +36,7 @@ class CartPoleActionModel(ActionModel):
         # NOTE: assumes two batching dimensions
         return action_log_prob
 
-    def sample_and_log_prob(self, obs: Array, rng: PRNGKeyArray) -> Tuple[Array, Array]:
+    def sample_and_log_prob(self, obs: Array, rng: PRNGKeyArray) -> tuple[Array, Array]:
         logits = self(obs)
         log_probs = jax.nn.log_softmax(logits)
         sampled_actions = jax.random.categorical(rng, log_probs)
@@ -61,6 +64,10 @@ class CartPoleConfig(PPOConfig):
     critic_hidden_dims: int = xax.field(value=128, help="Hidden dimensions for the critic.")
     critic_num_layers: int = xax.field(value=2, help="Number of layers for the critic.")
 
+    # Environment parameters
+    render_mode: str | None = xax.field(
+        value=None, help="Render mode for the environment. Options: 'human', 'rgb_array', None"
+    )
     observation_size: int = 4
     action_size: int = 1
 
@@ -74,7 +81,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
         Returns:
             The environment.
         """
-        return CartPoleEnv()
+        return CartPoleEnv(render_mode=self.config.render_mode)
 
     def get_model_obs_from_state(self, state: BraxState) -> Array:
         """Get the observation from the state."""
@@ -90,6 +97,69 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
             The processed output.
         """
         return model_out.action
+
+    def viz_environment(
+        self,
+    ) -> None:
+        """Run the environment with visualization.
+
+        Uses trained policy from latest checkpoint if available, otherwise uses a randomly initialized policy.
+        """
+        rng = self.prng_key()
+        env = self.get_environment()
+        model = self.get_model(rng)
+        params = None
+
+        # Load checkpoint if available, otherwise use random initialization
+        ckpt_path = self.get_ckpt_path()
+        if ckpt_path.exists():
+            try:
+                logger.info("Loading checkpoint: %s", ckpt_path)
+                params = self.load_checkpoint(ckpt_path, part="model")
+            except Exception as e:
+                logger.error("Failed loading checkpoint: %s", e)
+
+        if params is None:
+            logger.warning("Using randomly initialized policy")
+            params = self.get_init_params(rng)
+
+        episode_count = 0
+        try:
+            while True:  # Keep running episodes until interrupted
+                logger.info("Starting Episode %d", episode_count)
+                total_reward = 0
+                env_state = env.reset(rng)
+                episode_length = 0
+
+                while True:
+                    # Get observations and use policy
+                    obs = self.get_model_obs_from_state(env_state)
+                    rng, action_rng = jax.random.split(rng)
+                    action, _ = model.apply(params, obs, action_rng, method="actor_sample_and_log_prob")
+
+                    # Take step
+                    env_state = env.step(env_state, action)
+                    reward = env_state.reward.item()
+                    done = env_state.done.item()
+                    total_reward += reward
+
+                    episode_length += 1
+
+                    if done:
+                        logger.info(
+                            "Episode %d finished after %d steps with total reward: %f",
+                            episode_count,
+                            episode_length,
+                            total_reward,
+                        )
+                        episode_count += 1
+                        time.sleep(1.0)  # Pause briefly between episodes
+                        break
+
+        except KeyboardInterrupt:
+            logger.info("Stopping episodes - cleaning up...")
+        finally:
+            env.env.close()
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
         """Get the model.
@@ -120,6 +190,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
 
 if __name__ == "__main__":
     # python -m examples.cartpole.cartpole_task action=train
+    # python -m examples.cartpole.cartpole_task action=viz
     CartPoleTask.launch(
         CartPoleConfig(
             num_envs=1,
