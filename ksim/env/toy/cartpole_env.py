@@ -11,22 +11,20 @@ from ksim.env.base_env import BaseEnv, EnvState
 
 
 class CartPoleEnv(BaseEnv):
-    """CartPole environment wrapper to match the BraxState interface."""
+    """CartPole environment wrapper to match the EnvState interface."""
 
-    def __init__(self) -> None:
-        self.env = gym.make("CartPole-v1")
+    def __init__(self, render_mode: str | None = None) -> None:
+        """Initialize the CartPole environment.
+
+        Args:
+            render_mode: The render mode for the environment. Options: 'human', 'rgb_array', None
+        """
+        self.env = gym.make("CartPole-v1", render_mode=render_mode)
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
 
     def reset(self, rng: PRNGKeyArray) -> EnvState:
-        """Reset the environment.
-
-        Args:
-            rng: PRNG key.
-
-        Returns:
-            BraxState: The initial state of the environment.
-        """
+        """Reset the environment."""
         # TODO: probably want to use RNG properly
         obs, info = self.env.reset()
 
@@ -42,13 +40,6 @@ class CartPoleEnv(BaseEnv):
 
         NOTE: for simplicity, this environment is stateful and doesn't actually use prev_state in
         a functional manner.
-
-        Args:
-            prev_state: The previous state of the environment.
-            action: The action to take.
-
-        Returns:
-            BraxState: The next state of the environment.
         """
         try:
             obs, reward, terminated, truncated, info = self.env.step(action.item())
@@ -79,16 +70,7 @@ class CartPoleEnv(BaseEnv):
         num_envs: int,
         **kwargs: Any,
     ) -> EnvState:
-        """Rollout the model for a given number of steps.
-
-        Args:
-            model: The model.
-            params: The parameters (really a variable dictionary).
-            rng: The random key.
-
-        Returns:
-            A BraxState containing trajectories with shape (num_steps, ...) in leaves.
-        """
+        """Rollout the model for a given number of steps."""
         assert num_envs == 1, "CartPoleEnv only supports a single environment"
         observations = []
         actions = []
