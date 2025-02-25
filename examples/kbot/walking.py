@@ -479,6 +479,14 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
 
     def get_init_critic_carry(self) -> None:
         return None
+    
+    @property
+    def observation_size(self) -> int:
+        return self.env.observation_size
+
+    @property
+    def action_size(self) -> int:
+        return self.env.action_size
 
 
 if __name__ == "__main__":
@@ -487,5 +495,6 @@ if __name__ == "__main__":
         KBotWalkingConfig(
             num_envs=32,
             max_trajectory_seconds=10.0,
+            robot_model_name="kbot-v1-feet",
         ),
     )

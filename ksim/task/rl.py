@@ -96,9 +96,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_model_obs_from_state(self, state: EnvState) -> PyTree: ...
 
     @abstractmethod
-    def viz_environment(self) -> None: ...
-
-    @abstractmethod
     def get_trajectory_batch(
         self,
         model: ActorCriticModel,
@@ -152,7 +149,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.run_environment()
 
             case "viz":
-                self.viz_environment()
+                self.run_visualization()
 
             case _:
                 raise ValueError(
@@ -456,17 +453,3 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Get the batch size for the current task."""
         # TODO: this is a hack... need to implement mini batching properly later.
         return 1
-
-    def run(self) -> None:
-        match self.config.action:
-            case "train":
-                self.run_training()
-
-            case "env":
-                self.run_environment()
-
-            case "viz":
-                self.run_visualization()
-
-            case _:
-                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
