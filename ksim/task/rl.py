@@ -91,7 +91,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         self.max_trajectory_steps = round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
         self.curr_logging_data = LoggingData()
-        self.loggers = [
+        self.log_items = [
             EpisodeLengthLog(),
             AverageRewardLog(),
             ModelUpdateLog("policy_loss"), # name should be the key in update_metrics
@@ -309,7 +309,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Logs the trajectory statistics.
             with self.step_context("write_logs"):
                 training_state.raw_phase = "train"
-                for log_item in self.loggers:
+                for log_item in self.log_items:
                     self.logger.log_scalar(
                         log_item.get_name(), lambda logger=log_item: logger(self.curr_logging_data), namespace="📉"
                     )
