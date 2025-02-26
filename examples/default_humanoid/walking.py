@@ -66,6 +66,7 @@ class HumanoidActorModel(ActionModel):
         # Return mean of Gaussian policy
         return self.mlp(x)
 
+    # TODO: Abstract into parent class
     def calc_log_prob(self, prediction: jax.Array, action: jax.Array) -> jax.Array:
         # Calculate log probability of actions under Gaussian distribution
         mean = prediction
