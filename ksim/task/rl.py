@@ -133,7 +133,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         batch: NamedTuple,
-    ) -> tuple[PyTree, optax.OptState, Array, dict]: ...
+    ) -> tuple[PyTree, optax.OptState, Array, dict[str, Array]]: ...
 
     ##############
     # Properties #
@@ -311,7 +311,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 training_state.raw_phase = "train"
                 for log_item in self.log_items:
                     self.logger.log_scalar(
-                        log_item.get_name(), lambda logger=log_item: logger(self.curr_logging_data), namespace="📉"
+                        log_item.get_name(),
+                        lambda logger=log_item: logger(self.curr_logging_data),
+                        namespace="📉",
                     )
                 self.logger.write(training_state)
                 training_state.num_steps += 1
@@ -361,7 +363,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             except xax.TrainingFinishedError:
                 if xax.is_master():
                     msg = (
-                        f"Finished training after {training_state.num_steps} steps {training_state.num_samples} samples"
+                        f"Finished training after {training_state.num_steps}"
+                        f"steps and {training_state.num_samples} samples"
                     )
                     xax.show_info(msg, important=True)
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
