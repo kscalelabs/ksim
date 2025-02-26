@@ -31,6 +31,7 @@ from ksim.builders.rewards import (
 from ksim.builders.terminations import IllegalContactTerminationBuilder
 from ksim.env.base_env import EnvState
 from ksim.env.mjx.mjx_env import MjxEnv
+from ksim.env.mjx.types import MjxEnvState
 from ksim.model.formulations import (
     ActionModel,
     ActorCriticModel,
@@ -273,35 +274,13 @@ class KBotActorModel(ActionModel):
     def setup(self) -> None:
         self.log_std = self.param("log_std", nn.initializers.constant(-0.7), (NUM_OUTPUTS,))
 
-    def input_vec_from_state(self, state: PyTree) -> jax.Array:
-        lin_vel_cmd_2 = state["info"]["commands"]["linear_velocity_command"]
-        ang_vel_cmd_1 = state["info"]["commands"]["angular_velocity_command"]
-        joint_pos_j = state["obs"]["joint_position_observation"]
-        joint_vel_j = state["obs"]["joint_velocity_observation"]
-
-        imu_acc_3 = state["obs"]["imu_acc_sensor_observation"]
-        imu_gyro_3 = state["obs"]["imu_gyro_sensor_observation"]
-
-        x_n = jnp.concatenate(
-            [
-                lin_vel_cmd_2,
-                ang_vel_cmd_1,
-                imu_acc_3,
-                imu_gyro_3,
-                joint_pos_j,
-                joint_vel_j,
-            ],
-            axis=-1,
-        )
-        return x_n
-
-    def out_from_input_vec(self, x_n: jax.Array) -> jax.Array:
+    def __call__(self, state: MjxEnvState) -> jax.Array:
+        assert isinstance(state.obs, dict)
+        assert isinstance(state.commands, dict)
+        x_n = jnp.concatenate([obs_array for obs_array in state.obs.values()])
+        cmd_n = jnp.concatenate([cmd_array for cmd_array in state.commands.values()])
+        x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
         actions_n = self.mlp(x_n)
-        return actions_n
-
-    def __call__(self, state: PyTree) -> jax.Array:
-        x_n = self.input_vec_from_state(state)
-        actions_n = self.out_from_input_vec(x_n)
 
         return actions_n
 
@@ -314,8 +293,8 @@ class KBotActorModel(ActionModel):
         )
         return jnp.sum(log_prob, axis=-1)
 
-    def sample_and_log_prob(self, obs: Array, rng: PRNGKeyArray) -> Tuple[Array, Array]:
-        mean = self(obs)
+    def sample_and_log_prob(self, state: MjxEnvState, rng: PRNGKeyArray) -> Tuple[Array, Array]:
+        mean = self(state)
         std = jnp.exp(self.log_std)
 
         noise = jax.random.normal(rng, mean.shape)
@@ -329,18 +308,18 @@ class KBotCriticModel(nn.Module):
     mlp: MLP
 
     @nn.compact
-    def __call__(self, state: PyTree) -> jax.Array:
-        lin_vel_cmd_2 = state["info"]["commands"]["linear_velocity_command"]
-        ang_vel_cmd_1 = state["info"]["commands"]["angular_velocity_command"]
-        joint_pos_j = state["obs"]["joint_position_observation"]
-        joint_vel_j = state["obs"]["joint_velocity_observation"]
+    def __call__(self, state: MjxEnvState) -> jax.Array:
+        lin_vel_cmd_2 = state.commands["linear_velocity_command"]
+        ang_vel_cmd_1 = state.commands["angular_velocity_command"]
+        joint_pos_j = state.obs["joint_position_observation"]
+        joint_vel_j = state.obs["joint_velocity_observation"]
 
-        base_pos_3 = state["obs"]["base_position_observation"]
-        base_ang_vel_3 = state["obs"]["base_angular_velocity_observation"]
-        base_lin_vel_3 = state["obs"]["base_linear_velocity_observation"]
-        base_quat_4 = state["obs"]["base_orientation_observation"]
-        imu_acc_3 = state["obs"]["imu_acc_sensor_observation"]
-        imu_gyro_3 = state["obs"]["imu_gyro_sensor_observation"]
+        base_pos_3 = state.obs["base_position_observation"]
+        base_ang_vel_3 = state.obs["base_angular_velocity_observation"]
+        base_lin_vel_3 = state.obs["base_linear_velocity_observation"]
+        base_quat_4 = state.obs["base_orientation_observation"]
+        imu_acc_3 = state.obs["imu_acc_sensor_observation"]
+        imu_gyro_3 = state.obs["imu_gyro_sensor_observation"]
 
         x_n = jnp.concatenate(
             [
@@ -448,12 +427,6 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 ),
             ],
         )
-
-    def get_model_obs_from_state(self, state: EnvState) -> PyTree:
-        return {
-            "obs": state.obs,
-            "info": state.info,
-        }
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
         return ActorCriticModel(

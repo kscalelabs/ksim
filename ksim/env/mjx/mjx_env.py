@@ -227,7 +227,7 @@ class MjxEnv(BaseEnv):
     # Post Processing #
     ###################
 
-    def get_observation(self, mjx_data: mjx.Data, rng: jax.Array) -> dict:
+    def get_observation(self, mjx_data: mjx.Data, rng: jax.Array) -> dict[str, Array]:
         """Compute observations from the pipeline state."""
         observations = {}
         for observation_name, observation in self.observations:

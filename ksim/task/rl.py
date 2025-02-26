@@ -19,7 +19,7 @@ import optax
 import xax
 from dpshdl.dataset import Dataset
 from flax import linen as nn
-from jaxtyping import PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING, OmegaConf
 
 from ksim.env.base_env import BaseEnv, EnvState
@@ -29,7 +29,6 @@ from ksim.env.mjx.mjx_env import (
     cast_action_type,
 )
 from ksim.model.formulations import ActionModel, ActorCriticModel
-from ksim.types import ModelObs, ModelOut
 
 logger = logging.getLogger(__name__)
 
@@ -91,9 +90,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     @abstractmethod
     def get_environment(self) -> BaseEnv: ...
-
-    @abstractmethod
-    def get_model_obs_from_state(self, state: EnvState) -> PyTree: ...
 
     @abstractmethod
     def viz_environment(self) -> None: ...
@@ -248,14 +244,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # TODO: implement pretrained model loading.
             raise NotImplementedError("Pretrained models are not yet implemented.")
 
-        model = self.get_model(key)
+        model_key, init_key = jax.random.split(key, 2)
+        model = self.get_model(model_key)
         assert isinstance(model, nn.Module), "Model must be an Flax linen module."
-        return model.init(key, self.get_model_obs_from_state(state))
+        return model.init(init_key, state)
 
     @eqx.filter_jit
-    def apply_actor(self, model: ActorCriticModel, params: PyTree, obs: ModelObs) -> ModelOut:
+    def apply_actor(self, model: ActorCriticModel, params: PyTree, state: EnvState) -> Array:
         """Apply the actor model to inputs."""
-        res = model.apply(params, method="actor", obs=obs)
+        res = model.apply(params, method="actor", state=state)
+        assert isinstance(res, Array)
         return res
 
     def train_loop(

@@ -25,8 +25,8 @@ class CartPoleActionModel(ActionModel):
     mlp: MLP
 
     @nn.compact
-    def __call__(self, state: Array) -> Array:
-        return self.mlp(state)
+    def __call__(self, state: EnvState) -> Array:
+        return self.mlp(state.obs["observations"])
 
     def calc_log_prob(self, prediction: Array, action: Array) -> Array:
         logits = prediction
@@ -37,8 +37,8 @@ class CartPoleActionModel(ActionModel):
         # NOTE: assumes two batching dimensions
         return action_log_prob
 
-    def sample_and_log_prob(self, obs: Array, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        logits = self(obs)
+    def sample_and_log_prob(self, state: EnvState, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        logits = self(state)
         log_probs = jax.nn.log_softmax(logits)
         sampled_actions = jax.random.categorical(rng, log_probs)
         action_log_prob = log_probs[jnp.arange(log_probs.shape[0]), sampled_actions]
@@ -51,8 +51,8 @@ class CartPoleCriticModel(nn.Module):
     mlp: MLP
 
     @nn.compact
-    def __call__(self, state: Array) -> Array:
-        return self.mlp(state)
+    def __call__(self, state: EnvState) -> Array:
+        return self.mlp(state.obs["observations"])
 
 
 @dataclass
@@ -79,10 +79,6 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
     def get_environment(self) -> CartPoleEnv:
         """Get the environment."""
         return CartPoleEnv(render_mode=self.config.render_mode)
-
-    def get_model_obs_from_state(self, state: EnvState) -> Array:
-        """Get the observation from the state."""
-        return state.obs["observations"]
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
         """Get the model."""
@@ -138,14 +134,14 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
 
                 while True:
                     # Get observations and use policy
-                    obs = self.get_model_obs_from_state(env_state)
                     rng, action_rng = jax.random.split(rng)
                     action, _ = model.apply(
-                        params, obs, action_rng, method="actor_sample_and_log_prob"
+                        params, env_state, action_rng, method="actor_sample_and_log_prob"
                     )
 
                     # Take step
-                    env_state = env.step(env_state, action)
+                    rng, step_rng = jax.random.split(rng)
+                    env_state = env.step(env_state, action, step_rng)
                     reward = env_state.reward.item()
                     done = env_state.done.item()
                     total_reward += reward

@@ -14,7 +14,6 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.model.formulations import ActorCriticModel
 from ksim.task.rl import RLConfig, RLTask
-from ksim.types import ModelObs, ModelOut
 
 
 @jax.tree_util.register_dataclass
@@ -48,8 +47,8 @@ class PPOConfig(RLConfig):
 class PPOBatch(NamedTuple):
     """A batch of PPO training data."""
 
-    observations: PyTree
-    next_observations: PyTree
+    state: EnvState
+    next_state: EnvState
     actions: Array
     rewards: Array
     done: Array
@@ -95,30 +94,26 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         @jax.jit
         def action_log_prob_fn(state: EnvState, rng: PRNGKeyArray) -> Tuple[Array, Array]:
-            obs = self.get_model_obs_from_state(state)
-            actions, log_probs = model.apply(params, obs, rng, method="actor_sample_and_log_prob")
+            actions, log_probs = model.apply(params, state, rng, method="actor_sample_and_log_prob")
             assert isinstance(actions, Array)
             assert isinstance(log_probs, Array)
             return actions, log_probs
 
-        trajectory = env.unroll_trajectories(
+        states = env.unroll_trajectories(
             action_log_prob_fn=action_log_prob_fn,
             rng=rng,
             num_steps=self.max_trajectory_steps,
             num_envs=self.config.num_envs,
         )
-        observations = self.get_model_obs_from_state(trajectory)
-        next_observations = jax.tree_util.tree_map(
-            lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs
-        )
-        actions = trajectory.info["actions"]
-        rewards = trajectory.reward
-        done = trajectory.done
-        action_log_probs = trajectory.info["action_log_probs"]
+        next_states = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), states)
+        actions = states.info["actions"]
+        rewards = states.reward
+        done = states.done
+        action_log_probs = states.info["action_log_probs"]
 
         return PPOBatch(
-            observations=observations,
-            next_observations=next_observations,
+            state=states,
+            next_state=next_states,
             actions=actions,
             rewards=rewards,
             done=done,
@@ -150,19 +145,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
     # Pass-through abstract methods:
-    # `get_environment`, `get_model_obs_from_state`, `viz_environment`
+    # `get_environment`, `viz_environment`
 
     ######################
     # Training Utilities #
     ######################
 
     @eqx.filter_jit
-    def apply_critic(self, model: ActorCriticModel, params: PyTree, obs: ModelObs) -> ModelOut:
+    def apply_critic(self, model: ActorCriticModel, params: PyTree, state: EnvState) -> Array:
         """Apply the critic model to inputs. Used by all actor-critic tasks.
 
         TODO: it might be worth creating another Task abstraction that requires `apply_critic`
         """
-        res = model.apply(params, method="critic", obs=obs)
+        res = model.apply(params, method="critic", state=state)
+        assert isinstance(res, Array)
         return res
 
     @eqx.filter_jit
@@ -183,7 +179,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A tuple of (loss, metrics).
         """
         # get the log probs of the current model
-        predictions = self.apply_actor(model, params, batch.observations)
+        predictions = self.apply_actor(model, params, batch.state)
         assert isinstance(predictions, Array)
         log_probs = model.apply(
             params, predictions, method="actor_calc_log_prob", action=batch.actions
@@ -191,7 +187,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         ratio = jnp.exp(log_probs - batch.action_log_probs)
 
         # get the state-value estimates
-        values = self.apply_critic(model, params, batch.observations)
+        values = self.apply_critic(model, params, batch.state)
         assert isinstance(values, Array)
         values = values.squeeze(axis=-1)  # values is (time, env)
         advantages = self._compute_advantages(values, batch)  # (time, env)
@@ -210,7 +206,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # value loss term
         # TODO: add clipping
-        value_pred = self.apply_critic(model, params, batch.observations)
+        value_pred = self.apply_critic(model, params, batch.state)
         value_pred = value_pred.squeeze(axis=-1)  # (time, env)
         value_loss = 0.5 * jnp.mean((returns - value_pred) ** 2)
 

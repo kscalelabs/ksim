@@ -3,12 +3,14 @@
 from dataclasses import dataclass
 from typing import Any
 
+import jax
 from jaxtyping import Array
 from mujoco import mjx
 
 from ksim.env.base_env import EnvState
 
 
+@jax.tree_util.register_dataclass
 @dataclass
 class MjxEnvState(EnvState):
     """The state of the environment.

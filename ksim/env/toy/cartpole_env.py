@@ -96,7 +96,8 @@ class CartPoleEnv(BaseEnv):
                 state = self.reset(rng)
                 rng, _ = jax.random.split(rng)
             else:
-                state = self.step(state, action)
+                rng, step_rng = jax.random.split(rng)
+                state = self.step(state, action, step_rng)
 
         observations = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *observations)
         actions = jnp.stack(actions)
