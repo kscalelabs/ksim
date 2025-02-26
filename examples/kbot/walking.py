@@ -277,8 +277,8 @@ class KBotActorModel(ActionModel):
     def __call__(self, state: MjxEnvState) -> jax.Array:
         assert isinstance(state.obs, dict)
         assert isinstance(state.commands, dict)
-        x_n = jnp.concatenate([obs_array for obs_array in state.obs.values()])
-        cmd_n = jnp.concatenate([cmd_array for cmd_array in state.commands.values()])
+        x_n = jnp.concatenate([obs_array for obs_array in state.obs.values()], axis=-1)
+        cmd_n = jnp.concatenate([cmd_array for cmd_array in state.commands.values()], axis=-1)
         x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
         actions_n = self.mlp(x_n)
 
