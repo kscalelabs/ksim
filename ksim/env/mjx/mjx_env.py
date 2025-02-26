@@ -294,12 +294,10 @@ class MjxEnv(BaseEnv):
     # Main API Implementation #
     ###########################
 
-    def reset(self, rng: jax.Array, env_state: MjxEnvState | None = None) -> MjxEnvState:
+    def reset(self, rng: jax.Array, mjx_data: mjx.Data, mjx_model: mjx.Model, env_state: EnvState | None = None) -> tuple[EnvState, mjx.Data]:
         """Pure reset function: returns an initial state computed solely from the inputs."""
         if env_state is None:
-            env_state = MjxEnvState(
-                mjx_model=self.default_mjx_model,
-                mjx_data=self.default_mjx_data,
+            env_state = EnvState(
                 obs={},
                 commands={},
                 reward=jnp.array(0.0),
@@ -311,7 +309,7 @@ class MjxEnv(BaseEnv):
                 action_log_prob_at_prev_step=jnp.array(0.0),
             )
 
-        reset_data = env_state.mjx_data
+        reset_data = mjx_data
         for _, reset_func in self.resets:
             reset_data = reset_func(reset_data, rng)
         assert isinstance(reset_data, mjx.Data)
@@ -319,7 +317,7 @@ class MjxEnv(BaseEnv):
         rng, obs_rng = jax.random.split(rng)
 
         new_data = step_mjx(
-            mjx_model=env_state.mjx_model,
+            mjx_model=mjx_model,
             mjx_data=reset_data,
             ctrl=jnp.zeros_like(reset_data.ctrl),
         )
@@ -332,9 +330,7 @@ class MjxEnv(BaseEnv):
             "prev_ctrl": jnp.zeros_like(new_data.ctrl),
         }
         obs = self.get_observation(new_data, obs_rng)
-        return MjxEnvState(
-            mjx_model=env_state.mjx_model,
-            mjx_data=new_data,
+        return EnvState(
             obs=obs,
             reward=reward,
             done=done,
@@ -344,7 +340,7 @@ class MjxEnv(BaseEnv):
             command_at_prev_step=jnp.zeros_like(new_data.ctrl),
             action_at_prev_step=jnp.zeros_like(new_data.ctrl),
             action_log_prob_at_prev_step=jnp.array(0.0),
-        )
+        ), new_data
 
     def _apply_physics_steps(
         self,
@@ -374,11 +370,13 @@ class MjxEnv(BaseEnv):
 
     def step(
         self,
-        env_state: MjxEnvState,
+        env_state: EnvState,
+        mjx_data: mjx.Data,
+        mjx_model: mjx.Model,
         action: Array,
         rng: PRNGKeyArray,
         action_log_prob: Array | None = None,
-    ) -> MjxEnvState:
+    ) -> tuple[EnvState, mjx.Data]:
         """Stepping the environment in a consistent, JIT-able manner. Works on a single environment.
 
         At t=t_0:
@@ -423,9 +421,7 @@ class MjxEnv(BaseEnv):
 
         commands = self.get_commands(env_state.commands, rng, time)
 
-        new_state = MjxEnvState(
-            mjx_model=env_state.mjx_model,
-            mjx_data=new_mjx_data,
+        new_state = EnvState(
             obs=obs,
             commands=commands,
             reward=reward,
@@ -437,7 +433,7 @@ class MjxEnv(BaseEnv):
             action_log_prob_at_prev_step=jnp.array(0.0),
         )
 
-        return new_state
+        return new_state, new_mjx_data
 
     def unroll_trajectories(
         self,
@@ -446,7 +442,7 @@ class MjxEnv(BaseEnv):
         num_steps: int,
         num_envs: int,
         **kwargs: Any,
-    ) -> MjxEnvState:
+    ) -> EnvState:
         """Vectorized rollout of trajectories.
 
         1. The batched reset (using vmap) initializes a state for each environment.
@@ -455,32 +451,35 @@ class MjxEnv(BaseEnv):
         4. The resulting trajectory has shape (num_steps, num_envs, ...).
         """
         init_rngs = jax.random.split(rng, num_envs)
-        init_states = jax.vmap(lambda key: self.reset(key))(init_rngs)
+        mjx_model = self.default_mjx_model
+        mjx_data = self.default_mjx_data
+        init_states, init_mjx_data = jax.vmap(lambda key: self.reset(key, mjx_data, mjx_model))(init_rngs)
         rng, _ = jax.random.split(rng)
 
-        def env_step(env_state: MjxEnvState, rng: Array) -> MjxEnvState:
+        def env_step(env_state: EnvState, mjx_model: mjx.Model, mjx_data: mjx.Data, rng: Array) -> tuple[EnvState, mjx.Data]:
             action, action_log_prob = action_log_prob_fn(env_state, rng)
             # ML: I don't love how we update info in multiple places...
-            new_state = jax.lax.cond(
+            new_state, new_mjx_data = jax.lax.cond(
                 env_state.done,
-                lambda _: self.reset(rng, env_state),
-                lambda _: self.step(env_state, action, rng, action_log_prob),
+                lambda _: self.reset(rng, mjx_data, mjx_model, env_state),
+                lambda _: self.step(env_state, mjx_data, mjx_model, action, rng, action_log_prob),
                 operand=None,
             )
-            assert isinstance(new_state, MjxEnvState)
-            return new_state
+            assert isinstance(new_state, EnvState)
+            assert isinstance(new_mjx_data, mjx.Data)
+            return new_state, new_mjx_data
 
         def scan_fn(
-            carry: Tuple[MjxEnvState, Array], _: Any
-        ) -> Tuple[Tuple[MjxEnvState, Array], MjxEnvState]:
-            states, rng = carry
+            carry: Tuple[EnvState, mjx.Data, Array], _: Any
+        ) -> Tuple[Tuple[EnvState, mjx.Data, Array], EnvState]:
+            states, mjx_data, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
-            new_states = jax.vmap(env_step)(states, rngs[1:])
-            return (new_states, rngs[0]), new_states
+            new_states, new_mjx_data = jax.vmap(env_step)(states, mjx_model, mjx_data, rngs[1:])
+            return (new_states, new_mjx_data, rngs[0]), new_states
 
-        (_, _), traj = jax.lax.scan(
+        (_, _, _), traj = jax.lax.scan(
             f=scan_fn,
-            init=(init_states, rng),
+            init=(init_states, init_mjx_data, rng),
             xs=None,
             length=num_steps,
         )

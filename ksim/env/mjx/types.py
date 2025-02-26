@@ -20,7 +20,6 @@ class MjxEnvState(EnvState):
         obs: The post-processed observations of the environment.
         reward: The reward of the environment.
         done: Whether the episode is done.
-        info: Additional information about the environment.
     """
 
     # MJX attributes
