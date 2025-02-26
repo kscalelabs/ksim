@@ -91,7 +91,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         env: BaseEnv,
         rng: PRNGKeyArray,
     ) -> NamedTuple:
-        """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)"""
+        """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)."""
 
         @jax.jit
         def action_log_prob_fn(state: EnvState, rng: PRNGKeyArray) -> Tuple[Array, Array]:
@@ -108,9 +108,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
         observations = self.get_model_obs_from_state(trajectory)
-        next_observations = jax.tree_util.tree_map(
-            lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs
-        )
+        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs)
         actions = trajectory.info["actions"]
         rewards = trajectory.reward
         done = trajectory.done
@@ -185,9 +183,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # get the log probs of the current model
         predictions = self.apply_actor(model, params, batch.observations)
         assert isinstance(predictions, Array)
-        log_probs = model.apply(
-            params, predictions, method="actor_calc_log_prob", action=batch.actions
-        )
+        log_probs = model.apply(params, predictions, method="actor_calc_log_prob", action=batch.actions)
         ratio = jnp.exp(log_probs - batch.action_log_probs)
 
         # get the state-value estimates

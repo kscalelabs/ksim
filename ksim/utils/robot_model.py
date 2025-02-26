@@ -56,7 +56,7 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
 
         for name, metadata in actuators.items():
             if hasattr(metadata, "kp") and hasattr(metadata, "kd"):
-                actuator_metadata[name+"_ctrl"] = MITPositionActuatorMetadata(
+                actuator_metadata[name + "_ctrl"] = MITPositionActuatorMetadata(
                     kp=cast(float, metadata.kp),
                     kd=cast(float, metadata.kd),
                 )
@@ -64,7 +64,7 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
                 raise ValueError(f"Unknown actuator metadata: {metadata}")
 
         # Type cast control_frequency to float.
-        try: 
+        try:
             assert isinstance(control_frequency, str)
             control_frequency = float(control_frequency)
         except ValueError:
@@ -75,20 +75,15 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
 
     # Load from file and create the correct object
     loaded_conf = OmegaConf.load(metadata_path)
-    
+
     # Create the actuators dictionary with correct types
     actuators_meta: dict[str, MITPositionActuatorMetadata] = {}
     for name, actuator_data in loaded_conf.actuators.items():
-        actuators_meta[name] = MITPositionActuatorMetadata(
-            kp=float(actuator_data.kp),
-            kd=float(actuator_data.kd)
-        )
-    
-    # Create the ModelMetadata object directly 
-    return ModelMetadata(
-        actuators=actuators_meta,
-        control_frequency=float(loaded_conf.control_frequency)
-    )
+        actuators_meta[name] = MITPositionActuatorMetadata(kp=float(actuator_data.kp), kd=float(actuator_data.kd))
+
+    # Create the ModelMetadata object directly
+    return ModelMetadata(actuators=actuators_meta, control_frequency=float(loaded_conf.control_frequency))
+
 
 async def get_model_and_metadata(model_name: str, cache: bool = True) -> tuple[str, ModelMetadata]:
     """Downloads and caches the model URDF and metadata."""

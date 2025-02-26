@@ -31,9 +31,7 @@ class CartPoleActionModel(ActionModel):
     def calc_log_prob(self, prediction: Array, action: Array) -> Array:
         logits = prediction
         log_probs = jax.nn.log_softmax(logits)
-        action_log_prob = log_probs[
-            jnp.arange(log_probs.shape[0])[:, None], jnp.arange(log_probs.shape[1]), action
-        ]
+        action_log_prob = log_probs[jnp.arange(log_probs.shape[0])[:, None], jnp.arange(log_probs.shape[1]), action]
         # NOTE: assumes two batching dimensions
         return action_log_prob
 
@@ -138,9 +136,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
                     # Get observations and use policy
                     obs = self.get_model_obs_from_state(env_state)
                     rng, action_rng = jax.random.split(rng)
-                    action, _ = model.apply(
-                        params, obs, action_rng, method="actor_sample_and_log_prob"
-                    )
+                    action, _ = model.apply(params, obs, action_rng, method="actor_sample_and_log_prob")
 
                     # Take step
                     env_state = env.step(env_state, action)

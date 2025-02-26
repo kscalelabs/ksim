@@ -1,6 +1,6 @@
 """CartPole environment."""
 
-from typing import Any, Callable, Tuple
+from typing import Callable, Tuple
 
 import gymnasium as gym
 import jax
@@ -77,14 +77,14 @@ class CartPoleEnv(BaseEnv):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
-        **kwargs: Any,
     ) -> EnvState:
         """Rollout the model for a given number of steps.
 
         Args:
-            model: The model.
-            params: The parameters (really a variable dictionary).
+            action_log_prob_fn: Function to get actions and log probs from states.
             rng: The random key.
+            num_steps: Number of steps to roll out.
+            num_envs: Number of environments to run in parallel.
 
         Returns:
             A BraxState containing trajectories with shape (num_steps, ...) in leaves.

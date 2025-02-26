@@ -88,6 +88,7 @@ class DefaultHumanoidEnv(BaseEnv):
             rng: The random key.
             num_steps: Number of steps to roll out.
             num_envs: Number of environments to run in parallel.
+            **kwargs: Additional keyword arguments.
 
         Returns:
             A EnvState containing trajectories with shape (num_steps, ...) in leaves.
@@ -133,10 +134,9 @@ class DefaultHumanoidEnv(BaseEnv):
                 "action_log_probs": action_log_probs,
             },
         )
-    
+
     def run_visualization(self) -> None:
         """Run the environment in visualization mode."""
-
 
     @property
     def observation_size(self) -> int:

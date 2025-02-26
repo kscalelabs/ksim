@@ -152,9 +152,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.run_visualization()
 
             case _:
-                raise ValueError(
-                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
-                )
+                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
 
     #########################
     # Logging and Rendering #
@@ -295,9 +293,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Updates the model on the collected trajectories.
             with self.step_context("update_state"):
-                params, opt_state = self.model_update(
-                    model, params, optimizer, opt_state, trajectories
-                )
+                params, opt_state = self.model_update(model, params, optimizer, opt_state, trajectories)
 
             # # Logs the trajectory statistics.
             with self.step_context("write_logs"):
@@ -351,7 +347,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
-                    msg = f"Finished training after {training_state.num_steps} steps {training_state.num_samples} samples"
+                    msg = (
+                        f"Finished training after {training_state.num_steps} steps {training_state.num_samples} samples"
+                    )
                     xax.show_info(msg, important=True)
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
 
@@ -360,9 +358,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(
-                    xax.highlight_exception_message(traceback.format_exc()), "  "
-                )
+                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
@@ -448,8 +444,3 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 renderer.close()
             elif hasattr(env, "cleanup_renderer"):
                 env.cleanup_renderer()
-
-    def get_batch_size(self) -> int:
-        """Get the batch size for the current task."""
-        # TODO: this is a hack... need to implement mini batching properly later.
-        return 1

@@ -17,13 +17,13 @@ import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
+from mujoco.renderer import Renderer
 from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING
-from mujoco.renderer import Renderer
-import numpy as np
 
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.env.builders.commands import Command, CommandBuilder
@@ -173,9 +173,7 @@ class MjxEnv(BaseEnv):
                 f"minimum action latency ({self.config.min_action_latency})"
             )
         if self.config.min_action_latency < 0:
-            raise ValueError(
-                f"Action latency ({self.config.min_action_latency}) must be non-negative"
-            )
+            raise ValueError(f"Action latency ({self.config.min_action_latency}) must be non-negative")
 
         self.min_action_latency_step = round(self.config.min_action_latency / self.config.dt)
         self.max_action_latency_step = round(self.config.max_action_latency / self.config.dt)
@@ -249,9 +247,7 @@ class MjxEnv(BaseEnv):
         rewards = []
         for reward_name, reward in self.rewards:
             reward_val = reward(prev_state, action, new_mjx_data) * reward.scale
-            chex.assert_shape(
-                reward_val, (), custom_message=f"Reward {reward_name} must be a scalar"
-            )
+            chex.assert_shape(reward_val, (), custom_message=f"Reward {reward_name} must be a scalar")
             rewards.append((reward_name, reward_val))
         return rewards
 
@@ -260,9 +256,7 @@ class MjxEnv(BaseEnv):
         terminations = []
         for termination_name, termination in self.terminations:
             term_val = termination(new_mjx_data)
-            chex.assert_shape(
-                term_val, (), custom_message=f"Termination {termination_name} must be a scalar"
-            )
+            chex.assert_shape(term_val, (), custom_message=f"Termination {termination_name} must be a scalar")
             terminations.append((termination_name, term_val))
         return terminations
 
@@ -419,9 +413,7 @@ class MjxEnv(BaseEnv):
             )
             return new_state
 
-        def scan_fn(
-            carry: Tuple[MjxEnvState, Array], _: Any
-        ) -> Tuple[Tuple[MjxEnvState, Array], MjxEnvState]:
+        def scan_fn(carry: Tuple[MjxEnvState, Array], _: Any) -> Tuple[Tuple[MjxEnvState, Array], MjxEnvState]:
             states, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
             new_states = jax.vmap(env_step)(states, rngs[1:])
@@ -434,7 +426,7 @@ class MjxEnv(BaseEnv):
             length=num_steps,
         )
         return traj  # Shape: (num_steps, num_envs, ...)
-    
+
     def unroll_trajectories(
         self,
         action_log_prob_fn: Callable[[EnvState, PRNGKeyArray], Tuple[Array, Array]],
@@ -451,7 +443,6 @@ class MjxEnv(BaseEnv):
             info=dict(),
         )
 
-
     def render_frame(self, env_state: MjxEnvState, renderer: Renderer) -> np.ndarray:
         """Render a single frame from the environment state."""
         # We need to render using CPU MuJoCo, so we convert from MJX state
@@ -460,7 +451,7 @@ class MjxEnv(BaseEnv):
         # Copy state from JAX arrays to numpy for rendering
         np_qpos = np.array(env_state.mjx_data.qpos)
         np_qvel = np.array(env_state.mjx_data.qvel)
-        
+
         # Update the render data with the current state
         render_data = env_state.mjx_data
         render_data.qpos[:] = np_qpos
@@ -476,7 +467,7 @@ class MjxEnv(BaseEnv):
     def observation_size(self) -> int:
         """Return the total size of all observations."""
         # TODO: implement this.
-        return 10 
+        return 10
 
     @property
     def action_size(self) -> int:

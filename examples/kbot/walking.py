@@ -34,7 +34,6 @@ from ksim.env.mjx.mjx_env import MjxEnv
 from ksim.model.formulations import (
     ActionModel,
     ActorCriticModel,
-    GaussianActorCriticModel,
 )
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -309,9 +308,7 @@ class KBotActorModel(ActionModel):
         mean = prediction
         std = jnp.exp(self.log_std)
 
-        log_prob = (
-            -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
-        )
+        log_prob = -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
         return jnp.sum(log_prob, axis=-1)
 
     def sample_and_log_prob(self, obs: Array, rng: PRNGKeyArray) -> Tuple[Array, Array]:
@@ -479,7 +476,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
 
     def get_init_critic_carry(self) -> None:
         return None
-    
+
     @property
     def observation_size(self) -> int:
         return self.env.observation_size
