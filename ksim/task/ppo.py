@@ -156,7 +156,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         batch: PPOBatch,
-    ) -> tuple[Array, dict[str, float]]:
+    ) -> tuple[Array, dict[str, Array]]:
         """Compute the PPO loss (required by XAX).
 
         Args:
@@ -165,7 +165,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             batch: The mini-batch containing trajectories.
 
         Returns:
-            A tuple of (loss, metrics).
+            A tuple of (loss, metrics), where metrics contains JAX arrays for various losses.
         """
         # get the log probs of the current model
         predictions = self.apply_actor(model, params, batch.observations)
@@ -240,10 +240,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         batch: PPOBatch,
-    ) -> tuple[Array, dict[str, float], PyTree]:
+    ) -> tuple[Array, dict[str, Array], PyTree]:
         """Jitted version of value_and_grad computation."""
 
-        def loss_fn(p: PyTree) -> tuple[Array, dict[str, float]]:
+        def loss_fn(p: PyTree) -> tuple[Array, dict[str, Array]]:
             loss, metrics = self.compute_loss(model, p, batch)
             return loss, metrics
 
