@@ -41,19 +41,8 @@ class CartPoleEnv(BaseEnv):
         NOTE: for simplicity, this environment is stateful and doesn't actually use prev_state in
         a functional manner.
         """
-        try:
-            obs, reward, terminated, truncated, info = self.env.step(action.item())
-            done = bool(terminated or truncated)  # Convert to Python bool
-        except AttributeError as e:
-            if "bool8" in str(e):
-                # Handle the numpy bool8 error
-                obs, reward, terminated, truncated, info = self.env.step(action.item())
-                # Ensure terminated and truncated are Python booleans
-                terminated = bool(terminated)
-                truncated = bool(truncated)
-                done = terminated or truncated
-            else:
-                raise
+        obs, reward, terminated, truncated, info = self.env.step(action.item())
+        done = bool(terminated or truncated)  # Convert to Python bool
 
         return EnvState(
             obs={"observations": jnp.array(obs)[None, :]},
@@ -89,6 +78,7 @@ class CartPoleEnv(BaseEnv):
             actions.append(action)
             action_log_probs.append(log_probs)
             rewards.append(state.reward)
+
             # NOTE: need to be careful about when the reward updates... this works for survival
             # related tasks, but not those that directly depend on the action.
 

@@ -38,13 +38,10 @@ class PPOConfig(RLConfig):
     lam: float = xax.field(value=0.95, help="Lambda for GAE: high = more bias; low = more variance")
 
     # General training parameters
-    # TODO: none of these except `max_grad_norm` are actually used in the training script
-    num_learning_epochs: int = xax.field(value=5, help="Number of learning epochs per PPO update.")
-    num_mini_batches: int = xax.field(value=4, help="Number of mini-batches per PPO epoch.")
     learning_rate: float = xax.field(value=1e-3, help="Learning rate for PPO.")
-    schedule: str = xax.field(value="adaptive", help="Learning rate schedule 'fixed' | 'adaptive'")
-    desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive LR.")
-    max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
+    max_grad_norm: float = xax.field(value=0.5, help="Maximum gradient norm for clipping.")
+    num_learning_epochs: int = xax.field(value=1, help="Number of learning epochs per PPO update.")
+    num_mini_batches: int = xax.field(value=1, help="Number of mini-batches per PPO epoch.")
 
 
 class PPOBatch(NamedTuple):
@@ -110,9 +107,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
         observations = self.get_model_obs_from_state(trajectory)
-        next_observations = jax.tree_util.tree_map(
-            lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs
-        )
+        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs)
         actions = trajectory.info["actions"]
         rewards = trajectory.reward
         done = trajectory.done
@@ -187,21 +182,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # get the log probs of the current model
         predictions = self.apply_actor(model, params, batch.observations)
         assert isinstance(predictions, Array)
-        log_probs = model.apply(
-            params, predictions, method="actor_calc_log_prob", action=batch.actions
-        )
+        log_probs = model.apply(params, predictions, method="actor_calc_log_prob", action=batch.actions)
         ratio = jnp.exp(log_probs - batch.action_log_probs)
 
         # get the state-value estimates
-        # FIXME
         values = self.apply_critic(model, params, batch.observations)
         assert isinstance(values, Array)
         values = values.squeeze(axis=-1)  # values is (time, env)
-        advantages = self._compute_advantages(values, batch)  # (time, env)
 
+        # compute the gae advantages and returns
+        advantages = self._compute_advantages(values, batch)  # (time, env)
         returns = advantages + values
         # normalizing advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + _EPS)
+
         # policy loss with clipping
         policy_loss = -jnp.mean(
             jnp.minimum(
@@ -209,34 +203,25 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param) * advantages,
             )
         )
-        value_pred = self.apply_critic(model, params, batch.observations)
-        value_pred = value_pred.squeeze(axis=-1)  # (time, env)
 
-        @eqx.filter_jit
-        def _clipped_value_loss(value_pred: Array, values: Array, returns: Array) -> Array:
-            value_clipped = value_pred + jnp.clip(values - value_pred, -self.config.clip_param, self.config.clip_param)
-            clipped_error = value_clipped - returns
-            error = value_pred - returns
-            return 0.5 * jnp.mean(jnp.maximum(error**2, clipped_error**2))
+        # value loss with clipping
 
         value_loss = jax.lax.cond(
             self.config.use_clipped_value_loss,
-            lambda: _clipped_value_loss(value_pred, values, returns),
-            lambda: 0.5 * jnp.mean((returns - value_pred) ** 2),
+            lambda: self._clipped_value_loss(values, values, returns),
+            lambda: 0.5 * jnp.mean((returns - values) ** 2),
         )
-        breakpoint()
 
         # entropy bonus term
         probs = jax.nn.softmax(predictions)  # TODO: make this live in the model
-        entropy = -jnp.mean(jnp.sum(probs * log_probs, axis=-1))
-        entropy_loss = -self.config.entropy_coef * entropy
+        entropy_loss = -jnp.mean(jnp.sum(probs * log_probs, axis=-1))
 
-        total_loss = policy_loss + self.config.value_loss_coef * value_loss + entropy_loss
+        total_loss = policy_loss + self.config.value_loss_coef * value_loss - self.config.entropy_coef * entropy_loss
 
         metrics = {
             "policy_loss": policy_loss,
             "value_loss": value_loss,
-            "entropy": entropy,
+            "entropy_loss": entropy_loss,
             "total_loss": total_loss,
         }
 
@@ -263,6 +248,25 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         _, advantages = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1]))
         return advantages[::-1]
+
+    @eqx.filter_jit
+    def _clipped_value_loss(
+        self,
+        target_values: Array,
+        values: Array,
+        returns: Array,
+    ) -> Array:
+        """Compute the clipped value loss.
+
+        Since we do one right now update per batch,
+        the target values are the same as the values.
+        """
+        value_clipped = target_values + jnp.clip(
+            values - target_values, -self.config.clip_param, self.config.clip_param
+        )
+        clipped_error = value_clipped - returns
+        error = values - returns
+        return 0.5 * jnp.mean(jnp.maximum(error**2, clipped_error**2))
 
     @eqx.filter_jit
     def _jitted_value_and_grad(

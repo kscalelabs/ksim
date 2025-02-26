@@ -155,9 +155,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.viz_environment()
 
             case _:
-                raise ValueError(
-                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
-                )
+                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
 
     #########################
     # Logging and Rendering #
@@ -292,17 +290,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             with self.step_context("on_step_start"):
                 training_state = self.on_step_start(training_state)
 
-            # Unrolls a trajectory.
-            train_rng, step_rng = jax.random.split(train_rng)
-            trajectories = self.get_trajectory_batch(model, params, env, step_rng)
-
             # Updates the model on the collected trajectories.
             with self.step_context("update_state"):
-                params, opt_state = self.model_update(
-                    model, params, optimizer, opt_state, trajectories
-                )
+                for _ in range(self.config.num_learning_epochs):
+                    for _ in range(self.config.num_mini_batches):
+                        # Unrolls a trajectory.
+                        train_rng, step_rng = jax.random.split(train_rng)
+                        trajectories = self.get_trajectory_batch(model, params, env, step_rng)
 
-            # # Logs the trajectory statistics.
+                        params, opt_state = self.model_update(model, params, optimizer, opt_state, trajectories)
+
+            # Logs the trajectory statistics.
             with self.step_context("write_logs"):
                 #     state.phase = "train"
                 #     self.log_state_timers(state)
@@ -354,7 +352,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
-                    msg = f"Finished training after {training_state.num_steps} steps {training_state.num_samples} samples"
+                    msg = (
+                        f"Finished training after {training_state.num_steps} steps {training_state.num_samples} samples"
+                    )
                     xax.show_info(msg, important=True)
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
 
@@ -363,9 +363,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(
-                    xax.highlight_exception_message(traceback.format_exc()), "  "
-                )
+                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(model, optimizer, opt_state, training_state)

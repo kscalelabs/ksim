@@ -28,12 +28,14 @@ class DummyPPOTask(PPOTask):
 
     def get_model_obs_from_state(self, state): ...
 
+    def viz_environment(self): ...
+
 
 class ComputeAdvantagesTest(chex.TestCase):
     def setUp(self):
         self.task = DummyPPOTask(config=DummyConfig())
 
-    def test_compute_advantages(self):
+    def test_simple(self):
         batch = PPOBatch(
             observations=None,
             next_observations=None,
@@ -43,10 +45,57 @@ class ComputeAdvantagesTest(chex.TestCase):
             action_log_probs=None,
         )
 
-        values = jnp.array([[0.0, 0.0], [1.0, 1.0]])
+        values = jnp.array([[1.0, 1.0], [0.0, 0.0]])
 
-        expected_advantages = jnp.array([[1.99, 1.99], [0.0, 0.0]])
-        computed_advantages = self.task.compute_advantages(values, batch)
+        expected_advantages = jnp.array([[0.9405, 0.9405], [1.0, 1.0]])
+        computed_advantages = self.task._compute_advantages(values, batch)
+        chex.assert_trees_all_close(
+            computed_advantages,
+            expected_advantages,
+            atol=_TOL,
+        )
+
+    def test_one_episode_one_env(self):
+        batch = PPOBatch(
+            observations=None,
+            next_observations=None,
+            actions=None,
+            rewards=jnp.array([[1.0], [1.0], [0.0]]),
+            done=jnp.array([[0], [0], [1]]),
+            action_log_probs=None,
+        )
+
+        values = jnp.array([[1.0], [1.0], [0.0]])
+        expected_advantages = jnp.array([[0.99], [0.0], [0.0]])
+        computed_advantages = self.task._compute_advantages(values, batch)
+        chex.assert_trees_all_close(
+            computed_advantages,
+            expected_advantages,
+            atol=_TOL,
+        )
+
+    def test_two_episodes_two_envs(self):
+        batch = PPOBatch(
+            observations=None,
+            next_observations=None,
+            actions=None,
+            rewards=jnp.array([[1.0, 1.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0]]),
+            done=jnp.array([[0, 0], [1, 1], [0, 0], [1, 1]]),
+            action_log_probs=None,
+        )
+
+        values = jnp.array([[1.0, 1.0], [0.0, 0.0], [1.0, 1.0], [0.0, 0.0]])
+
+        expected_advantages = jnp.array(
+            [
+                [0.0, 0.9405],
+                [0.0, 1.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ]
+        )
+
+        computed_advantages = self.task._compute_advantages(values, batch)
         chex.assert_trees_all_close(
             computed_advantages,
             expected_advantages,
