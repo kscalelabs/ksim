@@ -2,7 +2,7 @@
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, Generic, NamedTuple, Tuple, TypeVar
+from typing import Generic, NamedTuple, TypeVar
 
 import equinox as eqx
 import jax
@@ -14,7 +14,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.model.formulations import ActorCriticModel
 from ksim.task.rl import RLConfig, RLTask
-from ksim.types import ModelObs, ModelOut
+from ksim.types import ModelObs, ModelOut, PPOBatch
 
 
 @jax.tree_util.register_dataclass
@@ -43,17 +43,6 @@ class PPOConfig(RLConfig):
     schedule: str = xax.field(value="adaptive", help="Learning rate schedule 'fixed' | 'adaptive'")
     desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive LR.")
     max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
-
-
-class PPOBatch(NamedTuple):
-    """A batch of PPO training data."""
-
-    observations: PyTree
-    next_observations: PyTree
-    actions: Array
-    rewards: Array
-    done: Array
-    action_log_probs: Array
 
 
 Config = TypeVar("Config", bound=PPOConfig)
@@ -91,10 +80,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         env: BaseEnv,
         rng: PRNGKeyArray,
     ) -> NamedTuple:
-        """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)"""
+        """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)."""
 
         @jax.jit
-        def action_log_prob_fn(state: EnvState, rng: PRNGKeyArray) -> Tuple[Array, Array]:
+        def action_log_prob_fn(state: EnvState, rng: PRNGKeyArray) -> tuple[Array, Array]:
             obs = self.get_model_obs_from_state(state)
             actions, log_probs = model.apply(params, obs, rng, method="actor_sample_and_log_prob")
             assert isinstance(actions, Array)
@@ -108,9 +97,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
         observations = self.get_model_obs_from_state(trajectory)
-        next_observations = jax.tree_util.tree_map(
-            lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs
-        )
+        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs)
         actions = trajectory.info["actions"]
         rewards = trajectory.reward
         done = trajectory.done
@@ -132,15 +119,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         params: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        batch: NamedTuple,
-    ) -> tuple[PyTree, optax.OptState]:
+        batch: PPOBatch,
+    ) -> tuple[PyTree, optax.OptState, Array, dict[str, Array]]:
         """Update the model parameters."""
-        assert isinstance(batch, PPOBatch)
-        loss_val, grads = self._jitted_value_and_grad(model, params, batch)
-        print(f"Loss: {loss_val}")
+        loss_val, metrics, grads = self._jitted_value_and_grad(model, params, batch)
         updates, new_opt_state = optimizer.update(grads, opt_state, params)
         new_params = optax.apply_updates(params, updates)
-        return new_params, new_opt_state
+        return new_params, new_opt_state, loss_val, metrics
 
     def get_optimizer(self) -> optax.GradientTransformation:
         """Get the optimizer: handled by XAX."""
@@ -171,7 +156,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         batch: PPOBatch,
-    ) -> tuple[Array, Dict[str, Array]]:
+    ) -> tuple[Array, dict[str, Array]]:
         """Compute the PPO loss (required by XAX).
 
         Args:
@@ -180,14 +165,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             batch: The mini-batch containing trajectories.
 
         Returns:
-            A tuple of (loss, metrics).
+            A tuple of (loss, metrics), where metrics contains JAX arrays for various losses.
         """
         # get the log probs of the current model
         predictions = self.apply_actor(model, params, batch.observations)
         assert isinstance(predictions, Array)
-        log_probs = model.apply(
-            params, predictions, method="actor_calc_log_prob", action=batch.actions
-        )
+        log_probs = model.apply(params, predictions, method="actor_calc_log_prob", action=batch.actions)
         ratio = jnp.exp(log_probs - batch.action_log_probs)
 
         # get the state-value estimates
@@ -257,10 +240,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         batch: PPOBatch,
-    ) -> tuple[Array, PyTree]:
+    ) -> tuple[Array, dict[str, Array], PyTree]:
         """Jitted version of value_and_grad computation."""
 
-        def loss_fn(p: PyTree) -> Array:
-            return self.compute_loss(model, p, batch)[0]
+        def loss_fn(p: PyTree) -> tuple[Array, dict[str, Array]]:
+            loss, metrics = self.compute_loss(model, p, batch)
+            return loss, metrics
 
-        return jax.value_and_grad(loss_fn)(params)
+        (loss, metrics), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+        return loss, metrics, grads
