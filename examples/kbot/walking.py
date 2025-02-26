@@ -461,7 +461,7 @@ if __name__ == "__main__":
     # python -m examples.kbot.walking train
     KBotWalkingTask.launch(
         KBotWalkingConfig(
-            num_envs=32,
+            num_envs=1,
             max_trajectory_seconds=10.0,
         ),
     )
