@@ -1,33 +1,18 @@
 """Defines a standard interface for logging metrics."""
 
 from abc import ABC, abstractmethod
-from typing import NamedTuple
 
 import attrs
 import jax.numpy as jnp
 import xax
-from jaxtyping import Array, PyTree
+from jaxtyping import PyTree
 
-
-class TrajectoryData(NamedTuple):
-    """Simple trajectory data structure for logging.
-
-    TODO: This class should really be PPOBatch, but that leads to circular imports.
-    So we should have a base "Batch" type in a seperate file that both PPO and
-    logging can import from.
-    """
-
-    observations: PyTree
-    next_observations: PyTree
-    actions: Array
-    rewards: Array
-    done: Array
-    action_log_probs: Array
+from ksim.types import PPOBatch
 
 
 @attrs.define(frozen=True, kw_only=True)
 class LoggingData:
-    trajectory: TrajectoryData | None = None
+    trajectory: PPOBatch | None = None
     update_metrics: dict[str, jnp.ndarray] = attrs.field(factory=dict)
     gradients: PyTree | None = None
     loss: float | None = None

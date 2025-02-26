@@ -14,7 +14,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.model.formulations import ActorCriticModel
 from ksim.task.rl import RLConfig, RLTask
-from ksim.types import ModelObs, ModelOut
+from ksim.types import ModelObs, ModelOut, PPOBatch
 
 
 @jax.tree_util.register_dataclass
@@ -43,17 +43,6 @@ class PPOConfig(RLConfig):
     schedule: str = xax.field(value="adaptive", help="Learning rate schedule 'fixed' | 'adaptive'")
     desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive LR.")
     max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
-
-
-class PPOBatch(NamedTuple):
-    """A batch of PPO training data."""
-
-    observations: PyTree
-    next_observations: PyTree
-    actions: Array
-    rewards: Array
-    done: Array
-    action_log_probs: Array
 
 
 Config = TypeVar("Config", bound=PPOConfig)
