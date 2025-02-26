@@ -122,7 +122,7 @@ class TrackAngularVelocityZReward(Reward):
     norm: NormType = attrs.field(default="l2")
 
     def __call__(self, prev_state: MjxEnvState, action: Array, mjx_data: mjx.Data) -> Array:
-        ang_vel_cmd_1 = prev_state.commands[self.cmd_name]
+        ang_vel_cmd_1 = prev_state.commands[self.cmd_name][0]
         ang_vel_z = mjx_data.qvel[5]
         return get_norm(ang_vel_z * ang_vel_cmd_1, self.norm)
 

@@ -421,5 +421,38 @@ class FootContactPenaltyBuilderTest(chex.TestCase):
         self.assertEqual(penalty.skip_if_zero_command, [])
 
 
+class RewardShapeTest(chex.TestCase):
+    """Test that all rewards return scalar values."""
+
+    def setUp(self):
+        self.prev_state = DummyMjxEnvState()
+        self.action = jnp.array([0.1, 0.2, 0.3])
+        self.mjx_data = DummyMjxData()
+
+    def test_all_rewards_are_scalars(self):
+        # Test all reward classes
+        rewards = [
+            DummyReward(scale=1.0),
+            LinearVelocityZPenalty(scale=1.0),
+            AngularVelocityXYPenalty(scale=1.0),
+            TrackAngularVelocityZReward(scale=1.0),
+            TrackLinearVelocityXYReward(scale=1.0),
+            ActionSmoothnessPenalty(scale=1.0),
+            FootContactPenalty(
+                scale=1.0,
+                illegal_geom_idxs=jnp.array([1, 3, 5]),
+                allowed_contact_prct=0.1,
+                contact_eps=0.02,
+            ),
+        ]
+
+        for reward in rewards:
+            reward_val = reward(self.prev_state, self.action, self.mjx_data)
+            reward_name = reward.get_name()
+            chex.assert_shape(
+                reward_val, (), custom_message=f"Reward {reward_name} must be a scalar"
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

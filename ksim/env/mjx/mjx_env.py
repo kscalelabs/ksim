@@ -343,7 +343,7 @@ class MjxEnv(BaseEnv):
         env_state: MjxEnvState,
         ctrl: Array,
         prev_ctrl: Array,
-        num_latency_steps: int,
+        num_latency_steps: Array,
     ) -> mjx.Data:
         """A 'step' of the environment on a state composes multiple steps of the actual physics.
 
@@ -396,7 +396,7 @@ class MjxEnv(BaseEnv):
             env_state,
             torque_ctrl,
             prev_ctrl,
-            latency_steps.item(),
+            latency_steps,
         )
 
         obs = self.get_observation(new_mjx_data, obs_rng)

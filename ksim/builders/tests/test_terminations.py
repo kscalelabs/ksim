@@ -20,7 +20,7 @@ class DummyTermination(Termination):
     """Dummy termination class for testing base functionality."""
 
     def __call__(self, state: Any) -> Array:
-        return jnp.zeros((1,), dtype=bool)
+        return jnp.zeros((), dtype=bool)
 
 
 class DummyMjxData:
@@ -140,6 +140,37 @@ class IllegalContactTerminationBuilderTest(chex.TestCase):
         self.assertIsInstance(term, IllegalContactTermination)
         self.assertEqual(term.contact_eps, -0.005)
         self.assertTrue(jnp.array_equal(term.illegal_geom_idxs, jnp.array([0, 3])))
+
+
+class TerminationShapeTest(chex.TestCase):
+    """Test that all terminations return boolean arrays of the correct shape."""
+
+    def setUp(self):
+        self.mjx_data = DummyMjxData()
+
+    def test_all_terminations_are_boolean_scalars(self):
+        # Test all termination classes
+        terminations = [
+            DummyTermination(),
+            PitchTooGreatTermination(max_pitch=0.5),
+            RollTooGreatTermination(max_roll=0.5),
+            MinimumHeightTermination(min_height=1.0),
+            IllegalContactTermination(illegal_geom_idxs=jnp.array([0, 3])),
+        ]
+
+        for termination in terminations:
+            term_result = termination(self.mjx_data)
+            term_name = termination.get_name()
+            chex.assert_shape(
+                term_result,
+                (),
+                custom_message=f"Termination {term_name} must return shape ()",
+            )
+            self.assertEqual(
+                term_result.dtype,
+                jnp.bool_,
+                f"Termination {term_name} must return boolean dtype",
+            )
 
 
 if __name__ == "__main__":
