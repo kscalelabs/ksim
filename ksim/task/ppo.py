@@ -116,7 +116,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
         observations = self.get_model_obs_from_state(trajectory)
-        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs)
+        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=1, axis=0), trajectory.obs)
         actions = trajectory.info["actions"]
         rewards = trajectory.reward
         done = trajectory.done

@@ -245,7 +245,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if pretrained is not None:
             # TODO: implement pretrained model loading.
             raise NotImplementedError("Pretrained models are not yet implemented.")
-        breakpoint()
+
         model = self.get_model(key)
         assert isinstance(model, nn.Module), "Model must be an Flax linen module."
         return model.init(key, self.get_model_obs_from_state(state))
@@ -268,8 +268,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Runs the main RL training loop."""
         rng = self.prng_key()
         rng, train_rng, val_rng = jax.random.split(rng, 3)
-
+        total_steps = 0
         while not self.is_training_over(training_state):
+            print(f"Total steps: {total_steps}")
+            total_steps += self.config.num_envs * 500
             if self.valid_step_timer.is_valid_step(training_state):
                 val_rng, step_val_rng = jax.random.split(val_rng)
                 trajectory = self.get_trajectory_batch(model, params, env, step_val_rng)
