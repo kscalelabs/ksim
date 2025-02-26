@@ -103,9 +103,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
             ),
         )
 
-    def viz_environment(
-        self,
-    ) -> None:
+    def run_visualization(self) -> None:
         """Run the environment with visualization.
 
         Uses trained policy from latest checkpoint, otherwise uses a randomly initialized policy.

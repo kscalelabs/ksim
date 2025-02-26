@@ -1,6 +1,9 @@
 """Default Humanoid walking task using Gymnasium's Humanoid-v4 environment."""
 
+import logging
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Tuple
 
 import flax.linen as nn
@@ -15,7 +18,10 @@ from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-# Humanoid-v4 has a 17-dimensional continuous action space
+logger = logging.getLogger(__name__)
+
+
+# Humanoid-v5 has a 17-dimensional continuous action space
 NUM_OUTPUTS = 17
 
 
@@ -131,6 +137,76 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
     def action_size(self) -> int:
         """Return the action space size."""
         return self.config.action_size
+
+    # NOTE: Implemented in the HumanoidWalkingTask
+    # because it's not the same pattern as the kscale API
+    def run_visualization(self) -> None:
+        """Run the environment in visualization mode."""
+        # Get checkpoint path from CLI args if available
+        checkpoint_path = None
+        if hasattr(self.config, "checkpoint") and self.config.checkpoint is not None:
+            checkpoint_path = Path(self.config.checkpoint)
+            if not checkpoint_path.exists():
+                logger.error("Checkpoint path %s does not exist", checkpoint_path)
+                return
+            logger.info("Loading checkpoint from %s", checkpoint_path)
+
+        # Create environment with rendering enabled
+        env = DefaultHumanoidEnv(render_mode="human")
+
+        # Get model and initialize parameters
+        rng = self.prng_key()
+        model = self.get_model(rng)
+
+        # Initialize parameters or load from checkpoint
+        if checkpoint_path is not None:
+            # TODO: implement proper checkpoint loading
+            logger.error("Checkpoint loading not implemented yet")
+            return
+        else:
+            params = self.get_init_params(rng)
+
+        # Run episodes
+        episode_count = 0
+
+        try:
+            while True:  # Keep running episodes until interrupted
+                logger.info("Starting Episode %d", episode_count)
+                total_reward = 0
+                env_state = env.reset(rng)
+                rng, _ = jax.random.split(rng)
+                episode_length = 0
+
+                while True:
+                    # Get observations and use policy
+                    obs = self.get_model_obs_from_state(env_state)
+                    rng, action_rng = jax.random.split(rng)
+                    action, _ = model.apply(params, obs, action_rng, method="actor_sample_and_log_prob")
+
+                    # Take step
+                    env_state = env.step(env_state, action)
+                    reward = env_state.reward.item()
+                    done = env_state.done.item()
+                    total_reward += reward
+
+                    episode_length += 1
+
+                    if done:
+                        logger.info(
+                            "Episode %d finished after %d steps with total reward: %f",
+                            episode_count,
+                            episode_length,
+                            total_reward,
+                        )
+                        episode_count += 1
+                        time.sleep(1.0)  # Pause briefly between episodes
+                        break
+
+        except KeyboardInterrupt:
+            logger.info("Stopping episodes - cleaning up...")
+        finally:
+            env.env.close()
+
 
 if __name__ == "__main__":
     # python -m examples.default_humanoid.walking action=train

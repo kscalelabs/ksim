@@ -19,7 +19,7 @@ class DefaultHumanoidEnv(BaseEnv):
         Args:
             render_mode: The render mode for the environment.
         """
-        self.env = gym.make("Humanoid-v4", render_mode=render_mode)
+        self.env = gym.make("Humanoid-v5", render_mode=render_mode)
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
 
@@ -133,6 +133,10 @@ class DefaultHumanoidEnv(BaseEnv):
                 "action_log_probs": action_log_probs,
             },
         )
+    
+    def run_visualization(self) -> None:
+        """Run the environment in visualization mode."""
+
 
     @property
     def observation_size(self) -> int:
