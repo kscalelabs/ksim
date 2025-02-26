@@ -91,7 +91,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         env: BaseEnv,
         rng: PRNGKeyArray,
     ) -> NamedTuple:
-        """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)"""
+        """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)."""
 
         @jax.jit
         def action_log_prob_fn(state: EnvState, rng: PRNGKeyArray) -> Tuple[Array, Array]:
@@ -108,9 +108,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
         observations = self.get_model_obs_from_state(trajectory)
-        next_observations = jax.tree_util.tree_map(
-            lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs
-        )
+        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs)
         actions = trajectory.info["actions"]
         rewards = trajectory.reward
         done = trajectory.done
@@ -133,14 +131,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         batch: NamedTuple,
-    ) -> tuple[PyTree, optax.OptState]:
+    ) -> tuple[PyTree, optax.OptState, Array, dict]:
         """Update the model parameters."""
-        assert isinstance(batch, PPOBatch)
-        loss_val, grads = self._jitted_value_and_grad(model, params, batch)
-        print(f"Loss: {loss_val}")
+        loss_val, metrics, grads = self._jitted_value_and_grad(model, params, batch)
         updates, new_opt_state = optimizer.update(grads, opt_state, params)
         new_params = optax.apply_updates(params, updates)
-        return new_params, new_opt_state
+        return new_params, new_opt_state, loss_val, metrics
 
     def get_optimizer(self) -> optax.GradientTransformation:
         """Get the optimizer: handled by XAX."""
@@ -185,9 +181,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # get the log probs of the current model
         predictions = self.apply_actor(model, params, batch.observations)
         assert isinstance(predictions, Array)
-        log_probs = model.apply(
-            params, predictions, method="actor_calc_log_prob", action=batch.actions
-        )
+        log_probs = model.apply(params, predictions, method="actor_calc_log_prob", action=batch.actions)
         ratio = jnp.exp(log_probs - batch.action_log_probs)
 
         # get the state-value estimates
@@ -260,7 +254,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     ) -> tuple[Array, PyTree]:
         """Jitted version of value_and_grad computation."""
 
-        def loss_fn(p: PyTree) -> Array:
-            return self.compute_loss(model, p, batch)[0]
+        def loss_fn(p: PyTree) -> tuple[Array, dict[str, Array]]:
+            loss, metrics = self.compute_loss(model, p, batch)
+            return loss, metrics
 
-        return jax.value_and_grad(loss_fn)(params)
+        (loss, metrics), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+        return loss, metrics, grads

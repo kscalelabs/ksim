@@ -19,10 +19,19 @@ import optax
 import xax
 from dpshdl.dataset import Dataset
 from flax import linen as nn
-from jaxtyping import PRNGKeyArray, PyTree
-from omegaconf import MISSING, OmegaConf
+from jaxtyping import Array, PRNGKeyArray, PyTree
+from omegaconf import MISSING
 
 from ksim.env.base_env import BaseEnv, EnvState
+from ksim.env.builders.loggers import (
+    AverageRewardLogBuilder,
+    EntropyLogBuilder,
+    EpisodeLengthLogBuilder,
+    LoggingData,
+    PolicyLossLogBuilder,
+    TotalLossLogBuilder,
+    ValueLossLogBuilder,
+)
 from ksim.env.mjx.mjx_env import (
     KScaleActionModelType,
     KScaleEnvConfig,
@@ -84,6 +93,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         super().__init__(config)
 
         self.max_trajectory_steps = round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
+        self.curr_logging_data = LoggingData()
+        self.loggers = [
+            EpisodeLengthLogBuilder()(None),
+            AverageRewardLogBuilder()(None),
+            PolicyLossLogBuilder()(None),
+            ValueLossLogBuilder()(None),
+            EntropyLogBuilder()(None),
+            TotalLossLogBuilder()(None),
+        ]
 
     ####################
     # Abstract methods #
@@ -118,7 +136,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         batch: NamedTuple,
-    ) -> tuple[PyTree, optax.OptState]: ...
+    ) -> tuple[PyTree, optax.OptState, Array, dict]: ...
 
     ##############
     # Properties #
@@ -155,9 +173,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.viz_environment()
 
             case _:
-                raise ValueError(
-                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
-                )
+                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
 
     #########################
     # Logging and Rendering #
@@ -191,7 +207,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def log_state(self, env: BaseEnv) -> None:
         super().log_state()
 
-        self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
+        # self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
 
     def log_trajectory(self, env: BaseEnv, trajectory: EnvState) -> None:
         for plot_key, img in env.generate_trajectory_plots(trajectory):
@@ -272,23 +288,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng, train_rng, val_rng = jax.random.split(rng, 3)
 
         while not self.is_training_over(training_state):
-            if self.valid_step_timer.is_valid_step(training_state):
-                val_rng, step_val_rng = jax.random.split(val_rng)
-                trajectory = self.get_trajectory_batch(model, params, env, step_val_rng)
-                assert hasattr(trajectory, "done"), "Trajectory must contain a `done` field."
-                # Calculate episode length by counting steps until done
-                episode_lengths = jnp.sum(~trajectory.done) / jnp.sum(trajectory.done)
-                print(f"Average episode length: {episode_lengths}")
-
-            #     # Perform logging.
-            #     with self.step_context("write_logs"):
-            #         state.raw_phase = "valid"
-            #         # self.log_state_timers(state)
-            #         # self.log_trajectory(env, trajectory)
-            #         # self.log_trajectory_stats(env, trajectory)
-            #         self.logger.write(state)
-            #         state.num_valid_samples += 1
-
             with self.step_context("on_step_start"):
                 training_state = self.on_step_start(training_state)
 
@@ -298,16 +297,26 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Updates the model on the collected trajectories.
             with self.step_context("update_state"):
-                params, opt_state = self.model_update(
+                params, opt_state, loss_val, metrics = self.model_update(
                     model, params, optimizer, opt_state, trajectories
                 )
 
-            # # Logs the trajectory statistics.
+            self.curr_logging_data = LoggingData(
+                trajectory=trajectories,
+                update_metrics=metrics,
+                gradients=None,
+                loss=loss_val,
+                training_state=training_state,
+            )
+
+            # Logs the trajectory statistics.
             with self.step_context("write_logs"):
-                #     state.phase = "train"
-                #     self.log_state_timers(state)
-                #     self.log_trajectory_stats(env, trajectories)
-                #     self.logger.write(state)
+                training_state.raw_phase = "train"
+                for logger in self.loggers:
+                    self.logger.log_scalar(
+                        logger.get_name(), lambda logger=logger: logger(self.curr_logging_data), namespace="📉"
+                    )
+                self.logger.write(training_state)
                 training_state.num_steps += 1
 
             with self.step_context("on_step_end"):
@@ -354,7 +363,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
-                    msg = f"Finished training after {training_state.num_steps} steps {training_state.num_samples} samples"
+                    msg = (
+                        f"Finished training after {training_state.num_steps} steps {training_state.num_samples} samples"
+                    )
                     xax.show_info(msg, important=True)
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
 
@@ -363,9 +374,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(
-                    xax.highlight_exception_message(traceback.format_exc()), "  "
-                )
+                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
