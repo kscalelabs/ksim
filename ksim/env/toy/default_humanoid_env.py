@@ -1,87 +1,145 @@
-"""Default humanoid mjx env."""
+"""Default Humanoid environment from Gymnasium."""
 
-import asyncio
-import logging
-from dataclasses import dataclass
-from typing import Any, Callable, Collection, Literal, Tuple, TypeVar, cast, get_args
+from typing import Any, Callable, Tuple
 
-import chex
-import equinox as eqx
+import gymnasium as gym
 import jax
 import jax.numpy as jnp
-import numpy as np
-import xax
 from jaxtyping import Array, PRNGKeyArray
-from mujoco import mjx
-from mujoco.renderer import Renderer
-from mujoco_scenes.mjcf import load_mjmodel
 
 from ksim.env.base_env import BaseEnv, EnvState
-from ksim.env.builders.commands import Command, CommandBuilder
-from ksim.env.builders.observation import Observation, ObservationBuilder
-from ksim.env.builders.resets import Reset, ResetBuilder, ResetData
-from ksim.env.builders.rewards import Reward, RewardBuilder
-from ksim.env.builders.terminations import Termination, TerminationBuilder
-from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
-from ksim.env.mjx.mjx_env import KScaleEnvConfig, MjxEnv
-from ksim.env.mjx.types import MjxEnvState
-from ksim.utils.mujoco import make_mujoco_mappings
-from ksim.utils.robot_model import get_model_and_metadata
-
-logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 
-# The new stateless environment – note that we do not call any stateful methods.
-class DefaultHumanoidEnv(MjxEnv):
-    """An environment for massively parallel rollouts, stateless to obj state and system parameters.
+class DefaultHumanoidEnv(BaseEnv):
+    """Humanoid environment wrapper to match the KSim interface."""
 
-    In this design:
-      - All state (a MjxEnvState) is passed in and returned by reset and step.
-      - The underlying Mujoco model (here referred to as `mjx_model`) is provided to step/reset.
-      - Rollouts are performed by vectorizing (vmap) the reset and step functions,
-        with a final trajectory of shape (time, num_envs, ...).
-      - The step wrapper only computes a reset (via jax.lax.cond) if the done flag is True.
-    """
+    def __init__(self, render_mode: str | None = None) -> None:
+        """Initialize the environment.
 
-    def __init__(
+        Args:
+            render_mode: The render mode for the environment.
+        """
+        self.env = gym.make("Humanoid-v4", render_mode=render_mode)
+        self.observation_space = self.env.observation_space
+        self.action_space = self.env.action_space
+
+    def reset(self, rng: PRNGKeyArray) -> EnvState:
+        """Reset the environment.
+
+        Args:
+            rng: PRNG key.
+
+        Returns:
+            EnvState: The initial state of the environment.
+        """
+        # Use rng properly for seed
+        seed = int(jax.random.randint(rng, (), 0, 2**31 - 1))
+        obs, info = self.env.reset(seed=seed)
+
+        return EnvState(
+            obs={"observations": jnp.array(obs)[None, :]},
+            reward=jnp.array(0.0)[None],
+            done=jnp.array(False)[None],
+            info={"rng": rng, **info},
+        )
+
+    def step(self, prev_state: EnvState, action: Array) -> EnvState:
+        """Step the environment.
+
+        Args:
+            prev_state: The previous state of the environment.
+            action: The action to take.
+
+        Returns:
+            EnvState: The next state of the environment.
+        """
+        # Convert JAX array to NumPy for Gymnasium
+        np_action = jax.device_get(action[0])
+
+        try:
+            obs, reward, terminated, truncated, info = self.env.step(np_action)
+            done = terminated or truncated
+        except Exception as e:
+            print(f"Error stepping environment: {e}")
+            obs = jnp.zeros_like(prev_state.obs["observations"][0])
+            reward = 0.0
+            done = True
+            info = {}
+
+        return EnvState(
+            obs={"observations": jnp.array(obs)[None, :]},
+            reward=jnp.array(reward)[None],
+            done=jnp.array(done)[None],
+            info={"rng": prev_state.info["rng"], **info},
+        )
+
+    def unroll_trajectories(
         self,
-        config: KScaleEnvConfig,
-        terminations: Collection[Termination | TerminationBuilder],
-        resets: Collection[Reset | ResetBuilder],
-        rewards: Collection[Reward | RewardBuilder],
-        observations: Collection[Observation | ObservationBuilder],
-        commands: Collection[Command | CommandBuilder] = (),
-    ) -> None:
-        self.config = config
+        action_log_prob_fn: Callable[[EnvState, PRNGKeyArray], Tuple[Array, Array]],
+        rng: PRNGKeyArray,
+        num_steps: int,
+        num_envs: int,
+        **kwargs: Any,
+    ) -> EnvState:
+        """Rollout the model for a given number of steps.
 
-        if self.config.max_action_latency < self.config.min_action_latency:
-            raise ValueError(
-                f"Maximum action latency ({self.config.max_action_latency}) must be greater than "
-                f"minimum action latency ({self.config.min_action_latency})"
-            )
-        if self.config.min_action_latency < 0:
-            raise ValueError(f"Action latency ({self.config.min_action_latency}) must be non-negative")
+        Args:
+            action_log_prob_fn: Function to get actions and log probs from states.
+            rng: The random key.
+            num_steps: Number of steps to roll out.
+            num_envs: Number of environments to run in parallel.
 
-        self.min_action_latency_step = round(self.config.min_action_latency / self.config.dt)
-        self.max_action_latency_step = round(self.config.max_action_latency / self.config.dt)
+        Returns:
+            A EnvState containing trajectories with shape (num_steps, ...) in leaves.
+        """
+        assert num_envs == 1, "DefaultHumanoidEnv only supports a single environment"
+        observations = []
+        actions = []
+        rewards = []
+        done = []
+        action_log_probs = []
 
-        # getting the robot model and metadata
-        robot_model_path, robot_model_metadata = asyncio.run(
-            get_model_and_metadata(
-                self.config.robot_model_name,
-                cache=not self.config.ignore_cached_urdf,
-            )
+        state = self.reset(rng)
+        rng, _ = jax.random.split(rng)
+
+        for _ in range(num_steps):
+            rng, action_rng = jax.random.split(rng)
+            action, log_probs = action_log_prob_fn(state, action_rng)
+
+            observations.append(state.obs)
+            done.append(state.done)
+            actions.append(action)
+            action_log_probs.append(log_probs)
+            rewards.append(state.reward)
+
+            if state.done:
+                state = self.reset(rng)
+                rng, _ = jax.random.split(rng)
+            else:
+                state = self.step(state, action)
+
+        observations = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *observations)
+        actions = jnp.stack(actions)
+        rewards = jnp.stack(rewards)
+        done = jnp.stack(done)
+        action_log_probs = jnp.stack(action_log_probs)
+
+        return EnvState(
+            obs=observations,
+            reward=rewards,
+            done=done,
+            info={
+                "actions": actions,
+                "action_log_probs": action_log_probs,
+            },
         )
 
-        logger.info("Loading robot model %s", robot_model_path)
-        mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
-        self.mujoco_mappings = make_mujoco_mappings(mj_model)
-        self.actuators = MITPositionActuators(
-            actuators_metadata=robot_model_metadata.actuators,
-            mujoco_mappings=self.mujoco_mappings,
-        )
+    @property
+    def observation_size(self) -> int:
+        """Return the observation space size."""
+        return self.observation_space.shape[0]
 
-        assert self.config.ctrl_dt % self.config.dt == 0, "ctrl_dt must be a multiple of dt"
-        self._expected_dt_per_ctrl_dt = int(self.config.ctrl_dt / self.config.dt)
+    @property
+    def action_size(self) -> int:
+        """Return the action space size."""
+        return self.action_space.shape[0]
