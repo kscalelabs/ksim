@@ -298,9 +298,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Updates the model on the collected trajectories.
             with self.step_context("update_state"):
-                params, opt_state = self.model_update(
-                    model, params, optimizer, opt_state, trajectories
-                )
+                params, opt_state = self.model_update(model, params, optimizer, opt_state, trajectories)
 
             # Logs the trajectory statistics.
             with self.step_context("write_logs"):

@@ -25,6 +25,7 @@ class PPOConfig(RLConfig):
     # For the CLIP term (see Schulman et al. 2017)
     clip_param: float = xax.field(value=0.2, help="Clipping parameter for PPO.")
     normalize_advantage: bool = xax.field(value=True, help="Whether to normalize advantages.")
+    normalize_returns: bool = xax.field(value=True, help="Whether to normalize returns.")
 
     # For the Value Function (VF) term
     value_loss_coef: float = xax.field(value=1.0, help="Value loss coefficient for PPO.")
@@ -116,7 +117,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
         observations = self.get_model_obs_from_state(trajectory)
-        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=1, axis=0), trajectory.obs)
+        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs)
         actions = trajectory.info["actions"]
         rewards = trajectory.reward
         done = trajectory.done
@@ -203,8 +204,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         advantages = self._compute_advantages(values, batch)  # (time, env)
         returns = advantages + values
         # normalizing advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + _EPS)   
-        returns = (returns - returns.mean()) / (returns.std() + _EPS)
+        if self.config.normalize_advantage:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + _EPS)
+        if self.config.normalize_returns:
+            returns = (returns - returns.mean()) / (returns.std() + _EPS)
+
         # policy loss with clipping
         policy_loss = -jnp.mean(
             jnp.minimum(

@@ -3,6 +3,7 @@
 import logging
 import time
 from dataclasses import dataclass
+import math
 
 import flax.linen as nn
 import jax
@@ -13,7 +14,7 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim.env.base_env import EnvState
 from ksim.env.toy.cartpole_env import CartPoleEnv
 from ksim.model.formulations import ActionModel, ActorCriticModel
-from ksim.model.mlp import MLP, CriticMLP
+from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
 logger = logging.getLogger(__name__)
@@ -90,14 +91,17 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
                     num_hidden_layers=self.config.actor_num_layers,
                     hidden_features=self.config.actor_hidden_dims,
                     out_features=2,  # two discrete actions for CartPole
+                    output_layer_init_scale=0.01,
+                    dense_init_scale=math.sqrt(2),
                 ),
             ),
             critic_module=CartPoleCriticModel(
-                mlp=CriticMLP(
+                mlp=MLP(
                     num_hidden_layers=self.config.critic_num_layers,
                     hidden_features=self.config.critic_hidden_dims,
                     out_features=1,
-
+                    output_layer_init_scale=1.0,
+                    dense_init_scale=math.sqrt(2),
                 ),
             ),
         )
@@ -116,6 +120,10 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
 
         # Load checkpoint if available, otherwise use random initialization
         ckpt_path = self.get_ckpt_path()
+        import pathlib
+
+        ckpt_path = pathlib.Path("/Users/pfb30/ksim/examples/cartpole/cart_pole_task/run_11/checkpoints/ckpt.351.bin")
+
         if ckpt_path.exists():
             try:
                 logger.info("Loading checkpoint: %s", ckpt_path)
