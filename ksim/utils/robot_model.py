@@ -56,7 +56,7 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
 
         for name, metadata in actuators.items():
             if hasattr(metadata, "kp") and hasattr(metadata, "kd"):
-                actuator_metadata[name] = MITPositionActuatorMetadata(
+                actuator_metadata[name+"_ctrl"] = MITPositionActuatorMetadata(
                     kp=cast(float, metadata.kp),
                     kd=cast(float, metadata.kd),
                 )

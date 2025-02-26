@@ -33,8 +33,8 @@ class MITPositionActuators(Actuators):
         for actuator_name, actuator_metadata in actuators_metadata.items():
             assert isinstance(actuator_metadata, MITPositionActuatorMetadata)
             actuator_idx = mujoco_mappings.name_to_ctrl[actuator_name]
-            self.kps[actuator_idx] = actuator_metadata.kp
-            self.kds[actuator_idx] = actuator_metadata.kd
+            self.kps = self.kps.at[actuator_idx].set(actuator_metadata.kp)
+            self.kds = self.kds.at[actuator_idx].set(actuator_metadata.kd)
 
         if any(self.kps == 0) or any(self.kds == 0):
             raise ValueError("Some kps or kds are 0. Check your actuators_metadata.")
