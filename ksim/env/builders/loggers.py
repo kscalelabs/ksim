@@ -6,14 +6,30 @@ from typing import Generic, NamedTuple, Optional, TypeVar
 import attrs
 import jax.numpy as jnp
 import xax
-from jaxtyping import PyTree
+from jaxtyping import Array, PyTree
 
 from ksim.utils.data import BuilderData
 
 
+class TrajectoryData(NamedTuple):
+    """Simple trajectory data structure for logging.
+
+    TODO: This class should really be PPOBatch, but that leads to circular imports.
+    So we should have a base "Batch" type in a seperate file that both PPO and
+    logging can import from.
+    """
+
+    observations: PyTree
+    next_observations: PyTree
+    actions: Array
+    rewards: Array
+    done: Array
+    action_log_probs: Array
+
+
 @attrs.define(frozen=True, kw_only=True)
 class LoggingData:
-    trajectory: Optional[NamedTuple] = None
+    trajectory: Optional[TrajectoryData] = None
     update_metrics: dict[str, jnp.ndarray] = attrs.field(
         factory=dict
     )  # e.g., policy_loss, value_loss, entropy, total_loss
@@ -50,6 +66,8 @@ class LogMetricBuilder(ABC, Generic[T]):
 class EpisodeLengthLog(LogMetric):
     def __call__(self, data: LoggingData) -> jnp.ndarray:
         """Computes the average episode length."""
+        if data.trajectory is None:
+            raise ValueError("Trajectory cannot be None for EpisodeLengthLog")
         trajectory = data.trajectory
         return jnp.sum(~trajectory.done) / (jnp.sum(trajectory.done) + 1)
 
@@ -65,6 +83,8 @@ class EpisodeLengthLogBuilder(LogMetricBuilder[EpisodeLengthLog]):
 class AverageRewardLog(LogMetric):
     def __call__(self, data: LoggingData) -> jnp.ndarray:
         """Computes the average reward per episode."""
+        if data.trajectory is None:
+            raise ValueError("Trajectory cannot be None for AverageRewardLog")
         trajectory = data.trajectory
         total_reward = jnp.sum(trajectory.rewards)
         episode_count = jnp.sum(trajectory.done) + 1  # +1 to avoid division by zero

@@ -305,7 +305,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 trajectory=trajectories,
                 update_metrics=metrics,
                 gradients=None,
-                loss=loss_val,
+                loss=float(loss_val),
                 training_state=training_state,
             )
 

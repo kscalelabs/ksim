@@ -130,7 +130,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         params: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        batch: NamedTuple,
+        batch: PPOBatch,
     ) -> tuple[PyTree, optax.OptState, Array, dict]:
         """Update the model parameters."""
         loss_val, metrics, grads = self._jitted_value_and_grad(model, params, batch)
@@ -251,7 +251,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         batch: PPOBatch,
-    ) -> tuple[Array, PyTree]:
+    ) -> tuple[Array, Dict[str, Array], PyTree]:
         """Jitted version of value_and_grad computation."""
 
         def loss_fn(p: PyTree) -> tuple[Array, dict[str, Array]]:
