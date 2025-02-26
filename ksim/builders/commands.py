@@ -76,7 +76,7 @@ class LinearVelocityCommand(Command):
         """Updates command: returns (command_dim,) array."""
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self(rng_b)
+        new_commands = self(rng_b, time)
         return jnp.where(switch_mask, new_commands, prev_command)
 
 
@@ -103,5 +103,5 @@ class AngularVelocityCommand(Command):
         """Updates command: returns (command_dim,) array."""
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self(rng_b)
+        new_commands = self(rng_b, time)
         return jnp.where(switch_mask, new_commands, prev_command)

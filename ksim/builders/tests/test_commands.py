@@ -28,6 +28,7 @@ class BaseCommandTest(chex.TestCase):
 class LinearVelocityCommandTest(chex.TestCase):
     def setUp(self):
         self.rng = jax.random.PRNGKey(0)
+        self.time = jnp.array(0.0)
 
     def test_initialization(self):
         cmd = LinearVelocityCommand(
@@ -43,7 +44,7 @@ class LinearVelocityCommandTest(chex.TestCase):
 
     def test_command_shape(self):
         cmd = LinearVelocityCommand()
-        result = cmd(self.rng)
+        result = cmd(self.rng, self.time)
         chex.assert_shape(result, (2,))
 
     def test_command_bounds(self):
@@ -53,7 +54,7 @@ class LinearVelocityCommandTest(chex.TestCase):
         # Run multiple times to test bounds probabilistically
         for _ in range(100):
             self.rng, key = jax.random.split(self.rng)
-            result = cmd(key)
+            result = cmd(key, self.time)
 
             self.assertTrue(result[0] >= -x_scale)
             self.assertTrue(result[0] <= x_scale)
@@ -62,7 +63,7 @@ class LinearVelocityCommandTest(chex.TestCase):
 
     def test_zero_probability(self):
         cmd = LinearVelocityCommand(zero_prob=1.0)
-        result = cmd(self.rng)
+        result = cmd(self.rng, self.time)
         chex.assert_trees_all_close(
             result,
             jnp.zeros_like(result),
@@ -81,6 +82,7 @@ class LinearVelocityCommandTest(chex.TestCase):
 class AngularVelocityCommandTest(chex.TestCase):
     def setUp(self):
         self.rng = jax.random.PRNGKey(0)
+        self.time = jnp.array(0.0)
 
     def test_initialization(self):
         cmd = AngularVelocityCommand(scale=1.0, switch_prob=0.0, zero_prob=0.0)
@@ -90,7 +92,7 @@ class AngularVelocityCommandTest(chex.TestCase):
 
     def test_command_shape(self):
         cmd = AngularVelocityCommand()
-        result = cmd(self.rng)
+        result = cmd(self.rng, self.time)
         chex.assert_shape(result, (1,))
 
     def test_command_bounds(self):
@@ -100,14 +102,14 @@ class AngularVelocityCommandTest(chex.TestCase):
         # Run multiple times to test bounds probabilistically
         for _ in range(100):
             self.rng, key = jax.random.split(self.rng)
-            result = cmd(key)
+            result = cmd(key, self.time)
 
             self.assertTrue(result[0] >= -scale)
             self.assertTrue(result[0] <= scale)
 
     def test_zero_probability(self):
         cmd = AngularVelocityCommand(zero_prob=1.0)
-        result = cmd(self.rng)
+        result = cmd(self.rng, self.time)
         chex.assert_trees_all_close(
             result,
             jnp.zeros_like(result),

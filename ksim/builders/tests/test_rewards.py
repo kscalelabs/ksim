@@ -59,20 +59,18 @@ class DummyMjxData:
 class DummyMjxEnvState:
     """Mock MjxEnvState for testing."""
 
-    def __init__(self, info=None, last_action=None, commands=None):
+    def __init__(
+        self,
+        action_at_prev_step=None,
+        commands=None,
+    ):
         default_commands = {
             "linear_velocity_command": jnp.array([0.5, 0.3]),
             "angular_velocity_command": jnp.array([0.2]),
         }
         self.commands = commands if commands is not None else default_commands
-        self.info = (
-            info
-            if info is not None
-            else {
-                "last_action": (
-                    last_action if last_action is not None else jnp.array([0.1, 0.2, 0.3])
-                ),
-            }
+        self.action_at_prev_step = (
+            action_at_prev_step if action_at_prev_step is not None else jnp.array([0.1, 0.2, 0.3])
         )
 
 
@@ -227,7 +225,9 @@ class ActionSmoothnessPenaltyTest(chex.TestCase):
 
     def test_l2_norm(self):
         penalty = ActionSmoothnessPenalty(scale=1.0, norm="l2")
-        prev_state = DummyMjxEnvState(info={"last_action": jnp.array([0.1, 0.2, 0.3])})
+        prev_state = DummyMjxEnvState(
+            action_at_prev_step=jnp.array([0.1, 0.2, 0.3]),
+        )
         action = jnp.array([0.2, 0.4, 0.5])
         mjx_data = DummyMjxData()
 
@@ -239,7 +239,9 @@ class ActionSmoothnessPenaltyTest(chex.TestCase):
 
     def test_l1_norm(self):
         penalty = ActionSmoothnessPenalty(scale=1.0, norm="l1")
-        prev_state = DummyMjxEnvState(info={"last_action": jnp.array([0.1, 0.2, 0.3])})
+        prev_state = DummyMjxEnvState(
+            action_at_prev_step=jnp.array([0.1, 0.2, 0.3]),
+        )
         action = jnp.array([0.0, 0.4, 0.2])
         mjx_data = DummyMjxData()
 
