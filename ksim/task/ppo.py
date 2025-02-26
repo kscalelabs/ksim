@@ -106,10 +106,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
         next_states = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), states)
-        actions = states.info["actions"]
-        rewards = states.reward
+        actions = states.action_at_prev_step  # a_{t-1}
+        rewards = states.reward  # r_{t-1} = R(s_{t-1}, a_{t-1}, s_t)
         done = states.done
-        action_log_probs = states.info["action_log_probs"]
+        action_log_probs = states.action_log_prob_at_prev_step  # log(a_{t-1})
 
         return PPOBatch(
             state=states,

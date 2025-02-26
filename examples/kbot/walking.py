@@ -29,9 +29,9 @@ from ksim.builders.rewards import (
     TrackLinearVelocityXYReward,
 )
 from ksim.builders.terminations import IllegalContactTerminationBuilder
-from ksim.env.base_env import EnvState
 from ksim.env.mjx.mjx_env import MjxEnv
 from ksim.env.mjx.types import MjxEnvState
+from ksim.env.types import EnvState
 from ksim.model.formulations import (
     ActionModel,
     ActorCriticModel,

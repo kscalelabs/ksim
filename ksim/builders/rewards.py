@@ -147,7 +147,7 @@ class ActionSmoothnessPenalty(Reward):
     norm: NormType = attrs.field(default="l2")
 
     def __call__(self, prev_state: MjxEnvState, action: Array, mjx_data: mjx.Data) -> Array:
-        last_action = prev_state.info["last_action"]
+        last_action = prev_state.action_at_prev_step
         return get_norm(action - last_action, self.norm).sum(axis=-1)
 
 

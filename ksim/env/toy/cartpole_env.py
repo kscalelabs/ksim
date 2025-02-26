@@ -32,10 +32,19 @@ class CartPoleEnv(BaseEnv):
             obs={"observations": jnp.array(obs)[None, :]},
             reward=jnp.array(1.0)[None],
             done=jnp.array(False)[None],
-            info={"rng": rng, **info},
+            time=jnp.array(0.0),
+            rng=rng,
+            action_at_prev_step=jnp.zeros_like(self.env.action_space.sample()),
+            action_log_prob_at_prev_step=jnp.array(0.0),
         )
 
-    def step(self, prev_state: EnvState, action: Array, rng: PRNGKeyArray) -> EnvState:
+    def step(
+        self,
+        prev_state: EnvState,
+        action: Array,
+        rng: PRNGKeyArray,
+        action_log_prob: Array,
+    ) -> EnvState:
         """Step the environment.
 
         NOTE: for simplicity, this environment is stateful and doesn't actually use prev_state in
@@ -59,7 +68,10 @@ class CartPoleEnv(BaseEnv):
             obs={"observations": jnp.array(obs)[None, :]},
             reward=jnp.array(reward)[None],
             done=jnp.array(done)[None],
-            info={"rng": prev_state.info["rng"], **info},
+            time=prev_state.time + 1.0,
+            rng=prev_state.rng,
+            action_at_prev_step=action,
+            action_log_prob_at_prev_step=action_log_prob,
         )
 
     def unroll_trajectories(
@@ -97,7 +109,7 @@ class CartPoleEnv(BaseEnv):
                 rng, _ = jax.random.split(rng)
             else:
                 rng, step_rng = jax.random.split(rng)
-                state = self.step(state, action, step_rng)
+                state = self.step(state, action, step_rng, log_probs)
 
         observations = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *observations)
         actions = jnp.stack(actions)
@@ -109,7 +121,10 @@ class CartPoleEnv(BaseEnv):
             obs=observations,
             reward=rewards,
             done=done,
-            info={"rng": rng, "actions": actions, "action_log_probs": action_log_probs},
+            time=jnp.arange(num_steps),
+            rng=rng,
+            action_at_prev_step=actions,
+            action_log_prob_at_prev_step=action_log_probs,
         )
 
     @property

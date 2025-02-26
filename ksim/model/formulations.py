@@ -6,7 +6,7 @@ from typing import Tuple
 import flax.linen as nn
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.env.base_env import EnvState
+from ksim.env.types import EnvState
 
 
 class ActionModel(nn.Module, ABC):

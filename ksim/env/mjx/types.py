@@ -1,13 +1,12 @@
 """MJX Utils."""
 
 from dataclasses import dataclass
-from typing import Any
 
 import jax
-from jaxtyping import Array
+from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
-from ksim.env.base_env import EnvState
+from ksim.env.types import EnvState
 
 
 @jax.tree_util.register_dataclass
@@ -24,10 +23,19 @@ class MjxEnvState(EnvState):
         info: Additional information about the environment.
     """
 
+    # MJX attributes
     mjx_model: mjx.Model
-    mjx_data: mjx.Data  # making this non-optional.
+    mjx_data: mjx.Data
+
+    # Classic state attributes
     obs: dict[str, Array]
-    commands: dict[str, Array]
     reward: Array
     done: Array
-    info: dict[str, Any]
+    commands: dict[str, Array]  # added for MJX envs... decoupled commands from observations
+
+    # Auxiliary attributes
+    time: Array
+    rng: PRNGKeyArray
+    command_at_prev_step: Array
+    action_at_prev_step: Array
+    action_log_prob_at_prev_step: Array

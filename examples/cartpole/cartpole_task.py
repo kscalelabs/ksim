@@ -10,8 +10,8 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.env.base_env import EnvState
 from ksim.env.toy.cartpole_env import CartPoleEnv
+from ksim.env.types import EnvState
 from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask

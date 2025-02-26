@@ -304,7 +304,11 @@ class MjxEnv(BaseEnv):
                 commands={},
                 reward=jnp.array(0.0),
                 done=jnp.array(False),
-                info={},
+                time=jnp.array(0.0),
+                rng=rng,
+                command_at_prev_step=jnp.zeros_like(self.default_mjx_data.ctrl),
+                action_at_prev_step=jnp.zeros_like(self.default_mjx_data.ctrl),
+                action_log_prob_at_prev_step=jnp.array(0.0),
             )
 
         reset_data = env_state.mjx_data
@@ -334,8 +338,12 @@ class MjxEnv(BaseEnv):
             obs=obs,
             reward=reward,
             done=done,
-            info=info,
             commands=self.get_initial_commands(rng, None),
+            time=jnp.array(0.0),
+            rng=rng,
+            command_at_prev_step=jnp.zeros_like(new_data.ctrl),
+            action_at_prev_step=jnp.zeros_like(new_data.ctrl),
+            action_log_prob_at_prev_step=jnp.array(0.0),
         )
 
     def _apply_physics_steps(
@@ -364,7 +372,13 @@ class MjxEnv(BaseEnv):
         (state, _), _ = jax.lax.scan(f, (mjx_data, 0), None, n_steps)
         return state
 
-    def step(self, env_state: MjxEnvState, action: Array, rng: PRNGKeyArray) -> MjxEnvState:
+    def step(
+        self,
+        env_state: MjxEnvState,
+        action: Array,
+        rng: PRNGKeyArray,
+        action_log_prob: Array | None = None,
+    ) -> MjxEnvState:
         """Stepping the environment in a consistent, JIT-able manner. Works on a single environment.
 
         At t=t_0:
@@ -389,7 +403,7 @@ class MjxEnv(BaseEnv):
             minval=self.min_action_latency_step,
             maxval=self.max_action_latency_step,
         )
-        prev_ctrl = env_state.info["prev_ctrl"]
+        prev_ctrl = self.actuators.get_ctrl(env_state, env_state.action_at_prev_step)
         torque_ctrl = self.actuators.get_ctrl(env_state, action)
 
         new_mjx_data = self._apply_physics_steps(
@@ -405,15 +419,9 @@ class MjxEnv(BaseEnv):
         all_rewards = self.get_rewards(env_state, action, new_mjx_data)
         reward = jnp.stack([v for _, v in all_rewards]).sum()
 
-        new_info = dict(
-            time=env_state.info["time"] + self.config.ctrl_dt,
-            rng=rng,
-            prev_ctrl=new_mjx_data.ctrl,
-            prev_commands=env_state.commands,
-            actions=action,
-        )
+        time = env_state.time + self.config.ctrl_dt
 
-        commands = self.get_commands(env_state.commands, rng, env_state.info["time"])
+        commands = self.get_commands(env_state.commands, rng, time)
 
         new_state = MjxEnvState(
             mjx_model=env_state.mjx_model,
@@ -422,7 +430,11 @@ class MjxEnv(BaseEnv):
             commands=commands,
             reward=reward,
             done=done,
-            info=new_info,
+            time=time,
+            rng=rng,
+            command_at_prev_step=env_state.command_at_prev_step,
+            action_at_prev_step=action,
+            action_log_prob_at_prev_step=jnp.array(0.0),
         )
 
         return new_state
@@ -448,12 +460,11 @@ class MjxEnv(BaseEnv):
 
         def env_step(env_state: MjxEnvState, rng: Array) -> MjxEnvState:
             action, action_log_prob = action_log_prob_fn(env_state, rng)
-            env_state.info["action_log_probs"] = action_log_prob
             # ML: I don't love how we update info in multiple places...
             new_state = jax.lax.cond(
                 env_state.done,
                 lambda _: self.reset(rng, env_state),
-                lambda _: self.step(env_state, action, rng),
+                lambda _: self.step(env_state, action, rng, action_log_prob),
                 operand=None,
             )
             assert isinstance(new_state, MjxEnvState)
