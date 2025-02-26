@@ -2,7 +2,7 @@
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, Generic, NamedTuple, Tuple, TypeVar
+from typing import Generic, NamedTuple, TypeVar
 
 import equinox as eqx
 import jax
@@ -94,7 +94,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)."""
 
         @jax.jit
-        def action_log_prob_fn(state: EnvState, rng: PRNGKeyArray) -> Tuple[Array, Array]:
+        def action_log_prob_fn(state: EnvState, rng: PRNGKeyArray) -> tuple[Array, Array]:
             obs = self.get_model_obs_from_state(state)
             actions, log_probs = model.apply(params, obs, rng, method="actor_sample_and_log_prob")
             assert isinstance(actions, Array)
@@ -131,7 +131,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         batch: PPOBatch,
-    ) -> tuple[PyTree, optax.OptState, Array, dict]:
+    ) -> tuple[PyTree, optax.OptState, Array, dict[str, Array]]:
         """Update the model parameters."""
         loss_val, metrics, grads = self._jitted_value_and_grad(model, params, batch)
         updates, new_opt_state = optimizer.update(grads, opt_state, params)
@@ -167,7 +167,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         batch: PPOBatch,
-    ) -> tuple[Array, Dict[str, Array]]:
+    ) -> tuple[Array, dict[str, float]]:
         """Compute the PPO loss (required by XAX).
 
         Args:
@@ -251,10 +251,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         batch: PPOBatch,
-    ) -> tuple[Array, Dict[str, Array], PyTree]:
+    ) -> tuple[Array, dict[str, float], PyTree]:
         """Jitted version of value_and_grad computation."""
 
-        def loss_fn(p: PyTree) -> tuple[Array, dict[str, Array]]:
+        def loss_fn(p: PyTree) -> tuple[Array, dict[str, float]]:
             loss, metrics = self.compute_loss(model, p, batch)
             return loss, metrics
 
