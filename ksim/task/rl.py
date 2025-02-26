@@ -24,13 +24,10 @@ from omegaconf import MISSING
 
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.env.builders.loggers import (
-    AverageRewardLogBuilder,
-    EntropyLogBuilder,
-    EpisodeLengthLogBuilder,
     LoggingData,
-    PolicyLossLogBuilder,
-    TotalLossLogBuilder,
-    ValueLossLogBuilder,
+    EpisodeLengthLog,
+    AverageRewardLog,
+    ModelUpdateLog,
 )
 from ksim.env.mjx.mjx_env import (
     KScaleActionModelType,
@@ -95,12 +92,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self.max_trajectory_steps = round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
         self.curr_logging_data = LoggingData()
         self.loggers = [
-            EpisodeLengthLogBuilder()(None),
-            AverageRewardLogBuilder()(None),
-            PolicyLossLogBuilder()(None),
-            ValueLossLogBuilder()(None),
-            EntropyLogBuilder()(None),
-            TotalLossLogBuilder()(None),
+            EpisodeLengthLog(),
+            AverageRewardLog(),
+            ModelUpdateLog("policy_loss"), # name should be the key in update_metrics
+            ModelUpdateLog("value_loss"),
+            ModelUpdateLog("entropy"),
+            ModelUpdateLog("total_loss"),
         ]
 
     ####################
@@ -312,9 +309,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Logs the trajectory statistics.
             with self.step_context("write_logs"):
                 training_state.raw_phase = "train"
-                for logger in self.loggers:
+                for log_item in self.loggers:
                     self.logger.log_scalar(
-                        logger.get_name(), lambda logger=logger: logger(self.curr_logging_data), namespace="📉"
+                        log_item.get_name(), lambda logger=log_item: logger(self.curr_logging_data), namespace="📉"
                     )
                 self.logger.write(training_state)
                 training_state.num_steps += 1
