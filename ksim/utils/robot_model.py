@@ -48,6 +48,7 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
 
         if (control_frequency := metadata.control_frequency) is None:
             raise ValueError(f"No control frequency found for {model_name}")
+
         if (actuators := metadata.joint_name_to_metadata) is None:
             raise ValueError(f"No actuators found for {model_name}")
 
@@ -62,14 +63,32 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
             else:
                 raise ValueError(f"Unknown actuator metadata: {metadata}")
 
-        assert isinstance(control_frequency, float)  # NOTE: currently typed as str... need to change
+        # Type cast control_frequency to float.
+        try: 
+            assert isinstance(control_frequency, str)
+            control_frequency = float(control_frequency)
+        except ValueError:
+            raise ValueError(f"Control frequency {control_frequency} is not a float")
         model_metadata = ModelMetadata(actuators=actuator_metadata, control_frequency=control_frequency)
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
         OmegaConf.save(model_metadata, metadata_path)
 
-    config = OmegaConf.structured(ModelMetadata)
-    return cast(ModelMetadata, OmegaConf.merge(config, OmegaConf.load(metadata_path)))
-
+    # Load from file and create the correct object
+    loaded_conf = OmegaConf.load(metadata_path)
+    
+    # Create the actuators dictionary with correct types
+    actuators_meta: dict[str, MITPositionActuatorMetadata] = {}
+    for name, actuator_data in loaded_conf.actuators.items():
+        actuators_meta[name] = MITPositionActuatorMetadata(
+            kp=float(actuator_data.kp),
+            kd=float(actuator_data.kd)
+        )
+    
+    # Create the ModelMetadata object directly 
+    return ModelMetadata(
+        actuators=actuators_meta,
+        control_frequency=float(loaded_conf.control_frequency)
+    )
 
 async def get_model_and_metadata(model_name: str, cache: bool = True) -> tuple[str, ModelMetadata]:
     """Downloads and caches the model URDF and metadata."""
