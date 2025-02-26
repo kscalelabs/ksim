@@ -24,9 +24,9 @@ from omegaconf import MISSING
 
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.env.builders.loggers import (
-    LoggingData,
-    EpisodeLengthLog,
     AverageRewardLog,
+    EpisodeLengthLog,
+    LoggingData,
     ModelUpdateLog,
 )
 from ksim.env.mjx.mjx_env import (
@@ -94,7 +94,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self.log_items = [
             EpisodeLengthLog(),
             AverageRewardLog(),
-            ModelUpdateLog("policy_loss"), # name should be the key in update_metrics
+            ModelUpdateLog("policy_loss"),  # name should be the key in update_metrics
             ModelUpdateLog("value_loss"),
             ModelUpdateLog("entropy"),
             ModelUpdateLog("total_loss"),

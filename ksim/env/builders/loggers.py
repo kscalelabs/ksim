@@ -1,14 +1,12 @@
 """Defines a standard interface for logging metrics."""
 
 from abc import ABC, abstractmethod
-from typing import Generic, NamedTuple, TypeVar
+from typing import NamedTuple
 
 import attrs
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PyTree
-
-from ksim.utils.data import BuilderData
 
 
 class TrajectoryData(NamedTuple):
@@ -30,9 +28,7 @@ class TrajectoryData(NamedTuple):
 @attrs.define(frozen=True, kw_only=True)
 class LoggingData:
     trajectory: TrajectoryData | None = None
-    update_metrics: dict[str, jnp.ndarray] = attrs.field(
-        factory=dict
-    )
+    update_metrics: dict[str, jnp.ndarray] = attrs.field(factory=dict)
     gradients: PyTree | None = None
     loss: float | None = None
     training_state: xax.State | None = None
@@ -52,6 +48,7 @@ class LogMetric(ABC):
         """Returns a human-friendly name for the metric."""
         return xax.camelcase_to_snakecase(self.__class__.__name__)
 
+
 @attrs.define(frozen=True, kw_only=True)
 class EpisodeLengthLog(LogMetric):
     def __call__(self, data: LoggingData) -> jnp.ndarray:
@@ -61,6 +58,7 @@ class EpisodeLengthLog(LogMetric):
         # Ensure we have at least one termination event.
         episode_count = jnp.sum(trajectory.done).clip(min=1)
         return jnp.sum(~trajectory.done) / episode_count
+
 
 @attrs.define(frozen=True, kw_only=True)
 class AverageRewardLog(LogMetric):
