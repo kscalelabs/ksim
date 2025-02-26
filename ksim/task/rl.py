@@ -245,7 +245,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if pretrained is not None:
             # TODO: implement pretrained model loading.
             raise NotImplementedError("Pretrained models are not yet implemented.")
-
+        breakpoint()
         model = self.get_model(key)
         assert isinstance(model, nn.Module), "Model must be an Flax linen module."
         return model.init(key, self.get_model_obs_from_state(state))
@@ -290,15 +290,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             with self.step_context("on_step_start"):
                 training_state = self.on_step_start(training_state)
 
+            # Unrolls a trajectory.
+            train_rng, step_rng = jax.random.split(train_rng)
+            trajectories = self.get_trajectory_batch(model, params, env, step_rng)
+
             # Updates the model on the collected trajectories.
             with self.step_context("update_state"):
-                for _ in range(self.config.num_learning_epochs):
-                    for _ in range(self.config.num_mini_batches):
-                        # Unrolls a trajectory.
-                        train_rng, step_rng = jax.random.split(train_rng)
-                        trajectories = self.get_trajectory_batch(model, params, env, step_rng)
-
-                        params, opt_state = self.model_update(model, params, optimizer, opt_state, trajectories)
+                params, opt_state = self.model_update(
+                    model, params, optimizer, opt_state, trajectories
+                )
 
             # Logs the trajectory statistics.
             with self.step_context("write_logs"):

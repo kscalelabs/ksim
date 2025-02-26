@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
-
+from typing import Iterator
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.model.formulations import ActorCriticModel
 from ksim.task.rl import RLConfig, RLTask
@@ -31,14 +31,14 @@ class PPOConfig(RLConfig):
     use_clipped_value_loss: bool = xax.field(value=False, help="Whether to use clipped value loss.")
 
     # For the entropy bonus term
-    entropy_coef: float = xax.field(value=0.008, help="Entropy coefficient for PPO.")
+    entropy_coef: float = xax.field(value=0.001, help="Entropy coefficient for PPO.")
 
     # For the GAE computation
     gamma: float = xax.field(value=0.99, help="Discount factor for PPO")
     lam: float = xax.field(value=0.95, help="Lambda for GAE: high = more bias; low = more variance")
 
     # General training parameters
-    learning_rate: float = xax.field(value=1e-3, help="Learning rate for PPO.")
+    learning_rate: float = xax.field(value=1e-4, help="Learning rate for PPO.")
     max_grad_norm: float = xax.field(value=0.5, help="Maximum gradient norm for clipping.")
     num_learning_epochs: int = xax.field(value=1, help="Number of learning epochs per PPO update.")
     num_mini_batches: int = xax.field(value=1, help="Number of mini-batches per PPO epoch.")
@@ -83,13 +83,22 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Get the critic carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
 
+    def batch_generator(self, trajectories: Iterator[PPOBatch]) -> Iterator[PPOBatch]:
+        """Generate mini-batches from trajectories."""
+        batch_size = self.config.num_envs * self.config.num_
+        mini_batch_size = batch_size // self.config.num_mini_batches
+        indices = jnp.random.permutation(self.config.num_mini_batches * mini_batch_size)
+        for i in range(self.config.num_learning_epochs):
+            for batch in trajectories:
+                yield batch
+
     def get_trajectory_batch(
         self,
         model: ActorCriticModel,
         params: PyTree,
         env: BaseEnv,
         rng: PRNGKeyArray,
-    ) -> NamedTuple:
+    ) -> Iterator[PPOBatch]:
         """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)"""
 
         @jax.jit
@@ -194,8 +203,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         advantages = self._compute_advantages(values, batch)  # (time, env)
         returns = advantages + values
         # normalizing advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + _EPS)
-
+        advantages = (advantages - advantages.mean()) / (advantages.std() + _EPS)   
+        returns = (returns - returns.mean()) / (returns.std() + _EPS)
         # policy loss with clipping
         policy_loss = -jnp.mean(
             jnp.minimum(
@@ -205,7 +214,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         # value loss with clipping
-
         value_loss = jax.lax.cond(
             self.config.use_clipped_value_loss,
             lambda: self._clipped_value_loss(values, values, returns),
@@ -215,7 +223,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # entropy bonus term
         probs = jax.nn.softmax(predictions)  # TODO: make this live in the model
         entropy_loss = -jnp.mean(jnp.sum(probs * log_probs, axis=-1))
-
         total_loss = policy_loss + self.config.value_loss_coef * value_loss - self.config.entropy_coef * entropy_loss
 
         metrics = {

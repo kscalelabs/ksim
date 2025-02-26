@@ -13,7 +13,7 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim.env.base_env import EnvState
 from ksim.env.toy.cartpole_env import CartPoleEnv
 from ksim.model.formulations import ActionModel, ActorCriticModel
-from ksim.model.mlp import MLP
+from ksim.model.mlp import MLP, CriticMLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
 logger = logging.getLogger(__name__)
@@ -58,9 +58,9 @@ class CartPoleConfig(PPOConfig):
     """Configuration for CartPole training."""
 
     # ML model parameters.
-    actor_hidden_dims: int = xax.field(value=128, help="Hidden dimensions for the actor.")
+    actor_hidden_dims: int = xax.field(value=256, help="Hidden dimensions for the actor.")
     actor_num_layers: int = xax.field(value=2, help="Number of layers for the actor.")
-    critic_hidden_dims: int = xax.field(value=128, help="Hidden dimensions for the critic.")
+    critic_hidden_dims: int = xax.field(value=256, help="Hidden dimensions for the critic.")
     critic_num_layers: int = xax.field(value=2, help="Number of layers for the critic.")
 
     # Environment parameters
@@ -93,10 +93,11 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
                 ),
             ),
             critic_module=CartPoleCriticModel(
-                mlp=MLP(
+                mlp=CriticMLP(
                     num_hidden_layers=self.config.critic_num_layers,
                     hidden_features=self.config.critic_hidden_dims,
                     out_features=1,
+
                 ),
             ),
         )
