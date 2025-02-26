@@ -35,7 +35,7 @@ class CartPoleEnv(BaseEnv):
             info={"rng": rng, **info},
         )
 
-    def step(self, prev_state: EnvState, action: Array) -> EnvState:
+    def step(self, prev_state: EnvState, action: Array, rng: PRNGKeyArray) -> EnvState:
         """Step the environment.
 
         NOTE: for simplicity, this environment is stateful and doesn't actually use prev_state in

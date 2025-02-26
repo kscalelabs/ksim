@@ -27,15 +27,23 @@ class MITPositionActuators(Actuators):
         **kwargs: Any,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
-        self.kps = jnp.zeros(len(mujoco_mappings.ctrl_name_to_idx))
-        self.kds = jnp.zeros(len(mujoco_mappings.ctrl_name_to_idx))
+        kps_list = [0.0] * len(mujoco_mappings.ctrl_name_to_idx)
+        kds_list = [0.0] * len(mujoco_mappings.ctrl_name_to_idx)
 
-        for actuator_name, actuator_metadata in actuators_metadata.items():
-            assert isinstance(actuator_metadata, MITPositionActuatorMetadata)
+        for joint_name, actuator_metadata in actuators_metadata.items():
+            actuator_name = joint_name + "_ctrl"  # TODO: properly agree upon naming accross org...
             actuator_idx = mujoco_mappings.ctrl_name_to_idx[actuator_name]
-            self.kps[actuator_idx] = actuator_metadata.kp
-            self.kds[actuator_idx] = actuator_metadata.kd
+            kp = getattr(actuator_metadata, "kp", None)
+            kd = getattr(actuator_metadata, "kd", None)
+            if kp is None or kd is None:
+                raise ValueError(
+                    f"actuator_metadata for {joint_name} missing required kp or kd attribute"
+                )
+            kps_list[actuator_idx] = kp
+            kds_list[actuator_idx] = kd
 
+        self.kps = jnp.array(kps_list)
+        self.kds = jnp.array(kds_list)
         if any(self.kps == 0) or any(self.kds == 0):
             raise ValueError("Some kps or kds are 0. Check your actuators_metadata.")
 

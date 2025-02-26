@@ -2,30 +2,25 @@
 
 import functools
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Generic, TypeVar
 
+import attrs
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import numpy as np
+import mujoco.mjx as mjx
 import xax
 from jaxtyping import PRNGKeyArray
 
-from ksim.env.mjx.mjx_env import EnvState
 from ksim.utils.data import BuilderData
 
 
-@jax.tree_util.register_dataclass
-@dataclass
-class ResetData:
-    rng: PRNGKeyArray
-    state: EnvState
+@attrs.define(frozen=True, kw_only=True)
+class Reset(ABC):
+    """Base class for resets."""
 
-
-class Reset(eqx.Module, ABC):
     @abstractmethod
-    def __call__(self, data: ResetData) -> ResetData:
+    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
         """Resets the environment."""
 
     def get_name(self) -> str:
@@ -42,75 +37,49 @@ T = TypeVar("T", bound=Reset)
 class ResetBuilder(ABC, Generic[T]):
     @abstractmethod
     def __call__(self, data: BuilderData) -> T:
-        """Builds a reset from a MuJoCo model.
-
-        Args:
-            data: The data to build the reset from.
-
-        Returns:
-            A reset that can be applied to a state.
-        """
+        """Builds a reset from a MuJoCo model."""
 
 
+@attrs.define(frozen=True, kw_only=True)
 class XYPositionReset(Reset):
+    """Resets the position of the robot to a random point within a bounding box."""
+
     bounds: tuple[float, float, float, float]
-    padding_prct: float
+    padding_prct: float = attrs.field(default=0.1)
     hfield_data: jnp.ndarray
 
-    def __init__(
-        self,
-        *,
-        bounds: tuple[float, float, float, float],
-        hfield_data: np.ndarray,
-        padding_prct: float = 0.1,
-    ) -> None:
-        """Initialize the reset.
-
-        Args:
-            bounds: Bounds for where to position the robot.
-            hfield_data: The height field data.
-            padding_prct: The percentage of the bounds to pad.
-        """
-        super().__init__()
-
-        self.bounds = bounds
-        self.padding_prct = padding_prct
-        self.hfield_data = jnp.array(hfield_data)
-
-    def __call__(self, data: ResetData) -> ResetData:
+    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+        # TODO: figure out why this is not jit-able.
         x, y, ztop, _ = self.bounds
 
         prct = 1.0 - self.padding_prct
         x, y = x * prct, y * prct
 
-        # Generate random position
-        rng, keyx, keyy = jax.random.split(data.rng, 3)
+        rng, keyx, keyy = jax.random.split(rng, 3)
         dx = jax.random.uniform(keyx, (1,), minval=-x, maxval=x)
         dy = jax.random.uniform(keyy, (1,), minval=-y, maxval=y)
 
-        # Update position while maintaining small height above ground
-        qpos_j = data.state.q
+        qpos_j = data.qpos
         qpos_j = qpos_j.at[0:1].set(dx)
         qpos_j = qpos_j.at[1:2].set(dy)
 
-        # Make sure the Z position is above the ground.
         z = self.hfield_data[dx.astype(int), dy.astype(int)]
         qpos_j = qpos_j.at[2:3].set(z + ztop)
 
-        data.state = data.state.replace(q=qpos_j)
-        data.rng = rng
+        data = data.replace(qpos=qpos_j)
         return data
 
+    def __hash__(self) -> int:
+        """Convert JAX arrays to bytes for hashing."""
+        array_bytes = self.hfield_data.tobytes()
+        return hash((self.bounds, self.padding_prct, self.hfield_data.shape, array_bytes))
 
+
+@attrs.define(frozen=True, kw_only=True)
 class XYPositionResetBuilder(ResetBuilder[XYPositionReset]):
-    def __init__(
-        self,
-        *,
-        padding_prct: float = 0.1,
-    ) -> None:
-        super().__init__()
+    """Builds a XYPositionReset from a MuJoCo model."""
 
-        self.padding_prct = padding_prct
+    padding_prct: float = attrs.field(default=0.1)
 
     def __call__(self, data: BuilderData) -> XYPositionReset:
         x, y, ztop, zbottom = data.model.hfield_size.flatten().tolist()

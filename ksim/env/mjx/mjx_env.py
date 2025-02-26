@@ -23,14 +23,16 @@ from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING
 
+from ksim.builders.commands import Command, CommandBuilder
+from ksim.builders.observation import Observation, ObservationBuilder
+from ksim.builders.resets import Reset, ResetBuilder
+from ksim.builders.rewards import Reward, RewardBuilder
+from ksim.builders.terminations import Termination, TerminationBuilder
 from ksim.env.base_env import BaseEnv, EnvState
-from ksim.env.builders.commands import Command, CommandBuilder
-from ksim.env.builders.observation import Observation, ObservationBuilder
-from ksim.env.builders.resets import Reset, ResetBuilder, ResetData
-from ksim.env.builders.rewards import Reward, RewardBuilder
-from ksim.env.builders.terminations import Termination, TerminationBuilder
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.mjx.types import MjxEnvState
+from ksim.utils import mujoco
+from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import make_mujoco_mappings
 from ksim.utils.robot_model import get_model_and_metadata
 
@@ -188,36 +190,34 @@ class MjxEnv(BaseEnv):
 
         logger.info("Loading robot model %s", robot_model_path)
         mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
-        self.mujoco_mappings = make_mujoco_mappings(mj_model)
+        self.default_mjx_model = mjx.put_model(mj_model)
+        self.default_mjx_data = mjx.make_data(self.default_mjx_model)
+        self.mujoco_mappings = make_mujoco_mappings(self.default_mjx_model)
         self.actuators = MITPositionActuators(
             actuators_metadata=robot_model_metadata.actuators,
             mujoco_mappings=self.mujoco_mappings,
         )
 
-        # preparing builder data.        # data = BuilderData(
-        #     model=mj_model,
-        #     dt=self.config.dt,
-        #     ctrl_dt=self.config.ctrl_dt,
-        #     body_name_to_idx=self.body_name_to_idx,
-        #     joint_name_to_idx=self.joint_name_to_idx,
-        #     actuator_name_to_idx=self.actuator_name_to_idx,
-        #     geom_name_to_idx=self.geom_name_to_idx,
-        #     site_name_to_idx=self.site_name_to_idx,
-        #     sensor_name_to_idx=self.sensor_name_to_idx,
-        # )
+        # preparing builder data.
+        data = BuilderData(
+            model=self.default_mjx_model,
+            dt=self.config.dt,
+            ctrl_dt=self.config.ctrl_dt,
+            mujoco_mappings=self.mujoco_mappings,
+        )
 
         # storing the termination, reset, reward, observation, and command builders
-        # terminations_v = [t(data) if isinstance(t, TerminationBuilder) else t for t in terminations]
-        # resets_v = [r(data) if isinstance(r, ResetBuilder) else r for r in resets]
-        # rewards_v = [r(data) if isinstance(r, RewardBuilder) else r for r in rewards]
-        # observations_v = [o(data) if isinstance(o, ObservationBuilder) else o for o in observations]
-        # commands_v = [c(data) if isinstance(c, CommandBuilder) else c for c in commands]
+        terminations_v = [t(data) if isinstance(t, TerminationBuilder) else t for t in terminations]
+        resets_v = [r(data) if isinstance(r, ResetBuilder) else r for r in resets]
+        rewards_v = [r(data) if isinstance(r, RewardBuilder) else r for r in rewards]
+        observations_v = [o(data) if isinstance(o, ObservationBuilder) else o for o in observations]
+        commands_v = [c(data) if isinstance(c, CommandBuilder) else c for c in commands]
 
-        # self.terminations = _unique_list([(term.termination_name, term) for term in terminations_v])
-        # self.resets = _unique_list([(reset.reset_name, reset) for reset in resets_v])
-        # self.rewards = _unique_list([(reward.reward_name, reward) for reward in rewards_v])
-        # self.observations = _unique_list([(obs.observation_name, obs) for obs in observations_v])
-        # self.commands = _unique_list([(cmd.command_name, cmd) for cmd in commands_v])
+        self.terminations = _unique_list([(term.termination_name, term) for term in terminations_v])
+        self.resets = _unique_list([(reset.reset_name, reset) for reset in resets_v])
+        self.rewards = _unique_list([(reward.reward_name, reward) for reward in rewards_v])
+        self.observations = _unique_list([(obs.observation_name, obs) for obs in observations_v])
+        self.commands = _unique_list([(cmd.command_name, cmd) for cmd in commands_v])
 
         # For simplicity, assume integer (increase granularity if needed).
         assert self.config.ctrl_dt % self.config.dt == 0, "ctrl_dt must be a multiple of dt"
@@ -229,13 +229,12 @@ class MjxEnv(BaseEnv):
 
     def get_observation(self, mjx_data: mjx.Data, rng: jax.Array) -> dict:
         """Compute observations from the pipeline state."""
-        observations = []
+        observations = {}
         for observation_name, observation in self.observations:
             rng, obs_rng = jax.random.split(rng)
-            observation_value = observation(mjx_data)
-            observation_value = observation.add_noise(observation_value, obs_rng)
-            observations.append((observation_name, observation_value))
-        return {k: v for k, v in observations}
+            observation_value = observation(mjx_data, obs_rng)
+            observations[observation_name] = observation_value
+        return observations
 
     def get_rewards(
         self,
@@ -243,8 +242,11 @@ class MjxEnv(BaseEnv):
         action: jnp.ndarray,
         new_mjx_data: mjx.Data,
     ) -> list[tuple[str, float]]:
-        """Compute rewards (each as a scalar) from the state transition."""
-        rewards = []
+        """Compute rewards (each as a scalar) from the state transition.
+
+        TODO: ML we might want to represent rewards as graphs (multiply and sum) or add flags...
+        """
+        rewards = []  # this ensures ordering...
         for reward_name, reward in self.rewards:
             reward_val = reward(prev_state, action, new_mjx_data) * reward.scale
             chex.assert_shape(
@@ -264,24 +266,58 @@ class MjxEnv(BaseEnv):
             terminations.append((termination_name, term_val))
         return terminations
 
+    def get_initial_commands(
+        self, rng: PRNGKeyArray, initial_time: Array | None
+    ) -> dict[str, Array]:
+        """Compute initial commands from the pipeline state. Assumes consistent ordering."""
+        commands = {}
+        if initial_time is None:
+            initial_time = jnp.array(0.0)
+        for command_name, command_def in self.commands:
+            assert isinstance(command_def, Command)
+            command_val = command_def(rng, initial_time)
+            commands[command_name] = command_val
+        return commands
+
+    def get_commands(
+        self, prev_commands: dict[str, Array], rng: PRNGKeyArray, time: Array
+    ) -> dict[str, Array]:
+        """Compute commands from the pipeline state. Assumes consistent ordering."""
+        commands = {}
+        for command_name, command_def in self.commands:
+            assert isinstance(command_def, Command)
+            command_val = command_def.update(prev_commands[command_name], rng, time)
+            commands[command_name] = command_val
+        return commands
+
     ###########################
     # Main API Implementation #
     ###########################
 
-    def reset(self, env_state: MjxEnvState, rng: jax.Array) -> MjxEnvState:
+    def reset(self, rng: jax.Array, env_state: MjxEnvState | None = None) -> MjxEnvState:
         """Pure reset function: returns an initial state computed solely from the inputs."""
-        # Apply any reset functions.
-        reset_data = ResetData(rng=rng, state=env_state)
+        if env_state is None:
+            env_state = MjxEnvState(
+                mjx_model=self.default_mjx_model,
+                mjx_data=self.default_mjx_data,
+                obs={},
+                commands={},
+                reward=jnp.array(0.0),
+                done=jnp.array(False),
+                info={},
+            )
+
+        reset_data = env_state.mjx_data
         for _, reset_func in self.resets:
-            reset_data = reset_func(reset_data)
-        updated_state = reset_data.state
+            reset_data = reset_func(reset_data, rng)
+        assert isinstance(reset_data, mjx.Data)
 
         rng, obs_rng = jax.random.split(rng)
 
         new_data = step_mjx(
-            mjx_model=updated_state.mjx_model,
-            mjx_data=updated_state.mjx_data,
-            ctrl=jnp.zeros_like(updated_state.mjx_data.ctrl),
+            mjx_model=env_state.mjx_model,
+            mjx_data=reset_data,
+            ctrl=jnp.zeros_like(reset_data.ctrl),
         )
 
         done = jnp.array(False, dtype=jnp.bool_)
@@ -293,12 +329,13 @@ class MjxEnv(BaseEnv):
         }
         obs = self.get_observation(new_data, obs_rng)
         return MjxEnvState(
-            mjx_model=updated_state.mjx_model,
+            mjx_model=env_state.mjx_model,
             mjx_data=new_data,
             obs=obs,
             reward=reward,
             done=done,
             info=info,
+            commands=self.get_initial_commands(rng, None),
         )
 
     def _apply_physics_steps(
@@ -327,8 +364,8 @@ class MjxEnv(BaseEnv):
         (state, _), _ = jax.lax.scan(f, (mjx_data, 0), None, n_steps)
         return state
 
-    def step(self, env_state: MjxEnvState, action: Array, rng: Array | None = None) -> MjxEnvState:
-        """Stepping the environment in a consistent, JIT-able manner.
+    def step(self, env_state: MjxEnvState, action: Array, rng: PRNGKeyArray) -> MjxEnvState:
+        """Stepping the environment in a consistent, JIT-able manner. Works on a single environment.
 
         At t=t_0:
             - Action is sampled.
@@ -345,8 +382,6 @@ class MjxEnv(BaseEnv):
             - Rewards are computed.
             - Terminations are computed.
         """
-        if rng is None:
-            rng = env_state.info["rng"]
         rng, latency_rng, obs_rng = jax.random.split(rng, 3)
         latency_steps = jax.random.randint(
             key=latency_rng,
@@ -366,20 +401,25 @@ class MjxEnv(BaseEnv):
 
         obs = self.get_observation(new_mjx_data, obs_rng)
         all_dones = self.get_terminations(new_mjx_data)
-        done = jnp.stack([v for _, v in all_dones], axis=-1).any(axis=-1)
+        done = jnp.stack([v for _, v in all_dones]).any()
         all_rewards = self.get_rewards(env_state, action, new_mjx_data)
-        reward = jnp.stack([v for _, v in all_rewards], axis=-1).sum(axis=-1)
+        reward = jnp.stack([v for _, v in all_rewards]).sum()
 
         new_info = dict(
             time=env_state.info["time"] + self.config.ctrl_dt,
             rng=rng,
             prev_ctrl=new_mjx_data.ctrl,
+            prev_commands=env_state.commands,
+            actions=action,
         )
+
+        commands = self.get_commands(env_state.commands, rng, env_state.info["time"])
 
         new_state = MjxEnvState(
             mjx_model=env_state.mjx_model,
             mjx_data=new_mjx_data,
             obs=obs,
+            commands=commands,
             reward=reward,
             done=done,
             info=new_info,
@@ -387,13 +427,13 @@ class MjxEnv(BaseEnv):
 
         return new_state
 
-    def rollout_trajectories(
+    def unroll_trajectories(
         self,
-        env_state: EnvState,
-        rng: Array,
+        action_log_prob_fn: Callable[[EnvState, PRNGKeyArray], Tuple[Array, Array]],
+        rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
-        action_fn: Callable[[MjxEnvState], Array],
+        **kwargs: Any,
     ) -> MjxEnvState:
         """Vectorized rollout of trajectories.
 
@@ -402,19 +442,21 @@ class MjxEnv(BaseEnv):
         3. A jax.lax.scan unrolls the trajectory for num_steps.
         4. The resulting trajectory has shape (num_steps, num_envs, ...).
         """
-        assert isinstance(env_state, MjxEnvState)
         init_rngs = jax.random.split(rng, num_envs)
-        init_states = jax.vmap(lambda key: self.reset(env_state, key))(init_rngs)
+        init_states = jax.vmap(lambda key: self.reset(key))(init_rngs)
         rng, _ = jax.random.split(rng)
 
         def env_step(env_state: MjxEnvState, rng: Array) -> MjxEnvState:
-            action = action_fn(env_state)
+            action, action_log_prob = action_log_prob_fn(env_state, rng)
+            env_state.info["action_log_probs"] = action_log_prob
+            # ML: I don't love how we update info in multiple places...
             new_state = jax.lax.cond(
                 env_state.done,
-                lambda _: self.reset(env_state, rng),
+                lambda _: self.reset(rng, env_state),
                 lambda _: self.step(env_state, action, rng),
                 operand=None,
             )
+            assert isinstance(new_state, MjxEnvState)
             return new_state
 
         def scan_fn(
@@ -432,3 +474,11 @@ class MjxEnv(BaseEnv):
             length=num_steps,
         )
         return traj  # Shape: (num_steps, num_envs, ...)
+
+    @property
+    def observation_size(self) -> int:
+        raise NotImplementedError("Not implemented yet... need to compile observations?")
+
+    @property
+    def action_size(self) -> int:
+        raise NotImplementedError("Not implemented yet... need to compile actions?")

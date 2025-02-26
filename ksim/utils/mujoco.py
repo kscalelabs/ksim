@@ -97,6 +97,7 @@ Tv = TypeVar("Tv")
 
 
 def lookup_in_dict(names: Collection[Tk], mapping: dict[Tk, Tv], names_type: str) -> list[Tv]:
+    """Lookup a list of names in a dictionary and return the corresponding values."""
     missing_names = [name for name in names if name not in mapping]
     if missing_names:
         available_names_str = "\n".join(str(name) for name in sorted(mapping.keys()))
@@ -128,7 +129,7 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
         else:
             sensordata_end = mjx_model.sensor_adr[i + 1]
 
-        name_start = mjx_model.name_actuatoradr[i]
+        name_start = mjx_model.name_sensoradr[i]
         name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
 
         sensor_name_to_idx_range[name] = (sensordata_start, sensordata_end)
@@ -177,11 +178,11 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
         geom_idx_to_body_name[i] = name
 
     return MujocoMappings(
-        sensor_name_to_idx_range,
-        qpos_name_to_idx_range,
-        qvelacc_name_to_idx_range,
-        ctrl_name_to_idx,
-        geom_idx_to_body_name,
+        sensor_name_to_idx_range=sensor_name_to_idx_range,
+        qpos_name_to_idx_range=qpos_name_to_idx_range,
+        qvelacc_name_to_idx_range=qvelacc_name_to_idx_range,
+        ctrl_name_to_idx=ctrl_name_to_idx,
+        geom_idx_to_body_name=geom_idx_to_body_name,
     )
 
 

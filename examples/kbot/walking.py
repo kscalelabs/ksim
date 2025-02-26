@@ -9,9 +9,8 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.base_env import EnvState
-from ksim.env.builders.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.env.builders.observation import (
+from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
+from ksim.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,
@@ -20,8 +19,8 @@ from ksim.env.builders.observation import (
     JointVelocityObservation,
     SensorObservationBuilder,
 )
-from ksim.env.builders.resets import XYPositionResetBuilder
-from ksim.env.builders.rewards import (
+from ksim.builders.resets import XYPositionResetBuilder
+from ksim.builders.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
     FootContactPenaltyBuilder,
@@ -29,7 +28,8 @@ from ksim.env.builders.rewards import (
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.env.builders.terminations import IllegalContactTerminationBuilder
+from ksim.builders.terminations import IllegalContactTerminationBuilder
+from ksim.env.base_env import EnvState
 from ksim.env.mjx.mjx_env import MjxEnv
 from ksim.model.formulations import (
     ActionModel,
@@ -365,7 +365,7 @@ class KBotCriticModel(nn.Module):
 @dataclass
 class KBotWalkingConfig(PPOConfig):
     # Robot model name to use.
-    model_name: str = xax.field(value="kbot-v1-feet")
+    robot_model_name: str = xax.field(value="kbot-v1-feet")
 
     # ML model parameters.
     actor_hidden_dims: int = xax.field(value=512)
@@ -407,7 +407,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 ActionSmoothnessPenalty(scale=-0.1),
                 FootContactPenaltyBuilder(
                     scale=-0.1,
-                    foot_name="foot1",
+                    foot_body_names=["KB_D_501R_R_LEG_FOOT"],
                     allowed_contact_prct=0.7,
                     skip_if_zero_command=[
                         "linear_velocity_command",
@@ -416,7 +416,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 ),
                 FootContactPenaltyBuilder(
                     scale=-0.1,
-                    foot_name="foot3",
+                    foot_body_names=["KB_D_501L_L_LEG_FOOT"],
                     allowed_contact_prct=0.7,
                     skip_if_zero_command=[
                         "linear_velocity_command",
@@ -479,6 +479,9 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
 
     def get_init_critic_carry(self) -> None:
         return None
+
+    def viz_environment(self) -> None:
+        raise NotImplementedError("Not implemented")
 
 
 if __name__ == "__main__":

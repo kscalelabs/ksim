@@ -25,6 +25,7 @@ class MjxEnvState(EnvState):
     mjx_model: mjx.Model
     mjx_data: mjx.Data  # making this non-optional.
     obs: dict[str, Array]
+    commands: dict[str, Array]
     reward: Array
     done: Array
     info: dict[str, Any]

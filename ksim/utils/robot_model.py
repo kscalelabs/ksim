@@ -4,7 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from kscale import K
 from kscale.web.utils import get_robots_dir, should_refresh_file
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ModelMetadata:
-    actuators: dict[str, BaseActuatorMetadata]
+    actuators: dict[str, Any]  # NOTE: using BaseActuatorMetadata breaks OmegaConf
     control_frequency: float
 
 
@@ -62,8 +62,10 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
             else:
                 raise ValueError(f"Unknown actuator metadata: {metadata}")
 
-        assert isinstance(control_frequency, float)  # NOTE: currently typed as str... need to change
-        model_metadata = ModelMetadata(actuators=actuator_metadata, control_frequency=control_frequency)
+        control_frequency = float(control_frequency)
+        model_metadata = ModelMetadata(
+            actuators=actuator_metadata, control_frequency=control_frequency
+        )
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
         OmegaConf.save(model_metadata, metadata_path)
 

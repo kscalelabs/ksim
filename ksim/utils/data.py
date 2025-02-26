@@ -2,19 +2,16 @@
 
 from dataclasses import dataclass
 
-import mujoco
+import mujoco.mjx as mjx
+
+from ksim.utils.mujoco import MujocoMappings
 
 
 @dataclass(frozen=True)
 class BuilderData:
     """A trajectory of states."""
 
-    model: mujoco.MjModel
+    model: mjx.Model
     dt: float
     ctrl_dt: float
-    joint_name_to_idx: dict[str, int]
-    body_name_to_idx: dict[str, int]
-    actuator_name_to_idx: dict[str, int]
-    geom_name_to_idx: dict[str, int]
-    site_name_to_idx: dict[str, int]
-    sensor_name_to_idx: dict[str, int]
+    mujoco_mappings: MujocoMappings
