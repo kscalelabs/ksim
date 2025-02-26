@@ -11,7 +11,7 @@ from ksim.env.base_env import BaseEnv, EnvState
 
 
 class CartPoleEnv(BaseEnv):
-    """CartPole environment wrapper to match the BraxState interface."""
+    """CartPole environment wrapper to match the MjxState interface."""
 
     def __init__(self, render_mode: str | None = None) -> None:
         self.env = gym.make("CartPole-v1", render_mode=render_mode)
@@ -25,7 +25,7 @@ class CartPoleEnv(BaseEnv):
             rng: PRNG key.
 
         Returns:
-            BraxState: The initial state of the environment.
+            MjxState: The initial state of the environment.
         """
         # TODO: probably want to use RNG properly
         obs, info = self.env.reset()
@@ -48,7 +48,7 @@ class CartPoleEnv(BaseEnv):
             action: The action to take.
 
         Returns:
-            BraxState: The next state of the environment.
+            MjxState: The next state of the environment.
         """
         try:
             obs, reward, terminated, truncated, info = self.env.step(action.item())
@@ -87,7 +87,7 @@ class CartPoleEnv(BaseEnv):
             num_envs: Number of environments to run in parallel.
 
         Returns:
-            A BraxState containing trajectories with shape (num_steps, ...) in leaves.
+            A MjxState containing trajectories with shape (num_steps, ...) in leaves.
         """
         assert num_envs == 1, "CartPoleEnv only supports a single environment"
         observations = []

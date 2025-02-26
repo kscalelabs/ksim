@@ -383,7 +383,7 @@ class MjxEnv(BaseEnv):
 
         return new_state
 
-    def rollout_trajectories(
+    def unroll_trajectories(
         self,
         env_state: EnvState,
         rng: Array,
@@ -427,22 +427,6 @@ class MjxEnv(BaseEnv):
         )
         return traj  # Shape: (num_steps, num_envs, ...)
 
-    def unroll_trajectories(
-        self,
-        action_log_prob_fn: Callable[[EnvState, PRNGKeyArray], Tuple[Array, Array]],
-        rng: PRNGKeyArray,
-        num_steps: int,
-        num_envs: int,
-        **kwargs: Any,
-    ) -> EnvState:
-        # TODO: implement this.
-        return EnvState(
-            obs=dict(),
-            reward=jnp.zeros(num_envs),
-            done=jnp.zeros(num_envs, dtype=jnp.bool_),
-            info=dict(),
-        )
-
     def render_frame(self, env_state: MjxEnvState, renderer: Renderer) -> np.ndarray:
         """Render a single frame from the environment state."""
         # We need to render using CPU MuJoCo, so we convert from MJX state
@@ -462,12 +446,10 @@ class MjxEnv(BaseEnv):
         frame = renderer.render()
 
         return frame
-
+    
     @property
     def observation_size(self) -> int:
-        """Return the total size of all observations."""
-        # TODO: implement this.
-        return 10
+        return sum(obs.shape for obs in self.get_observation(self.mujoco_mappings.name_to_qpos.values(), rng=jnp.zeros(1)))
 
     @property
     def action_size(self) -> int:
