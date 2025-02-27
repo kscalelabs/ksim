@@ -1,10 +1,8 @@
 """Base JAX centric environment class."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Any, Callable, Tuple
 
-import jax
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.env.types import EnvState

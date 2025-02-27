@@ -2,7 +2,7 @@
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, Generic, Tuple, TypeVar
+from typing import Generic, Tuple, TypeVar
 
 import equinox as eqx
 import jax
@@ -110,13 +110,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         env_state_batch: EnvState,
-    ) -> tuple[PyTree, optax.OptState]:
+    ) -> tuple[PyTree, optax.OptState, Array, dict[str, Array]]:
         """Update the model parameters."""
-        loss_val, grads = self._jitted_value_and_grad(model, params, env_state_batch)
+        loss_val, metrics, grads = self._jitted_value_and_grad(model, params, env_state_batch)
         print(f"Loss: {loss_val}")
         updates, new_opt_state = optimizer.update(grads, opt_state, params)
         new_params = optax.apply_updates(params, updates)
-        return new_params, new_opt_state
+        return new_params, new_opt_state, loss_val, metrics
 
     def get_optimizer(self) -> optax.GradientTransformation:
         """Get the optimizer: handled by XAX."""
@@ -154,7 +154,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         env_state_batch: EnvState,
-    ) -> tuple[Array, Dict[str, Array]]:
+    ) -> tuple[Array, dict[str, Array]]:
         """Compute the PPO loss (required by XAX).
 
         Args:
@@ -163,7 +163,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             env_state_batch: The environment state batch containing trajectories.
 
         Returns:
-            A tuple of (loss, metrics).
+            A tuple of (loss, metrics), where metrics contains JAX arrays for various losses.
         """
         # get the log probs of the current model
         prediction = self.apply_actor(model, params, env_state_batch.obs, env_state_batch.commands)
@@ -245,10 +245,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         env_state_batch: EnvState,
-    ) -> tuple[Array, PyTree]:
+    ) -> tuple[Array, dict[str, Array], PyTree]:
         """Jitted version of value_and_grad computation."""
 
-        def loss_fn(p: PyTree) -> Array:
-            return self.compute_loss(model, p, env_state_batch)[0]
+        def loss_fn(p: PyTree) -> tuple[Array, dict[str, Array]]:
+            return self.compute_loss(model, p, env_state_batch)
 
-        return jax.value_and_grad(loss_fn)(params)
+        (loss_val, metrics), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+        return loss_val, metrics, grads

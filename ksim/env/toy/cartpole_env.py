@@ -1,6 +1,6 @@
 """CartPole environment."""
 
-from typing import Any, Callable, Tuple
+from typing import Any
 
 import gymnasium as gym
 import jax

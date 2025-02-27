@@ -12,7 +12,6 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.env.toy.cartpole_env import CartPoleEnv
-from ksim.env.types import EnvState
 from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -142,13 +141,14 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
                 while True:
                     # Get observations and use policy
                     rng, action_rng = jax.random.split(rng)
-                    action, _ = model.apply(
+                    action, log_prob = model.apply(
                         params, env_state, action_rng, method="actor_sample_and_log_prob"
                     )
+                    assert isinstance(log_prob, Array)
 
                     # Take step
                     rng, step_rng = jax.random.split(rng)
-                    env_state = env.step(env_state, action, step_rng)
+                    env_state = env.step(env_state, action, step_rng, log_prob)
                     reward = env_state.reward.item()
                     done = env_state.done.item()
                     total_reward += reward
