@@ -187,12 +187,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             render_dir = self.exp_dir / "renders" / render_name
             logger.log(logging.INFO, "Rendering to %s", render_dir)
 
-            # Create or use an existing training state for logging
-            if state is None:
-                training_state = xax.State(raw_phase="eval")
-            else:
-                training_state = state
-
             self.set_loggers()
 
             # Unroll trajectories and collect the frames for rendering
@@ -203,16 +197,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 actions=actions,
             )
 
-            # Log trajectory statistics
-            self.log_trajectory_stats(env, trajectory)
-
             # Use the log items for additional metrics
             self.curr_logging_data = LoggingData(
                 trajectory=trajectory,
                 update_metrics={},
                 gradients=None,
                 loss=0.0,
-                training_state=training_state,
+                training_state="valid",
             )
 
             for log_item in self.log_items:
@@ -221,12 +212,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Log the rendered frames
             self.logger.log_images("trajectory", frames, namespace="video")
-
-            # Render and log trajectory video
-            self.log_trajectory(env, trajectory)
-
-            # Write the logs
-            self.logger.write(training_state)
 
             logger.log(logging.INFO, "Finished running environment and logging metrics")
 
