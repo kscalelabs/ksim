@@ -453,7 +453,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot.walking train
+    # python -m examples.kbot.walking action=train
     KBotWalkingTask.launch(
         KBotWalkingConfig(
             num_envs=1,

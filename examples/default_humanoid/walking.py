@@ -206,7 +206,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot.walking train
+    # python -m examples.default_humanoid.walking action=train
     HumanoidWalkingTask.launch(
         HumanoidWalkingConfig(
             num_envs=1,

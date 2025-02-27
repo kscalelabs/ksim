@@ -12,6 +12,7 @@ brax
 distrax
 gymnasium
 jax
+mediapy
 mujoco
 mujoco-mjx
 mujoco-scenes
