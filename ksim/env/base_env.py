@@ -9,7 +9,6 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.types import EnvState, KScaleActionModelType
 from ksim.model.formulations import ActionModel, ActorCriticModel
-from ksim.model.types import ActionLogProbFn
 
 
 class BaseEnv(ABC):

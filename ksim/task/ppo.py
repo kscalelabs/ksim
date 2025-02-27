@@ -3,7 +3,7 @@
 import os
 from abc import ABC
 from dataclasses import dataclass
-from typing import Generic, Tuple, TypeVar
+from typing import Generic, TypeVar
 
 import jax
 import jax.numpy as jnp
@@ -14,7 +14,6 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.model.formulations import ActorCriticModel
-from ksim.model.types import ActionLogProbFn
 from ksim.task.rl import RLConfig, RLTask
 from ksim.utils.jit import legit_jit
 

@@ -37,7 +37,6 @@ from ksim.env.base_env import BaseEnv, EnvState
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.types import EnvState, KScaleActionModelType
 from ksim.model.formulations import ActionModel, ActorCriticModel
-from ksim.model.types import ActionLogProbFn
 from ksim.utils.data import BuilderData
 from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
