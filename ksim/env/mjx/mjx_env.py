@@ -40,10 +40,10 @@ from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import make_mujoco_mappings
 from ksim.utils.robot_model import get_model_and_metadata
 from pathlib import Path
+import mediapy as media
 from PIL import Image
-from mujoco import renderer
 import mujoco
-from mujoco import viewer
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -552,12 +552,6 @@ class MjxEnv(BaseEnv):
             tb_log_dir: Directory for TensorBoard logs. If None, uses render_dir.
             **kwargs: Additional arguments including camera_id.
         """
-        import numpy as np
-        import time
-        import os
-        from PIL import Image
-        import mujoco
-        
         # Create render directory
         render_dir = Path(render_dir)
         render_dir.mkdir(parents=True, exist_ok=True)
@@ -629,7 +623,6 @@ class MjxEnv(BaseEnv):
                 img = render_frame(mjx_data)
                 frames.append(img)
                 
-                # Save individual frame as PNG if needed
                 frame_path = render_dir / f"frame_{step:06d}.png"
                 Image.fromarray(img).save(frame_path)
                 
@@ -642,18 +635,11 @@ class MjxEnv(BaseEnv):
             renderer.close()
         
         print(f"Rendered {num_steps} frames to {render_dir}")
-        
-        # Create video
-        try:
-            import mediapy as media
             
-            video_path = render_dir / "trajectory.mp4"
-            fps = 1.0 / self.config.dt / 2  # Adjust as needed for smooth playback
-            media.write_video(str(video_path), np.array(frames), fps=fps)
-            print(f"Video saved to {video_path}")
-            
-        except ImportError:
-            print("Video creation requires the 'media' module. Please make sure it's available in your environment.")
+        video_path = render_dir / "trajectory.mp4"
+        fps = 1.0 / self.config.dt / 2
+        media.write_video(str(video_path), np.array(frames), fps=fps)
+        print(f"Video saved to {video_path}")
 
         return frames, state
 
