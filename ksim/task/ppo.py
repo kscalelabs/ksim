@@ -186,7 +186,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # entropy bonus term
         probs = jax.nn.softmax(prediction)  # TODO: make this live in the model
-        entropy = -jnp.mean(jnp.sum(probs * log_probs, axis=-1))
+        entropy = -jnp.mean(jnp.sum(jax.scipy.special.entr(probs), axis=-1))
         entropy_loss = -self.config.entropy_coef * entropy
 
         total_loss = policy_loss + self.config.value_loss_coef * value_loss + entropy_loss
