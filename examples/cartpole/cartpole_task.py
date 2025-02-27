@@ -70,6 +70,8 @@ class CartPoleConfig(PPOConfig):
     )
     observation_size: int = 4
     action_size: int = 1
+    num_updates: int = xax.field(value=4, help="Number of updates to run.")
+    mini_batch_size: int = xax.field(value=50, help="Mini-batch size.")
 
 
 class CartPoleTask(PPOTask[CartPoleConfig]):

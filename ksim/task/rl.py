@@ -10,7 +10,7 @@ import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from threading import Thread
-from typing import Generic, Literal, NamedTuple, TypeVar
+from typing import Generic, Literal, NamedTuple, TypeVar, Iterator
 
 import equinox as eqx
 import jax
@@ -270,15 +270,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng, train_rng, val_rng = jax.random.split(rng, 3)
         total_steps = 0
         while not self.is_training_over(training_state):
-            print(f"Total steps: {total_steps}")
-            total_steps += self.config.num_envs * 500
-            if self.valid_step_timer.is_valid_step(training_state):
-                val_rng, step_val_rng = jax.random.split(val_rng)
-                trajectory = self.get_trajectory_batch(model, params, env, step_val_rng)
-                assert hasattr(trajectory, "done"), "Trajectory must contain a `done` field."
-                # Calculate episode length by counting steps until done
-                episode_lengths = jnp.sum(~trajectory.done) / jnp.sum(trajectory.done)
-                print(f"Average episode length: {episode_lengths}")
+            # if self.valid_step_timer.is_valid_step(training_state):
+            #     val_rng, step_val_rng = jax.random.split(val_rng)
+            #     trajectory = self.get_trajectory_batch(model, params, env, step_val_rng)
+            #     assert hasattr(trajectory, "done"), "Trajectory must contain a `done` field."
+            #     # Calculate episode length by counting steps until done
+            #     episode_lengths = jnp.sum(~trajectory.done) / jnp.sum(trajectory.done)
+            #     print(f"Average episode length: {episode_lengths}")
 
             #     # Perform logging.
             #     with self.step_context("write_logs"):
@@ -294,11 +292,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Unrolls a trajectory.
             train_rng, step_rng = jax.random.split(train_rng)
-            trajectories = self.get_trajectory_batch(model, params, env, step_rng)
 
             # Updates the model on the collected trajectories.
             with self.step_context("update_state"):
-                params, opt_state = self.model_update(model, params, optimizer, opt_state, trajectories)
+                for batch in self.get_trajectory_batch(model, params, env, step_rng):
+                    params, opt_state = self.model_update(model, params, optimizer, opt_state, batch)
+                # params, opt_state = jax.lax.scan(self.model_update, model, params, optimizer, opt_state, batch)
 
             # Logs the trajectory statistics.
             with self.step_context("write_logs"):

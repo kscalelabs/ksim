@@ -171,9 +171,7 @@ class MjxEnv(BaseEnv):
                 f"minimum action latency ({self.config.min_action_latency})"
             )
         if self.config.min_action_latency < 0:
-            raise ValueError(
-                f"Action latency ({self.config.min_action_latency}) must be non-negative"
-            )
+            raise ValueError(f"Action latency ({self.config.min_action_latency}) must be non-negative")
 
         self.min_action_latency_step = round(self.config.min_action_latency / self.config.dt)
         self.max_action_latency_step = round(self.config.max_action_latency / self.config.dt)
@@ -247,9 +245,7 @@ class MjxEnv(BaseEnv):
         rewards = []
         for reward_name, reward in self.rewards:
             reward_val = reward(prev_state, action, new_mjx_data) * reward.scale
-            chex.assert_shape(
-                reward_val, (), custom_message=f"Reward {reward_name} must be a scalar"
-            )
+            chex.assert_shape(reward_val, (), custom_message=f"Reward {reward_name} must be a scalar")
             rewards.append((reward_name, reward_val))
         return rewards
 
@@ -258,9 +254,7 @@ class MjxEnv(BaseEnv):
         terminations = []
         for termination_name, termination in self.terminations:
             term_val = termination(new_mjx_data)
-            chex.assert_shape(
-                term_val, (), custom_message=f"Termination {termination_name} must be a scalar"
-            )
+            chex.assert_shape(term_val, (), custom_message=f"Termination {termination_name} must be a scalar")
             terminations.append((termination_name, term_val))
         return terminations
 
@@ -417,9 +411,7 @@ class MjxEnv(BaseEnv):
             )
             return new_state
 
-        def scan_fn(
-            carry: Tuple[MjxEnvState, Array], _: Any
-        ) -> Tuple[Tuple[MjxEnvState, Array], MjxEnvState]:
+        def scan_fn(carry: Tuple[MjxEnvState, Array], _: Any) -> Tuple[Tuple[MjxEnvState, Array], MjxEnvState]:
             states, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
             new_states = jax.vmap(env_step)(states, rngs[1:])

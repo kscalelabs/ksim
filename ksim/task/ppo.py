@@ -70,6 +70,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         dataset: The PPO dataset.
         max_trajectory_steps: The maximum number of steps in a trajectory.
     """
+    
 
     ########################
     # Implementing RL Task #
@@ -117,21 +118,76 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
         observations = self.get_model_obs_from_state(trajectory)
-        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs)
+        next_observations = jax.tree_util.tree_map(lambda x: jnp.roll(x, shift=-1, axis=0), trajectory.obs)["observations"]
         actions = trajectory.info["actions"]
         rewards = trajectory.reward
         done = trajectory.done
         action_log_probs = trajectory.info["action_log_probs"]
 
-        return PPOBatch(
-            observations=observations,
-            next_observations=next_observations,
-            actions=actions,
-            rewards=rewards,
-            done=done,
-            action_log_probs=action_log_probs,
-        )
+        batch_size = self.config.num_envs * self.max_trajectory_steps
+        num_mini_batches = batch_size // self.config.mini_batch_size
+        assert batch_size % self.config.mini_batch_size == 0
 
+        # Flatten the time and environment dimensions
+        def flatten_and_shuffle(x):
+            # Reshape from [time, env, ...] to [time*env, ...]
+            time_steps, n_envs = x.shape[0], x.shape[1]
+            flat_shape = (time_steps * n_envs,) + x.shape[2:]
+            x_flat = x.reshape(flat_shape)
+            # Apply permutation to shuffle data
+            return x_flat[permutation]
+
+        # Handle observations differently as they might be a nested structure
+        def flatten_and_shuffle_obs(obs):
+            return jax.tree_util.tree_map(
+                lambda x: flatten_and_shuffle(x) if isinstance(x, jnp.ndarray) else x,
+                obs
+            )
+
+        # Generate permutation for shuffling
+        rng, _rng = jax.random.split(rng)
+        permutation = jax.random.permutation(_rng, batch_size)
+
+        # Flatten and shuffle all data
+        flat_obs = flatten_and_shuffle_obs(observations)
+        flat_next_obs = flatten_and_shuffle_obs(next_observations)
+        flat_actions = flatten_and_shuffle(actions)
+        flat_rewards = flatten_and_shuffle(rewards)
+        flat_done = flatten_and_shuffle(done)
+        flat_log_probs = flatten_and_shuffle(action_log_probs)
+
+        # TODO move this to scan
+        # Return mini-batches for the specified number of epochs
+        for i in range(self.config.num_mini_batches):
+
+            # Get start and end indices for the current mini-batch
+            start_idx = i * self.config.mini_batch_size
+            end_idx = (i + 1) * self.config.mini_batch_size
+
+            # Extract mini-batch data
+            mb_obs = jax.tree_util.tree_map(
+                lambda x: x[start_idx:end_idx] if isinstance(x, jnp.ndarray) else x,
+                flat_obs
+            ).reshape(self.config.mini_batch_size, self.config.num_envs, -1)
+        
+            mb_next_obs = jax.tree_util.tree_map(
+                lambda x: x[start_idx:end_idx] if isinstance(x, jnp.ndarray) else x,
+                flat_next_obs
+            ).reshape(self.config.mini_batch_size, self.config.num_envs, -1)
+
+            mb_actions = flat_actions[start_idx:end_idx].reshape(self.config.mini_batch_size, self.config.num_envs)
+            mb_rewards = flat_rewards[start_idx:end_idx].reshape(self.config.mini_batch_size, self.config.num_envs)
+            mb_done = flat_done[start_idx:end_idx].reshape(self.config.mini_batch_size, self.config.num_envs)
+            mb_log_probs = flat_log_probs[start_idx:end_idx].reshape(self.config.mini_batch_size, self.config.num_envs)
+            yield PPOBatch(
+                observations=mb_obs,
+                next_observations=mb_next_obs,
+                actions=mb_actions,
+                rewards=mb_rewards,
+                done=mb_done,
+                action_log_probs=mb_log_probs,
+            )
+                
     @eqx.filter_jit
     def model_update(
         self,
@@ -217,6 +273,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             )
         )
 
+        # todo - values at the run time here
         # value loss with clipping
         value_loss = jax.lax.cond(
             self.config.use_clipped_value_loss,
