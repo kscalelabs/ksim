@@ -160,7 +160,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.viz_environment()
 
             case _:
-                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
+                raise ValueError(
+                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
+                )
 
     #########################
     # Logging and Rendering #
@@ -304,22 +306,29 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> None:
         """Runs the main RL training loop."""
         rng = self.prng_key()
-        rng, train_rng, val_rng = jax.random.split(rng, 3)
+        rng, train_rng = jax.random.split(rng, 2)
 
         while not self.is_training_over(training_state):
             with self.step_context("on_step_start"):
                 training_state = self.on_step_start(training_state)
 
             # Unrolls a trajectory.
+            start_time = time.time()
             train_rng, step_rng = jax.random.split(train_rng)
             trajectories = self.get_trajectory_batch(model, params, env, step_rng)
+            end_time = time.time()
+            print(f"Time taken for trajectory batch: {end_time - start_time} seconds")
 
             # Updates the model on the collected trajectories.
+            start_time = time.time()
             with self.step_context("update_state"):
                 params, opt_state, loss_val, metrics = self.model_update(
                     model, params, optimizer, opt_state, trajectories
                 )
+            end_time = time.time()
+            print(f"Time taken for model update: {end_time - start_time} seconds")
 
+            start_time = time.time()
             self.curr_logging_data = LoggingData(
                 trajectory=trajectories,
                 update_metrics=metrics,
@@ -335,7 +344,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     log_item(self.logger, self.curr_logging_data)
                 self.logger.write(training_state)
                 training_state.num_steps += 1
+            end_time = time.time()
+            print(f"Time taken for logging: {end_time - start_time} seconds")
 
+            start_time = time.time()
             with self.step_context("on_step_end"):
                 training_state = self.on_step_end(training_state)
 
@@ -343,6 +355,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.save_checkpoint(
                     model=params, optimizer=optimizer, opt_state=opt_state, state=training_state
                 )  # Update XAX to be Flax supportive...
+            end_time = time.time()
+            print(f"Time taken for on_step_end and save checkpoint: {end_time - start_time} seconds")
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
@@ -392,7 +406,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
+                exception_tb = textwrap.indent(
+                    xax.highlight_exception_message(traceback.format_exc()), "  "
+                )
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(model, optimizer, opt_state, training_state)

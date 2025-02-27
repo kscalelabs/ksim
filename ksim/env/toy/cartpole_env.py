@@ -1,15 +1,18 @@
 """CartPole environment."""
 
+from pathlib import Path
 from typing import Any
 
 import gymnasium as gym
 import jax
 import jax.numpy as jnp
+import numpy as np
 from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, EnvState
-from ksim.model.types import ActionLogProbFn
+from ksim.env.types import KScaleActionModelType
+from ksim.model.formulations import ActionModel, ActorCriticModel
 
 
 class CartPoleEnv(BaseEnv):
@@ -82,11 +85,11 @@ class CartPoleEnv(BaseEnv):
 
     def unroll_trajectories(
         self,
-        action_log_prob_fn: ActionLogProbFn,
+        model: ActorCriticModel,
+        params: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
-        **kwargs: Any,
     ) -> EnvState:
         """Rollout the model for a given number of steps."""
         assert num_envs == 1, "CartPoleEnv only supports a single environment"
@@ -100,8 +103,10 @@ class CartPoleEnv(BaseEnv):
         rng, _ = jax.random.split(rng)
         for _ in range(num_steps):
             rng, action_rng = jax.random.split(rng)
-            action, log_probs = action_log_prob_fn(state.obs, state.commands, action_rng)
-
+            action, log_probs = model.apply(
+                params, state.obs, state.commands, action_rng, method="actor_sample_and_log_prob"
+            )
+            assert isinstance(log_probs, Array)
             observations.append(state.obs)
             done.append(state.done)
             actions.append(action)
@@ -134,6 +139,18 @@ class CartPoleEnv(BaseEnv):
             action_at_prev_step=actions,
             action_log_prob_at_prev_step=action_log_probs,
         )
+
+    def unroll_trajectories_and_render(
+        self,
+        rng: PRNGKeyArray,
+        num_steps: int,
+        render_dir: Path,
+        actions: KScaleActionModelType | ActionModel | None = None,
+        width: int = 640,
+        height: int = 480,
+        **kwargs: Any,
+    ) -> tuple[list[np.ndarray], EnvState]:
+        raise NotImplementedError("CartPoleEnv does not support trajectory saving yet.")
 
     @property
     def observation_size(self) -> int:

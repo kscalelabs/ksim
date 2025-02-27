@@ -14,8 +14,9 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.model.formulations import ActorCriticModel
+from ksim.model.types import ActionLogProbFn
 from ksim.task.rl import RLConfig, RLTask
-from ksim.utils.jit import toggleable_jit
+from ksim.utils.jit import legit_jit
 
 
 @jax.tree_util.register_dataclass
@@ -74,6 +75,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Get the critic carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
 
+    @legit_jit(static_argnames=["self", "model", "env"], compile_timeout=10)
     def get_trajectory_batch(
         self,
         model: ActorCriticModel,
@@ -83,19 +85,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     ) -> EnvState:
         """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)"""
 
-        @toggleable_jit()
-        def action_log_prob_fn(
-            obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-        ) -> Tuple[Array, Array]:
-            actions, log_probs = model.apply(
-                params, obs, cmd, rng, method="actor_sample_and_log_prob"
-            )
-            assert isinstance(actions, Array)
-            assert isinstance(log_probs, Array)
-            return actions, log_probs
-
         env_state_batch = env.unroll_trajectories(
-            action_log_prob_fn=action_log_prob_fn,
+            model=model,
+            params=params,
             rng=rng,
             num_steps=self.max_trajectory_steps,
             num_envs=self.config.num_envs,
@@ -103,7 +95,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return env_state_batch
 
-    @toggleable_jit()
+    @legit_jit(static_argnames=["self", "model", "optimizer"])
     def model_update(
         self,
         model: ActorCriticModel,
@@ -133,7 +125,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     # Training Utilities #
     ######################
 
-    @toggleable_jit()
+    @legit_jit(static_argnames=["self", "model"])
     def apply_critic(
         self,
         model: ActorCriticModel,
@@ -149,7 +141,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    @toggleable_jit()
+    @legit_jit(static_argnames=["self", "model"])
     def compute_loss(
         self,
         model: ActorCriticModel,
@@ -215,7 +207,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return total_loss, metrics
 
-    @toggleable_jit()
+    @legit_jit(static_argnames=["self"])
     def _compute_advantages(
         self,
         values: Array,
@@ -239,7 +231,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         _, advantages = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1]))
         return advantages[::-1]
 
-    @toggleable_jit()
+    @legit_jit(static_argnames=["self", "model"])
     def _jitted_value_and_grad(
         self,
         model: ActorCriticModel,

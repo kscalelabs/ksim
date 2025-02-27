@@ -2,13 +2,14 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Callable, Tuple
+from typing import Any
 
-from jaxtyping import Array, PRNGKeyArray
 import numpy as np
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.types import EnvState, KScaleActionModelType
-from ksim.model.formulations import ActionModel
+from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.model.types import ActionLogProbFn
 
 
 class BaseEnv(ABC):
@@ -31,11 +32,11 @@ class BaseEnv(ABC):
     @abstractmethod
     def unroll_trajectories(
         self,
-        action_log_prob_fn: Callable[[EnvState, PRNGKeyArray], Tuple[Array, Array]],
+        model: ActorCriticModel,
+        params: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
-        **kwargs: Any,
     ) -> EnvState: ...
 
     @abstractmethod

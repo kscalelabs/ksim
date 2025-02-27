@@ -12,20 +12,21 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Collection, Literal, Tuple, TypeVar, cast, get_args
+from typing import Any, Callable, Collection, Tuple, TypeVar, cast, get_args
 
 import chex
-import equinox as eqx
 import jax
 import jax.numpy as jnp
+import mediapy as media
+import mujoco
 import numpy as np
-from ksim.model.formulations import ActionModel
 import xax
 from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING
+from PIL import Image
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
@@ -35,21 +36,19 @@ from ksim.builders.terminations import Termination, TerminationBuilder
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.types import EnvState, KScaleActionModelType
+from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.types import ActionLogProbFn
 from ksim.utils.data import BuilderData
+from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
 from ksim.utils.robot_model import get_model_and_metadata
-from pathlib import Path
-import mediapy as media
-from PIL import Image
-import mujoco
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
 
+@legit_jit()
 def step_mjx(
     mjx_model: mjx.Model,
     mjx_data: mjx.Data,
@@ -76,7 +75,7 @@ def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
 
 
 # TODO: add these back in.
-@eqx.filter_jit
+@legit_jit()
 def get_random_action(
     mjx_model: mjx.Model,
     mjx_data: mjx.Data,
@@ -90,7 +89,7 @@ def get_random_action(
     return ctrl, 1.0
 
 
-@eqx.filter_jit
+@legit_jit()
 def get_midpoint_action(
     mjx_model: mjx.Model,
     mjx_data: mjx.Data,
@@ -103,7 +102,7 @@ def get_midpoint_action(
     return ctrl, 1.0
 
 
-@eqx.filter_jit
+@legit_jit()
 def get_zero_action(
     mjx_model: mjx.Model,
     mjx_data: mjx.Data,
@@ -121,7 +120,10 @@ def cast_action_type(action_type: str) -> KScaleActionModelType:
         raise ValueError(f"Invalid action type: {action_type} Choices are {options}")
     return cast(KScaleActionModelType, action_type)
 
-def get_action_fn(action_type: KScaleActionModelType) -> Callable[[mjx.Model, mjx.Data, PRNGKeyArray], tuple[jnp.ndarray, float]]:
+
+def get_action_fn(
+    action_type: KScaleActionModelType,
+) -> Callable[[mjx.Model, mjx.Data, PRNGKeyArray], tuple[jnp.ndarray, float]]:
     """Get the action function for the given action type."""
     match action_type:
         case "random":
@@ -132,6 +134,7 @@ def get_action_fn(action_type: KScaleActionModelType) -> Callable[[mjx.Model, mj
             return get_zero_action
         case _:
             raise ValueError(f"Invalid action type: {action_type}")
+
 
 @jax.tree_util.register_dataclass
 @dataclass
@@ -243,7 +246,9 @@ class MjxEnv(BaseEnv):
     ###################
     # Post Processing #
     ###################
+    # TODO make these jittable...
 
+    @legit_jit(static_argnames=["self"])
     def get_observation(self, mjx_data: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
         """Compute observations from the pipeline state."""
         observations = {}
@@ -261,7 +266,7 @@ class MjxEnv(BaseEnv):
     ) -> list[tuple[str, float]]:
         """Compute rewards (each as a scalar) from the state transition.
 
-        TODO: ML we might want to represent rewards as graphs (multiply and sum) or add flags...
+        ML: we might want to represent rewards as graphs (multiply and sum) or add flags...
         """
         rewards = []  # this ensures ordering...
         for reward_name, reward in self.rewards:
@@ -283,6 +288,7 @@ class MjxEnv(BaseEnv):
             terminations.append((termination_name, term_val))
         return terminations
 
+    @legit_jit(static_argnames=["self"])
     def get_initial_commands(
         self, rng: PRNGKeyArray, initial_time: Array | None
     ) -> FrozenDict[str, Array]:
@@ -296,6 +302,7 @@ class MjxEnv(BaseEnv):
             commands[command_name] = command_val
         return FrozenDict(commands)
 
+    @legit_jit(static_argnames=["self"])
     def get_commands(
         self, prev_commands: FrozenDict[str, Array], rng: PRNGKeyArray, time: Array
     ) -> FrozenDict[str, Array]:
@@ -313,6 +320,7 @@ class MjxEnv(BaseEnv):
     # Main API Implementation #
     ###########################
 
+    @legit_jit(static_argnames=["self"])
     def scannable_reset(
         self,
         rng: jax.Array,
@@ -354,6 +362,7 @@ class MjxEnv(BaseEnv):
             new_data,
         )
 
+    @legit_jit(static_argnames=["self"])
     def reset(
         self,
         rng: jax.Array,
@@ -363,6 +372,7 @@ class MjxEnv(BaseEnv):
         state, _ = self.scannable_reset(rng, mjx_model)
         return state
 
+    @legit_jit(static_argnames=["self"])
     def _apply_physics_steps(
         self,
         mjx_model: mjx.Model,
@@ -389,6 +399,7 @@ class MjxEnv(BaseEnv):
         (state, _), _ = jax.lax.scan(f, (mjx_data, 0), None, n_steps)
         return state
 
+    @legit_jit(static_argnames=["self"])
     def scannable_step(
         self,
         env_state: EnvState,
@@ -441,6 +452,7 @@ class MjxEnv(BaseEnv):
 
         return new_state, new_mjx_data
 
+    @legit_jit(static_argnames=["self", "mjx_model"])
     def step(
         self,
         env_state: EnvState,
@@ -472,13 +484,14 @@ class MjxEnv(BaseEnv):
         )
         return new_state
 
+    @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs"])
     def unroll_trajectories(
         self,
-        action_log_prob_fn: ActionLogProbFn,
+        model: ActorCriticModel,
+        params: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
-        **kwargs: Any,
     ) -> EnvState:
         """Vectorized rollout of trajectories.
 
@@ -495,29 +508,43 @@ class MjxEnv(BaseEnv):
         )
         rng, _ = jax.random.split(rng)
 
+        # Define env_step as a pure function with all dependencies passed explicitly
+        @legit_jit()
         def env_step(
-            env_state: EnvState, mjx_data: mjx.Data, rng: Array
+            env_state: EnvState,
+            mjx_data: mjx.Data,
+            rng: Array,
         ) -> tuple[EnvState, mjx.Data]:
-            action, action_log_prob = action_log_prob_fn(env_state.obs, env_state.commands, rng)
-            # ML: I don't love how we update info in multiple places...
-            new_state, new_mjx_data = jax.lax.cond(
-                env_state.done,
-                lambda _: self.scannable_reset(rng, mjx_model),
-                lambda _: self.scannable_step(
-                    env_state, mjx_data, mjx_model, action, rng, action_log_prob
-                ),
-                operand=None,
+            action, action_log_prob = model.apply(
+                params, env_state.obs, env_state.commands, rng, method="actor_sample_and_log_prob"
             )
-            assert isinstance(new_state, EnvState)
-            assert isinstance(new_mjx_data, mjx.Data)
+            assert isinstance(action_log_prob, Array)
+
+            reset_result = self.scannable_reset(rng, mjx_model)
+            step_result = self.scannable_step(
+                env_state, mjx_data, mjx_model, action, rng, action_log_prob
+            )
+
+            new_state = jax.tree_util.tree_map(
+                lambda r, s: jax.lax.select(env_state.done, r, s), reset_result[0], step_result[0]
+            )
+            new_mjx_data = jax.tree_util.tree_map(
+                lambda r, s: jax.lax.select(env_state.done, r, s), reset_result[1], step_result[1]
+            )
+            # ML: unintuitive but this is more efficient than `.cond` by keeping consistent path.
+
             return new_state, new_mjx_data
 
+        # Create a partially applied version with fixed arguments
+        env_step_partial = lambda state, data, key: env_step(state, data, key)
+
+        @legit_jit()
         def scan_fn(
             carry: Tuple[EnvState, mjx.Data, Array], _: Any
         ) -> Tuple[Tuple[EnvState, mjx.Data, Array], EnvState]:
             states, mjx_data, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
-            new_states, new_mjx_data = jax.vmap(env_step)(states, mjx_data, rngs[1:])
+            new_states, new_mjx_data = jax.vmap(env_step_partial)(states, mjx_data, rngs[1:])
             return (new_states, new_mjx_data, rngs[0]), new_states
 
         (_, _, _), traj = jax.lax.scan(
@@ -539,7 +566,7 @@ class MjxEnv(BaseEnv):
         **kwargs: Any,
     ) -> tuple[list[np.ndarray], EnvState]:
         """Render a trajectory for visualization.
-        
+
         Args:
             rng: Random number generator key.
             num_steps: Number of steps to simulate.
@@ -555,20 +582,20 @@ class MjxEnv(BaseEnv):
         # Create render directory
         render_dir = Path(render_dir)
         render_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Setup action function
         if actions is None:
             actions = cast_action_type(self.config.default_action_model)
-        
+
         if isinstance(actions, str):
             actions = cast_action_type(actions)
 
         action_fn = actions
         if not callable(action_fn):
             action_fn = get_action_fn(actions)
-        
+
         # Select camera
-        camera = kwargs.get('camera_id', None)
+        camera = kwargs.get("camera_id", None)
         if isinstance(camera, str):
             try:
                 camera = self.default_mj_model.name2id(camera, mujoco.mjtObj.mjOBJ_CAMERA)
@@ -576,40 +603,42 @@ class MjxEnv(BaseEnv):
                 camera = -1
         elif camera is None:
             camera = 0 if self.default_mj_model.ncam > 0 else -1
-        
+
         # Create visual options
         scene_option = mujoco.MjvOption()
-        
+
         # Create renderer
         renderer = mujoco.Renderer(self.default_mj_model, height=height, width=width)
-        
+
         # Helper function to render a single frame
         def render_frame(mjx_data: mjx.Data) -> np.ndarray:
             # Create fresh MjData for each frame
             d = mujoco.MjData(self.default_mj_model)
-            
+
             d.qpos, d.qvel = mjx_data.qpos, mjx_data.qvel
             d.mocap_pos, d.mocap_quat = mjx_data.mocap_pos, mjx_data.mocap_quat
             d.xfrc_applied = mjx_data.xfrc_applied
-            
+
             # Ensure physics state is fully updated
             mujoco.mj_forward(self.default_mj_model, d)
-            
+
             # Update scene and render
             renderer.update_scene(d, camera=camera, scene_option=scene_option)
             return renderer.render()
-        
+
         frames = []  # Store all frames for video creation
-        
+
         try:
             # Initialize environment
             state, mjx_data = self.scannable_reset(rng, self.default_mjx_model)
-            
+
             # Run trajectory
             for step in range(num_steps):
                 # Get action
                 rng, action_rng = jax.random.split(rng)
-                action, action_log_prob = action_fn(self.default_mjx_model, self.default_mjx_data, action_rng)
+                action, action_log_prob = action_fn(
+                    self.default_mjx_model, self.default_mjx_data, action_rng
+                )
                 # Step environment
                 rng, step_rng = jax.random.split(rng)
                 if state.done:
@@ -622,20 +651,20 @@ class MjxEnv(BaseEnv):
                 # Render and save frame
                 img = render_frame(mjx_data)
                 frames.append(img)
-                
+
                 frame_path = render_dir / f"frame_{step:06d}.png"
                 Image.fromarray(img).save(frame_path)
-                
+
                 # Print progress
                 if step % 10 == 0:
                     print(f"Rendered frame {step}/{num_steps}")
-        
+
         finally:
             # Ensure renderer is closed properly
             renderer.close()
-        
+
         print(f"Rendered {num_steps} frames to {render_dir}")
-            
+
         video_path = render_dir / "trajectory.mp4"
         fps = 1.0 / self.config.dt / 2
         media.write_video(str(video_path), np.array(frames), fps=fps)
