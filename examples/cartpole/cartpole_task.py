@@ -8,6 +8,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import xax
+from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.env.toy.cartpole_env import CartPoleEnv
@@ -25,8 +26,10 @@ class CartPoleActionModel(ActionModel):
     mlp: MLP
 
     @nn.compact
-    def __call__(self, state: EnvState) -> Array:
-        return self.mlp(state.obs["observations"])
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        observation = obs["observations"]
+        assert isinstance(observation, Array)
+        return self.mlp(observation)
 
     def calc_log_prob(self, prediction: Array, action: Array) -> Array:
         logits = prediction
@@ -37,8 +40,10 @@ class CartPoleActionModel(ActionModel):
         # NOTE: assumes two batching dimensions
         return action_log_prob
 
-    def sample_and_log_prob(self, state: EnvState, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        logits = self(state)
+    def sample_and_log_prob(
+        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+    ) -> tuple[Array, Array]:
+        logits = self(obs, cmd)
         log_probs = jax.nn.log_softmax(logits)
         sampled_actions = jax.random.categorical(rng, log_probs)
         action_log_prob = log_probs[jnp.arange(log_probs.shape[0]), sampled_actions]
@@ -51,8 +56,10 @@ class CartPoleCriticModel(nn.Module):
     mlp: MLP
 
     @nn.compact
-    def __call__(self, state: EnvState) -> Array:
-        return self.mlp(state.obs["observations"])
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        observation = obs["observations"]
+        assert isinstance(observation, Array)
+        return self.mlp(observation)
 
 
 @dataclass

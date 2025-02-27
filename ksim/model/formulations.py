@@ -4,16 +4,15 @@ from abc import ABC, abstractmethod
 from typing import Tuple
 
 import flax.linen as nn
+from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
-
-from ksim.env.types import EnvState
 
 
 class ActionModel(nn.Module, ABC):
     """Action model."""
 
     @abstractmethod
-    def __call__(self, state: EnvState) -> Array:
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Forward pass of the model."""
         ...
 
@@ -23,7 +22,9 @@ class ActionModel(nn.Module, ABC):
         ...
 
     @abstractmethod
-    def sample_and_log_prob(self, state: EnvState, rng: PRNGKeyArray) -> Tuple[Array, Array]:
+    def sample_and_log_prob(
+        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+    ) -> Tuple[Array, Array]:
         """Sample and calculate the log probability of the action."""
         ...
 
@@ -50,25 +51,29 @@ class ActorCriticModel(nn.Module):
     critic_module: nn.Module
 
     @nn.compact
-    def __call__(self, state: EnvState) -> Tuple[Array, Array]:
+    def __call__(
+        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]
+    ) -> Tuple[Array, Array]:
         """Forward pass of the model."""
-        return self.actor(state), self.critic(state)
+        return self.actor(obs, cmd), self.critic(obs, cmd)
 
-    def actor(self, state: EnvState) -> Array:
+    def actor(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Actor forward pass."""
-        return self.actor_module(state)
+        return self.actor_module(obs, cmd)
 
-    def critic(self, state: EnvState) -> Array:
+    def critic(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Critic forward pass."""
-        return self.critic_module(state)
+        return self.critic_module(obs, cmd)
 
     def actor_calc_log_prob(self, prediction: Array, action: Array) -> Array:
         """Calculate the log probability of the action."""
         return self.actor_module.calc_log_prob(prediction, action)
 
-    def actor_sample_and_log_prob(self, state: EnvState, rng: PRNGKeyArray) -> Tuple[Array, Array]:
+    def actor_sample_and_log_prob(
+        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+    ) -> Tuple[Array, Array]:
         """Sample and calculate the log probability of the action."""
-        return self.actor_module.sample_and_log_prob(state, rng)
+        return self.actor_module.sample_and_log_prob(obs, cmd, rng)
 
 
 class GaussianActorCriticModel(ActorCriticModel):

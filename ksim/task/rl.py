@@ -19,6 +19,7 @@ import optax
 import xax
 from dpshdl.dataset import Dataset
 from flax import linen as nn
+from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING, OmegaConf
 
@@ -247,12 +248,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model_key, init_key = jax.random.split(key, 2)
         model = self.get_model(model_key)
         assert isinstance(model, nn.Module), "Model must be an Flax linen module."
-        return model.init(init_key, state)
+        return model.init(init_key, state.obs, state.commands)
 
     @eqx.filter_jit
-    def apply_actor(self, model: ActorCriticModel, params: PyTree, state: EnvState) -> Array:
+    def apply_actor(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        obs: FrozenDict[str, Array],
+        cmd: FrozenDict[str, Array],
+    ) -> Array:
         """Apply the actor model to inputs."""
-        res = model.apply(params, method="actor", state=state)
+        res = model.apply(params, obs=obs, cmd=cmd, method="actor")
         assert isinstance(res, Array)
         return res
 

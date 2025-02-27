@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from typing import Any, Dict
 
 import jax.numpy as jnp
+import mujoco.mjx as mjx
 from jaxtyping import Array
 
 from ksim.env.mjx.actuators.base_actuator import Actuators, BaseActuatorMetadata
-from ksim.env.mjx.types import MjxEnvState
 from ksim.utils.mujoco import MujocoMappings
 
 
@@ -47,8 +47,8 @@ class MITPositionActuators(Actuators):
         if any(self.kps == 0) or any(self.kds == 0):
             raise ValueError("Some kps or kds are 0. Check your actuators_metadata.")
 
-    def get_ctrl(self, env_state: MjxEnvState, action: Array) -> Array:
+    def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
         """Get the control signal from the (position) action vector."""
-        current_pos = env_state.mjx_data.qpos[7:]  # NOTE: we assume first 7 are always root pos.
+        current_pos = mjx_data.qpos[7:]  # NOTE: we assume first 7 are always root pos.
         ctrl = self.kps * (action - current_pos)  # TODO: explore using velocity as damping...
         return ctrl

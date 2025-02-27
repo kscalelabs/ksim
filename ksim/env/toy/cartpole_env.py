@@ -5,9 +5,11 @@ from typing import Any, Callable, Tuple
 import gymnasium as gym
 import jax
 import jax.numpy as jnp
+from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.env.base_env import BaseEnv, EnvState
+from ksim.model.types import ActionLogProbFn
 
 
 class CartPoleEnv(BaseEnv):
@@ -29,9 +31,11 @@ class CartPoleEnv(BaseEnv):
         obs, info = self.env.reset()
 
         return EnvState(
-            obs={"observations": jnp.array(obs)[None, :]},
+            obs=FrozenDict({"observations": jnp.array(obs)[None, :]}),
             reward=jnp.array(1.0)[None],
             done=jnp.array(False)[None],
+            commands=FrozenDict({}),
+            command_at_prev_step=FrozenDict({}),
             time=jnp.array(0.0),
             rng=rng,
             action_at_prev_step=jnp.zeros_like(self.env.action_space.sample()),
@@ -65,9 +69,11 @@ class CartPoleEnv(BaseEnv):
                 raise
 
         return EnvState(
-            obs={"observations": jnp.array(obs)[None, :]},
+            obs=FrozenDict({"observations": jnp.array(obs)[None, :]}),
             reward=jnp.array(reward)[None],
             done=jnp.array(done)[None],
+            commands=FrozenDict({}),
+            command_at_prev_step=FrozenDict({}),
             time=prev_state.time + 1.0,
             rng=prev_state.rng,
             action_at_prev_step=action,
@@ -76,7 +82,7 @@ class CartPoleEnv(BaseEnv):
 
     def unroll_trajectories(
         self,
-        action_log_prob_fn: Callable[[EnvState, PRNGKeyArray], Tuple[Array, Array]],
+        action_log_prob_fn: ActionLogProbFn,
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
@@ -94,7 +100,7 @@ class CartPoleEnv(BaseEnv):
         rng, _ = jax.random.split(rng)
         for _ in range(num_steps):
             rng, action_rng = jax.random.split(rng)
-            action, log_probs = action_log_prob_fn(state, action_rng)
+            action, log_probs = action_log_prob_fn(state.obs, state.commands, action_rng)
 
             observations.append(state.obs)
             done.append(state.done)
@@ -123,6 +129,8 @@ class CartPoleEnv(BaseEnv):
             done=done,
             time=jnp.arange(num_steps),
             rng=rng,
+            commands=FrozenDict({}),
+            command_at_prev_step=FrozenDict({}),
             action_at_prev_step=actions,
             action_log_prob_at_prev_step=action_log_probs,
         )

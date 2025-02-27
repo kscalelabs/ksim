@@ -4,9 +4,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict
 
+import mujoco.mjx as mjx
 from jaxtyping import Array
 
-from ksim.env.mjx.types import MjxEnvState
 from ksim.utils.mujoco import MujocoMappings
 
 
@@ -27,6 +27,6 @@ class Actuators(ABC):
     ) -> None: ...
 
     @abstractmethod
-    def get_ctrl(self, env_state: MjxEnvState, action: Array) -> Array:
+    def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
         """Get the control signal from the action vector."""
         ...

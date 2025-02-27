@@ -11,9 +11,8 @@ import mujoco.mjx as mjx
 import xax
 from jaxtyping import Array
 
-from ksim.env.mjx.types import MjxEnvState
+from ksim.env.types import EnvState
 from ksim.utils.data import BuilderData
-from ksim.utils.mujoco import lookup_in_dict
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +65,7 @@ class Reward(ABC):
         return reward
 
     @abstractmethod
-    def __call__(self, prev_state: MjxEnvState, action: Array, mjx_data: mjx.Data) -> Array: ...
+    def __call__(self, prev_state: EnvState, action: Array, mjx_data: mjx.Data) -> Array: ...
 
     def get_name(self) -> str:
         return xax.camelcase_to_snakecase(self.__class__.__name__)
@@ -121,7 +120,7 @@ class TrackAngularVelocityZReward(Reward):
     cmd_name: str = attrs.field(default="angular_velocity_command")
     norm: NormType = attrs.field(default="l2")
 
-    def __call__(self, prev_state: MjxEnvState, action: Array, mjx_data: mjx.Data) -> Array:
+    def __call__(self, prev_state: EnvState, action: Array, mjx_data: mjx.Data) -> Array:
         ang_vel_cmd_1 = prev_state.commands[self.cmd_name][0]
         ang_vel_z = mjx_data.qvel[5]
         return get_norm(ang_vel_z * ang_vel_cmd_1, self.norm)
@@ -134,7 +133,7 @@ class TrackLinearVelocityXYReward(Reward):
     cmd_name: str = attrs.field(default="linear_velocity_command")
     norm: NormType = attrs.field(default="l2")
 
-    def __call__(self, prev_state: MjxEnvState, action: Array, mjx_data: mjx.Data) -> Array:
+    def __call__(self, prev_state: EnvState, action: Array, mjx_data: mjx.Data) -> Array:
         lin_vel_cmd_2 = prev_state.commands[self.cmd_name]
         lin_vel_xy_2 = mjx_data.qvel[:2]
         return get_norm(lin_vel_xy_2 * lin_vel_cmd_2, self.norm).sum(axis=-1)
@@ -146,7 +145,7 @@ class ActionSmoothnessPenalty(Reward):
 
     norm: NormType = attrs.field(default="l2")
 
-    def __call__(self, prev_state: MjxEnvState, action: Array, mjx_data: mjx.Data) -> Array:
+    def __call__(self, prev_state: EnvState, action: Array, mjx_data: mjx.Data) -> Array:
         last_action = prev_state.action_at_prev_step
         return get_norm(action - last_action, self.norm).sum(axis=-1)
 
@@ -174,7 +173,7 @@ class FootContactPenalty(Reward):
         if len(self.skip_if_zero_command) == 0 and self.skip_if_zero_command is not None:
             assert False, "skip_if_zero_command should be None or non-empty"
 
-    def __call__(self, prev_state: MjxEnvState, action: Array, mjx_data: mjx.Data) -> Array:
+    def __call__(self, prev_state: EnvState, action: Array, mjx_data: mjx.Data) -> Array:
         has_contact_1 = jnp.isin(mjx_data.contact.geom1, self.illegal_geom_idxs)
         has_contact_2 = jnp.isin(mjx_data.contact.geom2, self.illegal_geom_idxs)
         has_contact = jnp.logical_or(has_contact_1, has_contact_2)

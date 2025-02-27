@@ -7,7 +7,8 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import xax
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from flax.core import FrozenDict
+from jaxtyping import Array, PRNGKeyArray
 
 from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.builders.observation import (
@@ -30,7 +31,6 @@ from ksim.builders.rewards import (
 )
 from ksim.builders.terminations import IllegalContactTerminationBuilder
 from ksim.env.mjx.mjx_env import MjxEnv
-from ksim.env.mjx.types import MjxEnvState
 from ksim.env.types import EnvState
 from ksim.model.formulations import (
     ActionModel,
@@ -274,17 +274,15 @@ class KBotActorModel(ActionModel):
     def setup(self) -> None:
         self.log_std = self.param("log_std", nn.initializers.constant(-0.7), (NUM_OUTPUTS,))
 
-    def __call__(self, state: MjxEnvState) -> jax.Array:
-        assert isinstance(state.obs, dict)
-        assert isinstance(state.commands, dict)
-        x_n = jnp.concatenate([obs_array for obs_array in state.obs.values()], axis=-1)
-        cmd_n = jnp.concatenate([cmd_array for cmd_array in state.commands.values()], axis=-1)
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        x_n = jnp.concatenate([obs_array for obs_array in obs.values()], axis=-1)
+        cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
         x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
         actions_n = self.mlp(x_n)
 
         return actions_n
 
-    def calc_log_prob(self, prediction: jax.Array, action: jax.Array) -> jax.Array:
+    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
         mean = prediction
         std = jnp.exp(self.log_std)
 
@@ -293,8 +291,10 @@ class KBotActorModel(ActionModel):
         )
         return jnp.sum(log_prob, axis=-1)
 
-    def sample_and_log_prob(self, state: MjxEnvState, rng: PRNGKeyArray) -> Tuple[Array, Array]:
-        mean = self(state)
+    def sample_and_log_prob(
+        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+    ) -> Tuple[Array, Array]:
+        mean = self(obs, cmd)
         std = jnp.exp(self.log_std)
 
         noise = jax.random.normal(rng, mean.shape)
@@ -308,18 +308,18 @@ class KBotCriticModel(nn.Module):
     mlp: MLP
 
     @nn.compact
-    def __call__(self, state: MjxEnvState) -> jax.Array:
-        lin_vel_cmd_2 = state.commands["linear_velocity_command"]
-        ang_vel_cmd_1 = state.commands["angular_velocity_command"]
-        joint_pos_j = state.obs["joint_position_observation"]
-        joint_vel_j = state.obs["joint_velocity_observation"]
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> jax.Array:
+        lin_vel_cmd_2 = cmd["linear_velocity_command"]
+        ang_vel_cmd_1 = cmd["angular_velocity_command"]
+        joint_pos_j = obs["joint_position_observation"]
+        joint_vel_j = obs["joint_velocity_observation"]
 
-        base_pos_3 = state.obs["base_position_observation"]
-        base_ang_vel_3 = state.obs["base_angular_velocity_observation"]
-        base_lin_vel_3 = state.obs["base_linear_velocity_observation"]
-        base_quat_4 = state.obs["base_orientation_observation"]
-        imu_acc_3 = state.obs["imu_acc_sensor_observation"]
-        imu_gyro_3 = state.obs["imu_gyro_sensor_observation"]
+        base_pos_3 = obs["base_position_observation"]
+        base_ang_vel_3 = obs["base_angular_velocity_observation"]
+        base_lin_vel_3 = obs["base_linear_velocity_observation"]
+        base_quat_4 = obs["base_orientation_observation"]
+        imu_acc_3 = obs["imu_acc_sensor_observation"]
+        imu_gyro_3 = obs["imu_gyro_sensor_observation"]
 
         x_n = jnp.concatenate(
             [

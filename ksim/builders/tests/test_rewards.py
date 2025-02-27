@@ -19,7 +19,7 @@ from ksim.builders.rewards import (
     TrackLinearVelocityXYReward,
     get_norm,
 )
-from ksim.env.mjx.types import MjxEnvState
+from ksim.env.types import EnvState
 from ksim.utils.data import BuilderData, MujocoMappings
 
 _TOL = 1e-4
@@ -28,7 +28,7 @@ _TOL = 1e-4
 class DummyReward(Reward):
     """Simple reward class for testing the base functionality."""
 
-    def __call__(self, prev_state: MjxEnvState, action: Array, mjx_data: mjx.Data) -> Array:
+    def __call__(self, prev_state: EnvState, action: Array, mjx_data: mjx.Data) -> Array:
         return jnp.ones(())
 
 
@@ -56,8 +56,8 @@ class DummyMjxData:
         )
 
 
-class DummyMjxEnvState:
-    """Mock MjxEnvState for testing."""
+class DummyEnvState:
+    """Mock EnvState for testing."""
 
     def __init__(
         self,
@@ -115,7 +115,7 @@ class BaseRewardTest(chex.TestCase):
 
     def test_reward_call(self):
         reward = DummyReward(scale=2.0)
-        prev_state = DummyMjxEnvState()
+        prev_state = DummyEnvState()
         action = jnp.array([0.1, 0.2])
         mjx_data = DummyMjxData()
 
@@ -127,7 +127,7 @@ class LinearVelocityZPenaltyTest(chex.TestCase):
 
     def test_l2_norm(self):
         penalty = LinearVelocityZPenalty(scale=1.0, norm="l2")
-        prev_state = DummyMjxEnvState()
+        prev_state = DummyEnvState()
         action = jnp.array([0.1, 0.2])
         mjx_data = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
@@ -137,7 +137,7 @@ class LinearVelocityZPenaltyTest(chex.TestCase):
 
     def test_l1_norm(self):
         penalty = LinearVelocityZPenalty(scale=1.0, norm="l1")
-        prev_state = DummyMjxEnvState()
+        prev_state = DummyEnvState()
         action = jnp.array([0.1, 0.2])
         mjx_data = DummyMjxData(qvel=jnp.array([0.1, 0.2, -0.3, 0.4, 0.5, 0.6]))
 
@@ -150,7 +150,7 @@ class AngularVelocityXYPenaltyTest(chex.TestCase):
 
     def test_l2_norm(self):
         penalty = AngularVelocityXYPenalty(scale=1.0, norm="l2")
-        prev_state = DummyMjxEnvState()
+        prev_state = DummyEnvState()
         action = jnp.array([0.1, 0.2])
         mjx_data = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
@@ -160,7 +160,7 @@ class AngularVelocityXYPenaltyTest(chex.TestCase):
 
     def test_l1_norm(self):
         penalty = AngularVelocityXYPenalty(scale=1.0, norm="l1")
-        prev_state = DummyMjxEnvState()
+        prev_state = DummyEnvState()
         action = jnp.array([0.1, 0.2])
         mjx_data = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, -0.4, 0.5, 0.6]))
 
@@ -173,7 +173,7 @@ class TrackAngularVelocityZRewardTest(chex.TestCase):
 
     def test_reward_calculation(self):
         reward = TrackAngularVelocityZReward(scale=1.0, norm="l2")
-        prev_state = DummyMjxEnvState(commands={"angular_velocity_command": jnp.array([0.2])})
+        prev_state = DummyEnvState(commands={"angular_velocity_command": jnp.array([0.2])})
         action = jnp.array([0.1, 0.2])
         mjx_data = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
@@ -185,7 +185,7 @@ class TrackAngularVelocityZRewardTest(chex.TestCase):
 
     def test_custom_cmd_name(self):
         reward = TrackAngularVelocityZReward(scale=1.0, norm="l2", cmd_name="custom_command")
-        prev_state = DummyMjxEnvState(commands={"custom_command": jnp.array([0.3])})
+        prev_state = DummyEnvState(commands={"custom_command": jnp.array([0.3])})
         action = jnp.array([0.1, 0.2])
         mjx_data = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
@@ -198,7 +198,7 @@ class TrackLinearVelocityXYRewardTest(chex.TestCase):
 
     def test_reward_calculation(self):
         reward = TrackLinearVelocityXYReward(scale=1.0, norm="l2")
-        prev_state = DummyMjxEnvState(commands={"linear_velocity_command": jnp.array([0.5, 0.3])})
+        prev_state = DummyEnvState(commands={"linear_velocity_command": jnp.array([0.5, 0.3])})
         action = jnp.array([0.1, 0.2])
         mjx_data = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
@@ -210,7 +210,7 @@ class TrackLinearVelocityXYRewardTest(chex.TestCase):
 
     def test_custom_cmd_name(self):
         reward = TrackLinearVelocityXYReward(scale=1.0, norm="l1", cmd_name="custom_command")
-        prev_state = DummyMjxEnvState(commands={"custom_command": jnp.array([0.6, 0.4])})
+        prev_state = DummyEnvState(commands={"custom_command": jnp.array([0.6, 0.4])})
         action = jnp.array([0.1, 0.2])
         mjx_data = DummyMjxData(qvel=jnp.array([-0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
@@ -225,7 +225,7 @@ class ActionSmoothnessPenaltyTest(chex.TestCase):
 
     def test_l2_norm(self):
         penalty = ActionSmoothnessPenalty(scale=1.0, norm="l2")
-        prev_state = DummyMjxEnvState(
+        prev_state = DummyEnvState(
             action_at_prev_step=jnp.array([0.1, 0.2, 0.3]),
         )
         action = jnp.array([0.2, 0.4, 0.5])
@@ -239,7 +239,7 @@ class ActionSmoothnessPenaltyTest(chex.TestCase):
 
     def test_l1_norm(self):
         penalty = ActionSmoothnessPenalty(scale=1.0, norm="l1")
-        prev_state = DummyMjxEnvState(
+        prev_state = DummyEnvState(
             action_at_prev_step=jnp.array([0.1, 0.2, 0.3]),
         )
         action = jnp.array([0.0, 0.4, 0.2])
@@ -261,7 +261,7 @@ class FootContactPenaltyTest(chex.TestCase):
             allowed_contact_prct=0.1,
             contact_eps=0.02,
         )
-        prev_state = DummyMjxEnvState()
+        prev_state = DummyEnvState()
         action = jnp.array([0.1, 0.2])
 
         # Test with contact (first geom has distance < contact_eps)
@@ -311,7 +311,7 @@ class FootContactPenaltyTest(chex.TestCase):
         )
 
         # Test with zero commands - should skip penalty
-        zero_cmd_state = DummyMjxEnvState(
+        zero_cmd_state = DummyEnvState(
             commands={
                 "linear_velocity_command": jnp.array([0.0, 0.0]),
                 "angular_velocity_command": jnp.array([0.0]),
@@ -328,7 +328,7 @@ class FootContactPenaltyTest(chex.TestCase):
         chex.assert_trees_all_close(result, jnp.array(0.0))
 
         # Test with non-zero commands - should apply penalty
-        non_zero_cmd_state = DummyMjxEnvState(
+        non_zero_cmd_state = DummyEnvState(
             commands={
                 "linear_velocity_command": jnp.array([0.1, 0.0]),
                 "angular_velocity_command": jnp.array([0.0]),
@@ -427,7 +427,7 @@ class RewardShapeTest(chex.TestCase):
     """Test that all rewards return scalar values."""
 
     def setUp(self):
-        self.prev_state = DummyMjxEnvState()
+        self.prev_state = DummyEnvState()
         self.action = jnp.array([0.1, 0.2, 0.3])
         self.mjx_data = DummyMjxData()
 
