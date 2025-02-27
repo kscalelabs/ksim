@@ -7,7 +7,6 @@ from typing import Any, Generic, Literal, TypeVar
 import attrs
 import equinox as eqx
 import jax
-import jax.numpy as jnp
 import mujoco.mjx as mjx
 import xax
 from jaxtyping import Array, PRNGKeyArray

@@ -15,6 +15,11 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.model.formulations import ActorCriticModel
 from ksim.task.rl import RLConfig, RLTask
+from ksim.utils.jit import toggleable_jit
+
+DEBUG = True
+# ML: I'm fine with this living here and not in a config... used only for debugging purposes and
+# is not user/experiment-facing.
 
 
 @jax.tree_util.register_dataclass
@@ -82,7 +87,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     ) -> EnvState:
         """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)"""
 
-        @jax.jit
+        @toggleable_jit(disabled=DEBUG)
         def action_log_prob_fn(
             obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
         ) -> Tuple[Array, Array]:
@@ -102,7 +107,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return env_state_batch
 
-    @eqx.filter_jit
+    @toggleable_jit(disabled=DEBUG)
     def model_update(
         self,
         model: ActorCriticModel,
@@ -132,7 +137,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     # Training Utilities #
     ######################
 
-    @eqx.filter_jit
+    @toggleable_jit(disabled=DEBUG)
     def apply_critic(
         self,
         model: ActorCriticModel,
@@ -148,23 +153,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    @eqx.filter_jit
+    @toggleable_jit(disabled=DEBUG)
     def compute_loss(
         self,
         model: ActorCriticModel,
         params: PyTree,
         env_state_batch: EnvState,
     ) -> tuple[Array, dict[str, Array]]:
-        """Compute the PPO loss (required by XAX).
-
-        Args:
-            model: The model.
-            params: The parameters.
-            env_state_batch: The environment state batch containing trajectories.
-
-        Returns:
-            A tuple of (loss, metrics), where metrics contains JAX arrays for various losses.
-        """
+        """Compute the PPO loss (required by XAX)."""
         # get the log probs of the current model
         prediction = self.apply_actor(model, params, env_state_batch.obs, env_state_batch.commands)
         assert isinstance(prediction, Array)
@@ -174,7 +170,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             action=env_state_batch.action_at_prev_step,
             method="actor_calc_log_prob",
         )
-        ratio = jnp.exp(log_probs - env_state_batch.action_log_prob_at_prev_step)
+        log_prob_diff = log_probs - env_state_batch.action_log_prob_at_prev_step
+        ratio = jnp.exp(log_prob_diff)
 
         # get the state-value estimates
         values = self.apply_critic(model, params, env_state_batch.obs, env_state_batch.commands)
@@ -212,10 +209,16 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "value_loss": value_loss,
             "entropy": entropy,
             "total_loss": total_loss,
+            "average_ratio": jnp.mean(ratio),
+            "average_log_prob_diff": jnp.mean(log_prob_diff),
         }
+
+        if DEBUG and jnp.isnan(total_loss):
+            breakpoint()
+
         return total_loss, metrics
 
-    @eqx.filter_jit
+    @toggleable_jit(disabled=DEBUG)
     def _compute_advantages(
         self,
         values: Array,
@@ -239,7 +242,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         _, advantages = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1]))
         return advantages[::-1]
 
-    @eqx.filter_jit
+    @toggleable_jit(disabled=DEBUG)
     def _jitted_value_and_grad(
         self,
         model: ActorCriticModel,

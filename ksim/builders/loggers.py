@@ -22,7 +22,7 @@ class LoggingData:
 @attrs.define(frozen=True, kw_only=True)
 class LogMetric(ABC):
     @abstractmethod
-    def __call__(self, data: LoggingData) -> jnp.ndarray:
+    def __call__(self, logger: xax.Logger, data: LoggingData) -> None:
         """Compute the log metric from trajectory data.
 
         The data argument should include any fields necessary for computing
@@ -36,32 +36,41 @@ class LogMetric(ABC):
 
 @attrs.define(frozen=True, kw_only=True)
 class EpisodeLengthLog(LogMetric):
-    def __call__(self, data: LoggingData) -> jnp.ndarray:
+    def __call__(self, logger: xax.Logger, data: LoggingData) -> None:
         if data.trajectory is None:
             raise ValueError("Trajectory cannot be None for EpisodeLengthLog")
         trajectory = data.trajectory
         # Ensure we have at least one termination event.
         episode_count = jnp.sum(trajectory.done).clip(min=1)
-        return jnp.sum(~trajectory.done) / episode_count
+        logger.log_scalar(
+            "average_episode_length",
+            jnp.sum(~trajectory.done) / episode_count,
+            namespace="📉",
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
 class AverageRewardLog(LogMetric):
-    def __call__(self, data: LoggingData) -> jnp.ndarray:
+    def __call__(self, logger: xax.Logger, data: LoggingData) -> None:
         if data.trajectory is None:
             raise ValueError("Trajectory cannot be None for AverageRewardLog")
         trajectory = data.trajectory
         total_reward = jnp.sum(trajectory.reward)
         episode_count = jnp.sum(trajectory.done).clip(min=1)
-        return total_reward / episode_count
+        logger.log_scalar(
+            "average_reward",
+            total_reward / episode_count,
+            namespace="📉",
+        )
 
 
 @attrs.define(frozen=True)
 class ModelUpdateLog(LogMetric):
-    name: str = attrs.field()
 
-    def __call__(self, data: LoggingData) -> jnp.ndarray:
-        return data.update_metrics[self.name]
-
-    def get_name(self) -> str:
-        return self.name
+    def __call__(self, logger: xax.Logger, data: LoggingData) -> None:
+        for key, value in data.update_metrics.items():
+            logger.log_scalar(
+                key,
+                value,
+                namespace="📉",
+            )

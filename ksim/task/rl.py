@@ -10,7 +10,7 @@ import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from threading import Thread
-from typing import Generic, Literal, NamedTuple, TypeVar
+from typing import Generic, Literal, TypeVar
 
 import equinox as eqx
 import jax
@@ -91,18 +91,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         self.max_trajectory_steps = round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
         self.curr_logging_data = LoggingData()
-        self.log_items = [
-            EpisodeLengthLog(),
-            AverageRewardLog(),
-            ModelUpdateLog("policy_loss"),  # name should be the key in update_metrics
-            ModelUpdateLog("value_loss"),
-            ModelUpdateLog("entropy"),
-            ModelUpdateLog("total_loss"),
-        ]
-
-    ####################
-    # Abstract methods #
-    ####################
+        self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]
 
     ####################
     # Abstract methods #
@@ -321,11 +310,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             with self.step_context("write_logs"):
                 training_state.raw_phase = "train"
                 for log_item in self.log_items:
-                    self.logger.log_scalar(
-                        log_item.get_name(),
-                        lambda logger=log_item: logger(self.curr_logging_data),
-                        namespace="📉",
-                    )
+                    log_item(self.logger, self.curr_logging_data)
                 self.logger.write(training_state)
                 training_state.num_steps += 1
 
