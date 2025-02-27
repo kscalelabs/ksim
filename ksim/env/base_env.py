@@ -1,11 +1,14 @@
 """Base JAX centric environment class."""
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, Callable, Tuple
 
 from jaxtyping import Array, PRNGKeyArray
+import numpy as np
 
-from ksim.env.types import EnvState
+from ksim.env.types import EnvState, KScaleActionModelType
+from ksim.model.formulations import ActionModel
 
 
 class BaseEnv(ABC):
@@ -34,6 +37,18 @@ class BaseEnv(ABC):
         num_envs: int,
         **kwargs: Any,
     ) -> EnvState: ...
+
+    @abstractmethod
+    def unroll_trajectories_and_render(
+        self,
+        rng: PRNGKeyArray,
+        num_steps: int,
+        render_dir: Path,
+        actions: KScaleActionModelType | ActionModel | None = None,
+        width: int = 640,
+        height: int = 480,
+        **kwargs: Any,
+    ) -> tuple[list[np.ndarray], EnvState]: ...
 
     @property
     @abstractmethod

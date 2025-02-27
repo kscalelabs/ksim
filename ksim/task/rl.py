@@ -160,9 +160,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.viz_environment()
 
             case _:
-                raise ValueError(
-                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
-                )
+                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
 
     #########################
     # Logging and Rendering #
@@ -179,19 +177,58 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         state: xax.State | None = None,
         actions: KScaleActionModelType | ActionModel | None = None,
     ) -> None:
-        if actions is None:
-            actions = cast_action_type(self.config.default_action_model)
-        # rng = self.prng_key()
-        # env = self.get_environment()
-        # render_name = self.get_render_name(state)
-        # render_dir = self.exp_dir / "renders" / render_name
-        # logger.log(xax.LOG_STATUS, "Rendering to %s", render_dir)
-        # env.unroll_trajectories_and_render(
-        #     rng=rng,
-        #     num_steps=self.max_steps_per_trajectory,
-        #     render_dir=render_dir,
-        #     actions=actions,
-        # ) # TODO: implement unrolling trajectories and rendering in environment class.
+        """Run the environment with rendering and logging."""
+        with self:
+            if actions is None:
+                actions = cast_action_type(self.config.default_action_model)
+            rng = self.prng_key()
+            env = self.get_environment()
+            render_name = self.get_render_name(state)
+            render_dir = self.exp_dir / "renders" / render_name
+            logger.log(logging.INFO, "Rendering to %s", render_dir)
+
+            # Create or use an existing training state for logging
+            if state is None:
+                training_state = xax.State(raw_phase="eval")
+            else:
+                training_state = state
+
+            self.set_loggers()
+
+            # Unroll trajectories and collect the frames for rendering
+            frames, trajectory = env.unroll_trajectories_and_render(
+                rng=rng,
+                num_steps=10,  # self.max_steps_per_trajectory,
+                render_dir=render_dir,
+                actions=actions,
+            )
+
+            # Log trajectory statistics
+            self.log_trajectory_stats(env, trajectory)
+
+            # Use the log items for additional metrics
+            self.curr_logging_data = LoggingData(
+                trajectory=trajectory,
+                update_metrics={},
+                gradients=None,
+                loss=0.0,
+                training_state=training_state,
+            )
+
+            for log_item in self.log_items:
+                if not isinstance(log_item, ModelUpdateLog):  # Skip model update logs
+                    log_item(self.logger, self.curr_logging_data)
+
+            # Log the rendered frames
+            self.logger.log_images("trajectory", frames, namespace="video")
+
+            # Render and log trajectory video
+            self.log_trajectory(env, trajectory)
+
+            # Write the logs
+            self.logger.write(training_state)
+
+            logger.log(logging.INFO, "Finished running environment and logging metrics")
 
     def log_state(self, env: BaseEnv) -> None:
         super().log_state()
@@ -370,9 +407,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(
-                    xax.highlight_exception_message(traceback.format_exc()), "  "
-                )
+                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(model, optimizer, opt_state, training_state)

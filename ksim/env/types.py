@@ -1,7 +1,7 @@
 """Base Types for Environments."""
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import jax
 from flax.core import FrozenDict
@@ -25,3 +25,5 @@ class EnvState:
     action_at_prev_step: Array
     command_at_prev_step: FrozenDict[str, Array]
     action_log_prob_at_prev_step: Array
+
+KScaleActionModelType = Literal["random", "zero", "midpoint"]

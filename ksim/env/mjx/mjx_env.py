@@ -11,12 +11,15 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, Collection, Literal, Tuple, TypeVar, cast, get_args
+from pathlib import Path
+from typing import Any, Callable, Collection, Literal, Tuple, TypeVar, cast, get_args
 
 import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
+from ksim.model.formulations import ActionModel
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
@@ -31,11 +34,16 @@ from ksim.builders.rewards import Reward, RewardBuilder
 from ksim.builders.terminations import Termination, TerminationBuilder
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
-from ksim.env.types import EnvState
+from ksim.env.types import EnvState, KScaleActionModelType
 from ksim.model.types import ActionLogProbFn
 from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import make_mujoco_mappings
 from ksim.utils.robot_model import get_model_and_metadata
+from pathlib import Path
+from PIL import Image
+from mujoco import renderer
+import mujoco
+from mujoco import viewer
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +58,7 @@ def step_mjx(
     """Step the mujoco model."""
     data_with_ctrl = mjx_data.replace(ctrl=ctrl)
     # more logic if needed...
-    mjx.step(mjx_model, data_with_ctrl)
-    return data_with_ctrl
+    return mjx.step(mjx_model, data_with_ctrl)
 
 
 def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
@@ -74,13 +81,13 @@ def get_random_action(
     mjx_model: mjx.Model,
     mjx_data: mjx.Data,
     rng: PRNGKeyArray,
-) -> jnp.ndarray:
+) -> tuple[jnp.ndarray, float]:
     """Get a random action."""
     ctrl_range = mjx_model.actuator_ctrlrange
     ctrl_min, ctrl_max = ctrl_range.T
     action_scale = jax.random.uniform(rng, shape=ctrl_min.shape, dtype=ctrl_min.dtype)
     ctrl = ctrl_min + (ctrl_max - ctrl_min) * action_scale
-    return ctrl
+    return ctrl, 1.0
 
 
 @eqx.filter_jit
@@ -88,12 +95,12 @@ def get_midpoint_action(
     mjx_model: mjx.Model,
     mjx_data: mjx.Data,
     rng: PRNGKeyArray,
-) -> jnp.ndarray:
+) -> tuple[jnp.ndarray, float]:
     """Get a midpoint action."""
     ctrl_range = mjx_model.actuator_ctrlrange
     ctrl_min, ctrl_max = ctrl_range.T
     ctrl = (ctrl_min + ctrl_max) / 2
-    return ctrl
+    return ctrl, 1.0
 
 
 @eqx.filter_jit
@@ -101,13 +108,10 @@ def get_zero_action(
     mjx_model: mjx.Model,
     mjx_data: mjx.Data,
     rng: PRNGKeyArray,
-) -> jnp.ndarray:
+) -> tuple[jnp.ndarray, float]:
     """Get a zero action."""
     ctrl = jnp.zeros_like(mjx_model.actuator_ctrlrange[..., 0])
-    return ctrl
-
-
-KScaleActionModelType = Literal["random", "zero", "midpoint"]
+    return ctrl, 1.0
 
 
 def cast_action_type(action_type: str) -> KScaleActionModelType:
@@ -117,6 +121,17 @@ def cast_action_type(action_type: str) -> KScaleActionModelType:
         raise ValueError(f"Invalid action type: {action_type} Choices are {options}")
     return cast(KScaleActionModelType, action_type)
 
+def get_action_fn(action_type: KScaleActionModelType) -> Callable[[mjx.Model, mjx.Data, PRNGKeyArray], tuple[jnp.ndarray, float]]:
+    """Get the action function for the given action type."""
+    match action_type:
+        case "random":
+            return get_random_action
+        case "midpoint":
+            return get_midpoint_action
+        case "zero":
+            return get_zero_action
+        case _:
+            raise ValueError(f"Invalid action type: {action_type}")
 
 @jax.tree_util.register_dataclass
 @dataclass
@@ -191,6 +206,7 @@ class MjxEnv(BaseEnv):
 
         logger.info("Loading robot model %s", robot_model_path)
         mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        self.default_mj_model = mj_model
         self.default_mjx_model = mjx.put_model(mj_model)
         self.default_mjx_data = mjx.make_data(self.default_mjx_model)
         self.mujoco_mappings = make_mujoco_mappings(self.default_mjx_model)
@@ -511,6 +527,135 @@ class MjxEnv(BaseEnv):
             length=num_steps,
         )
         return traj  # Shape: (num_steps, num_envs, ...)
+
+    def unroll_trajectories_and_render(
+        self,
+        rng: PRNGKeyArray,
+        num_steps: int,
+        render_dir: Path,
+        actions: KScaleActionModelType | ActionModel | None = None,
+        width: int = 640,
+        height: int = 480,
+        **kwargs: Any,
+    ) -> tuple[list[np.ndarray], EnvState]:
+        """Render a trajectory for visualization.
+        
+        Args:
+            rng: Random number generator key.
+            num_steps: Number of steps to simulate.
+            render_dir: Directory to save rendered frames.
+            actions: Action model or type to use for generating actions.
+            width: Width of rendered images.
+            height: Height of rendered images.
+            create_video: Whether to create a video file from frames.
+            log_to_tensorboard: Whether to log the video to TensorBoard.
+            tb_log_dir: Directory for TensorBoard logs. If None, uses render_dir.
+            **kwargs: Additional arguments including camera_id.
+        """
+        import numpy as np
+        import time
+        import os
+        from PIL import Image
+        import mujoco
+        
+        # Create render directory
+        render_dir = Path(render_dir)
+        render_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Setup action function
+        if actions is None:
+            actions = cast_action_type(self.config.default_action_model)
+        
+        if isinstance(actions, str):
+            actions = cast_action_type(actions)
+
+        action_fn = actions
+        if not callable(action_fn):
+            action_fn = get_action_fn(actions)
+        
+        # Select camera
+        camera = kwargs.get('camera_id', None)
+        if isinstance(camera, str):
+            try:
+                camera = self.default_mj_model.name2id(camera, mujoco.mjtObj.mjOBJ_CAMERA)
+            except ValueError:
+                camera = -1
+        elif camera is None:
+            camera = 0 if self.default_mj_model.ncam > 0 else -1
+        
+        # Create visual options
+        scene_option = mujoco.MjvOption()
+        
+        # Create renderer
+        renderer = mujoco.Renderer(self.default_mj_model, height=height, width=width)
+        
+        # Helper function to render a single frame
+        def render_frame(mjx_data: mjx.Data) -> np.ndarray:
+            # Create fresh MjData for each frame
+            d = mujoco.MjData(self.default_mj_model)
+            
+            d.qpos, d.qvel = mjx_data.qpos, mjx_data.qvel
+            d.mocap_pos, d.mocap_quat = mjx_data.mocap_pos, mjx_data.mocap_quat
+            d.xfrc_applied = mjx_data.xfrc_applied
+            
+            # Ensure physics state is fully updated
+            mujoco.mj_forward(self.default_mj_model, d)
+            
+            # Update scene and render
+            renderer.update_scene(d, camera=camera, scene_option=scene_option)
+            return renderer.render()
+        
+        frames = []  # Store all frames for video creation
+        
+        try:
+            # Initialize environment
+            state, mjx_data = self.scannable_reset(rng, self.default_mjx_model)
+            
+            # Run trajectory
+            for step in range(num_steps):
+                # Get action
+                rng, action_rng = jax.random.split(rng)
+                action, action_log_prob = action_fn(self.default_mjx_model, self.default_mjx_data, action_rng)
+                # Step environment
+                rng, step_rng = jax.random.split(rng)
+                if state.done:
+                    print("Resetting environment")
+                    state, mjx_data = self.scannable_reset(step_rng, self.default_mjx_model)
+                else:
+                    state, mjx_data = self.scannable_step(
+                        state, mjx_data, self.default_mjx_model, action, step_rng, action_log_prob
+                    )
+                # Render and save frame
+                img = render_frame(mjx_data)
+                frames.append(img)
+                
+                # Save individual frame as PNG if needed
+                frame_path = render_dir / f"frame_{step:06d}.png"
+                Image.fromarray(img).save(frame_path)
+                
+                # Print progress
+                if step % 10 == 0:
+                    print(f"Rendered frame {step}/{num_steps}")
+        
+        finally:
+            # Ensure renderer is closed properly
+            renderer.close()
+        
+        print(f"Rendered {num_steps} frames to {render_dir}")
+        
+        # Create video
+        try:
+            import mediapy as media
+            
+            video_path = render_dir / "trajectory.mp4"
+            fps = 1.0 / self.config.dt / 2  # Adjust as needed for smooth playback
+            media.write_video(str(video_path), np.array(frames), fps=fps)
+            print(f"Video saved to {video_path}")
+            
+        except ImportError:
+            print("Video creation requires the 'media' module. Please make sure it's available in your environment.")
+
+        return frames, state
 
     @property
     def observation_size(self) -> int:
