@@ -1,0 +1,60 @@
+# Metadata for default humanoid model
+control_frequency: 333.333  # Based on timestep 0.003 in MJCF file
+
+actuators:
+  # Torso actuators
+  abdomen_y:
+    kp: 100.0
+    kd: 10.0
+  abdomen_z:
+    kp: 100.0
+    kd: 10.0
+  abdomen_x:
+    kp: 100.0
+    kd: 10.0
+  
+  # Leg actuators
+  right_hip_x:
+    kp: 100.0
+    kd: 10.0
+  right_hip_z:
+    kp: 100.0
+    kd: 10.0
+  right_hip_y:
+    kp: 300.0
+    kd: 30.0
+  right_knee:
+    kp: 200.0
+    kd: 20.0
+  left_hip_x:
+    kp: 100.0
+    kd: 10.0
+  left_hip_z:
+    kp: 100.0
+    kd: 10.0
+  left_hip_y:
+    kp: 300.0
+    kd: 30.0
+  left_knee:
+    kp: 200.0
+    kd: 20.0
+  
+  # Arm actuators
+  right_shoulder1:
+    kp: 25.0
+    kd: 2.5
+  right_shoulder2:
+    kp: 25.0
+    kd: 2.5
+  right_elbow:
+    kp: 25.0
+    kd: 2.5
+  left_shoulder1:
+    kp: 25.0
+    kd: 2.5
+  left_shoulder2:
+    kp: 25.0
+    kd: 2.5
+  left_elbow:
+    kp: 25.0
+    kd: 2.5

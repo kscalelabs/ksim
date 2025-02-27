@@ -147,6 +147,7 @@ class TerminationShapeTest(chex.TestCase):
 
     def setUp(self):
         self.mjx_data = DummyMjxData()
+        self.mjx_data_no_contact = DummyMjxData(has_contact=False)
 
     def test_all_terminations_are_boolean_scalars(self):
         # Test all termination classes
@@ -171,6 +172,50 @@ class TerminationShapeTest(chex.TestCase):
                 jnp.bool_,
                 f"Termination {term_name} must return boolean dtype",
             )
+
+    def test_illegal_contact_termination_shape_with_no_contacts(self):
+        """Test that IllegalContactTermination returns correct shape when ncon=0."""
+        termination = IllegalContactTermination(illegal_geom_idxs=jnp.array([0, 3]))
+        term_result = termination(self.mjx_data_no_contact)
+        chex.assert_shape(
+            term_result,
+            (),
+            custom_message="IllegalContactTermination must return shape () when ncon=0",
+        )
+        self.assertEqual(
+            term_result.dtype,
+            jnp.bool_,
+            "IllegalContactTermination must return boolean dtype when ncon=0",
+        )
+
+    def test_termination_shape_with_batched_state(self):
+        """Test terminations with mock batched input states."""
+
+        class BatchedMjxData:
+            def __init__(self):
+                self.qpos = jnp.ones((2, 9))  # Batched qpos
+                self.ncon = jnp.array([2, 0])  # Different ncon per batch
+
+                class BatchedContact:
+                    geom1 = jnp.array([[0, 2], [0, 0]])
+                    geom2 = jnp.array([[1, 3], [0, 0]])
+                    dist = jnp.array([[-0.01, -0.02], [0.0, 0.0]])
+
+                self.contact = BatchedContact()
+
+        batched_data = BatchedMjxData()
+
+        # A termination that correctly handles batched input should still return scalar
+        termination = IllegalContactTermination(illegal_geom_idxs=jnp.array([0, 3]))
+        term_result = termination(self.mjx_data)  # Non-batched input
+
+        chex.assert_shape(term_result, ())
+        self.assertEqual(term_result.dtype, jnp.bool_)
+
+        # For completeness, test other terminations as well with non-batched input
+        min_height_term = MinimumHeightTermination(min_height=1.0)
+        term_result = min_height_term(self.mjx_data)
+        chex.assert_shape(term_result, ())
 
 
 if __name__ == "__main__":

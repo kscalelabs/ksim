@@ -90,7 +90,7 @@ class IllegalContactTermination(Termination):
 
     def __call__(self, state: mjx.Data) -> Array:
         if state.ncon == 0:
-            return jnp.array([False])
+            return jnp.array(False)
 
         illegal_geom1 = jnp.isin(state.contact.geom1, self.illegal_geom_idxs)
         illegal_geom2 = jnp.isin(state.contact.geom2, self.illegal_geom_idxs)

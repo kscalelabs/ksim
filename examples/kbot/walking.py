@@ -31,12 +31,7 @@ from ksim.builders.rewards import (
 )
 from ksim.builders.terminations import IllegalContactTerminationBuilder
 from ksim.env.mjx.mjx_env import MjxEnv
-from ksim.env.types import EnvState
-from ksim.model.formulations import (
-    ActionModel,
-    ActorCriticModel,
-    GaussianActorCriticModel,
-)
+from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 

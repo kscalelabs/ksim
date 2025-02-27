@@ -74,17 +74,3 @@ class ActorCriticModel(nn.Module):
     ) -> Tuple[Array, Array]:
         """Sample and calculate the log probability of the action."""
         return self.actor_module.sample_and_log_prob(obs, cmd, rng)
-
-
-class GaussianActorCriticModel(ActorCriticModel):
-    """Gaussian actor-critic model."""
-
-    actor_module: GaussianActionModel
-    critic_module: nn.Module
-
-
-class CategoricalActorCriticModel(ActorCriticModel):
-    """Categorical actor-critic model."""
-
-    actor_module: CategoricalActionModel
-    critic_module: nn.Module

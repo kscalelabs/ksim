@@ -178,8 +178,11 @@ class FootContactPenalty(Reward):
         has_contact_2 = jnp.isin(mjx_data.contact.geom2, self.illegal_geom_idxs)
         has_contact = jnp.logical_or(has_contact_1, has_contact_2)
 
-        penalty = jnp.where(has_contact, mjx_data.contact.dist, 1e4).min() <= self.contact_eps
-        penalty = penalty.astype(jnp.float32)
+        # Handle case where there might be no contacts or no matches
+        distances_where_contact = jnp.where(has_contact, mjx_data.contact.dist, 1e4)
+        min_distance = jnp.min(distances_where_contact, initial=1e4)
+        penalty = (min_distance <= self.contact_eps).astype(jnp.float32)
+
         if self.skip_if_zero_command:
             commands_are_zero = jnp.stack(
                 [(prev_state.commands[cmd] < self.eps).all() for cmd in self.skip_if_zero_command],
