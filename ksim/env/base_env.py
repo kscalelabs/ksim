@@ -45,7 +45,7 @@ class BaseEnv(ABC):
         rng: PRNGKeyArray,
         num_steps: int,
         render_dir: Path,
-        actions: KScaleActionModelType | ActionModel | None = None,
+        actions: KScaleActionModelType | ActionModel,
         width: int = 640,
         height: int = 480,
         **kwargs: Any,
