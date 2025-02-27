@@ -207,6 +207,7 @@ class MjxEnv(BaseEnv):
         logger.info("Loading robot model %s", robot_model_path)
         mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
         self.default_mj_model = mj_model
+        self.default_mj_data = mujoco.MjData(mj_model)
         self.default_mjx_model = mjx.put_model(mj_model)
         self.default_mjx_data = mjx.make_data(self.default_mjx_model)
         self.mujoco_mappings = make_mujoco_mappings(self.default_mjx_model)
@@ -479,7 +480,7 @@ class MjxEnv(BaseEnv):
         num_steps: int,
         num_envs: int,
         **kwargs: Any,
-    ) -> EnvState:
+    ) -> tuple[EnvState, list[np.ndarray]]:
         """Vectorized rollout of trajectories.
 
         1. The batched reset (using vmap) initializes a state for each environment.
@@ -526,14 +527,52 @@ class MjxEnv(BaseEnv):
             xs=None,
             length=num_steps,
         )
-        return traj  # Shape: (num_steps, num_envs, ...)
+        if kwargs.get("render", False):
+            # TODO: render the trajectory
+            pass
+        
+        return traj, []  # Shape: (num_steps, num_envs, ...)
+
+
+    def render_trajectory(
+        self,
+        trajectory: list[mjx.Data],
+        width: int = 640,
+        height: int = 480,
+        camera: int | None = None,
+    ) -> list[np.ndarray]:
+        def render_frame(renderer: mujoco.Renderer, mjx_data: mjx.Data, camera: int) -> np.ndarray:
+            # Create fresh MjData for each frame
+            d = self.default_mj_data
+            
+            d.qpos, d.qvel = mjx_data.qpos, mjx_data.qvel
+            d.mocap_pos, d.mocap_quat = mjx_data.mocap_pos, mjx_data.mocap_quat
+            d.xfrc_applied = mjx_data.xfrc_applied
+            
+            # Ensure physics state is fully updated
+            mujoco.mj_forward(self.default_mj_model, d)
+            
+            # Update scene and render
+            renderer.update_scene(d, camera=camera, scene_option=scene_option)
+            return renderer.render()
+        
+        camera_id = camera or 0
+        
+        renderer = mujoco.Renderer(self.default_mj_model, height=height, width=width)
+        scene_option = mujoco.MjvOption()
+        frames = []
+        for data in trajectory:
+            frame = render_frame(renderer, data, camera_id)
+            frames.append(frame)
+        renderer.close()
+        return frames
 
     def unroll_trajectories_and_render(
         self,
         rng: PRNGKeyArray,
         num_steps: int,
         render_dir: Path,
-        actions: KScaleActionModelType | ActionModel | None = None,
+        actions: KScaleActionModelType | ActionModel,
         width: int = 640,
         height: int = 480,
         **kwargs: Any,
@@ -556,10 +595,6 @@ class MjxEnv(BaseEnv):
         render_dir = Path(render_dir)
         render_dir.mkdir(parents=True, exist_ok=True)
         
-        # Setup action function
-        if actions is None:
-            actions = cast_action_type(self.config.default_action_model)
-        
         if isinstance(actions, str):
             actions = cast_action_type(actions)
 
@@ -577,64 +612,32 @@ class MjxEnv(BaseEnv):
         elif camera is None:
             camera = 0 if self.default_mj_model.ncam > 0 else -1
         
-        # Create visual options
-        scene_option = mujoco.MjvOption()
+        data = [] # Store all mjx.Data objects for rendering
         
-        # Create renderer
-        renderer = mujoco.Renderer(self.default_mj_model, height=height, width=width)
+        state, mjx_data = self.scannable_reset(rng, self.default_mjx_model)
         
-        # Helper function to render a single frame
-        def render_frame(mjx_data: mjx.Data) -> np.ndarray:
-            # Create fresh MjData for each frame
-            d = mujoco.MjData(self.default_mj_model)
-            
-            d.qpos, d.qvel = mjx_data.qpos, mjx_data.qvel
-            d.mocap_pos, d.mocap_quat = mjx_data.mocap_pos, mjx_data.mocap_quat
-            d.xfrc_applied = mjx_data.xfrc_applied
-            
-            # Ensure physics state is fully updated
-            mujoco.mj_forward(self.default_mj_model, d)
-            
-            # Update scene and render
-            renderer.update_scene(d, camera=camera, scene_option=scene_option)
-            return renderer.render()
-        
-        frames = []  # Store all frames for video creation
-        
-        try:
-            # Initialize environment
-            state, mjx_data = self.scannable_reset(rng, self.default_mjx_model)
-            
-            # Run trajectory
-            for step in range(num_steps):
-                # Get action
-                rng, action_rng = jax.random.split(rng)
-                action, action_log_prob = action_fn(self.default_mjx_model, self.default_mjx_data, action_rng)
-                # Step environment
-                rng, step_rng = jax.random.split(rng)
-                if state.done:
-                    print("Resetting environment")
-                    state, mjx_data = self.scannable_reset(step_rng, self.default_mjx_model)
-                else:
-                    state, mjx_data = self.scannable_step(
-                        state, mjx_data, self.default_mjx_model, action, step_rng, action_log_prob
-                    )
-                # Render and save frame
-                img = render_frame(mjx_data)
-                frames.append(img)
-                
-                frame_path = render_dir / f"frame_{step:06d}.png"
-                Image.fromarray(img).save(frame_path)
-                
-                # Print progress
-                if step % 10 == 0:
-                    print(f"Rendered frame {step}/{num_steps}")
-        
-        finally:
-            # Ensure renderer is closed properly
-            renderer.close()
-        
-        print(f"Rendered {num_steps} frames to {render_dir}")
+        # Run trajectory
+        for _ in range(num_steps):
+            # Get action
+            rng, action_rng = jax.random.split(rng)
+            action, action_log_prob = action_fn(self.default_mjx_model, self.default_mjx_data, action_rng)
+            # Step environment
+            rng, step_rng = jax.random.split(rng)
+            if state.done:
+                print("Resetting environment")
+                state, mjx_data = self.scannable_reset(step_rng, self.default_mjx_model)
+            else:
+                state, mjx_data = self.scannable_step(
+                    state, mjx_data, self.default_mjx_model, action, step_rng, action_log_prob
+                )
+            # Render and save frame
+            data.append(mjx_data)
+
+        frames = self.render_trajectory(data, width, height, camera)
+
+        for i, frame in enumerate(frames):
+            frame_path = render_dir / f"frame_{i:06d}.png"
+            Image.fromarray(frame).save(frame_path)
             
         video_path = render_dir / "trajectory.mp4"
         fps = 1.0 / self.config.dt / 2

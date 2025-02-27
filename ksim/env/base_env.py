@@ -36,7 +36,7 @@ class BaseEnv(ABC):
         num_steps: int,
         num_envs: int,
         **kwargs: Any,
-    ) -> EnvState: ...
+    ) -> tuple[EnvState, list[np.ndarray]]: ...
 
     @abstractmethod
     def unroll_trajectories_and_render(
@@ -44,7 +44,7 @@ class BaseEnv(ABC):
         rng: PRNGKeyArray,
         num_steps: int,
         render_dir: Path,
-        actions: KScaleActionModelType | ActionModel | None = None,
+        actions: KScaleActionModelType | ActionModel,
         width: int = 640,
         height: int = 480,
         **kwargs: Any,
