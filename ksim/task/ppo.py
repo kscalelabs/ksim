@@ -1,10 +1,10 @@
 """Defines a standard task interface for training a policy."""
 
+import os
 from abc import ABC
 from dataclasses import dataclass
 from typing import Generic, Tuple, TypeVar
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
@@ -16,10 +16,6 @@ from ksim.env.base_env import BaseEnv, EnvState
 from ksim.model.formulations import ActorCriticModel
 from ksim.task.rl import RLConfig, RLTask
 from ksim.utils.jit import toggleable_jit
-
-DEBUG = True
-# ML: I'm fine with this living here and not in a config... used only for debugging purposes and
-# is not user/experiment-facing.
 
 
 @jax.tree_util.register_dataclass
@@ -87,7 +83,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     ) -> EnvState:
         """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)"""
 
-        @toggleable_jit(disabled=DEBUG)
+        @toggleable_jit()
         def action_log_prob_fn(
             obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
         ) -> Tuple[Array, Array]:
@@ -107,7 +103,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return env_state_batch
 
-    @toggleable_jit(disabled=DEBUG)
+    @toggleable_jit()
     def model_update(
         self,
         model: ActorCriticModel,
@@ -137,7 +133,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     # Training Utilities #
     ######################
 
-    @toggleable_jit(disabled=DEBUG)
+    @toggleable_jit()
     def apply_critic(
         self,
         model: ActorCriticModel,
@@ -153,7 +149,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    @toggleable_jit(disabled=DEBUG)
+    @toggleable_jit()
     def compute_loss(
         self,
         model: ActorCriticModel,
@@ -213,12 +209,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "average_log_prob_diff": jnp.mean(log_prob_diff),
         }
 
-        if DEBUG and jnp.isnan(total_loss):
+        use_debug = os.environ.get("DEBUG", "0") == "1"
+        if use_debug and jnp.isnan(total_loss):
             breakpoint()
 
         return total_loss, metrics
 
-    @toggleable_jit(disabled=DEBUG)
+    @toggleable_jit()
     def _compute_advantages(
         self,
         values: Array,
@@ -242,7 +239,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         _, advantages = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1]))
         return advantages[::-1]
 
-    @toggleable_jit(disabled=DEBUG)
+    @toggleable_jit()
     def _jitted_value_and_grad(
         self,
         model: ActorCriticModel,
