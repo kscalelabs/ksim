@@ -19,17 +19,19 @@ from ksim.task.rl import RLConfig, RLTask
 from ksim.utils.jit import legit_jit
 
 
+_EPS = 1e-8
+
+
 @jax.tree_util.register_dataclass
 @dataclass
 class PPOConfig(RLConfig):
     # For the CLIP term (see Schulman et al. 2017)
     clip_param: float = xax.field(value=0.2, help="Clipping parameter for PPO.")
-    normalize_advantage: bool = xax.field(value=True, help="Whether to normalize advantages.")
-    normalize_returns: bool = xax.field(value=False, help="Whether to normalize returns.")
+    normalize_returns: bool = xax.field(value=True, help="Whether to normalize returns.")
 
     # For the Value Function (VF) term
     value_loss_coef: float = xax.field(value=1.0, help="Value loss coefficient for PPO.")
-    use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss.")
+    use_clipped_value_loss: bool = xax.field(value=False, help="Whether to use clipped value loss.")
 
     # For the entropy bonus term
     entropy_coef: float = xax.field(value=0.008, help="Entropy coefficient for PPO.")
@@ -39,9 +41,9 @@ class PPOConfig(RLConfig):
     lam: float = xax.field(value=0.95, help="Lambda for GAE: high = more bias; low = more variance")
 
     # General training parameters
-    minibatch_size: int = xax.field(value=5, help="Equals to the number of updates per trajectory")
-    num_mini_batches: int = xax.field(value=12, help="Number of mini-batches per PPO epoch.")
-    learning_rate: float = xax.field(value=1e-3, help="Learning rate for PPO.")
+    minibatch_size: int = xax.field(value=50, help="Equals to the number of updates per trajectory")
+    num_mini_batches: int = xax.field(value=10, help="Number of mini-batches per PPO epoch.")
+    learning_rate: float = xax.field(value=3e-4, help="Learning rate for PPO.")
     max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
 
 
@@ -73,7 +75,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Get the critic carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
 
-    @legit_jit(static_argnames=["self", "model", "env"], compile_timeout=10)
+    # @legit_jit(static_argnames=["self", "model", "env"], compile_timeout=10)
     def get_trajectory_batch(
         self,
         model: ActorCriticModel,
@@ -147,18 +149,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         env_state_batch: EnvState,
     ) -> MinibatchEnvState:
         """Update the model parameters."""
-        # get the log probs of the current model
-        prediction = self.apply_actor(model, params, env_state_batch.obs, env_state_batch.command)
-        assert isinstance(prediction, Array)
-        log_probs = model.apply(
-            variables=params,
-            prediction=prediction,
-            action=env_state_batch.action,
-            method="actor_calc_log_prob",
-        )
-        log_prob_diff = log_probs - env_state_batch.action_log_prob
-        ratio = jnp.exp(log_prob_diff)
-
         # get the state-value estimates
         values = self.apply_critic(model, params, env_state_batch.obs, env_state_batch.command)
         assert isinstance(values, Array)
@@ -166,36 +156,27 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         advantages = self._compute_advantages(values, env_state_batch)  # (time, env)
 
         returns = advantages + values
-        # normalizing advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
-        if self.config.normalize_returns:
-            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
 
         return MinibatchEnvState(
-            obs=env_state_batch.obs, 
-            reward=env_state_batch.reward, 
-            done=env_state_batch.done, 
-            commands=env_state_batch.commands, 
-            time=env_state_batch.time, 
-            rng=env_state_batch.rng, 
-            action_at_prev_step=env_state_batch.action_at_prev_step, 
-            command_at_prev_step=env_state_batch.command_at_prev_step, 
-            action_log_prob_at_prev_step=env_state_batch.action_log_prob_at_prev_step, 
-            prediction=prediction, 
-            advantages=advantages, 
-            returns=returns, 
-            ratio=ratio, 
-            log_prob_diff=log_prob_diff
+            obs=env_state_batch.obs,
+            command=env_state_batch.command,
+            action=env_state_batch.action,
+            reward=env_state_batch.reward,
+            done=env_state_batch.done,
+            timestep=env_state_batch.timestep,
+            rng=env_state_batch.rng,
+            action_log_prob=env_state_batch.action_log_prob,
+            advantages=advantages,
+            returns=returns,
+            values=values,
         )
 
-    @legit_jit(static_argnames=["self", "model"])
+    # @legit_jit(static_argnames=["self", "model"])
     def get_minibatches(
         self,
         trajectories: EnvState,
         model: ActorCriticModel,
         params: PyTree,
-        env: BaseEnv,
         rng: PRNGKeyArray,
     ) -> list[MinibatchEnvState]:
         """Get the minibatches for the current environment."""
@@ -206,8 +187,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         permutation = jax.random.permutation(_rng, batch_size)
 
-        # flatten
-        batch = jax.tree_util.tree_map(lambda x: x.reshape((batch_size,) + x.shape[2:]), batch)
+        # flatten - not neeed in cartpole case
+        # pfb30
+        # batch = jax.tree_util.tree_map(lambda x: x.reshape((batch_size,) + x.shape[2:]), batch)
         # permute
         permutted_batch = jax.tree_util.tree_map(lambda x: jnp.take(x, permutation, axis=0), batch)
         # divide
@@ -221,22 +203,18 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 obs=FrozenDict({k: minibatches.obs[k][i] for k in minibatches.obs}),
                 reward=minibatches.reward[i],
                 done=minibatches.done[i],
-                commands=FrozenDict({k: minibatches.commands[k][i] for k in minibatches.commands}),
-                time=minibatches.time[i],
+                command=FrozenDict({k: minibatches.command[k][i] for k in minibatches.command}),
+                timestep=minibatches.timestep[i],
                 rng=minibatches.rng[i],
-                action_at_prev_step=minibatches.action_at_prev_step[i],
-                command_at_prev_step=FrozenDict({k: minibatches.command_at_prev_step[k][i] for k in minibatches.command_at_prev_step}),
-                action_log_prob_at_prev_step=minibatches.action_log_prob_at_prev_step[i],
+                action=minibatches.action[i],
+                action_log_prob=minibatches.action_log_prob[i],
                 advantages=minibatches.advantages[i],
                 returns=minibatches.returns[i],
-                ratio=minibatches.ratio[i],
-                log_prob_diff=minibatches.log_prob_diff[i],
-                prediction=minibatches.prediction[i],
+                values=minibatches.values[i],
             )
             for i in range(self.config.num_mini_batches)
         ]
-        # if os.environ.get("DEBUG", "0") == "1":
-        #     breakpoint()
+
         return minibatch_list
 
     @legit_jit(static_argnames=["self", "model"])
@@ -247,22 +225,50 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         minibatch: EnvState,
     ) -> tuple[Array, dict[str, Array]]:
         """Compute the PPO loss (required by XAX)."""
+        # get the log probs of the current model
+        prediction = self.apply_actor(model, params, minibatch.obs, minibatch.command)
+        assert isinstance(prediction, Array)
+        log_probs = model.apply(
+            variables=params,
+            prediction=prediction,
+            action=minibatch.action,
+            method="actor_calc_log_prob",
+        )
+        log_prob_diff = log_probs - minibatch.action_log_prob
+        ratio = jnp.exp(log_prob_diff)
+        advantages = (minibatch.advantages - minibatch.advantages.mean()) / (
+            minibatch.advantages.std() + _EPS
+        )
+
+        # normalize returns
+        returns = jax.lax.cond(
+            self.config.normalize_returns,
+            lambda: (minibatch.returns - minibatch.returns.mean())
+            / (minibatch.returns.std() + _EPS),
+            lambda: minibatch.returns,
+        )
 
         # policy loss with clipping
         policy_loss = -jnp.mean(
             jnp.minimum(
-                minibatch.ratio * minibatch.advantages,
-                jnp.clip(minibatch.ratio, 1 - self.config.clip_param, 1 + self.config.clip_param) * minibatch.advantages,
+                ratio * advantages,
+                jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param)
+                * minibatch.advantages,
             )
         )
 
         # values here should be recomputed
         value_pred = self.apply_critic(model, params, minibatch.obs, minibatch.command)
         value_pred = value_pred.squeeze(axis=-1)  # (time, env)
-        value_loss = 0.5 * jnp.mean((minibatch.returns - value_pred) ** 2)
+
+        value_loss = jax.lax.cond(
+            self.config.use_clipped_value_loss,
+            lambda: self._clipped_value_loss(minibatch.values, value_pred, returns),
+            lambda: 0.5 * jnp.mean((returns - value_pred) ** 2),
+        )
 
         # entropy bonus term
-        probs = jax.nn.softmax(minibatch.prediction)  # TODO: make this live in the model
+        probs = jax.nn.softmax(prediction)
         entropy = -jnp.mean(jnp.sum(jax.scipy.special.entr(probs), axis=-1))
         entropy_loss = -self.config.entropy_coef * entropy
 
@@ -273,8 +279,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "value_loss": value_loss,
             "entropy": entropy,
             "total_loss": total_loss,
-            "average_ratio": jnp.mean(minibatch.ratio),
-            "average_log_prob_diff": jnp.mean(minibatch.log_prob_diff),
+            "average_ratio": jnp.mean(ratio),
+            "average_log_prob_diff": jnp.mean(log_prob_diff),
         }
 
         use_debug = os.environ.get("DEBUG", "0") == "1"
@@ -282,6 +288,24 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             breakpoint()
 
         return total_loss, metrics
+
+    @legit_jit(static_argnames=["self"])
+    def _clipped_value_loss(
+        self,
+        target_values: Array,
+        values: Array,
+        returns: Array,
+    ) -> Array:
+        """Compute the clipped value loss.
+        Since we do one right now update per batch,
+        the target values are the same as the values.
+        """
+        value_clipped = target_values + jnp.clip(
+            values - target_values, -self.config.clip_param, self.config.clip_param
+        )
+        clipped_error = value_clipped - returns
+        error = values - returns
+        return 0.5 * jnp.mean(jnp.maximum(error**2, clipped_error**2))
 
     @legit_jit(static_argnames=["self"])
     def _compute_advantages(
@@ -304,7 +328,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # getting td residuals
         deltas = rewards + self.config.gamma * next_values * mask - values
 
-        _, advantages = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1]))
+        _, advantages = jax.lax.scan(
+            scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1])
+        )
         return advantages[::-1]
 
     @legit_jit(static_argnames=["self", "model"])

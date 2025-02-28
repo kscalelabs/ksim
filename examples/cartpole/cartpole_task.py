@@ -180,6 +180,6 @@ if __name__ == "__main__":
             num_envs=1,
             max_trajectory_seconds=10.0,
             valid_every_n_steps=5,
-            learning_rate=1e-3,
+            learning_rate=3e-4,
         ),
     )

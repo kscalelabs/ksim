@@ -85,7 +85,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def __init__(self, config: Config) -> None:
         super().__init__(config)
         # pfb30 - this does not work somehow
-        self.max_trajectory_steps = 20 #round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
+        self.max_trajectory_steps = round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
         self.curr_logging_data = LoggingData()
         self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]
 
@@ -262,7 +262,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Logs the mean episode length.
         mean_episode_length_steps = (~trajectory.done).sum(axis=-1).astype(jnp.float32).mean()
         mean_episode_length_seconds = mean_episode_length_steps * self.config.ctrl_dt
-        self.logger.log_scalar("mean_episode_length", mean_episode_length_seconds, namespace="stats")
+        self.logger.log_scalar(
+            "mean_episode_length", mean_episode_length_seconds, namespace="stats"
+        )
 
     ########################
     # Training and Running #
@@ -319,19 +321,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             end_time = time.time()
             print(f"Time taken for trajectory batch: {end_time - start_time} seconds")
 
-            minibatches = self.get_minibatches(trajectories, model, params, env, step_rng)
+            minibatches = self.get_minibatches(trajectories, model, params, step_rng)
             # Updates the model on the collected trajectories.
             start_time = time.time()
-            import os
-            if os.environ.get("DEBUG", "0") == "1":
-                breakpoint()
             with self.step_context("update_state"):
                 # TODO: jax.lax.scan(self.model_update, (params, opt_state), minibatches)
                 for minibatch in minibatches:
                     params, opt_state, loss_val, metrics = self.model_update(
                         model, params, optimizer, opt_state, minibatch
                     )
-            
 
             end_time = time.time()
             print(f"Time taken for model update: {end_time - start_time} seconds")
@@ -364,7 +362,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     model=params, optimizer=optimizer, opt_state=opt_state, state=training_state
                 )  # Update XAX to be Flax supportive...
             end_time = time.time()
-            print(f"Time taken for on_step_end and save checkpoint: {end_time - start_time} seconds")
+            print(
+                f"Time taken for on_step_end and save checkpoint: {end_time - start_time} seconds"
+            )
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
