@@ -11,8 +11,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, EnvState
-from ksim.env.types import KScaleActionModelType
-from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.model.formulations import ActorCriticModel
 
 
 class CartPoleEnv(BaseEnv):
@@ -41,16 +40,12 @@ class CartPoleEnv(BaseEnv):
             rng=rng,
         )
 
-    def reset(
-        self, model: ActorCriticModel, params: PyTree, rng: PRNGKeyArray
-    ) -> EnvState:
+    def reset(self, model: ActorCriticModel, params: PyTree, rng: PRNGKeyArray) -> EnvState:
         """Reset the environment and sample an initial action from the model."""
         obs, info = self.env.reset()
         obs_dict = FrozenDict({"observations": jnp.array(obs)[None, :]})
         command = FrozenDict({})
-        action, log_prob = model.apply(
-            params, obs_dict, command, rng, method="actor_sample_and_log_prob"
-        )
+        action, log_prob = model.apply(params, obs_dict, command, rng, method="actor_sample_and_log_prob")
         return EnvState(
             obs=obs_dict,
             reward=jnp.array(1.0)[None],
@@ -95,9 +90,7 @@ class CartPoleEnv(BaseEnv):
         new_command = FrozenDict({})
 
         # Sample a new action and its log probability based on the new observation.
-        new_action, new_log_prob = model.apply(
-            params, new_obs, new_command, rng, method="actor_sample_and_log_prob"
-        )
+        new_action, new_log_prob = model.apply(params, new_obs, new_command, rng, method="actor_sample_and_log_prob")
         return EnvState(
             obs=new_obs,
             reward=jnp.array(reward)[None],
