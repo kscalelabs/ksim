@@ -67,8 +67,8 @@ class CartPoleEnv(BaseEnv):
     ) -> EnvState:
         """Take a step in the environment.
 
-        The environment uses the previous state's action (prev_state.action) as the action
-        to apply. After stepping, a new action is sampled from the model based on the new observation.
+        NOTE: for simplicity, this environment is stateful and doesn't actually use prev_state in
+        a functional manner.
         """
         # Use the action stored in the previous state to step the gym environment.
         try:
@@ -85,11 +85,8 @@ class CartPoleEnv(BaseEnv):
             else:
                 raise
 
-        # Build new observation dict.
         new_obs = FrozenDict({"observations": jnp.array(obs)[None, :]})
         new_command = FrozenDict({})
-
-        # Sample a new action and its log probability based on the new observation.
         new_action, new_log_prob = model.apply(params, new_obs, new_command, rng, method="actor_sample_and_log_prob")
         return EnvState(
             obs=new_obs,
