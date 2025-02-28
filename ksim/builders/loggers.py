@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import attrs
 import jax.numpy as jnp
 import xax
+from flax.core import FrozenDict
 from jaxtyping import PyTree
 
 from ksim.env.types import EnvState
@@ -13,7 +14,7 @@ from ksim.env.types import EnvState
 @attrs.define(frozen=True, kw_only=True)
 class LoggingData:
     trajectory: EnvState | None = None
-    update_metrics: dict[str, jnp.ndarray] = attrs.field(factory=dict)
+    update_metrics: FrozenDict[str, jnp.ndarray] = attrs.field(factory=FrozenDict)
     gradients: PyTree | None = None
     loss: float | None = None
     training_state: xax.State | None = None
@@ -69,6 +70,7 @@ class ModelUpdateLog(LogMetric):
 
     def __call__(self, logger: xax.Logger, data: LoggingData) -> None:
         for key, value in data.update_metrics.items():
+            assert isinstance(value, jnp.ndarray)
             logger.log_scalar(
                 key,
                 value,

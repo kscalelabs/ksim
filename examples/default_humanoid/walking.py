@@ -187,6 +187,8 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking action=train
     HumanoidWalkingTask.launch(
         HumanoidWalkingConfig(
-            max_trajectory_seconds=10.0,
+            num_envs=32,
+            num_steps_per_trajectory=500,
+            minibatch_size=500 * 4,
         ),
     )

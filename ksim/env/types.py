@@ -24,7 +24,6 @@ class EnvState:
 
     # Auxiliary attributes
     rng: PRNGKeyArray
-    action_log_prob: Array
 
 
 KScaleActionModelType = Literal["random", "zero", "midpoint"]

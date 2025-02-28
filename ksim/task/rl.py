@@ -35,6 +35,9 @@ from ksim.builders.loggers import (
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.env.mjx.mjx_env import KScaleEnvConfig
 from ksim.model.formulations import ActorCriticModel
+from ksim.task.types import RolloutTimeLossComponents
+from ksim.utils.jit import legit_jit
+from ksim.utils.pytree import slice_pytree
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,10 @@ class RLConfig(KScaleEnvConfig, xax.Config):
         value=MISSING,
         help="The maximum episode length, in seconds.",
     )
+    num_steps_per_trajectory: int = xax.field(
+        value=MISSING,
+        help="The number of steps in a trajectory.",
+    )
     num_envs: int = xax.field(
         value=MISSING,
         help="The number of training environments to run in parallel.",
@@ -57,10 +64,6 @@ class RLConfig(KScaleEnvConfig, xax.Config):
     default_action_model: str = xax.field(
         value="zero",
         help="The default action model to use if `actions` is not specified.",
-    )
-    max_trajectory_seconds: float = xax.field(
-        value=MISSING,
-        help="The maximum trajectory length, in seconds.",
     )
     observation_size: int = xax.field(
         value=MISSING,
@@ -70,27 +73,26 @@ class RLConfig(KScaleEnvConfig, xax.Config):
         value=MISSING,
         help="The size of the action space.",
     )
+    num_learning_epochs: int = xax.field(
+        value=5,
+        help="Number of learning epochs per PPO update.",
+    )
+    minibatch_size: int = xax.field(
+        value=MISSING,
+        help="The size of each minibatch.",
+    )
 
 
 Config = TypeVar("Config", bound=RLConfig)
 
 
 class RLTask(xax.Task[Config], Generic[Config], ABC):
-    """Base class for reinforcement learning tasks.
-
-    Attributes:
-        config: The RL configuration.
-        max_trajectory_steps: The maximum number of steps in a trajectory.
-    """
-
-    max_trajectory_steps: int
+    """Base class for reinforcement learning tasks."""
 
     def __init__(self, config: Config) -> None:
-        super().__init__(config)
-
-        self.max_trajectory_steps = round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
-        self.curr_logging_data = LoggingData()
+        self.config = config
         self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]
+        super().__init__(config)
 
     ####################
     # Abstract methods #
@@ -103,16 +105,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def viz_environment(self) -> None: ...
 
     @abstractmethod
-    def get_trajectory_batch(
+    def get_init_actor_carry(self) -> jnp.ndarray | None: ...
+
+    @abstractmethod
+    def get_rollout_time_loss_components(
         self,
         model: ActorCriticModel,
         params: PyTree,
-        env: BaseEnv,
-        rng: PRNGKeyArray,
-    ) -> EnvState: ...
-
-    @abstractmethod
-    def get_init_actor_carry(self) -> jnp.ndarray | None: ...
+        trajectory_dataset: EnvState,
+    ) -> RolloutTimeLossComponents: ...
 
     @abstractmethod
     def model_update(
@@ -122,16 +123,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         env_state_batch: EnvState,
-    ) -> tuple[PyTree, optax.OptState, Array, dict[str, Array]]: ...
+        rollout_time_loss_components: RolloutTimeLossComponents,
+    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]: ...
 
     ##############
     # Properties #
     ##############
 
     @property
-    def max_steps_per_trajectory(self) -> int:
-        """Max episode length (in seconds) divided by control time step."""
-        return round(self.config.max_episode_length / self.config.ctrl_dt)
+    def dataset_size(self) -> int:
+        """The size of the dataset."""
+        return self.config.num_envs * self.config.num_steps_per_trajectory
+
+    @property
+    def num_minibatches(self) -> int:
+        """The number of minibatches in the dataset."""
+        assert self.dataset_size % self.config.minibatch_size == 0
+        return self.dataset_size // self.config.minibatch_size
 
     ########################
     # XAX-specific methods #
@@ -307,7 +315,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         assert isinstance(model, nn.Module), "Model must be an Flax linen module."
         return model.init(init_key, state.obs, state.command)
 
-    @eqx.filter_jit
+    @legit_jit(static_argnames=["self", "model"])
     def apply_actor(
         self,
         model: ActorCriticModel,
@@ -319,6 +327,82 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         res = model.apply(params, obs=obs, cmd=cmd, method="actor")
         assert isinstance(res, Array)
         return res
+
+    @legit_jit(static_argnames=["self", "model", "env"], compile_timeout=10)
+    def get_trajectory_dataset(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        env: BaseEnv,
+        rng: PRNGKeyArray,
+    ) -> EnvState:
+        """Rollout a batch of trajectory data.
+
+        To avoid confusion, batch comprises 1 or more unrolled trajectory states stacked
+        along the first axis, and minibatches are sampled from this batch.
+        """
+
+        # TODO: implement logic to handle randomize model initialization when creating batch
+        rollout = env.unroll_trajectories(
+            model=model,
+            params=params,
+            rng=rng,
+            num_steps=self.config.num_steps_per_trajectory,
+            num_envs=self.config.num_envs,
+        )
+
+        def flatten_rollout_array(x: Array) -> Array:
+            """Flatten a rollout array."""
+            reshaped = jnp.reshape(x, (x.shape[0] * x.shape[1], *x.shape[2:]))
+            assert reshaped.shape[0] == self.config.num_steps_per_trajectory * self.config.num_envs
+            return reshaped
+
+        # flattening (num_steps, num_envs, ...) -> (num_steps * num_envs, ...) in leaves
+        flattened_rollout = jax.tree_util.tree_map(flatten_rollout_array, rollout)
+
+        return flattened_rollout
+
+    @legit_jit(static_argnames=["self"])
+    def reshuffle_rollout(
+        self,
+        rollout_dataset: EnvState,
+        rollout_time_loss_components: RolloutTimeLossComponents,
+        rng: PRNGKeyArray,
+    ) -> tuple[EnvState, RolloutTimeLossComponents]:
+        """Reshuffle a rollout array."""
+        # Generate permutation indices
+        batch_size = self.dataset_size
+        permutation = jax.random.permutation(rng, batch_size)
+
+        # Apply permutation to rollout dataset
+        def permute_array(x):
+            # Handle arrays with proper shape checking
+            if x.shape[0] == batch_size:
+                return x[permutation]
+            return x
+
+        # Apply permutation to both structures
+        reshuffled_rollout_dataset = jax.tree_util.tree_map(permute_array, rollout_dataset)
+        reshuffled_rollout_time_loss_components = jax.tree_util.tree_map(
+            permute_array, rollout_time_loss_components
+        )
+
+        return reshuffled_rollout_dataset, reshuffled_rollout_time_loss_components
+
+    @legit_jit(static_argnames=["self"])
+    def get_minibatch(
+        self,
+        rollout: EnvState,
+        rollout_time_loss_components: RolloutTimeLossComponents,
+        minibatch_idx: Array,
+    ) -> tuple[EnvState, RolloutTimeLossComponents]:
+        """Get a minibatch from the rollout."""
+        starting_idx = minibatch_idx * self.config.minibatch_size
+        minibatched_rollout = slice_pytree(rollout, starting_idx, self.config.minibatch_size)
+        minibatched_rollout_time_loss_components = slice_pytree(
+            rollout_time_loss_components, starting_idx, self.config.minibatch_size
+        )
+        return minibatched_rollout, minibatched_rollout_time_loss_components
 
     def train_loop(
         self,
@@ -339,38 +423,59 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Unrolls a trajectory.
             start_time = time.time()
-            train_rng, step_rng = jax.random.split(train_rng)
-            trajectories = self.get_trajectory_batch(model, params, env, step_rng)
-            end_time = time.time()
-            print(f"Time taken for trajectory batch: {end_time - start_time} seconds")
+            reshuffle_rng, rollout_rng = jax.random.split(train_rng)
+            trajectories_dataset = self.get_trajectory_dataset(model, params, env, rollout_rng)
+            rollout_time = time.time() - start_time
 
-            # Updates the model on the collected trajectories.
+            # running training on minibatches
             start_time = time.time()
-            with self.step_context("update_state"):
-                params, opt_state, loss_val, metrics = self.model_update(
-                    model, params, optimizer, opt_state, trajectories
-                )
-            end_time = time.time()
-            print(f"Time taken for model update: {end_time - start_time} seconds")
-
-            start_time = time.time()
-            self.curr_logging_data = LoggingData(
-                trajectory=trajectories,
-                update_metrics=metrics,
-                gradients=None,
-                loss=float(loss_val),
-                training_state=training_state,
+            rollout_time_loss_components = self.get_rollout_time_loss_components(
+                model, params, trajectories_dataset
             )
+            for epoch_idx in range(self.config.num_learning_epochs):
+                trajectories_dataset, rollout_time_loss_components = self.reshuffle_rollout(
+                    trajectories_dataset, rollout_time_loss_components, reshuffle_rng
+                )
+                reshuffle_rng, _ = jax.random.split(reshuffle_rng)
+                for minibatch_idx in range(self.num_minibatches):
+                    minibatch_idx = jnp.array(minibatch_idx)  # TODO: scanning will do this anyways
+                    minibatch, rollout_time_minibatch_loss_components = self.get_minibatch(
+                        trajectories_dataset, rollout_time_loss_components, minibatch_idx
+                    )
+                    with self.step_context("update_state"):
+                        params, opt_state, loss_val, metrics = self.model_update(
+                            model,
+                            params,
+                            optimizer,
+                            opt_state,
+                            minibatch,
+                            rollout_time_minibatch_loss_components,
+                        )
 
-            # Logs the trajectory statistics.
+                        # log metrics from the model update
+                        metric_logging_data = LoggingData(
+                            trajectory=trajectories_dataset,
+                            update_metrics=metrics,
+                            gradients=None,
+                            loss=float(loss_val),
+                            training_state=training_state,
+                        )
+
+                        with self.step_context("write_logs"):
+                            training_state.raw_phase = "train"
+                            for log_item in self.log_items:
+                                log_item(self.logger, metric_logging_data)
+
+                            self.logger.write(training_state)
+                            training_state.num_steps += 1
+
+            model_update_time = time.time() - start_time
+
+            # Log the time taken for the model update.
             with self.step_context("write_logs"):
-                training_state.raw_phase = "train"
-                for log_item in self.log_items:
-                    log_item(self.logger, self.curr_logging_data)
+                self.logger.log_scalar("rollout_time", rollout_time, namespace="⏰")
+                self.logger.log_scalar("model_update_time", model_update_time, namespace="⏰")
                 self.logger.write(training_state)
-                training_state.num_steps += 1
-            end_time = time.time()
-            print(f"Time taken for logging: {end_time - start_time} seconds")
 
             start_time = time.time()
             with self.step_context("on_step_end"):

@@ -10,11 +10,12 @@ import jax.numpy as jnp
 import optax
 import xax
 from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import Array, PyTree
 
-from ksim.env.base_env import BaseEnv, EnvState
+from ksim.env.types import EnvState
 from ksim.model.formulations import ActorCriticModel
 from ksim.task.rl import RLConfig, RLTask
+from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
 
 
@@ -38,8 +39,6 @@ class PPOConfig(RLConfig):
 
     # General training parameters
     # TODO: none of these except `max_grad_norm` are actually used in the training script
-    num_learning_epochs: int = xax.field(value=5, help="Number of learning epochs per PPO update.")
-    num_mini_batches: int = xax.field(value=4, help="Number of mini-batches per PPO epoch.")
     learning_rate: float = xax.field(value=1e-3, help="Learning rate for PPO.")
     schedule: str = xax.field(value="adaptive", help="Learning rate schedule 'fixed' | 'adaptive'")
     desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive LR.")
@@ -50,16 +49,7 @@ Config = TypeVar("Config", bound=PPOConfig)
 
 
 class PPOTask(RLTask[Config], Generic[Config], ABC):
-    """Base class for PPO tasks.
-
-    Attributes:
-        config: The PPO configuration.
-        model: The PPO model.
-        optimizer: The PPO optimizer.
-        state: The PPO state.
-        dataset: The PPO dataset.
-        max_trajectory_steps: The maximum number of steps in a trajectory.
-    """
+    """Base class for PPO tasks."""
 
     ########################
     # Implementing RL Task #
@@ -74,25 +64,41 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Get the critic carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
 
-    @legit_jit(static_argnames=["self", "model", "env"], compile_timeout=10)
-    def get_trajectory_batch(
+    @legit_jit(static_argnames=["self", "model"])
+    def get_rollout_time_loss_components(
         self,
         model: ActorCriticModel,
         params: PyTree,
-        env: BaseEnv,
-        rng: PRNGKeyArray,
-    ) -> EnvState:
-        """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)"""
-
-        env_state_batch, _ = env.unroll_trajectories(
-            model=model,
-            params=params,
-            rng=rng,
-            num_steps=self.max_trajectory_steps,
-            num_envs=self.config.num_envs,
+        trajectory_dataset: EnvState,
+    ) -> RolloutTimeLossComponents:
+        """Calculating advantages and returns for a rollout."""
+        prediction = self.apply_actor(
+            model, params, trajectory_dataset.obs, trajectory_dataset.command
+        )  # I'm fine with recomputing once to ensure separation of rollout and training logic
+        initial_action_log_probs = model.apply(
+            variables=params,
+            prediction=prediction,
+            action=trajectory_dataset.action,
+            method="actor_calc_log_prob",
         )
+        assert isinstance(initial_action_log_probs, Array)
+        initial_values = self.apply_critic(
+            model, params, trajectory_dataset.obs, trajectory_dataset.command
+        ).squeeze(axis=-1)
+        # We squeeze because last dimension is a singleton, advantages expects (batch_dims,)
 
-        return env_state_batch
+        advantages = self._compute_advantages(initial_values, trajectory_dataset)
+        returns = advantages + initial_values
+
+        if self.config.normalize_advantage:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        return PPORolloutTimeLossComponents(
+            initial_action_log_probs=jax.lax.stop_gradient(initial_action_log_probs),
+            initial_values=jax.lax.stop_gradient(initial_values),
+            advantages=jax.lax.stop_gradient(advantages),
+            returns=jax.lax.stop_gradient(returns),
+        )
 
     @legit_jit(static_argnames=["self", "model", "optimizer"])
     def model_update(
@@ -102,9 +108,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         env_state_batch: EnvState,
-    ) -> tuple[PyTree, optax.OptState, Array, dict[str, Array]]:
+        rollout_time_loss_components: RolloutTimeLossComponents,
+    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Update the model parameters."""
-        loss_val, metrics, grads = self._jitted_value_and_grad(model, params, env_state_batch)
+        loss_val, metrics, grads = self._jitted_value_and_grad(
+            model, params, env_state_batch, rollout_time_loss_components
+        )
         print(f"Loss: {loss_val}")
         updates, new_opt_state = optimizer.update(grads, opt_state, params)
         new_params = optax.apply_updates(params, updates)
@@ -146,35 +155,36 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         env_state_batch: EnvState,
-    ) -> tuple[Array, dict[str, Array]]:
+        rollout_time_loss_components: RolloutTimeLossComponents,
+    ) -> tuple[Array, FrozenDict[str, Array]]:
         """Compute the PPO loss (required by XAX)."""
         # get the log probs of the current model
         prediction = self.apply_actor(model, params, env_state_batch.obs, env_state_batch.command)
-        assert isinstance(prediction, Array)
         log_probs = model.apply(
             variables=params,
             prediction=prediction,
             action=env_state_batch.action,
             method="actor_calc_log_prob",
         )
-        log_prob_diff = log_probs - env_state_batch.action_log_prob
+
+        assert isinstance(prediction, Array)
+        assert isinstance(log_probs, Array)
+        assert isinstance(rollout_time_loss_components, PPORolloutTimeLossComponents)
+
+        log_prob_diff = log_probs - rollout_time_loss_components.initial_action_log_probs
         ratio = jnp.exp(log_prob_diff)
 
         # get the state-value estimates
         values = self.apply_critic(model, params, env_state_batch.obs, env_state_batch.command)
         assert isinstance(values, Array)
         values = values.squeeze(axis=-1)  # values is (time, env)
-        advantages = self._compute_advantages(values, env_state_batch)  # (time, env)
-
-        returns = advantages + values
-        # normalizing advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # policy loss with clipping
         policy_loss = -jnp.mean(
             jnp.minimum(
-                ratio * advantages,
-                jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param) * advantages,
+                ratio * rollout_time_loss_components.advantages,
+                jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param)
+                * rollout_time_loss_components.advantages,
             )
         )
 
@@ -182,7 +192,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # TODO: add clipping
         value_pred = self.apply_critic(model, params, env_state_batch.obs, env_state_batch.command)
         value_pred = value_pred.squeeze(axis=-1)  # (time, env)
-        value_loss = 0.5 * jnp.mean((returns - value_pred) ** 2)
+        value_loss = 0.5 * jnp.mean((rollout_time_loss_components.returns - value_pred) ** 2)
 
         # entropy bonus term
         probs = jax.nn.softmax(prediction)  # TODO: make this live in the model
@@ -191,20 +201,22 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         total_loss = policy_loss + self.config.value_loss_coef * value_loss + entropy_loss
 
-        metrics = {
-            "policy_loss": policy_loss,
-            "value_loss": value_loss,
-            "entropy": entropy,
-            "total_loss": total_loss,
-            "average_ratio": jnp.mean(ratio),
-            "average_log_prob_diff": jnp.mean(log_prob_diff),
-        }
+        metrics_to_log = FrozenDict(
+            {
+                "policy_loss": policy_loss,
+                "value_loss": value_loss,
+                "entropy": entropy,
+                "total_loss": total_loss,
+                "average_ratio": jnp.mean(ratio),
+                "average_log_prob_diff": jnp.mean(log_prob_diff),
+            }
+        )
 
         use_debug = os.environ.get("DEBUG", "0") == "1"
-        if use_debug and jnp.isnan(total_loss):
+        if use_debug and jnp.isnan(total_loss):  # should skip compilation
             breakpoint()
 
-        return total_loss, metrics
+        return total_loss, metrics_to_log
 
     @legit_jit(static_argnames=["self"])
     def _compute_advantages(
@@ -236,11 +248,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         env_state_batch: EnvState,
-    ) -> tuple[Array, dict[str, Array], PyTree]:
+        rollout_time_loss_components: RolloutTimeLossComponents,
+    ) -> tuple[Array, FrozenDict[str, Array], PyTree]:
         """Jitted version of value_and_grad computation."""
 
-        def loss_fn(p: PyTree) -> tuple[Array, dict[str, Array]]:
-            return self.compute_loss(model, p, env_state_batch)
+        def loss_fn(p: PyTree) -> tuple[Array, FrozenDict[str, Array]]:
+            return self.compute_loss(model, p, env_state_batch, rollout_time_loss_components)
 
         (loss_val, metrics), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
         return loss_val, metrics, grads

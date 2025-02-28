@@ -419,7 +419,6 @@ class MjxEnv(BaseEnv):
                 action=action_0,
                 timestep=timestep,
                 rng=rng,
-                action_log_prob=action_log_prob_0,
             ),
             mjx_data_1,
         )
@@ -474,7 +473,6 @@ class MjxEnv(BaseEnv):
             done=done_t,
             timestep=timestep,
             rng=rng,
-            action_log_prob=action_log_prob_t,
         )
 
         return env_state_t, mjx_data_t_plus_1
@@ -509,7 +507,6 @@ class MjxEnv(BaseEnv):
             done=jnp.ones(()),
             timestep=jnp.ones(()),
             rng=rng,
-            action_log_prob=jnp.ones(()),
         )
 
     @legit_jit(static_argnames=["self"])
