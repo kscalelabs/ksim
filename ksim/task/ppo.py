@@ -158,6 +158,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             method="actor_calc_log_prob",
         )
         log_prob_diff = log_probs - env_state_batch.action_log_prob_at_prev_step
+        # TODO: ^^ this is wrong... log_probs depends on current obs...
         ratio = jnp.exp(log_prob_diff)
 
         # get the state-value estimates
@@ -221,7 +222,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             new_carry = d + self.config.gamma * self.config.lam * m * carry
             return new_carry, new_carry
 
-        next_values = jnp.roll(values, shift=-1, axis=0)
+        next_values = jnp.roll(values, shift=-1, axis=0)  # TODO: concat not roll...
         mask = jnp.where(done, 0.0, 1.0)
 
         # getting td residuals

@@ -30,7 +30,7 @@ from ksim.builders.rewards import (
 )
 from ksim.builders.terminations import IllegalContactTerminationBuilder
 from ksim.env.mjx.mjx_env import MjxEnv
-from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.model.formulations import ActorCriticModel, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
@@ -38,11 +38,8 @@ NUM_INPUTS = 24
 NUM_OUTPUTS = 17
 
 
-class HumanoidActorModel(ActionModel):
+class HumanoidActorModel(GaussianActionModel):
     mlp: MLP
-
-    def setup(self) -> None:
-        self.log_std = self.param("log_std", nn.initializers.constant(-0.7), (NUM_OUTPUTS,))
 
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         x_n = jnp.concatenate([obs_array for obs_array in obs.values()], axis=-1)
@@ -51,27 +48,6 @@ class HumanoidActorModel(ActionModel):
         actions_n = self.mlp(x_n)
 
         return actions_n
-
-    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
-        mean = prediction
-        std = jnp.exp(self.log_std)
-
-        log_prob = (
-            -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
-        )
-        return jnp.sum(log_prob, axis=-1)
-
-    def sample_and_log_prob(
-        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> Tuple[Array, Array]:
-        mean = self(obs, cmd)
-        std = jnp.exp(self.log_std)
-
-        noise = jax.random.normal(rng, mean.shape)
-        action = mean + noise * std
-        log_prob = self.calc_log_prob(mean, action)
-
-        return action, log_prob
 
 
 class HumanoidCriticModel(nn.Module):
@@ -185,6 +161,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                     hidden_features=self.config.actor_hidden_dims,
                     out_features=NUM_OUTPUTS,
                 ),
+                init_log_std=-0.7,
+                num_outputs=NUM_OUTPUTS,
             ),
             critic_module=HumanoidCriticModel(
                 mlp=MLP(
@@ -209,7 +187,6 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking action=train
     HumanoidWalkingTask.launch(
         HumanoidWalkingConfig(
-            num_envs=1,
             max_trajectory_seconds=10.0,
         ),
     )
