@@ -2,6 +2,7 @@
 
 import bdb
 import logging
+import os
 import signal
 import sys
 import textwrap
@@ -15,6 +16,7 @@ from typing import Generic, Literal, TypeVar
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import mediapy as mp
 import optax
 import xax
 from dpshdl.dataset import Dataset
@@ -22,6 +24,7 @@ from flax import linen as nn
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING
+from PIL import Image
 
 from ksim.builders.loggers import (
     AverageRewardLog,
@@ -150,15 +153,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.run_training()
 
             case "env":
-                self.run_environment()
+                model, _, _, _ = self.load_initial_state(self.prng_key())
+                self.run_environment(model)
 
             case "viz":
                 self.viz_environment()
 
             case _:
-                raise ValueError(
-                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
-                )
+                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
 
     #########################
     # Logging and Rendering #
@@ -172,50 +174,73 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run_environment(
         self,
-        # model: ActorCriticModel,
+        model: ActorCriticModel,
         # params: PyTree | None = None,
         state: xax.State | None = None,
     ) -> None:
         """Run the environment with rendering and logging."""
         with self:
+            start_time = time.time()
             rng = self.prng_key()
             env = self.get_environment()
             render_name = self.get_render_name(state)
-            render_dir = self.exp_dir / "renders" / render_name
+            render_dir = self.exp_dir / self.config.render_dir / render_name
+
+            os.makedirs(render_dir, exist_ok=True)
+            end_time = time.time()
+            print(f"Time taken for environment setup: {end_time - start_time} seconds")
+
             logger.log(logging.INFO, "Rendering to %s", render_dir)
 
             self.set_loggers()
 
-            key, model_key = jax.random.split(rng)
-            model, optimizer, opt_state, training_state = self.load_initial_state(model_key)
+            key, _ = jax.random.split(rng)
+
+            start_time = time.time()
             params = self.get_init_params(key)
+            end_time = time.time()
+            print(f"Time taken for parameter initialization: {end_time - start_time} seconds")
 
             # Unroll trajectories and collect the frames for rendering
-            frames, trajectory = env.unroll_trajectories_and_render(
-                model=model,
-                params=params,
-                rng=rng,
-                num_steps=10,  # self.max_steps_per_trajectory,
-                render_dir=render_dir,
+            logger.info("Unrolling trajectories")
+
+            start_time = time.time()
+            _, traj = env.unroll_trajectories(
+                model, params, rng, self.max_trajectory_steps, self.config.num_envs, return_data=True
             )
+            end_time = time.time()
+            print(f"Time taken for trajectory unrolling: {end_time - start_time} seconds")
 
-            # Use the log items for additional metrics
-            self.curr_logging_data = LoggingData(
-                trajectory=trajectory,
-                update_metrics={},
-                gradients=None,
-                loss=0.0,
-                training_state=state,
+            start_time = time.time()
+            mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), traj)
+
+            mjx_data_list = [
+                jax.tree_util.tree_map(lambda x: x[i], mjx_data_traj)
+                for i in range(self.max_trajectory_steps)
+            ]
+            end_time = time.time()
+            print(f"Time taken for trajectory processing: {end_time - start_time} seconds")
+
+            start_time = time.time()
+            frames = env.render_trajectory(
+                trajectory=mjx_data_list, width=self.config.render_width, height=self.config.render_height
             )
+            end_time = time.time()
+            print(f"Time taken for rendering frames: {end_time - start_time} seconds")
 
-            for log_item in self.log_items:
-                if not isinstance(log_item, ModelUpdateLog):  # Skip model update logs
-                    log_item(self.logger, self.curr_logging_data)
+            logger.info("Saving %d frames to %s", len(frames), render_dir)
 
-            # Log the rendered frames
-            self.logger.log_images("trajectory", frames, namespace="video")
+            start_time = time.time()
+            for i, frame in enumerate(frames):
+                frame_path = render_dir / f"frame_{i:06d}.png"
+                Image.fromarray(frame).save(frame_path)
+            end_time = time.time()
+            print(f"Time taken for saving frames: {end_time - start_time} seconds")
 
-            logger.log(logging.INFO, "Finished running environment and logging metrics")
+            start_time = time.time()
+            mp.write_video(render_dir / "trajectory.mp4", frames, fps=1 / self.config.ctrl_dt)
+            end_time = time.time()
+            print(f"Time taken for video creation: {end_time - start_time} seconds")
 
     def log_state(self, env: BaseEnv) -> None:
         super().log_state()
@@ -406,9 +431,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(
-                    xax.highlight_exception_message(traceback.format_exc()), "  "
-                )
+                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(model, optimizer, opt_state, training_state)

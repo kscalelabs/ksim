@@ -144,6 +144,7 @@ class KScaleEnvConfig(xax.Config):
     render_camera: str = xax.field(value="tracking_camera", help="The camera to use for rendering.")
     render_width: int = xax.field(value=640, help="The width of the rendered image.")
     render_height: int = xax.field(value=480, help="The height of the rendered image.")
+    render_dir: Path = xax.field(value="render", help="The directory to save rendered images to.")
 
     # environment configuration options
     dt: float = xax.field(value=0.004, help="Simulation time step.")
@@ -161,6 +162,7 @@ class KScaleEnvConfig(xax.Config):
     # simulation artifact options
     ignore_cached_urdf: bool = xax.field(value=False, help="Whether to ignore the cached URDF.")
 
+    viz_action: str = xax.field(value="policy", help="The action to use for visualization.")
 
 # The new stateless environment – note that we do not call any stateful methods.
 class MjxEnv(BaseEnv):
@@ -566,7 +568,7 @@ class MjxEnv(BaseEnv):
         )
         return new_state
 
-    @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs"])
+    @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs", "return_data"])
     def unroll_trajectories(
         self,
         model: ActorCriticModel,
@@ -574,8 +576,9 @@ class MjxEnv(BaseEnv):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
+        return_data: bool = False,
         **kwargs: Any,
-    ) -> EnvState:
+    ) -> tuple[EnvState, mjx.Data]:
         """Vectorized rollout of trajectories.
 
         1. The batched reset (using vmap) initializes a state for each environment.
@@ -583,6 +586,10 @@ class MjxEnv(BaseEnv):
         3. A jax.lax.scan unrolls the trajectory for num_steps.
         4. The resulting trajectory has shape (num_steps, num_envs, ...).
         """
+
+        if return_data:
+            num_envs = 1
+
         init_rngs = jax.random.split(rng, num_envs)
         mjx_model = self.default_mjx_model
         # TODO: include logic to randomize environment parameters here...
@@ -634,11 +641,15 @@ class MjxEnv(BaseEnv):
         @legit_jit()
         def scan_fn(
             carry: Tuple[EnvState, mjx.Data, Array], _: Any
-        ) -> Tuple[Tuple[EnvState, mjx.Data, Array], EnvState]:
+        ) -> Tuple[Tuple[EnvState, mjx.Data, Array], Tuple[EnvState, mjx.Data]]:
             states, mjx_data, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
             new_states, new_mjx_data = jax.vmap(env_step_partial)(states, mjx_data, rngs[1:])
-            return (new_states, new_mjx_data, rngs[0]), new_states
+
+            if return_data:
+                return (new_states, new_mjx_data, rngs[0]), (new_states, new_mjx_data)
+            else:
+                return (new_states, new_mjx_data, rngs[0]), (new_states, None)
 
         (_, _, _), traj = jax.lax.scan(
             f=scan_fn,
@@ -646,9 +657,6 @@ class MjxEnv(BaseEnv):
             xs=None,
             length=num_steps,
         )
-        if kwargs.get("render", False):
-            # TODO: render the trajectory
-            pass
 
         return traj  # Shape: (num_steps, num_envs, ...)
 
@@ -684,91 +692,6 @@ class MjxEnv(BaseEnv):
             frames.append(frame)
         renderer.close()
         return frames
-
-    def unroll_trajectories_and_render(
-        self,
-        rng: PRNGKeyArray,
-        num_steps: int,
-        render_dir: Path,
-        model: ActorCriticModel,
-        params: PyTree,
-        width: int = 640,
-        height: int = 480,
-        **kwargs: Any,
-    ) -> tuple[list[np.ndarray], EnvState]:
-        """Render a trajectory for visualization.
-
-        Args:
-            rng: Random number generator key.
-            num_steps: Number of steps to simulate.
-            render_dir: Directory to save rendered frames.
-            actions: Action model or type to use for generating actions.
-            width: Width of rendered images.
-            height: Height of rendered images.
-            create_video: Whether to create a video file from frames.
-            log_to_tensorboard: Whether to log the video to TensorBoard.
-            tb_log_dir: Directory for TensorBoard logs. If None, uses render_dir.
-            **kwargs: Additional arguments including camera_id.
-        """
-        # Create render directory
-        render_dir = Path(render_dir)
-        render_dir.mkdir(parents=True, exist_ok=True)
-
-        # Select camera
-        camera = kwargs.get("camera_id", None)
-        if isinstance(camera, str):
-            try:
-                camera = self.default_mj_model.name2id(camera, mujoco.mjtObj.mjOBJ_CAMERA)
-            except ValueError:
-                camera = -1
-        elif camera is None:
-            camera = 0 if self.default_mj_model.ncam > 0 else -1
-
-        data = []  # Store all mjx.Data objects for rendering
-
-        state, mjx_data = self.scannable_reset(
-            model=model,
-            params=params,
-            rng=rng,
-            mjx_model=self.default_mjx_model,
-        )
-
-        # Run trajectory
-        for _ in range(num_steps):
-            # Step environment
-            rng, step_rng = jax.random.split(rng)
-            if state.done:
-                print("Resetting environment")
-                state, mjx_data = self.scannable_reset(
-                    model=model,
-                    params=params,
-                    rng=step_rng,
-                    mjx_model=self.default_mjx_model,
-                )
-            else:
-                state, mjx_data = self.scannable_step(
-                    model=model,
-                    params=params,
-                    env_state_t_minus_1=state,
-                    mjx_data_t=mjx_data,
-                    mjx_model=self.default_mjx_model,
-                    rng=step_rng,
-                )
-            # Render and save frame
-            data.append(mjx_data)
-
-        frames = self.render_trajectory(data, width, height, camera)
-
-        for i, frame in enumerate(frames):
-            frame_path = render_dir / f"frame_{i:06d}.png"
-            Image.fromarray(frame).save(frame_path)
-
-        video_path = render_dir / "trajectory.mp4"
-        fps = 1.0 / self.config.dt / 2
-        media.write_video(str(video_path), np.array(frames), fps=fps)
-        print(f"Video saved to {video_path}")
-
-        return frames, state
 
     @property
     def observation_size(self) -> int:
