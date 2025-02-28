@@ -114,7 +114,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         loss_val, metrics, grads = self._jitted_value_and_grad(
             model, params, env_state_batch, rollout_time_loss_components
         )
-        print(f"Loss: {loss_val}")
         updates, new_opt_state = optimizer.update(grads, opt_state, params)
         new_params = optax.apply_updates(params, updates)
         return new_params, new_opt_state, loss_val, metrics
@@ -180,7 +179,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         values = values.squeeze(axis=-1)  # values is (time, env)
 
         # policy loss with clipping
-        policy_loss = -jnp.mean(
+        policy_objective = jnp.mean(
             jnp.minimum(
                 ratio * rollout_time_loss_components.advantages,
                 jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param)
@@ -192,23 +191,29 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # TODO: add clipping
         value_pred = self.apply_critic(model, params, env_state_batch.obs, env_state_batch.command)
         value_pred = value_pred.squeeze(axis=-1)  # (time, env)
-        value_loss = 0.5 * jnp.mean((rollout_time_loss_components.returns - value_pred) ** 2)
+        value_objective = 0.5 * jnp.mean((rollout_time_loss_components.returns - value_pred) ** 2)
 
         # entropy bonus term
         probs = jax.nn.softmax(prediction)  # TODO: make this live in the model
         entropy = -jnp.mean(jnp.sum(jax.scipy.special.entr(probs), axis=-1))
-        entropy_loss = -self.config.entropy_coef * entropy
+        entropy_objective = self.config.entropy_coef * entropy
 
-        total_loss = policy_loss + self.config.value_loss_coef * value_loss + entropy_loss
+        total_objective = (
+            policy_objective
+            - self.config.value_loss_coef * value_objective
+            + self.config.entropy_coef * entropy
+        )
+        total_loss = -total_objective
 
         metrics_to_log = FrozenDict(
             {
-                "policy_loss": policy_loss,
-                "value_loss": value_loss,
-                "entropy": entropy,
-                "total_loss": total_loss,
+                "policy_objective": policy_objective,
+                "value_objective": value_objective,
+                "entropy_objective": entropy_objective,
+                "total_objective": total_objective,
                 "average_ratio": jnp.mean(ratio),
                 "average_log_prob_diff": jnp.mean(log_prob_diff),
+                "average_advantage_norm": jnp.mean(jnp.abs(rollout_time_loss_components.advantages)),
             }
         )
 

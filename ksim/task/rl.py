@@ -170,7 +170,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.viz_environment()
 
             case _:
-                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
+                raise ValueError(
+                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
+                )
 
     #########################
     # Logging and Rendering #
@@ -233,7 +235,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             start_time = time.time()
             frames = env.render_trajectory(
-                trajectory=mjx_data_list, width=self.config.render_width, height=self.config.render_height
+                trajectory=mjx_data_list,
+                width=self.config.render_width,
+                height=self.config.render_height,
             )
             end_time = time.time()
             print(f"Time taken for rendering frames: {end_time - start_time} seconds")
@@ -463,6 +467,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             training_state=training_state,
                         )
 
+                        # print(f"{epoch_idx}, {minibatch_idx}: {metrics}")
+
                         with self.step_context("write_logs"):
                             training_state.raw_phase = "train"
                             for log_item in self.log_items:
@@ -535,7 +541,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
+                exception_tb = textwrap.indent(
+                    xax.highlight_exception_message(traceback.format_exc()), "  "
+                )
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
