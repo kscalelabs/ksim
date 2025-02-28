@@ -84,7 +84,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def __init__(self, config: Config) -> None:
         super().__init__(config)
-        # pfb30 - this does not work somehow
         self.max_trajectory_steps = round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
         self.curr_logging_data = LoggingData()
         self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]
@@ -333,7 +332,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             end_time = time.time()
             print(f"Time taken for model update: {end_time - start_time} seconds")
-            print("loss_val", loss_val)
             start_time = time.time()
             self.curr_logging_data = LoggingData(
                 trajectory=trajectories,

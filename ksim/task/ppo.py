@@ -188,7 +188,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         permutation = jax.random.permutation(_rng, batch_size)
 
         # flatten - not neeed in cartpole case
-        # pfb30
         # batch = jax.tree_util.tree_map(lambda x: x.reshape((batch_size,) + x.shape[2:]), batch)
         # permute
         permutted_batch = jax.tree_util.tree_map(lambda x: jnp.take(x, permutation, axis=0), batch)
