@@ -30,8 +30,8 @@ class PPOConfig(RLConfig):
     normalize_returns: bool = xax.field(value=True, help="Whether to normalize returns.")
 
     # For the Value Function (VF) term
-    value_loss_coef: float = xax.field(value=1.0, help="Value loss coefficient for PPO.")
-    use_clipped_value_loss: bool = xax.field(value=False, help="Whether to use clipped value loss.")
+    value_loss_coef: float = xax.field(value=0.5, help="Value loss coefficient for PPO.")
+    use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss.")
 
     # For the entropy bonus term
     entropy_coef: float = xax.field(value=0.008, help="Entropy coefficient for PPO.")
@@ -44,7 +44,7 @@ class PPOConfig(RLConfig):
     minibatch_size: int = xax.field(value=50, help="Equals to the number of updates per trajectory")
     num_mini_batches: int = xax.field(value=10, help="Number of mini-batches per PPO epoch.")
     learning_rate: float = xax.field(value=3e-4, help="Learning rate for PPO.")
-    max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
+    max_grad_norm: float = xax.field(value=0.5, help="Maximum gradient norm for clipping.")
 
 
 Config = TypeVar("Config", bound=PPOConfig)
@@ -243,8 +243,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # normalize returns
         returns = jax.lax.cond(
             self.config.normalize_returns,
-            lambda: (minibatch.returns - minibatch.returns.mean())
-            / (minibatch.returns.std() + _EPS),
+            lambda: (minibatch.returns - minibatch.returns.mean())/ (minibatch.returns.std() + _EPS),
             lambda: minibatch.returns,
         )
 
@@ -257,13 +256,17 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             )
         )
 
-        # values here should be recomputed
+        # value loss with clipping
         value_pred = self.apply_critic(model, params, minibatch.obs, minibatch.command)
         value_pred = value_pred.squeeze(axis=-1)  # (time, env)
 
         value_loss = jax.lax.cond(
             self.config.use_clipped_value_loss,
-            lambda: self._clipped_value_loss(minibatch.values, value_pred, returns),
+            lambda: self._clipped_value_loss(
+                target_values=minibatch.values,
+                values=value_pred,
+                returns=returns,
+            ),
             lambda: 0.5 * jnp.mean((returns - value_pred) ** 2),
         )
 

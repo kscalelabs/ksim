@@ -27,7 +27,9 @@ class MLP(nn.Module):
             The output of the MLP [..., out_features]
         """
         for _ in range(self.num_hidden_layers):
-            x = nn.Dense(features=self.hidden_features, kernel_init=nn.initializers.kaiming_normal())(x)
+            x = nn.Dense(
+                features=self.hidden_features, kernel_init=nn.initializers.kaiming_normal()
+            )(x)
             x = nn.relu(x)
         x = nn.Dense(features=self.out_features, kernel_init=nn.initializers.xavier_normal())(x)
         return x

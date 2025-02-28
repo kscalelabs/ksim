@@ -45,7 +45,9 @@ class CartPoleEnv(BaseEnv):
         obs, info = self.env.reset()
         obs_dict = FrozenDict({"observations": jnp.array(obs)[None, :]})
         command = FrozenDict({})
-        action, log_prob = model.apply(params, obs_dict, command, rng, method="actor_sample_and_log_prob")
+        action, log_prob = model.apply(
+            params, obs_dict, command, rng, method="actor_sample_and_log_prob"
+        )
         return EnvState(
             obs=obs_dict,
             reward=jnp.array(1.0)[None],
@@ -87,7 +89,9 @@ class CartPoleEnv(BaseEnv):
 
         new_obs = FrozenDict({"observations": jnp.array(obs)[None, :]})
         new_command = FrozenDict({})
-        new_action, new_log_prob = model.apply(params, new_obs, new_command, rng, method="actor_sample_and_log_prob")
+        new_action, new_log_prob = model.apply(
+            params, new_obs, new_command, rng, method="actor_sample_and_log_prob"
+        )
         assert isinstance(new_log_prob, Array)
         return EnvState(
             obs=new_obs,
