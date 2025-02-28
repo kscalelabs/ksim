@@ -463,6 +463,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             training_state=training_state,
                         )
 
+                        # print(f"{epoch_idx}, {minibatch_idx}: {metrics}")
+
                         with self.step_context("write_logs"):
                             training_state.raw_phase = "train"
                             for log_item in self.log_items:
