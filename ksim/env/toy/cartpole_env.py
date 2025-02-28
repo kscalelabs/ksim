@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.env.types import KScaleActionModelType, PhysicsData
@@ -28,6 +28,9 @@ class CartPoleEnv(BaseEnv):
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
 
+    ########################
+    # Implementing the API #
+    ########################
     def get_dummy_env_state(self, rng: PRNGKeyArray) -> EnvState:
         """Get a dummy environment state for compilation purposes."""
         return EnvState(
@@ -36,70 +39,28 @@ class CartPoleEnv(BaseEnv):
             done=jnp.array([False]),
             command=FrozenDict({}),
             action=jnp.zeros((self.action_size,)),
-            action_log_prob=jnp.array(0.0),
             timestep=jnp.array(0.0),
-            rng=rng,
         )
 
     def reset(self, model: ActorCriticModel, params: PyTree, rng: PRNGKeyArray) -> EnvState:
         """Reset the environment and sample an initial action from the model."""
-        obs, info = self.env.reset()
-        obs_dict = FrozenDict({"observations": jnp.array(obs)[None, :]})
-        command = FrozenDict({})
-        action, log_prob = model.apply(params, obs_dict, command, rng, method="actor_sample_and_log_prob")
-        return EnvState(
-            obs=obs_dict,
-            reward=jnp.array(1.0)[None],
-            done=jnp.array([False]),
-            command=command,
-            action=action,
-            action_log_prob=log_prob,
-            timestep=jnp.array(0.0),
-            rng=rng,
-        )
+        env_state_0, gym_obs_1 = self.reset_and_give_obs(model, params, rng)
+        return env_state_0
 
     def step(
         self,
         model: ActorCriticModel,
         params: PyTree,
-        prev_state: EnvState,
+        prev_env_state: EnvState,
         rng: PRNGKeyArray,
-        action_log_prob: Array,
+        *,
+        current_gym_obs: np.ndarray,
     ) -> EnvState:
-        """Take a step in the environment.
-
-        NOTE: for simplicity, this environment is stateful and doesn't actually use prev_state in
-        a functional manner.
-        """
-        # Use the action stored in the previous state to step the gym environment.
-        try:
-            obs, reward, terminated, truncated, info = self.env.step(prev_state.action.item())
-            done = bool(terminated or truncated)  # Convert to Python bool
-        except AttributeError as e:
-            if "bool8" in str(e):
-                # Handle the numpy bool8 error
-                obs, reward, terminated, truncated, info = self.env.step(prev_state.action.item())
-                # Ensure terminated and truncated are Python booleans
-                terminated = bool(terminated)
-                truncated = bool(truncated)
-                done = terminated or truncated
-            else:
-                raise
-
-        new_obs = FrozenDict({"observations": jnp.array(obs)[None, :]})
-        new_command = FrozenDict({})
-        new_action, new_log_prob = model.apply(params, new_obs, new_command, rng, method="actor_sample_and_log_prob")
-        assert isinstance(new_log_prob, Array)
-        return EnvState(
-            obs=new_obs,
-            reward=jnp.array(reward)[None],
-            done=jnp.array([done]),
-            command=new_command,
-            action=new_action,
-            action_log_prob=new_log_prob,
-            timestep=prev_state.timestep + 1.0,
-            rng=prev_state.rng,
+        """Take a step in the environment."""
+        current_env_state, _ = self.step_given_gym_obs(
+            model, params, prev_env_state, rng, current_gym_obs=current_gym_obs
         )
+        return current_env_state
 
     def unroll_trajectories(
         self,
@@ -116,31 +77,38 @@ class CartPoleEnv(BaseEnv):
         actions = []
         rewards = []
         done = []
-        action_log_probs = []
 
-        state = self.reset(model, params, rng)
-        rng, _ = jax.random.split(rng)
+        prev_state, current_obs = self.reset_and_give_obs(
+            model=model,
+            params=params,
+            rng=rng,
+        )
         for _ in range(num_steps):
-            observations.append(state.obs)
-            done.append(state.done)
-            actions.append(state.action)
-            rewards.append(state.reward)
-            action_log_probs.append(state.action_log_prob)
-            # NOTE: need to be careful about when the reward updates... this works for survival
-            # related tasks, but not those that directly depend on the action.
-
-            if state.done[0]:
-                state = self.reset(model, params, rng)
-                rng, _ = jax.random.split(rng)
+            rng = jax.random.split(rng)[0]
+            if prev_state.done[0]:
+                prev_state, current_obs = self.reset_and_give_obs(
+                    model=model,
+                    params=params,
+                    rng=rng,
+                )
             else:
-                rng, step_rng = jax.random.split(rng)
-                state = self.step(model, params, state, step_rng, state.action_log_prob)
+                prev_state, current_obs = self.step_given_gym_obs(
+                    model=model,
+                    params=params,
+                    prev_env_state=prev_state,
+                    rng=rng,
+                    current_gym_obs=current_obs,
+                )
+
+            observations.append(prev_state.obs)
+            done.append(prev_state.done)
+            actions.append(prev_state.action)
+            rewards.append(prev_state.reward)
 
         observations = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *observations)
         actions = jnp.stack(actions)
         rewards = jnp.stack(rewards)
         done = jnp.stack(done)
-        action_log_probs = jnp.stack(action_log_probs)
 
         return EnvState(
             obs=observations,
@@ -148,9 +116,7 @@ class CartPoleEnv(BaseEnv):
             done=done,
             command=FrozenDict({}),
             action=actions,
-            action_log_prob=action_log_probs,
-            timestep=jnp.arange(num_steps),
-            rng=rng,
+            timestep=jnp.arange(num_steps)[None],
         )
 
     @property
@@ -160,3 +126,72 @@ class CartPoleEnv(BaseEnv):
     @property
     def action_size(self) -> int:
         return 1
+
+    ####################
+    # Helper functions #
+    ####################
+    def reset_and_give_obs(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        rng: PRNGKeyArray,
+    ) -> tuple[EnvState, np.ndarray]:
+        """Reset the environment and return the observation."""
+        gym_obs_0, _ = self.env.reset()
+        obs_0 = FrozenDict({"observations": jnp.array(gym_obs_0)[None, :]})
+        command = FrozenDict({})
+        action_0, _ = model.apply(params, obs_0, command, rng, method="actor_sample_and_log_prob")
+        gym_obs_1 = self.env.step(action_0.item())[0]
+        env_state_0 = EnvState(
+            obs=obs_0,
+            reward=jnp.array(1.0)[None],
+            done=jnp.array([False]),
+            command=command,
+            action=action_0,
+            timestep=jnp.array(0.0)[None],
+        )
+        return env_state_0, gym_obs_1
+
+    def step_given_gym_obs(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        prev_env_state: EnvState,
+        rng: PRNGKeyArray,
+        *,
+        current_gym_obs: np.ndarray,  # following same pattern as mjx.Env
+    ) -> tuple[EnvState, np.ndarray]:
+        """Take a step in the environment.
+
+        NOTE: for simplicity, this environment is stateful and doesn't actually use prev_state in
+        a functional manner.
+        """
+
+        obs = FrozenDict({"observations": jnp.array(current_gym_obs)[None, :]})
+        command = FrozenDict({})
+        action, _ = model.apply(params, obs, command, rng, method="actor_sample_and_log_prob")
+
+        try:
+            gym_obs, gym_reward, gym_terminated, gym_truncated, _ = self.env.step(action.item())
+            done = bool(gym_terminated or gym_truncated)  # Convert to Python bool
+        except AttributeError as e:
+            if "bool8" in str(e):
+                # Handle the numpy bool8 error
+                gym_obs, gym_reward, gym_terminated, gym_truncated, _ = self.env.step(action.item())
+                # Ensure terminated and truncated are Python booleans
+                terminated = bool(gym_terminated)
+                truncated = bool(gym_truncated)
+                done = terminated or truncated
+            else:
+                raise e
+
+        current_env_state = EnvState(
+            obs=obs,
+            reward=jnp.array(gym_reward)[None],
+            done=jnp.array([done]),
+            command=command,
+            action=action,
+            timestep=prev_env_state.timestep + 1.0,
+        )
+
+        return current_env_state, gym_obs

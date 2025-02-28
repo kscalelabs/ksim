@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import PRNGKeyArray, PyTree
 
 from ksim.env.types import EnvState, PhysicsData
 from ksim.model.formulations import ActorCriticModel
@@ -33,9 +33,9 @@ class BaseEnv(ABC):
         self,
         model: ActorCriticModel,
         params: PyTree,
-        prev_state: EnvState,
+        prev_env_state: EnvState,
         rng: PRNGKeyArray,
-        action_log_prob: Array,
+        **kwargs: Any,
     ) -> EnvState: ...
 
     @abstractmethod

@@ -5,7 +5,7 @@ from typing import Literal
 
 import jax
 from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array
 from mujoco import mjx
 
 
@@ -21,9 +21,6 @@ class EnvState:
     reward: Array  # R(prev_state, action_at_prev_state, current_state)
     done: Array
     timestep: Array
-
-    # Auxiliary attributes
-    rng: PRNGKeyArray
 
 
 KScaleActionModelType = Literal["random", "zero", "midpoint"]

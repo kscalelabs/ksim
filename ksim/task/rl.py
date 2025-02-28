@@ -138,7 +138,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @property
     def num_minibatches(self) -> int:
         """The number of minibatches in the dataset."""
-        assert self.dataset_size % self.config.minibatch_size == 0
+        assert (
+            self.dataset_size % self.config.minibatch_size == 0
+        ), f"Dataset size of {self.dataset_size} must be divisible by minibatch size of {self.config.minibatch_size}."
         return self.dataset_size // self.config.minibatch_size
 
     ########################
@@ -328,7 +330,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    @legit_jit(static_argnames=["self", "model", "env"], compile_timeout=10)
     def get_trajectory_dataset(
         self,
         model: ActorCriticModel,
@@ -351,6 +352,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
 
+        @legit_jit()
         def flatten_rollout_array(x: Array) -> Array:
             """Flatten a rollout array."""
             reshaped = jnp.reshape(x, (x.shape[0] * x.shape[1], *x.shape[2:]))
@@ -372,7 +374,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Reshuffle a rollout array."""
         # Generate permutation indices
         batch_size = self.dataset_size
-        permutation = jax.random.permutation(rng, batch_size)
+        permutation = jax.random.choice(rng, jnp.arange(batch_size), (batch_size,))
 
         # Apply permutation to rollout dataset
         def permute_array(x):
@@ -477,7 +479,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.logger.log_scalar("model_update_time", model_update_time, namespace="⏰")
                 self.logger.write(training_state)
 
-            start_time = time.time()
             with self.step_context("on_step_end"):
                 training_state = self.on_step_end(training_state)
 
@@ -485,8 +486,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.save_checkpoint(
                     model=params, optimizer=optimizer, opt_state=opt_state, state=training_state
                 )  # Update XAX to be Flax supportive...
-            end_time = time.time()
-            print(f"Time taken for on_step_end and save checkpoint: {end_time - start_time} seconds")
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""

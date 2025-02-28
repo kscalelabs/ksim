@@ -418,7 +418,6 @@ class MjxEnv(BaseEnv):
                 command=command_0,
                 action=action_0,
                 timestep=timestep,
-                rng=rng,
             ),
             mjx_data_1,
         )
@@ -435,7 +434,7 @@ class MjxEnv(BaseEnv):
     ) -> tuple[EnvState, mjx.Data]:
         """A scannable step function: returns a new state computed solely from the inputs."""
         rng, latency_rng, obs_rng = jax.random.split(rng, 3)
-        timestep = env_state_t_minus_1.timestep
+        timestep = mjx_data_t.time
         latency_steps = jax.random.randint(
             key=latency_rng,
             shape=(),
@@ -445,10 +444,7 @@ class MjxEnv(BaseEnv):
 
         obs_t = self.get_observation(mjx_data_t, obs_rng)
         command_t = self.get_commands(env_state_t_minus_1.command, rng, timestep)
-        action_t, action_log_prob_t = model.apply(
-            params, obs_t, command_t, rng, method="actor_sample_and_log_prob"
-        )
-        assert isinstance(action_log_prob_t, Array)
+        action_t, _ = model.apply(params, obs_t, command_t, rng, method="actor_sample_and_log_prob")
 
         mjx_data_t_plus_1 = self._apply_physics_steps(
             mjx_model=mjx_model,
@@ -472,7 +468,6 @@ class MjxEnv(BaseEnv):
             reward=reward_t,
             done=done_t,
             timestep=timestep,
-            rng=rng,
         )
 
         return env_state_t, mjx_data_t_plus_1
@@ -506,7 +501,6 @@ class MjxEnv(BaseEnv):
             reward=jnp.ones(()),
             done=jnp.ones(()),
             timestep=jnp.ones(()),
-            rng=rng,
         )
 
     @legit_jit(static_argnames=["self"])
@@ -515,6 +509,7 @@ class MjxEnv(BaseEnv):
         model: ActorCriticModel,
         params: PyTree,
         rng: jax.Array,
+        *,
         mjx_model: mjx.Model,
     ) -> EnvState:
         """Pure reset function: returns an initial state computed solely from the inputs.
@@ -530,10 +525,11 @@ class MjxEnv(BaseEnv):
         self,
         model: ActorCriticModel,
         params: PyTree,
-        env_state: EnvState,
+        prev_env_state: EnvState,
+        rng: PRNGKeyArray,
+        *,
         mjx_data: mjx.Data,
         mjx_model: mjx.Model,
-        rng: PRNGKeyArray,
     ) -> EnvState:
         """Stepping the environment in a consistent, JIT-able manner. Works on a single environment.
 
@@ -558,7 +554,7 @@ class MjxEnv(BaseEnv):
         new_state, _ = self.scannable_step(
             model=model,
             params=params,
-            env_state_t_minus_1=env_state,
+            env_state_t_minus_1=prev_env_state,
             mjx_data_t=mjx_data,
             mjx_model=mjx_model,
             rng=rng,

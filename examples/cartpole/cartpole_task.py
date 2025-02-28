@@ -6,20 +6,19 @@ from dataclasses import dataclass
 
 import flax.linen as nn
 import jax
-import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.env.toy.cartpole_env import CartPoleEnv
-from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.model.formulations import ActorCriticModel, CategoricalActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
 logger = logging.getLogger(__name__)
 
 
-class CartPoleActionModel(ActionModel):
+class CartPoleActionModel(CategoricalActionModel):
     """Action model for CartPole."""
 
     mlp: MLP
@@ -29,24 +28,6 @@ class CartPoleActionModel(ActionModel):
         observation = obs["observations"]
         assert isinstance(observation, Array)
         return self.mlp(observation)
-
-    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
-        logits = prediction
-        log_probs = jax.nn.log_softmax(logits)
-        action_log_prob = log_probs[
-            jnp.arange(log_probs.shape[0])[:, None], jnp.arange(log_probs.shape[1]), action
-        ]
-        # NOTE: assumes two batching dimensions
-        return action_log_prob
-
-    def sample_and_log_prob(
-        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> tuple[Array, Array]:
-        logits = self(obs, cmd)
-        log_probs = jax.nn.log_softmax(logits)
-        sampled_actions = jax.random.categorical(rng, log_probs)
-        action_log_prob = log_probs[jnp.arange(log_probs.shape[0]), sampled_actions]
-        return sampled_actions, action_log_prob
 
 
 class CartPoleCriticModel(nn.Module):
@@ -95,6 +76,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
                     hidden_features=self.config.actor_hidden_dims,
                     out_features=2,  # two discrete actions for CartPole
                 ),
+                sampling_temperature=0.0,
             ),
             critic_module=CartPoleCriticModel(
                 mlp=MLP(
@@ -135,7 +117,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
             while True:  # Keep running episodes until interrupted
                 logger.info("Starting Episode %d", episode_count)
                 total_reward = 0
-                env_state = env.reset(rng)
+                env_state = env.reset(model, params, rng)
                 episode_length = 0
 
                 while True:
@@ -148,7 +130,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
 
                     # Take step
                     rng, step_rng = jax.random.split(rng)
-                    env_state = env.step(env_state, action, step_rng, log_prob)
+                    env_state = env.step(model, params, env_state, step_rng)
                     reward = env_state.reward.item()
                     done = env_state.done.item()
                     total_reward += reward
@@ -178,8 +160,9 @@ if __name__ == "__main__":
     CartPoleTask.launch(
         CartPoleConfig(
             num_envs=1,
-            max_trajectory_seconds=10.0,
+            num_steps_per_trajectory=500,
             valid_every_n_steps=5,
+            minibatch_size=100,
             learning_rate=1e-3,
         ),
     )

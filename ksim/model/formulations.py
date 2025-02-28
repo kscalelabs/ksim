@@ -66,9 +66,32 @@ class GaussianActionModel(ActionModel, ABC):
 
 
 class CategoricalActionModel(ActionModel, ABC):
-    """Categorical action model."""
+    """Categorical action model: assume action space is tokenized such that the last dimension is
+    the logits for each action."""
 
     sampling_temperature: float
+
+    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
+        logits = prediction
+        log_probs = jax.nn.log_softmax(logits, axis=-1)
+
+        # get the log probs for the selected actions (inefficient but compiler should optimize)
+        batch_shape = action.shape
+        flat_log_probs = log_probs.reshape(-1, log_probs.shape[-1])
+        flat_actions = action.reshape(-1)
+        flat_action_log_prob = flat_log_probs[jnp.arange(flat_log_probs.shape[0]), flat_actions]
+        action_log_prob = flat_action_log_prob.reshape(batch_shape)
+
+        return action_log_prob
+
+    def sample_and_log_prob(
+        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+    ) -> tuple[Array, Array]:
+        logits = self(obs, cmd)
+        log_probs = jax.nn.log_softmax(logits)
+        sampled_actions = jax.random.categorical(rng, log_probs)
+        action_log_prob = log_probs[jnp.arange(log_probs.shape[0]), sampled_actions]
+        return sampled_actions, action_log_prob
 
 
 class ActorCriticModel(nn.Module):
