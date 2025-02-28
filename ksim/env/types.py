@@ -6,6 +6,7 @@ from typing import Literal
 import jax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
+from mujoco import mjx
 
 
 @jax.tree_util.register_dataclass
@@ -27,3 +28,4 @@ class EnvState:
 
 
 KScaleActionModelType = Literal["random", "zero", "midpoint"]
+PhysicsData = mjx.Data | None

@@ -84,7 +84,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     ) -> EnvState:
         """Rollout the model for a given number of steps, dims (num_steps, num_envs, ...)"""
 
-        env_state_batch = env.unroll_trajectories(
+        env_state_batch, _ = env.unroll_trajectories(
             model=model,
             params=params,
             rng=rng,

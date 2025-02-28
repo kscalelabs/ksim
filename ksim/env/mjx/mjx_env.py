@@ -144,6 +144,7 @@ class KScaleEnvConfig(xax.Config):
     render_camera: str = xax.field(value="tracking_camera", help="The camera to use for rendering.")
     render_width: int = xax.field(value=640, help="The width of the rendered image.")
     render_height: int = xax.field(value=480, help="The height of the rendered image.")
+    render_dir: Path = xax.field(value="render", help="The directory to save rendered images to.")
 
     # environment configuration options
     dt: float = xax.field(value=0.004, help="Simulation time step.")
@@ -160,7 +161,6 @@ class KScaleEnvConfig(xax.Config):
 
     # simulation artifact options
     ignore_cached_urdf: bool = xax.field(value=False, help="Whether to ignore the cached URDF.")
-
 
 # The new stateless environment – note that we do not call any stateful methods.
 class MjxEnv(BaseEnv):
@@ -566,7 +566,7 @@ class MjxEnv(BaseEnv):
         )
         return new_state
 
-    @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs"])
+    @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs", "return_data"])
     def unroll_trajectories(
         self,
         model: ActorCriticModel,
@@ -574,8 +574,9 @@ class MjxEnv(BaseEnv):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
+        return_data: bool = False,
         **kwargs: Any,
-    ) -> EnvState:
+    ) -> tuple[EnvState, mjx.Data]:
         """Vectorized rollout of trajectories.
 
         1. The batched reset (using vmap) initializes a state for each environment.
@@ -583,6 +584,10 @@ class MjxEnv(BaseEnv):
         3. A jax.lax.scan unrolls the trajectory for num_steps.
         4. The resulting trajectory has shape (num_steps, num_envs, ...).
         """
+
+        if return_data:
+            num_envs = 1
+
         init_rngs = jax.random.split(rng, num_envs)
         mjx_model = self.default_mjx_model
         # TODO: include logic to randomize environment parameters here...
@@ -634,11 +639,15 @@ class MjxEnv(BaseEnv):
         @legit_jit()
         def scan_fn(
             carry: Tuple[EnvState, mjx.Data, Array], _: Any
-        ) -> Tuple[Tuple[EnvState, mjx.Data, Array], EnvState]:
+        ) -> Tuple[Tuple[EnvState, mjx.Data, Array], Tuple[EnvState, mjx.Data]]:
             states, mjx_data, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
             new_states, new_mjx_data = jax.vmap(env_step_partial)(states, mjx_data, rngs[1:])
-            return (new_states, new_mjx_data, rngs[0]), new_states
+
+            if return_data:
+                return (new_states, new_mjx_data, rngs[0]), (new_states, new_mjx_data)
+            else:
+                return (new_states, new_mjx_data, rngs[0]), (new_states, None)
 
         (_, _, _), traj = jax.lax.scan(
             f=scan_fn,
@@ -646,9 +655,6 @@ class MjxEnv(BaseEnv):
             xs=None,
             length=num_steps,
         )
-        if kwargs.get("render", False):
-            # TODO: render the trajectory
-            pass
 
         return traj  # Shape: (num_steps, num_envs, ...)
 
@@ -679,6 +685,7 @@ class MjxEnv(BaseEnv):
         renderer = mujoco.Renderer(self.default_mj_model, height=height, width=width)
         scene_option = mujoco.MjvOption()
         frames = []
+        breakpoint()
         for data in trajectory:
             frame = render_frame(renderer, data, camera_id)
             frames.append(frame)

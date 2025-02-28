@@ -2,6 +2,7 @@
 
 import bdb
 import logging
+import os
 import signal
 import sys
 import textwrap
@@ -15,6 +16,7 @@ from typing import Generic, Literal, TypeVar
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import mediapy as mp
 import optax
 import xax
 from dpshdl.dataset import Dataset
@@ -22,6 +24,7 @@ from flax import linen as nn
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING
+from PIL import Image
 
 from ksim.builders.loggers import (
     AverageRewardLog,
@@ -156,9 +159,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.viz_environment()
 
             case _:
-                raise ValueError(
-                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
-                )
+                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
 
     #########################
     # Logging and Rendering #
@@ -181,7 +182,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng = self.prng_key()
             env = self.get_environment()
             render_name = self.get_render_name(state)
-            render_dir = self.exp_dir / "renders" / render_name
+            render_dir = self.exp_dir / self.config.render_dir / render_name
+
+            os.makedirs(render_dir, exist_ok=True)
+
             logger.log(logging.INFO, "Rendering to %s", render_dir)
 
             self.set_loggers()
@@ -191,31 +195,27 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             params = self.get_init_params(key)
 
             # Unroll trajectories and collect the frames for rendering
-            frames, trajectory = env.unroll_trajectories_and_render(
-                model=model,
-                params=params,
-                rng=rng,
-                num_steps=10,  # self.max_steps_per_trajectory,
-                render_dir=render_dir,
+            logger.info("Unrolling trajectories")
+
+            traj = env.unroll_trajectories(
+                model, params, rng, self.max_trajectory_steps, self.config.num_envs, return_data=True
             )
 
-            # Use the log items for additional metrics
-            self.curr_logging_data = LoggingData(
-                trajectory=trajectory,
-                update_metrics={},
-                gradients=None,
-                loss=0.0,
-                training_state=state,
+            breakpoint()
+
+            mjx_data_list = [data for data in traj[1]]
+
+            frames = env.render_trajectory(
+                trajectory=mjx_data_list, width=self.config.render_width, height=self.config.render_height
             )
 
-            for log_item in self.log_items:
-                if not isinstance(log_item, ModelUpdateLog):  # Skip model update logs
-                    log_item(self.logger, self.curr_logging_data)
+            logger.info("Saving %d frames to %s", len(frames), render_dir)
 
-            # Log the rendered frames
-            self.logger.log_images("trajectory", frames, namespace="video")
+            for i, frame in enumerate(frames):
+                frame_path = render_dir / f"frame_{i:06d}.png"
+                Image.fromarray(frame).save(frame_path)
 
-            logger.log(logging.INFO, "Finished running environment and logging metrics")
+            mp.write_video(render_dir / "trajectory.mp4", frames, fps=1 / self.config.ctrl_dt)
 
     def log_state(self, env: BaseEnv) -> None:
         super().log_state()
@@ -406,9 +406,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(
-                    xax.highlight_exception_message(traceback.format_exc()), "  "
-                )
+                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(model, optimizer, opt_state, training_state)

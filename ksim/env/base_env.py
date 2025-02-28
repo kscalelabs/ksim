@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.types import EnvState
+from ksim.env.types import EnvState, PhysicsData
 from ksim.model.formulations import ActorCriticModel
 
 
@@ -46,7 +46,8 @@ class BaseEnv(ABC):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
-    ) -> EnvState: ...
+        return_data: bool = False,
+    ) -> tuple[EnvState, PhysicsData]: ...
 
     @abstractmethod
     def unroll_trajectories_and_render(
@@ -60,6 +61,14 @@ class BaseEnv(ABC):
         height: int = 480,
         **kwargs: Any,
     ) -> tuple[list[np.ndarray], EnvState]: ...
+
+    @abstractmethod
+    def render_trajectory(
+        self,
+        trajectory: list[PhysicsData],
+        width: int = 640,
+        height: int = 480,
+    ) -> list[np.ndarray]: ...
 
     @property
     @abstractmethod
