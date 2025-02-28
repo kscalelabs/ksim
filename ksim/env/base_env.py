@@ -50,19 +50,6 @@ class BaseEnv(ABC):
     ) -> tuple[EnvState, PhysicsData]: ...
 
     @abstractmethod
-    def unroll_trajectories_and_render(
-        self,
-        model: ActorCriticModel,
-        params: PyTree,
-        rng: PRNGKeyArray,
-        num_steps: int,
-        render_dir: Path,
-        width: int = 640,
-        height: int = 480,
-        **kwargs: Any,
-    ) -> tuple[list[np.ndarray], EnvState]: ...
-
-    @abstractmethod
     def render_trajectory(
         self,
         trajectory: list[PhysicsData],

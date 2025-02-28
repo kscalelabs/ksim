@@ -11,7 +11,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, EnvState
-from ksim.env.types import KScaleActionModelType
+from ksim.env.types import KScaleActionModelType, PhysicsData
 from ksim.model.formulations import ActionModel, ActorCriticModel
 
 
@@ -90,7 +90,8 @@ class CartPoleEnv(BaseEnv):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
-    ) -> EnvState:
+        return_data: bool = False,
+    ) -> tuple[EnvState, PhysicsData]:
         """Rollout the model for a given number of steps."""
         assert num_envs == 1, "CartPoleEnv only supports a single environment"
         observations = []
@@ -139,18 +140,6 @@ class CartPoleEnv(BaseEnv):
             action_at_prev_step=actions,
             action_log_prob_at_prev_step=action_log_probs,
         )
-
-    def unroll_trajectories_and_render(
-        self,
-        rng: PRNGKeyArray,
-        num_steps: int,
-        render_dir: Path,
-        actions: KScaleActionModelType | ActionModel | None = None,
-        width: int = 640,
-        height: int = 480,
-        **kwargs: Any,
-    ) -> tuple[list[np.ndarray], EnvState]:
-        raise NotImplementedError("CartPoleEnv does not support trajectory saving yet.")
 
     @property
     def observation_size(self) -> int:
