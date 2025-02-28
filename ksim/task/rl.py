@@ -153,7 +153,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.run_training()
 
             case "env":
-                self.run_environment()
+                model, _, _, _ = self.load_initial_state(self.prng_key())
+                self.run_environment(model)
 
             case "viz":
                 self.viz_environment()
@@ -171,9 +172,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return f"render_{time_string}"
         return f"render_{state.num_steps}_{time_string}"
 
-    def run_environment(
+    def  run_environment(
         self,
-        # model: ActorCriticModel,
+        model: ActorCriticModel,
         # params: PyTree | None = None,
         state: xax.State | None = None,
     ) -> None:
@@ -190,20 +191,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             self.set_loggers()
 
-            key, model_key = jax.random.split(rng)
-            model, optimizer, opt_state, training_state = self.load_initial_state(model_key)
+            key, _ = jax.random.split(rng)
+
             params = self.get_init_params(key)
 
             # Unroll trajectories and collect the frames for rendering
             logger.info("Unrolling trajectories")
 
-            traj = env.unroll_trajectories(
+            _, traj = env.unroll_trajectories(
                 model, params, rng, self.max_trajectory_steps, self.config.num_envs, return_data=True
             )
 
-            breakpoint()
+            mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), traj)
 
-            mjx_data_list = [data for data in traj[1]]
+            mjx_data_list = [
+                jax.tree_util.tree_map(lambda x: x[i], mjx_data_traj)
+                for i in range(self.max_trajectory_steps)
+            ]
 
             frames = env.render_trajectory(
                 trajectory=mjx_data_list, width=self.config.render_width, height=self.config.render_height

@@ -281,9 +281,7 @@ class KBotActorModel(ActionModel):
         mean = prediction
         std = jnp.exp(self.log_std)
 
-        log_prob = (
-            -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
-        )
+        log_prob = -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
         return jnp.sum(log_prob, axis=-1)
 
     def sample_and_log_prob(
@@ -294,6 +292,38 @@ class KBotActorModel(ActionModel):
 
         noise = jax.random.normal(rng, mean.shape)
         action = mean + noise * std
+        log_prob = self.calc_log_prob(mean, action)
+
+        return action, log_prob
+
+
+class KBotZeroActions(ActionModel):
+    mlp: MLP
+
+    def setup(self) -> None:
+        self.log_std = self.param("log_std", nn.initializers.constant(-0.7), (NUM_OUTPUTS,))
+
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        x_n = jnp.concatenate([obs_array for obs_array in obs.values()], axis=-1)
+        cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
+        x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
+        actions_n = self.mlp(x_n)
+
+        return actions_n
+
+    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
+        mean = prediction
+        std = jnp.exp(self.log_std)
+
+        log_prob = -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
+        return jnp.sum(log_prob, axis=-1)
+
+    def sample_and_log_prob(
+        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+    ) -> Tuple[Array, Array]:
+        mean = self(obs, cmd)
+
+        action = mean * 0.0
         log_prob = self.calc_log_prob(mean, action)
 
         return action, log_prob
@@ -450,6 +480,39 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
 
     def viz_environment(self) -> None:
         raise NotImplementedError("Not implemented")
+
+    # Overloading to run KBotZeroActions instead of default Actor model
+    def run(self) -> None:
+        """Highest level entry point for RL tasks, determines what to run."""
+        match self.config.action:
+            case "train":
+                self.run_training()
+
+            case "env":
+                zero_model = ActorCriticModel(
+                    actor_module=KBotZeroActions(
+                        mlp=MLP(
+                            num_hidden_layers=self.config.actor_num_layers,
+                            hidden_features=self.config.actor_hidden_dims,
+                            out_features=NUM_OUTPUTS,
+                        ),
+                    ),
+                    critic_module=KBotCriticModel(
+                        mlp=MLP(
+                            num_hidden_layers=self.config.critic_num_layers,
+                            hidden_features=self.config.critic_hidden_dims,
+                            out_features=1,
+                        ),
+                    ),
+                )
+
+                self.run_environment(zero_model)
+
+            case "viz":
+                self.viz_environment()
+
+            case _:
+                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
 
 
 if __name__ == "__main__":
