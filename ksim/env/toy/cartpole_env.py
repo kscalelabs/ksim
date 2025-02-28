@@ -16,7 +16,7 @@ from ksim.model.formulations import ActionModel, ActorCriticModel
 
 
 class CartPoleEnv(BaseEnv):
-    """CartPole environment wrapper to match the EnvState interface."""
+    """CartPole environment wrapper."""
 
     def __init__(self, render_mode: str | None = None) -> None:
         """Initialize the CartPole environment.
@@ -28,42 +28,57 @@ class CartPoleEnv(BaseEnv):
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
 
-    def reset(self, rng: PRNGKeyArray) -> EnvState:
-        """Reset the environment."""
-        # TODO: probably want to use RNG properly
-        obs, info = self.env.reset()
-
+    def get_dummy_env_state(self, rng: PRNGKeyArray) -> EnvState:
+        """Get a dummy environment state for compilation purposes."""
         return EnvState(
-            obs=FrozenDict({"observations": jnp.array(obs)[None, :]}),
-            reward=jnp.array(1.0)[None],
-            done=jnp.array(False)[None],
+            obs=FrozenDict({"observations": jnp.zeros((1, self.observation_size))}),
+            reward=jnp.zeros((1,)),
+            done=jnp.array([False]),
             command=FrozenDict({}),
-            command_at_prev_step=FrozenDict({}),
-            time=jnp.array(0.0),
+            action=jnp.zeros((self.action_size,)),
+            action_log_prob=jnp.array(0.0),
+            timestep=jnp.array(0.0),
             rng=rng,
-            action_at_prev_step=jnp.zeros_like(self.env.action_space.sample()),
-            action_log_prob_at_prev_step=jnp.array(0.0),
+        )
+
+    def reset(self, model: ActorCriticModel, params: PyTree, rng: PRNGKeyArray) -> EnvState:
+        """Reset the environment and sample an initial action from the model."""
+        obs, info = self.env.reset()
+        obs_dict = FrozenDict({"observations": jnp.array(obs)[None, :]})
+        command = FrozenDict({})
+        action, log_prob = model.apply(params, obs_dict, command, rng, method="actor_sample_and_log_prob")
+        return EnvState(
+            obs=obs_dict,
+            reward=jnp.array(1.0)[None],
+            done=jnp.array([False]),
+            command=command,
+            action=action,
+            action_log_prob=log_prob,
+            timestep=jnp.array(0.0),
+            rng=rng,
         )
 
     def step(
         self,
+        model: ActorCriticModel,
+        params: PyTree,
         prev_state: EnvState,
-        action: Array,
         rng: PRNGKeyArray,
         action_log_prob: Array,
     ) -> EnvState:
-        """Step the environment.
+        """Take a step in the environment.
 
         NOTE: for simplicity, this environment is stateful and doesn't actually use prev_state in
         a functional manner.
         """
+        # Use the action stored in the previous state to step the gym environment.
         try:
-            obs, reward, terminated, truncated, info = self.env.step(action.item())
+            obs, reward, terminated, truncated, info = self.env.step(prev_state.action.item())
             done = bool(terminated or truncated)  # Convert to Python bool
         except AttributeError as e:
             if "bool8" in str(e):
                 # Handle the numpy bool8 error
-                obs, reward, terminated, truncated, info = self.env.step(action.item())
+                obs, reward, terminated, truncated, info = self.env.step(prev_state.action.item())
                 # Ensure terminated and truncated are Python booleans
                 terminated = bool(terminated)
                 truncated = bool(truncated)
@@ -71,16 +86,19 @@ class CartPoleEnv(BaseEnv):
             else:
                 raise
 
+        new_obs = FrozenDict({"observations": jnp.array(obs)[None, :]})
+        new_command = FrozenDict({})
+        new_action, new_log_prob = model.apply(params, new_obs, new_command, rng, method="actor_sample_and_log_prob")
+        assert isinstance(new_log_prob, Array)
         return EnvState(
-            obs=FrozenDict({"observations": jnp.array(obs)[None, :]}),
+            obs=new_obs,
             reward=jnp.array(reward)[None],
-            done=jnp.array(done)[None],
-            commands=FrozenDict({}),
-            command_at_prev_step=FrozenDict({}),
-            time=prev_state.time + 1.0,
+            done=jnp.array([done]),
+            command=new_command,
+            action=new_action,
+            action_log_prob=new_log_prob,
+            timestep=prev_state.timestep + 1.0,
             rng=prev_state.rng,
-            action_at_prev_step=action,
-            action_log_prob_at_prev_step=action_log_prob,
         )
 
     def unroll_trajectories(
@@ -100,28 +118,23 @@ class CartPoleEnv(BaseEnv):
         done = []
         action_log_probs = []
 
-        state = self.reset(rng)
+        state = self.reset(model, params, rng)
         rng, _ = jax.random.split(rng)
         for _ in range(num_steps):
-            rng, action_rng = jax.random.split(rng)
-            action, log_probs = model.apply(
-                params, state.obs, state.command, action_rng, method="actor_sample_and_log_prob"
-            )
-            assert isinstance(log_probs, Array)
             observations.append(state.obs)
             done.append(state.done)
-            actions.append(action)
-            action_log_probs.append(log_probs)
+            actions.append(state.action)
             rewards.append(state.reward)
+            action_log_probs.append(state.action_log_prob)
             # NOTE: need to be careful about when the reward updates... this works for survival
             # related tasks, but not those that directly depend on the action.
 
-            if state.done:
-                state = self.reset(rng)
+            if state.done[0]:
+                state = self.reset(model, params, rng)
                 rng, _ = jax.random.split(rng)
             else:
                 rng, step_rng = jax.random.split(rng)
-                state = self.step(state, action, step_rng, log_probs)
+                state = self.step(model, params, state, step_rng, state.action_log_prob)
 
         observations = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *observations)
         actions = jnp.stack(actions)
@@ -133,12 +146,11 @@ class CartPoleEnv(BaseEnv):
             obs=observations,
             reward=rewards,
             done=done,
-            time=jnp.arange(num_steps),
+            command=FrozenDict({}),
+            action=actions,
+            action_log_prob=action_log_probs,
+            timestep=jnp.arange(num_steps),
             rng=rng,
-            commands=FrozenDict({}),
-            command_at_prev_step=FrozenDict({}),
-            action_at_prev_step=actions,
-            action_log_prob_at_prev_step=action_log_probs,
         )
 
     @property
