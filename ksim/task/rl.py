@@ -88,8 +88,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def __init__(self, config: Config) -> None:
         super().__init__(config)
-
-        self.max_trajectory_steps = round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
+        # pfb30 - this does not work somehow
+        self.max_trajectory_steps = 20 #round(self.config.max_trajectory_seconds / self.config.ctrl_dt)
         self.curr_logging_data = LoggingData()
         self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]
 
@@ -319,15 +319,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             end_time = time.time()
             print(f"Time taken for trajectory batch: {end_time - start_time} seconds")
 
+            minibatches = self.get_minibatches(trajectories, model, params, env, step_rng)
             # Updates the model on the collected trajectories.
             start_time = time.time()
+            import os
+            if os.environ.get("DEBUG", "0") == "1":
+                breakpoint()
             with self.step_context("update_state"):
-                params, opt_state, loss_val, metrics = self.model_update(
-                    model, params, optimizer, opt_state, trajectories
-                )
+                # TODO: jax.lax.scan(self.model_update, (params, opt_state), minibatches)
+                for minibatch in minibatches:
+                    params, opt_state, loss_val, metrics = self.model_update(
+                        model, params, optimizer, opt_state, minibatch
+                    )
+            
+
             end_time = time.time()
             print(f"Time taken for model update: {end_time - start_time} seconds")
-
+            print("loss_val", loss_val)
             start_time = time.time()
             self.curr_logging_data = LoggingData(
                 trajectory=trajectories,
