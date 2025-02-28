@@ -7,26 +7,36 @@ from typing import Any
 import numpy as np
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.types import EnvState, KScaleActionModelType
-from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.env.types import EnvState
+from ksim.model.formulations import ActorCriticModel
 
 
 class BaseEnv(ABC):
     """Base environment class."""
 
     @abstractmethod
-    def reset(self, rng: PRNGKeyArray) -> EnvState: ...
+    def get_dummy_env_state(  # exists for compilation purposes
+        self,
+        rng: PRNGKeyArray,
+    ) -> EnvState: ...
+
+    @abstractmethod
+    def reset(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        rng: PRNGKeyArray,
+    ) -> EnvState: ...
 
     @abstractmethod
     def step(
         self,
+        model: ActorCriticModel,
+        params: PyTree,
         prev_state: EnvState,
-        action: Array,
         rng: PRNGKeyArray,
         action_log_prob: Array,
-    ) -> EnvState:
-        """Step the environment."""
-        ...
+    ) -> EnvState: ...
 
     @abstractmethod
     def unroll_trajectories(
@@ -41,10 +51,11 @@ class BaseEnv(ABC):
     @abstractmethod
     def unroll_trajectories_and_render(
         self,
+        model: ActorCriticModel,
+        params: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,
         render_dir: Path,
-        actions: KScaleActionModelType | ActionModel,
         width: int = 640,
         height: int = 480,
         **kwargs: Any,

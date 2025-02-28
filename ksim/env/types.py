@@ -15,16 +15,15 @@ class EnvState:
 
     # Data attributes
     obs: FrozenDict[str, Array]
+    command: FrozenDict[str, Array]
+    action: Array
     reward: Array  # R(prev_state, action_at_prev_state, current_state)
     done: Array
-    commands: FrozenDict[str, Array]
+    timestep: Array
 
     # Auxiliary attributes
-    time: Array
     rng: PRNGKeyArray
-    action_at_prev_step: Array
-    command_at_prev_step: FrozenDict[str, Array]
-    action_log_prob_at_prev_step: Array
+    action_log_prob: Array
 
 
 # pfb30: temporary replacement

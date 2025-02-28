@@ -148,19 +148,19 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     ) -> MinibatchEnvState:
         """Update the model parameters."""
         # get the log probs of the current model
-        prediction = self.apply_actor(model, params, env_state_batch.obs, env_state_batch.commands)
+        prediction = self.apply_actor(model, params, env_state_batch.obs, env_state_batch.command)
         assert isinstance(prediction, Array)
         log_probs = model.apply(
             variables=params,
             prediction=prediction,
-            action=env_state_batch.action_at_prev_step,
+            action=env_state_batch.action,
             method="actor_calc_log_prob",
         )
-        log_prob_diff = log_probs - env_state_batch.action_log_prob_at_prev_step
+        log_prob_diff = log_probs - env_state_batch.action_log_prob
         ratio = jnp.exp(log_prob_diff)
 
         # get the state-value estimates
-        values = self.apply_critic(model, params, env_state_batch.obs, env_state_batch.commands)
+        values = self.apply_critic(model, params, env_state_batch.obs, env_state_batch.command)
         assert isinstance(values, Array)
         values = values.squeeze(axis=-1)  # values is (time, env)
         advantages = self._compute_advantages(values, env_state_batch)  # (time, env)
@@ -257,7 +257,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         # values here should be recomputed
-        value_pred = self.apply_critic(model, params, minibatch.obs, minibatch.commands)
+        value_pred = self.apply_critic(model, params, minibatch.obs, minibatch.command)
         value_pred = value_pred.squeeze(axis=-1)  # (time, env)
         value_loss = 0.5 * jnp.mean((minibatch.returns - value_pred) ** 2)
 
@@ -298,7 +298,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             new_carry = d + self.config.gamma * self.config.lam * m * carry
             return new_carry, new_carry
 
-        next_values = jnp.roll(values, shift=-1, axis=0)
+        next_values = jnp.roll(values, shift=-1, axis=0)  # TODO: concat not roll...
         mask = jnp.where(done, 0.0, 1.0)
 
         # getting td residuals

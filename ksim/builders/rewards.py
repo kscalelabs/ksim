@@ -6,12 +6,13 @@ from abc import ABC, abstractmethod
 from typing import Generic, Literal, TypeVar
 
 import attrs
+import jax
 import jax.numpy as jnp
 import mujoco.mjx as mjx
 import xax
+from flax.core import FrozenDict
 from jaxtyping import Array
 
-from ksim.env.types import EnvState
 from ksim.utils.data import BuilderData
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,14 @@ class Reward(ABC):
         return reward
 
     @abstractmethod
-    def __call__(self, prev_state: EnvState, action: Array, mjx_data: mjx.Data) -> Array: ...
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array: ...
 
     def get_name(self) -> str:
         return xax.camelcase_to_snakecase(self.__class__.__name__)
@@ -97,8 +105,15 @@ class LinearVelocityZPenalty(Reward):
 
     norm: NormType = attrs.field(default="l2")
 
-    def __call__(self, prev_state: mjx.Data, action: Array, state: mjx.Data) -> Array:
-        lin_vel_z = state.qvel[2]
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        lin_vel_z = mjx_data_t_plus_1.qvel[2]
         return get_norm(lin_vel_z, self.norm)
 
 
@@ -108,8 +123,15 @@ class AngularVelocityXYPenalty(Reward):
 
     norm: NormType = attrs.field(default="l2")
 
-    def __call__(self, prev_state: mjx.Data, action: Array, state: mjx.Data) -> Array:
-        ang_vel_xy = state.qvel[3:5]
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        ang_vel_xy = mjx_data_t_plus_1.qvel[3:5]
         return get_norm(ang_vel_xy, self.norm).sum(axis=-1)
 
 
@@ -120,9 +142,16 @@ class TrackAngularVelocityZReward(Reward):
     cmd_name: str = attrs.field(default="angular_velocity_command")
     norm: NormType = attrs.field(default="l2")
 
-    def __call__(self, prev_state: EnvState, action: Array, mjx_data: mjx.Data) -> Array:
-        ang_vel_cmd_1 = prev_state.commands[self.cmd_name][0]
-        ang_vel_z = mjx_data.qvel[5]
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        ang_vel_cmd_1 = command_t[self.cmd_name][0]
+        ang_vel_z = mjx_data_t_plus_1.qvel[5]
         return get_norm(ang_vel_z * ang_vel_cmd_1, self.norm)
 
 
@@ -133,9 +162,16 @@ class TrackLinearVelocityXYReward(Reward):
     cmd_name: str = attrs.field(default="linear_velocity_command")
     norm: NormType = attrs.field(default="l2")
 
-    def __call__(self, prev_state: EnvState, action: Array, mjx_data: mjx.Data) -> Array:
-        lin_vel_cmd_2 = prev_state.commands[self.cmd_name]
-        lin_vel_xy_2 = mjx_data.qvel[:2]
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        lin_vel_cmd_2 = command_t[self.cmd_name]
+        lin_vel_xy_2 = mjx_data_t_plus_1.qvel[:2]
         return get_norm(lin_vel_xy_2 * lin_vel_cmd_2, self.norm).sum(axis=-1)
 
 
@@ -145,9 +181,20 @@ class ActionSmoothnessPenalty(Reward):
 
     norm: NormType = attrs.field(default="l2")
 
-    def __call__(self, prev_state: EnvState, action: Array, mjx_data: mjx.Data) -> Array:
-        last_action = prev_state.action_at_prev_step
-        return get_norm(action - last_action, self.norm).sum(axis=-1)
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        normed_action_smoothness = get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1)
+        return jax.lax.select(
+            action_t_minus_1 is None,
+            jnp.zeros_like(normed_action_smoothness),
+            normed_action_smoothness,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -173,19 +220,26 @@ class FootContactPenalty(Reward):
         if len(self.skip_if_zero_command) == 0 and self.skip_if_zero_command is not None:
             assert False, "skip_if_zero_command should be None or non-empty"
 
-    def __call__(self, prev_state: EnvState, action: Array, mjx_data: mjx.Data) -> Array:
-        has_contact_1 = jnp.isin(mjx_data.contact.geom1, self.illegal_geom_idxs)
-        has_contact_2 = jnp.isin(mjx_data.contact.geom2, self.illegal_geom_idxs)
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        has_contact_1 = jnp.isin(mjx_data_t_plus_1.contact.geom1, self.illegal_geom_idxs)
+        has_contact_2 = jnp.isin(mjx_data_t_plus_1.contact.geom2, self.illegal_geom_idxs)
         has_contact = jnp.logical_or(has_contact_1, has_contact_2)
 
         # Handle case where there might be no contacts or no matches
-        distances_where_contact = jnp.where(has_contact, mjx_data.contact.dist, 1e4)
+        distances_where_contact = jnp.where(has_contact, mjx_data_t_plus_1.contact.dist, 1e4)
         min_distance = jnp.min(distances_where_contact, initial=1e4)
         penalty = (min_distance <= self.contact_eps).astype(jnp.float32)
 
         if self.skip_if_zero_command:
             commands_are_zero = jnp.stack(
-                [(prev_state.commands[cmd] < self.eps).all() for cmd in self.skip_if_zero_command],
+                [(command_t[cmd] < self.eps).all() for cmd in self.skip_if_zero_command],
                 axis=0,
             )
             penalty = jnp.where(commands_are_zero, 0.0, penalty).sum()
