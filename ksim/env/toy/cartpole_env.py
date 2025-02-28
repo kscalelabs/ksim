@@ -37,7 +37,7 @@ class CartPoleEnv(BaseEnv):
             obs=FrozenDict({"observations": jnp.array(obs)[None, :]}),
             reward=jnp.array(1.0)[None],
             done=jnp.array(False)[None],
-            commands=FrozenDict({}),
+            command=FrozenDict({}),
             command_at_prev_step=FrozenDict({}),
             time=jnp.array(0.0),
             rng=rng,
@@ -104,7 +104,7 @@ class CartPoleEnv(BaseEnv):
         for _ in range(num_steps):
             rng, action_rng = jax.random.split(rng)
             action, log_probs = model.apply(
-                params, state.obs, state.commands, action_rng, method="actor_sample_and_log_prob"
+                params, state.obs, state.command, action_rng, method="actor_sample_and_log_prob"
             )
             assert isinstance(log_probs, Array)
             observations.append(state.obs)

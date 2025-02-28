@@ -52,3 +52,8 @@ class MITPositionActuators(Actuators):
         current_pos = mjx_data.qpos[7:]  # NOTE: we assume first 7 are always root pos.
         ctrl = self.kps * (action - current_pos)  # TODO: explore using velocity as damping...
         return ctrl
+
+    @property
+    def actuator_input_size(self) -> int:
+        """Get the size of the actuator input vector."""
+        return self.kps.shape[0]

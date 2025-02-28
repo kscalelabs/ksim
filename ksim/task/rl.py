@@ -30,12 +30,8 @@ from ksim.builders.loggers import (
     ModelUpdateLog,
 )
 from ksim.env.base_env import BaseEnv, EnvState
-from ksim.env.mjx.mjx_env import (
-    KScaleActionModelType,
-    KScaleEnvConfig,
-    cast_action_type,
-)
-from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.env.mjx.mjx_env import KScaleEnvConfig
+from ksim.model.formulations import ActorCriticModel
 
 logger = logging.getLogger(__name__)
 
@@ -176,13 +172,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run_environment(
         self,
+        # model: ActorCriticModel,
+        # params: PyTree | None = None,
         state: xax.State | None = None,
-        actions: KScaleActionModelType | ActionModel | None = None,
     ) -> None:
         """Run the environment with rendering and logging."""
         with self:
-            if actions is None:
-                actions = cast_action_type(self.config.default_action_model)
             rng = self.prng_key()
             env = self.get_environment()
             render_name = self.get_render_name(state)
@@ -191,12 +186,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             self.set_loggers()
 
+            key, model_key = jax.random.split(rng)
+            model, optimizer, opt_state, training_state = self.load_initial_state(model_key)
+            params = self.get_init_params(key)
+
             # Unroll trajectories and collect the frames for rendering
             frames, trajectory = env.unroll_trajectories_and_render(
+                model=model,
+                params=params,
                 rng=rng,
                 num_steps=10,  # self.max_steps_per_trajectory,
                 render_dir=render_dir,
-                actions=actions,
             )
 
             # Use the log items for additional metrics
@@ -205,7 +205,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 update_metrics={},
                 gradients=None,
                 loss=0.0,
-                training_state="valid",
+                training_state=state,
             )
 
             for log_item in self.log_items:
@@ -271,7 +271,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_init_params(self, key: PRNGKeyArray, pretrained: str | None = None) -> PyTree:
         """Get the initial parameters as a PyTree: assumes flax-compatible model."""
         env = self.get_environment()
-        state = env.reset(key)
+        state = env.get_dummy_env_state(key)
 
         if pretrained is not None:
             # TODO: implement pretrained model loading.
@@ -280,7 +280,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model_key, init_key = jax.random.split(key, 2)
         model = self.get_model(model_key)
         assert isinstance(model, nn.Module), "Model must be an Flax linen module."
-        return model.init(init_key, state.obs, state.commands)
+        return model.init(init_key, state.obs, state.command)
 
     @eqx.filter_jit
     def apply_actor(
