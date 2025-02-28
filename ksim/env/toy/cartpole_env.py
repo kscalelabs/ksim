@@ -88,6 +88,7 @@ class CartPoleEnv(BaseEnv):
         new_obs = FrozenDict({"observations": jnp.array(obs)[None, :]})
         new_command = FrozenDict({})
         new_action, new_log_prob = model.apply(params, new_obs, new_command, rng, method="actor_sample_and_log_prob")
+        assert isinstance(new_log_prob, Array)
         return EnvState(
             obs=new_obs,
             reward=jnp.array(reward)[None],
@@ -119,10 +120,12 @@ class CartPoleEnv(BaseEnv):
         rng, _ = jax.random.split(rng)
         for _ in range(num_steps):
             observations.append(state.obs)
-            rewards.append(state.reward)
             done.append(state.done)
             actions.append(state.action)
+            rewards.append(state.reward)
             action_log_probs.append(state.action_log_prob)
+            # NOTE: need to be careful about when the reward updates... this works for survival
+            # related tasks, but not those that directly depend on the action.
 
             if state.done[0]:
                 state = self.reset(model, params, rng)
