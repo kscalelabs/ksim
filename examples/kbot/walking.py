@@ -321,12 +321,9 @@ class KBotZeroActions(ActionModel):
     def sample_and_log_prob(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
     ) -> Tuple[Array, Array]:
-        mean = self(obs, cmd)
+        zeros = self(obs, cmd) * 0.0
 
-        action = mean * 0.0
-        log_prob = self.calc_log_prob(mean, action)
-
-        return action, log_prob
+        return zeros, zeros
 
 
 class KBotCriticModel(nn.Module):
@@ -489,14 +486,21 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 self.run_training()
 
             case "env":
-                zero_model = ActorCriticModel(
-                    actor_module=KBotZeroActions(
-                        mlp=MLP(
-                            num_hidden_layers=self.config.actor_num_layers,
-                            hidden_features=self.config.actor_hidden_dims,
-                            out_features=NUM_OUTPUTS,
-                        ),
-                    ),
+                mlp = MLP(
+                    num_hidden_layers=self.config.actor_num_layers,
+                    hidden_features=self.config.actor_hidden_dims,
+                    out_features=NUM_OUTPUTS,
+                )
+                match self.config.viz_action:
+                    case "policy":
+                        actor = KBotActorModel(mlp=mlp)
+                    case "zero":
+                        actor = KBotZeroActions(mlp=mlp)
+                    case _:
+                        raise ValueError(f"Invalid action: {self.config.viz_action}. Should be one of `policy` or `zero`.")
+
+                model = ActorCriticModel(
+                    actor_module=actor,
                     critic_module=KBotCriticModel(
                         mlp=MLP(
                             num_hidden_layers=self.config.critic_num_layers,
@@ -506,7 +510,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                     ),
                 )
 
-                self.run_environment(zero_model)
+                self.run_environment(model)
 
             case "viz":
                 self.viz_environment()

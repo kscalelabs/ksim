@@ -162,6 +162,8 @@ class KScaleEnvConfig(xax.Config):
     # simulation artifact options
     ignore_cached_urdf: bool = xax.field(value=False, help="Whether to ignore the cached URDF.")
 
+    viz_action: str = xax.field(value="policy", help="The action to use for visualization.")
+
 # The new stateless environment – note that we do not call any stateful methods.
 class MjxEnv(BaseEnv):
     """An environment for massively parallel rollouts, stateless to obj state and system parameters.
