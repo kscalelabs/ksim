@@ -26,10 +26,10 @@ class EnvState:
     action_log_prob: Array
 
 
-# pfb30: temporary replacement
+# pfb30: temporary holder
 @jax.tree_util.register_dataclass
 @dataclass
-class MinibatchEnvState:
+class Minibatch:
     """Base environment state class."""
 
     # Data attributes

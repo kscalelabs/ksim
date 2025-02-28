@@ -13,7 +13,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, EnvState
-from ksim.env.types import MinibatchEnvState
+from ksim.env.types import Minibatch
 from ksim.model.formulations import ActorCriticModel
 from ksim.task.rl import RLConfig, RLTask
 from ksim.utils.jit import legit_jit
@@ -34,7 +34,7 @@ class PPOConfig(RLConfig):
     use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss.")
 
     # For the entropy bonus term
-    entropy_coef: float = xax.field(value=0.008, help="Entropy coefficient for PPO.")
+    entropy_coef: float = xax.field(value=0.08, help="Entropy coefficient for PPO.")
 
     # For the GAE computation
     gamma: float = xax.field(value=0.99, help="Discount factor for PPO")
@@ -43,7 +43,7 @@ class PPOConfig(RLConfig):
     # General training parameters
     minibatch_size: int = xax.field(value=50, help="Equals to the number of updates per trajectory")
     num_mini_batches: int = xax.field(value=10, help="Number of mini-batches per PPO epoch.")
-    learning_rate: float = xax.field(value=3e-4, help="Learning rate for PPO.")
+    learning_rate: float = xax.field(value=1e-4, help="Learning rate for PPO.")
     max_grad_norm: float = xax.field(value=0.5, help="Maximum gradient norm for clipping.")
 
 
@@ -106,7 +106,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     ) -> tuple[PyTree, optax.OptState, Array, dict[str, Array]]:
         """Update the model parameters."""
         loss_val, metrics, grads = self._jitted_value_and_grad(model, params, env_state_batch)
-        print(f"Loss: {loss_val}")
         updates, new_opt_state = optimizer.update(grads, opt_state, params)
         new_params = optax.apply_updates(params, updates)
         return new_params, new_opt_state, loss_val, metrics
@@ -141,13 +140,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    @legit_jit(static_argnames=["self", "model"])
+    # @legit_jit(static_argnames=["self", "model"])
     def update_minibatch(
         self,
         model: ActorCriticModel,
         params: PyTree,
         env_state_batch: EnvState,
-    ) -> MinibatchEnvState:
+    ) -> Minibatch:
         """Update the model parameters."""
         # get the state-value estimates
         values = self.apply_critic(model, params, env_state_batch.obs, env_state_batch.command)
@@ -157,7 +156,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         returns = advantages + values
 
-        return MinibatchEnvState(
+        return Minibatch(
             obs=env_state_batch.obs,
             command=env_state_batch.command,
             action=env_state_batch.action,
@@ -178,17 +177,22 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticModel,
         params: PyTree,
         rng: PRNGKeyArray,
-    ) -> list[MinibatchEnvState]:
+    ) -> list[Minibatch]:
         """Get the minibatches for the current environment."""
         batch = self.update_minibatch(model, params, trajectories)
 
         rng, _rng = jax.random.split(rng)
         batch_size = self.config.num_mini_batches * self.config.minibatch_size
+        assert batch_size == self.config.num_envs * self.max_trajectory_steps
 
         permutation = jax.random.permutation(_rng, batch_size)
-
-        # flatten - not neeed in cartpole case
-        # batch = jax.tree_util.tree_map(lambda x: x.reshape((batch_size,) + x.shape[2:]), batch)
+        # skipp flattening if work on one env
+        # batch = jax.lax.cond(
+        #     len(batch.action.shape) == 2,
+        #     lambda b: b,
+        #     lambda b: jax.tree_util.tree_map(lambda x: x.reshape((batch_size,) + x.shape[2:]), b),
+        #     operand=batch,
+        # )
         # permute
         permutted_batch = jax.tree_util.tree_map(lambda x: jnp.take(x, permutation, axis=0), batch)
         # divide
@@ -198,7 +202,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         minibatch_list = [
-            MinibatchEnvState(
+            Minibatch(
                 obs=FrozenDict({k: minibatches.obs[k][i] for k in minibatches.obs}),
                 reward=minibatches.reward[i],
                 done=minibatches.done[i],
