@@ -172,7 +172,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return f"render_{time_string}"
         return f"render_{state.num_steps}_{time_string}"
 
-    def  run_environment(
+    def run_environment(
         self,
         model: ActorCriticModel,
         # params: PyTree | None = None,
@@ -180,12 +180,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> None:
         """Run the environment with rendering and logging."""
         with self:
+            start_time = time.time()
             rng = self.prng_key()
             env = self.get_environment()
             render_name = self.get_render_name(state)
             render_dir = self.exp_dir / self.config.render_dir / render_name
 
             os.makedirs(render_dir, exist_ok=True)
+            end_time = time.time()
+            print(f"Time taken for environment setup: {end_time - start_time} seconds")
 
             logger.log(logging.INFO, "Rendering to %s", render_dir)
 
@@ -193,33 +196,51 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             key, _ = jax.random.split(rng)
 
+            start_time = time.time()
             params = self.get_init_params(key)
+            end_time = time.time()
+            print(f"Time taken for parameter initialization: {end_time - start_time} seconds")
 
             # Unroll trajectories and collect the frames for rendering
             logger.info("Unrolling trajectories")
 
+            start_time = time.time()
             _, traj = env.unroll_trajectories(
                 model, params, rng, self.max_trajectory_steps, self.config.num_envs, return_data=True
             )
+            end_time = time.time()
+            print(f"Time taken for trajectory unrolling: {end_time - start_time} seconds")
 
+            start_time = time.time()
             mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), traj)
 
             mjx_data_list = [
                 jax.tree_util.tree_map(lambda x: x[i], mjx_data_traj)
                 for i in range(self.max_trajectory_steps)
             ]
+            end_time = time.time()
+            print(f"Time taken for trajectory processing: {end_time - start_time} seconds")
 
+            start_time = time.time()
             frames = env.render_trajectory(
                 trajectory=mjx_data_list, width=self.config.render_width, height=self.config.render_height
             )
+            end_time = time.time()
+            print(f"Time taken for rendering frames: {end_time - start_time} seconds")
 
             logger.info("Saving %d frames to %s", len(frames), render_dir)
 
+            start_time = time.time()
             for i, frame in enumerate(frames):
                 frame_path = render_dir / f"frame_{i:06d}.png"
                 Image.fromarray(frame).save(frame_path)
+            end_time = time.time()
+            print(f"Time taken for saving frames: {end_time - start_time} seconds")
 
+            start_time = time.time()
             mp.write_video(render_dir / "trajectory.mp4", frames, fps=1 / self.config.ctrl_dt)
+            end_time = time.time()
+            print(f"Time taken for video creation: {end_time - start_time} seconds")
 
     def log_state(self, env: BaseEnv) -> None:
         super().log_state()
