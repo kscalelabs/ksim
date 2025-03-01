@@ -348,7 +348,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
         # TODO: implement logic to handle randomize model initialization when creating batch
-        rollout = env.unroll_trajectories(
+        rollout, _ = env.unroll_trajectories(
             model=model,
             params=params,
             rng=rng,
@@ -431,6 +431,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             start_time = time.time()
             reshuffle_rng, rollout_rng = jax.random.split(train_rng)
             trajectories_dataset = self.get_trajectory_dataset(model, params, env, rollout_rng)
+            breakpoint()
             rollout_time = time.time() - start_time
 
             # running training on minibatches

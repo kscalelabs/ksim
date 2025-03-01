@@ -31,7 +31,7 @@ from ksim.builders.rewards import (
 )
 from ksim.builders.terminations import IllegalContactTerminationBuilder
 from ksim.env.mjx.mjx_env import MjxEnv
-from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.model.formulations import ActionModel, ActorCriticModel, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
@@ -263,7 +263,7 @@ NUM_OUTPUTS = 20
 #         self.critic = critic
 
 
-class KBotActorModel(ActionModel):
+class KBotActorModel(GaussianActionModel):
     mlp: MLP
 
     def setup(self) -> None:
@@ -276,25 +276,6 @@ class KBotActorModel(ActionModel):
         actions_n = self.mlp(x_n)
 
         return actions_n
-
-    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
-        mean = prediction
-        std = jnp.exp(self.log_std)
-
-        log_prob = -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
-        return jnp.sum(log_prob, axis=-1)
-
-    def sample_and_log_prob(
-        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> Tuple[Array, Array]:
-        mean = self(obs, cmd)
-        std = jnp.exp(self.log_std)
-
-        noise = jax.random.normal(rng, mean.shape)
-        action = mean + noise * std
-        log_prob = self.calc_log_prob(mean, action)
-
-        return action, log_prob
 
 
 class KBotZeroActions(ActionModel):
@@ -315,7 +296,9 @@ class KBotZeroActions(ActionModel):
         mean = prediction
         std = jnp.exp(self.log_std)
 
-        log_prob = -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
+        log_prob = (
+            -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
+        )
         return jnp.sum(log_prob, axis=-1)
 
     def sample_and_log_prob(
@@ -458,6 +441,8 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                     hidden_features=self.config.actor_hidden_dims,
                     out_features=NUM_OUTPUTS,
                 ),
+                init_log_std=-0.7,
+                num_outputs=NUM_OUTPUTS,
             ),
             critic_module=KBotCriticModel(
                 mlp=MLP(
@@ -493,11 +478,17 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 )
                 match self.config.viz_action:
                     case "policy":
-                        actor = KBotActorModel(mlp=mlp)
+                        actor = KBotActorModel(
+                            mlp=mlp,
+                            init_log_std=-0.7,
+                            num_outputs=NUM_OUTPUTS,
+                        )
                     case "zero":
                         actor = KBotZeroActions(mlp=mlp)
                     case _:
-                        raise ValueError(f"Invalid action: {self.config.viz_action}. Should be one of `policy` or `zero`.")
+                        raise ValueError(
+                            f"Invalid action: {self.config.viz_action}. Should be one of `policy` or `zero`."
+                        )
 
                 model = ActorCriticModel(
                     actor_module=actor,
@@ -516,14 +507,17 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 self.viz_environment()
 
             case _:
-                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
+                raise ValueError(
+                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
+                )
 
 
 if __name__ == "__main__":
     # python -m examples.kbot.walking action=train
     KBotWalkingTask.launch(
         KBotWalkingConfig(
-            num_envs=1,
-            max_trajectory_seconds=10.0,
+            num_envs=2048,
+            num_steps_per_trajectory=500,
+            minibatch_size=500 * 4,
         ),
     )
