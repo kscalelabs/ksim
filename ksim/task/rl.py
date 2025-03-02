@@ -74,7 +74,7 @@ class RLConfig(KScaleEnvConfig, xax.Config):
         help="The size of the action space.",
     )
     num_learning_epochs: int = xax.field(
-        value=5,
+        value=1,
         help="Number of learning epochs per PPO update.",
     )
     minibatch_size: int = xax.field(
@@ -438,10 +438,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rollout_time_loss_components = self.get_rollout_time_loss_components(
                 model, params, trajectories_dataset
             )
-            for epoch_idx in range(self.config.num_learning_epochs):
+            for _ in range(self.config.num_learning_epochs):
                 trajectories_dataset, rollout_time_loss_components = self.reshuffle_rollout(
                     trajectories_dataset, rollout_time_loss_components, reshuffle_rng
                 )
+
                 reshuffle_rng, _ = jax.random.split(reshuffle_rng)
                 for minibatch_idx in range(self.num_minibatches):
                     minibatch_idx = jnp.array(minibatch_idx)  # TODO: scanning will do this anyways
@@ -466,8 +467,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             loss=float(loss_val),
                             training_state=training_state,
                         )
-
-                        # print(f"{epoch_idx}, {minibatch_idx}: {metrics}")
 
                         with self.step_context("write_logs"):
                             training_state.raw_phase = "train"

@@ -47,9 +47,9 @@ class CartPoleConfig(PPOConfig):
     """Configuration for CartPole training."""
 
     # ML model parameters.
-    actor_hidden_dims: int = xax.field(value=128, help="Hidden dimensions for the actor.")
+    actor_hidden_dims: int = xax.field(value=256, help="Hidden dimensions for the actor.")
     actor_num_layers: int = xax.field(value=2, help="Number of layers for the actor.")
-    critic_hidden_dims: int = xax.field(value=128, help="Hidden dimensions for the critic.")
+    critic_hidden_dims: int = xax.field(value=256, help="Hidden dimensions for the critic.")
     critic_num_layers: int = xax.field(value=2, help="Number of layers for the critic.")
 
     # Environment parameters
@@ -160,7 +160,7 @@ if __name__ == "__main__":
     CartPoleTask.launch(
         CartPoleConfig(
             num_envs=1,
-            num_steps_per_trajectory=500,
+            num_steps_per_trajectory=2000,
             valid_every_n_steps=5,
             minibatch_size=100,
             learning_rate=1e-3,

@@ -171,19 +171,8 @@ class CartPoleEnv(BaseEnv):
         command = FrozenDict({})
         action, _ = model.apply(params, obs, command, rng, method="actor_sample_and_log_prob")
 
-        try:
-            gym_obs, gym_reward, gym_terminated, gym_truncated, _ = self.env.step(action.item())
-            done = bool(gym_terminated or gym_truncated)  # Convert to Python bool
-        except AttributeError as e:
-            if "bool8" in str(e):
-                # Handle the numpy bool8 error
-                gym_obs, gym_reward, gym_terminated, gym_truncated, _ = self.env.step(action.item())
-                # Ensure terminated and truncated are Python booleans
-                terminated = bool(gym_terminated)
-                truncated = bool(gym_truncated)
-                done = terminated or truncated
-            else:
-                raise e
+        gym_obs, gym_reward, gym_terminated, gym_truncated, _ = self.env.step(action.item())
+        done = bool(gym_terminated or gym_truncated)  # Convert to Python bool
 
         current_env_state = EnvState(
             obs=obs,
@@ -195,3 +184,6 @@ class CartPoleEnv(BaseEnv):
         )
 
         return current_env_state, gym_obs
+
+    # TODO: Wesley
+    def render_trajectory(self): ...
