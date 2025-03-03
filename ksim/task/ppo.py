@@ -18,6 +18,8 @@ from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
 
+EPSILON = 1e-5
+
 
 @jax.tree_util.register_dataclass
 @dataclass
@@ -91,7 +93,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         returns = advantages + initial_values
 
         if self.config.normalize_advantage:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            advantages = (advantages - advantages.mean()) / (advantages.std() + EPSILON)
 
         return PPORolloutTimeLossComponents(
             initial_action_log_probs=jax.lax.stop_gradient(initial_action_log_probs),
