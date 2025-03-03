@@ -133,9 +133,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @property
     def num_minibatches(self) -> int:
         """The number of minibatches in the dataset."""
-        assert (
-            self.dataset_size % self.config.minibatch_size == 0
-        ), f"Dataset size of {self.dataset_size} must be divisible by minibatch size of {self.config.minibatch_size}."
+        msg = (
+            f"Dataset size of {self.dataset_size} must"
+            f" be divisible by minibatch size of {self.config.minibatch_size}."
+        )
+        assert self.dataset_size % self.config.minibatch_size == 0, msg
         return self.dataset_size // self.config.minibatch_size
 
     ########################
@@ -275,7 +277,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Logs the mean episode length.
         mean_episode_length_steps = (~trajectory.done).sum(axis=-1).astype(jnp.float32).mean()
         mean_episode_length_seconds = mean_episode_length_steps * self.config.ctrl_dt
-        self.logger.log_scalar("mean_episode_length", mean_episode_length_seconds, namespace="stats")
+        self.logger.log_scalar(
+            "mean_episode_length", mean_episode_length_seconds, namespace="stats"
+        )
 
     ########################
     # Training and Running #

@@ -213,7 +213,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 "total_objective": total_objective,
                 "average_ratio": jnp.mean(ratio),
                 "average_log_prob_diff": jnp.mean(log_prob_diff),
-                "average_advantage_norm": jnp.mean(jnp.abs(rollout_time_loss_components.advantages)),
+                "average_advantage_norm": jnp.mean(
+                    jnp.abs(rollout_time_loss_components.advantages)
+                ),
             }
         )
 
@@ -244,7 +246,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # getting td residuals
         deltas = rewards + self.config.gamma * next_values * mask - values
 
-        _, advantages = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1]))
+        _, advantages = jax.lax.scan(
+            scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1])
+        )
         return advantages[::-1]
 
     @legit_jit(static_argnames=["self", "model"])

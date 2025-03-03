@@ -75,7 +75,6 @@ class DummyEnvState:
 
 
 class GetNormTest(chex.TestCase):
-
     def test_l1_norm(self):
         x = jnp.array([-1.0, 2.0, -3.0])
         result = get_norm(x, "l1")
@@ -95,7 +94,6 @@ class GetNormTest(chex.TestCase):
 
 
 class BaseRewardTest(chex.TestCase):
-
     def test_reward_name(self):
         reward = DummyReward(scale=1.0)
         self.assertEqual(reward.get_name(), "dummy_reward")
@@ -124,7 +122,6 @@ class BaseRewardTest(chex.TestCase):
 
 
 class LinearVelocityZPenaltyTest(chex.TestCase):
-
     def test_l2_norm(self):
         penalty = LinearVelocityZPenalty(scale=1.0, norm="l2")
         prev_state = DummyEnvState()
@@ -147,7 +144,6 @@ class LinearVelocityZPenaltyTest(chex.TestCase):
 
 
 class AngularVelocityXYPenaltyTest(chex.TestCase):
-
     def test_l2_norm(self):
         penalty = AngularVelocityXYPenalty(scale=1.0, norm="l2")
         prev_state = DummyEnvState()
@@ -170,7 +166,6 @@ class AngularVelocityXYPenaltyTest(chex.TestCase):
 
 
 class TrackAngularVelocityZRewardTest(chex.TestCase):
-
     def test_reward_calculation(self):
         reward = TrackAngularVelocityZReward(scale=1.0, norm="l2")
         prev_state = DummyEnvState(commands={"angular_velocity_command": jnp.array([0.2])})
@@ -195,7 +190,6 @@ class TrackAngularVelocityZRewardTest(chex.TestCase):
 
 
 class TrackLinearVelocityXYRewardTest(chex.TestCase):
-
     def test_reward_calculation(self):
         reward = TrackLinearVelocityXYReward(scale=1.0, norm="l2")
         prev_state = DummyEnvState(commands={"linear_velocity_command": jnp.array([0.5, 0.3])})
@@ -222,7 +216,6 @@ class TrackLinearVelocityXYRewardTest(chex.TestCase):
 
 
 class ActionSmoothnessPenaltyTest(chex.TestCase):
-
     def test_l2_norm(self):
         penalty = ActionSmoothnessPenalty(scale=1.0, norm="l2")
         prev_state = DummyEnvState(
@@ -253,7 +246,6 @@ class ActionSmoothnessPenaltyTest(chex.TestCase):
 
 
 class FootContactPenaltyTest(chex.TestCase):
-
     def test_contact_detection(self):
         penalty = FootContactPenalty(
             scale=1.0,
@@ -364,7 +356,6 @@ class FootContactPenaltyTest(chex.TestCase):
 
 
 class FootContactPenaltyBuilderTest(chex.TestCase):
-
     def setUp(self):
         self.mappings = MujocoMappings(
             geom_idx_to_body_name={
