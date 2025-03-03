@@ -184,35 +184,5 @@ class CartPoleEnv(BaseEnv):
 
         return current_env_state, gym_obs
 
-    def render_trajectory(
-        self,
-        trajectory,
-        width: int = 640,
-        height: int = 480,
-        camera: int | None = None,
-    ) -> list[np.ndarray]:
-        def render_frame(renderer: mujoco.Renderer, mjx_data, camera: int) -> np.ndarray:
-            # Create fresh MjData for each frame
-            d = self.default_mj_data
-
-            d.qpos, d.qvel = mjx_data.qpos, mjx_data.qvel
-            d.mocap_pos, d.mocap_quat = mjx_data.mocap_pos, mjx_data.mocap_quat
-            d.xfrc_applied = mjx_data.xfrc_applied
-
-            # Ensure physics state is fully updated
-            mujoco.mj_forward(self.default_mj_model, d)
-
-            # Update scene and render
-            renderer.update_scene(d, camera=camera, scene_option=scene_option)
-            return renderer.render()
-
-        camera_id = camera or 0
-
-        renderer = mujoco.Renderer(self.default_mj_model, height=height, width=width)
-        scene_option = mujoco.MjvOption()
-        frames = []
-        for data in trajectory:
-            frame = render_frame(renderer, data, camera_id)
-            frames.append(frame)
-        renderer.close()
-        return frames
+    def render_trajectory(self):
+        raise NotImplementedError("Not implemented for this environment.")
