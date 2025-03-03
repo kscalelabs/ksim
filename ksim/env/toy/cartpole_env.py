@@ -1,7 +1,5 @@
 """CartPole environment."""
 
-from typing import Any
-
 import gymnasium as gym
 import jax
 import jax.numpy as jnp
@@ -10,8 +8,8 @@ from flax.core import FrozenDict
 from jaxtyping import PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, EnvState
+from ksim.env.types import PhysicsData
 from ksim.model.formulations import ActorCriticModel
-import mujoco
 
 
 class CartPoleEnv(BaseEnv):
@@ -69,7 +67,7 @@ class CartPoleEnv(BaseEnv):
         num_steps: int,
         num_envs: int,
         return_data: bool = False,
-    ) -> EnvState:
+    ) -> tuple[EnvState, PhysicsData]:
         """Rollout the model for a given number of steps."""
         assert num_envs == 1, "CartPoleEnv only supports a single environment"
         observations = []

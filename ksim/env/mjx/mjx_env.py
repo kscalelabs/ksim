@@ -207,9 +207,7 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        # breakpoint()
-        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
-        mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
+        mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
         self.default_mj_model = mj_model
         self.default_mj_data = mujoco.MjData(mj_model)
         self.default_mjx_model = mjx.put_model(mj_model)
@@ -571,7 +569,7 @@ class MjxEnv(BaseEnv):
         num_envs: int,
         return_data: bool = False,
         **kwargs: Any,
-    ) -> EnvState:
+    ) -> tuple[EnvState, mjx.Data]:
         """Vectorized rollout of trajectories.
 
         1. The batched reset (using vmap) initializes a state for each environment.

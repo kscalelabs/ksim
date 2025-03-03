@@ -340,7 +340,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
         # TODO: implement logic to handle randomize model initialization when creating batch
-        rollout = env.unroll_trajectories(
+        rollout, _ = env.unroll_trajectories(
             model=model,
             params=params,
             rng=rng,

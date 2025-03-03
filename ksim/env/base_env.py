@@ -46,7 +46,7 @@ class BaseEnv(ABC):
         num_steps: int,
         num_envs: int,
         return_data: bool = False,
-    ) -> EnvState: ...
+    ) -> tuple[EnvState, PhysicsData]: ...
 
     @abstractmethod
     def render_trajectory(
