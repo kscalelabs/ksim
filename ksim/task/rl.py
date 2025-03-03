@@ -207,29 +207,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Unroll trajectories and collect the frames for rendering
             logger.info("Unrolling trajectories")
 
-            # start_time = time.time()
-            # rollout = env.unroll_trajectories(
-            #     model,
-            #     params,
-            #     rng,
-            #     self.config.num_steps_per_trajectory,
-            #     self.config.num_envs,
-            #     return_data=True,
-            # )
-            # end_time = time.time()
-            # print(f"Time taken for trajectory unrolling: {end_time - start_time} seconds")
-
-            # start_time = time.time()
-            # mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), rollout)
-
-            # mjx_data_list = [
-            #     jax.tree_util.tree_map(lambda x: x[i], mjx_data_traj)
-            #     for i in range(self.config.num_steps_per_trajectory)
-            # ]
-            # end_time = time.time()
-            # print(f"Time taken for trajectory processing: {end_time - start_time} seconds")
-
-            # start_time = time.time()
             frames = env.render_trajectory(
                 model=model,
                 params=params,
