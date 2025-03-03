@@ -358,7 +358,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         permutation = jax.random.choice(rng, jnp.arange(batch_size), (batch_size,))
 
         # Apply permutation to rollout dataset
-        def permute_array(x):
+        def permute_array(x: Array) -> Array:
             # Handle arrays with proper shape checking
             if x.shape[0] == batch_size:
                 return x[permutation]

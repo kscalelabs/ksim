@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import jax
 import numpy as np
@@ -52,7 +51,6 @@ class BaseEnv(ABC):
         params: PyTree,
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
-        **kwargs: Any,
     ) -> EnvState: ...
 
     @abstractmethod
@@ -63,6 +61,7 @@ class BaseEnv(ABC):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
+        *,
         return_data: bool = False,
     ) -> tuple[EnvState, PhysicsData]: ...
 

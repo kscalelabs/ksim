@@ -11,7 +11,7 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Collection, Tuple, TypeVar, cast, get_args
+from typing import Callable, Collection, Tuple, TypeVar, cast, get_args
 
 import chex
 import jax
@@ -29,7 +29,7 @@ from ksim.builders.observation import Observation, ObservationBuilder
 from ksim.builders.resets import Reset, ResetBuilder
 from ksim.builders.rewards import Reward, RewardBuilder
 from ksim.builders.terminations import Termination, TerminationBuilder
-from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
+from ksim.env.base_env import BaseEnv, BaseEnvConfig
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.types import EnvState, KScaleActionModelType
 from ksim.model.formulations import ActorCriticModel
@@ -254,7 +254,7 @@ class MjxEnv(BaseEnv):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
-    ) -> list[tuple[str, float]]:
+    ) -> list[tuple[str, Array]]:
         """Compute rewards (each as a scalar) from the state transition.
 
         ML: we might want to represent rewards as graphs (multiply and sum) or add flags...
@@ -277,7 +277,7 @@ class MjxEnv(BaseEnv):
             rewards.append((reward_name, reward_val))
         return rewards
 
-    def get_terminations(self, new_mjx_data: mjx.Data) -> list[tuple[str, float]]:
+    def get_terminations(self, new_mjx_data: mjx.Data) -> list[tuple[str, Array]]:
         """Compute termination conditions (each as a scalar) from the pipeline state."""
         terminations = []
         for termination_name, termination in self.terminations:
@@ -336,7 +336,7 @@ class MjxEnv(BaseEnv):
         """
         n_steps = self._expected_dt_per_ctrl_dt  # total number of pipeline steps to take.
 
-        def f(carry: Tuple[mjx.Data, int], _: Any) -> Tuple[Tuple[mjx.Data, int], None]:
+        def f(carry: Tuple[mjx.Data, int], _: None) -> Tuple[Tuple[mjx.Data, int], None]:
             state, step_num = carry
 
             action_motor_sees = jax.lax.select(
@@ -497,13 +497,15 @@ class MjxEnv(BaseEnv):
         params: PyTree,
         rng: jax.Array,
         *,
-        mjx_model: mjx.Model,
+        mjx_model: mjx.Model | None = None,
     ) -> EnvState:
         """Pure reset function: returns an initial state computed solely from the inputs.
 
         We couple the step and actor because we couple the actions with the rest of env state. This
         ultimately allows for extremely constrained `EnvState`s, which promote correct RL code.
         """
+        if mjx_model is None:
+            mjx_model = self.default_mjx_model
         state, _ = self.scannable_reset(model=model, params=params, rng=rng, mjx_model=mjx_model)
         return state
 
@@ -515,8 +517,8 @@ class MjxEnv(BaseEnv):
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
         *,
-        mjx_data: mjx.Data,
-        mjx_model: mjx.Model,
+        mjx_data: mjx.Data | None = None,
+        mjx_model: mjx.Model | None = None,
     ) -> EnvState:
         """Stepping the environment in a consistent, JIT-able manner. Works on a single environment.
 
@@ -538,6 +540,10 @@ class MjxEnv(BaseEnv):
             - Rewards are computed.
             - Terminations are computed.
         """
+        if mjx_model is None:
+            mjx_model = self.default_mjx_model
+        if mjx_data is None:
+            mjx_data = self.default_mjx_data
         new_state, _ = self.scannable_step(
             model=model,
             params=params,
@@ -558,7 +564,6 @@ class MjxEnv(BaseEnv):
         num_envs: int,
         *,
         return_data: bool = False,
-        **kwargs: Any,
     ) -> tuple[EnvState, mjx.Data]:
         """Vectorized rollout of trajectories.
 
@@ -616,11 +621,14 @@ class MjxEnv(BaseEnv):
             return new_state, new_mjx_data
 
         # Create a partially applied version with fixed arguments
-        env_step_partial = lambda state, data, key: env_step(state, data, key)
+        def env_step_partial(
+            state: EnvState, data: mjx.Data, key: Array
+        ) -> Tuple[EnvState, mjx.Data]:
+            return env_step(state, data, key)
 
         @legit_jit()
         def scan_fn(
-            carry: Tuple[EnvState, mjx.Data, Array], _: Any
+            carry: Tuple[EnvState, mjx.Data, Array], _: None
         ) -> Tuple[Tuple[EnvState, mjx.Data, Array], Tuple[EnvState, mjx.Data]]:
             states, mjx_data, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)

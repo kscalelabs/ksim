@@ -1,7 +1,7 @@
 """MIT Controller, as used by the Robstride actuators."""
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Dict
 
 import jax.numpy as jnp
 from jaxtyping import Array
@@ -24,7 +24,7 @@ class MITPositionActuators(Actuators):
         self,
         actuators_metadata: Dict[str, BaseActuatorMetadata],
         mujoco_mappings: MujocoMappings,
-        **kwargs: Any,
+        max_torque: float | None = None,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         kps_list = [0.0] * len(mujoco_mappings.ctrl_name_to_idx)
@@ -47,10 +47,15 @@ class MITPositionActuators(Actuators):
         if any(self.kps == 0) or any(self.kds == 0):
             raise ValueError("Some kps or kds are 0. Check your actuators_metadata.")
 
+        self.max_torque = max_torque
+
     def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
         """Get the control signal from the (position) action vector."""
         current_pos = mjx_data.qpos[7:]  # NOTE: we assume first 7 are always root pos.
         ctrl = self.kps * (action - current_pos)  # TODO: explore using velocity as damping...
+
+        if self.max_torque is not None:
+            ctrl = jnp.clip(ctrl, -self.max_torque, self.max_torque)
         return ctrl
 
     @property

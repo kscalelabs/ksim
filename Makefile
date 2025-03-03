@@ -41,6 +41,7 @@ push-to-pypi: build-for-pypi
 # ------------------------ #
 
 py-files := $(shell find . -name '*.py' -not -path "./build/*" -not -path "./scratch/*")
+py-files-no-tests := $(shell find . -name '*.py' -not -path "./build/*" -not -path "./scratch/*" -not -path "*/tests/*")
 
 format:
 	@black $(py-files)
@@ -48,9 +49,9 @@ format:
 .PHONY: format
 
 static-checks:
-	@black --diff --check $(py-files)
-	@ruff check $(py-files)
-	@mypy --install-types --non-interactive $(py-files)
+	@black --diff --check $(py-files-no-tests)
+	@ruff check $(py-files-no-tests)
+	@mypy --install-types --non-interactive $(py-files-no-tests)
 .PHONY: lint
 
 # ------------------------ #

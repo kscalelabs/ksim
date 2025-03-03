@@ -2,7 +2,7 @@
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Any, Generic, Literal, TypeVar
+from typing import Generic, Literal, TypeVar
 
 import attrs
 import equinox as eqx
@@ -11,6 +11,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
+from ksim.env.types import PhysicsData
 from ksim.utils.data import BuilderData
 
 NoiseType = Literal["gaussian", "uniform"]
@@ -24,7 +25,7 @@ class Observation(ABC):
     noise_type: NoiseType = attrs.field(default="gaussian")
 
     @abstractmethod
-    def __call__(self, state: Any, rng: PRNGKeyArray) -> Array:
+    def __call__(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         """Gets the observation from the state."""
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:

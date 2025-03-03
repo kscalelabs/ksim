@@ -181,5 +181,15 @@ class CartPoleEnv(BaseEnv):
 
         return current_env_state, gym_obs
 
-    def render_trajectory(self):
+    def render_trajectory(
+        self,
+        model: ActorCriticModel,
+        params: PyTree,
+        rng: PRNGKeyArray,
+        *,
+        num_steps: int,
+        width: int = 640,
+        height: int = 480,
+        camera: int | None = None,
+    ) -> list[np.ndarray]:
         raise NotImplementedError("Not implemented for this environment.")

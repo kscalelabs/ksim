@@ -66,7 +66,9 @@ class GaussianActionModel(ActionModel, ABC):
 
 
 class CategoricalActionModel(ActionModel, ABC):
-    """Categorical action model: assume action space is tokenized such that the last dimension is
+    """Categorical action model.
+
+    Assume action space is tokenized such that the last dimension is
     the logits for each action.
     """
 

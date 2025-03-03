@@ -499,7 +499,8 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                         actor = KBotZeroActions(mlp=mlp)
                     case _:
                         raise ValueError(
-                            f"Invalid action: {self.config.viz_action}. Should be one of `policy` or `zero`."
+                            f"Invalid action: {self.config.viz_action}."
+                            f" Should be one of `policy` or `zero`."
                         )
 
                 model = ActorCriticModel(
