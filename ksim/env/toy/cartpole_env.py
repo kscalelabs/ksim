@@ -1,6 +1,5 @@
 """CartPole environment."""
 
-from pathlib import Path
 from typing import Any
 
 import gymnasium as gym
@@ -11,8 +10,8 @@ from flax.core import FrozenDict
 from jaxtyping import PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, EnvState
-from ksim.env.types import KScaleActionModelType, PhysicsData
-from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.model.formulations import ActorCriticModel
+import mujoco
 
 
 class CartPoleEnv(BaseEnv):
@@ -70,7 +69,7 @@ class CartPoleEnv(BaseEnv):
         num_steps: int,
         num_envs: int,
         return_data: bool = False,
-    ) -> tuple[EnvState, PhysicsData]:
+    ) -> EnvState:
         """Rollout the model for a given number of steps."""
         assert num_envs == 1, "CartPoleEnv only supports a single environment"
         observations = []
@@ -171,19 +170,8 @@ class CartPoleEnv(BaseEnv):
         command = FrozenDict({})
         action, _ = model.apply(params, obs, command, rng, method="actor_sample_and_log_prob")
 
-        try:
-            gym_obs, gym_reward, gym_terminated, gym_truncated, _ = self.env.step(action.item())
-            done = bool(gym_terminated or gym_truncated)  # Convert to Python bool
-        except AttributeError as e:
-            if "bool8" in str(e):
-                # Handle the numpy bool8 error
-                gym_obs, gym_reward, gym_terminated, gym_truncated, _ = self.env.step(action.item())
-                # Ensure terminated and truncated are Python booleans
-                terminated = bool(gym_terminated)
-                truncated = bool(gym_truncated)
-                done = terminated or truncated
-            else:
-                raise e
+        gym_obs, gym_reward, gym_terminated, gym_truncated, _ = self.env.step(action.item())
+        done = bool(gym_terminated or gym_truncated)
 
         current_env_state = EnvState(
             obs=obs,
@@ -195,3 +183,36 @@ class CartPoleEnv(BaseEnv):
         )
 
         return current_env_state, gym_obs
+
+    def render_trajectory(
+        self,
+        trajectory,
+        width: int = 640,
+        height: int = 480,
+        camera: int | None = None,
+    ) -> list[np.ndarray]:
+        def render_frame(renderer: mujoco.Renderer, mjx_data, camera: int) -> np.ndarray:
+            # Create fresh MjData for each frame
+            d = self.default_mj_data
+
+            d.qpos, d.qvel = mjx_data.qpos, mjx_data.qvel
+            d.mocap_pos, d.mocap_quat = mjx_data.mocap_pos, mjx_data.mocap_quat
+            d.xfrc_applied = mjx_data.xfrc_applied
+
+            # Ensure physics state is fully updated
+            mujoco.mj_forward(self.default_mj_model, d)
+
+            # Update scene and render
+            renderer.update_scene(d, camera=camera, scene_option=scene_option)
+            return renderer.render()
+
+        camera_id = camera or 0
+
+        renderer = mujoco.Renderer(self.default_mj_model, height=height, width=width)
+        scene_option = mujoco.MjvOption()
+        frames = []
+        for data in trajectory:
+            frame = render_frame(renderer, data, camera_id)
+            frames.append(frame)
+        renderer.close()
+        return frames

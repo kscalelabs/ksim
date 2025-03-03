@@ -156,7 +156,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
 
 if __name__ == "__main__":
     # python -m examples.cartpole.cartpole_task action=train
-    # python -m examples.cartpole.cartpole_task action=viz
+    # python -m examples.cartpole.cartpole_task action=env
     CartPoleTask.launch(
         CartPoleConfig(
             num_envs=1,

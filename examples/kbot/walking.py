@@ -475,9 +475,6 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
     def get_init_critic_carry(self) -> None:
         return None
 
-    def viz_environment(self) -> None:
-        raise NotImplementedError("Not implemented")
-
     # Overloading to run KBotZeroActions instead of default Actor model
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
@@ -512,18 +509,15 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
 
                 self.run_environment(model)
 
-            case "viz":
-                self.viz_environment()
-
             case _:
                 raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot.walking action=train
+    # python -m examples.kbot.walking action=env
     KBotWalkingTask.launch(
         KBotWalkingConfig(
             num_envs=1,
-            max_trajectory_seconds=10.0,
+            max_episode_length=5.0,
         ),
     )

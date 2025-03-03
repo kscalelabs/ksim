@@ -1,7 +1,6 @@
 """Base JAX centric environment class."""
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -47,7 +46,7 @@ class BaseEnv(ABC):
         num_steps: int,
         num_envs: int,
         return_data: bool = False,
-    ) -> tuple[EnvState, PhysicsData]: ...
+    ) -> EnvState: ...
 
     @abstractmethod
     def render_trajectory(

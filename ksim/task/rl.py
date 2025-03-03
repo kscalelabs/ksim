@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from threading import Thread
 from typing import Generic, Literal, TypeVar
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mediapy as mp
@@ -102,9 +101,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_environment(self) -> BaseEnv: ...
 
     @abstractmethod
-    def viz_environment(self) -> None: ...
-
-    @abstractmethod
     def get_init_actor_carry(self) -> jnp.ndarray | None: ...
 
     @abstractmethod
@@ -166,9 +162,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 model, _, _, _ = self.load_initial_state(self.prng_key())
                 self.run_environment(model)
 
-            case "viz":
-                self.viz_environment()
-
             case _:
                 raise ValueError(
                     f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
@@ -187,7 +180,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run_environment(
         self,
         model: ActorCriticModel,
-        # params: PyTree | None = None,
         state: xax.State | None = None,
     ) -> None:
         """Run the environment with rendering and logging."""
@@ -217,18 +209,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             logger.info("Unrolling trajectories")
 
             start_time = time.time()
-            _, traj = env.unroll_trajectories(
-                model, params, rng, self.max_trajectory_steps, self.config.num_envs, return_data=True
+            rollout = env.unroll_trajectories(
+                model, params, rng, self.config.num_steps_per_trajectory, self.config.num_envs, return_data=True
             )
             end_time = time.time()
             print(f"Time taken for trajectory unrolling: {end_time - start_time} seconds")
 
             start_time = time.time()
-            mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), traj)
+            mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), rollout)
 
             mjx_data_list = [
                 jax.tree_util.tree_map(lambda x: x[i], mjx_data_traj)
-                for i in range(self.max_trajectory_steps)
+                for i in range(self.config.num_steps_per_trajectory)
             ]
             end_time = time.time()
             print(f"Time taken for trajectory processing: {end_time - start_time} seconds")

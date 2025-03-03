@@ -17,7 +17,6 @@ from typing import Any, Callable, Collection, Tuple, TypeVar, cast, get_args
 import chex
 import jax
 import jax.numpy as jnp
-import mediapy as media
 import mujoco
 import numpy as np
 import xax
@@ -26,7 +25,6 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING
-from PIL import Image
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
@@ -209,7 +207,9 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        # breakpoint()
+        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
         self.default_mj_model = mj_model
         self.default_mj_data = mujoco.MjData(mj_model)
         self.default_mjx_model = mjx.put_model(mj_model)
@@ -571,7 +571,7 @@ class MjxEnv(BaseEnv):
         num_envs: int,
         return_data: bool = False,
         **kwargs: Any,
-    ) -> tuple[EnvState, mjx.Data]:
+    ) -> EnvState:
         """Vectorized rollout of trajectories.
 
         1. The batched reset (using vmap) initializes a state for each environment.
