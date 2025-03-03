@@ -22,6 +22,9 @@ class EnvState:
     done: Array
     timestep: Array
 
+    term_terms: FrozenDict[str, Array]  # Termination terms at same timestep as done
+    reward_terms: FrozenDict[str, Array]  # Reward terms at same timestep as reward
+
 
 KScaleActionModelType = Literal["random", "zero", "midpoint"]
 PhysicsData = mjx.Data | None

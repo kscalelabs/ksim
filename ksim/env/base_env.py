@@ -10,6 +10,8 @@ import xax
 from jaxtyping import PRNGKeyArray, PyTree
 from omegaconf import MISSING
 
+from ksim.builders.rewards import Reward
+from ksim.builders.terminations import Termination
 from ksim.env.types import EnvState, PhysicsData
 from ksim.model.formulations import ActorCriticModel
 
@@ -31,6 +33,9 @@ class BaseEnvConfig(xax.Config):
 
 class BaseEnv(ABC):
     """Base environment class."""
+
+    rewards: list[tuple[str, Reward]]
+    terminations: list[tuple[str, Termination]]
 
     @abstractmethod
     def get_dummy_env_state(  # exists for compilation purposes

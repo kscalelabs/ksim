@@ -240,24 +240,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_reward_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
         reward_stats: dict[str, jnp.ndarray] = {}
 
-        # Gets the reward statistics.
-        reward = jnp.where(trajectory.done[..., None], jnp.nan, trajectory.info["all_rewards"])
-        for i, (key, _) in enumerate(env.rewards):
-            reward_values = reward[..., i : i + 1].astype(jnp.float32)
-            reward_stats[f"{key}/mean"] = jnp.nanmean(reward_values)
-            reward_stats[f"{key}/std"] = jnp.nanstd(reward_values)
+        terms = trajectory.reward_terms
+        for key, _ in env.rewards:
+            reward_stats[key] = terms[key].mean()
 
         return reward_stats
 
     def get_termination_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
         termination_stats: dict[str, jnp.ndarray] = {}
 
-        # Gets the termination statistics.
-        termination = trajectory.done.max(axis=-2).astype(jnp.float32)
-        termination = termination.reshape(-1, termination.shape[-1])
-        max_ids = termination.argmax(axis=-1)
-        for i, (key, _) in enumerate(env.done):
-            termination_stats[key] = (max_ids == i).astype(jnp.float32).mean()
+        terms = trajectory.term_terms
+        for key, _ in env.terminations:
+            termination_stats[key] = terms[key].mean()
 
         return termination_stats
 
@@ -380,7 +374,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         return minibatched_rollout, minibatched_rollout_time_loss_components
 
-    def train_loop(
+    def rl_train_loop(
         self,
         model: ActorCriticModel,
         optimizer: optax.GradientTransformation,
@@ -490,7 +484,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             opt_state = optimizer.init(params)
 
             try:
-                self.train_loop(
+                self.rl_train_loop(
                     model=model,
                     params=params,
                     env=env,

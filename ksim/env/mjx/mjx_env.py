@@ -395,6 +395,11 @@ class MjxEnv(BaseEnv):
         done_0 = jnp.array(False, dtype=jnp.bool_)
         reward_0 = jnp.array(0.0)
 
+        term_terms_0 = {k: v for k, v in self.get_terminations(mjx_data_1)}
+        reward_terms_0 = {
+            k: v for k, v in self.get_rewards(action_0, mjx_data_0, command_0, action_0, mjx_data_1)
+        }
+
         return (
             EnvState(
                 obs=obs_0,
@@ -403,6 +408,8 @@ class MjxEnv(BaseEnv):
                 command=command_0,
                 action=action_0,
                 timestep=timestep,
+                term_terms=FrozenDict(term_terms_0),
+                reward_terms=FrozenDict(reward_terms_0),
             ),
             mjx_data_1,
         )
@@ -446,6 +453,9 @@ class MjxEnv(BaseEnv):
         )
         reward_t = jnp.stack([v for _, v in all_rewards]).sum()
 
+        term_terms_t = {k: v for k, v in all_dones}
+        reward_terms_t = {k: v for k, v in all_rewards}
+
         env_state_t = EnvState(
             obs=obs_t,
             command=command_t,
@@ -453,6 +463,8 @@ class MjxEnv(BaseEnv):
             reward=reward_t,
             done=done_t,
             timestep=timestep,
+            term_terms=FrozenDict(term_terms_t),
+            reward_terms=FrozenDict(reward_terms_t),
         )
 
         return env_state_t, mjx_data_t_plus_1
@@ -486,6 +498,21 @@ class MjxEnv(BaseEnv):
             reward=jnp.ones(()),
             done=jnp.ones(()),
             timestep=jnp.ones(()),
+            term_terms=FrozenDict(
+                {k: jnp.zeros_like(v) for k, v in self.get_terminations(mjx_data_0)}
+            ),
+            reward_terms=FrozenDict(
+                {
+                    k: jnp.zeros_like(v)
+                    for k, v in self.get_rewards(
+                        jnp.ones(self.action_size),
+                        mjx_data_0,
+                        command_dummy,
+                        jnp.ones(self.action_size),
+                        mjx_data_0,
+                    )
+                }
+            ),
         )
 
     @legit_jit(static_argnames=["self"])
@@ -570,9 +597,6 @@ class MjxEnv(BaseEnv):
         3. A jax.lax.scan unrolls the trajectory for num_steps.
         4. The resulting trajectory has shape (num_steps, num_envs, ...).
         """
-        if return_data:
-            num_envs = 1
-
         init_rngs = jax.random.split(rng, num_envs)
         mjx_model = self.default_mjx_model
         # TODO: include logic to randomize environment parameters here...
