@@ -29,7 +29,7 @@ from ksim.builders.rewards import (
     TrackLinearVelocityXYReward,
 )
 from ksim.builders.terminations import IllegalContactTerminationBuilder
-from ksim.env.mjx.mjx_env import MjxEnv
+from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActorCriticModel, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -64,7 +64,7 @@ class HumanoidCriticModel(nn.Module):
 
 
 @dataclass
-class HumanoidWalkingConfig(PPOConfig):
+class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     # Robot model name to use.
     robot_model_name: str = xax.field(value="examples/default_humanoid/")
 
@@ -178,9 +178,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
 
     def get_init_critic_carry(self) -> None:
         return None
-
-    def viz_environment(self) -> None:
-        raise NotImplementedError("Not implemented")
 
 
 if __name__ == "__main__":

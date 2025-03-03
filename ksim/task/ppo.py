@@ -126,7 +126,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
     # Pass-through abstract methods:
-    # `get_environment`, `viz_environment`
+    # `get_environment`
 
     ######################
     # Training Utilities #

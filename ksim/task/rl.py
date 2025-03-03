@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from threading import Thread
 from typing import Generic, Literal, TypeVar
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mediapy as mp
@@ -32,8 +31,7 @@ from ksim.builders.loggers import (
     LoggingData,
     ModelUpdateLog,
 )
-from ksim.env.base_env import BaseEnv, EnvState
-from ksim.env.mjx.mjx_env import KScaleEnvConfig
+from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.model.formulations import ActorCriticModel
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
@@ -44,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 @jax.tree_util.register_dataclass
 @dataclass
-class RLConfig(KScaleEnvConfig, xax.Config):
+class RLConfig(BaseEnvConfig, xax.Config):
     action: str = xax.field(
         value="train",
         help="The action to take; should be either `train` or `env`.",
@@ -100,9 +98,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     @abstractmethod
     def get_environment(self) -> BaseEnv: ...
-
-    @abstractmethod
-    def viz_environment(self) -> None: ...
 
     @abstractmethod
     def get_init_actor_carry(self) -> jnp.ndarray | None: ...
@@ -166,9 +161,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 model, _, _, _ = self.load_initial_state(self.prng_key())
                 self.run_environment(model)
 
-            case "viz":
-                self.viz_environment()
-
             case _:
                 raise ValueError(
                     f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
@@ -187,7 +179,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run_environment(
         self,
         model: ActorCriticModel,
-        # params: PyTree | None = None,
         state: xax.State | None = None,
     ) -> None:
         """Run the environment with rendering and logging."""
@@ -216,31 +207,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Unroll trajectories and collect the frames for rendering
             logger.info("Unrolling trajectories")
 
-            start_time = time.time()
-            _, traj = env.unroll_trajectories(
-                model, params, rng, self.max_trajectory_steps, self.config.num_envs, return_data=True
-            )
-            end_time = time.time()
-            print(f"Time taken for trajectory unrolling: {end_time - start_time} seconds")
-
-            start_time = time.time()
-            mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), traj)
-
-            mjx_data_list = [
-                jax.tree_util.tree_map(lambda x: x[i], mjx_data_traj)
-                for i in range(self.max_trajectory_steps)
-            ]
-            end_time = time.time()
-            print(f"Time taken for trajectory processing: {end_time - start_time} seconds")
-
-            start_time = time.time()
             frames = env.render_trajectory(
-                trajectory=mjx_data_list,
+                model=model,
+                params=params,
+                rng=rng,
+                num_steps=self.config.num_steps_per_trajectory,
                 width=self.config.render_width,
                 height=self.config.render_height,
             )
-            end_time = time.time()
-            print(f"Time taken for rendering frames: {end_time - start_time} seconds")
 
             logger.info("Saving %d frames to %s", len(frames), render_dir)
 
@@ -348,7 +322,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
         # TODO: implement logic to handle randomize model initialization when creating batch
-        rollout = env.unroll_trajectories(
+        rollout, _ = env.unroll_trajectories(
             model=model,
             params=params,
             rng=rng,

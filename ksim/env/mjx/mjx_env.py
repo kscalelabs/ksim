@@ -17,7 +17,6 @@ from typing import Any, Callable, Collection, Tuple, TypeVar, cast, get_args
 import chex
 import jax
 import jax.numpy as jnp
-import mediapy as media
 import mujoco
 import numpy as np
 import xax
@@ -26,14 +25,13 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
 from omegaconf import MISSING
-from PIL import Image
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
 from ksim.builders.resets import Reset, ResetBuilder
 from ksim.builders.rewards import Reward, RewardBuilder
 from ksim.builders.terminations import Termination, TerminationBuilder
-from ksim.env.base_env import BaseEnv, EnvState
+from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.types import EnvState, KScaleActionModelType
 from ksim.model.formulations import ActionModel, ActorCriticModel
@@ -137,15 +135,7 @@ def get_action_fn(
 
 @jax.tree_util.register_dataclass
 @dataclass
-class KScaleEnvConfig(xax.Config):
-    # robot model configuration options
-    robot_model_name: str = xax.field(value=MISSING, help="The name of the model to use.")
-    robot_model_scene: str = xax.field(value="patch", help="The scene to use for the model.")
-    render_camera: str = xax.field(value="tracking_camera", help="The camera to use for rendering.")
-    render_width: int = xax.field(value=640, help="The width of the rendered image.")
-    render_height: int = xax.field(value=480, help="The height of the rendered image.")
-    render_dir: Path = xax.field(value="render", help="The directory to save rendered images to.")
-
+class MjxEnvConfig(BaseEnvConfig):
     # environment configuration options
     dt: float = xax.field(value=0.004, help="Simulation time step.")
     ctrl_dt: float = xax.field(value=0.02, help="Control time step.")
@@ -162,7 +152,6 @@ class KScaleEnvConfig(xax.Config):
     # simulation artifact options
     ignore_cached_urdf: bool = xax.field(value=False, help="Whether to ignore the cached URDF.")
 
-    viz_action: str = xax.field(value="policy", help="The action to use for visualization.")
 
 # The new stateless environment – note that we do not call any stateful methods.
 class MjxEnv(BaseEnv):
@@ -178,7 +167,7 @@ class MjxEnv(BaseEnv):
 
     def __init__(
         self,
-        config: KScaleEnvConfig,
+        config: MjxEnvConfig,
         terminations: Collection[Termination | TerminationBuilder],
         resets: Collection[Reset | ResetBuilder],
         rewards: Collection[Reward | RewardBuilder],
@@ -569,6 +558,7 @@ class MjxEnv(BaseEnv):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
+        *,
         return_data: bool = False,
         **kwargs: Any,
     ) -> tuple[EnvState, mjx.Data]:
@@ -655,24 +645,38 @@ class MjxEnv(BaseEnv):
 
     def render_trajectory(
         self,
-        trajectory: list[mjx.Data],
+        model: ActorCriticModel,
+        params: PyTree,
+        rng: PRNGKeyArray,
+        num_steps: int,
         width: int = 640,
         height: int = 480,
         camera: int | None = None,
     ) -> list[np.ndarray]:
+        _, traj_data = self.unroll_trajectories(model, params, rng, num_steps, 1, return_data=True)
+
+        mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), traj_data)
+
+        mjx_data_list = [
+            jax.tree_util.tree_map(lambda x: x[i], mjx_data_traj) for i in range(num_steps)
+        ]
+
+        render_mj_data = mujoco.MjData(self.default_mj_model)
+
         def render_frame(renderer: mujoco.Renderer, mjx_data: mjx.Data, camera: int) -> np.ndarray:
             # Create fresh MjData for each frame
-            d = self.default_mj_data
-
-            d.qpos, d.qvel = mjx_data.qpos, mjx_data.qvel
-            d.mocap_pos, d.mocap_quat = mjx_data.mocap_pos, mjx_data.mocap_quat
-            d.xfrc_applied = mjx_data.xfrc_applied
+            render_mj_data.qpos, render_mj_data.qvel = mjx_data.qpos, mjx_data.qvel
+            render_mj_data.mocap_pos, render_mj_data.mocap_quat = (
+                mjx_data.mocap_pos,
+                mjx_data.mocap_quat,
+            )
+            render_mj_data.xfrc_applied = mjx_data.xfrc_applied
 
             # Ensure physics state is fully updated
-            mujoco.mj_forward(self.default_mj_model, d)
+            mujoco.mj_forward(self.default_mj_model, render_mj_data)
 
             # Update scene and render
-            renderer.update_scene(d, camera=camera, scene_option=scene_option)
+            renderer.update_scene(render_mj_data, camera=camera, scene_option=scene_option)
             return renderer.render()
 
         camera_id = camera or 0
@@ -680,7 +684,7 @@ class MjxEnv(BaseEnv):
         renderer = mujoco.Renderer(self.default_mj_model, height=height, width=width)
         scene_option = mujoco.MjvOption()
         frames = []
-        for data in trajectory:
+        for data in mjx_data_list:
             frame = render_frame(renderer, data, camera_id)
             frames.append(frame)
         renderer.close()

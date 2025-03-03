@@ -30,7 +30,7 @@ from ksim.builders.rewards import (
     TrackLinearVelocityXYReward,
 )
 from ksim.builders.terminations import IllegalContactTerminationBuilder
-from ksim.env.mjx.mjx_env import MjxEnv
+from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -281,7 +281,9 @@ class KBotActorModel(ActionModel):
         mean = prediction
         std = jnp.exp(self.log_std)
 
-        log_prob = -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
+        log_prob = (
+            -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
+        )
         return jnp.sum(log_prob, axis=-1)
 
     def sample_and_log_prob(
@@ -315,7 +317,9 @@ class KBotZeroActions(ActionModel):
         mean = prediction
         std = jnp.exp(self.log_std)
 
-        log_prob = -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
+        log_prob = (
+            -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
+        )
         return jnp.sum(log_prob, axis=-1)
 
     def sample_and_log_prob(
@@ -364,7 +368,7 @@ class KBotCriticModel(nn.Module):
 
 
 @dataclass
-class KBotWalkingConfig(PPOConfig):
+class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
     # Robot model name to use.
     robot_model_name: str = xax.field(value="kbot-v1-feet")
 
@@ -475,9 +479,6 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
     def get_init_critic_carry(self) -> None:
         return None
 
-    def viz_environment(self) -> None:
-        raise NotImplementedError("Not implemented")
-
     # Overloading to run KBotZeroActions instead of default Actor model
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
@@ -497,7 +498,9 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                     case "zero":
                         actor = KBotZeroActions(mlp=mlp)
                     case _:
-                        raise ValueError(f"Invalid action: {self.config.viz_action}. Should be one of `policy` or `zero`.")
+                        raise ValueError(
+                            f"Invalid action: {self.config.viz_action}. Should be one of `policy` or `zero`."
+                        )
 
                 model = ActorCriticModel(
                     actor_module=actor,
@@ -512,18 +515,17 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
 
                 self.run_environment(model)
 
-            case "viz":
-                self.viz_environment()
-
             case _:
-                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
+                raise ValueError(
+                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
+                )
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot.walking action=train
+    # python -m examples.kbot.walking action=env
     KBotWalkingTask.launch(
         KBotWalkingConfig(
             num_envs=1,
-            max_trajectory_seconds=10.0,
+            num_steps_per_trajectory=100,
         ),
     )
