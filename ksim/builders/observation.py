@@ -7,9 +7,9 @@ from typing import Any, Generic, Literal, TypeVar
 import attrs
 import equinox as eqx
 import jax
-import mujoco.mjx as mjx
 import xax
 from jaxtyping import Array, PRNGKeyArray
+from mujoco import mjx
 
 from ksim.utils.data import BuilderData
 

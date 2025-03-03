@@ -4,7 +4,6 @@ from typing import Any
 import chex
 import jax
 import jax.numpy as jnp
-import mujoco.mjx as mjx
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.builders.resets import Reset, XYPositionReset, XYPositionResetBuilder

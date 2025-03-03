@@ -11,7 +11,6 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 import asyncio
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable, Collection, Tuple, TypeVar, cast, get_args
 
 import chex
@@ -24,7 +23,6 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
-from omegaconf import MISSING
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
@@ -34,7 +32,7 @@ from ksim.builders.terminations import Termination, TerminationBuilder
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.types import EnvState, KScaleActionModelType
-from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.model.formulations import ActorCriticModel
 from ksim.utils.data import BuilderData
 from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
@@ -569,7 +567,6 @@ class MjxEnv(BaseEnv):
         3. A jax.lax.scan unrolls the trajectory for num_steps.
         4. The resulting trajectory has shape (num_steps, num_envs, ...).
         """
-
         if return_data:
             num_envs = 1
 

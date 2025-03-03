@@ -324,7 +324,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         To avoid confusion, batch comprises 1 or more unrolled trajectory states stacked
         along the first axis, and minibatches are sampled from this batch.
         """
-
         # TODO: implement logic to handle randomize model initialization when creating batch
         rollout, _ = env.unroll_trajectories(
             model=model,

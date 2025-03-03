@@ -10,7 +10,6 @@ from kscale import K
 from kscale.web.utils import get_robots_dir, should_refresh_file
 from omegaconf import OmegaConf
 
-from ksim.env.mjx.actuators.base_actuator import BaseActuatorMetadata
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuatorMetadata
 
 logger = logging.getLogger(__name__)
@@ -28,7 +27,7 @@ async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
         urdf_dir = Path(model_name)
         if not urdf_dir.exists():
             raise ValueError(f"Model {model_name} does not exist")
-    except:
+    except ValueError:
         async with K() as api:
             urdf_dir = await api.download_and_extract_urdf(model_name, cache=cache)
 
@@ -47,7 +46,7 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
         if not directory.exists():
             raise ValueError(f"Model {model_name} does not exist")
         metadata_path = directory / "metadata.yaml"
-    except:
+    except ValueError:
         metadata_path = get_robots_dir() / model_name / "metadata.yaml"
 
         # Downloads and caches the metadata if it doesn't exist.

@@ -5,12 +5,11 @@ from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
 import attrs
-import equinox as eqx
 import jax
 import jax.numpy as jnp
-import mujoco.mjx as mjx
 import xax
 from jaxtyping import PRNGKeyArray
+from mujoco import mjx
 
 from ksim.utils.data import BuilderData
 

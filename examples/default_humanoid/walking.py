@@ -1,7 +1,6 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
 from dataclasses import dataclass
-from typing import Tuple
 
 import flax.linen as nn
 import jax

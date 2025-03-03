@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Dict
 
 import jax.numpy as jnp
-import mujoco.mjx as mjx
 from jaxtyping import Array
+from mujoco import mjx
 
 from ksim.env.mjx.actuators.base_actuator import Actuators, BaseActuatorMetadata
 from ksim.utils.mujoco import MujocoMappings

@@ -163,7 +163,6 @@ class CartPoleEnv(BaseEnv):
         NOTE: for simplicity, this environment is stateful and doesn't actually use prev_state in
         a functional manner.
         """
-
         obs = FrozenDict({"observations": jnp.array(current_gym_obs)[None, :]})
         command = FrozenDict({})
         action, _ = model.apply(params, obs, command, rng, method="actor_sample_and_log_prob")

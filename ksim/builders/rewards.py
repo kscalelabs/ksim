@@ -8,10 +8,10 @@ from typing import Generic, Literal, TypeVar
 import attrs
 import jax
 import jax.numpy as jnp
-import mujoco.mjx as mjx
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array
+from mujoco import mjx
 
 from ksim.utils.data import BuilderData
 

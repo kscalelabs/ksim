@@ -1,11 +1,9 @@
 import unittest
-from typing import Any, Dict
 
 import chex
-import jax
 import jax.numpy as jnp
-import mujoco.mjx as mjx
 from jaxtyping import Array
+from mujoco import mjx
 
 from ksim.builders.rewards import (
     ActionSmoothnessPenalty,
@@ -13,7 +11,6 @@ from ksim.builders.rewards import (
     FootContactPenalty,
     FootContactPenaltyBuilder,
     LinearVelocityZPenalty,
-    NormType,
     Reward,
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,

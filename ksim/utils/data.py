@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-import mujoco.mjx as mjx
+from mujoco import mjx
 
 from ksim.utils.mujoco import MujocoMappings
 
