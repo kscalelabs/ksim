@@ -103,7 +103,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 #         "left_lower_arm",
                 #     ],
                 # ),
-                MinimumHeightTermination(min_height=0.0),
+                MinimumHeightTermination(min_height=0.4),
             ],
             resets=[
                 XYPositionResetBuilder(),
