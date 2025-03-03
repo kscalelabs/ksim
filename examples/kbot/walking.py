@@ -492,6 +492,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                     hidden_features=self.config.actor_hidden_dims,
                     out_features=NUM_OUTPUTS,
                 )
+                actor: ActionModel
                 match self.config.viz_action:
                     case "policy":
                         actor = KBotActorModel(mlp=mlp)

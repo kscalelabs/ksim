@@ -89,7 +89,7 @@ def step(
         data = mjx.step(model, data)
         return data, None
 
-    return jax.lax.scan(single_step, data, (), num_substeps)[0]
+    return jax.lax.scan(f=single_step, init=data, xs=None, length=num_substeps)[0]
 
 
 Tk = TypeVar("Tk", bound=Hashable)
@@ -100,7 +100,9 @@ def lookup_in_dict(names: Collection[Tk], mapping: dict[Tk, Tv], names_type: str
     """Lookup a list of names in a dictionary and return the corresponding values."""
     missing_names = [name for name in names if name not in mapping]
     if missing_names:
-        available_names_str = "\n".join(str(name) for name in sorted(mapping.keys()))
+        available_names_str = "\n".join(
+            name for name in sorted(str(lookup) for lookup in mapping.keys())
+        )
         raise ValueError(
             f"{names_type} not found in model: {missing_names}\nAvailable:\n{available_names_str}"
         )

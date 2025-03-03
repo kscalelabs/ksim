@@ -25,6 +25,8 @@ class BaseEnvConfig(xax.Config):
     render_height: int = xax.field(value=480, help="The height of the rendered image.")
     render_dir: Path = xax.field(value="render", help="The directory to save rendered images to.")
     viz_action: str = xax.field(value="policy", help="The action to use for visualization.")
+    ctrl_dt: float = xax.field(value=0.02, help="The control time step.")
+    dt: float = xax.field(value=0.004, help="The simulation time step.")
 
 
 class BaseEnv(ABC):

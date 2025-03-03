@@ -130,7 +130,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
 
                     # Take step
                     rng, step_rng = jax.random.split(rng)
-                    env_state = env.step(model, params, env_state, step_rng)
+                    env_state = env.step(model, params, env_state, step_rng, current_gym_obs=None)
                     reward = env_state.reward.item()
                     done = env_state.done.item()
                     total_reward += reward

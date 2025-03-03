@@ -61,20 +61,20 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
             if (actuators := metadata.joint_name_to_metadata) is None:
                 raise ValueError(f"No actuators found for {model_name}")
 
-            actuator_metadata = {}
+            actuators_metadata = {}
 
-            for name, metadata in actuators.items():
-                if hasattr(metadata, "kp") and hasattr(metadata, "kd"):
-                    actuator_metadata[name] = MITPositionActuatorMetadata(
-                        kp=cast(float, metadata.kp),
-                        kd=cast(float, metadata.kd),
+            for name, actuator_metadata in actuators.items():
+                if hasattr(actuator_metadata, "kp") and hasattr(actuator_metadata, "kd"):
+                    actuators_metadata[name] = MITPositionActuatorMetadata(
+                        kp=cast(float, actuator_metadata.kp),
+                        kd=cast(float, actuator_metadata.kd),
                     )
                 else:
                     raise ValueError(f"Unknown actuator metadata: {metadata}")
 
-            control_frequency = float(control_frequency)
+            control_frequency_float = float(control_frequency)
             model_metadata = ModelMetadata(
-                actuators=actuator_metadata, control_frequency=control_frequency
+                actuators=actuators_metadata, control_frequency=control_frequency_float
             )
             metadata_path.parent.mkdir(parents=True, exist_ok=True)
             OmegaConf.save(model_metadata, metadata_path)

@@ -232,17 +232,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             end_time = time.time()
             print(f"Time taken for video creation: {end_time - start_time} seconds")
 
-    def log_state(self, env: BaseEnv) -> None:
+    def log_state(self) -> None:
         super().log_state()
 
         # self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
-
-    def log_trajectory(self, env: BaseEnv, trajectory: EnvState) -> None:
-        for plot_key, img in env.generate_trajectory_plots(trajectory):
-            self.logger.log_image(plot_key, img, namespace="traj")
-
-        frames, fps = env.render_trajectory_video(trajectory)
-        self.logger.log_video("trajectory", frames, fps=fps, namespace="video")
 
     def get_reward_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
         reward_stats: dict[str, jnp.ndarray] = {}
@@ -260,10 +253,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         termination_stats: dict[str, jnp.ndarray] = {}
 
         # Gets the termination statistics.
-        termination = trajectory.info["all_dones"].max(axis=-2).astype(jnp.float32)
+        termination = trajectory.done.max(axis=-2).astype(jnp.float32)
         termination = termination.reshape(-1, termination.shape[-1])
         max_ids = termination.argmax(axis=-1)
-        for i, (key, _) in enumerate(env.terminations):
+        for i, (key, _) in enumerate(env.done):
             termination_stats[key] = (max_ids == i).astype(jnp.float32).mean()
 
         return termination_stats
@@ -390,10 +383,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def train_loop(
         self,
         model: ActorCriticModel,
-        params: PyTree,
-        env: BaseEnv,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
+        params: PyTree,
+        env: BaseEnv,
         training_state: xax.State,
     ) -> None:
         """Runs the main RL training loop."""
@@ -421,9 +414,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
                 reshuffle_rng, _ = jax.random.split(reshuffle_rng)
                 for minibatch_idx in range(self.num_minibatches):
-                    minibatch_idx = jnp.array(minibatch_idx)  # TODO: scanning will do this anyways
+                    minibatch_idx_array = jnp.array(
+                        minibatch_idx
+                    )  # TODO: scanning will do this anyways
                     minibatch, rollout_time_minibatch_loss_components = self.get_minibatch(
-                        trajectories_dataset, rollout_time_loss_components, minibatch_idx
+                        trajectories_dataset, rollout_time_loss_components, minibatch_idx_array
                     )
                     with self.step_context("update_state"):
                         params, opt_state, loss_val, metrics = self.model_update(
@@ -478,7 +473,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             env = self.get_environment()
 
             if xax.is_master():
-                Thread(target=self.log_state, daemon=True, args=(env,)).start()
+                Thread(target=self.log_state, daemon=True).start()
 
             key, model_key = jax.random.split(key)
             model, optimizer, opt_state, training_state = self.load_initial_state(model_key)

@@ -135,8 +135,6 @@ def get_action_fn(
 @dataclass
 class MjxEnvConfig(BaseEnvConfig):
     # environment configuration options
-    dt: float = xax.field(value=0.004, help="Simulation time step.")
-    ctrl_dt: float = xax.field(value=0.02, help="Control time step.")
     debug_env: bool = xax.field(value=False, help="Whether to enable debug mode for the env.")
 
     # action configuration options
