@@ -684,7 +684,7 @@ class MjxEnv(BaseEnv):
         renderer = mujoco.Renderer(self.default_mj_model, height=height, width=width)
         scene_option = mujoco.MjvOption()
         frames = []
-        for _, data in mjx_data_list:
+        for data in mjx_data_list:
             frame = render_frame(renderer, data, camera_id)
             frames.append(frame)
         renderer.close()
