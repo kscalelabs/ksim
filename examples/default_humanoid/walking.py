@@ -28,7 +28,7 @@ from ksim.builders.rewards import (
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.builders.terminations import IllegalContactTerminationBuilder
+from ksim.builders.terminations import MinimumHeightTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActorCriticModel, GaussianActionModel
 from ksim.model.mlp import MLP
@@ -86,20 +86,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                IllegalContactTerminationBuilder(
-                    body_names=[
-                        "torso",
-                        "pelvis",
-                        "right_thigh",
-                        "right_shin",
-                        "right_upper_arm",
-                        "right_lower_arm",
-                        "left_thigh",
-                        "left_shin",
-                        "left_upper_arm",
-                        "left_lower_arm",
-                    ],
-                ),
+                MinimumHeightTermination(min_height=0.4),
             ],
             resets=[
                 XYPositionResetBuilder(),
