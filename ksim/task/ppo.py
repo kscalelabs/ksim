@@ -218,9 +218,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         use_debug = os.environ.get("DEBUG", "0") == "1"
-        if use_debug:  # should skip compilation
-            # breakpoint()
-            print(total_loss)
+        # if use_debug:  # should skip compilation
+        #     breakpoint()
+
+        jax.debug.print("total_loss: {total_loss}", total_loss=total_loss)
 
         return total_loss, metrics_to_log
 

@@ -103,7 +103,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 #         "left_lower_arm",
                 #     ],
                 # ),
-                MinimumHeightTermination(min_height=0.5),
+                MinimumHeightTermination(min_height=0.0),
             ],
             resets=[
                 XYPositionResetBuilder(),
@@ -188,8 +188,8 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking action=train
     HumanoidWalkingTask.launch(
         HumanoidWalkingConfig(
-            num_envs=1,
-            num_steps_per_trajectory=500,
+            num_envs=32,
+            num_steps_per_trajectory=700,
             minibatch_size=100,
         ),
     )

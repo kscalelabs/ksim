@@ -566,7 +566,7 @@ class MjxEnv(BaseEnv):
         )
         return new_state
 
-    # @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs", "return_data"])
+    @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs", "return_data"])
     def unroll_trajectories(
         self,
         model: ActorCriticModel,
@@ -603,7 +603,7 @@ class MjxEnv(BaseEnv):
         rng, _ = jax.random.split(rng)
 
         # Define env_step as a pure function with all dependencies passed explicitly
-        # @legit_jit()
+        @legit_jit()
         def env_step(
             env_state: EnvState,
             mjx_data: mjx.Data,
@@ -638,7 +638,7 @@ class MjxEnv(BaseEnv):
         # Create a partially applied version with fixed arguments
         env_step_partial = lambda state, data, key: env_step(state, data, key)
 
-        # @legit_jit()
+        @legit_jit()
         def scan_fn(
             carry: Tuple[EnvState, mjx.Data, Array], _: Any
         ) -> Tuple[Tuple[EnvState, mjx.Data, Array], Tuple[EnvState, mjx.Data]]:
