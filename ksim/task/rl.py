@@ -218,7 +218,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             start_time = time.time()
             _, traj = env.unroll_trajectories(
-                model, params, rng, self.max_trajectory_steps, self.config.num_envs, return_data=True
+                model, params, rng, self.config.num_steps_per_trajectory, self.config.num_envs, return_data=True
             )
             end_time = time.time()
             print(f"Time taken for trajectory unrolling: {end_time - start_time} seconds")
@@ -228,7 +228,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             mjx_data_list = [
                 jax.tree_util.tree_map(lambda x: x[i], mjx_data_traj)
-                for i in range(self.max_trajectory_steps)
+                for i in range(self.config.num_steps_per_trajectory)
             ]
             end_time = time.time()
             print(f"Time taken for trajectory processing: {end_time - start_time} seconds")
@@ -348,7 +348,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
         # TODO: implement logic to handle randomize model initialization when creating batch
-        rollout = env.unroll_trajectories(
+        rollout, _ = env.unroll_trajectories(
             model=model,
             params=params,
             rng=rng,
