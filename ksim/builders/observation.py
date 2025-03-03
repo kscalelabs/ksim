@@ -5,12 +5,12 @@ from abc import ABC, abstractmethod
 from typing import Any, Generic, Literal, TypeVar
 
 import attrs
-import equinox as eqx
 import jax
 import mujoco.mjx as mjx
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
+from ksim.utils.jit import legit_jit
 from ksim.utils.data import BuilderData
 
 NoiseType = Literal["gaussian", "uniform"]
@@ -70,7 +70,7 @@ class MjxObservation(Observation, ABC):
 
 @attrs.define(frozen=True)
 class BasePositionObservation(MjxObservation):
-    @eqx.filter_jit
+    @legit_jit()
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[0:3]  # (3,)
         return self.add_noise(qpos, rng)
@@ -78,7 +78,7 @@ class BasePositionObservation(MjxObservation):
 
 @attrs.define(frozen=True)
 class BaseOrientationObservation(Observation):
-    @eqx.filter_jit
+    @legit_jit()
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[3:7]  # (4,)
         return self.add_noise(qpos, rng)
@@ -86,7 +86,7 @@ class BaseOrientationObservation(Observation):
 
 @attrs.define(frozen=True)
 class BaseLinearVelocityObservation(Observation):
-    @eqx.filter_jit
+    @legit_jit()
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[0:3]  # (3,)
         return self.add_noise(qvel, rng)
@@ -94,7 +94,7 @@ class BaseLinearVelocityObservation(Observation):
 
 @attrs.define(frozen=True)
 class BaseAngularVelocityObservation(Observation):
-    @eqx.filter_jit
+    @legit_jit()
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[3:6]  # (3,)
         return self.add_noise(qvel, rng)
@@ -102,7 +102,7 @@ class BaseAngularVelocityObservation(Observation):
 
 @attrs.define(frozen=True)
 class JointPositionObservation(Observation):
-    @eqx.filter_jit
+    @legit_jit()
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[7:]  # (N,)
         return self.add_noise(qpos, rng)
@@ -110,7 +110,7 @@ class JointPositionObservation(Observation):
 
 @attrs.define(frozen=True)
 class JointVelocityObservation(Observation):
-    @eqx.filter_jit
+    @legit_jit()
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[6:]  # (N,)
         return self.add_noise(qvel, rng)
@@ -121,7 +121,7 @@ class SensorObservation(Observation):
     sensor_name: str = attrs.field()
     sensor_idx_range: tuple[int, int | None] | None = attrs.field(default=None)
 
-    @eqx.filter_jit
+    @legit_jit()
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         assert self.sensor_idx_range is not None
         sensor_data = state.sensordata[self.sensor_idx_range[0] : self.sensor_idx_range[1]].ravel()

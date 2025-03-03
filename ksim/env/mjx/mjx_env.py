@@ -23,7 +23,7 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
-from mujoco_scenes.mjcf import load_mjmodel
+from mujoco_scenes.mjcf import load_mjmodel, validate_model
 from omegaconf import MISSING
 
 from ksim.builders.commands import Command, CommandBuilder
@@ -52,8 +52,8 @@ def step_mjx(
     ctrl: Array,
 ) -> mjx.Data:
     """Step the mujoco model."""
+    ctrl = jnp.zeros_like(ctrl)
     data_with_ctrl = mjx_data.replace(ctrl=ctrl)
-    # more logic if needed...
     return mjx.step(mjx_model, data_with_ctrl)
 
 
@@ -198,11 +198,20 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        # scenes_mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        # mj_model = scenes_mj_model
+        # x = validate_model(mj_model)
+        # scenes_mj_model.geom_priority
+        # mj_model.geom_priority
+        # pfb30: remove that
+        mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
+        mj_model = self.override_model_settings(mj_model)
+
         self.default_mj_model = mj_model
         self.default_mj_data = mujoco.MjData(mj_model)
         self.default_mjx_model = mjx.put_model(mj_model)
         self.default_mjx_data = mjx.make_data(self.default_mjx_model)
+
         self.mujoco_mappings = make_mujoco_mappings(self.default_mjx_model)
         self.actuators = MITPositionActuators(
             actuators_metadata=robot_model_metadata.actuators,
@@ -237,7 +246,14 @@ class MjxEnv(BaseEnv):
     ###################
     # Post Processing #
     ###################
-    # TODO make these jittable...
+    
+    def override_model_settings(self, mj_model: mujoco.MjModel):
+        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
+        mj_model.opt.disableflags = mujoco.mjtDisableBit.mjDSBL_EULERDAMP
+        mj_model.opt.iterations = 1
+        mj_model.opt.ls_iterations = 4
+        mj_model.opt.timestep = self.config.dt
+        return mj_model
 
     @legit_jit(static_argnames=["self"])
     def get_observation(self, mjx_data: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
@@ -550,7 +566,7 @@ class MjxEnv(BaseEnv):
         )
         return new_state
 
-    @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs", "return_data"])
+    # @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs", "return_data"])
     def unroll_trajectories(
         self,
         model: ActorCriticModel,
@@ -587,7 +603,7 @@ class MjxEnv(BaseEnv):
         rng, _ = jax.random.split(rng)
 
         # Define env_step as a pure function with all dependencies passed explicitly
-        @legit_jit()
+        # @legit_jit()
         def env_step(
             env_state: EnvState,
             mjx_data: mjx.Data,
@@ -599,6 +615,7 @@ class MjxEnv(BaseEnv):
                 rng=rng,
                 mjx_model=mjx_model,
             )
+
             step_result = self.scannable_step(
                 model=model,
                 params=params,
@@ -621,7 +638,7 @@ class MjxEnv(BaseEnv):
         # Create a partially applied version with fixed arguments
         env_step_partial = lambda state, data, key: env_step(state, data, key)
 
-        @legit_jit()
+        # @legit_jit()
         def scan_fn(
             carry: Tuple[EnvState, mjx.Data, Array], _: Any
         ) -> Tuple[Tuple[EnvState, mjx.Data, Array], Tuple[EnvState, mjx.Data]]:

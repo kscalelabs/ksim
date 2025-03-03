@@ -218,8 +218,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         use_debug = os.environ.get("DEBUG", "0") == "1"
-        if use_debug and jnp.isnan(total_loss):  # should skip compilation
-            breakpoint()
+        if use_debug:  # should skip compilation
+            # breakpoint()
+            print(total_loss)
 
         return total_loss, metrics_to_log
 

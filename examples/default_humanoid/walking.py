@@ -28,7 +28,10 @@ from ksim.builders.rewards import (
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.builders.terminations import IllegalContactTerminationBuilder
+from ksim.builders.terminations import (
+    IllegalContactTerminationBuilder,
+    MinimumHeightTermination,
+)
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActorCriticModel, GaussianActionModel
 from ksim.model.mlp import MLP
@@ -86,20 +89,21 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                IllegalContactTerminationBuilder(
-                    body_names=[
-                        "torso",
-                        "pelvis",
-                        "right_thigh",
-                        "right_shin",
-                        "right_upper_arm",
-                        "right_lower_arm",
-                        "left_thigh",
-                        "left_shin",
-                        "left_upper_arm",
-                        "left_lower_arm",
-                    ],
-                ),
+                # IllegalContactTerminationBuilder(
+                #     body_names=[
+                #         "torso",
+                #         "pelvis",
+                #         "right_thigh",
+                #         "right_shin",
+                #         "right_upper_arm",
+                #         "right_lower_arm",
+                #         "left_thigh",
+                #         "left_shin",
+                #         "left_upper_arm",
+                #         "left_lower_arm",
+                #     ],
+                # ),
+                MinimumHeightTermination(min_height=0.5),
             ],
             resets=[
                 XYPositionResetBuilder(),
@@ -184,8 +188,8 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking action=train
     HumanoidWalkingTask.launch(
         HumanoidWalkingConfig(
-            num_envs=32,
+            num_envs=1,
             num_steps_per_trajectory=500,
-            minibatch_size=500 * 4,
+            minibatch_size=100,
         ),
     )

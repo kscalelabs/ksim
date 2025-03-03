@@ -5,13 +5,13 @@ from abc import ABC, abstractmethod
 from typing import Collection, Generic, TypeVar
 
 import attrs
-import equinox as eqx
+
 import jax
 import jax.numpy as jnp
 import mujoco.mjx as mjx
 import xax
 from jaxtyping import Array
-
+from ksim.utils.jit import legit_jit
 from ksim.utils.data import BuilderData
 
 
@@ -46,7 +46,7 @@ class PitchTooGreatTermination(Termination):
 
     max_pitch: float
 
-    @eqx.filter_jit
+    @legit_jit()
     def __call__(self, state: mjx.Data) -> Array:
         quat = state.qpos[3:7]
         pitch = jnp.arctan2(
@@ -61,7 +61,7 @@ class RollTooGreatTermination(Termination):
 
     max_roll: float
 
-    @eqx.filter_jit
+    @legit_jit()
     def __call__(self, state: mjx.Data) -> Array:
         quat = state.qpos[3:7]
         roll = jnp.arctan2(
@@ -76,7 +76,7 @@ class MinimumHeightTermination(Termination):
 
     min_height: float
 
-    @eqx.filter_jit
+    @legit_jit()
     def __call__(self, state: mjx.Data) -> Array:
         return state.qpos[2] < self.min_height
 
