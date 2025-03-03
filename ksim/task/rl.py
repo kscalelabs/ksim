@@ -31,8 +31,7 @@ from ksim.builders.loggers import (
     LoggingData,
     ModelUpdateLog,
 )
-from ksim.env.base_env import BaseEnv, EnvState
-from ksim.env.mjx.mjx_env import KScaleEnvConfig
+from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.model.formulations import ActorCriticModel
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
@@ -43,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 @jax.tree_util.register_dataclass
 @dataclass
-class RLConfig(KScaleEnvConfig, xax.Config):
+class RLConfig(BaseEnvConfig, xax.Config):
     action: str = xax.field(
         value="train",
         help="The action to take; should be either `train` or `env`.",
@@ -210,7 +209,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             start_time = time.time()
             rollout = env.unroll_trajectories(
-                model, params, rng, self.config.num_steps_per_trajectory, self.config.num_envs, return_data=True
+                model,
+                params,
+                rng,
+                self.config.num_steps_per_trajectory,
+                self.config.num_envs,
+                return_data=True,
             )
             end_time = time.time()
             print(f"Time taken for trajectory unrolling: {end_time - start_time} seconds")
