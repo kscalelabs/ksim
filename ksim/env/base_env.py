@@ -69,9 +69,14 @@ class BaseEnv(ABC):
     @abstractmethod
     def render_trajectory(
         self,
-        trajectory: list[PhysicsData],
+        model: ActorCriticModel,
+        params: PyTree,
+        rng: PRNGKeyArray,
+        *,
+        num_steps: int,
         width: int = 640,
         height: int = 480,
+        camera: int | None = None,
     ) -> list[np.ndarray]: ...
 
     @property
