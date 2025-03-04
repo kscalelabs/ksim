@@ -41,7 +41,7 @@ class BaseEnv(ABC):
     def reset(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         rng: PRNGKeyArray,
     ) -> EnvState: ...
 
@@ -49,7 +49,7 @@ class BaseEnv(ABC):
     def step(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
         **kwargs: Any,
@@ -59,7 +59,7 @@ class BaseEnv(ABC):
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
@@ -70,7 +70,7 @@ class BaseEnv(ABC):
     def render_trajectory(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         rng: PRNGKeyArray,
         *,
         num_steps: int,

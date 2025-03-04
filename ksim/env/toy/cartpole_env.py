@@ -39,15 +39,15 @@ class CartPoleEnv(BaseEnv):
             timestep=jnp.array(0.0),
         )
 
-    def reset(self, model: ActorCriticAgent, params: PyTree, rng: PRNGKeyArray) -> EnvState:
+    def reset(self, model: ActorCriticAgent, variables: PyTree, rng: PRNGKeyArray) -> EnvState:
         """Reset the environment and sample an initial action from the model."""
-        env_state_0, gym_obs_1 = self.reset_and_give_obs(model, params, rng)
+        env_state_0, gym_obs_1 = self.reset_and_give_obs(model, variables, rng)
         return env_state_0
 
     def step(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
         *,
@@ -55,14 +55,14 @@ class CartPoleEnv(BaseEnv):
     ) -> EnvState:
         """Take a step in the environment."""
         current_env_state, _ = self.step_given_gym_obs(
-            model, params, prev_env_state, rng, current_gym_obs=current_gym_obs
+            model, variables, prev_env_state, rng, current_gym_obs=current_gym_obs
         )
         return current_env_state
 
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
@@ -77,7 +77,7 @@ class CartPoleEnv(BaseEnv):
 
         prev_state, current_obs = self.reset_and_give_obs(
             model=model,
-            params=params,
+            variables=variables,
             rng=rng,
         )
         for _ in range(num_steps):
@@ -85,13 +85,13 @@ class CartPoleEnv(BaseEnv):
             if prev_state.done[0]:
                 prev_state, current_obs = self.reset_and_give_obs(
                     model=model,
-                    params=params,
+                    variables=variables,
                     rng=rng,
                 )
             else:
                 prev_state, current_obs = self.step_given_gym_obs(
                     model=model,
-                    params=params,
+                    variables=variables,
                     prev_env_state=prev_state,
                     rng=rng,
                     current_gym_obs=current_obs,
@@ -130,14 +130,14 @@ class CartPoleEnv(BaseEnv):
     def reset_and_give_obs(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         rng: PRNGKeyArray,
     ) -> tuple[EnvState, np.ndarray]:
         """Reset the environment and return the observation."""
         gym_obs_0, _ = self.env.reset()
         obs_0 = FrozenDict({"observations": jnp.array(gym_obs_0)[None, :]})
         command = FrozenDict({})
-        action_0, _ = model.apply(params, obs_0, command, rng, method="actor_sample_and_log_prob")
+        action_0, _ = model.apply(variables, obs_0, command, rng, method="actor_sample_and_log_prob")
         gym_obs_1 = self.env.step(action_0.item())[0]
         env_state_0 = EnvState(
             obs=obs_0,
@@ -152,7 +152,7 @@ class CartPoleEnv(BaseEnv):
     def step_given_gym_obs(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
         *,
@@ -166,7 +166,7 @@ class CartPoleEnv(BaseEnv):
 
         obs = FrozenDict({"observations": jnp.array(current_gym_obs)[None, :]})
         command = FrozenDict({})
-        action, _ = model.apply(params, obs, command, rng, method="actor_sample_and_log_prob")
+        action, _ = model.apply(variables, obs, command, rng, method="actor_sample_and_log_prob")
 
         gym_obs, gym_reward, gym_terminated, gym_truncated, _ = self.env.step(action.item())
         done = bool(gym_terminated or gym_truncated)

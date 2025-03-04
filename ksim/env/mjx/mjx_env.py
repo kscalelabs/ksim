@@ -357,7 +357,7 @@ class MjxEnv(BaseEnv):
     def scannable_reset(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         rng: jax.Array,
         mjx_model: mjx.Model,
     ) -> tuple[EnvState, mjx.Data]:
@@ -384,7 +384,7 @@ class MjxEnv(BaseEnv):
 
         # TODO: when we add in historical context to the model, we need to handle burn-in.
         action_0, action_log_prob_0 = model.apply(
-            params, obs_0, command_0, rng, method="actor_sample_and_log_prob"
+            variables, obs_0, command_0, rng, method="actor_sample_and_log_prob"
         )
         assert isinstance(action_log_prob_0, Array)
 
@@ -415,7 +415,7 @@ class MjxEnv(BaseEnv):
     def scannable_step(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         env_state_t_minus_1: EnvState,
         mjx_data_t: mjx.Data,
         mjx_model: mjx.Model,
@@ -433,7 +433,9 @@ class MjxEnv(BaseEnv):
 
         obs_t = self.get_observation(mjx_data_t, obs_rng)
         command_t = self.get_commands(env_state_t_minus_1.command, rng, timestep)
-        action_t, _ = model.apply(params, obs_t, command_t, rng, method="actor_sample_and_log_prob")
+        action_t, _ = model.apply(
+            variables, obs_t, command_t, rng, method="actor_sample_and_log_prob"
+        )
 
         mjx_data_t_plus_1 = self._apply_physics_steps(
             mjx_model=mjx_model,
@@ -496,7 +498,7 @@ class MjxEnv(BaseEnv):
     def reset(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         rng: jax.Array,
         *,
         mjx_model: mjx.Model,
@@ -506,14 +508,16 @@ class MjxEnv(BaseEnv):
         We couple the step and actor because we couple the actions with the rest of env state. This
         ultimately allows for extremely constrained `EnvState`s, which promote correct RL code.
         """
-        state, _ = self.scannable_reset(model=model, params=params, rng=rng, mjx_model=mjx_model)
+        state, _ = self.scannable_reset(
+            model=model, variables=variables, rng=rng, mjx_model=mjx_model
+        )
         return state
 
     @legit_jit(static_argnames=["self", "model"])
     def step(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
         *,
@@ -542,7 +546,7 @@ class MjxEnv(BaseEnv):
         """
         new_state, _ = self.scannable_step(
             model=model,
-            params=params,
+            variables=variables,
             env_state_t_minus_1=prev_env_state,
             mjx_data_t=mjx_data,
             mjx_model=mjx_model,
@@ -554,7 +558,7 @@ class MjxEnv(BaseEnv):
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
@@ -579,7 +583,7 @@ class MjxEnv(BaseEnv):
         init_states, init_mjx_data = jax.vmap(
             lambda key: self.scannable_reset(
                 model=model,
-                params=params,
+                variables=variables,
                 rng=key,
                 mjx_model=mjx_model,
             )
@@ -595,13 +599,13 @@ class MjxEnv(BaseEnv):
         ) -> tuple[EnvState, mjx.Data]:
             reset_result = self.scannable_reset(
                 model=model,
-                params=params,
+                variables=variables,
                 rng=rng,
                 mjx_model=mjx_model,
             )
             step_result = self.scannable_step(
                 model=model,
-                params=params,
+                variables=variables,
                 env_state_t_minus_1=env_state,
                 mjx_data_t=mjx_data,
                 mjx_model=mjx_model,
@@ -641,22 +645,21 @@ class MjxEnv(BaseEnv):
             length=num_steps,
         )
 
-        traj = jax.block_until_ready(traj)
-        # jax.debug.breakpoint()
-
         return traj  # Shape: (num_steps, num_envs, ...)
 
     def render_trajectory(
         self,
         model: ActorCriticAgent,
-        params: PyTree,
+        variables: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,
         width: int = 640,
         height: int = 480,
         camera: int | None = None,
     ) -> list[np.ndarray]:
-        _, traj_data = self.unroll_trajectories(model, params, rng, num_steps, 1, return_data=True)
+        _, traj_data = self.unroll_trajectories(
+            model, variables, rng, num_steps, 1, return_data=True
+        )
 
         mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), traj_data)
 

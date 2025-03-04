@@ -8,7 +8,7 @@
     <!-- Removed RK4 integrator for brax. -->
     <option iterations="8" timestep="0.003"/>
     <custom>
-        <!-- brax custom params -->
+        <!-- brax custom variables -->
         <numeric data="2500" name="constraint_limit_stiffness"/>
         <numeric data="27000" name="constraint_stiffness"/>
         <numeric data="30" name="constraint_ang_damping"/>

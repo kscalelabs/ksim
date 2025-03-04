@@ -160,7 +160,7 @@ class ActorCriticAgent(nn.Module):
     @nn.compact
     def actor(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Actor forward pass."""
-        # initialize normalization params if not already done
+        # initialize normalization variables if not already done
         normalized_obs = self.normalize_obs(obs)
         return self.actor_module(normalized_obs, cmd)
 
@@ -184,7 +184,7 @@ class ActorCriticAgent(nn.Module):
 
 
 def update_actor_critic_normalization(
-    params: PyTree,
+    variables: PyTree,
     returns: Array,
     returns_norm_alpha: float,
     obs_norm_alpha: float,
@@ -195,15 +195,15 @@ def update_actor_critic_normalization(
     # update the returns normalization parameters
     returns_mean = jnp.mean(returns)
     returns_std = jnp.std(returns)
-    old_returns_mean = params["normalization"]["returns_mean"]
-    old_returns_std = params["normalization"]["returns_std"]
+    old_returns_mean = variables["normalization"]["returns_mean"]
+    old_returns_std = variables["normalization"]["returns_std"]
     assert isinstance(old_returns_mean, Array)
     assert isinstance(old_returns_std, Array)
 
-    params["normalization"]["returns_mean"] = (
+    variables["normalization"]["returns_mean"] = (
         old_returns_mean * (1 - returns_norm_alpha) + returns_mean * returns_norm_alpha
     )
-    params["normalization"]["returns_std"] = (
+    variables["normalization"]["returns_std"] = (
         old_returns_std * (1 - returns_norm_alpha) + returns_std * returns_norm_alpha
     )
 
@@ -212,14 +212,14 @@ def update_actor_critic_normalization(
         assert isinstance(obs_vec, Array)
         obs_mean = jnp.mean(obs_vec, axis=tuple(range(obs_vec.ndim - 1)))
         obs_std = jnp.std(obs_vec, axis=tuple(range(obs_vec.ndim - 1)))
-        old_obs_mean = params["normalization"][f"obs_mean_{obs_name}"]
-        old_obs_std = params["normalization"][f"obs_std_{obs_name}"]
+        old_obs_mean = variables["normalization"][f"obs_mean_{obs_name}"]
+        old_obs_std = variables["normalization"][f"obs_std_{obs_name}"]
 
-        params["normalization"][f"obs_mean_{obs_name}"] = (
+        variables["normalization"][f"obs_mean_{obs_name}"] = (
             old_obs_mean * (1 - obs_norm_alpha) + obs_mean * obs_norm_alpha
         )
-        params["normalization"][f"obs_std_{obs_name}"] = (
+        variables["normalization"][f"obs_std_{obs_name}"] = (
             old_obs_std * (1 - obs_norm_alpha) + obs_std * obs_norm_alpha
         )
 
-    return params
+    return variables

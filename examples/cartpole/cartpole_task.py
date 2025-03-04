@@ -97,40 +97,40 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
         rng = self.prng_key()
         env = self.get_environment()
         model = self.get_model(rng)
-        params = None
+        variables = None
 
         # Load checkpoint if available, otherwise use random initialization
         ckpt_path = self.get_ckpt_path()
         if ckpt_path.exists():
             try:
                 logger.info("Loading checkpoint: %s", ckpt_path)
-                params = self.load_checkpoint(ckpt_path, part="model")
+                variables = self.load_checkpoint(ckpt_path, part="model")
             except Exception as e:
                 logger.error("Failed loading checkpoint: %s", e)
 
-        if params is None:
+        if variables is None:
             logger.warning("Using randomly initialized policy")
-            params = self.get_init_params(rng)
+            variables = self.get_init_variables(rng)
 
         episode_count = 0
         try:
             while True:  # Keep running episodes until interrupted
                 logger.info("Starting Episode %d", episode_count)
                 total_reward = 0
-                env_state = env.reset(model, params, rng)
+                env_state = env.reset(model, variables, rng)
                 episode_length = 0
 
                 while True:
                     # Get observations and use policy
                     rng, action_rng = jax.random.split(rng)
                     action, log_prob = model.apply(
-                        params, env_state, action_rng, method="actor_sample_and_log_prob"
+                        variables, env_state, action_rng, method="actor_sample_and_log_prob"
                     )
                     assert isinstance(log_prob, Array)
 
                     # Take step
                     rng, step_rng = jax.random.split(rng)
-                    env_state = env.step(model, params, env_state, step_rng)
+                    env_state = env.step(model, variables, env_state, step_rng)
                     reward = env_state.reward.item()
                     done = env_state.done.item()
                     total_reward += reward
