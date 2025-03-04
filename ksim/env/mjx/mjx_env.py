@@ -246,7 +246,7 @@ class MjxEnv(BaseEnv):
     ###################
     # Post Processing #
     ###################
-    
+
     def override_model_settings(self, mj_model: mujoco.MjModel):
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
         mj_model.opt.disableflags = mujoco.mjtDisableBit.mjDSBL_EULERDAMP
@@ -666,26 +666,17 @@ class MjxEnv(BaseEnv):
 
     def render_trajectory(
         self,
-<<<<<<< HEAD
         model: ActorCriticAgent,
         variables: PyTree,
-=======
-        model: ActorCriticModel,
-        params: PyTree,
->>>>>>> pawel/nans_debugging
         rng: PRNGKeyArray,
         num_steps: int,
         width: int = 640,
         height: int = 480,
         camera: int | None = None,
     ) -> list[np.ndarray]:
-<<<<<<< HEAD
         _, traj_data = self.unroll_trajectories(
             model, variables, rng, num_steps, 1, return_data=True
         )
-=======
-        _, traj_data = self.unroll_trajectories(model, params, rng, num_steps, 1, return_data=True)
->>>>>>> pawel/nans_debugging
 
         mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), traj_data)
 
