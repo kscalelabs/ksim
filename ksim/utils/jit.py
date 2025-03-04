@@ -4,29 +4,33 @@ import inspect
 import os
 import time
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, ParamSpec, TypeVar, cast
 
 import jax
 
 DEFAULT_COMPILE_TIMEOUT = 1.0
 
 
-def get_hash(obj: Any) -> int:
+def get_hash(obj: object) -> int:
     """Get a hash of an object.
 
     If the object is hashable, use the hash. Otherwise, use the id.
     """
     try:
         return hash(obj)
-    except:
+    except (TypeError, RecursionError):
         return id(obj)
+
+
+P = ParamSpec("P")  # For function parameters
+R = TypeVar("R")  # For function return type
 
 
 def legit_jit(
     static_argnames: list[str] | None = None,
     compile_timeout: float = DEFAULT_COMPILE_TIMEOUT,
-    **jit_kwargs,
-) -> Callable:
+    **jit_kwargs: Any,  # noqa: ANN401
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Jit that works on class methods, is toggleable, and detects recompilations.
 
     To avoid confusion...
@@ -34,7 +38,7 @@ def legit_jit(
     - `decorator` is the actual decorator, and the decorated function calls `wrapped`.
     """
 
-    def decorator(fn: Callable) -> Callable:
+    def decorator(fn: Callable[P, R]) -> Callable[P, R]:
         class JitState:
             compilation_count = 0
             last_arg_dict: dict[str, int] | None = None
@@ -49,7 +53,7 @@ def legit_jit(
         )
 
         @wraps(fn)
-        def wrapped(*args: Any, **kwargs: Any) -> Any:
+        def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
             if os.environ.get("DEBUG", "0") == "1":  # skipping during debug
                 return fn(*args, **kwargs)
 
@@ -84,7 +88,7 @@ def legit_jit(
 
                 JitState.last_arg_dict = arg_dict
 
-            return res
+            return cast(R, res)
 
         return wrapped
 

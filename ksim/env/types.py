@@ -10,7 +10,7 @@ from mujoco import mjx
 
 
 @jax.tree_util.register_dataclass
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class EnvState:
     """Base environment state class."""
 
@@ -21,6 +21,9 @@ class EnvState:
     reward: Array  # R(prev_state, action_at_prev_state, current_state)
     done: Array
     timestep: Array
+
+    termination_components: FrozenDict[str, Array]  # Termination terms at same timestep as done
+    reward_components: FrozenDict[str, Array]  # Reward terms at same timestep as reward
 
 
 KScaleActionModelType = Literal["random", "zero", "midpoint"]

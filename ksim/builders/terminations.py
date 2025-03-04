@@ -5,14 +5,14 @@ from abc import ABC, abstractmethod
 from typing import Collection, Generic, TypeVar
 
 import attrs
-
 import jax
 import jax.numpy as jnp
-import mujoco.mjx as mjx
 import xax
 from jaxtyping import Array
-from ksim.utils.jit import legit_jit
+from mujoco import mjx
+
 from ksim.utils.data import BuilderData
+from ksim.utils.jit import legit_jit
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -101,7 +101,7 @@ class IllegalContactTermination(Termination):
 
         return jnp.array(significant_contact)
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         """Convert JAX arrays to tuples for hashing."""
         return hash((tuple(self.illegal_geom_idxs), self.contact_eps))
 

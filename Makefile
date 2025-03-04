@@ -40,7 +40,8 @@ push-to-pypi: build-for-pypi
 #       Static Checks      #
 # ------------------------ #
 
-py-files := $(shell find . -name '*.py' -not -path "./build/*")
+py-files := $(shell find . -name '*.py' -not -path "./build/*" -not -path "./scratch/*")
+py-files-no-tests := $(shell find . -name '*.py' -not -path "./build/*" -not -path "./scratch/*" -not -path "*/tests/*")
 
 format:
 	@black $(py-files)

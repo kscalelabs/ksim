@@ -13,7 +13,11 @@ from ksim.model.formulations import ActorCriticAgent
 
 
 class CartPoleEnv(BaseEnv):
-    """CartPole environment wrapper."""
+    """CartPole environment wrapper.
+
+    TODO: Incorporate simulation frequency (dt) and policy frequency (ctrl_dt) parameters
+    from BaseEnvConfig into this environment.
+    """
 
     def __init__(self, render_mode: str | None = None) -> None:
         """Initialize the CartPole environment.
@@ -37,6 +41,8 @@ class CartPoleEnv(BaseEnv):
             command=FrozenDict({}),
             action=jnp.zeros((self.action_size,)),
             timestep=jnp.array(0.0),
+            termination_components=FrozenDict({}),
+            reward_components=FrozenDict({}),
         )
 
     def reset(self, model: ActorCriticAgent, variables: PyTree, rng: PRNGKeyArray) -> EnvState:
@@ -51,7 +57,7 @@ class CartPoleEnv(BaseEnv):
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
         *,
-        current_gym_obs: np.ndarray,
+        current_gym_obs: np.ndarray | None = None,
     ) -> EnvState:
         """Take a step in the environment."""
         current_env_state, _ = self.step_given_gym_obs(
@@ -107,13 +113,18 @@ class CartPoleEnv(BaseEnv):
         rewards = jnp.stack(rewards)
         done = jnp.stack(done)
 
-        return EnvState(
-            obs=observations,
-            reward=rewards,
-            done=done,
-            command=FrozenDict({}),
-            action=actions,
-            timestep=jnp.arange(num_steps)[None],
+        return (
+            EnvState(
+                obs=observations,
+                reward=rewards,
+                done=done,
+                command=FrozenDict({}),
+                action=actions,
+                timestep=jnp.arange(num_steps)[None],
+                termination_components=FrozenDict({}),
+                reward_components=FrozenDict({}),
+            ),
+            None,
         )
 
     @property
@@ -135,9 +146,13 @@ class CartPoleEnv(BaseEnv):
     ) -> tuple[EnvState, np.ndarray]:
         """Reset the environment and return the observation."""
         gym_obs_0, _ = self.env.reset()
-        obs_0 = FrozenDict({"observations": jnp.array(gym_obs_0)[None, :]})
-        command = FrozenDict({})
-        action_0, _ = model.apply(variables, obs_0, command, rng, method="actor_sample_and_log_prob")
+        obs_0: FrozenDict[str, jax.Array] = FrozenDict(
+            {"observations": jnp.array(gym_obs_0)[None, :]}
+        )
+        command: FrozenDict[str, jax.Array] = FrozenDict({})
+        action_0, _ = model.apply(
+            variables, obs_0, command, rng, method="actor_sample_and_log_prob"
+        )
         gym_obs_1 = self.env.step(action_0.item())[0]
         env_state_0 = EnvState(
             obs=obs_0,
@@ -146,6 +161,8 @@ class CartPoleEnv(BaseEnv):
             command=command,
             action=action_0,
             timestep=jnp.array(0.0)[None],
+            termination_components=FrozenDict({}),
+            reward_components=FrozenDict({}),
         )
         return env_state_0, gym_obs_1
 
@@ -156,16 +173,17 @@ class CartPoleEnv(BaseEnv):
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
         *,
-        current_gym_obs: np.ndarray,  # following same pattern as mjx.Env
+        current_gym_obs: np.ndarray | None = None,  # following same pattern as mjx.Env
     ) -> tuple[EnvState, np.ndarray]:
         """Take a step in the environment.
 
         NOTE: for simplicity, this environment is stateful and doesn't actually use prev_state in
         a functional manner.
         """
-
-        obs = FrozenDict({"observations": jnp.array(current_gym_obs)[None, :]})
-        command = FrozenDict({})
+        obs: FrozenDict[str, jax.Array] = FrozenDict(
+            {"observations": jnp.array(current_gym_obs)[None, :]}
+        )
+        command: FrozenDict[str, jax.Array] = FrozenDict({})
         action, _ = model.apply(variables, obs, command, rng, method="actor_sample_and_log_prob")
 
         gym_obs, gym_reward, gym_terminated, gym_truncated, _ = self.env.step(action.item())
@@ -178,9 +196,21 @@ class CartPoleEnv(BaseEnv):
             command=command,
             action=action,
             timestep=prev_env_state.timestep + 1.0,
+            termination_components=FrozenDict({}),
+            reward_components=FrozenDict({}),
         )
 
         return current_env_state, gym_obs
 
-    def render_trajectory(self):
+    def render_trajectory(
+        self,
+        model: ActorCriticAgent,
+        variables: PyTree,
+        rng: PRNGKeyArray,
+        *,
+        num_steps: int,
+        width: int = 640,
+        height: int = 480,
+        camera: int | None = None,
+    ) -> list[np.ndarray]:
         raise NotImplementedError("Not implemented for this environment.")

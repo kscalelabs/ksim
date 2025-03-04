@@ -6,12 +6,11 @@ from abc import ABC, abstractmethod
 from typing import Generic, Literal, TypeVar
 
 import attrs
-import jax
 import jax.numpy as jnp
-import mujoco.mjx as mjx
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array
+from mujoco import mjx
 
 from ksim.utils.data import BuilderData
 
@@ -210,12 +209,12 @@ class ActionSmoothnessPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        normed_action_smoothness = get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1)
-        return jax.lax.select(
-            action_t_minus_1 is None,
-            jnp.zeros_like(normed_action_smoothness),
-            normed_action_smoothness,
-        )
+        # During tracing, both branches of jax.lax.cond are evaluated, so
+        # we need to handle the case where action_t_minus_1 is None.
+        # This only works if action_t_minus_1 is statically None or not None.
+        if action_t_minus_1 is None:
+            return jnp.zeros_like(get_norm(action_t, self.norm).sum(axis=-1))
+        return get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
