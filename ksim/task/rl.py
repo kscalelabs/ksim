@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from threading import Thread
 from typing import Generic, Literal, TypeVar
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -78,6 +79,14 @@ class RLConfig(BaseEnvConfig, xax.Config):
     minibatch_size: int = xax.field(
         value=MISSING,
         help="The size of each minibatch.",
+    )
+    pretrained: str | None = xax.field(
+        value=None,
+        help="The path to a saved run to load from.",
+    )
+    checkpoint_num: int | None = xax.field(
+        value=None,
+        help="The checkpoint number to load. Otherwise the latest checkpoint is loaded.",
     )
 
 
@@ -200,7 +209,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             key, _ = jax.random.split(rng)
 
             start_time = time.time()
-            variables = self.get_init_variables(key)
+            variables = self.get_init_variables(
+                key, pretrained=self.config.pretrained, checkpoint_num=self.config.checkpoint_num
+            )
             end_time = time.time()
             print(f"Time taken for parameter initialization: {end_time - start_time} seconds")
 
@@ -281,14 +292,30 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     # Training and Running #
     ########################
 
-    def get_init_variables(self, key: PRNGKeyArray, pretrained: str | None = None) -> PyTree:
+    def get_init_variables(
+        self, key: PRNGKeyArray, pretrained: str | None = None, checkpoint_num: int | None = None
+    ) -> PyTree:
         """Get the initial parameters as a PyTree: assumes flax-compatible model."""
         env = self.get_environment()
         state = env.get_dummy_env_state(key)
 
         if pretrained is not None:
-            # TODO: implement pretrained model loading.
-            raise NotImplementedError("Pretrained models are not yet implemented.")
+            pretrained_path = Path(pretrained)
+            if not pretrained_path.exists():
+                raise ValueError(f"Checkpoint not found at {pretrained_path}")
+
+            if checkpoint_num is not None:
+                checkpoint_path = pretrained_path / "checkpoints" / f"ckpt.{checkpoint_num}.bin"
+                assert checkpoint_path.exists(), f"Checkpoint not found at {checkpoint_path}"
+            else:
+                # Get the latest checkpoint in the folder
+                ckpt_files = sorted(pretrained_path.glob("checkpoints/ckpt.*.bin"))
+                if not ckpt_files:
+                    raise ValueError(f"No checkpoints found in {pretrained_path}/checkpoints/")
+                checkpoint_path = ckpt_files[-1]
+
+            logger.info("Loading pretrained checkpoint from %s", checkpoint_path)
+            return self.load_checkpoint(checkpoint_path, part="model")
 
         model_key, init_key = jax.random.split(key, 2)
         model = self.get_model(model_key)

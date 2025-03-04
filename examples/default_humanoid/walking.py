@@ -81,6 +81,8 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     max_episode_length: float = xax.field(value=10.0)
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
+    pretrained: str | None = xax.field(value=None)
+    checkpoint_num: int | None = xax.field(value=None)
 
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):

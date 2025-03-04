@@ -56,6 +56,14 @@ class PPOConfig(RLConfig):
         value=0.0000,
         help="Rate at which to update observations normalization.",
     )
+    pretrained: str | None = xax.field(
+        value=None,
+        help="The path to a pretrained model to load.",
+    )
+    checkpoint_num: int | None = xax.field(
+        value=None,
+        help="The checkpoint number to load. Otherwise the latest checkpoint is loaded.",
+    )
 
 
 Config = TypeVar("Config", bound=PPOConfig)
