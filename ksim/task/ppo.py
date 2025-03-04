@@ -297,8 +297,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         if use_debug and jnp.isnan(total_loss):  # should skip compilation
             breakpoint()
 
-        jax.debug.print("total_loss: {total_loss}", total_loss=total_loss)
-
         return total_loss, metrics_to_log
 
     @legit_jit(static_argnames=["self"])

@@ -2,7 +2,7 @@
     <compiler angle="degree" inertiafromgeom="true"/>
     <default>
         <joint armature="1" damping="1" limited="true"/>
-        <geom conaffinity="1" condim="3" contype="0" material="geom" rgba="0.4 0.33 0.26 1.0"/>
+        <geom conaffinity="0" condim="3" contype="0" material="geom" rgba="0.4 0.33 0.26 1.0"/>
         <motor ctrllimited="true" ctrlrange="-.4 .4"/>
     </default>
     <!-- Removed RK4 integrator for brax. -->
@@ -57,7 +57,7 @@
                             <joint armature="0.0060" axis="0 -1 0" name="right_knee" pos="0 0 .02" range="-160 -2" type="hinge"/>
                             <geom fromto="0 0 0 0 0 -.3" name="right_shin1" size="0.049" type="capsule"/>
                             <body name="right_foot" pos="0 0 -0.45">
-                                <geom contype="1" name="right_foot" pos="0 0 0.1" size="0.075" type="sphere" user="0"/>
+                                <geom conaffinity="1" condim="3" contype="0" name="right_foot" pos="0 0 0.1" size="0.075" type="sphere" user="0"/>
                             </body>
                         </body>
                     </body>
@@ -70,7 +70,7 @@
                             <joint armature="0.0060" axis="0 -1 0" name="left_knee" pos="0 0 .02" range="-160 -2" stiffness="1" type="hinge"/>
                             <geom fromto="0 0 0 0 0 -.3" name="left_shin1" size="0.049" type="capsule"/>
                             <body name="left_foot" pos="0 0 -0.45">
-                                <geom contype="1" name="left_foot" type="sphere" size="0.075" pos="0 0 0.1" user="0" />
+                                <geom conaffinity="1" condim="3" contype="0" name="left_foot" type="sphere" size="0.075" pos="0 0 0.1" user="0" />
                             </body>
                         </body>
                     </body>

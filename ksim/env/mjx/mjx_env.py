@@ -11,7 +11,6 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 import asyncio
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable, Collection, Tuple, TypeVar, cast, get_args
 
 import chex
@@ -23,8 +22,7 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
-from mujoco_scenes.mjcf import load_mjmodel, validate_model
-from omegaconf import MISSING
+from mujoco_scenes.mjcf import load_mjmodel
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
@@ -34,7 +32,7 @@ from ksim.builders.terminations import Termination, TerminationBuilder
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.types import EnvState, KScaleActionModelType
-from ksim.model.formulations import ActionModel, ActorCriticAgent
+from ksim.model.formulations import ActorCriticAgent
 from ksim.utils.data import BuilderData
 from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
@@ -145,8 +143,11 @@ class MjxEnvConfig(BaseEnvConfig):
     max_action_latency: float = xax.field(value=0.0, help="The maximum action latency.")
 
     # solver configuration options
+    solver_type: int = xax.field(value=mujoco.mjtSolver.mjSOL_NEWTON.value, help="Solver type.")
     solver_iterations: int = xax.field(value=1, help="Number of main solver iterations.")
     solver_ls_iterations: int = xax.field(value=4, help="Number of line search iterations.")
+    disable_flags_bitmask: int = xax.field(
+        value=mujoco.mjtDisableBit.mjDSBL_EULERDAMP.value, help="Bitmask of flags to disable.")
 
     # simulation artifact options
     ignore_cached_urdf: bool = xax.field(value=False, help="Whether to ignore the cached URDF.")
@@ -242,8 +243,8 @@ class MjxEnv(BaseEnv):
 
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
-        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
-        mj_model.opt.disableflags = mujoco.mjtDisableBit.mjDSBL_EULERDAMP
+        mj_model.opt.solver = self.config.solver_type
+        mj_model.opt.disableflags = self.config.disable_flags_bitmask
         mj_model.opt.iterations = self.config.solver_iterations
         mj_model.opt.ls_iterations = self.config.solver_ls_iterations
         mj_model.opt.timestep = self.config.dt
