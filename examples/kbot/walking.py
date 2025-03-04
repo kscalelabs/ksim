@@ -15,7 +15,6 @@ from ksim.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,
-    BasePositionObservation,
     JointPositionObservation,
     JointVelocityObservation,
     SensorObservationBuilder,
@@ -35,7 +34,6 @@ from ksim.model.formulations import ActionModel, ActorCriticModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_INPUTS = 49
 NUM_OUTPUTS = 20
 
 # NOTE: implement after MLP is working.
@@ -430,7 +428,6 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 ),
             ],
             observations=[
-                BasePositionObservation(noise_type="gaussian", noise=0.01),
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
                 BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
                 BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),

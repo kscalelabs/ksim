@@ -1,7 +1,6 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
 from dataclasses import dataclass
-from typing import Tuple
 
 import flax.linen as nn
 import jax
@@ -15,7 +14,6 @@ from ksim.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,
-    BasePositionObservation,
     JointPositionObservation,
     JointVelocityObservation,
 )
@@ -34,7 +32,7 @@ from ksim.model.formulations import ActorCriticModel, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_INPUTS = 24
+
 NUM_OUTPUTS = 17
 
 
@@ -117,7 +115,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 ),
             ],
             observations=[
-                BasePositionObservation(noise_type="gaussian", noise=0.01),
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
                 BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
                 BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
