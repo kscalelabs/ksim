@@ -2,7 +2,7 @@
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Generic, Tuple, TypeVar
+from typing import Generic, TypeVar
 
 import attrs
 import jax
@@ -54,10 +54,10 @@ class XYPositionReset(Reset):
         prct = 1.0 - self.padding_prct
         x, y = x * prct, y * prct
 
-        def zero_case(_: None) -> Tuple[jax.Array, jax.Array]:
+        def zero_case(_: None) -> tuple[jax.Array, jax.Array]:
             return jnp.array([0.0]), jnp.array([0.0])
 
-        def random_case(_: None) -> Tuple[jax.Array, jax.Array]:
+        def random_case(_: None) -> tuple[jax.Array, jax.Array]:
             rng_split, keyx, keyy = jax.random.split(rng, 3)
             dx = jax.random.uniform(keyx, (1,), minval=-x, maxval=x)
             dy = jax.random.uniform(keyy, (1,), minval=-y, maxval=y)

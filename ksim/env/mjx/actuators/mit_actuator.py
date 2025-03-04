@@ -1,7 +1,6 @@
 """MIT Controller, as used by the Robstride actuators."""
 
 from dataclasses import dataclass
-from typing import Dict
 
 import jax.numpy as jnp
 from jaxtyping import Array
@@ -22,7 +21,7 @@ class MITPositionActuators(Actuators):
 
     def __init__(
         self,
-        actuators_metadata: Dict[str, BaseActuatorMetadata],
+        actuators_metadata: dict[str, BaseActuatorMetadata],
         mujoco_mappings: MujocoMappings,
         max_torque: float | None = None,
     ) -> None:

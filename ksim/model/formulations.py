@@ -1,7 +1,6 @@
 """High Level Formulations of RL Models."""
 
 from abc import ABC, abstractmethod
-from typing import Tuple
 
 import flax.linen as nn
 import jax
@@ -26,7 +25,7 @@ class ActionModel(nn.Module, ABC):
     @abstractmethod
     def sample_and_log_prob(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> Tuple[Array, Array]:
+    ) -> tuple[Array, Array]:
         """Sample and calculate the log probability of the action."""
         ...
 
@@ -54,7 +53,7 @@ class GaussianActionModel(ActionModel, ABC):
 
     def sample_and_log_prob(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> Tuple[Array, Array]:
+    ) -> tuple[Array, Array]:
         mean = self(obs, cmd)
         std = jnp.exp(self.log_std)
 
@@ -106,7 +105,7 @@ class ActorCriticModel(nn.Module):
     @nn.compact
     def __call__(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]
-    ) -> Tuple[Array, Array]:
+    ) -> tuple[Array, Array]:
         """Forward pass of the model."""
         return self.actor(obs, cmd), self.critic(obs, cmd)
 
@@ -124,6 +123,6 @@ class ActorCriticModel(nn.Module):
 
     def actor_sample_and_log_prob(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> Tuple[Array, Array]:
+    ) -> tuple[Array, Array]:
         """Sample and calculate the log probability of the action."""
         return self.actor_module.sample_and_log_prob(obs, cmd, rng)

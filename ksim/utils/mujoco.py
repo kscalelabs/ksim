@@ -5,7 +5,7 @@ Much of this is referenced from Mujoco Playground.
 
 import logging
 from dataclasses import dataclass
-from typing import Collection, Dict, Hashable, Tuple, TypeVar
+from typing import Collection, Hashable, TypeVar
 
 import jax
 import jax.numpy as jnp
@@ -113,11 +113,11 @@ def lookup_in_dict(names: Collection[Tk], mapping: dict[Tk, Tv], names_type: str
 class MujocoMappings:
     """A minimal set of mappings helpful for constructing rewards, terminations, etc."""
 
-    sensor_name_to_idx_range: Dict[str, Tuple[int, int | None]]
-    qpos_name_to_idx_range: Dict[str, Tuple[int, int | None]]
-    qvelacc_name_to_idx_range: Dict[str, Tuple[int, int | None]]
-    ctrl_name_to_idx: Dict[str, int]
-    geom_idx_to_body_name: Dict[int, str]
+    sensor_name_to_idx_range: dict[str, tuple[int, int | None]]
+    qpos_name_to_idx_range: dict[str, tuple[int, int | None]]
+    qvelacc_name_to_idx_range: dict[str, tuple[int, int | None]]
+    ctrl_name_to_idx: dict[str, int]
+    geom_idx_to_body_name: dict[int, str]
 
 
 def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:

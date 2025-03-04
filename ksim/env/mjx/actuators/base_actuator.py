@@ -2,7 +2,6 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict
 
 from jaxtyping import Array
 from mujoco import mjx
@@ -21,7 +20,7 @@ class Actuators(ABC):
     @abstractmethod
     def __init__(
         self,
-        actuators_metadata: Dict[str, BaseActuatorMetadata],
+        actuators_metadata: dict[str, BaseActuatorMetadata],
         mujoco_mappings: MujocoMappings,
     ) -> None: ...
 

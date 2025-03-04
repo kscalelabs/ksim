@@ -1,7 +1,6 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
 from dataclasses import dataclass
-from typing import Tuple
 
 import flax.linen as nn
 import jax
@@ -288,7 +287,7 @@ class KBotActorModel(ActionModel):
 
     def sample_and_log_prob(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> Tuple[Array, Array]:
+    ) -> tuple[Array, Array]:
         mean = self(obs, cmd)
         std = jnp.exp(self.log_std)
 
@@ -324,7 +323,7 @@ class KBotZeroActions(ActionModel):
 
     def sample_and_log_prob(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> Tuple[Array, Array]:
+    ) -> tuple[Array, Array]:
         zeros = self(obs, cmd) * 0.0
 
         return zeros, zeros

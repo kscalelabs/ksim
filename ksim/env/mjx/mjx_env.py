@@ -11,7 +11,7 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Callable, Collection, Tuple, TypeVar, cast, get_args
+from typing import Callable, Collection, TypeVar, cast, get_args
 
 import chex
 import jax
@@ -334,7 +334,7 @@ class MjxEnv(BaseEnv):
         """
         n_steps = self._expected_dt_per_ctrl_dt  # total number of pipeline steps to take.
 
-        def f(carry: Tuple[mjx.Data, int], _: None) -> Tuple[Tuple[mjx.Data, int], None]:
+        def f(carry: tuple[mjx.Data, int], _: None) -> tuple[tuple[mjx.Data, int], None]:
             state, step_num = carry
 
             action_motor_sees = jax.lax.select(
@@ -645,13 +645,13 @@ class MjxEnv(BaseEnv):
         # Create a partially applied version with fixed arguments
         def env_step_partial(
             state: EnvState, data: mjx.Data, key: Array
-        ) -> Tuple[EnvState, mjx.Data]:
+        ) -> tuple[EnvState, mjx.Data]:
             return env_step(state, data, key)
 
         @legit_jit()
         def scan_fn(
-            carry: Tuple[EnvState, mjx.Data, Array], _: None
-        ) -> Tuple[Tuple[EnvState, mjx.Data, Array], Tuple[EnvState, mjx.Data]]:
+            carry: tuple[EnvState, mjx.Data, Array], _: None
+        ) -> tuple[tuple[EnvState, mjx.Data, Array], tuple[EnvState, mjx.Data]]:
             states, mjx_data, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
             new_states, new_mjx_data = jax.vmap(env_step_partial)(states, mjx_data, rngs[1:])

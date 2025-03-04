@@ -1,7 +1,5 @@
 """Tests for reset builders in the ksim package."""
 
-from typing import Dict
-
 import jax
 import jax.numpy as jnp
 import pytest
@@ -18,7 +16,7 @@ from ksim.utils.data import BuilderData, MujocoMappings
 class DummyReset(Reset):
     """Dummy reset for testing."""
 
-    def __call__(self, data: mjx.Data, rng: jax.Array) -> Dict[str, Array]:
+    def __call__(self, data: mjx.Data, rng: jax.Array) -> dict[str, Array]:
         return {"qpos": jnp.zeros((3,))}
 
 
