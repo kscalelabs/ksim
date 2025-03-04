@@ -15,7 +15,6 @@ from ksim.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,
-    BasePositionObservation,
     JointPositionObservation,
     JointVelocityObservation,
 )
@@ -86,7 +85,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                MinimumHeightTermination(min_height=0.4),
+                MinimumHeightTermination(min_height=0.5),
             ],
             resets=[
                 XYPositionResetBuilder(),

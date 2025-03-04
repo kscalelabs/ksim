@@ -32,7 +32,7 @@ from ksim.builders.loggers import (
     ModelUpdateLog,
 )
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
-from ksim.model.formulations import ActorCriticAgent, update_actor_critic_normalization
+from ksim.model.formulations import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
 from ksim.utils.pytree import slice_pytree
