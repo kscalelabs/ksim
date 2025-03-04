@@ -1,7 +1,6 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
 from dataclasses import dataclass
-from typing import Tuple
 
 import flax.linen as nn
 import jax
@@ -20,16 +19,10 @@ from ksim.builders.observation import (
 )
 from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import (
-    ActionSmoothnessPenalty,
-    AngularVelocityXYPenalty,
-    FootContactPenaltyBuilder,
     HeightReward,
-    LinearVelocityZPenalty,
-    TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
 from ksim.builders.terminations import (
-    MinimumHeightTermination,
     PitchTooGreatTermination,
     RollTooGreatTermination,
 )
@@ -97,29 +90,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 XYPositionResetBuilder(),
             ],
             rewards=[
-                # LinearVelocityZPenalty(scale=-0.1),
-                # AngularVelocityXYPenalty(scale=-0.1),
                 TrackLinearVelocityXYReward(scale=0.5),
-                # TrackAngularVelocityZReward(scale=0.1),
-                # FootContactPenaltyBuilder(
-                #     scale=-0.1,
-                #     foot_body_names=["KB_D_501R_R_LEG_FOOT"],
-                #     allowed_contact_prct=0.7,
-                #     skip_if_zero_command=[
-                #         "linear_velocity_command",
-                #         "angular_velocity_command",
-                #     ],
-                # ),
-                # FootContactPenaltyBuilder(
-                #     scale=-0.1,
-                #     foot_body_names=["KB_D_501L_L_LEG_FOOT"],
-                #     allowed_contact_prct=0.7,
-                #     skip_if_zero_command=[
-                #         "linear_velocity_command",
-                #         "angular_velocity_command",
-                #     ],
-                # ),
-                # ActionSmoothnessPenalty(scale=-0.1),
                 HeightReward(
                     scale=0.5,
                     height_target=1.4,
@@ -181,7 +152,7 @@ if __name__ == "__main__":
         HumanoidWalkingConfig(
             num_envs=2048,
             num_steps_per_trajectory=600,
-            minibatch_size=38400,
+            minibatch_size=1024,
             num_learning_epochs=10,
         ),
     )

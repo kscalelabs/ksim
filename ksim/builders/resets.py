@@ -50,9 +50,6 @@ class XYPositionReset(Reset):
     def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
         # TODO: figure out why this is not jit-able.
         x, y, ztop, _ = self.bounds
-        # pfb30: remove that
-        x = 0.01
-        y = 0.01
         prct = 1.0 - self.padding_prct
         x, y = x * prct, y * prct
 
@@ -64,9 +61,7 @@ class XYPositionReset(Reset):
         qpos_j = qpos_j.at[0:1].set(dx)
         qpos_j = qpos_j.at[1:2].set(dy)
 
-        # z = self.hfield_data[dx.astype(int), dy.astype(int)]
-        # pfb30: remove that
-        z = 1.4
+        z = self.hfield_data[dx.astype(int), dy.astype(int)]
         qpos_j = qpos_j.at[2:3].set(z + ztop)
         data = data.replace(qpos=qpos_j)
         return data
@@ -85,10 +80,9 @@ class XYPositionResetBuilder(ResetBuilder[XYPositionReset]):
     padding_prct: float = attrs.field(default=0.1)
 
     def __call__(self, data: BuilderData) -> XYPositionReset:
-        # pfb30: remove that
-        x, y, ztop, zbottom = 0, 0, 0, 0  # data.model.hfield_size.flatten().tolist()
-        nx, ny = 256, 256  # int(data.model.hfield_nrow), int(data.model.hfield_ncol)
-        hfield_data = 0  # data.model.hfield_data.reshape(nx, ny)
+        x, y, ztop, zbottom = data.model.hfield_size.flatten().tolist()
+        nx, ny = int(data.model.hfield_nrow), int(data.model.hfield_ncol)
+        hfield_data = data.model.hfield_data.reshape(nx, ny)
         return XYPositionReset(
             bounds=(x, y, ztop, zbottom),
             hfield_data=hfield_data,
