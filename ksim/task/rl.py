@@ -32,7 +32,7 @@ from ksim.builders.loggers import (
     ModelUpdateLog,
 )
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
-from ksim.model.formulations import ActorCriticModel
+from ksim.model.formulations import ActorCriticAgent, update_actor_critic_normalization
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
 from ksim.utils.pytree import slice_pytree
@@ -105,7 +105,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @abstractmethod
     def get_rollout_time_loss_components(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         trajectory_dataset: EnvState,
     ) -> RolloutTimeLossComponents: ...
@@ -113,7 +113,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @abstractmethod
     def model_update(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
@@ -178,7 +178,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run_environment(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         state: xax.State | None = None,
     ) -> None:
         """Run the environment with rendering and logging."""
@@ -295,10 +295,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         assert isinstance(model, nn.Module), "Model must be an Flax linen module."
         return model.init(init_key, state.obs, state.command)
 
+    @abstractmethod
+    def update_input_normalization_stats(
+        self,
+        params: PyTree,
+        trajectories_dataset: EnvState,
+        rollout_time_loss_components: RolloutTimeLossComponents,
+        initial_step: bool,
+    ) -> PyTree: ...
+
     @legit_jit(static_argnames=["self", "model"])
     def apply_actor(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         obs: FrozenDict[str, Array],
         cmd: FrozenDict[str, Array],
@@ -310,11 +319,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def get_trajectory_dataset(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         env: BaseEnv,
         rng: PRNGKeyArray,
-    ) -> EnvState:
+    ) -> tuple[EnvState, RolloutTimeLossComponents]:
         """Rollout a batch of trajectory data.
 
         To avoid confusion, batch comprises 1 or more unrolled trajectory states stacked
@@ -330,6 +339,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             num_envs=self.config.num_envs,
         )
 
+        rollout_time_loss_components = self.get_rollout_time_loss_components(model, params, rollout)
+
         @legit_jit()
         def flatten_rollout_array(x: Array) -> Array:
             """Flatten a rollout array."""
@@ -339,8 +350,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # flattening (num_steps, num_envs, ...) -> (num_steps * num_envs, ...) in leaves
         flattened_rollout = jax.tree_util.tree_map(flatten_rollout_array, rollout)
+        flattened_rollout_time_loss_components = jax.tree_util.tree_map(
+            flatten_rollout_array, rollout_time_loss_components
+        )
 
-        return flattened_rollout
+        return flattened_rollout, flattened_rollout_time_loss_components
 
     @legit_jit(static_argnames=["self"])
     def reshuffle_rollout(
@@ -386,7 +400,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def train_loop(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         env: BaseEnv,
         optimizer: optax.GradientTransformation,
@@ -395,8 +409,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> None:
         """Runs the main RL training loop."""
         rng = self.prng_key()
-        rng, train_rng = jax.random.split(rng, 2)
+        rng, burn_in_rng, train_rng = jax.random.split(rng, 3)
 
+        # Burn in trajectory to get normalization statistics
+        burn_in_trajectories_dataset, burn_in_rollout_time_loss_components = (
+            self.get_trajectory_dataset(model, params, env, burn_in_rng)
+        )
+        params = self.update_input_normalization_stats(
+            params=params,
+            trajectories_dataset=burn_in_trajectories_dataset,
+            rollout_time_loss_components=burn_in_rollout_time_loss_components,
+            initial_step=True,
+        )
         while not self.is_training_over(training_state):
             with self.step_context("on_step_start"):
                 training_state = self.on_step_start(training_state)
@@ -404,14 +428,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Unrolls a trajectory.
             start_time = time.time()
             reshuffle_rng, rollout_rng = jax.random.split(train_rng)
-            trajectories_dataset = self.get_trajectory_dataset(model, params, env, rollout_rng)
+            trajectories_dataset, rollout_time_loss_components = self.get_trajectory_dataset(
+                model, params, env, rollout_rng
+            )
             rollout_time = time.time() - start_time
 
             # running training on minibatches
             start_time = time.time()
-            rollout_time_loss_components = self.get_rollout_time_loss_components(
-                model, params, trajectories_dataset
-            )
             for epoch_idx in range(self.config.num_learning_epochs):
                 trajectories_dataset, rollout_time_loss_components = self.reshuffle_rollout(
                     trajectories_dataset, rollout_time_loss_components, reshuffle_rng
@@ -431,6 +454,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             minibatch,
                             rollout_time_minibatch_loss_components,
                         )
+                        print(f"loss: {loss_val}")
+                        print(f"metrics: {metrics}")
 
                         # log metrics from the model update
                         metric_logging_data = LoggingData(
@@ -452,6 +477,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             training_state.num_steps += 1
 
             model_update_time = time.time() - start_time
+
+            # updating normalization statistics for the next rollout
+            # NOTE: for the first step, the normalization stats are not updated
+            params = self.update_input_normalization_stats(
+                params=params,
+                trajectories_dataset=trajectories_dataset,
+                rollout_time_loss_components=rollout_time_loss_components,
+                initial_step=False,
+            )
 
             # Log the time taken for the model update.
             with self.step_context("write_logs"):

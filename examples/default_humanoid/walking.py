@@ -30,7 +30,7 @@ from ksim.builders.rewards import (
 )
 from ksim.builders.terminations import MinimumHeightTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.formulations import ActorCriticModel, GaussianActionModel
+from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
@@ -140,8 +140,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
             ],
         )
 
-    def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
-        return ActorCriticModel(
+    def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
+        return ActorCriticAgent(
             actor_module=HumanoidActorModel(
                 mlp=MLP(
                     num_hidden_layers=self.config.actor_num_layers,

@@ -31,7 +31,7 @@ from ksim.builders.rewards import (
 )
 from ksim.builders.terminations import IllegalContactTerminationBuilder
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.model.formulations import ActionModel, ActorCriticAgent
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
@@ -252,7 +252,7 @@ NUM_OUTPUTS = 20
 #         return x_n
 
 
-# class ActorCriticModel(eqx.Module):
+# class ActorCriticAgent(eqx.Module):
 #     actor: ActorModel
 #     critic: CriticModel
 
@@ -454,8 +454,8 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             ],
         )
 
-    def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
-        return ActorCriticModel(
+    def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
+        return ActorCriticAgent(
             actor_module=KBotActorModel(
                 mlp=MLP(
                     num_hidden_layers=self.config.actor_num_layers,
@@ -502,7 +502,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                             f"Invalid action: {self.config.viz_action}. Should be one of `policy` or `zero`."
                         )
 
-                model = ActorCriticModel(
+                model = ActorCriticAgent(
                     actor_module=actor,
                     critic_module=KBotCriticModel(
                         mlp=MLP(

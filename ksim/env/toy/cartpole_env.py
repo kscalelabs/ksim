@@ -9,7 +9,7 @@ from jaxtyping import PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, EnvState
 from ksim.env.types import PhysicsData
-from ksim.model.formulations import ActorCriticModel
+from ksim.model.formulations import ActorCriticAgent
 
 
 class CartPoleEnv(BaseEnv):
@@ -39,14 +39,14 @@ class CartPoleEnv(BaseEnv):
             timestep=jnp.array(0.0),
         )
 
-    def reset(self, model: ActorCriticModel, params: PyTree, rng: PRNGKeyArray) -> EnvState:
+    def reset(self, model: ActorCriticAgent, params: PyTree, rng: PRNGKeyArray) -> EnvState:
         """Reset the environment and sample an initial action from the model."""
         env_state_0, gym_obs_1 = self.reset_and_give_obs(model, params, rng)
         return env_state_0
 
     def step(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
@@ -61,7 +61,7 @@ class CartPoleEnv(BaseEnv):
 
     def unroll_trajectories(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,
@@ -129,7 +129,7 @@ class CartPoleEnv(BaseEnv):
     ####################
     def reset_and_give_obs(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         rng: PRNGKeyArray,
     ) -> tuple[EnvState, np.ndarray]:
@@ -151,7 +151,7 @@ class CartPoleEnv(BaseEnv):
 
     def step_given_gym_obs(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         prev_env_state: EnvState,
         rng: PRNGKeyArray,

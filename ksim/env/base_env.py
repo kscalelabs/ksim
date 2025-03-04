@@ -12,7 +12,7 @@ from jaxtyping import PRNGKeyArray, PyTree
 from omegaconf import MISSING
 
 from ksim.env.types import EnvState, PhysicsData
-from ksim.model.formulations import ActorCriticModel
+from ksim.model.formulations import ActorCriticAgent
 
 
 @jax.tree_util.register_dataclass
@@ -40,7 +40,7 @@ class BaseEnv(ABC):
     @abstractmethod
     def reset(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         rng: PRNGKeyArray,
     ) -> EnvState: ...
@@ -48,7 +48,7 @@ class BaseEnv(ABC):
     @abstractmethod
     def step(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
@@ -58,7 +58,7 @@ class BaseEnv(ABC):
     @abstractmethod
     def unroll_trajectories(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,
@@ -69,7 +69,7 @@ class BaseEnv(ABC):
     @abstractmethod
     def render_trajectory(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         rng: PRNGKeyArray,
         *,

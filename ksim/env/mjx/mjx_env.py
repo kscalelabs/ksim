@@ -34,7 +34,7 @@ from ksim.builders.terminations import Termination, TerminationBuilder
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.types import EnvState, KScaleActionModelType
-from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.model.formulations import ActionModel, ActorCriticAgent
 from ksim.utils.data import BuilderData
 from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
@@ -356,7 +356,7 @@ class MjxEnv(BaseEnv):
     @legit_jit(static_argnames=["self", "model"])
     def scannable_reset(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         rng: jax.Array,
         mjx_model: mjx.Model,
@@ -414,7 +414,7 @@ class MjxEnv(BaseEnv):
     @legit_jit(static_argnames=["self", "model"])
     def scannable_step(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         env_state_t_minus_1: EnvState,
         mjx_data_t: mjx.Data,
@@ -495,7 +495,7 @@ class MjxEnv(BaseEnv):
     @legit_jit(static_argnames=["self"])
     def reset(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         rng: jax.Array,
         *,
@@ -512,7 +512,7 @@ class MjxEnv(BaseEnv):
     @legit_jit(static_argnames=["self", "model"])
     def step(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
@@ -553,7 +553,7 @@ class MjxEnv(BaseEnv):
     @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs", "return_data"])
     def unroll_trajectories(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,
@@ -641,11 +641,14 @@ class MjxEnv(BaseEnv):
             length=num_steps,
         )
 
+        traj = jax.block_until_ready(traj)
+        # jax.debug.breakpoint()
+
         return traj  # Shape: (num_steps, num_envs, ...)
 
     def render_trajectory(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         rng: PRNGKeyArray,
         num_steps: int,

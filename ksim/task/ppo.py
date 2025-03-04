@@ -13,7 +13,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PyTree
 
 from ksim.env.types import EnvState
-from ksim.model.formulations import ActorCriticModel
+from ksim.model.formulations import ActorCriticAgent, update_actor_critic_normalization
 from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
@@ -46,6 +46,16 @@ class PPOConfig(RLConfig):
     desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive LR.")
     max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
 
+    # Normalization parameters
+    returns_norm_alpha: float = xax.field(
+        value=0.0003,
+        help="Rate at which to update returns normalization. Default follows PopArt paper.",
+    )
+    obs_norm_alpha: float = xax.field(
+        value=0.0003,
+        help="Rate at which to update observations normalization. Default follows PopArt paper.",
+    )
+
 
 Config = TypeVar("Config", bound=PPOConfig)
 
@@ -69,7 +79,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     @legit_jit(static_argnames=["self", "model"])
     def get_rollout_time_loss_components(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         trajectory_dataset: EnvState,
     ) -> RolloutTimeLossComponents:
@@ -105,7 +115,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     @legit_jit(static_argnames=["self", "model", "optimizer"])
     def model_update(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
@@ -127,6 +137,29 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             optax.adam(self.config.learning_rate),
         )
 
+    @legit_jit(static_argnames=["self", "initial_step"])
+    def update_input_normalization_stats(
+        self,
+        params: PyTree,
+        trajectories_dataset: EnvState,
+        rollout_time_loss_components: RolloutTimeLossComponents,
+        initial_step: bool,
+    ) -> PyTree:
+        """Update the input normalization parameters."""
+        assert isinstance(rollout_time_loss_components, PPORolloutTimeLossComponents)
+        obs_norm_alpha = self.config.obs_norm_alpha if initial_step else 0.0
+        returns_norm_alpha = self.config.returns_norm_alpha if initial_step else 0.0
+        if initial_step:
+            obs_norm_alpha = 1.0
+            returns_norm_alpha = 1.0
+        return update_actor_critic_normalization(
+            params=params,
+            returns=rollout_time_loss_components.returns,
+            returns_norm_alpha=returns_norm_alpha,
+            obs_norm_alpha=obs_norm_alpha,
+            trajectories_dataset=trajectories_dataset,
+        )
+
     # Pass-through abstract methods:
     # `get_environment`
 
@@ -137,7 +170,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     @legit_jit(static_argnames=["self", "model"])
     def apply_critic(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         obs: FrozenDict[str, Array],
         cmd: FrozenDict[str, Array],
@@ -153,7 +186,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     @legit_jit(static_argnames=["self", "model"])
     def compute_loss(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         env_state_batch: EnvState,
         rollout_time_loss_components: RolloutTimeLossComponents,
@@ -252,7 +285,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     @legit_jit(static_argnames=["self", "model"])
     def _jitted_value_and_grad(
         self,
-        model: ActorCriticModel,
+        model: ActorCriticAgent,
         params: PyTree,
         env_state_batch: EnvState,
         rollout_time_loss_components: RolloutTimeLossComponents,

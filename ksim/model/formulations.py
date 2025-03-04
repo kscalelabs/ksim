@@ -7,7 +7,10 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
+
+from ksim.env.types import EnvState
+from ksim.utils.jit import legit_jit
 
 
 class ActionModel(nn.Module, ABC):
@@ -94,11 +97,58 @@ class CategoricalActionModel(ActionModel, ABC):
         return sampled_actions, action_log_prob
 
 
-class ActorCriticModel(nn.Module):
+class ActorCriticAgent(nn.Module):
     """Actor-Critic model."""
 
     actor_module: ActionModel
     critic_module: nn.Module
+
+    def setup(self) -> None:
+        self.returns_mean = self.variable(
+            "normalization", "returns_mean", nn.initializers.zeros, key=(), shape=()
+        )
+        self.returns_std = self.variable(
+            "normalization", "returns_std", nn.initializers.ones, key=(), shape=()
+        )
+
+    @nn.compact
+    def normalize_obs(self, obs: FrozenDict[str, Array]) -> FrozenDict[str, Array]:
+        """Normalize the observations."""
+        obs_mean = {
+            obs_name: self.variable(
+                "normalization",
+                f"obs_mean_{obs_name}",
+                nn.initializers.zeros,
+                key=(),
+                shape=obs_vec.shape[-1],
+            )
+            for obs_name, obs_vec in obs.items()
+        }
+        obs_std = {
+            obs_name: self.variable(
+                "normalization",
+                f"obs_std_{obs_name}",
+                nn.initializers.ones,
+                key=(),
+                shape=obs_vec.shape[-1],
+            )
+            for obs_name, obs_vec in obs.items()
+        }
+        # note: initialized here once, will be updated in the training loop
+
+        # do normaliaztion on inputs
+        normalized_obs = {
+            obs_name: (obs_vec - obs_mean[obs_name].value) / obs_std[obs_name].value
+            for obs_name, obs_vec in obs.items()
+        }
+
+        normalized_obs = FrozenDict(normalized_obs)
+
+        return normalized_obs
+
+    def normalize_returns(self, returns: Array) -> Array:
+        """Normalize the returns."""
+        return (returns - self.returns_mean.value) / self.returns_std.value
 
     @nn.compact
     def __call__(
@@ -107,20 +157,69 @@ class ActorCriticModel(nn.Module):
         """Forward pass of the model."""
         return self.actor(obs, cmd), self.critic(obs, cmd)
 
+    @nn.compact
     def actor(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Actor forward pass."""
-        return self.actor_module(obs, cmd)
+        # initialize normalization params if not already done
+        normalized_obs = self.normalize_obs(obs)
+        return self.actor_module(normalized_obs, cmd)
 
+    @nn.compact
     def critic(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Critic forward pass."""
-        return self.critic_module(obs, cmd)
+        normalized_obs = self.normalize_obs(obs)
+        return self.critic_module(normalized_obs, cmd)
 
     def actor_calc_log_prob(self, prediction: Array, action: Array) -> Array:
         """Calculate the log probability of the action."""
         return self.actor_module.calc_log_prob(prediction, action)
 
+    @nn.compact
     def actor_sample_and_log_prob(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
     ) -> Tuple[Array, Array]:
         """Sample and calculate the log probability of the action."""
-        return self.actor_module.sample_and_log_prob(obs, cmd, rng)
+        normalized_obs = self.normalize_obs(obs)
+        return self.actor_module.sample_and_log_prob(normalized_obs, cmd, rng)
+
+
+def update_actor_critic_normalization(
+    params: PyTree,
+    returns: Array,
+    returns_norm_alpha: float,
+    obs_norm_alpha: float,
+    trajectories_dataset: EnvState,
+) -> PyTree:
+    """Update the normalization parameters for the observations and returns. High alpha mean more
+    weight is given to the new data."""
+    # update the returns normalization parameters
+    returns_mean = jnp.mean(returns)
+    returns_std = jnp.std(returns)
+    old_returns_mean = params["normalization"]["returns_mean"]
+    old_returns_std = params["normalization"]["returns_std"]
+    assert isinstance(old_returns_mean, Array)
+    assert isinstance(old_returns_std, Array)
+
+    params["normalization"]["returns_mean"] = (
+        old_returns_mean * (1 - returns_norm_alpha) + returns_mean * returns_norm_alpha
+    )
+    params["normalization"]["returns_std"] = (
+        old_returns_std * (1 - returns_norm_alpha) + returns_std * returns_norm_alpha
+    )
+
+    # update the observations normalization parameters
+    for obs_name, obs_vec in trajectories_dataset.obs.items():
+        assert isinstance(obs_vec, Array)
+        obs_mean = jnp.mean(obs_vec, axis=tuple(range(obs_vec.ndim - 1)))
+        obs_std = jnp.std(obs_vec, axis=tuple(range(obs_vec.ndim - 1)))
+        old_obs_mean = params["normalization"][f"obs_mean_{obs_name}"]
+        old_obs_std = params["normalization"][f"obs_std_{obs_name}"]
+
+        params["normalization"][f"obs_mean_{obs_name}"] = (
+            old_obs_mean * (1 - obs_norm_alpha) + obs_mean * obs_norm_alpha
+        )
+        params["normalization"][f"obs_std_{obs_name}"] = (
+            old_obs_std * (1 - obs_norm_alpha) + obs_std * obs_norm_alpha
+        )
+
+    return params

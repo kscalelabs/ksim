@@ -11,7 +11,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.env.toy.cartpole_env import CartPoleEnv
-from ksim.model.formulations import ActorCriticModel, CategoricalActionModel
+from ksim.model.formulations import ActorCriticAgent, CategoricalActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
@@ -67,9 +67,9 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
         """Get the environment."""
         return CartPoleEnv(render_mode=self.config.render_mode)
 
-    def get_model(self, key: PRNGKeyArray) -> ActorCriticModel:
+    def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         """Get the model."""
-        return ActorCriticModel(
+        return ActorCriticAgent(
             actor_module=CartPoleActionModel(
                 mlp=MLP(
                     num_hidden_layers=self.config.actor_num_layers,
