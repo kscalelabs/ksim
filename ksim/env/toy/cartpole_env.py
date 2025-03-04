@@ -13,7 +13,11 @@ from ksim.model.formulations import ActorCriticModel
 
 
 class CartPoleEnv(BaseEnv):
-    """CartPole environment wrapper."""
+    """CartPole environment wrapper.
+
+    TODO: Incorporate simulation frequency (dt) and policy frequency (ctrl_dt) parameters
+    from BaseEnvConfig into this environment.
+    """
 
     def __init__(self, render_mode: str | None = None) -> None:
         """Initialize the CartPole environment.
