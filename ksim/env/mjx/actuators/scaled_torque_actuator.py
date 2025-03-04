@@ -1,7 +1,6 @@
 """Direct torque control, scaled to a specifiable input range and gear ratio."""
 
 from dataclasses import dataclass
-from typing import Any
 
 import jax.numpy as jnp
 from jaxtyping import Array
@@ -22,7 +21,6 @@ class ScaledTorqueActuators(Actuators):
         self,
         actuators_metadata: dict[str, BaseActuatorMetadata],
         mujoco_mappings: MujocoMappings,
-        **kwargs: Any,
     ) -> None:
         """Creates an instance of ScaledTorqueActuators."""
         self.gear_ratios = jnp.array(

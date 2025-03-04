@@ -28,7 +28,6 @@ from ksim.builders.rewards import (
     TrackLinearVelocityXYReward,
 )
 from ksim.builders.terminations import (
-    IllegalContactTerminationBuilder,
     PitchTooGreatTermination,
     RollTooGreatTermination,
 )

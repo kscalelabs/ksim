@@ -9,7 +9,6 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.types import EnvState
-from ksim.utils.jit import legit_jit
 
 
 class ActionModel(nn.Module, ABC):
@@ -192,8 +191,10 @@ def update_actor_critic_normalization(
     obs_norm_alpha: float,
     trajectories_dataset: EnvState,
 ) -> PyTree:
-    """Update the normalization parameters for the observations and returns. High alpha mean more
-    weight is given to the new data."""
+    """Update the normalization parameters for the observations and returns.
+
+    High alpha means more weight is given to the new data.
+    """
     # update the returns normalization parameters
     returns_mean = jnp.mean(returns)
     returns_std = jnp.std(returns)
