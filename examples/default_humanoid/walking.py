@@ -27,6 +27,7 @@ from ksim.builders.rewards import (
     LinearVelocityZPenalty,
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
+    HeightReward,
 )
 from ksim.builders.terminations import (
     IllegalContactTerminationBuilder,
@@ -107,37 +108,41 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 XYPositionResetBuilder(),
             ],
             rewards=[
-                LinearVelocityZPenalty(scale=-0.1),
-                AngularVelocityXYPenalty(scale=-0.1),
-                TrackLinearVelocityXYReward(scale=0.1),
-                TrackAngularVelocityZReward(scale=0.1),
-                ActionSmoothnessPenalty(scale=-0.1),
-                FootContactPenaltyBuilder(
-                    scale=-0.1,
-                    foot_body_names=["KB_D_501R_R_LEG_FOOT"],
-                    allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
-                ),
-                FootContactPenaltyBuilder(
-                    scale=-0.1,
-                    foot_body_names=["KB_D_501L_L_LEG_FOOT"],
-                    allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
+                # LinearVelocityZPenalty(scale=-0.1),
+                # AngularVelocityXYPenalty(scale=-0.1),
+                # TrackLinearVelocityXYReward(scale=0.1),
+                # TrackAngularVelocityZReward(scale=0.1),
+                # ActionSmoothnessPenalty(scale=-0.1),
+                # FootContactPenaltyBuilder(
+                #     scale=-0.1,
+                #     foot_body_names=["KB_D_501R_R_LEG_FOOT"],
+                #     allowed_contact_prct=0.7,
+                #     skip_if_zero_command=[
+                #         "linear_velocity_command",
+                #         "angular_velocity_command",
+                #     ],
+                # ),
+                # FootContactPenaltyBuilder(
+                #     scale=-0.1,
+                #     foot_body_names=["KB_D_501L_L_LEG_FOOT"],
+                #     allowed_contact_prct=0.7,
+                #     skip_if_zero_command=[
+                #         "linear_velocity_command",
+                #         "angular_velocity_command",
+                #     ],
+                # ),
+                HeightReward(
+                    scale=1.0,
+                    height_target=1.4,
                 ),
             ],
             observations=[
                 # BasePositionObservation(noise_type="gaussian", noise=0.01),
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
-                BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
-                BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
-                JointPositionObservation(noise_type="gaussian", noise=0.01),
-                JointVelocityObservation(noise_type="gaussian", noise=0.01),
+                # BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
+                # BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
+                # JointPositionObservation(noise_type="gaussian", noise=0.01),
+                # JointVelocityObservation(noise_type="gaussian", noise=0.01),
                 # TODO: default humanoid doesn't have sensors, add them later
             ],
             commands=[

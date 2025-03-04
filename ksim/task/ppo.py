@@ -39,10 +39,10 @@ class PPOConfig(RLConfig):
 
     # General training parameters
     # TODO: none of these except `max_grad_norm` are actually used in the training script
-    learning_rate: float = xax.field(value=1e-3, help="Learning rate for PPO.")
+    learning_rate: float = xax.field(value=3e-4, help="Learning rate for PPO.")
     schedule: str = xax.field(value="adaptive", help="Learning rate schedule 'fixed' | 'adaptive'")
     desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive LR.")
-    max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
+    max_grad_norm: float = xax.field(value=0.5, help="Maximum gradient norm for clipping.")
 
 
 Config = TypeVar("Config", bound=PPOConfig)
