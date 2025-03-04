@@ -28,7 +28,7 @@ class PPOConfig(RLConfig):
     normalize_returns: bool = xax.field(value=False, help="Whether to normalize returns.")
 
     # For the Value Function (VF) term
-    value_loss_coef: float = xax.field(value=1.0, help="Value loss coefficient for PPO.")
+    value_loss_coef: float = xax.field(value=0.5, help="Value loss coefficient for PPO.")
     use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss.")
 
     # For the entropy bonus term
@@ -38,7 +38,7 @@ class PPOConfig(RLConfig):
     gamma: float = xax.field(value=0.99, help="Discount factor for PPO")
     lam: float = xax.field(value=0.95, help="Lambda for GAE: high = more bias; low = more variance")
 
-    learning_rate: float = xax.field(value=1e-4, help="Learning rate for PPO.")
+    learning_rate: float = xax.field(value=1e-5, help="Learning rate for PPO.")
     max_grad_norm: float = xax.field(value=0.5, help="Maximum gradient norm for clipping.")
 
 

@@ -94,7 +94,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 # AngularVelocityXYPenalty(scale=-0.1),
                 # TrackLinearVelocityXYReward(scale=0.1),
                 # TrackAngularVelocityZReward(scale=0.1),
-                # ActionSmoothnessPenalty(scale=-0.1),
                 # FootContactPenaltyBuilder(
                 #     scale=-0.1,
                 #     foot_body_names=["KB_D_501R_R_LEG_FOOT"],
@@ -113,8 +112,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 #         "angular_velocity_command",
                 #     ],
                 # ),
+                # ActionSmoothnessPenalty(scale=-0.1),
                 HeightReward(
-                    scale=1.0,
+                    scale=0.2,
                     height_target=1.4,
                 ),
             ],
