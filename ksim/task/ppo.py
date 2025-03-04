@@ -31,7 +31,7 @@ class PPOConfig(RLConfig):
 
     # For the Value Function (VF) term
     value_loss_coef: float = xax.field(value=0.5, help="Value loss coefficient for PPO.")
-    use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss.")
+    use_clipped_value_loss: bool = xax.field(value=False, help="Whether to use clipped value loss.")
 
     # For the entropy bonus term
     entropy_coef: float = xax.field(value=0.008, help="Entropy coefficient for PPO.")

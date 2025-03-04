@@ -28,7 +28,11 @@ from ksim.builders.rewards import (
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.builders.terminations import MinimumHeightTermination
+from ksim.builders.terminations import (
+    MinimumHeightTermination,
+    PitchTooGreatTermination,
+    RollTooGreatTermination,
+)
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
@@ -84,7 +88,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                MinimumHeightTermination(min_height=0.4),
+                RollTooGreatTermination(max_roll=1.04),
+                PitchTooGreatTermination(max_pitch=1.04),
             ],
             resets=[
                 XYPositionResetBuilder(),
@@ -92,7 +97,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
             rewards=[
                 # LinearVelocityZPenalty(scale=-0.1),
                 # AngularVelocityXYPenalty(scale=-0.1),
-                # TrackLinearVelocityXYReward(scale=0.1),
+                TrackLinearVelocityXYReward(scale=0.5),
                 # TrackAngularVelocityZReward(scale=0.1),
                 # FootContactPenaltyBuilder(
                 #     scale=-0.1,
@@ -114,7 +119,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 # ),
                 # ActionSmoothnessPenalty(scale=-0.1),
                 HeightReward(
-                    scale=0.2,
+                    scale=0.5,
                     height_target=1.4,
                 ),
             ],
@@ -174,7 +179,7 @@ if __name__ == "__main__":
         HumanoidWalkingConfig(
             num_envs=2048,
             num_steps_per_trajectory=600,
-            minibatch_size=2048,
+            minibatch_size=38400,
             num_learning_epochs=10,
         ),
     )
