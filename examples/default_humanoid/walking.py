@@ -77,6 +77,8 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     pretrained: str | None = xax.field(value=None)
     checkpoint_num: int | None = xax.field(value=None)
 
+    actuator_type: str = xax.field(value="scaled_torque", help="The type of actuator to use.")
+
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
     def get_environment(self) -> MjxEnv:

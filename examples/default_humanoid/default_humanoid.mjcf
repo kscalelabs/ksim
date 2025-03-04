@@ -101,22 +101,22 @@
     </worldbody>
 
     <actuator>
-        <motor gear="100" joint="abdomen_y" name="abdomen_y_ctrl"/>
-        <motor gear="100" joint="abdomen_z" name="abdomen_z_ctrl"/>
-        <motor gear="100" joint="abdomen_x" name="abdomen_x_ctrl"/>
-        <motor gear="100" joint="right_hip_x" name="right_hip_x_ctrl"/>
-        <motor gear="100" joint="right_hip_z" name="right_hip_z_ctrl"/>
-        <motor gear="300" joint="right_hip_y" name="right_hip_y_ctrl"/>
-        <motor gear="200" joint="right_knee" name="right_knee_ctrl"/>
-        <motor gear="100" joint="left_hip_x" name="left_hip_x_ctrl"/>
-        <motor gear="100" joint="left_hip_z" name="left_hip_z_ctrl"/>
-        <motor gear="300" joint="left_hip_y" name="left_hip_y_ctrl"/>
-        <motor gear="200" joint="left_knee" name="left_knee_ctrl"/>
-        <motor gear="25" joint="right_shoulder1" name="right_shoulder1_ctrl"/>
-        <motor gear="25" joint="right_shoulder2" name="right_shoulder2_ctrl"/>
-        <motor gear="25" joint="right_elbow" name="right_elbow_ctrl"/>
-        <motor gear="25" joint="left_shoulder1" name="left_shoulder1_ctrl"/>
-        <motor gear="25" joint="left_shoulder2" name="left_shoulder2_ctrl"/>
-        <motor gear="25" joint="left_elbow" name="left_elbow_ctrl"/>
+        <motor gear="1" joint="abdomen_y" name="abdomen_y_ctrl"/>
+        <motor gear="1" joint="abdomen_z" name="abdomen_z_ctrl"/>
+        <motor gear="1" joint="abdomen_x" name="abdomen_x_ctrl"/>
+        <motor gear="1" joint="right_hip_x" name="right_hip_x_ctrl"/>
+        <motor gear="1" joint="right_hip_z" name="right_hip_z_ctrl"/>
+        <motor gear="1" joint="right_hip_y" name="right_hip_y_ctrl"/>
+        <motor gear="1" joint="right_knee" name="right_knee_ctrl"/>
+        <motor gear="1" joint="left_hip_x" name="left_hip_x_ctrl"/>
+        <motor gear="1" joint="left_hip_z" name="left_hip_z_ctrl"/>
+        <motor gear="1" joint="left_hip_y" name="left_hip_y_ctrl"/>
+        <motor gear="1" joint="left_knee" name="left_knee_ctrl"/>
+        <motor gear="1" joint="right_shoulder1" name="right_shoulder1_ctrl"/>
+        <motor gear="1" joint="right_shoulder2" name="right_shoulder2_ctrl"/>
+        <motor gear="1" joint="right_elbow" name="right_elbow_ctrl"/>
+        <motor gear="1" joint="left_shoulder1" name="left_shoulder1_ctrl"/>
+        <motor gear="1" joint="left_shoulder2" name="left_shoulder2_ctrl"/>
+        <motor gear="1" joint="left_elbow" name="left_elbow_ctrl"/>
     </actuator>
 </mujoco>

@@ -1,4 +1,7 @@
 # Metadata for default humanoid model
+# Note that the kp kd values are currently guestimated. Initial trainins is performed with the
+# ScaledTorqueActuators, so the values are not yet tuned.
+
 control_frequency: 333.333  # Based on timestep 0.003 in MJCF file
 
 actuators:
@@ -6,55 +9,89 @@ actuators:
   abdomen_y:
     kp: 100.0
     kd: 10.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 100.0
   abdomen_z:
     kp: 100.0
     kd: 10.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 100.0
   abdomen_x:
     kp: 100.0
     kd: 10.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 100.0
   
   # Leg actuators
   right_hip_x:
     kp: 100.0
     kd: 10.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 100.0
   right_hip_z:
     kp: 100.0
     kd: 10.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 100.0
   right_hip_y:
     kp: 300.0
     kd: 30.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 300.0
   right_knee:
     kp: 200.0
     kd: 20.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 200.0
   left_hip_x:
     kp: 100.0
     kd: 10.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 100.0
   left_hip_z:
     kp: 100.0
     kd: 10.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 100.0
   left_hip_y:
     kp: 300.0
     kd: 30.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 300.0
   left_knee:
     kp: 200.0
     kd: 20.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 200.0
   
   # Arm actuators
   right_shoulder1:
     kp: 25.0
     kd: 2.5
+    input_range: [-0.4, 0.4]
+    gear_ratio: 25.0
   right_shoulder2:
     kp: 25.0
     kd: 2.5
+    input_range: [-0.4, 0.4]
+    gear_ratio: 25.0
   right_elbow:
     kp: 25.0
     kd: 2.5
+    input_range: [-0.4, 0.4]
+    gear_ratio: 25.0
   left_shoulder1:
     kp: 25.0
     kd: 2.5
+    input_range: [-0.4, 0.4]
+    gear_ratio: 25.0
   left_shoulder2:
     kp: 25.0
     kd: 2.5
+    input_range: [-0.4, 0.4]
+    gear_ratio: 25.0
   left_elbow:
     kp: 25.0
     kd: 2.5
+    input_range: [-0.4, 0.4]
+    gear_ratio: 25.0

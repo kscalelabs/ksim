@@ -31,6 +31,7 @@ from ksim.builders.rewards import Reward, RewardBuilder
 from ksim.builders.terminations import Termination, TerminationBuilder
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
+from ksim.env.mjx.actuators.scaled_torque_actuator import ScaledTorqueActuators
 from ksim.env.types import EnvState, KScaleActionModelType
 from ksim.model.formulations import ActorCriticAgent
 from ksim.utils.data import BuilderData
@@ -147,10 +148,14 @@ class MjxEnvConfig(BaseEnvConfig):
     solver_iterations: int = xax.field(value=1, help="Number of main solver iterations.")
     solver_ls_iterations: int = xax.field(value=4, help="Number of line search iterations.")
     disable_flags_bitmask: int = xax.field(
-        value=mujoco.mjtDisableBit.mjDSBL_EULERDAMP.value, help="Bitmask of flags to disable.")
+        value=mujoco.mjtDisableBit.mjDSBL_EULERDAMP.value, help="Bitmask of flags to disable."
+    )
 
     # simulation artifact options
     ignore_cached_urdf: bool = xax.field(value=False, help="Whether to ignore the cached URDF.")
+
+    # actuator configuration options
+    actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
 
 
 # The new stateless environment – note that we do not call any stateful methods.
@@ -207,10 +212,17 @@ class MjxEnv(BaseEnv):
         self.default_mjx_data = mjx.make_data(self.default_mjx_model)
 
         self.mujoco_mappings = make_mujoco_mappings(self.default_mjx_model)
-        self.actuators = MITPositionActuators(
-            actuators_metadata=robot_model_metadata.actuators,
-            mujoco_mappings=self.mujoco_mappings,
-        )
+        match self.config.actuator_type:
+            case "mit":
+                self.actuators = MITPositionActuators(
+                    actuators_metadata=robot_model_metadata.actuators,
+                    mujoco_mappings=self.mujoco_mappings,
+                )
+            case "scaled_torque":
+                self.actuators = ScaledTorqueActuators(
+                    actuators_metadata=robot_model_metadata.actuators,
+                    mujoco_mappings=self.mujoco_mappings,
+                )
 
         # preparing builder data.
         data = BuilderData(
@@ -355,8 +367,7 @@ class MjxEnv(BaseEnv):
             action_motor_sees = jax.lax.select(
                 step_num >= num_latency_steps, current_action, previous_action
             )
-            # torques = self.actuators.get_ctrl(state, action_motor_sees)
-            torques = action_motor_sees
+            torques = self.actuators.get_ctrl(state, action_motor_sees)
             # NOTE: can extend state to include anything from `mjx.Data` here...
             new_state = step_mjx(mjx_model, state, torques)
             return (new_state, step_num + 1), None

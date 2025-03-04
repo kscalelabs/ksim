@@ -12,6 +12,7 @@ from omegaconf import OmegaConf
 
 from ksim.env.mjx.actuators.base_actuator import BaseActuatorMetadata
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuatorMetadata
+from ksim.env.mjx.actuators.scaled_torque_actuator import ScaledTorqueActuatorMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,14 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
             actuator_metadata = {}
 
             for name, metadata in actuators.items():
-                if hasattr(metadata, "kp") and hasattr(metadata, "kd"):
+                if hasattr(metadata, "input_range") and hasattr(metadata, "gear_ratio"):
+                    # NOTE: we might want to add support for this in the web API
+                    # This was implemented to support the scaled torque actuators.
+                    actuator_metadata[name] = ScaledTorqueActuatorMetadata(
+                        input_range=cast(tuple[float, float], metadata.input_range),  # type: ignore
+                        gear_ratio=cast(float, metadata.gear_ratio),  # type: ignore
+                    )
+                elif hasattr(metadata, "kp") and hasattr(metadata, "kd"):
                     actuator_metadata[name] = MITPositionActuatorMetadata(
                         kp=cast(float, metadata.kp),
                         kd=cast(float, metadata.kd),
