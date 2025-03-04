@@ -28,7 +28,7 @@ from ksim.builders.rewards import (
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.builders.terminations import IllegalContactTerminationBuilder
+from ksim.builders.terminations import IllegalContactTerminationBuilder, PitchTooGreatTermination, RollTooGreatTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActionModel, ActorCriticAgent
 from ksim.model.mlp import MLP
@@ -269,9 +269,25 @@ class KBotActorModel(ActionModel):
         self.log_std = self.param("log_std", nn.initializers.constant(-0.7), (NUM_OUTPUTS,))
 
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        x_n = jnp.concatenate([obs_array for obs_array in obs.values()], axis=-1)
-        cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
-        x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
+        lin_vel_cmd_2 = cmd["linear_velocity_command"]
+        ang_vel_cmd_1 = cmd["angular_velocity_command"]
+        joint_pos_j = obs["joint_position_observation"]
+        joint_vel_j = obs["joint_velocity_observation"]
+        imu_acc_3 = obs["imu_acc_sensor_observation"]
+        imu_gyro_3 = obs["imu_gyro_sensor_observation"]
+
+        x_n = jnp.concatenate(
+            [
+                lin_vel_cmd_2,
+                ang_vel_cmd_1,
+                imu_acc_3,
+                imu_gyro_3,
+                joint_pos_j,
+                joint_vel_j,
+            ],
+            axis=-1,
+        )
+
         actions_n = self.mlp(x_n)
 
         return actions_n
@@ -334,33 +350,11 @@ class KBotCriticModel(nn.Module):
 
     @nn.compact
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> jax.Array:
-        lin_vel_cmd_2 = cmd["linear_velocity_command"]
-        ang_vel_cmd_1 = cmd["angular_velocity_command"]
-        joint_pos_j = obs["joint_position_observation"]
-        joint_vel_j = obs["joint_velocity_observation"]
+        # Concatenate all observations and commands (critic has privileged information)
+        x_n = jnp.concatenate([obs_array for obs_array in obs.values()], axis=-1)
+        cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
+        x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
 
-        base_pos_3 = obs["base_position_observation"]
-        base_ang_vel_3 = obs["base_angular_velocity_observation"]
-        base_lin_vel_3 = obs["base_linear_velocity_observation"]
-        base_quat_4 = obs["base_orientation_observation"]
-        imu_acc_3 = obs["imu_acc_sensor_observation"]
-        imu_gyro_3 = obs["imu_gyro_sensor_observation"]
-
-        x_n = jnp.concatenate(
-            [
-                lin_vel_cmd_2,
-                ang_vel_cmd_1,
-                imu_acc_3,
-                imu_gyro_3,
-                base_pos_3,
-                base_ang_vel_3,
-                base_lin_vel_3,
-                base_quat_4,
-                joint_pos_j,
-                joint_vel_j,
-            ],
-            axis=-1,
-        )
         value_estimate = self.mlp(x_n)
 
         return value_estimate
@@ -389,16 +383,18 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                IllegalContactTerminationBuilder(
-                    body_names=[
-                        "shoulder",
-                        "shoulder_2",
-                        "hand_shell",
-                        "hand_shell_2",
-                        "leg0_shell",
-                        "leg0_shell_2",
-                    ],
-                ),
+                # IllegalContactTerminationBuilder(
+                #     body_names=[
+                #         "shoulder",
+                #         "shoulder_2",
+                #         "hand_shell",
+                #         "hand_shell_2",
+                #         "leg0_shell",
+                #         "leg0_shell_2",
+                #     ],
+                # ),
+                RollTooGreatTermination(max_roll=1.04),
+                PitchTooGreatTermination(max_pitch=1.04),
             ],
             resets=[
                 XYPositionResetBuilder(),
