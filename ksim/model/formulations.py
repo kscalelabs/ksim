@@ -139,12 +139,12 @@ class ActorCriticAgent(nn.Module):
         # note: initialized here once, will be updated in the training loop
 
         # do normaliaztion on inputs
-        normalized_obs = {
+        normalized_obs_dict = {
             obs_name: (obs_vec - obs_mean[obs_name].value) / obs_std[obs_name].value
             for obs_name, obs_vec in obs.items()
         }
 
-        normalized_obs = FrozenDict(normalized_obs)
+        normalized_obs: FrozenDict[str, Array] = FrozenDict(normalized_obs_dict)
 
         return normalized_obs
 

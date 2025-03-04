@@ -10,6 +10,7 @@ from kscale import K
 from kscale.web.utils import get_robots_dir, should_refresh_file
 from omegaconf import OmegaConf
 
+from ksim.env.mjx.actuators.base_actuator import BaseActuatorMetadata
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuatorMetadata
 from ksim.env.mjx.actuators.scaled_torque_actuator import ScaledTorqueActuatorMetadata
 
@@ -62,23 +63,25 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
             if (actuators := metadata.joint_name_to_metadata) is None:
                 raise ValueError(f"No actuators found for {model_name}")
 
-            actuators_metadata = {}
+            actuators_metadata: dict[str, BaseActuatorMetadata] = {}
 
-            for name, metadata in actuators.items():
-                if hasattr(metadata, "input_range") and hasattr(metadata, "gear_ratio"):
+            for name, actuator_metadata in actuators.items():
+                if hasattr(actuator_metadata, "input_range") and hasattr(
+                    actuator_metadata, "gear_ratio"
+                ):
                     # NOTE: we might want to add support for this in the web API
                     # This was implemented to support the scaled torque actuators.
                     actuators_metadata[name] = ScaledTorqueActuatorMetadata(
-                        input_range=cast(tuple[float, float], metadata.input_range),  # type: ignore
-                        gear_ratio=cast(float, metadata.gear_ratio),  # type: ignore
+                        input_range=cast(tuple[float, float], actuator_metadata.input_range),
+                        gear_ratio=cast(float, actuator_metadata.gear_ratio),
                     )
-                elif hasattr(metadata, "kp") and hasattr(metadata, "kd"):
+                elif hasattr(actuator_metadata, "kp") and hasattr(actuator_metadata, "kd"):
                     actuators_metadata[name] = MITPositionActuatorMetadata(
-                        kp=cast(float, metadata.kp),
-                        kd=cast(float, metadata.kd),
+                        kp=cast(float, actuator_metadata.kp),
+                        kd=cast(float, actuator_metadata.kd),
                     )
                 else:
-                    raise ValueError(f"Unknown actuator metadata: {metadata}")
+                    raise ValueError(f"Unknown actuator metadata: {actuator_metadata}")
 
             control_frequency_float = float(control_frequency)
             model_metadata = ModelMetadata(

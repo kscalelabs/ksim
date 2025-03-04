@@ -30,6 +30,8 @@ warn_redundant_casts = true
 incremental = true
 namespace_packages = false
 
+exclude = "run_\\d"
+
 [[tool.mypy.overrides]]
 
 module = [
@@ -38,6 +40,7 @@ module = [
     "equinox.*",
     "mujoco.*",
     "optax.*",
+    "_pytest.*",
 ]
 ignore_missing_imports = true
 

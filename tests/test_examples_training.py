@@ -32,12 +32,12 @@ def test_default_humanoid_training() -> None:
     # Initialize model parameters
     key, init_key = jax.random.split(key)
     dummy_state = env.get_dummy_env_state(init_key)
-    params = model.init(init_key, dummy_state.obs, dummy_state.command)
+    variables = model.init(init_key, dummy_state.obs, dummy_state.command)
 
     key, rollout_key = jax.random.split(key)
     states, _ = env.unroll_trajectories(
         model=model,
-        params=params,
+        variables=variables,
         rng=rollout_key,
         num_steps=config.num_steps_per_trajectory,
         num_envs=config.num_envs,
@@ -74,15 +74,12 @@ def test_default_humanoid_training() -> None:
     # Test a single model update
     # Get optimizer
     optimizer = task.get_optimizer()
-    opt_state = optimizer.init(params)
+    opt_state = optimizer.init(variables["params"])
 
     # Get a trajectory dataset
     key, rollout_key = jax.random.split(key)
-    trajectories_dataset = task.get_trajectory_dataset(model, params, env, rollout_key)
-
-    # Get rollout time loss components
-    rollout_time_loss_components = task.get_rollout_time_loss_components(
-        model, params, trajectories_dataset
+    trajectories_dataset, rollout_time_loss_components = task.get_trajectory_dataset(
+        model, variables, env, rollout_key
     )
 
     # Get a minibatch
@@ -93,7 +90,7 @@ def test_default_humanoid_training() -> None:
     # Update the model
     new_params, new_opt_state, loss_val, metrics = task.model_update(
         model,
-        params,
+        variables,
         optimizer,
         opt_state,
         minibatch,
@@ -136,7 +133,7 @@ def test_default_humanoid_run_method() -> None:
         # Initialize model parameters
         key, init_key = jax.random.split(key)
         dummy_state = env.get_dummy_env_state(init_key)
-        params = model.init(init_key, dummy_state.obs, dummy_state.command)
+        variables = model.init(init_key, dummy_state.obs, dummy_state.command)
 
         # Check for NaN values in initial state
         # TODO: Switch these to asserts when we fix the NaN issue
@@ -150,7 +147,7 @@ def test_default_humanoid_run_method() -> None:
             print("WARNING: NaN values found in initial action")
 
         # Check for NaN values in model parameters
-        for param_key, param_value in jax.tree_util.tree_leaves_with_path(params):
+        for param_key, param_value in jax.tree_util.tree_leaves_with_path(variables["params"]):
             if jnp.isnan(param_value).any():
                 param_path = "/".join(str(p) for p in param_key)
                 print(f"WARNING: NaN values found in model parameter '{param_path}'")

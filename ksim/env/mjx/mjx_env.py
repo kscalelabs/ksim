@@ -30,6 +30,7 @@ from ksim.builders.resets import Reset, ResetBuilder
 from ksim.builders.rewards import Reward, RewardBuilder
 from ksim.builders.terminations import Termination, TerminationBuilder
 from ksim.env.base_env import BaseEnv, BaseEnvConfig
+from ksim.env.mjx.actuators.base_actuator import Actuators
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.mjx.actuators.scaled_torque_actuator import ScaledTorqueActuators
 from ksim.env.types import EnvState, KScaleActionModelType
@@ -167,6 +168,8 @@ class MjxEnv(BaseEnv):
         with a final trajectory of shape (time, num_envs, ...).
       - The step wrapper only computes a reset (via jax.lax.cond) if the done flag is True.
     """
+
+    actuators: Actuators
 
     def __init__(
         self,
