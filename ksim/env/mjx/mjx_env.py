@@ -703,8 +703,6 @@ class MjxEnv(BaseEnv):
             length=num_steps,
         )
 
-        jax.debug.breakpoint()
-
         return traj  # Shape: (num_steps, num_envs, ...)
 
     def render_trajectory(
