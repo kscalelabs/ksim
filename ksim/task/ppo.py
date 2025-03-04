@@ -38,7 +38,7 @@ class PPOConfig(RLConfig):
     gamma: float = xax.field(value=0.99, help="Discount factor for PPO")
     lam: float = xax.field(value=0.95, help="Lambda for GAE: high = more bias; low = more variance")
 
-    learning_rate: float = xax.field(value=3e-4, help="Learning rate for PPO.")
+    learning_rate: float = xax.field(value=1e-5, help="Learning rate for PPO.")
     max_grad_norm: float = xax.field(value=0.5, help="Maximum gradient norm for clipping.")
 
 
@@ -185,6 +185,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         assert isinstance(values, Array)
         values = values.squeeze(axis=-1)  # values is (time, env)
 
+        use_debug = os.environ.get("DEBUG", "0") == "1"
+        if use_debug:  # should skip compilation
+            breakpoint()
+            # env_state_batch.obs["base_orientation_observation"]
+            # env_state_batch.command["linear_velocity_command"]
+            # jnp.mean(env_state_batch.action)
+            # jnp.max(env_state_batch.reward)
+            # jnp.mean(env_state_batch.reward)
+
         advantages = rollout_time_loss_components.advantages
         if self.config.normalize_advantage:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
@@ -237,9 +246,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             }
         )
 
-        use_debug = os.environ.get("DEBUG", "0") == "1"
-        # if use_debug:  # should skip compilation
-        #     breakpoint()
+        if use_debug:  # should skip compilation
+            breakpoint()
 
         jax.debug.print("total_loss: {total_loss}", total_loss=total_loss)
 
