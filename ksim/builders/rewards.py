@@ -114,9 +114,9 @@ class HeightReward(Reward):
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
         height = mjx_data_t_plus_1.qpos[2]
-        jax.debug.print("height: {height}", height=height)
-        reward = jnp.exp(-jnp.abs(height - self.height_target))
-        jax.debug.print("reward: {reward}", reward=reward)
+        reward = jnp.exp(-jnp.abs(height - self.height_target) * 50)
+        # jax.debug.print("height: {height}", height=height)
+        # jax.debug.print("reward: {reward}", reward=reward)
         return reward
 
 

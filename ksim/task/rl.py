@@ -72,7 +72,7 @@ class RLConfig(BaseEnvConfig, xax.Config):
         help="The size of the action space.",
     )
     num_learning_epochs: int = xax.field(
-        value=5,
+        value=1,
         help="Number of learning epochs per PPO update.",
     )
     minibatch_size: int = xax.field(

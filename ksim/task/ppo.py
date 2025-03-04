@@ -25,23 +25,20 @@ class PPOConfig(RLConfig):
     # For the CLIP term (see Schulman et al. 2017)
     clip_param: float = xax.field(value=0.2, help="Clipping parameter for PPO.")
     normalize_advantage: bool = xax.field(value=True, help="Whether to normalize advantages.")
+    normalize_returns: bool = xax.field(value=False, help="Whether to normalize returns.")
 
     # For the Value Function (VF) term
     value_loss_coef: float = xax.field(value=1.0, help="Value loss coefficient for PPO.")
     use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss.")
 
     # For the entropy bonus term
-    entropy_coef: float = xax.field(value=0.008, help="Entropy coefficient for PPO.")
+    entropy_coef: float = xax.field(value=0.0, help="Entropy coefficient for PPO.")
 
     # For the GAE computation
     gamma: float = xax.field(value=0.99, help="Discount factor for PPO")
     lam: float = xax.field(value=0.95, help="Lambda for GAE: high = more bias; low = more variance")
 
-    # General training parameters
-    # TODO: none of these except `max_grad_norm` are actually used in the training script
     learning_rate: float = xax.field(value=3e-4, help="Learning rate for PPO.")
-    schedule: str = xax.field(value="adaptive", help="Learning rate schedule 'fixed' | 'adaptive'")
-    desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive LR.")
     max_grad_norm: float = xax.field(value=0.5, help="Maximum gradient norm for clipping.")
 
 
@@ -90,15 +87,25 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         advantages = self._compute_advantages(initial_values, trajectory_dataset)
         returns = advantages + initial_values
 
-        if self.config.normalize_advantage:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
         return PPORolloutTimeLossComponents(
             initial_action_log_probs=jax.lax.stop_gradient(initial_action_log_probs),
             initial_values=jax.lax.stop_gradient(initial_values),
             advantages=jax.lax.stop_gradient(advantages),
             returns=jax.lax.stop_gradient(returns),
         )
+    
+    @legit_jit(static_argnames=["self"])
+    def _clipped_value_loss(
+        self,
+        target_values: Array,
+        values: Array,
+        returns: Array,
+    ) -> Array:
+        """Compute the clipped value loss."""
+        value_clipped = target_values + (values - target_values).clip(-self.config.clip_param, self.config.clip_param)
+        clipped_error = value_clipped - returns
+        error = values - returns
+        return jnp.maximum(error**2, clipped_error**2).mean()
 
     @legit_jit(static_argnames=["self", "model", "optimizer"])
     def model_update(
@@ -178,21 +185,34 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         assert isinstance(values, Array)
         values = values.squeeze(axis=-1)  # values is (time, env)
 
+        advantages = rollout_time_loss_components.advantages
+        if self.config.normalize_advantage:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         # policy loss with clipping
         policy_objective = jnp.mean(
             jnp.minimum(
-                ratio * rollout_time_loss_components.advantages,
+                ratio * advantages,
                 jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param)
-                * rollout_time_loss_components.advantages,
+                * advantages,
             )
         )
-
+        returns = rollout_time_loss_components.returns
+        # TODO: this should be a moving average
+        if self.config.normalize_returns:
+            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+     
         # value loss term
-        # TODO: add clipping
         value_pred = self.apply_critic(model, params, env_state_batch.obs, env_state_batch.command)
         value_pred = value_pred.squeeze(axis=-1)  # (time, env)
-        value_objective = 0.5 * jnp.mean((rollout_time_loss_components.returns - value_pred) ** 2)
-
+        value_objective = jax.lax.cond(
+            self.config.use_clipped_value_loss,
+            lambda: 0.5 * self._clipped_value_loss(
+                target_values=rollout_time_loss_components.initial_values,
+                values=value_pred,
+                returns=returns,
+            ),
+            lambda: 0.5 * jnp.mean((returns - value_pred) ** 2),
+        )
         # entropy bonus term
         probs = jax.nn.softmax(prediction)  # TODO: make this live in the model
         entropy = -jnp.mean(jnp.sum(jax.scipy.special.entr(probs), axis=-1))
