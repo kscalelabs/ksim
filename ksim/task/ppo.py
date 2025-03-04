@@ -41,7 +41,7 @@ class PPOConfig(RLConfig):
 
     # General training parameters
     # TODO: none of these except `max_grad_norm` are actually used in the training script
-    learning_rate: float = xax.field(value=1e-3, help="Learning rate for PPO.")
+    learning_rate: float = xax.field(value=1e-4, help="Learning rate for PPO.")
     schedule: str = xax.field(value="adaptive", help="Learning rate schedule 'fixed' | 'adaptive'")
     desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive LR.")
     max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
@@ -49,11 +49,11 @@ class PPOConfig(RLConfig):
     # Normalization parameters
     returns_norm_alpha: float = xax.field(
         value=0.0000,
-        help="Rate at which to update returns normalization. Default follows PopArt paper.",
+        help="Rate at which to update returns normalization.",
     )
     obs_norm_alpha: float = xax.field(
         value=0.0000,
-        help="Rate at which to update observations normalization. Default follows PopArt paper.",
+        help="Rate at which to update observations normalization.",
     )
 
 
@@ -122,17 +122,18 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         env_state_batch: EnvState,
         rollout_time_loss_components: RolloutTimeLossComponents,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
-        """Update the model parameters."""
+        """Returns the updated parameters, optimizer state, loss value, and metrics."""
         loss_val, metrics, grads = self._jitted_value_and_grad(
             model, variables, env_state_batch, rollout_time_loss_components
         )
+
+        # while other variables might be present in comp graph, only update params...
         params = variables["params"]
+        grads = grads["params"]
         updates, new_opt_state = optimizer.update(grads, opt_state, params)
         new_params = optax.apply_updates(params, updates)
-        new_variables = variables.copy(update={"params": new_params})
-        jax.debug.breakpoint()
 
-        return new_variables, new_opt_state, loss_val, metrics
+        return new_params, new_opt_state, loss_val, metrics
 
     def get_optimizer(self) -> optax.GradientTransformation:
         """Get the optimizer: handled by XAX."""

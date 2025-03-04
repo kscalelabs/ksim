@@ -448,7 +448,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         trajectories_dataset, rollout_time_loss_components, minibatch_idx
                     )
                     with self.step_context("update_state"):
-                        variables, opt_state, loss_val, metrics = self.model_update(
+                        params, opt_state, loss_val, metrics = self.model_update(
                             model,
                             variables,
                             optimizer,
@@ -456,6 +456,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             minibatch,
                             rollout_time_minibatch_loss_components,
                         )
+                        variables["params"] = params
                         print(f"loss: {loss_val}")
                         print(f"metrics: {metrics}")
 
@@ -525,7 +526,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
 
             variables = self.get_init_variables(key)
-            opt_state = optimizer.init(variables)
+            opt_state = optimizer.init(variables["params"])
 
             try:
                 self.train_loop(
