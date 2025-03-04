@@ -11,8 +11,7 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 import asyncio
 import logging
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable, Collection, Tuple, TypeVar, cast, get_args
+from typing import Callable, Collection, TypeVar, cast, get_args
 
 import chex
 import jax
@@ -24,17 +23,16 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
-from omegaconf import MISSING
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
 from ksim.builders.resets import Reset, ResetBuilder
 from ksim.builders.rewards import Reward, RewardBuilder
 from ksim.builders.terminations import Termination, TerminationBuilder
-from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
+from ksim.env.base_env import BaseEnv, BaseEnvConfig
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.types import EnvState, KScaleActionModelType
-from ksim.model.formulations import ActionModel, ActorCriticModel
+from ksim.model.formulations import ActorCriticModel
 from ksim.utils.data import BuilderData
 from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
@@ -137,8 +135,6 @@ def get_action_fn(
 @dataclass
 class MjxEnvConfig(BaseEnvConfig):
     # environment configuration options
-    dt: float = xax.field(value=0.004, help="Simulation time step.")
-    ctrl_dt: float = xax.field(value=0.02, help="Control time step.")
     debug_env: bool = xax.field(value=False, help="Whether to enable debug mode for the env.")
 
     # action configuration options
@@ -256,7 +252,7 @@ class MjxEnv(BaseEnv):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
-    ) -> list[tuple[str, float]]:
+    ) -> list[tuple[str, Array]]:
         """Compute rewards (each as a scalar) from the state transition.
 
         ML: we might want to represent rewards as graphs (multiply and sum) or add flags...
@@ -279,7 +275,7 @@ class MjxEnv(BaseEnv):
             rewards.append((reward_name, reward_val))
         return rewards
 
-    def get_terminations(self, new_mjx_data: mjx.Data) -> list[tuple[str, float]]:
+    def get_terminations(self, new_mjx_data: mjx.Data) -> list[tuple[str, Array]]:
         """Compute termination conditions (each as a scalar) from the pipeline state."""
         terminations = []
         for termination_name, termination in self.terminations:
@@ -338,7 +334,7 @@ class MjxEnv(BaseEnv):
         """
         n_steps = self._expected_dt_per_ctrl_dt  # total number of pipeline steps to take.
 
-        def f(carry: Tuple[mjx.Data, int], _: Any) -> Tuple[Tuple[mjx.Data, int], None]:
+        def f(carry: tuple[mjx.Data, int], _: None) -> tuple[tuple[mjx.Data, int], None]:
             state, step_num = carry
 
             action_motor_sees = jax.lax.select(
@@ -399,6 +395,11 @@ class MjxEnv(BaseEnv):
         done_0 = jnp.array(False, dtype=jnp.bool_)
         reward_0 = jnp.array(0.0)
 
+        term_components_0 = {k: v for k, v in self.get_terminations(mjx_data_1)}
+        reward_components_0 = {
+            k: v for k, v in self.get_rewards(action_0, mjx_data_0, command_0, action_0, mjx_data_1)
+        }
+
         return (
             EnvState(
                 obs=obs_0,
@@ -407,6 +408,8 @@ class MjxEnv(BaseEnv):
                 command=command_0,
                 action=action_0,
                 timestep=timestep,
+                termination_components=FrozenDict(term_components_0),
+                reward_components=FrozenDict(reward_components_0),
             ),
             mjx_data_1,
         )
@@ -450,6 +453,9 @@ class MjxEnv(BaseEnv):
         )
         reward_t = jnp.stack([v for _, v in all_rewards]).sum()
 
+        term_components_t = {k: v for k, v in all_dones}
+        reward_components_t = {k: v for k, v in all_rewards}
+
         env_state_t = EnvState(
             obs=obs_t,
             command=command_t,
@@ -457,6 +463,8 @@ class MjxEnv(BaseEnv):
             reward=reward_t,
             done=done_t,
             timestep=timestep,
+            termination_components=FrozenDict(term_components_t),
+            reward_components=FrozenDict(reward_components_t),
         )
 
         return env_state_t, mjx_data_t_plus_1
@@ -490,6 +498,21 @@ class MjxEnv(BaseEnv):
             reward=jnp.ones(()),
             done=jnp.ones(()),
             timestep=jnp.ones(()),
+            termination_components=FrozenDict(
+                {k: jnp.zeros_like(v) for k, v in self.get_terminations(mjx_data_0)}
+            ),
+            reward_components=FrozenDict(
+                {
+                    k: jnp.zeros_like(v)
+                    for k, v in self.get_rewards(
+                        jnp.ones(self.action_size),
+                        mjx_data_0,
+                        command_dummy,
+                        jnp.ones(self.action_size),
+                        mjx_data_0,
+                    )
+                }
+            ),
         )
 
     @legit_jit(static_argnames=["self"])
@@ -499,13 +522,15 @@ class MjxEnv(BaseEnv):
         params: PyTree,
         rng: jax.Array,
         *,
-        mjx_model: mjx.Model,
+        mjx_model: mjx.Model | None = None,
     ) -> EnvState:
         """Pure reset function: returns an initial state computed solely from the inputs.
 
         We couple the step and actor because we couple the actions with the rest of env state. This
         ultimately allows for extremely constrained `EnvState`s, which promote correct RL code.
         """
+        if mjx_model is None:
+            mjx_model = self.default_mjx_model
         state, _ = self.scannable_reset(model=model, params=params, rng=rng, mjx_model=mjx_model)
         return state
 
@@ -517,8 +542,8 @@ class MjxEnv(BaseEnv):
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
         *,
-        mjx_data: mjx.Data,
-        mjx_model: mjx.Model,
+        mjx_data: mjx.Data | None = None,
+        mjx_model: mjx.Model | None = None,
     ) -> EnvState:
         """Stepping the environment in a consistent, JIT-able manner. Works on a single environment.
 
@@ -540,6 +565,10 @@ class MjxEnv(BaseEnv):
             - Rewards are computed.
             - Terminations are computed.
         """
+        if mjx_model is None:
+            mjx_model = self.default_mjx_model
+        if mjx_data is None:
+            mjx_data = self.default_mjx_data
         new_state, _ = self.scannable_step(
             model=model,
             params=params,
@@ -560,7 +589,6 @@ class MjxEnv(BaseEnv):
         num_envs: int,
         *,
         return_data: bool = False,
-        **kwargs: Any,
     ) -> tuple[EnvState, mjx.Data]:
         """Vectorized rollout of trajectories.
 
@@ -569,10 +597,6 @@ class MjxEnv(BaseEnv):
         3. A jax.lax.scan unrolls the trajectory for num_steps.
         4. The resulting trajectory has shape (num_steps, num_envs, ...).
         """
-
-        if return_data:
-            num_envs = 1
-
         init_rngs = jax.random.split(rng, num_envs)
         mjx_model = self.default_mjx_model
         # TODO: include logic to randomize environment parameters here...
@@ -619,12 +643,15 @@ class MjxEnv(BaseEnv):
             return new_state, new_mjx_data
 
         # Create a partially applied version with fixed arguments
-        env_step_partial = lambda state, data, key: env_step(state, data, key)
+        def env_step_partial(
+            state: EnvState, data: mjx.Data, key: Array
+        ) -> tuple[EnvState, mjx.Data]:
+            return env_step(state, data, key)
 
         @legit_jit()
         def scan_fn(
-            carry: Tuple[EnvState, mjx.Data, Array], _: Any
-        ) -> Tuple[Tuple[EnvState, mjx.Data, Array], Tuple[EnvState, mjx.Data]]:
+            carry: tuple[EnvState, mjx.Data, Array], _: None
+        ) -> tuple[tuple[EnvState, mjx.Data, Array], tuple[EnvState, mjx.Data]]:
             states, mjx_data, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
             new_states, new_mjx_data = jax.vmap(env_step_partial)(states, mjx_data, rngs[1:])

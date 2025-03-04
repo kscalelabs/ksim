@@ -8,9 +8,9 @@ import attrs
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import mujoco.mjx as mjx
 import xax
 from jaxtyping import Array
+from mujoco import mjx
 
 from ksim.utils.data import BuilderData
 
@@ -101,7 +101,7 @@ class IllegalContactTermination(Termination):
 
         return jnp.array(significant_contact)
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         """Convert JAX arrays to tuples for hashing."""
         return hash((tuple(self.illegal_geom_idxs), self.contact_eps))
 

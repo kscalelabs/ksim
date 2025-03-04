@@ -67,7 +67,6 @@ class AverageRewardLog(LogMetric):
 
 @attrs.define(frozen=True)
 class ModelUpdateLog(LogMetric):
-
     def __call__(self, logger: xax.Logger, data: LoggingData) -> None:
         for key, value in data.update_metrics.items():
             assert isinstance(value, jnp.ndarray)

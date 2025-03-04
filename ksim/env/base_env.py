@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import jax
 import numpy as np
@@ -11,6 +10,8 @@ import xax
 from jaxtyping import PRNGKeyArray, PyTree
 from omegaconf import MISSING
 
+from ksim.builders.rewards import Reward
+from ksim.builders.terminations import Termination
 from ksim.env.types import EnvState, PhysicsData
 from ksim.model.formulations import ActorCriticModel
 
@@ -26,10 +27,15 @@ class BaseEnvConfig(xax.Config):
     render_height: int = xax.field(value=480, help="The height of the rendered image.")
     render_dir: Path = xax.field(value="render", help="The directory to save rendered images to.")
     viz_action: str = xax.field(value="policy", help="The action to use for visualization.")
+    ctrl_dt: float = xax.field(value=0.02, help="The control time step.")
+    dt: float = xax.field(value=0.004, help="The simulation time step.")
 
 
 class BaseEnv(ABC):
     """Base environment class."""
+
+    rewards: list[tuple[str, Reward]]
+    terminations: list[tuple[str, Termination]]
 
     @abstractmethod
     def get_dummy_env_state(  # exists for compilation purposes
@@ -52,7 +58,6 @@ class BaseEnv(ABC):
         params: PyTree,
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
-        **kwargs: Any,
     ) -> EnvState: ...
 
     @abstractmethod
@@ -63,6 +68,7 @@ class BaseEnv(ABC):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
+        *,
         return_data: bool = False,
     ) -> tuple[EnvState, PhysicsData]: ...
 

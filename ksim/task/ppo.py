@@ -11,6 +11,7 @@ import optax
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PyTree
+from xax.task.mixins.train import Batch, Output
 
 from ksim.env.types import EnvState
 from ksim.model.formulations import ActorCriticModel
@@ -56,11 +57,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     ########################
 
     # TODO from ML eventually we should create
-    def get_init_actor_carry(self) -> Array:
+    def get_init_actor_carry(self) -> Array | None:
         """Get the actor carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
 
-    def get_init_critic_carry(self) -> Array:
+    def get_init_critic_carry(self) -> Array | None:
         """Get the critic carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
 
@@ -149,14 +150,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         return res
 
     @legit_jit(static_argnames=["self", "model"])
-    def compute_loss(
+    def compute_ppo_loss(
         self,
         model: ActorCriticModel,
         params: PyTree,
         env_state_batch: EnvState,
         rollout_time_loss_components: RolloutTimeLossComponents,
     ) -> tuple[Array, FrozenDict[str, Array]]:
-        """Compute the PPO loss (required by XAX)."""
+        """Compute the PPO loss."""
         # get the log probs of the current model
         prediction = self.apply_actor(model, params, env_state_batch.obs, env_state_batch.command)
         log_probs = model.apply(
@@ -205,7 +206,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
         total_loss = -total_objective
 
-        metrics_to_log = FrozenDict(
+        metrics_to_log: FrozenDict[str, Array] = FrozenDict(
             {
                 "policy_objective": policy_objective,
                 "value_objective": value_objective,
@@ -213,7 +214,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 "total_objective": total_objective,
                 "average_ratio": jnp.mean(ratio),
                 "average_log_prob_diff": jnp.mean(log_prob_diff),
-                "average_advantage_norm": jnp.mean(jnp.abs(rollout_time_loss_components.advantages)),
+                "average_advantage_norm": jnp.mean(
+                    jnp.abs(rollout_time_loss_components.advantages)
+                ),
             }
         )
 
@@ -222,6 +225,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             breakpoint()
 
         return total_loss, metrics_to_log
+
+    def compute_loss(self, model: PyTree, batch: Batch, output: Output) -> Array:
+        """Implementation to satisfy the TrainMixin interface.
+
+        In reinforcement learning context, this method is not expected to be called
+        directly by the XAX framework, but we provide an implementation to fulfill
+        the interface requirements.
+        """
+        # For RL tasks, this shouldn't be called by the XAX framework
+        # But we need to provide an implementation with the correct signature
+        raise NotImplementedError(
+            "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
+            "PPO tasks use model_update and _jitted_value_and_grad instead."
+        )
 
     @legit_jit(static_argnames=["self"])
     def _compute_advantages(
@@ -244,7 +261,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # getting td residuals
         deltas = rewards + self.config.gamma * next_values * mask - values
 
-        _, advantages = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1]))
+        _, advantages = jax.lax.scan(
+            scan_fn, jnp.zeros_like(deltas[-1]), (deltas[::-1], mask[::-1])
+        )
         return advantages[::-1]
 
     @legit_jit(static_argnames=["self", "model"])
@@ -258,7 +277,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Jitted version of value_and_grad computation."""
 
         def loss_fn(p: PyTree) -> tuple[Array, FrozenDict[str, Array]]:
-            return self.compute_loss(model, p, env_state_batch, rollout_time_loss_components)
+            return self.compute_ppo_loss(model, p, env_state_batch, rollout_time_loss_components)
 
         (loss_val, metrics), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
         return loss_val, metrics, grads

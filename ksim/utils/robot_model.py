@@ -10,7 +10,6 @@ from kscale import K
 from kscale.web.utils import get_robots_dir, should_refresh_file
 from omegaconf import OmegaConf
 
-from ksim.env.mjx.actuators.base_actuator import BaseActuatorMetadata
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuatorMetadata
 
 logger = logging.getLogger(__name__)
@@ -28,7 +27,7 @@ async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
         urdf_dir = Path(model_name)
         if not urdf_dir.exists():
             raise ValueError(f"Model {model_name} does not exist")
-    except:
+    except ValueError:
         async with K() as api:
             urdf_dir = await api.download_and_extract_urdf(model_name, cache=cache)
 
@@ -47,7 +46,7 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
         if not directory.exists():
             raise ValueError(f"Model {model_name} does not exist")
         metadata_path = directory / "metadata.yaml"
-    except:
+    except ValueError:
         metadata_path = get_robots_dir() / model_name / "metadata.yaml"
 
         # Downloads and caches the metadata if it doesn't exist.
@@ -62,20 +61,20 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
             if (actuators := metadata.joint_name_to_metadata) is None:
                 raise ValueError(f"No actuators found for {model_name}")
 
-            actuator_metadata = {}
+            actuators_metadata = {}
 
-            for name, metadata in actuators.items():
-                if hasattr(metadata, "kp") and hasattr(metadata, "kd"):
-                    actuator_metadata[name] = MITPositionActuatorMetadata(
-                        kp=cast(float, metadata.kp),
-                        kd=cast(float, metadata.kd),
+            for name, actuator_metadata in actuators.items():
+                if hasattr(actuator_metadata, "kp") and hasattr(actuator_metadata, "kd"):
+                    actuators_metadata[name] = MITPositionActuatorMetadata(
+                        kp=cast(float, actuator_metadata.kp),
+                        kd=cast(float, actuator_metadata.kd),
                     )
                 else:
                     raise ValueError(f"Unknown actuator metadata: {metadata}")
 
-            control_frequency = float(control_frequency)
+            control_frequency_float = float(control_frequency)
             model_metadata = ModelMetadata(
-                actuators=actuator_metadata, control_frequency=control_frequency
+                actuators=actuators_metadata, control_frequency=control_frequency_float
             )
             metadata_path.parent.mkdir(parents=True, exist_ok=True)
             OmegaConf.save(model_metadata, metadata_path)

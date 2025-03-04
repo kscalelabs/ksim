@@ -133,9 +133,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @property
     def num_minibatches(self) -> int:
         """The number of minibatches in the dataset."""
-        assert (
-            self.dataset_size % self.config.minibatch_size == 0
-        ), f"Dataset size of {self.dataset_size} must be divisible by minibatch size of {self.config.minibatch_size}."
+        msg = (
+            f"Dataset size of {self.dataset_size} must"
+            f" be divisible by minibatch size of {self.config.minibatch_size}."
+        )
+        assert self.dataset_size % self.config.minibatch_size == 0, msg
         return self.dataset_size // self.config.minibatch_size
 
     ########################
@@ -230,39 +232,26 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             end_time = time.time()
             print(f"Time taken for video creation: {end_time - start_time} seconds")
 
-    def log_state(self, env: BaseEnv) -> None:
+    def log_state(self) -> None:
         super().log_state()
 
         # self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
 
-    def log_trajectory(self, env: BaseEnv, trajectory: EnvState) -> None:
-        for plot_key, img in env.generate_trajectory_plots(trajectory):
-            self.logger.log_image(plot_key, img, namespace="traj")
-
-        frames, fps = env.render_trajectory_video(trajectory)
-        self.logger.log_video("trajectory", frames, fps=fps, namespace="video")
-
     def get_reward_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
         reward_stats: dict[str, jnp.ndarray] = {}
 
-        # Gets the reward statistics.
-        reward = jnp.where(trajectory.done[..., None], jnp.nan, trajectory.info["all_rewards"])
-        for i, (key, _) in enumerate(env.rewards):
-            reward_values = reward[..., i : i + 1].astype(jnp.float32)
-            reward_stats[f"{key}/mean"] = jnp.nanmean(reward_values)
-            reward_stats[f"{key}/std"] = jnp.nanstd(reward_values)
+        terms = trajectory.reward_components
+        for key, _ in env.rewards:
+            reward_stats[key] = terms[key].mean()
 
         return reward_stats
 
     def get_termination_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
         termination_stats: dict[str, jnp.ndarray] = {}
 
-        # Gets the termination statistics.
-        termination = trajectory.info["all_dones"].max(axis=-2).astype(jnp.float32)
-        termination = termination.reshape(-1, termination.shape[-1])
-        max_ids = termination.argmax(axis=-1)
-        for i, (key, _) in enumerate(env.terminations):
-            termination_stats[key] = (max_ids == i).astype(jnp.float32).mean()
+        terms = trajectory.termination_components
+        for key, _ in env.terminations:
+            termination_stats[key] = terms[key].mean()
 
         return termination_stats
 
@@ -275,7 +264,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Logs the mean episode length.
         mean_episode_length_steps = (~trajectory.done).sum(axis=-1).astype(jnp.float32).mean()
         mean_episode_length_seconds = mean_episode_length_steps * self.config.ctrl_dt
-        self.logger.log_scalar("mean_episode_length", mean_episode_length_seconds, namespace="stats")
+        self.logger.log_scalar(
+            "mean_episode_length", mean_episode_length_seconds, namespace="stats"
+        )
 
     ########################
     # Training and Running #
@@ -320,7 +311,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         To avoid confusion, batch comprises 1 or more unrolled trajectory states stacked
         along the first axis, and minibatches are sampled from this batch.
         """
-
         # TODO: implement logic to handle randomize model initialization when creating batch
         rollout, _ = env.unroll_trajectories(
             model=model,
@@ -355,7 +345,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         permutation = jax.random.choice(rng, jnp.arange(batch_size), (batch_size,))
 
         # Apply permutation to rollout dataset
-        def permute_array(x):
+        def permute_array(x: Array) -> Array:
             # Handle arrays with proper shape checking
             if x.shape[0] == batch_size:
                 return x[permutation]
@@ -384,13 +374,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         return minibatched_rollout, minibatched_rollout_time_loss_components
 
-    def train_loop(
+    def rl_train_loop(
         self,
         model: ActorCriticModel,
-        params: PyTree,
-        env: BaseEnv,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
+        params: PyTree,
+        env: BaseEnv,
         training_state: xax.State,
     ) -> None:
         """Runs the main RL training loop."""
@@ -418,9 +408,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
                 reshuffle_rng, _ = jax.random.split(reshuffle_rng)
                 for minibatch_idx in range(self.num_minibatches):
-                    minibatch_idx = jnp.array(minibatch_idx)  # TODO: scanning will do this anyways
+                    minibatch_idx_array = jnp.array(
+                        minibatch_idx
+                    )  # TODO: scanning will do this anyways
                     minibatch, rollout_time_minibatch_loss_components = self.get_minibatch(
-                        trajectories_dataset, rollout_time_loss_components, minibatch_idx
+                        trajectories_dataset, rollout_time_loss_components, minibatch_idx_array
                     )
                     with self.step_context("update_state"):
                         params, opt_state, loss_val, metrics = self.model_update(
@@ -475,7 +467,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             env = self.get_environment()
 
             if xax.is_master():
-                Thread(target=self.log_state, daemon=True, args=(env,)).start()
+                Thread(target=self.log_state, daemon=True).start()
 
             key, model_key = jax.random.split(key)
             model, optimizer, opt_state, training_state = self.load_initial_state(model_key)
@@ -492,7 +484,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             opt_state = optimizer.init(params)
 
             try:
-                self.train_loop(
+                self.rl_train_loop(
                     model=model,
                     params=params,
                     env=env,
