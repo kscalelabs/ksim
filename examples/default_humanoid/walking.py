@@ -15,7 +15,6 @@ from ksim.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,
-    BasePositionObservation,
     JointPositionObservation,
     JointVelocityObservation,
 )
@@ -29,10 +28,7 @@ from ksim.builders.rewards import (
     TrackLinearVelocityXYReward,
     HeightReward,
 )
-from ksim.builders.terminations import (
-    IllegalContactTerminationBuilder,
-    MinimumHeightTermination,
-)
+from ksim.builders.terminations import MinimumHeightTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActorCriticModel, GaussianActionModel
 from ksim.model.mlp import MLP
