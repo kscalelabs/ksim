@@ -75,7 +75,7 @@ class MinimumHeightTermination(Termination):
 
     min_height: float
 
-    @legit_jit()
+    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data) -> Array:
         return state.qpos[2] < self.min_height
 

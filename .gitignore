@@ -19,6 +19,7 @@ build/
 dist/
 *.so
 out*/
+.DS_STORE
 
 # Development related files.
 scratch/
