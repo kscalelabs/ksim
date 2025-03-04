@@ -206,7 +206,6 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 ),
             ],
             observations=[
-                BasePositionObservation(noise_type="gaussian", noise=0.01),
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
                 BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
                 BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),

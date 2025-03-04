@@ -46,7 +46,7 @@ class PitchTooGreatTermination(Termination):
 
     max_pitch: float
 
-    @legit_jit()
+    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data) -> Array:
         quat = state.qpos[3:7]
         pitch = jnp.arctan2(
@@ -61,7 +61,7 @@ class RollTooGreatTermination(Termination):
 
     max_roll: float
 
-    @legit_jit()
+    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data) -> Array:
         quat = state.qpos[3:7]
         roll = jnp.arctan2(
@@ -76,7 +76,7 @@ class MinimumHeightTermination(Termination):
 
     min_height: float
 
-    @legit_jit()
+    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data) -> Array:
         return state.qpos[2] < self.min_height
 

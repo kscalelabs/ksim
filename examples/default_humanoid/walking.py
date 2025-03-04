@@ -37,7 +37,6 @@ from ksim.model.formulations import ActorCriticModel, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_INPUTS = 24
 NUM_OUTPUTS = 17
 
 
@@ -49,7 +48,6 @@ class HumanoidActorModel(GaussianActionModel):
         cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
         x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
         actions_n = self.mlp(x_n)
-
         return actions_n
 
 
@@ -134,7 +132,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 ),
             ],
             observations=[
-                BasePositionObservation(noise_type="gaussian", noise=0.01),
+                # BasePositionObservation(noise_type="gaussian", noise=0.01),
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
                 BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
                 BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
