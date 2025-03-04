@@ -100,6 +100,27 @@ class RewardBuilder(ABC, Generic[T]):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class HeightReward(Reward):
+    """Reward for how high the robot is."""
+
+    height_target: float = attrs.field(default=1.4)
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        height = mjx_data_t_plus_1.qpos[2]
+        reward = jnp.exp(-jnp.abs(height - self.height_target) * 50)
+        # jax.debug.print("height: {height}", height=height)
+        # jax.debug.print("reward: {reward}", reward=reward)
+        return reward
+
+
+@attrs.define(frozen=True, kw_only=True)
 class LinearVelocityZPenalty(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 

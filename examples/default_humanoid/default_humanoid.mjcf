@@ -45,7 +45,7 @@
             <geom fromto="-.01 -.06 -.12 -.01 .06 -.12" name="uwaist" size="0.06" type="capsule"/>
             <body name="lwaist" pos="-.01 0 -0.260" quat="1.000 0 -0.002 0">
                 <geom fromto="0 -.06 0 0 .06 0" name="lwaist" size="0.06" type="capsule"/>
-                <joint armature="0.02" axis="0 0 1" damping="5" name="abdomen_z" pos="0 0 0.065" range="-90 90" stiffness="20" type="hinge"/>
+                <joint armature="0.02" axis="0 0 1" damping="5" name="abdomen_z" pos="0 0 0.065" range="-45 45" stiffness="20" type="hinge"/>
                 <joint armature="0.02" axis="0 1 0" damping="5" name="abdomen_y" pos="0 0 0.065" range="-75 30" stiffness="10" type="hinge"/>
                 <body name="pelvis" pos="0 0 -0.165" quat="1.000 0 -0.002 0">
                     <joint armature="0.02" axis="1 0 0" damping="5" name="abdomen_x" pos="0 0 0.1" range="-35 35" stiffness="10" type="hinge"/>

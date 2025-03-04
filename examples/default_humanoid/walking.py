@@ -23,6 +23,7 @@ from ksim.builders.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
     FootContactPenaltyBuilder,
+    HeightReward,
     LinearVelocityZPenalty,
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
@@ -33,7 +34,6 @@ from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_INPUTS = 24
 NUM_OUTPUTS = 17
 
 
@@ -45,7 +45,6 @@ class HumanoidActorModel(GaussianActionModel):
         cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
         x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
         actions_n = self.mlp(x_n)
-
         return actions_n
 
 
@@ -85,34 +84,38 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                MinimumHeightTermination(min_height=0.5),
+                MinimumHeightTermination(min_height=0.4),
             ],
             resets=[
                 XYPositionResetBuilder(),
             ],
             rewards=[
-                LinearVelocityZPenalty(scale=-0.1),
-                AngularVelocityXYPenalty(scale=-0.1),
-                TrackLinearVelocityXYReward(scale=0.1),
-                TrackAngularVelocityZReward(scale=0.1),
-                ActionSmoothnessPenalty(scale=-0.1),
-                FootContactPenaltyBuilder(
-                    scale=-0.1,
-                    foot_body_names=["KB_D_501R_R_LEG_FOOT"],
-                    allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
-                ),
-                FootContactPenaltyBuilder(
-                    scale=-0.1,
-                    foot_body_names=["KB_D_501L_L_LEG_FOOT"],
-                    allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
+                # LinearVelocityZPenalty(scale=-0.1),
+                # AngularVelocityXYPenalty(scale=-0.1),
+                # TrackLinearVelocityXYReward(scale=0.1),
+                # TrackAngularVelocityZReward(scale=0.1),
+                # FootContactPenaltyBuilder(
+                #     scale=-0.1,
+                #     foot_body_names=["KB_D_501R_R_LEG_FOOT"],
+                #     allowed_contact_prct=0.7,
+                #     skip_if_zero_command=[
+                #         "linear_velocity_command",
+                #         "angular_velocity_command",
+                #     ],
+                # ),
+                # FootContactPenaltyBuilder(
+                #     scale=-0.1,
+                #     foot_body_names=["KB_D_501L_L_LEG_FOOT"],
+                #     allowed_contact_prct=0.7,
+                #     skip_if_zero_command=[
+                #         "linear_velocity_command",
+                #         "angular_velocity_command",
+                #     ],
+                # ),
+                # ActionSmoothnessPenalty(scale=-0.1),
+                HeightReward(
+                    scale=0.2,
+                    height_target=1.4,
                 ),
             ],
             observations=[

@@ -52,7 +52,6 @@ def step_mjx(
     ctrl: Array,
 ) -> mjx.Data:
     """Step the mujoco model."""
-    ctrl = jnp.zeros_like(ctrl)
     data_with_ctrl = mjx_data.replace(ctrl=ctrl)
     return mjx.step(mjx_model, data_with_ctrl)
 
@@ -146,8 +145,8 @@ class MjxEnvConfig(BaseEnvConfig):
     max_action_latency: float = xax.field(value=0.0, help="The maximum action latency.")
 
     # solver configuration options
-    solver_iterations: int = xax.field(value=6, help="Number of main solver iterations.")
-    solver_ls_iterations: int = xax.field(value=6, help="Number of line search iterations.")
+    solver_iterations: int = xax.field(value=1, help="Number of main solver iterations.")
+    solver_ls_iterations: int = xax.field(value=4, help="Number of line search iterations.")
 
     # simulation artifact options
     ignore_cached_urdf: bool = xax.field(value=False, help="Whether to ignore the cached URDF.")
@@ -198,11 +197,7 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        # scenes_mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
-        # mj_model = scenes_mj_model
-        # x = validate_model(mj_model)
-        # scenes_mj_model.geom_priority
-        # mj_model.geom_priority
+        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
         # pfb30: remove that
         mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
         mj_model = self.override_model_settings(mj_model)
@@ -248,10 +243,12 @@ class MjxEnv(BaseEnv):
     ###################
 
     def override_model_settings(self, mj_model: mujoco.MjModel):
+        """Override default sim settings."""
+        # pfb30 following brax setup for now
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
         mj_model.opt.disableflags = mujoco.mjtDisableBit.mjDSBL_EULERDAMP
-        mj_model.opt.iterations = 1
-        mj_model.opt.ls_iterations = 4
+        mj_model.opt.iterations = self.config.solver_iterations
+        mj_model.opt.ls_iterations = self.config.solver_ls_iterations
         mj_model.opt.timestep = self.config.dt
         return mj_model
 
@@ -570,7 +567,7 @@ class MjxEnv(BaseEnv):
         )
         return new_state
 
-    # @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs", "return_data"])
+    @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs", "return_data"])
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
@@ -607,7 +604,7 @@ class MjxEnv(BaseEnv):
         rng, _ = jax.random.split(rng)
 
         # Define env_step as a pure function with all dependencies passed explicitly
-        # @legit_jit()
+        @legit_jit()
         def env_step(
             env_state: EnvState,
             mjx_data: mjx.Data,
@@ -642,7 +639,7 @@ class MjxEnv(BaseEnv):
         # Create a partially applied version with fixed arguments
         env_step_partial = lambda state, data, key: env_step(state, data, key)
 
-        # @legit_jit()
+        @legit_jit()
         def scan_fn(
             carry: Tuple[EnvState, mjx.Data, Array], _: Any
         ) -> Tuple[Tuple[EnvState, mjx.Data, Array], Tuple[EnvState, mjx.Data]]:
