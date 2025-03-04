@@ -246,8 +246,8 @@ class MjxEnv(BaseEnv):
         # pfb30 following brax setup for now
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
         mj_model.opt.disableflags = mujoco.mjtDisableBit.mjDSBL_EULERDAMP
-        mj_model.opt.iterations = 1
-        mj_model.opt.ls_iterations = 4
+        mj_model.opt.iterations = 6
+        mj_model.opt.ls_iterations = 6
         mj_model.opt.timestep = self.config.dt
         return mj_model
 
