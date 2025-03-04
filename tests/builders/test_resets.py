@@ -1,0 +1,106 @@
+"""Tests for reset builders in the ksim package."""
+
+from typing import Any, Dict
+
+import pytest
+import chex
+import jax
+import jax.numpy as jnp
+from jaxtyping import Array
+
+from ksim.builders.resets import (
+    Reset,
+    XYPositionResetBuilder,
+)
+from ksim.utils.data import BuilderData, MujocoMappings
+
+
+class DummyReset(Reset):
+    """Dummy reset for testing."""
+
+    def __call__(self, data: Any, rng: jax.Array) -> Dict[str, Array]:
+        return {"qpos": jnp.zeros((3,))}
+
+
+class DummyMjxData:
+    """Mock mjx.Data for testing."""
+
+    def __init__(self) -> None:
+        self.qpos = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+        self.model = DummyModel()
+        
+    def replace(self, **kwargs: Any) -> 'DummyMjxData':
+        """Mimics the behavior of mjx.Data.replace."""
+        new_data = DummyMjxData()
+        for key, value in kwargs.items():
+            setattr(new_data, key, value)
+        return new_data
+
+
+class DummyModel:
+    """Mock mjx.Model for testing."""
+
+    def __init__(self) -> None:
+        self.nq = 7
+        self.hfield_nrow = 10
+        self.hfield_ncol = 10
+        self.hfield_size = jnp.array([[1.0, 1.0, 0.1, 0.1]])
+        self.hfield_data = jnp.zeros((10, 10))
+
+
+def test_reset_name() -> None:
+    """Test that reset names are correctly generated."""
+    reset = DummyReset()
+    assert reset.get_name() == "dummy_reset"
+    assert reset.reset_name == "dummy_reset"
+
+
+class TestXYPositionResetBuilder:
+    """Tests for the XYPositionResetBuilder class."""
+
+    @pytest.fixture
+    def builder_data(self) -> BuilderData:
+        """Return a builder data object."""
+        mappings = MujocoMappings(
+            sensor_name_to_idx_range={},
+            qpos_name_to_idx_range={},
+            qvelacc_name_to_idx_range={},
+            ctrl_name_to_idx={},
+            geom_idx_to_body_name={},
+        )
+        return BuilderData(
+            model=DummyModel(),
+            dt=0.004,
+            ctrl_dt=0.02,
+            mujoco_mappings=mappings,
+        )
+
+    @pytest.fixture
+    def rng(self) -> jax.Array:
+        """Return a random number generator key."""
+        return jax.random.PRNGKey(0)
+
+    def test_xy_position_reset_builder(self, builder_data: BuilderData) -> None:
+        """Test that the XYPositionResetBuilder creates a reset function."""
+        builder = XYPositionResetBuilder()
+        reset = builder(builder_data)
+        assert reset.reset_name == "xyposition_reset"
+
+    def test_xy_position_reset(self, builder_data: BuilderData, rng: jax.Array) -> None:
+        """Test that the XYPositionReset resets the XY position."""
+        builder = XYPositionResetBuilder()
+        reset = builder(builder_data)
+        data = DummyMjxData()
+        result = reset(data, rng)
+        
+        # Check that the result is a DummyMjxData object
+        assert isinstance(result, DummyMjxData)
+        
+        # Check that the qpos has the right shape
+        assert result.qpos.shape == (7,)
+        
+        # Check that the XY position is reset (first two elements)
+        assert jnp.allclose(result.qpos[0:2], jnp.zeros(2))
+        
+        # Check that the rest of qpos is unchanged
+        assert jnp.allclose(result.qpos[2:], data.qpos[2:]) 

@@ -189,11 +189,10 @@ class ActionSmoothnessPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        normed_action_smoothness = get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1)
-        return jax.lax.select(
+        return jax.lax.cond(
             action_t_minus_1 is None,
-            jnp.zeros_like(normed_action_smoothness),
-            normed_action_smoothness,
+            lambda: jnp.zeros_like(get_norm(action_t, self.norm).sum(axis=-1)),
+            lambda: get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1),
         )
 
 
