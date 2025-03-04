@@ -26,7 +26,7 @@ EPSILON = 1e-5
 class PPOConfig(RLConfig):
     # For the CLIP term (see Schulman et al. 2017)
     clip_param: float = xax.field(value=0.2, help="Clipping parameter for PPO.")
-    normalize_advantage: bool = xax.field(value=True, help="Whether to normalize advantages.")
+    normalize_advantage: bool = xax.field(value=False, help="Whether to normalize advantages.")
 
     # For the Value Function (VF) term
     value_loss_coef: float = xax.field(value=1.0, help="Value loss coefficient for PPO.")
@@ -254,8 +254,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 "entropy_objective": entropy_objective,
                 "total_objective": total_objective,
                 "average_ratio": jnp.mean(ratio),
-                "average_log_prob_diff": jnp.mean(log_prob_diff),
-                "average_advantage_norm": jnp.mean(jnp.abs(rollout_time_loss_components.advantages)),
+                "log_prob_diff_mean": jnp.mean(log_prob_diff),
+                "advantage_norm_mean": jnp.mean(jnp.abs(rollout_time_loss_components.advantages)),
+                "prediction_std": jnp.std(prediction),
+                "prediction_mean": jnp.mean(prediction),
+                "log_prob_mean": jnp.mean(log_probs),
+                "values_std": jnp.std(values),
+                "values_mean": jnp.mean(values),
             }
         )
 

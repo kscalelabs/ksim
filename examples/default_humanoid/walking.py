@@ -117,7 +117,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 ),
             ],
             observations=[
-                BasePositionObservation(noise_type="gaussian", noise=0.01),
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
                 BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
                 BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
@@ -171,8 +170,9 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking action=train
     HumanoidWalkingTask.launch(
         HumanoidWalkingConfig(
-            num_envs=32,
-            num_steps_per_trajectory=500,
-            minibatch_size=500 * 4,
+            num_envs=2048,
+            num_steps_per_trajectory=600,
+            minibatch_size=2048,
+            num_learning_epochs=10,
         ),
     )

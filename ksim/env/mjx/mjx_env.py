@@ -344,8 +344,8 @@ class MjxEnv(BaseEnv):
             action_motor_sees = jax.lax.select(
                 step_num >= num_latency_steps, current_action, previous_action
             )
-            torques = self.actuators.get_ctrl(state, action_motor_sees)
-
+            # torques = self.actuators.get_ctrl(state, action_motor_sees)
+            torques = action_motor_sees
             # NOTE: can extend state to include anything from `mjx.Data` here...
             new_state = step_mjx(mjx_model, state, torques)
             return (new_state, step_num + 1), None
