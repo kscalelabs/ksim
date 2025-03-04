@@ -240,7 +240,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_reward_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
         reward_stats: dict[str, jnp.ndarray] = {}
 
-        terms = trajectory.reward_terms
+        terms = trajectory.reward_components
         for key, _ in env.rewards:
             reward_stats[key] = terms[key].mean()
 
@@ -249,7 +249,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_termination_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
         termination_stats: dict[str, jnp.ndarray] = {}
 
-        terms = trajectory.term_terms
+        terms = trajectory.termination_components
         for key, _ in env.terminations:
             termination_stats[key] = terms[key].mean()
 

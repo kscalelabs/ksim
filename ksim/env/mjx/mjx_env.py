@@ -395,8 +395,8 @@ class MjxEnv(BaseEnv):
         done_0 = jnp.array(False, dtype=jnp.bool_)
         reward_0 = jnp.array(0.0)
 
-        term_terms_0 = {k: v for k, v in self.get_terminations(mjx_data_1)}
-        reward_terms_0 = {
+        term_components_0 = {k: v for k, v in self.get_terminations(mjx_data_1)}
+        reward_components_0 = {
             k: v for k, v in self.get_rewards(action_0, mjx_data_0, command_0, action_0, mjx_data_1)
         }
 
@@ -408,8 +408,8 @@ class MjxEnv(BaseEnv):
                 command=command_0,
                 action=action_0,
                 timestep=timestep,
-                term_terms=FrozenDict(term_terms_0),
-                reward_terms=FrozenDict(reward_terms_0),
+                termination_components=FrozenDict(term_components_0),
+                reward_components=FrozenDict(reward_components_0),
             ),
             mjx_data_1,
         )
@@ -453,8 +453,8 @@ class MjxEnv(BaseEnv):
         )
         reward_t = jnp.stack([v for _, v in all_rewards]).sum()
 
-        term_terms_t = {k: v for k, v in all_dones}
-        reward_terms_t = {k: v for k, v in all_rewards}
+        term_components_t = {k: v for k, v in all_dones}
+        reward_components_t = {k: v for k, v in all_rewards}
 
         env_state_t = EnvState(
             obs=obs_t,
@@ -463,8 +463,8 @@ class MjxEnv(BaseEnv):
             reward=reward_t,
             done=done_t,
             timestep=timestep,
-            term_terms=FrozenDict(term_terms_t),
-            reward_terms=FrozenDict(reward_terms_t),
+            termination_components=FrozenDict(term_components_t),
+            reward_components=FrozenDict(reward_components_t),
         )
 
         return env_state_t, mjx_data_t_plus_1
@@ -498,10 +498,10 @@ class MjxEnv(BaseEnv):
             reward=jnp.ones(()),
             done=jnp.ones(()),
             timestep=jnp.ones(()),
-            term_terms=FrozenDict(
+            termination_components=FrozenDict(
                 {k: jnp.zeros_like(v) for k, v in self.get_terminations(mjx_data_0)}
             ),
-            reward_terms=FrozenDict(
+            reward_components=FrozenDict(
                 {
                     k: jnp.zeros_like(v)
                     for k, v in self.get_rewards(

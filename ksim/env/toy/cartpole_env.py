@@ -37,8 +37,8 @@ class CartPoleEnv(BaseEnv):
             command=FrozenDict({}),
             action=jnp.zeros((self.action_size,)),
             timestep=jnp.array(0.0),
-            term_terms=FrozenDict({}),
-            reward_terms=FrozenDict({}),
+            termination_components=FrozenDict({}),
+            reward_components=FrozenDict({}),
         )
 
     def reset(self, model: ActorCriticModel, params: PyTree, rng: PRNGKeyArray) -> EnvState:
@@ -117,8 +117,8 @@ class CartPoleEnv(BaseEnv):
                 command=FrozenDict({}),
                 action=actions,
                 timestep=jnp.arange(num_steps)[None],
-                term_terms=FrozenDict({}),
-                reward_terms=FrozenDict({}),
+                termination_components=FrozenDict({}),
+                reward_components=FrozenDict({}),
             ),
             None,
         )
@@ -155,8 +155,8 @@ class CartPoleEnv(BaseEnv):
             command=command,
             action=action_0,
             timestep=jnp.array(0.0)[None],
-            term_terms=FrozenDict({}),
-            reward_terms=FrozenDict({}),
+            termination_components=FrozenDict({}),
+            reward_components=FrozenDict({}),
         )
         return env_state_0, gym_obs_1
 
@@ -190,8 +190,8 @@ class CartPoleEnv(BaseEnv):
             command=command,
             action=action,
             timestep=prev_env_state.timestep + 1.0,
-            term_terms=FrozenDict({}),
-            reward_terms=FrozenDict({}),
+            termination_components=FrozenDict({}),
+            reward_components=FrozenDict({}),
         )
 
         return current_env_state, gym_obs
