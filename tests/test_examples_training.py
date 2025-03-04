@@ -48,8 +48,14 @@ def test_default_humanoid_training() -> None:
     assert states.obs is not None
     assert states.reward is not None
     assert states.done is not None
-    assert states.reward.shape == (config.num_steps_per_trajectory, config.num_envs)  # Shape is (num_steps, num_envs)
-    assert states.done.shape == (config.num_steps_per_trajectory, config.num_envs)  # Shape is (num_steps, num_envs)
+    assert states.reward.shape == (
+        config.num_steps_per_trajectory,
+        config.num_envs,
+    )  # Shape is (num_steps, num_envs)
+    assert states.done.shape == (
+        config.num_steps_per_trajectory,
+        config.num_envs,
+    )  # Shape is (num_steps, num_envs)
 
     # Test a single model update
     # Get optimizer
