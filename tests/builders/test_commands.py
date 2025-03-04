@@ -1,9 +1,10 @@
 """Tests for command builders in the ksim package."""
 
-import pytest
+import chex
 import jax
 import jax.numpy as jnp
-import chex
+import pytest
+from jaxtyping import Array
 
 from ksim.builders.commands import (
     AngularVelocityCommand,
@@ -15,7 +16,7 @@ _TOL = 1e-4
 
 
 class DummyCommand(Command):
-    def __call__(self, rng: jax.Array) -> jnp.ndarray:
+    def __call__(self, rng: jax.Array, time: Array) -> jnp.ndarray:
         return jnp.zeros((1,))
 
 
@@ -149,4 +150,4 @@ class TestAngularVelocityCommand:
         time = jnp.array(0.0)
 
         result = cmd.update(prev_command, rng, time)
-        assert not jnp.array_equal(result, prev_command) 
+        assert not jnp.array_equal(result, prev_command)

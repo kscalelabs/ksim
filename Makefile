@@ -49,9 +49,9 @@ format:
 .PHONY: format
 
 static-checks:
-	@black --diff --check $(py-files-no-tests)
-	@ruff check $(py-files-no-tests)
-	@mypy --install-types --non-interactive $(py-files-no-tests)
+	@black --diff --check $(py-files)
+	@ruff check $(py-files)
+	@mypy --install-types --non-interactive $(py-files)
 .PHONY: lint
 
 # ------------------------ #

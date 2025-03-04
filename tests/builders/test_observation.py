@@ -1,12 +1,13 @@
 """Tests for observation builders in the ksim package."""
 
 import unittest
-from typing import Any
+from typing import Literal
 
 import chex
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array
+from jaxtyping import Array, PRNGKeyArray
+from mujoco import mjx
 
 from ksim.builders.observation import (
     BaseAngularVelocityObservation,
@@ -25,7 +26,7 @@ _TOL = 1e-4
 
 
 class DummyObservation(Observation):
-    def __call__(self, state: Any, rng: jax.Array) -> Array:
+    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         return jnp.zeros((3,))
 
 
@@ -36,31 +37,24 @@ class DummyMjxData:
         self._qpos = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0])
         self._qvel = jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
         self._sensordata = jnp.array([10.0, 11.0, 12.0, 13.0, 14.0])
-    
+
     @property
     def qpos(self) -> Array:
         return self._qpos
-    
+
     @property
     def qvel(self) -> Array:
         return self._qvel
-    
+
     @property
     def sensordata(self) -> Array:
         return self._sensordata
-        
-    def replace(self, **kwargs: Any) -> 'DummyMjxData':
+
+    def replace(self, **kwargs: dict[str, Array]) -> "DummyMjxData":
         """Mimics the behavior of mjx.Data.replace."""
         new_data = DummyMjxData()
         for key, value in kwargs.items():
-            if key == 'qpos':
-                new_data._qpos = value
-            elif key == 'qvel':
-                new_data._qvel = value
-            elif key == 'sensordata':
-                new_data._sensordata = value
-            else:
-                setattr(new_data, key, value)
+            setattr(new_data, f"_{key}", value)
         return new_data
 
 
@@ -134,7 +128,8 @@ class BaseObservationTest(chex.TestCase):
     def test_invalid_noise_type(self) -> None:
         # Test that an invalid noise type raises an error
         rng = jax.random.PRNGKey(0)
-        obs = DummyObservation(noise=1.0, noise_type="invalid_type")  # type: ignore
+        # Using a string literal that's not a valid noise type
+        obs = DummyObservation(noise=1.0, noise_type="invalid_type")  # type: ignore[arg-type]
         clean_data = jnp.zeros((3,))
 
         with self.assertRaises(ValueError):
@@ -339,7 +334,7 @@ class SensorObservationBuilderTest(chex.TestCase):
     def test_builder_noise_parameters(self) -> None:
         # Test that noise parameters are correctly passed through the builder
         noise_value = 2.5
-        noise_type = "uniform"
+        noise_type: Literal["gaussian", "uniform"] = "uniform"
 
         builder = SensorObservationBuilder(
             sensor_name="imu_sensor",
@@ -354,4 +349,4 @@ class SensorObservationBuilderTest(chex.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main() 
+    unittest.main()

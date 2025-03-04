@@ -1,12 +1,12 @@
 """Tests for reset builders in the ksim package."""
 
-from typing import Any, Dict
+from typing import Dict
 
-import pytest
-import chex
 import jax
 import jax.numpy as jnp
+import pytest
 from jaxtyping import Array
+from mujoco import mjx
 
 from ksim.builders.resets import (
     Reset,
@@ -18,7 +18,7 @@ from ksim.utils.data import BuilderData, MujocoMappings
 class DummyReset(Reset):
     """Dummy reset for testing."""
 
-    def __call__(self, data: Any, rng: jax.Array) -> Dict[str, Array]:
+    def __call__(self, data: mjx.Data, rng: jax.Array) -> Dict[str, Array]:
         return {"qpos": jnp.zeros((3,))}
 
 
@@ -28,8 +28,8 @@ class DummyMjxData:
     def __init__(self) -> None:
         self.qpos = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
         self.model = DummyModel()
-        
-    def replace(self, **kwargs: Any) -> 'DummyMjxData':
+
+    def replace(self, **kwargs: dict[str, Array]) -> "DummyMjxData":
         """Mimics the behavior of mjx.Data.replace."""
         new_data = DummyMjxData()
         for key, value in kwargs.items():
@@ -92,15 +92,15 @@ class TestXYPositionResetBuilder:
         reset = builder(builder_data)
         data = DummyMjxData()
         result = reset(data, rng)
-        
+
         # Check that the result is a DummyMjxData object
         assert isinstance(result, DummyMjxData)
-        
+
         # Check that the qpos has the right shape
         assert result.qpos.shape == (7,)
-        
+
         # Check that the XY position is reset (first two elements)
         assert jnp.allclose(result.qpos[0:2], jnp.zeros(2))
-        
+
         # Check that the rest of qpos is unchanged
-        assert jnp.allclose(result.qpos[2:], data.qpos[2:]) 
+        assert jnp.allclose(result.qpos[2:], data.qpos[2:])

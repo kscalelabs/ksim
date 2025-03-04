@@ -1,11 +1,7 @@
 """Tests for termination builders in the ksim package."""
 
-from typing import Any, Dict, List
-
-import pytest
-import chex
-import jax
 import jax.numpy as jnp
+import pytest
 from jaxtyping import Array
 from mujoco import mjx
 
@@ -16,7 +12,6 @@ from ksim.builders.terminations import (
     PitchTooGreatTermination,
     RollTooGreatTermination,
     Termination,
-    TerminationBuilder,
 )
 from ksim.utils.data import BuilderData, MujocoMappings
 
@@ -28,19 +23,27 @@ class DummyTermination(Termination):
         return jnp.zeros((1,), dtype=jnp.bool_)
 
 
+class DummyContact:
+    """Mock contact data for testing."""
+
+    geom1: Array = jnp.array([0, 2])
+    geom2: Array = jnp.array([1, 3])
+    dist: Array = jnp.array([-0.01, -0.02])
+
+
 class DummyMjxData:
     """Mock mjx.Data for testing."""
 
-    def __init__(self, has_contact=True):
+    def __init__(self, has_contact: bool = True) -> None:
         self._has_contact = has_contact
         self._qpos = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0])
 
     @property
     def qpos(self) -> Array:
         return self._qpos
-    
+
     @qpos.setter
-    def qpos(self, value):
+    def qpos(self, value: Array) -> None:
         self._qpos = value
 
     @property
@@ -48,12 +51,7 @@ class DummyMjxData:
         return 2 if self._has_contact else 0
 
     @property
-    def contact(self):
-        class DummyContact:
-            geom1 = jnp.array([0, 2])
-            geom2 = jnp.array([1, 3])
-            dist = jnp.array([-0.01, -0.02])
-
+    def contact(self) -> DummyContact:
         return DummyContact()
 
 
@@ -70,12 +68,12 @@ class TestPitchTooGreatTermination:
     def test_pitch_too_great_termination(self) -> None:
         """Test that the PitchTooGreatTermination terminates when pitch exceeds the max."""
         data = DummyMjxData()
-        
+
         # With a small max_pitch, should terminate
         term = PitchTooGreatTermination(max_pitch=0.1)
         result = term(data)
         assert result.item()
-        
+
         # With a large max_pitch, should not terminate
         term = PitchTooGreatTermination(max_pitch=10.0)
         result = term(data)
@@ -88,12 +86,12 @@ class TestRollTooGreatTermination:
     def test_roll_too_great_termination(self) -> None:
         """Test that the RollTooGreatTermination terminates when roll exceeds the max."""
         data = DummyMjxData()
-        
+
         # With a small max_roll, should terminate
         term = RollTooGreatTermination(max_roll=0.1)
         result = term(data)
         assert result.item()
-        
+
         # With a large max_roll, should not terminate
         term = RollTooGreatTermination(max_roll=10.0)
         result = term(data)
@@ -111,7 +109,7 @@ class TestMinimumHeightTermination:
         term = MinimumHeightTermination(min_height=4.0)
         result = term(data)
         assert result.item()
-        
+
         # With min_height below the current height, should not terminate
         term = MinimumHeightTermination(min_height=2.0)
         result = term(data)
@@ -128,12 +126,12 @@ class TestIllegalContactTermination:
         term = IllegalContactTermination(illegal_geom_idxs=jnp.array([0, 3]))
         result = term(data)
         assert result.item()
-        
+
         # Test with no illegal contacts
         term = IllegalContactTermination(illegal_geom_idxs=jnp.array([4, 5]))
         result = term(data)
         assert not result.item()
-        
+
         # Test with no contacts at all
         data_no_contact = DummyMjxData(has_contact=False)
         term = IllegalContactTermination(illegal_geom_idxs=jnp.array([0, 1]))
@@ -174,4 +172,4 @@ class TestIllegalContactTerminationBuilder:
         builder = IllegalContactTerminationBuilder(body_names=body_names)
         term = builder(builder_data)
         assert term.termination_name == "illegal_contact_termination"
-        assert jnp.array_equal(term.illegal_geom_idxs, jnp.array([0, 1])) 
+        assert jnp.array_equal(term.illegal_geom_idxs, jnp.array([0, 1]))

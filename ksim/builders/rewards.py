@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from typing import Generic, Literal, TypeVar
 
 import attrs
-import jax
 import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
@@ -189,11 +188,12 @@ class ActionSmoothnessPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return jax.lax.cond(
-            action_t_minus_1 is None,
-            lambda: jnp.zeros_like(get_norm(action_t, self.norm).sum(axis=-1)),
-            lambda: get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1),
-        )
+        # During tracing, both branches of jax.lax.cond are evaluated, so
+        # we need to handle the case where action_t_minus_1 is None.
+        # This only works if action_t_minus_1 is statically None or not None.
+        if action_t_minus_1 is None:
+            return jnp.zeros_like(get_norm(action_t, self.norm).sum(axis=-1))
+        return get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
