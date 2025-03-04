@@ -54,19 +54,10 @@ class XYPositionReset(Reset):
         prct = 1.0 - self.padding_prct
         x, y = x * prct, y * prct
 
-        def zero_case(_: None) -> tuple[jax.Array, jax.Array]:
-            return jnp.array([0.0]), jnp.array([0.0])
-
-        def random_case(_: None) -> tuple[jax.Array, jax.Array]:
-            rng_split, keyx, keyy = jax.random.split(rng, 3)
-            dx = jax.random.uniform(keyx, (1,), minval=-x, maxval=x)
-            dy = jax.random.uniform(keyy, (1,), minval=-y, maxval=y)
-            return dx, dy
-
-        # For testing purposes. Should probably remove at some point?
-        # Check if both elements of the key are 0
-        is_zero_key = (rng[0] == 0) & (rng[1] == 0)
-        dx, dy = jax.lax.cond(is_zero_key, zero_case, random_case, None)
+        # Generate random position within bounds
+        rng_split, keyx, keyy = jax.random.split(rng, 3)
+        dx = jax.random.uniform(keyx, (1,), minval=-x, maxval=x)
+        dy = jax.random.uniform(keyy, (1,), minval=-y, maxval=y)
 
         qpos_j = data.qpos
         qpos_j = qpos_j.at[0:1].set(dx)

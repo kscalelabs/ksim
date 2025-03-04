@@ -97,8 +97,11 @@ class TestXYPositionResetBuilder:
         # Check that the qpos has the right shape
         assert result.qpos.shape == (7,)
 
-        # Check that the XY position is reset (first two elements)
-        assert jnp.allclose(result.qpos[0:2], jnp.zeros(2))
+        # Check that the XY position is exactly what we expect with RNG key 0
+        expected_dx = jnp.array([-0.8868711])
+        expected_dy = jnp.array([0.72440904])
+        assert jnp.allclose(result.qpos[0:1], expected_dx, rtol=1e-5)
+        assert jnp.allclose(result.qpos[1:2], expected_dy, rtol=1e-5)
 
         # Check that the rest of qpos is unchanged
         assert jnp.allclose(result.qpos[2:], data.qpos[2:])

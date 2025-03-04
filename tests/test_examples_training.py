@@ -57,6 +57,20 @@ def test_default_humanoid_training() -> None:
         config.num_envs,
     )  # Shape is (num_steps, num_envs)
 
+    # Check for NaN values in outputs
+    # TODO: Switch these to asserts when we fix the NaN issue
+    for k, v in states.obs.items():
+        if jnp.isnan(v).any():
+            print(f"WARNING: NaN values found in observation output '{k}'")
+    if jnp.isnan(states.reward).any():
+        print("WARNING: NaN values found in reward outputs")
+    if jnp.isnan(states.action).any():
+        print("WARNING: NaN values found in action outputs")
+    # Handle FrozenDict structures by checking each array in the dict
+    for k, v in states.command.items():
+        if jnp.isnan(v).any():
+            print(f"WARNING: NaN values found in command output '{k}'")
+
     # Test a single model update
     # Get optimizer
     optimizer = task.get_optimizer()
@@ -113,3 +127,30 @@ def test_default_humanoid_run_method() -> None:
     with patch.object(task, "rl_train_loop") as mock_train:
         task.run()
         assert mock_train.called
+
+        # Get the environment and model to check for NaN values in initial setup
+        env = task.get_environment()
+        key = jax.random.PRNGKey(0)
+        model = task.get_model(key)
+
+        # Initialize model parameters
+        key, init_key = jax.random.split(key)
+        dummy_state = env.get_dummy_env_state(init_key)
+        params = model.init(init_key, dummy_state.obs, dummy_state.command)
+
+        # Check for NaN values in initial state
+        # TODO: Switch these to asserts when we fix the NaN issue
+        for k, v in dummy_state.obs.items():
+            if jnp.isnan(v).any():
+                print(f"WARNING: NaN values found in initial observation '{k}'")
+        for k, v in dummy_state.command.items():
+            if jnp.isnan(v).any():
+                print(f"WARNING: NaN values found in initial command '{k}'")
+        if jnp.isnan(dummy_state.action).any():
+            print("WARNING: NaN values found in initial action")
+
+        # Check for NaN values in model parameters
+        for param_key, param_value in jax.tree_util.tree_leaves_with_path(params):
+            if jnp.isnan(param_value).any():
+                param_path = "/".join(str(p) for p in param_key)
+                print(f"WARNING: NaN values found in model parameter '{param_path}'")
