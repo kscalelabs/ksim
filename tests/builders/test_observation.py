@@ -1,6 +1,7 @@
 """Tests for observation builders in the ksim package."""
 
 import unittest
+from dataclasses import dataclass
 from typing import Literal
 
 import chex
@@ -30,32 +31,21 @@ class DummyObservation(Observation):
         return jnp.zeros((3,))
 
 
+@jax.tree_util.register_dataclass
+@dataclass
 class DummyMjxData:
     """Mock mjx.Data for testing."""
 
-    def __init__(self) -> None:
-        self._qpos = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0])
-        self._qvel = jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
-        self._sensordata = jnp.array([10.0, 11.0, 12.0, 13.0, 14.0])
+    qpos: Array
+    qvel: Array
+    sensordata: Array
 
-    @property
-    def qpos(self) -> Array:
-        return self._qpos
 
-    @property
-    def qvel(self) -> Array:
-        return self._qvel
-
-    @property
-    def sensordata(self) -> Array:
-        return self._sensordata
-
-    def replace(self, **kwargs: dict[str, Array]) -> "DummyMjxData":
-        """Mimics the behavior of mjx.Data.replace."""
-        new_data = DummyMjxData()
-        for key, value in kwargs.items():
-            setattr(new_data, f"_{key}", value)
-        return new_data
+default_mjx_data = DummyMjxData(
+    qpos=jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]),
+    qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]),
+    sensordata=jnp.array([10.0, 11.0, 12.0, 13.0, 14.0]),
+)
 
 
 class BaseObservationTest(chex.TestCase):
@@ -147,7 +137,7 @@ class BaseObservationTest(chex.TestCase):
 
 class MjxObservationTest(chex.TestCase):
     def setUp(self) -> None:
-        self.data = DummyMjxData()
+        self.data = default_mjx_data
         self.rng = jax.random.PRNGKey(0)
 
     def test_base_position_observation(self) -> None:
@@ -230,7 +220,7 @@ class MjxObservationTest(chex.TestCase):
 
 class SensorObservationTest(chex.TestCase):
     def setUp(self) -> None:
-        self.data = DummyMjxData()
+        self.data = default_mjx_data
         self.rng = jax.random.PRNGKey(0)
 
     def test_sensor_observation(self) -> None:

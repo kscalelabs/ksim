@@ -27,7 +27,11 @@ from ksim.builders.rewards import (
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.builders.terminations import IllegalContactTerminationBuilder, PitchTooGreatTermination, RollTooGreatTermination
+from ksim.builders.terminations import (
+    IllegalContactTerminationBuilder,
+    PitchTooGreatTermination,
+    RollTooGreatTermination,
+)
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActionModel, ActorCriticAgent
 from ksim.model.mlp import MLP

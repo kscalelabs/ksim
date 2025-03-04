@@ -502,7 +502,7 @@ class MjxEnv(BaseEnv):
     # Main API Implementation #
     ###########################
 
-    @legit_jit(static_argnames=["self"])
+    # @legit_jit(static_argnames=["self"])
     def get_dummy_env_state(
         self,
         rng: PRNGKeyArray,
@@ -702,6 +702,8 @@ class MjxEnv(BaseEnv):
             xs=None,
             length=num_steps,
         )
+
+        jax.debug.breakpoint()
 
         return traj  # Shape: (num_steps, num_envs, ...)
 

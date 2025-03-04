@@ -1,5 +1,8 @@
 """Tests for termination builders in the ksim package."""
 
+from dataclasses import dataclass
+
+import jax
 import jax.numpy as jnp
 import pytest
 from jaxtyping import Array
@@ -31,6 +34,8 @@ class DummyContact:
     dist: Array = jnp.array([-0.01, -0.02])
 
 
+@jax.tree_util.register_dataclass
+@dataclass
 class DummyMjxData:
     """Mock mjx.Data for testing."""
 
