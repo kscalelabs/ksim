@@ -198,11 +198,7 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        # scenes_mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
-        # mj_model = scenes_mj_model
-        # x = validate_model(mj_model)
-        # scenes_mj_model.geom_priority
-        # mj_model.geom_priority
+        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
         # pfb30: remove that
         mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
         mj_model = self.override_model_settings(mj_model)
@@ -248,6 +244,7 @@ class MjxEnv(BaseEnv):
     ###################
     
     def override_model_settings(self, mj_model: mujoco.MjModel):
+        # pfb30 following brax setup for now
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
         mj_model.opt.disableflags = mujoco.mjtDisableBit.mjDSBL_EULERDAMP
         mj_model.opt.iterations = 1

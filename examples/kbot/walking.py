@@ -15,12 +15,11 @@ from ksim.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,
-    BasePositionObservation,
     JointPositionObservation,
     JointVelocityObservation,
     SensorObservationBuilder,
 )
-from ksim.builders.resets import XYPositionResetKbotBuilder
+from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
@@ -178,7 +177,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 ),
             ],
             resets=[
-                XYPositionResetKbotBuilder(),
+                XYPositionResetBuilder(),
             ],
             rewards=[
                 LinearVelocityZPenalty(scale=-0.1),

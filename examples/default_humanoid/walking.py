@@ -88,20 +88,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                # IllegalContactTerminationBuilder(
-                #     body_names=[
-                #         "torso",
-                #         "pelvis",
-                #         "right_thigh",
-                #         "right_shin",
-                #         "right_upper_arm",
-                #         "right_lower_arm",
-                #         "left_thigh",
-                #         "left_shin",
-                #         "left_upper_arm",
-                #         "left_lower_arm",
-                #     ],
-                # ),
                 MinimumHeightTermination(min_height=0.4),
             ],
             resets=[
@@ -139,10 +125,10 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
             observations=[
                 # BasePositionObservation(noise_type="gaussian", noise=0.01),
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
-                # BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
-                # BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
-                # JointPositionObservation(noise_type="gaussian", noise=0.01),
-                # JointVelocityObservation(noise_type="gaussian", noise=0.01),
+                BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
+                BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
+                JointPositionObservation(noise_type="gaussian", noise=0.01),
+                JointVelocityObservation(noise_type="gaussian", noise=0.01),
                 # TODO: default humanoid doesn't have sensors, add them later
             ],
             commands=[
