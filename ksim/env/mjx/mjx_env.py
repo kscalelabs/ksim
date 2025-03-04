@@ -145,8 +145,8 @@ class MjxEnvConfig(BaseEnvConfig):
     max_action_latency: float = xax.field(value=0.0, help="The maximum action latency.")
 
     # solver configuration options
-    solver_iterations: int = xax.field(value=6, help="Number of main solver iterations.")
-    solver_ls_iterations: int = xax.field(value=6, help="Number of line search iterations.")
+    solver_iterations: int = xax.field(value=1, help="Number of main solver iterations.")
+    solver_ls_iterations: int = xax.field(value=4, help="Number of line search iterations.")
 
     # simulation artifact options
     ignore_cached_urdf: bool = xax.field(value=False, help="Whether to ignore the cached URDF.")
@@ -243,11 +243,12 @@ class MjxEnv(BaseEnv):
     ###################
     
     def override_model_settings(self, mj_model: mujoco.MjModel):
+        """Override default sim settings."""
         # pfb30 following brax setup for now
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
         mj_model.opt.disableflags = mujoco.mjtDisableBit.mjDSBL_EULERDAMP
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
+        mj_model.opt.iterations = self.config.solver_iterations
+        mj_model.opt.ls_iterations = self.config.solver_ls_iterations
         mj_model.opt.timestep = self.config.dt
         return mj_model
 
