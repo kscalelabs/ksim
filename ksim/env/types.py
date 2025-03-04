@@ -10,7 +10,7 @@ from mujoco import mjx
 
 
 @jax.tree_util.register_dataclass
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class EnvState:
     """Base environment state class."""
 
