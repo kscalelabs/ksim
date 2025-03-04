@@ -197,10 +197,8 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
-        # pfb30: remove that
-        mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
-        mj_model = self.override_model_settings(mj_model)
+        mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        mj_model = self._override_model_settings(mj_model)
 
         self.default_mj_model = mj_model
         self.default_mj_data = mujoco.MjData(mj_model)
@@ -242,9 +240,8 @@ class MjxEnv(BaseEnv):
     # Post Processing #
     ###################
 
-    def override_model_settings(self, mj_model: mujoco.MjModel):
+    def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
-        # pfb30 following brax setup for now
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
         mj_model.opt.disableflags = mujoco.mjtDisableBit.mjDSBL_EULERDAMP
         mj_model.opt.iterations = self.config.solver_iterations
