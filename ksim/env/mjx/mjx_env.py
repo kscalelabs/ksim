@@ -52,7 +52,6 @@ def step_mjx(
     ctrl: Array,
 ) -> mjx.Data:
     """Step the mujoco model."""
-    ctrl = jnp.zeros_like(ctrl)
     data_with_ctrl = mjx_data.replace(ctrl=ctrl)
     return mjx.step(mjx_model, data_with_ctrl)
 
