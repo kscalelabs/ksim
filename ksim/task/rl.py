@@ -513,7 +513,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             averaged_metrics = jax.tree_util.tree_map(jnp.mean, metrics)
             # TODO: we probably want a way of tracking how loss evolves within
-            # an epoch, and across epochs.
+            # an epoch, and across epochs, not just the final metrics.
             metric_logging_data = LoggingData(
                 trajectory=trajectories_dataset,
                 update_metrics=averaged_metrics,

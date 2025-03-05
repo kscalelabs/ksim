@@ -18,14 +18,8 @@ from ksim.builders.observation import (
     JointVelocityObservation,
 )
 from ksim.builders.resets import XYPositionResetBuilder
-from ksim.builders.rewards import (
-    HeightReward,
-    TrackLinearVelocityXYReward,
-)
-from ksim.builders.terminations import (
-    PitchTooGreatTermination,
-    RollTooGreatTermination,
-)
+from ksim.builders.rewards import HeightReward, TrackLinearVelocityXYReward
+from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
@@ -154,7 +148,7 @@ if __name__ == "__main__":
         HumanoidWalkingConfig(
             num_envs=2048,
             num_steps_per_trajectory=600,
-            minibatch_size=1024,
-            num_learning_epochs=10,
+            minibatch_size=30720,
+            num_learning_epochs=5,
         ),
     )
