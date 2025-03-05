@@ -44,6 +44,23 @@ class HumanoidActorModel(GaussianActionModel):
         actions_n = self.mlp(x_n)
         return actions_n
 
+class HumanoidZeroActions(GaussianActionModel):
+    mlp: MLP
+
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        x_n = jnp.concatenate([obs_array for obs_array in obs.values()], axis=-1)
+        cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
+        x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
+        actions_n = self.mlp(x_n)
+        return jnp.zeros_like(actions_n)
+
+
+    def sample_and_log_prob(
+        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+    ) -> tuple[Array, Array]:
+        mean = self(obs, cmd)
+        return mean, mean
+
 
 class HumanoidCriticModel(nn.Module):
     mlp: MLP
@@ -146,6 +163,47 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
 
     def get_init_critic_carry(self) -> None:
         return None
+
+    # Overloading to run KBotZeroActions instead of default Actor model
+    def run(self) -> None:
+        """Highest level entry point for RL tasks, determines what to run."""
+        match self.config.action:
+            case "train":
+                self.run_training()
+
+            case "env":
+                mlp = MLP(
+                    num_hidden_layers=self.config.actor_num_layers,
+                    hidden_features=self.config.actor_hidden_dims,
+                    out_features=NUM_OUTPUTS,
+                )
+                match self.config.viz_action:
+                    case "policy":
+                        actor = HumanoidActorModel(mlp=mlp, init_log_std=-0.7, num_outputs=NUM_OUTPUTS)
+                    case "zero":
+                        actor = HumanoidZeroActions(mlp=mlp, init_log_std=-0.7, num_outputs=NUM_OUTPUTS)
+                    case _:
+                        raise ValueError(
+                            f"Invalid action: {self.config.viz_action}. Should be one of `policy` or `zero`."
+                        )
+
+                model = ActorCriticAgent(
+                    actor_module=actor,
+                    critic_module=HumanoidCriticModel(
+                        mlp=MLP(
+                            num_hidden_layers=self.config.critic_num_layers,
+                            hidden_features=self.config.critic_hidden_dims,
+                            out_features=1,
+                        ),
+                    ),
+                )
+
+                self.run_environment(model)
+
+            case _:
+                raise ValueError(
+                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
+                )
 
 
 if __name__ == "__main__":

@@ -18,18 +18,23 @@ from ksim.builders.observation import (
     JointVelocityObservation,
     SensorObservationBuilder,
 )
-from ksim.builders.resets import XYPositionResetBuilder
+from ksim.builders.resets import JointVelocityResetBuilder, XYPositionResetBuilder
 from ksim.builders.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
     FootContactPenaltyBuilder,
+    HeightReward,
     LinearVelocityZPenalty,
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
+from ksim.builders.terminations import (
+    IllegalContactTerminationBuilder,
+    PitchTooGreatTermination,
+    RollTooGreatTermination,
+)
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.formulations import ActionModel, ActorCriticAgent
+from ksim.model.formulations import ActionModel, ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
@@ -261,26 +266,23 @@ NUM_OUTPUTS = 20
 #         self.critic = critic
 
 
-class KBotActorModel(ActionModel):
+class KBotActorModel(GaussianActionModel):
     mlp: MLP
-
-    def setup(self) -> None:
-        self.log_std = self.param("log_std", nn.initializers.constant(-0.7), (NUM_OUTPUTS,))
 
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         lin_vel_cmd_2 = cmd["linear_velocity_command"]
         ang_vel_cmd_1 = cmd["angular_velocity_command"]
         joint_pos_j = obs["joint_position_observation"]
         joint_vel_j = obs["joint_velocity_observation"]
-        imu_acc_3 = obs["imu_acc_sensor_observation"]
-        imu_gyro_3 = obs["imu_gyro_sensor_observation"]
+        # imu_acc_3 = obs["imu_acc_sensor_observation"]
+        # imu_gyro_3 = obs["imu_gyro_sensor_observation"]
 
         x_n = jnp.concatenate(
             [
                 lin_vel_cmd_2,
                 ang_vel_cmd_1,
-                imu_acc_3,
-                imu_gyro_3,
+                # imu_acc_3,
+                # imu_gyro_3,
                 joint_pos_j,
                 joint_vel_j,
             ],
@@ -289,59 +291,41 @@ class KBotActorModel(ActionModel):
 
         actions_n = self.mlp(x_n)
 
-        return actions_n
+        return actions_n * 0.5
 
-    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
-        mean = prediction
-        std = jnp.exp(self.log_std)
 
-        log_prob = (
-            -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
+class KBotZeroActions(GaussianActionModel):
+    mlp: MLP
+
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        lin_vel_cmd_2 = cmd["linear_velocity_command"]
+        ang_vel_cmd_1 = cmd["angular_velocity_command"]
+        joint_pos_j = obs["joint_position_observation"]
+        joint_vel_j = obs["joint_velocity_observation"]
+        # imu_acc_3 = obs["imu_acc_sensor_observation"]
+        # imu_gyro_3 = obs["imu_gyro_sensor_observation"]
+
+        x_n = jnp.concatenate(
+            [
+                lin_vel_cmd_2,
+                ang_vel_cmd_1,
+                # imu_acc_3,
+                # imu_gyro_3,
+                joint_pos_j,
+                joint_vel_j,
+            ],
+            axis=-1,
         )
-        return jnp.sum(log_prob, axis=-1)
 
+        actions_n = self.mlp(x_n)
+
+        return jnp.zeros_like(actions_n)
+    
     def sample_and_log_prob(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
     ) -> tuple[Array, Array]:
         mean = self(obs, cmd)
-        std = jnp.exp(self.log_std)
-
-        noise = jax.random.normal(rng, mean.shape)
-        action = mean + noise * std
-        log_prob = self.calc_log_prob(mean, action)
-
-        return action, log_prob
-
-
-class KBotZeroActions(ActionModel):
-    mlp: MLP
-
-    def setup(self) -> None:
-        self.log_std = self.param("log_std", nn.initializers.constant(-0.7), (NUM_OUTPUTS,))
-
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        x_n = jnp.concatenate([obs_array for obs_array in obs.values()], axis=-1)
-        cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
-        x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
-        actions_n = self.mlp(x_n)
-
-        return actions_n
-
-    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
-        mean = prediction
-        std = jnp.exp(self.log_std)
-
-        log_prob = (
-            -0.5 * jnp.square((action - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
-        )
-        return jnp.sum(log_prob, axis=-1)
-
-    def sample_and_log_prob(
-        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> tuple[Array, Array]:
-        zeros = self(obs, cmd) * 0.0
-
-        return zeros, zeros
+        return mean, mean
 
 
 class KBotCriticModel(nn.Module):
@@ -376,6 +360,7 @@ class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
 
+    actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
 
 class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
     def get_environment(self) -> MjxEnv:
@@ -397,31 +382,33 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             ],
             resets=[
                 XYPositionResetBuilder(),
+                # JointVelocityResetBuilder(max_velocity=1.0),
             ],
             rewards=[
-                LinearVelocityZPenalty(scale=-0.1),
-                AngularVelocityXYPenalty(scale=-0.1),
+                # LinearVelocityZPenalty(scale=-0.1),
+                # AngularVelocityXYPenalty(scale=-0.1),
                 TrackLinearVelocityXYReward(scale=0.1),
-                TrackAngularVelocityZReward(scale=0.1),
-                ActionSmoothnessPenalty(scale=-0.1),
-                FootContactPenaltyBuilder(
-                    scale=-0.1,
-                    foot_body_names=["KB_D_501R_R_LEG_FOOT"],
-                    allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
-                ),
-                FootContactPenaltyBuilder(
-                    scale=-0.1,
-                    foot_body_names=["KB_D_501L_L_LEG_FOOT"],
-                    allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
-                ),
+                HeightReward(scale=0.1, height_target=1.5),
+                # TrackAngularVelocityZReward(scale=0.1),
+                # ActionSmoothnessPenalty(scale=-0.1),
+                # FootContactPenaltyBuilder(
+                #     scale=-0.1,
+                #     foot_body_names=["KB_D_501R_R_LEG_FOOT"],
+                #     allowed_contact_prct=0.7,
+                #     skip_if_zero_command=[
+                #         "linear_velocity_command",
+                #         "angular_velocity_command",
+                #     ],
+                # ),
+                # FootContactPenaltyBuilder(
+                #     scale=-0.1,
+                #     foot_body_names=["KB_D_501L_L_LEG_FOOT"],
+                #     allowed_contact_prct=0.7,
+                #     skip_if_zero_command=[
+                #         "linear_velocity_command",
+                #         "angular_velocity_command",
+                #     ],
+                # ),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
@@ -429,8 +416,8 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
                 JointPositionObservation(noise_type="gaussian", noise=0.01),
                 JointVelocityObservation(noise_type="gaussian", noise=0.01),
-                SensorObservationBuilder(sensor_name="imu_acc"),  # Sensor has noise already.
-                SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
+                # SensorObservationBuilder(sensor_name="imu_acc"),  # Sensor has noise already.
+                # SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
             ],
             commands=[
                 LinearVelocityCommand(
@@ -450,12 +437,13 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         return ActorCriticAgent(
             actor_module=KBotActorModel(
-                num_outputs=NUM_OUTPUTS,
                 mlp=MLP(
                     num_hidden_layers=self.config.actor_num_layers,
                     hidden_features=self.config.actor_hidden_dims,
                     out_features=NUM_OUTPUTS,
                 ),
+                init_log_std=-0.7,
+                num_outputs=NUM_OUTPUTS,
             ),
             critic_module=KBotCriticModel(
                 mlp=MLP(
@@ -489,9 +477,9 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 actor: ActionModel
                 match self.config.viz_action:
                     case "policy":
-                        actor = KBotActorModel(num_outputs=NUM_OUTPUTS, mlp=mlp)
+                        actor = KBotActorModel(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
                     case "zero":
-                        actor = KBotZeroActions(num_outputs=NUM_OUTPUTS, mlp=mlp)
+                        actor = KBotZeroActions(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
                     case _:
                         raise ValueError(
                             f"Invalid action: {self.config.viz_action}."
@@ -521,7 +509,11 @@ if __name__ == "__main__":
     # python -m examples.kbot.walking action=env
     KBotWalkingTask.launch(
         KBotWalkingConfig(
-            num_envs=1,
-            num_steps_per_trajectory=100,
+            num_envs=2048,
+            num_steps_per_trajectory=600,
+            minibatch_size=1024,
+            # num_learning_epochs=10,
+            # normalize_advantage=True,
+            # obs_norm_alpha=0.01,
         ),
     )

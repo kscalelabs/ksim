@@ -477,8 +477,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             rollout_time_minibatch_loss_components,
                         )
                         variables["params"] = params
-                        print(f"loss: {loss_val}")
-                        print(f"metrics: {metrics}")
+                        # print(f"loss: {loss_val}")
+                        # print(f"metrics: {metrics}")
 
                         # log metrics from the model update
                         metric_logging_data = LoggingData(

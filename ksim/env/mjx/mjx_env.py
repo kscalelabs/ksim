@@ -372,8 +372,8 @@ class MjxEnv(BaseEnv):
             # NOTE: can extend state to include anything from `mjx.Data` here...
             new_state = step_mjx(mjx_model, state, torques)
             return (new_state, step_num + 1), None
-
         (state, _), _ = jax.lax.scan(f, (mjx_data, 0), None, n_steps)
+        breakpoint()
         return state
 
     @legit_jit(static_argnames=["self", "model"])
@@ -716,7 +716,7 @@ class MjxEnv(BaseEnv):
         height: int = 480,
         camera: int | None = None,
     ) -> list[np.ndarray]:
-        _, traj_data = self.unroll_trajectories(
+        states, traj_data = self.unroll_trajectories(
             model, variables, rng, num_steps, 1, return_data=True
         )
 
@@ -725,6 +725,14 @@ class MjxEnv(BaseEnv):
         mjx_data_list = [
             jax.tree_util.tree_map(lambda x: x[i], mjx_data_traj) for i in range(num_steps)
         ]
+
+        states_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), states)
+
+        states_list = [
+            jax.tree_util.tree_map(lambda x: x[i], states_traj) for i in range(num_steps)
+        ]
+
+        breakpoint()
 
         render_mj_data = mujoco.MjData(self.default_mj_model)
 

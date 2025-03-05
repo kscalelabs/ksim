@@ -123,3 +123,39 @@ class XYPositionResetBuilder(ResetBuilder[XYPositionReset]):
             hfield_data=hfield_data,
             padding_prct=self.padding_prct,
         )
+
+@attrs.define(frozen=True, kw_only=True)
+class JointVelocityReset(Reset):
+    """Resets the joint velocities of the robot to random values.
+
+    Sets random velocities in the range [-max_velocity, max_velocity] for all joints.
+    """
+
+    max_velocity: float = attrs.field(default=1.0)
+
+    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+        qvel_j = data.qvel
+        qvel_j = jax.random.uniform(
+            rng, qvel_j.shape, minval=-self.max_velocity, maxval=self.max_velocity
+        )
+        data = data.replace(qvel=qvel_j)
+        return data
+
+    def __hash__(self) -> int:
+        """Define hash function for the class."""
+        return hash(self.max_velocity)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointVelocityResetBuilder(ResetBuilder[JointVelocityReset]):
+    """Builds a JointVelocityReset from a MuJoCo model.
+
+    Parameters:
+        max_velocity: Maximum velocity for joints (in both positive and negative directions)
+    """
+
+    max_velocity: float
+
+    def __call__(self, data: BuilderData) -> JointVelocityReset:
+        """Builds a JointVelocityReset from a MuJoCo model."""
+        return JointVelocityReset(max_velocity=self.max_velocity)
