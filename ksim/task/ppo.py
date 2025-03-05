@@ -48,9 +48,9 @@ class PPOConfig(RLConfig):
         value=False,
         help="Whether to scale rewards, see Engstrom, Ilyas, et al., (2020).",
     )
-    normalize_advantage: bool = xax.field(value=True, help="Whether to normalize advantages.")
+    normalize_advantage: bool = xax.field(value=False, help="Whether to normalize advantages.")
     normalize_advantage_in_minibatch: bool = xax.field(
-        value=True,
+        value=False,
         help="Whether to normalize advantages at the minibatch level as per OpenAI baselines.",
     )
     # NOTE: if scale_rewards is True, advantages will still get its own normalization
