@@ -149,7 +149,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.default_humanoid.walking action=train
+    # python -m examples.default_humanoid.walking
     HumanoidWalkingTask.launch(
         HumanoidWalkingConfig(
             num_envs=2048,
