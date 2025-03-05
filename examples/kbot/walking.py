@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+import attrs
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -268,6 +269,7 @@ NUM_OUTPUTS = 20
 
 class KBotActorModel(GaussianActionModel):
     mlp: MLP
+    action_clipping: float = attrs.field(default=20.0)
 
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         lin_vel_cmd_2 = cmd["linear_velocity_command"]
@@ -290,6 +292,8 @@ class KBotActorModel(GaussianActionModel):
         )
 
         actions_n = self.mlp(x_n)
+
+        actions_n = jnp.clip(actions_n, -self.action_clipping, self.action_clipping)
 
         return actions_n * 0.5
 

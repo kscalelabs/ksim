@@ -38,7 +38,7 @@ class MITPositionActuators(Actuators):
                 )
             kps_list[actuator_idx] = kp
             kds_list[actuator_idx] = kd
-                
+
         self.kps = jnp.array(kps_list)
         self.kds = jnp.array(kds_list)
         if any(self.kps == 0) or any(self.kds == 0):
@@ -47,7 +47,10 @@ class MITPositionActuators(Actuators):
     def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
         """Get the control signal from the (position) action vector."""
         current_pos = mjx_data.qpos[7:]  # NOTE: we assume first 7 are always root pos.
-        ctrl = self.kps * (action - current_pos)  # TODO: explore using velocity as damping...
+        current_vel = mjx_data.qvel[6:]  # NOTE: we assume first 6 are always root vel.
+
+        target_velocities = jnp.zeros_like(action)
+        ctrl = self.kps * (action - current_pos) + self.kds * (target_velocities - current_vel)
         return ctrl
 
     @property
