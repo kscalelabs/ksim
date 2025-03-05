@@ -148,9 +148,7 @@ if __name__ == "__main__":
         HumanoidWalkingConfig(
             num_envs=2048,
             num_steps_per_trajectory=600,
-            minibatch_size=1024,
-            num_learning_epochs=10,
-            save_every_n_seconds=60 * 30,
-            only_save_most_recent=False,
+            minibatch_size=30720,
+            num_learning_epochs=5,
         ),
     )
