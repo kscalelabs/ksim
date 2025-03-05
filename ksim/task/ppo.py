@@ -41,8 +41,6 @@ class PPOConfig(RLConfig):
 
     # General training parameters
     learning_rate: float = xax.field(value=1e-4, help="Learning rate for PPO.")
-    schedule: str = xax.field(value="adaptive", help="Learning rate schedule 'fixed' | 'adaptive'")
-    desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive LR.")
     max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
 
     # Normalization parameters
