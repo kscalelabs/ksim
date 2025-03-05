@@ -172,11 +172,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     #########################
 
     def get_checkpoint_number_and_path(self) -> tuple[int, Path]:
-        """Get the checkpoint number and path from config or latest checkpoint.
-
-        Returns:
-            tuple: (checkpoint_number, checkpoint_path)
-        """
+        """Get the checkpoint number and path from config or latest checkpoint."""
         error_msg = "Tried to load pretrained checkpoint but no path was provided."
         assert self.config.pretrained is not None, error_msg
 
@@ -203,14 +199,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return ckpt_num, checkpoint_path
 
     def get_render_name(self, state: xax.State | None = None) -> str:
-        """Get a unique name for the render directory based on state and checkpoint info.
-
-        Args:
-            state: Current training state if available
-
-        Returns:
-            Formatted string containing timestamp and either state step count or checkpoint number
-        """
+        """Get a unique name for the render directory based on state and checkpoint info."""
         time_string = time.strftime("%Y%m%d_%H%M%S")
         prefix = "render"
 
