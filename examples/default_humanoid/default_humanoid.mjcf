@@ -3,7 +3,7 @@
     <default>
         <joint armature="1" damping="1" limited="true"/>
         <geom conaffinity="0" condim="3" contype="0" material="geom" rgba="0.4 0.33 0.26 1.0"/>
-        <motor ctrllimited="true" ctrlrange="-.4 .4"/>
+        <!-- <motor ctrllimited="true" ctrlrange="-.4 .4"/> -->
     </default>
     <!-- Removed RK4 integrator for brax. -->
     <option iterations="8" timestep="0.003"/>
