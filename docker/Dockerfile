@@ -5,7 +5,7 @@ ENV NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
     JAX_PLATFORM_NAME=cuda
 
-# Install additional dependencies (modify as needed)
+# Install additional dependencies
 RUN apt-get update && apt-get install -y \
     vim \
     wget \
@@ -23,7 +23,6 @@ FROM base AS jax-base
 RUN git clone https://github.com/kscalelabs/ksim.git && \
     cd ksim && \
     pip install -e .
-
 
 # Set up working directory
 WORKDIR /ksim
