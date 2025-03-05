@@ -105,12 +105,9 @@ class ActorCriticAgent(nn.Module):
     critic_module: nn.Module
 
     def setup(self) -> None:
-        self.returns_mean = self.variable(
-            "normalization", "returns_mean", nn.initializers.zeros, key=(), shape=()
-        )
         self.returns_std = self.variable(
             "normalization", "returns_std", nn.initializers.ones, key=(), shape=()
-        )
+        )  # used in downstream algorithm, initialized here for consistency of statistic interface
 
     @nn.compact
     def normalize_obs(self, obs: FrozenDict[str, Array]) -> FrozenDict[str, Array]:
@@ -137,7 +134,7 @@ class ActorCriticAgent(nn.Module):
         }
         # note: initialized here once, will be updated in the training loop
 
-        # do normaliaztion on inputs
+        # do normalization on inputs
         normalized_obs_dict = {
             obs_name: (obs_vec - obs_mean[obs_name].value) / obs_std[obs_name].value
             for obs_name, obs_vec in obs.items()
@@ -146,10 +143,6 @@ class ActorCriticAgent(nn.Module):
         normalized_obs: FrozenDict[str, Array] = FrozenDict(normalized_obs_dict)
 
         return normalized_obs
-
-    def normalize_returns(self, returns: Array) -> Array:
-        """Normalize the returns."""
-        return (returns - self.returns_mean.value) / self.returns_std.value
 
     @nn.compact
     def __call__(
@@ -196,18 +189,12 @@ def update_actor_critic_normalization(
     High alpha means more weight is given to the new data.
     """
     # update the returns normalization parameters
-    returns_mean = jnp.mean(returns)
     returns_std = jnp.std(returns)
-    old_returns_mean = variables["normalization"]["returns_mean"]
     old_returns_std = variables["normalization"]["returns_std"]
-    assert isinstance(old_returns_mean, Array)
     assert isinstance(old_returns_std, Array)
 
-    variables["normalization"]["returns_mean"] = (
-        old_returns_mean * (1 - returns_norm_alpha) + returns_mean * returns_norm_alpha
-    )
     variables["normalization"]["returns_std"] = (
-        old_returns_std * (1 - returns_norm_alpha) + returns_std * returns_norm_alpha
+        old_returns_std * returns_norm_alpha + returns_std * (1 - returns_norm_alpha)
     )
 
     # update the observations normalization parameters
@@ -219,10 +206,10 @@ def update_actor_critic_normalization(
         old_obs_std = variables["normalization"][f"obs_std_{obs_name}"]
 
         variables["normalization"][f"obs_mean_{obs_name}"] = (
-            old_obs_mean * (1 - obs_norm_alpha) + obs_mean * obs_norm_alpha
+            old_obs_mean * obs_norm_alpha + obs_mean * (1 - obs_norm_alpha)
         )
         variables["normalization"][f"obs_std_{obs_name}"] = (
-            old_obs_std * (1 - obs_norm_alpha) + obs_std * obs_norm_alpha
+            old_obs_std * obs_norm_alpha + obs_std * (1 - obs_norm_alpha)
         )
 
     return variables

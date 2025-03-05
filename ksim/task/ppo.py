@@ -27,8 +27,6 @@ EPSILON = 1e-5
 class PPOConfig(RLConfig):
     # For the CLIP term (see Schulman et al. 2017)
     clip_param: float = xax.field(value=0.2, help="Clipping parameter for PPO.")
-    normalize_advantage: bool = xax.field(value=False, help="Whether to normalize advantages.")
-    normalize_returns: bool = xax.field(value=False, help="Whether to normalize returns.")
 
     # For the Value Function (VF) term
     value_loss_coef: float = xax.field(value=0.5, help="Value loss coefficient for PPO.")
@@ -42,21 +40,31 @@ class PPOConfig(RLConfig):
     lam: float = xax.field(value=0.95, help="Lambda for GAE: high = more bias; low = more variance")
 
     # General training parameters
-    # TODO: none of these except `max_grad_norm` are actually used in the training script
     learning_rate: float = xax.field(value=1e-4, help="Learning rate for PPO.")
     schedule: str = xax.field(value="adaptive", help="Learning rate schedule 'fixed' | 'adaptive'")
     desired_kl: float = xax.field(value=0.01, help="Desired KL divergence for adaptive LR.")
     max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
 
     # Normalization parameters
-    returns_norm_alpha: float = xax.field(
-        value=0.0000,
-        help="Rate at which to update returns normalization.",
+    scale_rewards: bool = xax.field(
+        value=False,
+        help="Whether to scale rewards, see Engstrom, Ilyas, et al., (2020).",
+    )
+    normalize_advantage: bool = xax.field(value=True, help="Whether to normalize advantages.")
+    normalize_advantage_in_minibatch: bool = xax.field(
+        value=True,
+        help="Whether to normalize advantages at the minibatch level as per OpenAI baselines.",
+    )
+    # NOTE: if scale_rewards is True, advantages will still get its own normalization
+    reward_scaling_alpha: float = xax.field(
+        value=0.0003,
+        help="Rate at which to update reward scaling online as per Hessel, Soyer, et al., (2018).",
     )
     obs_norm_alpha: float = xax.field(
-        value=0.0000,
-        help="Rate at which to update observations normalization.",
+        value=0.0003,
+        help="Rate at which to update observation norm stats, Andrychowicz (2021) and Duan (2016).",
     )
+    # NOTE: as per recommendations, going to enforce observation normalization.
     pretrained: str | None = xax.field(
         value=None,
         help="The path to a pretrained model to load.",
@@ -109,10 +117,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         ).squeeze(axis=-1)
         # We squeeze because last dimension is a singleton, advantages expects (batch_dims,)
 
-        advantages = self._compute_advantages(initial_values, trajectory_dataset)
+        advantages = self._compute_advantages(variables, initial_values, trajectory_dataset)
         returns = advantages + initial_values
 
-        if self.config.normalize_advantage:
+        # normalizing at the trajectory dataset level
+        if self.config.normalize_advantage and not self.config.normalize_advantage_in_minibatch:
             advantages = (advantages - advantages.mean()) / (advantages.std() + EPSILON)
 
         return PPORolloutTimeLossComponents(
@@ -178,10 +187,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Update the input normalization parameters."""
         assert isinstance(rollout_time_loss_components, PPORolloutTimeLossComponents)
         obs_norm_alpha = self.config.obs_norm_alpha if initial_step else 0.0
-        returns_norm_alpha = self.config.returns_norm_alpha if initial_step else 0.0
-        if initial_step:
-            obs_norm_alpha = 1.0
-            returns_norm_alpha = 1.0
+        returns_norm_alpha = self.config.reward_scaling_alpha if initial_step else 0.0
         return update_actor_critic_normalization(
             variables=variables,
             returns=rollout_time_loss_components.returns,
@@ -246,8 +252,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         values = values.squeeze(axis=-1)  # values is (time, env)
 
         advantages = rollout_time_loss_components.advantages
-        if self.config.normalize_advantage:  # TODO: use EWMA for this
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        # worth noting that Andrychowicz (2021) found little advantage to
+        # minibatch normalization.
+        if self.config.normalize_advantage and self.config.normalize_advantage_in_minibatch:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + EPSILON)
+
         # policy loss with clipping
         policy_objective = jnp.mean(
             jnp.minimum(
@@ -257,9 +267,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             )
         )
         returns = rollout_time_loss_components.returns
-        # TODO: this should be a moving average
-        if self.config.normalize_returns:
-            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
 
         # value loss term
         value_pred = self.apply_critic(
@@ -328,12 +335,17 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     @legit_jit(static_argnames=["self"])
     def _compute_advantages(
         self,
+        variables: PyTree,
         values: Array,
         env_state_batch: EnvState,
     ) -> Array:
         """Computes the advantages using Generalized Advantage Estimation (GAE)."""
         done = env_state_batch.done
         rewards = env_state_batch.reward
+
+        if self.config.scale_rewards:  # as per Engstrom, Ilyas, et al., (2020)
+            returns_std = variables["normalization"]["returns_std"]
+            rewards = rewards / (returns_std + EPSILON)
 
         def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
             d, m = x
