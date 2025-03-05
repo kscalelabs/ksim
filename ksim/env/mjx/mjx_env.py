@@ -144,8 +144,8 @@ class MjxEnvConfig(BaseEnvConfig):
 
     # solver configuration options
     solver_type: int = xax.field(value=mujoco.mjtSolver.mjSOL_NEWTON.value, help="Solver type.")
-    solver_iterations: int = xax.field(value=1, help="Number of main solver iterations.")
-    solver_ls_iterations: int = xax.field(value=4, help="Number of line search iterations.")
+    solver_iterations: int = xax.field(value=10, help="Number of main solver iterations.")
+    solver_ls_iterations: int = xax.field(value=10, help="Number of line search iterations.")
     disable_flags_bitmask: int = xax.field(
         value=mujoco.mjtDisableBit.mjDSBL_EULERDAMP.value, help="Bitmask of flags to disable."
     )
@@ -204,14 +204,14 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
         mj_model = self._override_model_settings(mj_model)
 
         self.default_mj_model = mj_model
         self.default_mj_data = mujoco.MjData(mj_model)
         self.default_mjx_model = mjx.put_model(mj_model)
         self.default_mjx_data = mjx.make_data(self.default_mjx_model)
-
         self.mujoco_mappings = make_mujoco_mappings(self.default_mjx_model)
         match self.config.actuator_type:
             case "mit":
