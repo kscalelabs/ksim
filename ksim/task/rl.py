@@ -2,7 +2,6 @@
 
 import bdb
 import logging
-import os
 import signal
 import sys
 import textwrap
@@ -16,7 +15,6 @@ from typing import Generic, Literal, TypeVar
 
 import jax
 import jax.numpy as jnp
-import mediapy as mp
 import optax
 import xax
 from dpshdl.dataset import Dataset
@@ -24,7 +22,6 @@ from flax import linen as nn
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING
-from PIL import Image
 
 from ksim.builders.loggers import (
     AverageRewardLog,
@@ -37,6 +34,7 @@ from ksim.model.formulations import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
 from ksim.utils.pytree import slice_pytree
+from ksim.utils.visualization import render_and_save_trajectory
 
 logger = logging.getLogger(__name__)
 
@@ -174,11 +172,48 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     # Logging and Rendering #
     #########################
 
+    def get_checkpoint_number_and_path(self) -> tuple[int, Path]:
+        """Get the checkpoint number and path from config or latest checkpoint."""
+        error_msg = "Tried to load pretrained checkpoint but no path was provided."
+        assert self.config.pretrained is not None, error_msg
+
+        pretrained_path = Path(self.config.pretrained)
+        if not pretrained_path.exists():
+            raise ValueError(f"Checkpoint not found at {pretrained_path}")
+
+        if self.config.checkpoint_num is not None:
+            checkpoint_path = (
+                pretrained_path / "checkpoints" / f"ckpt.{self.config.checkpoint_num}.bin"
+            )
+            error_msg = (
+                f"Checkpoint number {self.config.checkpoint_num} not found at {checkpoint_path}"
+            )
+            assert checkpoint_path.exists(), error_msg
+            return self.config.checkpoint_num, checkpoint_path
+
+        # Get the latest checkpoint in the folder
+        ckpt_files = sorted(pretrained_path.glob("checkpoints/ckpt.*.bin"))
+        if not ckpt_files:
+            raise ValueError(f"No checkpoints found in {pretrained_path}/checkpoints/")
+        checkpoint_path = ckpt_files[-1]
+        ckpt_num = int(checkpoint_path.stem.split(".")[1])
+        return ckpt_num, checkpoint_path
+
     def get_render_name(self, state: xax.State | None = None) -> str:
+        """Get a unique name for the render directory based on state and checkpoint info."""
         time_string = time.strftime("%Y%m%d_%H%M%S")
-        if state is None:
-            return f"render_{time_string}"
-        return f"render_{state.num_steps}_{time_string}"
+        prefix = "render"
+
+        # If training, label render with step count
+        if state is not None:
+            return f"{prefix}_{state.num_steps}_{time_string}"
+
+        # If resuming, use the checkpoint number
+        if self.config.pretrained is not None:
+            ckpt_num, _ = self.get_checkpoint_number_and_path()
+            return f"{prefix}_pretrained_{ckpt_num}_{time_string}"
+
+        return f"{prefix}_no_state_{time_string}"
 
     def run_environment(
         self,
@@ -193,7 +228,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             render_name = self.get_render_name(state)
             render_dir = self.exp_dir / self.config.render_dir / render_name
 
-            os.makedirs(render_dir, exist_ok=True)
             end_time = time.time()
             print(f"Time taken for environment setup: {end_time - start_time} seconds")
 
@@ -213,28 +247,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Unroll trajectories and collect the frames for rendering
             logger.info("Unrolling trajectories")
 
-            frames = env.render_trajectory(
+            render_and_save_trajectory(
+                env=env,
                 model=model,
                 variables=variables,
                 rng=rng,
+                output_dir=render_dir,
                 num_steps=self.config.num_steps_per_trajectory,
                 width=self.config.render_width,
                 height=self.config.render_height,
             )
-
-            logger.info("Saving %d frames to %s", len(frames), render_dir)
-
-            start_time = time.time()
-            for i, frame in enumerate(frames):
-                frame_path = render_dir / f"frame_{i:06d}.png"
-                Image.fromarray(frame).save(frame_path)
-            end_time = time.time()
-            print(f"Time taken for saving frames: {end_time - start_time} seconds")
-
-            start_time = time.time()
-            mp.write_video(render_dir / "trajectory.mp4", frames, fps=1 / self.config.ctrl_dt)
-            end_time = time.time()
-            print(f"Time taken for video creation: {end_time - start_time} seconds")
 
     def log_state(self) -> None:
         super().log_state()
@@ -288,20 +310,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         state = env.get_dummy_env_state(key)
 
         if pretrained is not None:
-            pretrained_path = Path(pretrained)
-            if not pretrained_path.exists():
-                raise ValueError(f"Checkpoint not found at {pretrained_path}")
-
-            if checkpoint_num is not None:
-                checkpoint_path = pretrained_path / "checkpoints" / f"ckpt.{checkpoint_num}.bin"
-                assert checkpoint_path.exists(), f"Checkpoint not found at {checkpoint_path}"
-            else:
-                # Get the latest checkpoint in the folder
-                ckpt_files = sorted(pretrained_path.glob("checkpoints/ckpt.*.bin"))
-                if not ckpt_files:
-                    raise ValueError(f"No checkpoints found in {pretrained_path}/checkpoints/")
-                checkpoint_path = ckpt_files[-1]
-
+            _, checkpoint_path = self.get_checkpoint_number_and_path()
             logger.info("Loading pretrained checkpoint from %s", checkpoint_path)
             return self.load_checkpoint(checkpoint_path, part="model")
 
@@ -498,6 +507,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 model, variables, env, rollout_rng
             )
             rollout_time = time.time() - start_time
+            self.log_trajectory_stats(env, trajectories_dataset)
 
             # running training on minibatches
             start_time = time.time()
@@ -555,6 +565,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.save_checkpoint(
                     model=variables, optimizer=optimizer, opt_state=opt_state, state=training_state
                 )  # Update XAX to be Flax supportive...
+
+                render_name = self.get_render_name(training_state)
+                render_dir = self.exp_dir / self.config.render_dir / render_name
+                logger.info("Rendering to %s", render_dir)
+
+                render_and_save_trajectory(
+                    env=env,
+                    model=model,
+                    variables=variables,
+                    rng=rng,
+                    output_dir=render_dir,
+                    num_steps=self.config.num_steps_per_trajectory,
+                    width=self.config.render_width,
+                    height=self.config.render_height,
+                )
+
+                logger.info("Done rendering to %s", render_dir)
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
