@@ -21,7 +21,7 @@ from ksim.model.formulations import ActorCriticAgent
 class BaseEnvConfig(xax.Config):
     # robot model configuration options
     robot_model_name: str = xax.field(value=MISSING, help="The name of the model to use.")
-    robot_model_scene: str = xax.field(value="patch", help="The scene to use for the model.")
+    robot_model_scene: str = xax.field(value="smooth", help="The scene to use for the model.")
     render_camera: str = xax.field(value="tracking_camera", help="The camera to use for rendering.")
     render_width: int = xax.field(value=640, help="The width of the rendered image.")
     render_height: int = xax.field(value=480, help="The height of the rendered image.")
@@ -36,6 +36,10 @@ class BaseEnv(ABC):
 
     rewards: list[tuple[str, Reward]]
     terminations: list[tuple[str, Termination]]
+    config: BaseEnvConfig
+
+    def __init__(self, config: BaseEnvConfig) -> None:
+        self.config = config
 
     @abstractmethod
     def get_dummy_env_state(  # exists for compilation purposes

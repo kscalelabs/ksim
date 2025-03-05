@@ -151,7 +151,11 @@ class CartPoleEnv(BaseEnv):
         )
         command: FrozenDict[str, jax.Array] = FrozenDict({})
         action_0, _ = model.apply(
-            variables, obs_0, command, rng, method="actor_sample_and_log_prob"
+            variables,
+            obs_0,
+            command,
+            rng,
+            method="actor_sample_and_log_prob",
         )
         gym_obs_1 = self.env.step(action_0.item())[0]
         env_state_0 = EnvState(

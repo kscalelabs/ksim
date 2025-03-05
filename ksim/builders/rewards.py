@@ -178,7 +178,7 @@ class TrackLinearVelocityXYReward(Reward):
     """Reward for how well the robot is tracking the linear velocity command."""
 
     cmd_name: str = attrs.field(default="linear_velocity_command")
-    norm: NormType = attrs.field(default="l2")
+    sensitivity: float = attrs.field(default=1.0)
 
     def __call__(
         self,
@@ -188,9 +188,18 @@ class TrackLinearVelocityXYReward(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        lin_vel_cmd_2 = command_t[self.cmd_name]
-        lin_vel_xy_2 = mjx_data_t_plus_1.qvel[:2]
-        return get_norm(lin_vel_xy_2 * lin_vel_cmd_2, self.norm).sum(axis=-1)
+        cmd_vel_xy = command_t[self.cmd_name]
+        actual_vel_xy = mjx_data_t_plus_1.qvel[:2]
+
+        # Compute tracking error as L2 distance between commanded and actual velocity
+        tracking_error = jnp.linalg.norm(cmd_vel_xy - actual_vel_xy)
+
+        # Convert error to reward in [0,1] range using exponential decay
+        # sensitivity controls how quickly reward decays with error
+        # Higher sensitivity = sharper decay = more demanding tracking
+        tracking_reward = jnp.exp(-self.sensitivity * tracking_error)
+
+        return tracking_reward
 
 
 @attrs.define(frozen=True, kw_only=True)
