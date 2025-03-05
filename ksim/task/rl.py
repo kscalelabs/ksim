@@ -33,7 +33,7 @@ from ksim.builders.loggers import (
     ModelUpdateLog,
 )
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
-from ksim.model.formulations import ActorCriticAgent, ZeroActionModel, ZeroCriticModel
+from ksim.model.formulations import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
 from ksim.utils.pytree import slice_pytree
@@ -109,6 +109,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model: ActorCriticAgent,
         variables: PyTree,
         trajectory_dataset: EnvState,
+        burn_in: bool = False,
     ) -> RolloutTimeLossComponents: ...
 
     @abstractmethod
@@ -337,6 +338,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         variables: PyTree,
         env: BaseEnv,
         rng: PRNGKeyArray,
+        burn_in: bool = False,
     ) -> tuple[EnvState, RolloutTimeLossComponents]:
         """Rollout a batch of trajectory data.
 
@@ -353,7 +355,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         rollout_time_loss_components = self.get_rollout_time_loss_components(
-            model, variables, rollout
+            model,
+            variables,
+            rollout,
+            burn_in=burn_in,
         )
 
         @legit_jit()
@@ -466,14 +471,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng = self.prng_key()
         rng, burn_in_rng, train_rng = jax.random.split(rng, 3)
 
-        burn_in_agent = ActorCriticAgent(
-            actor_module=ZeroActionModel(num_outputs=env.action_size),
-            critic_module=ZeroCriticModel(),
-        )
-
         # Burn in trajectory to get normalization statistics
         burn_in_trajectories_dataset, burn_in_rollout_time_loss_components = (
-            self.get_trajectory_dataset(burn_in_agent, variables, env, burn_in_rng)
+            self.get_trajectory_dataset(
+                model,
+                variables,
+                env,
+                burn_in_rng,
+                burn_in=True,
+            )
         )
         variables = self.update_input_normalization_stats(
             variables=variables,
