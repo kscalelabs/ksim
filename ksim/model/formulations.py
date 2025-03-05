@@ -14,6 +14,8 @@ from ksim.env.types import EnvState
 class ActionModel(nn.Module, ABC):
     """Action model."""
 
+    num_outputs: int
+
     @abstractmethod
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Forward pass of the model."""
@@ -36,7 +38,6 @@ class GaussianActionModel(ActionModel, ABC):
     """Gaussian action model."""
 
     init_log_std: float
-    num_outputs: int
 
     def setup(self) -> None:
         self.log_std = self.param(
@@ -177,6 +178,36 @@ class ActorCriticAgent(nn.Module):
         return self.actor_module.sample_and_log_prob(normalized_obs, cmd, rng)
 
 
+class ZeroActionModel(ActionModel):
+    """Zero action model."""
+
+    num_outputs: int
+
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        """Forward pass of the model."""
+        batch_shapes = get_batch_shapes(obs)
+        return jnp.zeros(batch_shapes + (self.num_outputs,))
+
+    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
+        """Calculate the log probability of the action."""
+        return jnp.zeros_like(action)
+
+    def sample_and_log_prob(
+        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+    ) -> tuple[Array, Array]:
+        """Sample and calculate the log probability of the action."""
+        batch_shapes = get_batch_shapes(obs)
+        return jnp.zeros(batch_shapes + (self.num_outputs,)), jnp.zeros(batch_shapes)
+
+
+class ZeroCriticModel(nn.Module):
+    """Zero critic model."""
+
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        """Forward pass of the model."""
+        return jnp.zeros(get_batch_shapes(obs) + (1,))
+
+
 def update_actor_critic_normalization(
     variables: PyTree,
     returns: Array,
@@ -213,3 +244,18 @@ def update_actor_critic_normalization(
         )
 
     return variables
+
+
+def get_batch_shapes(obs: FrozenDict[str, Array]) -> tuple[int, ...]:
+    """Get the batch shapes of the observations."""
+    batch_shapes = None
+    for obs_name, obs_vec in obs.items():
+        assert isinstance(obs_vec, Array)
+        if batch_shapes is None:
+            batch_shapes = obs_vec.shape[:-1]
+        else:
+            assert (
+                batch_shapes == obs_vec.shape[:-1]
+            ), f"{obs_name} has batch shape {obs_vec.shape[:-1]} but expected {batch_shapes}"
+    assert batch_shapes is not None, "No observations provided"
+    return batch_shapes

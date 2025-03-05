@@ -27,10 +27,7 @@ from ksim.builders.rewards import (
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.builders.terminations import (
-    PitchTooGreatTermination,
-    RollTooGreatTermination,
-)
+from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActionModel, ActorCriticAgent
 from ksim.model.mlp import MLP
@@ -453,6 +450,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         return ActorCriticAgent(
             actor_module=KBotActorModel(
+                num_outputs=NUM_OUTPUTS,
                 mlp=MLP(
                     num_hidden_layers=self.config.actor_num_layers,
                     hidden_features=self.config.actor_hidden_dims,
@@ -491,9 +489,9 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 actor: ActionModel
                 match self.config.viz_action:
                     case "policy":
-                        actor = KBotActorModel(mlp=mlp)
+                        actor = KBotActorModel(num_outputs=NUM_OUTPUTS, mlp=mlp)
                     case "zero":
-                        actor = KBotZeroActions(mlp=mlp)
+                        actor = KBotZeroActions(num_outputs=NUM_OUTPUTS, mlp=mlp)
                     case _:
                         raise ValueError(
                             f"Invalid action: {self.config.viz_action}."

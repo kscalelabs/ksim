@@ -33,7 +33,7 @@ from ksim.builders.loggers import (
     ModelUpdateLog,
 )
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
-from ksim.model.formulations import ActorCriticAgent
+from ksim.model.formulations import ActorCriticAgent, ZeroActionModel, ZeroCriticModel
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
 from ksim.utils.pytree import slice_pytree
@@ -63,14 +63,6 @@ class RLConfig(BaseEnvConfig, xax.Config):
     default_action_model: str = xax.field(
         value="zero",
         help="The default action model to use if `actions` is not specified.",
-    )
-    observation_size: int = xax.field(
-        value=MISSING,
-        help="The size of the observation space.",
-    )
-    action_size: int = xax.field(
-        value=MISSING,
-        help="The size of the action space.",
     )
     num_learning_epochs: int = xax.field(
         value=1,
@@ -253,7 +245,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         terms = trajectory.reward_components
         for key, _ in env.rewards:
-            reward_stats[key] = terms[key].mean()
+            statistic = terms[key]
+            assert isinstance(statistic, Array)
+            reward_stats[key] = jnp.mean(statistic)
 
         return reward_stats
 
@@ -262,7 +256,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         terms = trajectory.termination_components
         for key, _ in env.terminations:
-            termination_stats[key] = terms[key].mean()
+            statistic = terms[key]
+            assert isinstance(statistic, Array)
+            termination_stats[key] = jnp.mean(statistic)
 
         return termination_stats
 
@@ -430,9 +426,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng = self.prng_key()
         rng, burn_in_rng, train_rng = jax.random.split(rng, 3)
 
+        burn_in_agent = ActorCriticAgent(
+            actor_module=ZeroActionModel(num_outputs=env.action_size),
+            critic_module=ZeroCriticModel(),
+        )
+
         # Burn in trajectory to get normalization statistics
         burn_in_trajectories_dataset, burn_in_rollout_time_loss_components = (
-            self.get_trajectory_dataset(model, variables, env, burn_in_rng)
+            self.get_trajectory_dataset(burn_in_agent, variables, env, burn_in_rng)
         )
         variables = self.update_input_normalization_stats(
             variables=variables,

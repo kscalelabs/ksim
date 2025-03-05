@@ -56,8 +56,6 @@ class CartPoleConfig(PPOConfig):
     render_mode: str | None = xax.field(
         value=None, help="Render mode for the environment. Options: 'human', 'rgb_array', None"
     )
-    observation_size: int = 4
-    action_size: int = 1
 
 
 class CartPoleTask(PPOTask[CartPoleConfig]):
@@ -76,6 +74,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
                     hidden_features=self.config.actor_hidden_dims,
                     out_features=2,  # two discrete actions for CartPole
                 ),
+                num_outputs=2,
                 sampling_temperature=0.0,
             ),
             critic_module=CartPoleCriticModel(
