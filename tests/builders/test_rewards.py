@@ -167,7 +167,7 @@ class TestTrackLinearVelocityXYReward:
             command["linear_velocity_command"] - data_t_plus_1.qvel[:2]
         )
         expected = scale * jnp.exp(-sensitivity * tracking_error)
-        
+
         assert jnp.allclose(result, expected)
 
 
