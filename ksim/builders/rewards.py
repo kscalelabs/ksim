@@ -190,15 +190,15 @@ class TrackLinearVelocityXYReward(Reward):
     ) -> Array:
         cmd_vel_xy = command_t[self.cmd_name]
         actual_vel_xy = mjx_data_t_plus_1.qvel[:2]
-        
+
         # Compute tracking error as L2 distance between commanded and actual velocity
         tracking_error = jnp.linalg.norm(cmd_vel_xy - actual_vel_xy)
-        
+
         # Convert error to reward in [0,1] range using exponential decay
         # sensitivity controls how quickly reward decays with error
         # Higher sensitivity = sharper decay = more demanding tracking
         tracking_reward = jnp.exp(-self.sensitivity * tracking_error)
-        
+
         return tracking_reward
 
 

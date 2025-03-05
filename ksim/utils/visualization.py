@@ -17,6 +17,7 @@ from ksim.model.formulations import ActorCriticAgent
 
 logger = logging.getLogger(__name__)
 
+
 def save_trajectory_visualization(
     frames: Sequence[np.ndarray],
     output_dir: Path,
@@ -26,7 +27,7 @@ def save_trajectory_visualization(
     save_video: bool = True,
 ) -> None:
     """Save trajectory visualization as individual frames and/or video.
-    
+
     Args:
         frames: List of frames to save
         output_dir: Directory to save the visualization to
@@ -53,6 +54,7 @@ def save_trajectory_visualization(
         end_time = time.time()
         logger.info("Time taken for video creation: %.2f seconds", end_time - start_time)
 
+
 def render_and_save_trajectory(
     env: BaseEnv,
     model: ActorCriticAgent,
@@ -68,7 +70,7 @@ def render_and_save_trajectory(
     save_video: bool = True,
 ) -> None:
     """Render a trajectory and save it as frames and/or video.
-    
+
     Args:
         env: Environment to render
         model: Model to use for actions
@@ -91,11 +93,11 @@ def render_and_save_trajectory(
         height=height,
         camera=camera,
     )
-    
+
     save_trajectory_visualization(
         frames=frames,
         output_dir=output_dir,
-        fps=1/env.config.ctrl_dt,
+        fps=1 / env.config.ctrl_dt,
         save_frames=save_frames,
         save_video=save_video,
-    ) 
+    )

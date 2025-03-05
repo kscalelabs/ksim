@@ -176,50 +176,56 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def get_checkpoint_number_and_path(self) -> tuple[int, Path]:
         """Get the checkpoint number and path from config or latest checkpoint.
-        
+
         Returns:
             tuple: (checkpoint_number, checkpoint_path)
         """
-        assert self.config.pretrained is not None, "Tried to load pretrained checkpoint but no path was provided."
-            
+        assert self.config.pretrained is not None, (
+            "Tried to load pretrained checkpoint but no path was provided."
+        )
+
         pretrained_path = Path(self.config.pretrained)
         if not pretrained_path.exists():
             raise ValueError(f"Checkpoint not found at {pretrained_path}")
 
         if self.config.checkpoint_num is not None:
-            checkpoint_path = pretrained_path / "checkpoints" / f"ckpt.{self.config.checkpoint_num}.bin"
-            assert checkpoint_path.exists(), f"Checkpoint number {self.config.checkpoint_num} not found at {checkpoint_path}"
+            checkpoint_path = (
+                pretrained_path / "checkpoints" / f"ckpt.{self.config.checkpoint_num}.bin"
+            )
+            assert checkpoint_path.exists(), (
+                f"Checkpoint number {self.config.checkpoint_num} not found at {checkpoint_path}"
+            )
             return self.config.checkpoint_num, checkpoint_path
-        
+
         # Get the latest checkpoint in the folder
         ckpt_files = sorted(pretrained_path.glob("checkpoints/ckpt.*.bin"))
         if not ckpt_files:
             raise ValueError(f"No checkpoints found in {pretrained_path}/checkpoints/")
         checkpoint_path = ckpt_files[-1]
-        ckpt_num = int(checkpoint_path.stem.split('.')[1])
+        ckpt_num = int(checkpoint_path.stem.split(".")[1])
         return ckpt_num, checkpoint_path
 
     def get_render_name(self, state: xax.State | None = None) -> str:
         """Get a unique name for the render directory based on state and checkpoint info.
-        
+
         Args:
             state: Current training state if available
-            
+
         Returns:
             Formatted string containing timestamp and either state step count or checkpoint number
         """
         time_string = time.strftime("%Y%m%d_%H%M%S")
         prefix = "render"
-        
+
         # If training, label render with step count
         if state is not None:
             return f"{prefix}_{state.num_steps}_{time_string}"
-            
+
         # If resuming, use the checkpoint number
         if self.config.pretrained is not None:
             ckpt_num, _ = self.get_checkpoint_number_and_path()
             return f"{prefix}_pretrained_{ckpt_num}_{time_string}"
-            
+
         return f"{prefix}_no_state_{time_string}"
 
     def run_environment(
@@ -556,7 +562,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     width=self.config.render_width,
                     height=self.config.render_height,
                 )
-                
+
                 logger.info("Done rendering to %s", render_dir)
 
     def run_training(self) -> None:

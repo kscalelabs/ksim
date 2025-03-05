@@ -157,7 +157,7 @@ if __name__ == "__main__":
             minibatch_size=1024,
             num_learning_epochs=10,
             save_every_n_steps=100,
-            save_every_n_seconds=60*5,
+            save_every_n_seconds=60 * 5,
             only_save_most_recent=False,
         ),
     )
