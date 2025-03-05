@@ -36,6 +36,10 @@ class BaseEnv(ABC):
 
     rewards: list[tuple[str, Reward]]
     terminations: list[tuple[str, Termination]]
+    config: BaseEnvConfig
+
+    def __init__(self, config: BaseEnvConfig) -> None:
+        self.config = config
 
     @abstractmethod
     def get_dummy_env_state(  # exists for compilation purposes

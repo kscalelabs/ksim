@@ -2,7 +2,6 @@
 
 import bdb
 import logging
-import os
 import signal
 import sys
 import textwrap
@@ -16,7 +15,6 @@ from typing import Generic, Literal, TypeVar
 
 import jax
 import jax.numpy as jnp
-import mediapy as mp
 import optax
 import xax
 from dpshdl.dataset import Dataset
@@ -24,7 +22,6 @@ from flax import linen as nn
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING
-from PIL import Image
 
 from ksim.builders.loggers import (
     AverageRewardLog,
@@ -180,9 +177,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Returns:
             tuple: (checkpoint_number, checkpoint_path)
         """
-        assert self.config.pretrained is not None, (
-            "Tried to load pretrained checkpoint but no path was provided."
-        )
+        error_msg = "Tried to load pretrained checkpoint but no path was provided."
+        assert self.config.pretrained is not None, error_msg
 
         pretrained_path = Path(self.config.pretrained)
         if not pretrained_path.exists():
@@ -192,9 +188,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             checkpoint_path = (
                 pretrained_path / "checkpoints" / f"ckpt.{self.config.checkpoint_num}.bin"
             )
-            assert checkpoint_path.exists(), (
+            error_msg = (
                 f"Checkpoint number {self.config.checkpoint_num} not found at {checkpoint_path}"
             )
+            assert checkpoint_path.exists(), error_msg
             return self.config.checkpoint_num, checkpoint_path
 
         # Get the latest checkpoint in the folder

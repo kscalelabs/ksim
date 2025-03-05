@@ -1,16 +1,15 @@
 """Utilities for visualization and rendering."""
 
+import logging
 import os
 import time
-import logging
 from pathlib import Path
 from typing import Sequence
 
-import jax
 import mediapy as mp
 import numpy as np
+from jaxtyping import PRNGKeyArray, PyTree
 from PIL import Image
-from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv
 from ksim.model.formulations import ActorCriticAgent
