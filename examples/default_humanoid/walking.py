@@ -25,6 +25,7 @@ from ksim.builders.rewards import (
 from ksim.builders.terminations import (
     PitchTooGreatTermination,
     RollTooGreatTermination,
+    MinimumHeightTermination,
 )
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
@@ -85,8 +86,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                RollTooGreatTermination(max_roll=1.04),
-                PitchTooGreatTermination(max_pitch=1.04),
+                # RollTooGreatTermination(max_roll=1.04),
+                # PitchTooGreatTermination(max_pitch=1.04),
+                MinimumHeightTermination(min_height=0.4),
             ],
             resets=[
                 XYPositionResetBuilder(),

@@ -440,6 +440,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng = self.prng_key()
         rng, burn_in_rng, train_rng = jax.random.split(rng, 3)
 
+        jax.debug.breakpoint()
         # Burn in trajectory to get normalization statistics
         burn_in_trajectories_dataset, burn_in_rollout_time_loss_components = (
             self.get_trajectory_dataset(
@@ -450,6 +451,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 burn_in=True,
             )
         )
+        jax.debug.breakpoint()
         variables = self.update_input_normalization_stats(
             variables=variables,
             trajectories_dataset=burn_in_trajectories_dataset,
@@ -468,7 +470,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
             rollout_time = time.time() - start_time
             self.log_trajectory_stats(env, trajectories_dataset)
-
+            jax.debug.breakpoint()
             # running training on minibatches
             start_time = time.time()
             for epoch_idx in range(self.config.num_learning_epochs):
