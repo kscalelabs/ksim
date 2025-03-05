@@ -184,61 +184,6 @@ class ActorCriticAgent(nn.Module):
         return self.actor_module.sample_and_log_prob(normalized_obs, cmd, rng)
 
 
-class ZeroActionModel(ActionModel):
-    """Zero action model."""
-
-    num_outputs: int
-
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        """Forward pass of the model."""
-        batch_shapes = get_batch_shapes(obs)
-        return jnp.zeros(batch_shapes + (self.num_outputs,))
-
-    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
-        """Calculate the log probability of the action."""
-        return jnp.zeros_like(action)
-
-    def sample_and_log_prob(
-        self,
-        obs: FrozenDict[str, Array],
-        cmd: FrozenDict[str, Array],
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, Array]:
-        """Sample and calculate the log probability of the action."""
-        batch_shapes = get_batch_shapes(obs)
-        return jnp.zeros(batch_shapes + (self.num_outputs,)), jnp.zeros(batch_shapes)
-
-
-class ZeroCategoricalActionModel(CategoricalActionModel):
-    """Zero categorical action model."""
-
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        """Forward pass of the model."""
-        return jnp.zeros(get_batch_shapes(obs) + (self.num_outputs,))
-
-    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
-        """Calculate the log probability of the action."""
-        return jnp.zeros_like(action)
-
-    def sample_and_log_prob(
-        self,
-        obs: FrozenDict[str, Array],
-        cmd: FrozenDict[str, Array],
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, Array]:
-        """Sample and calculate the log probability of the action."""
-        batch_shapes = get_batch_shapes(obs)
-        return jnp.zeros(batch_shapes + (self.num_outputs,)), jnp.zeros(batch_shapes)
-
-
-class ZeroCriticModel(nn.Module):
-    """Zero critic model."""
-
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        """Forward pass of the model."""
-        return jnp.zeros(get_batch_shapes(obs) + (1,))
-
-
 def update_actor_critic_normalization(
     variables: PyTree,
     returns: Array,
