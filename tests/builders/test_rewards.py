@@ -147,7 +147,8 @@ class TestTrackLinearVelocityXYReward:
     def test_track_linear_velocity_xy_reward(self) -> None:
         """Test that the TrackLinearVelocityXYReward returns the correct reward."""
         scale = 0.4
-        reward = TrackLinearVelocityXYReward(scale=scale)
+        sensitivity = 1.0
+        reward = TrackLinearVelocityXYReward(scale=scale, sensitivity=sensitivity)
 
         data_t = DummyMjxData()
         data_t_plus_1 = DummyMjxData()
@@ -161,11 +162,12 @@ class TestTrackLinearVelocityXYReward:
 
         result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1) * scale
 
-        # Expected reward is scale * sum((xy_velocity * command)^2) for L2 norm
-        expected = scale * (
-            (data_t_plus_1.qvel[0] * command["linear_velocity_command"][0]) ** 2
-            + (data_t_plus_1.qvel[1] * command["linear_velocity_command"][1]) ** 2
+        # Expected reward uses exponential decay based on L2 tracking error
+        tracking_error = jnp.linalg.norm(
+            command["linear_velocity_command"] - data_t_plus_1.qvel[:2]
         )
+        expected = scale * jnp.exp(-sensitivity * tracking_error)
+
         assert jnp.allclose(result, expected)
 
 
