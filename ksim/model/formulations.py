@@ -230,8 +230,7 @@ def get_batch_shapes(obs: FrozenDict[str, Array]) -> tuple[int, ...]:
         if batch_shapes is None:
             batch_shapes = obs_vec.shape[:-1]
         else:
-            assert (
-                batch_shapes == obs_vec.shape[:-1]
-            ), f"{obs_name} has batch shape {obs_vec.shape[:-1]} but expected {batch_shapes}"
+            err_msg = f"{obs_name} has batch shape {obs_vec.shape[:-1]} but expected {batch_shapes}"
+            assert batch_shapes == obs_vec.shape[:-1], err_msg
     assert batch_shapes is not None, "No observations provided"
     return batch_shapes
