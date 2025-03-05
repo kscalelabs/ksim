@@ -413,6 +413,46 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         return minibatched_rollout, minibatched_rollout_time_loss_components
 
+    @legit_jit(static_argnames=["self", "model", "optimizer"])
+    def train_epoch(
+        self,
+        model: ActorCriticAgent,
+        variables: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        trajectories_dataset: EnvState,
+        rollout_time_loss_components: RolloutTimeLossComponents,
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+        """Train a minibatch, returns the updated variables, optimizer state, loss, and metrics."""
+
+        @legit_jit()
+        def minibatch_step_fn(
+            carry: tuple[PyTree, optax.OptState], minibatch_idx: Array
+        ) -> tuple[tuple[PyTree, optax.OptState], FrozenDict[str, Array]]:
+            variables, opt_state = carry
+            minibatch, rollout_time_minibatch_loss_components = self.get_minibatch(
+                trajectories_dataset, rollout_time_loss_components, minibatch_idx
+            )
+            params, opt_state, _, metrics = self.model_update(
+                model=model,
+                variables=variables,
+                optimizer=optimizer,
+                opt_state=opt_state,
+                env_state_batch=minibatch,
+                rollout_time_loss_components=rollout_time_minibatch_loss_components,
+            )
+            variables["params"] = params
+
+            return (variables, opt_state), metrics
+
+        (variables, opt_state), metrics = jax.lax.scan(
+            minibatch_step_fn, (variables, opt_state), jnp.arange(self.num_minibatches)
+        )
+
+        # note that variables, opt_state are just the final values
+        # metrics is stacked over the minibatches
+        return variables, opt_state, metrics
+
     def rl_train_loop(
         self,
         model: ActorCriticAgent,
@@ -460,46 +500,32 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     trajectories_dataset, rollout_time_loss_components, reshuffle_rng
                 )
                 reshuffle_rng, _ = jax.random.split(reshuffle_rng)
-                for minibatch_idx in range(self.num_minibatches):
-                    minibatch_idx_array = jnp.array(
-                        minibatch_idx
-                    )  # TODO: scanning will do this anyways
-                    minibatch, rollout_time_minibatch_loss_components = self.get_minibatch(
-                        trajectories_dataset, rollout_time_loss_components, minibatch_idx_array
-                    )
-                    with self.step_context("update_state"):
-                        params, opt_state, loss_val, metrics = self.model_update(
-                            model,
-                            variables,
-                            optimizer,
-                            opt_state,
-                            minibatch,
-                            rollout_time_minibatch_loss_components,
-                        )
-                        variables["params"] = params
-                        print(f"loss: {loss_val}")
-                        print(f"metrics: {metrics}")
 
-                        # log metrics from the model update
-                        metric_logging_data = LoggingData(
-                            trajectory=trajectories_dataset,
-                            update_metrics=metrics,
-                            gradients=None,
-                            loss=float(loss_val),
-                            training_state=training_state,
-                        )
+                variables, opt_state, metrics = self.train_epoch(
+                    model=model,
+                    variables=variables,
+                    optimizer=optimizer,
+                    opt_state=opt_state,
+                    trajectories_dataset=trajectories_dataset,
+                    rollout_time_loss_components=rollout_time_loss_components,
+                )
+            update_time = time.time() - start_time
 
-                        # print(f"{epoch_idx}, {minibatch_idx}: {metrics}")
+            averaged_metrics = jax.tree_util.tree_map(jnp.mean, metrics)
+            # TODO: we probably want a way of tracking how loss evolves within
+            # an epoch, and across epochs.
+            metric_logging_data = LoggingData(
+                trajectory=trajectories_dataset,
+                update_metrics=averaged_metrics,
+            )
 
-                        with self.step_context("write_logs"):
-                            training_state.raw_phase = "train"
-                            for log_item in self.log_items:
-                                log_item(self.logger, metric_logging_data)
+            with self.step_context("write_logs"):
+                training_state.raw_phase = "train"
+                for log_item in self.log_items:
+                    log_item(self.logger, metric_logging_data)
 
-                            self.logger.write(training_state)
-                            training_state.num_steps += 1
-
-            model_update_time = time.time() - start_time
+                self.logger.write(training_state)
+                training_state.num_steps += 1
 
             # updating normalization statistics for the next rollout
             # NOTE: for the first step, the normalization stats are not updated
@@ -513,7 +539,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Log the time taken for the model update.
             with self.step_context("write_logs"):
                 self.logger.log_scalar("rollout_time", rollout_time, namespace="⏰")
-                self.logger.log_scalar("model_update_time", model_update_time, namespace="⏰")
+                self.logger.log_scalar("update_time", update_time, namespace="⏰")
                 self.logger.write(training_state)
 
             with self.step_context("on_step_end"):
