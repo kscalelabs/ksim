@@ -3,12 +3,8 @@
     <default>
         <joint armature="1" damping="1" limited="true"/>
         <geom conaffinity="0" condim="3" contype="0" material="geom" rgba="0.4 0.33 0.26 1.0"/>
-        <!-- <motor ctrllimited="true" ctrlrange="-.4 .4"/> -->
+        <motor ctrllimited="true" ctrlrange="-.4 .4"/>
     </default>
-    <size nkey="5" nuser_geom="1"/>
-    <visual>
-        <map fogend="5" fogstart="3"/>
-    </visual>
     <asset>
         <texture builtin="gradient" height="100" rgb1=".4 .5 .6" rgb2="0 0 0" type="skybox" width="100"/>
         <!-- <texture builtin="gradient" height="100" rgb1="1 1 1" rgb2="0 0 0" type="skybox" width="100"/>-->
