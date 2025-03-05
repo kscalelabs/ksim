@@ -146,6 +146,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                     num_hidden_layers=self.config.actor_num_layers,
                     hidden_features=self.config.actor_hidden_dims,
                     out_features=NUM_OUTPUTS,
+                    output_layer_scale=0.01,
                 ),
                 init_log_std=-0.7,
                 num_outputs=NUM_OUTPUTS,
@@ -155,6 +156,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                     num_hidden_layers=self.config.critic_num_layers,
                     hidden_features=self.config.critic_hidden_dims,
                     out_features=1,
+                    output_layer_scale=1.0,
                 ),
             ),
         )
