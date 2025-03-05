@@ -10,7 +10,7 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.env.toy.cartpole_env import CartPoleEnv
+from examples.cartpole.cartpole_env import CartPoleEnv
 from ksim.model.formulations import ActorCriticAgent, CategoricalActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -54,7 +54,8 @@ class CartPoleConfig(PPOConfig):
 
     # Environment parameters
     render_mode: str | None = xax.field(
-        value=None, help="Render mode for the environment. Options: 'human', 'rgb_array', None"
+        value=None,
+        help="Render mode for the environment. Options: 'human', 'rgb_array', None",
     )
 
 
@@ -86,9 +87,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
             ),
         )
 
-    def viz_environment(
-        self,
-    ) -> None:
+    def viz_environment(self) -> None:
         """Run the environment with visualization.
 
         Uses trained policy from latest checkpoint, otherwise uses a randomly initialized policy.
@@ -122,8 +121,11 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
                 while True:
                     # Get observations and use policy
                     rng, action_rng = jax.random.split(rng)
-                    action, log_prob = model.apply(
-                        variables, env_state, action_rng, method="actor_sample_and_log_prob"
+                    _, log_prob = model.apply(
+                        variables,
+                        env_state,
+                        action_rng,
+                        method="actor_sample_and_log_prob",
                     )
                     assert isinstance(log_prob, Array)
 

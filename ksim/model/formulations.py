@@ -90,7 +90,10 @@ class CategoricalActionModel(ActionModel, ABC):
         return action_log_prob
 
     def sample_and_log_prob(
-        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+        self,
+        obs: FrozenDict[str, Array],
+        cmd: FrozenDict[str, Array],
+        rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         logits = self(obs, cmd)
         log_probs = jax.nn.log_softmax(logits)
@@ -171,7 +174,10 @@ class ActorCriticAgent(nn.Module):
 
     @nn.compact
     def actor_sample_and_log_prob(
-        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+        self,
+        obs: FrozenDict[str, Array],
+        cmd: FrozenDict[str, Array],
+        rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         """Sample and calculate the log probability of the action."""
         normalized_obs = self.normalize_obs(obs)
@@ -193,7 +199,32 @@ class ZeroActionModel(ActionModel):
         return jnp.zeros_like(action)
 
     def sample_and_log_prob(
-        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+        self,
+        obs: FrozenDict[str, Array],
+        cmd: FrozenDict[str, Array],
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, Array]:
+        """Sample and calculate the log probability of the action."""
+        batch_shapes = get_batch_shapes(obs)
+        return jnp.zeros(batch_shapes + (self.num_outputs,)), jnp.zeros(batch_shapes)
+
+
+class ZeroCategoricalActionModel(CategoricalActionModel):
+    """Zero categorical action model."""
+
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        """Forward pass of the model."""
+        return jnp.zeros(get_batch_shapes(obs) + (self.num_outputs,))
+
+    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
+        """Calculate the log probability of the action."""
+        return jnp.zeros_like(action)
+
+    def sample_and_log_prob(
+        self,
+        obs: FrozenDict[str, Array],
+        cmd: FrozenDict[str, Array],
+        rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         """Sample and calculate the log probability of the action."""
         batch_shapes = get_batch_shapes(obs)
