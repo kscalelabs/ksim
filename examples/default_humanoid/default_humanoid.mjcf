@@ -5,22 +5,6 @@
         <geom conaffinity="0" condim="3" contype="0" material="geom" rgba="0.4 0.33 0.26 1.0"/>
         <!-- <motor ctrllimited="true" ctrlrange="-.4 .4"/> -->
     </default>
-    <!-- Removed RK4 integrator for brax. -->
-    <option iterations="8" timestep="0.003"/>
-    <custom>
-        <!-- brax custom variables -->
-        <numeric data="2500" name="constraint_limit_stiffness"/>
-        <numeric data="27000" name="constraint_stiffness"/>
-        <numeric data="30" name="constraint_ang_damping"/>
-        <numeric data="80" name="constraint_vel_damping"/>
-        <numeric data="-0.05" name="ang_damping"/>
-        <numeric data="0.5" name="joint_scale_pos"/>
-        <numeric data="0.1" name="joint_scale_ang"/>
-        <numeric data="0" name="spring_mass_scale"/>
-        <numeric data="1" name="spring_inertia_scale"/>
-        <numeric data="20" name="matrix_inv_iterations"/>
-        <numeric data="15" name="solver_maxls"/>
-    </custom>
     <size nkey="5" nuser_geom="1"/>
     <visual>
         <map fogend="5" fogstart="3"/>
