@@ -259,7 +259,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
 
     def get_reward_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
-        """Get reward statistics from the trajectory. (D)"""
+        """Get reward statistics from the trajectoryl (D)."""
         reward_stats: dict[str, jnp.ndarray] = {}
 
         terms = trajectory.reward_components
@@ -271,7 +271,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return reward_stats
 
     def get_termination_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
-        """Get termination statistics from the trajectory. (D)"""
+        """Get termination statistics from the trajectory (D)."""
         termination_stats: dict[str, jnp.ndarray] = {}
 
         terms = trajectory.termination_components
@@ -349,7 +349,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
         burn_in: bool = False,
     ) -> tuple[EnvState, RolloutTimeLossComponents, EnvState, PhysicsData]:
-        """Returns env_state_dataset, rollout_time_loss_components, carry env_state physics data"""
+        """Returns env state, loss components, carry env state, physics data."""
         # TODO: implement logic to handle randomize model initialization when creating batch
         rollout_TEL, data_EL_f_plus_1 = env.unroll_trajectories(
             model=model,
@@ -393,7 +393,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rollout_time_loss_components_DL: RolloutTimeLossComponents,
         rng: PRNGKeyArray,
     ) -> tuple[EnvState, RolloutTimeLossComponents]:
-        """Reshuffle a rollout array. (DL)"""
+        """Reshuffle a rollout array (DL)."""
         # Generate permutation indices
         batch_size = self.dataset_size
         permutation = jax.random.choice(rng, jnp.arange(batch_size), (batch_size,))
@@ -420,7 +420,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rollout_time_loss_components_DL: RolloutTimeLossComponents,
         minibatch_idx: Array,
     ) -> tuple[EnvState, RolloutTimeLossComponents]:
-        """Get a minibatch from the rollout. (B)"""
+        """Get a minibatch from the rollout (B)."""
         starting_idx = minibatch_idx * self.config.num_env_states_per_minibatch
         rollout_BL = slice_pytree(
             rollout_DL, starting_idx, self.config.num_env_states_per_minibatch

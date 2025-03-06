@@ -81,7 +81,7 @@ class MjxEnvConfig(BaseEnvConfig):
     max_action_latency: float = xax.field(value=0.0, help="The maximum action latency.")
 
     # solver configuration options
-    # solver_type: mujoco.mjtSolver = xax.field(value=mujoco.mjtSolver.mjSOL_CG, help="Solver type.")
+    solver_type: mujoco.mjtSolver = xax.field(value=mujoco.mjtSolver.mjSOL_CG, help="Solver type.")
     solver_iterations: int = xax.field(value=6, help="Number of main solver iterations.")
     solver_ls_iterations: int = xax.field(value=6, help="Number of line search iterations.")
     disable_flags_bitmask: int = xax.field(
@@ -196,17 +196,12 @@ class MjxEnv(BaseEnv):
 
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
-        # mj_model.opt.solver = self.config.solver
-        # mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        # mj_model.opt.disableflags = self.config.disable_flags_bitmask
-        # mj_model.opt.iterations = self.config.solver_iterations
-        # mj_model.opt.ls_iterations = self.config.solver_ls_iterations
-        # mj_model.opt.timestep = self.config.dt
+        mj_model.opt.solver = self.config.solver_type
+        mj_model.opt.disableflags = self.config.disable_flags_bitmask
+        mj_model.opt.iterations = self.config.solver_iterations
+        mj_model.opt.ls_iterations = self.config.solver_ls_iterations
+        mj_model.opt.timestep = self.config.dt
 
-        # copied over from legacy
-        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
         return mj_model
 
     @legit_jit(static_argnames=["self"])
@@ -349,7 +344,7 @@ class MjxEnv(BaseEnv):
         self,
         num_envs: int,
     ) -> EnvState:
-        """Get initial environment states (EL)"""
+        """Get initial environment states (EL)."""
         rng = jax.random.PRNGKey(0)
         cmd_rng, obs_rng = jax.random.split(rng, 2)
         mjx_data_EL_0 = self.get_init_physics_data(num_envs)
