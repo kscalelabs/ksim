@@ -17,7 +17,6 @@ from ksim.builders.observation import (
     JointPositionObservation,
     JointVelocityObservation,
 )
-from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import HeightReward, TrackLinearVelocityXYReward
 from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig

@@ -3,10 +3,7 @@
 from dataclasses import dataclass
 
 import jax
-import optax
-from jaxtyping import Array, PRNGKeyArray, PyTree
-
-from ksim.model.formulations import ActorCriticAgent
+from jaxtyping import Array
 
 
 @jax.tree_util.register_dataclass
