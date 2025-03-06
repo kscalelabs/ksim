@@ -16,6 +16,8 @@ def test_default_humanoid_training() -> None:
     config = HumanoidWalkingConfig(
         num_envs=4,
         num_learning_epochs=1,
+        num_env_states_per_minibatch=4,
+        num_minibatches=1,
         robot_model_name="examples/default_humanoid/",
     )
 
@@ -130,7 +132,9 @@ def test_default_humanoid_run_method() -> None:
     """Test that the run method of HumanoidWalkingTask works."""
     # Configure a minimal training run
     config = HumanoidWalkingConfig(
-        num_envs=2,
+        num_envs=4,
+        num_env_states_per_minibatch=4,
+        num_minibatches=1,
         num_learning_epochs=1,
         robot_model_name="examples/default_humanoid/",
         action="train",
