@@ -68,13 +68,15 @@ def legit_jit(
                 arg_dict = {}
                 for i, arg in enumerate(args):
                     if i < len(param_names):
-                        if i == 0 and param_names[i] in ("self", "cls"):
-                            continue
                         arg_dict[param_names[i]] = get_hash(arg)
                 for k, v in kwargs.items():
                     arg_dict[k] = get_hash(v)
 
-                print(f"Running {fn.__name__} (count: {JitState.compilation_count})")
+                if fn.__name__ == "__call__":
+                    class_name = (args[0].__class__.__name__) + "."
+                else:
+                    class_name = ""
+                print(f"Running {class_name}{fn.__name__} (count: {JitState.compilation_count})")
                 print(f"- took {runtime} seconds")
                 JitState.compilation_count += 1
 
@@ -83,8 +85,9 @@ def legit_jit(
                     for k in all_keys:
                         prev = JitState.last_arg_dict.get(k, "N/A")
                         curr = arg_dict.get(k, "N/A")
+
                         if prev != curr:
-                            print(f"  Arg '{k}' hash changed: {prev} -> {curr}")
+                            print(f"- Arg '{k}' hash changed: {prev} -> {curr}")
 
                 JitState.last_arg_dict = arg_dict
 

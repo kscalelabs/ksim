@@ -52,8 +52,9 @@ def step_mjx(
     ctrl_L: Array,
 ) -> mjx.Data:
     """Step the mujoco model."""
-    # data_with_ctrl_L = mjx_data_L.replace(ctrl=ctrl_L)
-    return mjx.step(mjx_model_L, mjx_data_L)
+    ctrl_L = jnp.zeros_like(mjx_data_L.ctrl)  # TODO: will need to change back
+    data_with_ctrl_L = mjx_data_L.replace(ctrl=ctrl_L)
+    return mjx.step(mjx_model_L, data_with_ctrl_L)
 
 
 def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
@@ -203,7 +204,7 @@ class MjxEnv(BaseEnv):
         mj_model.opt.timestep = self.config.dt
         return mj_model
 
-    # @legit_jit(static_argnames=["self"])
+    @legit_jit(static_argnames=["self"])
     def get_observation(self, mjx_data_L: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
         """Compute observations from the pipeline state."""
         observations = {}
@@ -213,6 +214,7 @@ class MjxEnv(BaseEnv):
             observations[observation_name] = observation_value
         return FrozenDict(observations)
 
+    @legit_jit(static_argnames=["self"])
     def get_rewards(
         self,
         action_L_t_minus_1: Array,
@@ -220,9 +222,9 @@ class MjxEnv(BaseEnv):
         command_L_t: FrozenDict[str, Array],
         action_L_t: Array,
         mjx_data_L_t_plus_1: mjx.Data,
-    ) -> list[tuple[str, Array]]:
+    ) -> FrozenDict[str, Array]:
         """Compute rewards from the state transition."""
-        rewards = []
+        rewards = {}
         for reward_name, reward in self.rewards:
             reward_val = (
                 reward(
@@ -237,19 +239,20 @@ class MjxEnv(BaseEnv):
             chex.assert_shape(
                 reward_val, (), custom_message=f"Reward {reward_name} must be a scalar"
             )
-            rewards.append((reward_name, reward_val))
-        return rewards
+            rewards[reward_name] = reward_val
+        return FrozenDict(rewards)
 
-    def get_terminations(self, mjx_data_L_t_plus_1: mjx.Data) -> list[tuple[str, Array]]:
+    @legit_jit(static_argnames=["self"])
+    def get_terminations(self, mjx_data_L_t_plus_1: mjx.Data) -> FrozenDict[str, Array]:
         """Compute termination conditions from the pipeline state."""
-        terminations = []
+        terminations = {}
         for termination_name, termination in self.terminations:
             term_val = termination(mjx_data_L_t_plus_1)
             chex.assert_shape(
                 term_val, (), custom_message=f"Termination {termination_name} must be a scalar"
             )
-            terminations.append((termination_name, term_val))
-        return terminations
+            terminations[termination_name] = term_val
+        return FrozenDict(terminations)
 
     @legit_jit(static_argnames=["self"])
     def get_initial_commands(
@@ -321,15 +324,13 @@ class MjxEnv(BaseEnv):
         num_envs: int,
     ) -> mjx.Data:
         """Get initial mjx.Data (EL)."""
-        mjx_data_L_0 = step_mjx(
-            mjx_model_L=self.default_mjx_model,
-            mjx_data_L=self.default_mjx_data,
-            ctrl_L=jnp.zeros_like(self.default_mjx_data.ctrl),
+        default_data_EL = jax.tree_util.tree_map(
+            lambda x: jnp.stack([x] * num_envs), self.default_mjx_data
         )
-
-        # stack the data over the leaf dimension
-        mjx_data_EL_0: mjx.Data = jax.tree_util.tree_map(
-            lambda x: jnp.stack([x] * num_envs), mjx_data_L_0
+        mjx_data_EL_0 = jax.vmap(step_mjx, in_axes=(None, 0, 0))(
+            self.default_mjx_model,
+            default_data_EL,
+            jnp.zeros_like(default_data_EL.ctrl),
         )
         return mjx_data_EL_0
 
@@ -415,12 +416,12 @@ class MjxEnv(BaseEnv):
         done_L_0 = jnp.array(False, dtype=jnp.bool_)
         reward_L_0 = jnp.array(0.0)
 
-        term_components_L_0 = {k: v for k, v in self.get_terminations(mjx_data_L_1)}
+        term_components_L_0 = {k: v for k, v in self.get_terminations(mjx_data_L_1).items()}
         reward_components_L_0 = {
             k: v
             for k, v in self.get_rewards(
                 action_L_0, mjx_data_L_0, command_L_0, action_L_0, mjx_data_L_1
-            )
+            ).items()
         }
 
         env_state_L_0 = EnvState(
@@ -492,7 +493,7 @@ class MjxEnv(BaseEnv):
         )
 
         all_dones = self.get_terminations(mjx_data_L_t_plus_1)
-        done_L_t = jnp.stack([v for _, v in all_dones]).any()
+        done_L_t = jnp.stack([v for _, v in all_dones.items()]).any()
         all_rewards = self.get_rewards(
             env_state_L_t_minus_1.action,
             mjx_data_L_t,
@@ -500,10 +501,10 @@ class MjxEnv(BaseEnv):
             action_L_t,
             mjx_data_L_t_plus_1,
         )
-        reward_L_t = jnp.stack([v for _, v in all_rewards]).sum()
+        reward_L_t = jnp.stack([v for _, v in all_rewards.items()]).sum()
 
-        term_components_L_t = {k: v for k, v in all_dones}
-        reward_components_L_t = {k: v for k, v in all_rewards}
+        term_components_L_t = {k: v for k, v in all_dones.items()}
+        reward_components_L_t = {k: v for k, v in all_rewards.items()}
 
         env_state_L_t = EnvState(
             obs=obs_L_t,
