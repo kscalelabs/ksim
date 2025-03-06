@@ -19,9 +19,9 @@ from ksim.builders.observation import (
 )
 from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import (
+    DHControlPenalty,
     DHForwardReward,
     DHHealthyReward,
-    DHControlPenalty,
 )
 from ksim.builders.terminations import (
     UnhealthyTermination,

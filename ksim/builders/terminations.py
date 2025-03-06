@@ -124,6 +124,7 @@ class IllegalContactTerminationBuilder(TerminationBuilder[IllegalContactTerminat
             illegal_geom_idxs=illegal_geom_idxs,
         )
 
+
 @attrs.define(frozen=True, kw_only=True)
 class UnhealthyTermination(Termination):
     """Terminates the episode if the robot is unhealthy."""
