@@ -18,14 +18,8 @@ from ksim.builders.observation import (
     JointVelocityObservation,
 )
 from ksim.builders.resets import XYPositionResetBuilder
-from ksim.builders.rewards import (
-    HeightReward,
-    TrackLinearVelocityXYReward,
-)
-from ksim.builders.terminations import (
-    PitchTooGreatTermination,
-    RollTooGreatTermination,
-)
+from ksim.builders.rewards import HeightReward, TrackLinearVelocityXYReward
+from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
@@ -76,6 +70,10 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     max_roll: float = xax.field(value=0.1)
     pretrained: str | None = xax.field(value=None)
     checkpoint_num: int | None = xax.field(value=None)
+
+    # Action latency.
+    min_action_latency: float = xax.field(value=0.0)
+    max_action_latency: float = xax.field(value=0.0)
 
     actuator_type: str = xax.field(value="scaled_torque", help="The type of actuator to use.")
 

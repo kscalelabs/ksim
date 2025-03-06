@@ -23,6 +23,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
+from omegaconf import MISSING
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
@@ -139,8 +140,8 @@ class MjxEnvConfig(BaseEnvConfig):
     debug_env: bool = xax.field(value=False, help="Whether to enable debug mode for the env.")
 
     # action configuration options
-    min_action_latency: float = xax.field(value=0.0, help="The minimum action latency.")
-    max_action_latency: float = xax.field(value=0.0, help="The maximum action latency.")
+    min_action_latency: float = xax.field(value=MISSING, help="The minimum action latency.")
+    max_action_latency: float = xax.field(value=MISSING, help="The maximum action latency.")
 
     # solver configuration options
     solver_type: int = xax.field(value=mujoco.mjtSolver.mjSOL_NEWTON.value, help="Solver type.")
