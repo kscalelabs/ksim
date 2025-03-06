@@ -363,7 +363,7 @@ class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
     max_episode_length: float = xax.field(value=10.0)
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
-    action_clipping: float = xax.field(value=20.0)
+    action_clipping: float = xax.field(value=10.0)
 
     actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
 
@@ -387,7 +387,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             ],
             resets=[
                 XYPositionResetBuilder(),
-                # JointVelocityResetBuilder(max_velocity=1.0),
+                JointVelocityResetBuilder(max_velocity=1.0),
             ],
             rewards=[
                 # LinearVelocityZPenalty(scale=-0.1),
