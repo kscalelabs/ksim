@@ -372,7 +372,6 @@ class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
     init_noise_std: float = xax.field(value=1.0)
 
     # Termination conditions.
-    max_episode_length: float = xax.field(value=10.0)
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
 

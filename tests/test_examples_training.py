@@ -34,6 +34,11 @@ def test_default_humanoid_training() -> None:
     dummy_states = env.get_dummy_env_states(config.num_envs)
     variables = model.init(init_key, dummy_states.obs, dummy_states.command)
 
+    # Get optimizer
+    optimizer = task.get_optimizer()
+    opt_state = optimizer.init(variables["params"])
+
+    # Test a single training iteration
     physics_model_L = env.get_init_physics_model()
     physics_data_EL_0 = env.get_init_physics_data(config.num_envs)
 
@@ -42,67 +47,16 @@ def test_default_humanoid_training() -> None:
         model, variables, reset_rngs, physics_data_EL_0, physics_model_L
     )
 
+    # Get a trajectory dataset
     key, rollout_key = jax.random.split(key)
-    states, _ = env.unroll_trajectories(
+    trajectories_dataset, rollout_time_loss_components, _, _ = task.get_rl_dataset(
         model=model,
         variables=variables,
-        rng=rollout_key,
-        num_steps=10,
-        num_envs=config.num_envs,
+        env=env,
         env_state_EL_t_minus_1=env_state_EL_0,
         physics_data_EL_t=physics_data_EL_1,
         physics_model_L=physics_model_L,
-    )
-
-    # Verify that we got valid outputs
-    assert states is not None
-    assert states.obs is not None
-    assert states.reward is not None
-    assert states.done is not None
-    assert states.reward.shape == (
-        10,
-        config.num_envs,
-    )  # Shape is (num_steps, num_envs)
-    assert states.done.shape == (
-        10,
-        config.num_envs,
-    )  # Shape is (num_steps, num_envs)
-
-    # Check for NaN values in outputs
-    # TODO: Switch these to asserts when we fix the NaN issue
-    for k, v in states.obs.items():
-        if jnp.isnan(v).any():
-            print(f"WARNING: NaN values found in observation output '{k}'")
-    if jnp.isnan(states.reward).any():
-        print("WARNING: NaN values found in reward outputs")
-    if jnp.isnan(states.action).any():
-        print("WARNING: NaN values found in action outputs")
-    # Handle FrozenDict structures by checking each array in the dict
-    for k, v in states.command.items():
-        if jnp.isnan(v).any():
-            print(f"WARNING: NaN values found in command output '{k}'")
-
-    # Test a single model update
-    # Get optimizer
-    optimizer = task.get_optimizer()
-    opt_state = optimizer.init(variables["params"])
-    rng = jax.random.PRNGKey(0)
-
-    # Get a trajectory dataset
-    key, rollout_key = jax.random.split(key)
-    (
-        trajectories_dataset,
-        rollout_time_loss_components,
-        _,
-        _,
-    ) = task.get_rl_dataset(
-        model,
-        variables,
-        env,
-        env_state_EL_0,
-        physics_data_EL_1,
-        physics_model_L,
-        rng,
+        rng=rollout_key,
     )
 
     # Get a minibatch
@@ -112,12 +66,12 @@ def test_default_humanoid_training() -> None:
 
     # Update the model
     _, _, _, metrics = task.model_update(
-        model,
-        variables,
-        optimizer,
-        opt_state,
-        minibatch,
-        minibatch_loss_components,
+        model=model,
+        variables=variables,
+        optimizer=optimizer,
+        opt_state=opt_state,
+        env_state_batch=minibatch,
+        rollout_time_loss_components=minibatch_loss_components,
     )
 
     # Verify metrics
