@@ -29,11 +29,16 @@ def test_default_humanoid_training() -> None:
 
     # Initialize model parameters
     key, init_key = jax.random.split(key)
-    dummy_states = env.get_dummy_env_states(init_key)
+    dummy_states = env.get_dummy_env_states(config.num_envs)
     variables = model.init(init_key, dummy_states.obs, dummy_states.command)
 
     physics_model_L = env.get_init_physics_model()
-    physics_data_EL_t = env.get_init_physics_data(config.num_envs)
+    physics_data_EL_0 = env.get_init_physics_data(config.num_envs)
+
+    reset_rngs = jax.random.split(key, config.num_envs)
+    env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, 0, None))(
+        model, variables, reset_rngs, physics_data_EL_0, physics_model_L
+    )
 
     key, rollout_key = jax.random.split(key)
     states, _ = env.unroll_trajectories(
@@ -42,8 +47,8 @@ def test_default_humanoid_training() -> None:
         rng=rollout_key,
         num_steps=10,
         num_envs=config.num_envs,
-        env_state_EL_t_minus_1=dummy_states,
-        physics_data_EL_t=physics_data_EL_t,
+        env_state_EL_t_minus_1=env_state_EL_0,
+        physics_data_EL_t=physics_data_EL_1,
         physics_model_L=physics_model_L,
     )
 
@@ -79,9 +84,6 @@ def test_default_humanoid_training() -> None:
     # Get optimizer
     optimizer = task.get_optimizer()
     opt_state = optimizer.init(variables["params"])
-    physics_model_L = env.get_init_physics_model()
-    physics_data_EL_t = env.get_init_physics_data(config.num_envs)
-    env_state_EL_t_minus_1 = env.get_dummy_env_states(config.num_envs)
     rng = jax.random.PRNGKey(0)
 
     # Get a trajectory dataset
@@ -89,14 +91,14 @@ def test_default_humanoid_training() -> None:
     (
         trajectories_dataset,
         rollout_time_loss_components,
-        env_state_EL_t_minus_1,
-        physics_data_EL_t,
+        _,
+        _,
     ) = task.get_rl_dataset(
         model,
         variables,
         env,
-        env_state_EL_t_minus_1,
-        physics_data_EL_t,
+        env_state_EL_0,
+        physics_data_EL_1,
         physics_model_L,
         rng,
     )
@@ -107,7 +109,7 @@ def test_default_humanoid_training() -> None:
     )
 
     # Update the model
-    new_params, new_opt_state, loss_val, metrics = task.model_update(
+    _, _, _, metrics = task.model_update(
         model,
         variables,
         optimizer,
@@ -149,7 +151,7 @@ def test_default_humanoid_run_method() -> None:
 
         # Initialize model parameters
         key, init_key = jax.random.split(key)
-        dummy_states = env.get_dummy_env_states(init_key)
+        dummy_states = env.get_dummy_env_states(config.num_envs)
         variables = model.init(init_key, dummy_states.obs, dummy_states.command)
 
         # Check for NaN values in initial state

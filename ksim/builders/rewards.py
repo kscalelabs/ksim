@@ -246,7 +246,7 @@ class FootContactPenalty(Reward):
     illegal_geom_idxs: Array
     allowed_contact_prct: float
     contact_eps: float = attrs.field(default=1e-2)
-    skip_if_zero_command: list[str] = attrs.field(factory=list)
+    skip_if_zero_command: tuple[str, ...] = attrs.field(factory=tuple)
     eps: float = attrs.field(default=1e-6)
 
     def __post_init__(self) -> None:
@@ -290,6 +290,16 @@ class FootContactPenalty(Reward):
         multiplier = 1 - (mean_contact - self.allowed_contact_prct).clip(min=0)
         return reward * multiplier
 
+    def __hash__(self) -> int:
+        return hash(
+            (
+                self.allowed_contact_prct,
+                self.contact_eps,
+                self.skip_if_zero_command,
+                self.eps,
+            )
+        )
+
     def get_name(self) -> str:
         return super().get_name()
 
@@ -300,7 +310,7 @@ class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     foot_body_names: list[str]
     allowed_contact_prct: float
     contact_eps: float = attrs.field(default=1e-2)
-    skip_if_zero_command: list[str] | None = attrs.field(default=None)
+    skip_if_zero_command: tuple[str, ...] | None = attrs.field(default=None)
 
     def __call__(self, data: BuilderData) -> FootContactPenalty:
         illegal_geom_idxs = []
@@ -315,5 +325,5 @@ class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
             illegal_geom_idxs=illegal_geom_idxs,
             allowed_contact_prct=self.allowed_contact_prct,
             contact_eps=self.contact_eps,
-            skip_if_zero_command=self.skip_if_zero_command if self.skip_if_zero_command else [],
+            skip_if_zero_command=self.skip_if_zero_command if self.skip_if_zero_command else (),
         )

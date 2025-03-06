@@ -386,7 +386,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return rollout_DL, rollout_time_loss_components_DL, rollout_EL_f, data_EL_f_plus_1
 
-    # @legit_jit(static_argnames=["self"])
     def reshuffle_rollout(
         self,
         rollout_dataset_DL: EnvState,
@@ -413,7 +412,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return reshuffled_rollout_dataset_DL, reshuffled_rollout_time_loss_components_DL
 
-    # @legit_jit(static_argnames=["self"])
     def get_minibatch(
         self,
         rollout_DL: EnvState,

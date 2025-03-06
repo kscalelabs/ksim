@@ -353,15 +353,19 @@ class MjxEnv(BaseEnv):
         command_rng_E = jax.random.split(cmd_rng, num_envs)
         obs_dummy_EL = jax.vmap(self.get_observation)(mjx_data_EL_0, obs_rng_E)
         command_dummy_EL = jax.vmap(self.get_initial_commands)(command_rng_E, timestep_E)
+
+        termination_components = {name: jnp.zeros((num_envs,)) for name, _ in self.terminations}
+        reward_components = {name: jnp.zeros((num_envs,)) for name, _ in self.rewards}
+
         return EnvState(
             obs=obs_dummy_EL,
             command=command_dummy_EL,
             action=jnp.ones((num_envs, self.action_size)),
             reward=jnp.ones((num_envs,)),
-            done=jnp.ones((num_envs,)),
+            done=jnp.zeros((num_envs,), dtype=jnp.bool_),
             timestep=timestep_E,
-            termination_components=FrozenDict({}),
-            reward_components=FrozenDict({}),
+            termination_components=FrozenDict(termination_components),
+            reward_components=FrozenDict(reward_components),
         )
 
     @legit_jit(static_argnames=["self", "model"])

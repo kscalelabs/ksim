@@ -408,19 +408,13 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                     scale=-0.1,
                     foot_body_names=["KB_D_501R_R_LEG_FOOT"],
                     allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
+                    skip_if_zero_command=("linear_velocity_command", "angular_velocity_command"),
                 ),
                 FootContactPenaltyBuilder(
                     scale=-0.1,
                     foot_body_names=["KB_D_501L_L_LEG_FOOT"],
                     allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
+                    skip_if_zero_command=("linear_velocity_command", "angular_velocity_command"),
                 ),
             ],
             observations=[
