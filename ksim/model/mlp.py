@@ -1,5 +1,7 @@
 """Base MLP implementation using Flax Linen."""
 
+from typing import Callable
+
 import flax.linen as nn
 import jax
 
@@ -16,7 +18,7 @@ class MLP(nn.Module):
     out_features: int
     """The number of features in the output layer."""
 
-    activation: nn.Module = nn.relu
+    activation: Callable[[jax.Array], jax.Array] = nn.relu
     """The activation function to use in the MLP."""
 
     bias_init: nn.initializers.Initializer = nn.initializers.zeros
