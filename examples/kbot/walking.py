@@ -376,6 +376,10 @@ class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
 
+    # Action latency.
+    min_action_latency: float = xax.field(value=0.0)
+    max_action_latency: float = xax.field(value=0.0)
+
 
 class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
     def get_environment(self) -> MjxEnv:
