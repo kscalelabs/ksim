@@ -19,12 +19,12 @@ from ksim.builders.observation import (
 )
 from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import (
-    HeightReward,
-    TrackLinearVelocityXYReward,
+    DHForwardReward,
+    DHHealthyReward,
+    DHControlPenalty,
 )
 from ksim.builders.terminations import (
-    PitchTooGreatTermination,
-    RollTooGreatTermination,
+    UnhealthyTermination,
 )
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
@@ -85,18 +85,22 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                RollTooGreatTermination(max_roll=1.04),
-                PitchTooGreatTermination(max_pitch=1.04),
+                UnhealthyTermination(
+                    unhealthy_z_lower=1.0,
+                    unhealthy_z_upper=2.0,
+                ),
             ],
             resets=[
                 XYPositionResetBuilder(),
             ],
             rewards=[
-                TrackLinearVelocityXYReward(scale=0.5),
-                HeightReward(
-                    scale=0.5,
-                    height_target=1.4,
+                DHForwardReward(scale=1.25),
+                DHHealthyReward(
+                    scale=5.0,
+                    healthy_z_lower=1.0,
+                    healthy_z_upper=2.0,
                 ),
+                DHControlPenalty(scale=0.1),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
