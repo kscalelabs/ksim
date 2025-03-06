@@ -29,7 +29,7 @@ class PPOConfig(RLConfig):
 
     # For the Value Function (VF) term
     value_loss_coef: float = xax.field(value=0.5, help="Value loss coefficient for PPO.")
-    use_clipped_value_loss: bool = xax.field(value=False, help="Whether to use clipped value loss.")
+    use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss.")
 
     # For the entropy bonus term
     entropy_coef: float = xax.field(value=0.008, help="Entropy coefficient for PPO.")
@@ -40,14 +40,14 @@ class PPOConfig(RLConfig):
 
     # General training parameters
     learning_rate: float = xax.field(value=1e-4, help="Learning rate for PPO.")
-    max_grad_norm: float = xax.field(value=1.0, help="Maximum gradient norm for clipping.")
+    max_grad_norm: float = xax.field(value=0.5, help="Maximum gradient norm for clipping.")
 
     # Normalization parameters
     scale_rewards: bool = xax.field(
         value=False,
         help="Whether to scale rewards, see Engstrom, Ilyas, et al., (2020).",
     )
-    normalize_advantage: bool = xax.field(value=False, help="Whether to normalize advantages.")
+    normalize_advantage: bool = xax.field(value=True, help="Whether to normalize advantages.")
     normalize_advantage_in_minibatch: bool = xax.field(
         value=False,
         help="Whether to normalize advantages at the minibatch level as per OpenAI baselines.",

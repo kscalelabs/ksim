@@ -35,8 +35,11 @@ class ScaledTorqueActuators(Actuators):
 
     def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
         """Get the control signal from the (position) action vector."""
-        clipped_action = jnp.clip(action, self.input_ranges[:, 0], self.input_ranges[:, 1])
-        ctrl = clipped_action * self.gear_ratios
+        # Copy legacy and brax setup here
+        action_min = self.input_ranges[:, 0]
+        action_max = self.input_ranges[:, 1]
+        # Scale action from [-1,1] to actuator limits
+        ctrl = (action + 1) * (action_max - action_min) * 0.5 + action_min
         return ctrl
 
     @property
