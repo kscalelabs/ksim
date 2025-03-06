@@ -64,7 +64,7 @@ def legit_jit(
 
             # if this is true, if runtime is higher than COMPILE_TIMEOUT, we recompile
             # TODO: we should probably reimplement the lower-level jitting logic to avoid this
-            if os.environ.get("CHECK_RECOMPILATIONS", "0") == "1":
+            if os.environ.get("JIT_PROFILE", "0") == "1":
                 arg_dict = {}
                 for i, arg in enumerate(args):
                     if i < len(param_names):
@@ -74,17 +74,17 @@ def legit_jit(
                 for k, v in kwargs.items():
                     arg_dict[k] = get_hash(v)
 
-                if runtime > compile_timeout:
-                    print(f"Recompiling {fn.__name__} (count: {JitState.compilation_count})")
-                    JitState.compilation_count += 1
+                print(f"Running {fn.__name__} (count: {JitState.compilation_count})")
+                print(f"- took {runtime} seconds")
+                JitState.compilation_count += 1
 
-                    if JitState.last_arg_dict is not None:
-                        all_keys = set(arg_dict.keys()) | set(JitState.last_arg_dict.keys())
-                        for k in all_keys:
-                            prev = JitState.last_arg_dict.get(k, "N/A")
-                            curr = arg_dict.get(k, "N/A")
-                            if prev != curr:
-                                print(f"  Arg '{k}' hash changed: {prev} -> {curr}")
+                if JitState.last_arg_dict is not None:
+                    all_keys = set(arg_dict.keys()) | set(JitState.last_arg_dict.keys())
+                    for k in all_keys:
+                        prev = JitState.last_arg_dict.get(k, "N/A")
+                        curr = arg_dict.get(k, "N/A")
+                        if prev != curr:
+                            print(f"  Arg '{k}' hash changed: {prev} -> {curr}")
 
                 JitState.last_arg_dict = arg_dict
 

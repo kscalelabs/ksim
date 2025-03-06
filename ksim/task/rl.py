@@ -4,6 +4,7 @@ TODO: need to add SPMD and sharding support for super fast training :)
 """
 
 import bdb
+import functools
 import logging
 import signal
 import sys
@@ -337,7 +338,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    @legit_jit(static_argnames=["self", "model", "env", "burn_in"])
+    # @legit_jit(static_argnames=["self", "model", "env", "burn_in"])
     def get_rl_dataset(
         self,
         model: ActorCriticAgent,
@@ -387,7 +388,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return rollout_DL, rollout_time_loss_components_DL, rollout_EL_f, data_EL_f_plus_1
 
-    @legit_jit(static_argnames=["self"])
+    # @legit_jit(static_argnames=["self"])
     def reshuffle_rollout(
         self,
         rollout_dataset_DL: EnvState,
@@ -414,7 +415,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return reshuffled_rollout_dataset_DL, reshuffled_rollout_time_loss_components_DL
 
-    @legit_jit(static_argnames=["self"])
+    # @legit_jit(static_argnames=["self"])
     def get_minibatch(
         self,
         rollout_DL: EnvState,
@@ -431,19 +432,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         return rollout_BL, rollout_time_loss_components_BL
 
-    @legit_jit(static_argnames=["self", "model", "optimizer"])
-    def train_epoch(
+    # @legit_jit(static_argnames=["self", "model", "optimizer"])
+    def scannable_train_epoch(
         self,
+        training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
+        _: None,
+        *,
         model: ActorCriticAgent,
-        variables: PyTree,
         optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
         dataset_DL: EnvState,
         rollout_time_loss_components_DL: RolloutTimeLossComponents,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+    ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Train a minibatch, returns the updated variables, optimizer state, loss, and metrics."""
+        variables = training_state[0]
+        opt_state = training_state[1]
+        reshuffle_rng = training_state[2]
 
-        @legit_jit()
+        dataset_DL, rollout_time_loss_components_DL = self.reshuffle_rollout(
+            dataset_DL, rollout_time_loss_components_DL, reshuffle_rng
+        )
+        reshuffle_rng, _ = jax.random.split(reshuffle_rng)
+
+        # @legit_jit()
         def minibatch_step_fn(
             carry: tuple[PyTree, optax.OptState], minibatch_idx: Array
         ) -> tuple[tuple[PyTree, optax.OptState], FrozenDict[str, Array]]:
@@ -469,7 +479,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # note that variables, opt_state are just the final values
         # metrics is stacked over the minibatches
-        return variables, opt_state, metrics
+        return (variables, opt_state, reshuffle_rng), metrics
 
     def rl_train_loop(
         self,
@@ -520,7 +530,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Unrolls a trajectory.
             start_time = time.time()
             reshuffle_rng, rollout_rng = jax.random.split(train_rng)
-            jax.debug.breakpoint()
             dataset_DL, rollout_loss_components_DL, carry_env_state_EL, carry_data_EL = (
                 self.get_rl_dataset(
                     model=model,
@@ -533,25 +542,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
             )
             rollout_time = time.time() - start_time
+            print(f"Rollout time: {rollout_time}")
             self.log_trajectory_stats(env, dataset_DL)
 
             # running training on minibatches
             start_time = time.time()
-            for epoch_idx in range(self.config.num_learning_epochs):
-                dataset_DL, rollout_loss_components_DL = self.reshuffle_rollout(
-                    dataset_DL, rollout_loss_components_DL, reshuffle_rng
-                )
-                reshuffle_rng, _ = jax.random.split(reshuffle_rng)
+            partial_fn = functools.partial(
+                self.scannable_train_epoch,
+                model=model,
+                optimizer=optimizer,
+                dataset_DL=dataset_DL,
+                rollout_time_loss_components_DL=rollout_loss_components_DL,
+            )
 
-                variables, opt_state, metrics = self.train_epoch(
-                    model=model,
-                    variables=variables,
-                    optimizer=optimizer,
-                    opt_state=opt_state,
-                    dataset_DL=dataset_DL,
-                    rollout_time_loss_components_DL=rollout_loss_components_DL,
-                )
+            (variables, opt_state, reshuffle_rng), metrics = jax.lax.scan(
+                partial_fn,
+                (variables, opt_state, reshuffle_rng),
+                length=self.config.num_learning_epochs,
+            )
+            metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
             update_time = time.time() - start_time
+            print(f"Update time: {update_time}")
+            print(f"Metrics: {metrics}")
 
             averaged_metrics = jax.tree_util.tree_map(jnp.mean, metrics)
             # TODO: we probably want a way of tracking how loss evolves within

@@ -150,5 +150,7 @@ if __name__ == "__main__":
             num_env_states_per_minibatch=8192,
             num_minibatches=32,
             num_envs=2048,
+            dt=0.002,
+            ctrl_dt=0.008,
         ),
     )

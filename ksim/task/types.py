@@ -3,11 +3,14 @@
 from dataclasses import dataclass
 
 import jax
-from jaxtyping import Array
+import optax
+from jaxtyping import Array, PRNGKeyArray, PyTree
+
+from ksim.model.formulations import ActorCriticAgent
 
 
 @jax.tree_util.register_dataclass
-@dataclass
+@dataclass(frozen=True)
 class RolloutTimeLossComponents:
     """Components of the loss function for a rollout."""
 
@@ -16,7 +19,7 @@ class RolloutTimeLossComponents:
 
 
 @jax.tree_util.register_dataclass
-@dataclass
+@dataclass(frozen=True)
 class PPORolloutTimeLossComponents(RolloutTimeLossComponents):
     """Components of the loss function for a PPO rollout."""
 

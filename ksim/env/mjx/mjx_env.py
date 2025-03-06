@@ -52,8 +52,8 @@ def step_mjx(
     ctrl_L: Array,
 ) -> mjx.Data:
     """Step the mujoco model."""
-    data_with_ctrl_L = mjx_data_L.replace(ctrl=ctrl_L)
-    return mjx.step(mjx_model_L, data_with_ctrl_L)
+    # data_with_ctrl_L = mjx_data_L.replace(ctrl=ctrl_L)
+    return mjx.step(mjx_model_L, mjx_data_L)
 
 
 def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
@@ -81,9 +81,9 @@ class MjxEnvConfig(BaseEnvConfig):
     max_action_latency: float = xax.field(value=0.0, help="The maximum action latency.")
 
     # solver configuration options
-    solver_type: int = xax.field(value=mujoco.mjtSolver.mjSOL_NEWTON.value, help="Solver type.")
-    solver_iterations: int = xax.field(value=1, help="Number of main solver iterations.")
-    solver_ls_iterations: int = xax.field(value=4, help="Number of line search iterations.")
+    # solver_type: mujoco.mjtSolver = xax.field(value=mujoco.mjtSolver.mjSOL_CG, help="Solver type.")
+    solver_iterations: int = xax.field(value=6, help="Number of main solver iterations.")
+    solver_ls_iterations: int = xax.field(value=6, help="Number of line search iterations.")
     disable_flags_bitmask: int = xax.field(
         value=mujoco.mjtDisableBit.mjDSBL_EULERDAMP.value, help="Bitmask of flags to disable."
     )
@@ -195,14 +195,15 @@ class MjxEnv(BaseEnv):
 
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
-        mj_model.opt.solver = self.config.solver_type
+        # mj_model.opt.solver = self.config.solver
+        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.disableflags = self.config.disable_flags_bitmask
         mj_model.opt.iterations = self.config.solver_iterations
         mj_model.opt.ls_iterations = self.config.solver_ls_iterations
         mj_model.opt.timestep = self.config.dt
         return mj_model
 
-    @legit_jit(static_argnames=["self"])
+    # @legit_jit(static_argnames=["self"])
     def get_observation(self, mjx_data_L: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
         """Compute observations from the pipeline state."""
         observations = {}
