@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
+import mujoco
 
 from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.builders.observation import (
@@ -64,11 +65,10 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     robot_model_name: str = xax.field(value="examples/default_humanoid/")
 
     # ML model parameters.
-    actor_hidden_dims: int = xax.field(value=512)
-    actor_num_layers: int = xax.field(value=2)
-    critic_hidden_dims: int = xax.field(value=512)
-    critic_num_layers: int = xax.field(value=4)
-    init_noise_std: float = xax.field(value=1.0)
+    actor_hidden_dims: int = xax.field(value=64)
+    actor_num_layers: int = xax.field(value=4)
+    critic_hidden_dims: int = xax.field(value=256)
+    critic_num_layers: int = xax.field(value=5)
 
     # Termination conditions.
     max_episode_length: float = xax.field(value=10.0)
@@ -76,8 +76,6 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     max_roll: float = xax.field(value=0.1)
     pretrained: str | None = xax.field(value=None)
     checkpoint_num: int | None = xax.field(value=None)
-
-    actuator_type: str = xax.field(value="scaled_torque", help="The type of actuator to use.")
 
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
@@ -153,10 +151,17 @@ if __name__ == "__main__":
     HumanoidWalkingTask.launch(
         HumanoidWalkingConfig(
             num_envs=2048,
-            num_steps_per_trajectory=600,
+            num_steps_per_trajectory=100,
             minibatch_size=1024,
             num_learning_epochs=10,
             save_every_n_seconds=60 * 30,
             only_save_most_recent=False,
+            # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
+            ctrl_dt=0.01,
+            dt=0.001,
+            solver_type=mujoco.mjtSolver.mjSOL_CG.value,
+            solver_iterations=6,
+            solver_ls_iterations=6,
+            actuator_type="scaled_torque",
         ),
     )

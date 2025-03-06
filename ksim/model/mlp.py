@@ -16,6 +16,15 @@ class MLP(nn.Module):
     out_features: int
     """The number of features in the output layer."""
 
+    activation: nn.Module = nn.relu
+    """The activation function to use in the MLP."""
+
+    bias_init: nn.initializers.Initializer = nn.initializers.zeros
+    """The initializer to use for the bias of the dense layers."""
+
+    output_layer_scale: float = 0.01
+    """The scale to use for the output layer."""
+
     @nn.compact
     def __call__(self, x: jax.Array) -> jax.Array:
         """Forward pass of the MLP.
@@ -28,8 +37,14 @@ class MLP(nn.Module):
         """
         for _ in range(self.num_hidden_layers):
             x = nn.Dense(
-                features=self.hidden_features, kernel_init=nn.initializers.kaiming_normal()
+                features=self.hidden_features, 
+                kernel_init=nn.initializers.lecun_uniform(),
             )(x)
-            x = nn.relu(x)
-        x = nn.Dense(features=self.out_features, kernel_init=nn.initializers.xavier_normal())(x)
+            x = self.activation(x)
+
+        x = nn.Dense(
+            features=self.out_features, 
+            kernel_init=nn.initializers.lecun_uniform(),
+            bias_init=self.bias_init
+        )(x)
         return x
