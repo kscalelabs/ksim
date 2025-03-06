@@ -274,10 +274,10 @@ class KBotActorModel(GaussianActionModel):
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         lin_vel_cmd_2 = cmd["linear_velocity_command"]
         ang_vel_cmd_1 = cmd["angular_velocity_command"]
-        joint_pos_j = obs["joint_position_observation"]
-        joint_vel_j = obs["joint_velocity_observation"]
-        # imu_acc_3 = obs["imu_acc_sensor_observation"]
-        # imu_gyro_3 = obs["imu_gyro_sensor_observation"]
+        joint_pos_j = obs["joint_position_observation_noisy"]
+        joint_vel_j = obs["joint_velocity_observation_noisy"]
+        imu_acc_3 = obs["imu_acc_sensor_observation"]
+        imu_gyro_3 = obs["imu_gyro_sensor_observation"]
 
         x_n = jnp.concatenate(
             [
@@ -306,15 +306,15 @@ class KBotZeroActions(GaussianActionModel):
         ang_vel_cmd_1 = cmd["angular_velocity_command"]
         joint_pos_j = obs["joint_position_observation"]
         joint_vel_j = obs["joint_velocity_observation"]
-        # imu_acc_3 = obs["imu_acc_sensor_observation"]
-        # imu_gyro_3 = obs["imu_gyro_sensor_observation"]
+        imu_acc_3 = obs["imu_acc_sensor_observation"]
+        imu_gyro_3 = obs["imu_gyro_sensor_observation"]
 
         x_n = jnp.concatenate(
             [
                 lin_vel_cmd_2,
                 ang_vel_cmd_1,
-                # imu_acc_3,
-                # imu_gyro_3,
+                imu_acc_3,
+                imu_gyro_3,
                 joint_pos_j,
                 joint_vel_j,
             ],
@@ -338,7 +338,8 @@ class KBotCriticModel(nn.Module):
     @nn.compact
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> jax.Array:
         # Concatenate all observations and commands (critic has privileged information)
-        x_n = jnp.concatenate([obs_array for obs_array in obs.values()], axis=-1)
+        clean_obs = FrozenDict({k: v for k, v in obs.items() if "_noisy" not in k})
+        x_n = jnp.concatenate([obs_array for obs_array in clean_obs.values()], axis=-1)
         cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
         x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
 
@@ -366,6 +367,7 @@ class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
     action_clipping: float = xax.field(value=10.0)
 
     actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
+
 
 class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
     def get_environment(self) -> MjxEnv:
@@ -417,12 +419,18 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
-                BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
-                BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
                 JointPositionObservation(noise_type="gaussian", noise=0.01),
                 JointVelocityObservation(noise_type="gaussian", noise=0.01),
-                # SensorObservationBuilder(sensor_name="imu_acc"),  # Sensor has noise already.
-                # SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
+                SensorObservationBuilder(sensor_name="imu_acc"),  # Sensor has noise already.
+                SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
+                # Clean observations
+                # NOTE: Depending on much we value flexibility vs cleanliness
+                # we might want to abstract this `clean` logic in `MjxEnv`
+                BaseOrientationObservation(noise_type="gaussian", noise=0.0),
+                BaseLinearVelocityObservation(noise_type="gaussian", noise=0.0),
+                BaseAngularVelocityObservation(noise_type="gaussian", noise=0.0),
+                JointPositionObservation(noise_type="gaussian", noise=0.0),
+                JointVelocityObservation(noise_type="gaussian", noise=0.0),
             ],
             commands=[
                 LinearVelocityCommand(

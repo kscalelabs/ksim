@@ -446,7 +446,7 @@ class MjxEnv(BaseEnv):
 
     @legit_jit(static_argnames=["self", "model"])
     def scannable_step(
-        self,
+        self,``
         model: ActorCriticAgent,
         variables: PyTree,
         env_state_t_minus_1: EnvState,

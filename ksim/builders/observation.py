@@ -40,7 +40,8 @@ class Observation(ABC):
                 raise ValueError(f"Invalid noise type: {self.noise_type}")
 
     def get_name(self) -> str:
-        return xax.camelcase_to_snakecase(self.__class__.__name__)
+        noisy = "_noisy" if self.noise > 0.0 else ""
+        return xax.camelcase_to_snakecase(self.__class__.__name__) + noisy
 
     @functools.cached_property
     def observation_name(self) -> str:
