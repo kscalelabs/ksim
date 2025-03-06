@@ -15,8 +15,6 @@ def test_default_humanoid_training() -> None:
     # Configure a minimal training run
     config = HumanoidWalkingConfig(
         num_envs=4,
-        num_steps_per_trajectory=10,
-        minibatch_size=20,
         num_learning_epochs=1,
         robot_model_name="examples/default_humanoid/",
     )
@@ -31,16 +29,22 @@ def test_default_humanoid_training() -> None:
 
     # Initialize model parameters
     key, init_key = jax.random.split(key)
-    dummy_state = env.get_dummy_env_state(init_key)
-    variables = model.init(init_key, dummy_state.obs, dummy_state.command)
+    dummy_states = env.get_dummy_env_states(init_key)
+    variables = model.init(init_key, dummy_states.obs, dummy_states.command)
+
+    physics_model_L = env.get_init_physics_model()
+    physics_data_EL_t = env.get_init_physics_data(config.num_envs)
 
     key, rollout_key = jax.random.split(key)
     states, _ = env.unroll_trajectories(
         model=model,
         variables=variables,
         rng=rollout_key,
-        num_steps=config.num_steps_per_trajectory,
+        num_steps=10,
         num_envs=config.num_envs,
+        env_state_EL_t_minus_1=dummy_states,
+        physics_data_EL_t=physics_data_EL_t,
+        physics_model_L=physics_model_L,
     )
 
     # Verify that we got valid outputs
@@ -49,11 +53,11 @@ def test_default_humanoid_training() -> None:
     assert states.reward is not None
     assert states.done is not None
     assert states.reward.shape == (
-        config.num_steps_per_trajectory,
+        10,
         config.num_envs,
     )  # Shape is (num_steps, num_envs)
     assert states.done.shape == (
-        config.num_steps_per_trajectory,
+        10,
         config.num_envs,
     )  # Shape is (num_steps, num_envs)
 
@@ -75,11 +79,26 @@ def test_default_humanoid_training() -> None:
     # Get optimizer
     optimizer = task.get_optimizer()
     opt_state = optimizer.init(variables["params"])
+    physics_model_L = env.get_init_physics_model()
+    physics_data_EL_t = env.get_init_physics_data(config.num_envs)
+    env_state_EL_t_minus_1 = env.get_dummy_env_states(config.num_envs)
+    rng = jax.random.PRNGKey(0)
 
     # Get a trajectory dataset
     key, rollout_key = jax.random.split(key)
-    trajectories_dataset, rollout_time_loss_components = task.get_trajectory_dataset(
-        model, variables, env, rollout_key
+    (
+        trajectories_dataset,
+        rollout_time_loss_components,
+        env_state_EL_t_minus_1,
+        physics_data_EL_t,
+    ) = task.get_rl_dataset(
+        model,
+        variables,
+        env,
+        env_state_EL_t_minus_1,
+        physics_data_EL_t,
+        physics_model_L,
+        rng,
     )
 
     # Get a minibatch
@@ -110,8 +129,6 @@ def test_default_humanoid_run_method() -> None:
     # Configure a minimal training run
     config = HumanoidWalkingConfig(
         num_envs=2,
-        num_steps_per_trajectory=10,
-        minibatch_size=20,
         num_learning_epochs=1,
         robot_model_name="examples/default_humanoid/",
         action="train",
@@ -132,18 +149,18 @@ def test_default_humanoid_run_method() -> None:
 
         # Initialize model parameters
         key, init_key = jax.random.split(key)
-        dummy_state = env.get_dummy_env_state(init_key)
-        variables = model.init(init_key, dummy_state.obs, dummy_state.command)
+        dummy_states = env.get_dummy_env_states(init_key)
+        variables = model.init(init_key, dummy_states.obs, dummy_states.command)
 
         # Check for NaN values in initial state
         # TODO: Switch these to asserts when we fix the NaN issue
-        for k, v in dummy_state.obs.items():
+        for k, v in dummy_states.obs.items():
             if jnp.isnan(v).any():
                 print(f"WARNING: NaN values found in initial observation '{k}'")
-        for k, v in dummy_state.command.items():
+        for k, v in dummy_states.command.items():
             if jnp.isnan(v).any():
                 print(f"WARNING: NaN values found in initial command '{k}'")
-        if jnp.isnan(dummy_state.action).any():
+        if jnp.isnan(dummy_states.action).any():
             print("WARNING: NaN values found in initial action")
 
         # Check for NaN values in model parameters

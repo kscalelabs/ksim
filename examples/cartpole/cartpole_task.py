@@ -52,19 +52,13 @@ class CartPoleConfig(PPOConfig):
     critic_hidden_dims: int = xax.field(value=128, help="Hidden dimensions for the critic.")
     critic_num_layers: int = xax.field(value=2, help="Number of layers for the critic.")
 
-    # Environment parameters
-    render_mode: str | None = xax.field(
-        value=None,
-        help="Render mode for the environment. Options: 'human', 'rgb_array', None",
-    )
-
 
 class CartPoleTask(PPOTask[CartPoleConfig]):
     """Task for CartPole training."""
 
     def get_environment(self) -> CartPoleEnv:
         """Get the environment."""
-        return CartPoleEnv(render_mode=self.config.render_mode)
+        return CartPoleEnv(config=self.config)
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         """Get the model."""
@@ -115,7 +109,9 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
             while True:  # Keep running episodes until interrupted
                 logger.info("Starting Episode %d", episode_count)
                 total_reward = 0
-                env_state = env.reset(model, variables, rng)
+                env_state, _ = env.reset(
+                    model, variables, rng, physics_data_L_0=None, physics_model_L=None
+                )
                 episode_length = 0
 
                 while True:
@@ -131,8 +127,13 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
 
                     # Take step
                     rng, step_rng = jax.random.split(rng)
-                    env_state = env.step(
-                        model, variables, env_state, step_rng, current_gym_obs=None
+                    env_state, _ = env.step(
+                        model,
+                        variables,
+                        env_state,
+                        step_rng,
+                        physics_data_L_t=None,
+                        physics_model_L=None,
                     )
                     reward = env_state.reward.item()
                     done = env_state.done.item()
@@ -163,9 +164,9 @@ if __name__ == "__main__":
     CartPoleTask.launch(
         CartPoleConfig(
             num_envs=1,
-            num_steps_per_trajectory=500,
-            valid_every_n_steps=5,
-            minibatch_size=100,
+            num_learning_epochs=1,
+            num_env_states_per_minibatch=100,
+            num_minibatches=1,
             learning_rate=1e-3,
         ),
     )

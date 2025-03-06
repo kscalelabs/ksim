@@ -22,6 +22,7 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
+from mujoco_scenes.mjcf import load_mjmodel
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
@@ -143,8 +144,7 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
-        mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
+        mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
         mj_model = self._override_model_settings(mj_model)
 
         self.default_mj_model = mj_model

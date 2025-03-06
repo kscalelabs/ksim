@@ -7,8 +7,8 @@ import numpy as np
 from flax.core import FrozenDict
 from jaxtyping import PRNGKeyArray, PyTree
 
-from ksim.env.base_env import BaseEnv, EnvState
-from ksim.env.types import PhysicsData
+from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
+from ksim.env.types import PhysicsData, PhysicsModel
 from ksim.model.formulations import ActorCriticAgent
 
 
@@ -19,51 +19,65 @@ class CartPoleEnv(BaseEnv):
     from BaseEnvConfig into this environment.
     """
 
-    def __init__(self, render_mode: str | None = None) -> None:
-        """Initialize the CartPole environment.
-
-        Args:
-            render_mode: The render mode for the environment. Options: 'human', 'rgb_array', None
-        """
-        self.env = gym.make("CartPole-v1", render_mode=render_mode)
+    def __init__(self, config: BaseEnvConfig) -> None:
+        """Initialize the CartPole environment."""
+        super().__init__(config)
+        self.env = gym.make("CartPole-v1", render_mode=None)  # render mode handled separately
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
+
+        # Empty rewards and terminations lists since CartPole handles these internally
+        self.rewards = []
+        self.terminations = []
 
     ########################
     # Implementing the API #
     ########################
-    def get_dummy_env_state(self, rng: PRNGKeyArray) -> EnvState:
-        """Get a dummy environment state for compilation purposes."""
+    def get_init_physics_data(self, num_envs: int) -> None:
+        """CartPole doesn't use physics data."""
+        return None
+
+    def get_init_physics_model(self) -> None:
+        """CartPole doesn't use physics model."""
+        return None
+
+    def get_dummy_env_states(self, num_envs: int) -> EnvState:
+        """Get dummy environment states for compilation."""
         return EnvState(
-            obs=FrozenDict({"observations": jnp.zeros((1, self.observation_size))}),
-            reward=jnp.zeros((1,)),
-            done=jnp.array([False]),
+            obs=FrozenDict({"observations": jnp.zeros((num_envs, self.observation_size))}),
+            reward=jnp.zeros((num_envs,)),
+            done=jnp.zeros((num_envs,), dtype=bool),
             command=FrozenDict({}),
-            action=jnp.zeros((self.action_size,)),
-            timestep=jnp.array(0.0),
+            action=jnp.zeros((num_envs, self.action_size)),
+            timestep=jnp.zeros((num_envs,)),
             termination_components=FrozenDict({}),
             reward_components=FrozenDict({}),
         )
 
-    def reset(self, model: ActorCriticAgent, variables: PyTree, rng: PRNGKeyArray) -> EnvState:
-        """Reset the environment and sample an initial action from the model."""
-        env_state_0, gym_obs_1 = self.reset_and_give_obs(model, variables, rng)
-        return env_state_0
+    def reset(
+        self,
+        model: ActorCriticAgent,
+        variables: PyTree,
+        rng: PRNGKeyArray,
+        physics_data_L_0: PhysicsData,
+        physics_model_L: PhysicsModel,
+    ) -> tuple[EnvState, PhysicsData | None]:
+        """Reset the environment."""
+        env_state_0, _ = self.reset_and_give_obs(model, variables, rng)
+        return env_state_0, None
 
     def step(
         self,
         model: ActorCriticAgent,
         variables: PyTree,
-        prev_env_state: EnvState,
+        env_state_L_t_minus_1: EnvState,
         rng: PRNGKeyArray,
-        *,
-        current_gym_obs: np.ndarray | None = None,
-    ) -> EnvState:
+        physics_data_L_t: PhysicsData,
+        physics_model_L: PhysicsModel,
+    ) -> tuple[EnvState, PhysicsData | None]:
         """Take a step in the environment."""
-        current_env_state, _ = self.step_given_gym_obs(
-            model, variables, prev_env_state, rng, current_gym_obs=current_gym_obs
-        )
-        return current_env_state
+        current_env_state, _ = self.step_given_gym_obs(model, variables, env_state_L_t_minus_1, rng)
+        return current_env_state, None
 
     def unroll_trajectories(
         self,
@@ -72,7 +86,10 @@ class CartPoleEnv(BaseEnv):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
-        return_data: bool = False,
+        env_state_EL_t_minus_1: EnvState | None = None,
+        physics_data_EL_t: PhysicsData | None = None,
+        physics_model_L: PhysicsModel | None = None,
+        return_intermediate_data: bool = False,
     ) -> tuple[EnvState, PhysicsData]:
         """Rollout the model for a given number of steps."""
         assert num_envs == 1, "CartPoleEnv only supports a single environment"

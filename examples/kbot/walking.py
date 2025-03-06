@@ -522,6 +522,5 @@ if __name__ == "__main__":
     KBotWalkingTask.launch(
         KBotWalkingConfig(
             num_envs=1,
-            num_steps_per_trajectory=100,
         ),
     )
