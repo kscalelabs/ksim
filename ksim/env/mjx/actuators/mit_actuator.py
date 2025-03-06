@@ -50,7 +50,16 @@ class MITPositionActuators(Actuators):
         current_vel = mjx_data.qvel[6:]  # NOTE: we assume first 6 are always root vel.
 
         target_velocities = jnp.zeros_like(action)
-        ctrl = self.kps * (action - current_pos) + self.kds * (target_velocities - current_vel)
+
+        pos_delta = action - current_pos
+        vel_delta = target_velocities - current_vel
+
+        print(f"pos_delta: {pos_delta}")
+        print(f"vel_delta: {vel_delta}")
+        print(f"Current position: {current_pos}")
+        print(f"Current velocity: {current_vel}")
+
+        ctrl = self.kps * pos_delta + self.kds * vel_delta
         return ctrl
 
     @property

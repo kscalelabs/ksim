@@ -734,7 +734,7 @@ class MjxEnv(BaseEnv):
             jax.tree_util.tree_map(lambda x: x[i], states_traj) for i in range(num_steps)
         ]
 
-        breakpoint()
+        # breakpoint()
 
         render_mj_data = mujoco.MjData(self.default_mj_model)
 
