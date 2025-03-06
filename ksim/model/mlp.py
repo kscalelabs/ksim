@@ -37,14 +37,14 @@ class MLP(nn.Module):
         """
         for _ in range(self.num_hidden_layers):
             x = nn.Dense(
-                features=self.hidden_features, 
+                features=self.hidden_features,
                 kernel_init=nn.initializers.lecun_uniform(),
             )(x)
             x = self.activation(x)
 
         x = nn.Dense(
-            features=self.out_features, 
+            features=self.out_features,
             kernel_init=nn.initializers.lecun_uniform(),
-            bias_init=self.bias_init
+            bias_init=self.bias_init,
         )(x)
         return x

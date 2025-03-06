@@ -17,7 +17,7 @@ class ScaledTorqueActuatorMetadata(BaseActuatorMetadata):
 
 
 class ScaledTorqueActuators(Actuators):
-    def __init__( 
+    def __init__(
         self,
         actuators_metadata: dict[str, BaseActuatorMetadata],
         mujoco_mappings: MujocoMappings,
