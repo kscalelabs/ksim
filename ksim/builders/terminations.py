@@ -3,7 +3,7 @@
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Generic, TypeVar, Literal, cast
+from typing import Collection, Generic, Literal, TypeVar
 
 import attrs
 import jax
@@ -18,6 +18,7 @@ from ksim.utils.jit import legit_jit
 logger = logging.getLogger(__name__)
 
 SensorType = Literal["quaternion_orientation", "gravity_vector", "base_orientation"]
+
 
 @attrs.define(frozen=True, kw_only=True)
 class Termination(ABC):
@@ -84,6 +85,7 @@ class MinimumHeightTermination(Termination):
     def __call__(self, state: mjx.Data) -> Array:
         return state.qpos[2] < self.min_height
 
+
 @attrs.define(frozen=True, kw_only=True)
 class PhysicsNaNTermination(Termination):
     """Terminates the episode if the physics are NaN."""
@@ -91,6 +93,7 @@ class PhysicsNaNTermination(Termination):
     @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data) -> Array:
         return jnp.isnan(state.qpos).any() | jnp.isnan(state.qvel).any()
+
 
 @attrs.define(frozen=True, kw_only=True)
 class FallTermination(Termination):
@@ -108,7 +111,8 @@ class FallTermination(Termination):
             case "quaternion_orientation":
                 quat = state.qpos[3:7]
                 pitch = jnp.arctan2(
-                    2 * quat[1] * quat[2] - 2 * quat[0] * quat[3], 1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2
+                    2 * quat[1] * quat[2] - 2 * quat[0] * quat[3],
+                    1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2,
                 )
                 return jnp.abs(pitch) > self.max_pitch
             case "gravity_vector":
@@ -117,26 +121,28 @@ class FallTermination(Termination):
             case "base_orientation":
                 quat = state.qpos[3:7]
                 pitch = jnp.arctan2(
-                    2 * quat[1] * quat[2] - 2 * quat[0] * quat[3], 1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2
+                    2 * quat[1] * quat[2] - 2 * quat[0] * quat[3],
+                    1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2,
                 )
                 return jnp.abs(pitch) > self.max_pitch
 
+
 @attrs.define(frozen=True, kw_only=True)
 class FallTerminationBuilder(TerminationBuilder[FallTermination]):
-
     quaternion_sensor: str | None = attrs.field(default=None)
     projected_gravity_sensor: str | None = attrs.field(default=None)
 
     def __call__(self, data: BuilderData) -> FallTermination:
-
         if not (self.quaternion_sensor or self.projected_gravity_sensor):
-            logger.info("No quaternion or projected gravity sensor specified, using base orientation.")
+            logger.info(
+                "No quaternion or projected gravity sensor specified, using base orientation."
+            )
             return FallTermination(
                 sensor_name="base",
                 sensor_type="base_orientation",
             )
 
-        if (self.quaternion_sensor and self.projected_gravity_sensor):
+        if self.quaternion_sensor and self.projected_gravity_sensor:
             raise ValueError("Only one of quaternion or projected gravity sensor can be specified.")
 
         sensor_name: str
@@ -160,6 +166,7 @@ class FallTerminationBuilder(TerminationBuilder[FallTermination]):
             sensor_name=sensor_name,
             sensor_type=sensor_type,
         )
+
 
 @attrs.define(frozen=True, kw_only=True)
 class IllegalContactTermination(Termination):

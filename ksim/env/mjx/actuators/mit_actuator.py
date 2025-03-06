@@ -15,6 +15,7 @@ class MITPositionActuatorMetadata(BaseActuatorMetadata):
     kp: float
     kd: float
 
+
 class MITPositionActuators(Actuators):
     """MIT Controller, as used by the Robstride actuators."""
 

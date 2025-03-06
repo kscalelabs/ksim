@@ -124,6 +124,7 @@ class XYPositionResetBuilder(ResetBuilder[XYPositionReset]):
             padding_prct=self.padding_prct,
         )
 
+
 @attrs.define(frozen=True, kw_only=True)
 class JointVelocityReset(Reset):
     """Resets the joint velocities of the robot to random values.

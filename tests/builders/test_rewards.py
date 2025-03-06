@@ -260,6 +260,7 @@ class TestFootContactPenaltyBuilder:
                 4: "body5",
                 5: "body6",
             },
+            floor_geom_idx=None,
         )
         return BuilderData(
             model=None,

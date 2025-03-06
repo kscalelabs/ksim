@@ -120,6 +120,7 @@ class MujocoMappings:
     geom_idx_to_body_name: dict[int, str]
     floor_geom_idx: int | None
 
+
 def make_mujoco_mappings(mjx_model: mjx.Model, floor_name: str = "floor") -> MujocoMappings:
     """Make a MujocoMappings object from a MuJoCo model."""
     # creating sensor mappings
@@ -182,9 +183,9 @@ def make_mujoco_mappings(mjx_model: mjx.Model, floor_name: str = "floor") -> Muj
 
         if name == floor_name:
             floor_idx = i
-        
+
     if not floor_idx:
-        logger.warning(f"No floor geom {floor_name} found in model")
+        logger.warning("No floor geom %s found in model", floor_name)
 
     return MujocoMappings(
         sensor_name_to_idx_range=sensor_name_to_idx_range,
@@ -227,17 +228,17 @@ def is_body_in_contact(
     # TODO: implement this properly...
     return False
 
-def get_collision_info(
-    contact: mjx.Contact, geom1: int, geom2: int
-) -> tuple[jax.Array, jax.Array]:
-  """Get the distance and normal of the collision between two geoms."""
-  mask = (jnp.array([geom1, geom2]) == contact.geom).all(axis=1)
-  mask |= (jnp.array([geom2, geom1]) == contact.geom).all(axis=1)
-  idx = jnp.where(mask, contact.dist, 1e4).argmin()
-  dist = contact.dist[idx] * mask[idx]
-  normal = (dist < 0) * contact.frame[idx, 0, :3]
-  return dist, normal
+
+def get_collision_info(contact: mjx.Contact, geom1: int, geom2: int) -> tuple[jax.Array, jax.Array]:
+    """Get the distance and normal of the collision between two geoms."""
+    mask = (jnp.array([geom1, geom2]) == contact.geom).all(axis=1)
+    mask |= (jnp.array([geom2, geom1]) == contact.geom).all(axis=1)
+    idx = jnp.where(mask, contact.dist, 1e4).argmin()
+    dist = contact.dist[idx] * mask[idx]
+    normal = (dist < 0) * contact.frame[idx, 0, :3]
+    return dist, normal
+
 
 def geoms_colliding(state: mjx.Data, geom1: int, geom2: int) -> jax.Array:
-  """Return True if the two geoms are colliding."""
-  return get_collision_info(state.contact, geom1, geom2)[0] < 0
+    """Return True if the two geoms are colliding."""
+    return get_collision_info(state.contact, geom1, geom2)[0] < 0

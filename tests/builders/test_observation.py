@@ -293,6 +293,7 @@ class SensorObservationBuilderTest(chex.TestCase):
             qvelacc_name_to_idx_range={},
             ctrl_name_to_idx={},
             geom_idx_to_body_name={},
+            floor_geom_idx=None,
         )
         self.builder_data = BuilderData(
             model=None,

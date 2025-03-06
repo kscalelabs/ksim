@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 
-import attrs
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -21,16 +20,10 @@ from ksim.builders.observation import (
 )
 from ksim.builders.resets import JointVelocityResetBuilder, XYPositionResetBuilder
 from ksim.builders.rewards import (
-    ActionSmoothnessPenalty,
-    AngularVelocityXYPenalty,
-    FootContactPenaltyBuilder,
     HeightReward,
-    LinearVelocityZPenalty,
-    TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
 from ksim.builders.terminations import (
-    IllegalContactTerminationBuilder,
     PitchTooGreatTermination,
     RollTooGreatTermination,
 )
@@ -338,7 +331,9 @@ class KBotCriticModel(nn.Module):
     @nn.compact
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> jax.Array:
         # Concatenate all observations and commands (critic has privileged information)
-        clean_obs = FrozenDict({k: v for k, v in obs.items() if "_noisy" not in k})
+        clean_obs: FrozenDict[str, Array] = FrozenDict(
+            {k: v for k, v in obs.items() if "_noisy" not in k}
+        )
         x_n = jnp.concatenate([obs_array for obs_array in clean_obs.values()], axis=-1)
         cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
         x_n = jnp.concatenate([x_n, cmd_n], axis=-1)

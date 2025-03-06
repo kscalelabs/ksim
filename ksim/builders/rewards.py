@@ -14,8 +14,8 @@ from jaxtyping import Array
 from mujoco import mjx
 
 from ksim.utils.data import BuilderData
-from ksim.utils.transforms import quat_to_euler
 from ksim.utils.mujoco import geoms_colliding
+from ksim.utils.transforms import quat_to_euler
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +177,7 @@ class EnergyPenalty(Reward):
             mjx_data_t_plus_1.actuator_force, self.norm
         )
 
+
 @attrs.define(frozen=True, kw_only=True)
 class JointAccelerationPenalty(Reward):
     """Penalty for high joint accelerations."""
@@ -192,6 +193,7 @@ class JointAccelerationPenalty(Reward):
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
         return get_norm(mjx_data_t_plus_1.qacc[6:], self.norm)
+
 
 @attrs.define(frozen=True, kw_only=True)
 class LinearVelocityZPenalty(Reward):
@@ -299,6 +301,7 @@ class ActionSmoothnessPenalty(Reward):
             return jnp.zeros_like(get_norm(action_t, self.norm).sum(axis=-1))
         return get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1)
 
+
 @attrs.define(frozen=True, kw_only=True)
 class FootSlipPenalty(Reward):
     """Penalty for horizontal movement while feet are contacting the floor."""
@@ -314,15 +317,18 @@ class FootSlipPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        contacts = jnp.array([
-            geoms_colliding(mjx_data_t_plus_1, geom_idx, self.floor_idx)
-            for geom_idx in self.foot_geom_idxs
-        ])
+        contacts = jnp.array(
+            [
+                geoms_colliding(mjx_data_t_plus_1, geom_idx, self.floor_idx)
+                for geom_idx in self.foot_geom_idxs
+            ]
+        )
 
         # Get x and y velocities
         body_vel = mjx_data_t_plus_1.qvel[:2]
 
         return jnp.linalg.norm(body_vel, axis=-1) * contacts
+
 
 @attrs.define(frozen=True, kw_only=True)
 class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
@@ -348,6 +354,7 @@ class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
             floor_idx=floor_idx,
         )
 
+
 @attrs.define(frozen=True, kw_only=True)
 class FeetClearancePenalty(Reward):
     """Penalty for deviation from desired feet clearance."""
@@ -369,6 +376,7 @@ class FeetClearancePenalty(Reward):
         # TODO: Look into adding linear feet velocity norm to scale the foot delta
 
         return get_norm(feet_heights - self.max_foot_height, self.norm)
+
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetClearancePenaltyBuilder(RewardBuilder[FeetClearancePenalty]):

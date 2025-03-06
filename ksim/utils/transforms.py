@@ -1,3 +1,5 @@
+"""Utility functions for transforming between different coordinate systems."""
+
 import jax
 import jax.numpy as jnp
 
@@ -19,7 +21,7 @@ def quat_to_euler(quat: jax.Array) -> jax.Array:
     pitch = jnp.where(
         jnp.abs(sinp) >= 1.0,
         jnp.sign(sinp) * jnp.pi / 2.0,  # Use 90 degrees if out of range
-        jnp.arcsin(sinp)
+        jnp.arcsin(sinp),
     )
 
     # Yaw (z-axis rotation)
