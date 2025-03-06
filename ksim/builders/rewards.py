@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Generic, Literal, TypeVar
 
 import attrs
+import jax
 import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
@@ -13,6 +14,7 @@ from jaxtyping import Array
 from mujoco import mjx
 
 from ksim.utils.data import BuilderData
+from ksim.utils.transforms import quat_to_euler
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +118,79 @@ class HeightReward(Reward):
         reward = jnp.exp(-jnp.abs(height - self.height_target) * 50)
         return reward
 
+
+# TODO: Check that this is correct
+@attrs.define(frozen=True, kw_only=True)
+class OrientationPenalty(Reward):
+    """Penalty for how well the robot is oriented."""
+
+    norm: NormType = attrs.field(default="l2")
+    target_orientation: jax.Array = attrs.field(default=jnp.array([0.073, 0.0, 1.0]))
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        return get_norm(
+            quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - self.target_orientation, self.norm
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TorquePenalty(Reward):
+    """Penalty for high torques."""
+
+    norm: NormType = attrs.field(default="l1")
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        return get_norm(mjx_data_t_plus_1.actuator_force, self.norm)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class EnergyPenalty(Reward):
+    """Penalty for high energies."""
+
+    norm: NormType = attrs.field(default="l1")
+
+    # NOTE: I think this is actually penalizing power (?). Rename if needed
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        return get_norm(mjx_data_t_plus_1.qvel[6:], self.norm) * get_norm(
+            mjx_data_t_plus_1.actuator_force, self.norm
+        )
+
+@attrs.define(frozen=True, kw_only=True)
+class JointAccelerationPenalty(Reward):
+    """Penalty for high joint accelerations."""
+
+    norm: NormType = attrs.field(default="l2")
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        return get_norm(mjx_data_t_plus_1.qacc[6:], self.norm)
 
 @attrs.define(frozen=True, kw_only=True)
 class LinearVelocityZPenalty(Reward):
