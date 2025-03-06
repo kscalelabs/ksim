@@ -426,7 +426,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             ],
             commands=[
                 LinearVelocityCommand(
-                    x_scale=1.0,
+                    x_scale=0.0,
                     y_scale=0.0,
                     switch_prob=0.02,
                     zero_prob=0.3,
