@@ -521,5 +521,7 @@ if __name__ == "__main__":
             # num_learning_epochs=10,
             # normalize_advantage=True,
             # obs_norm_alpha=0.01,
+            only_save_most_recent=False,
+            dt=0.001,
         ),
     )

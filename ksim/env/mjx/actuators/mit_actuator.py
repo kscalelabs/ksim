@@ -54,10 +54,10 @@ class MITPositionActuators(Actuators):
         pos_delta = action - current_pos
         vel_delta = target_velocities - current_vel
 
-        print(f"pos_delta: {pos_delta}")
-        print(f"vel_delta: {vel_delta}")
-        print(f"Current position: {current_pos}")
-        print(f"Current velocity: {current_vel}")
+        # print(f"pos_delta: {pos_delta}")
+        # print(f"vel_delta: {vel_delta}")
+        # print(f"Current position: {current_pos}")
+        # print(f"Current velocity: {current_vel}")
 
         ctrl = self.kps * pos_delta + self.kds * vel_delta
         return ctrl

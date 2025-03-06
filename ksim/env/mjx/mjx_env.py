@@ -371,12 +371,12 @@ class MjxEnv(BaseEnv):
             )
             torques = self.actuators.get_ctrl(state, action_motor_sees)
             # NOTE: can extend state to include anything from `mjx.Data` here...
-            print(f"Step: {step_num} with torque: {torques}")
+            # print(f"Step: {step_num} with torque: {torques}")
             new_state = step_mjx(mjx_model, state, torques)
             return (new_state, step_num + 1), None
         (state, _), _ = jax.lax.scan(f, (mjx_data, 0), None, n_steps)
         # breakpoint()
-        print(f"CURRENT ACTION: {current_action}")
+        # print(f"CURRENT ACTION: {current_action}")
         return state
 
     @legit_jit(static_argnames=["self", "model"])
