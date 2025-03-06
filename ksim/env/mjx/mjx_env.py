@@ -170,6 +170,7 @@ class MjxEnv(BaseEnv):
     """
 
     actuators: Actuators
+    config: MjxEnvConfig
 
     def __init__(
         self,

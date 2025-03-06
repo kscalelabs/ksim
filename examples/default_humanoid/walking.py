@@ -125,7 +125,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
             ],
             commands=[
                 LinearVelocityCommand(
-                    x_scale=1.0,
+                    x_scale=0.0,
                     y_scale=0.0,
                     switch_prob=0.02,
                     zero_prob=0.3,
@@ -207,12 +207,14 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.default_humanoid.walking action=train
+    # python -m examples.default_humanoid.walking
     HumanoidWalkingTask.launch(
         HumanoidWalkingConfig(
             num_envs=2048,
             num_steps_per_trajectory=600,
             minibatch_size=1024,
             num_learning_epochs=10,
+            save_every_n_seconds=60 * 30,
+            only_save_most_recent=False,
         ),
     )
