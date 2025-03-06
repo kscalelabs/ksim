@@ -144,7 +144,8 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
         mj_model = self._override_model_settings(mj_model)
 
         self.default_mj_model = mj_model
@@ -188,7 +189,7 @@ class MjxEnv(BaseEnv):
 
         # For simplicity, assume integer (increase granularity if needed).
         assert self.config.ctrl_dt % self.config.dt == 0, "ctrl_dt must be a multiple of dt"
-        self._expected_dt_per_ctrl_dt = int(self.config.ctrl_dt / self.config.dt)
+        self.physics_dt_per_ctrl_dt = int(self.config.ctrl_dt / self.config.dt)
 
     ###################
     # Post Processing #
@@ -197,11 +198,16 @@ class MjxEnv(BaseEnv):
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
         # mj_model.opt.solver = self.config.solver
+        # mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
+        # mj_model.opt.disableflags = self.config.disable_flags_bitmask
+        # mj_model.opt.iterations = self.config.solver_iterations
+        # mj_model.opt.ls_iterations = self.config.solver_ls_iterations
+        # mj_model.opt.timestep = self.config.dt
+
+        # copied over from legacy
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        mj_model.opt.disableflags = self.config.disable_flags_bitmask
-        mj_model.opt.iterations = self.config.solver_iterations
-        mj_model.opt.ls_iterations = self.config.solver_ls_iterations
-        mj_model.opt.timestep = self.config.dt
+        mj_model.opt.iterations = 6
+        mj_model.opt.ls_iterations = 6
         return mj_model
 
     @legit_jit(static_argnames=["self"])
@@ -300,7 +306,7 @@ class MjxEnv(BaseEnv):
         We take num_latency_steps (continuing the feedback loop for the previous action), then we
         apply the feedback loop for the current action for the remainder of the physics steps.
         """
-        n_steps = self._expected_dt_per_ctrl_dt  # total number of pipeline steps to take.
+        n_steps = self.physics_dt_per_ctrl_dt
 
         def f(carry: tuple[mjx.Data, int], _: None) -> tuple[tuple[mjx.Data, int], None]:
             state, step_num = carry
@@ -396,7 +402,7 @@ class MjxEnv(BaseEnv):
             ctrl_L=jnp.zeros_like(mjx_data_L_0.ctrl),
         )
 
-        timestep = mjx_data_L_0.time
+        timestep = jnp.array(0.0)
         obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
         command_L_0 = self.get_initial_commands(rng, timestep)
 
@@ -564,7 +570,7 @@ class MjxEnv(BaseEnv):
                 model=model,
                 variables=variables,
                 rng=rng,
-                physics_data_L_0=mjx_data_L_t,
+                physics_data_L_0=self.default_mjx_data,  # TODO: confirm
                 physics_model_L=mjx_model_L,
             )
 
