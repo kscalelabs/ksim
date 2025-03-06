@@ -283,8 +283,8 @@ class KBotActorModel(GaussianActionModel):
             [
                 lin_vel_cmd_2,
                 ang_vel_cmd_1,
-                # imu_acc_3,
-                # imu_gyro_3,
+                imu_acc_3,
+                imu_gyro_3,
                 joint_pos_j,
                 joint_vel_j,
             ],

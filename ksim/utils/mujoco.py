@@ -118,9 +118,9 @@ class MujocoMappings:
     qvelacc_name_to_idx_range: dict[str, tuple[int, int | None]]
     ctrl_name_to_idx: dict[str, int]
     geom_idx_to_body_name: dict[int, str]
+    floor_geom_idx: int | None
 
-
-def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
+def make_mujoco_mappings(mjx_model: mjx.Model, floor_name: str = "floor") -> MujocoMappings:
     """Make a MujocoMappings object from a MuJoCo model."""
     # creating sensor mappings
     sensor_name_to_idx_range = {}
@@ -170,6 +170,7 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
         name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
         ctrl_name_to_idx[name] = i
 
+    floor_idx = None
     # doing the same for geom_id_to_body_name
     geom_idx_to_body_name = {}
     for i in range(len(mjx_model.geom_bodyid)):
@@ -179,12 +180,19 @@ def make_mujoco_mappings(mjx_model: mjx.Model) -> MujocoMappings:
         name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
         geom_idx_to_body_name[i] = name
 
+        if name == floor_name:
+            floor_idx = i
+        
+    if not floor_idx:
+        logger.warning(f"No floor geom {floor_name} found in model")
+
     return MujocoMappings(
         sensor_name_to_idx_range=sensor_name_to_idx_range,
         qpos_name_to_idx_range=qpos_name_to_idx_range,
         qvelacc_name_to_idx_range=qvelacc_name_to_idx_range,
         ctrl_name_to_idx=ctrl_name_to_idx,
         geom_idx_to_body_name=geom_idx_to_body_name,
+        floor_geom_idx=floor_idx,
     )
 
 
@@ -218,3 +226,18 @@ def is_body_in_contact(
     """Check if a body is in contact."""
     # TODO: implement this properly...
     return False
+
+def get_collision_info(
+    contact: mjx.Contact, geom1: int, geom2: int
+) -> tuple[jax.Array, jax.Array]:
+  """Get the distance and normal of the collision between two geoms."""
+  mask = (jnp.array([geom1, geom2]) == contact.geom).all(axis=1)
+  mask |= (jnp.array([geom2, geom1]) == contact.geom).all(axis=1)
+  idx = jnp.where(mask, contact.dist, 1e4).argmin()
+  dist = contact.dist[idx] * mask[idx]
+  normal = (dist < 0) * contact.frame[idx, 0, :3]
+  return dist, normal
+
+def geoms_colliding(state: mjx.Data, geom1: int, geom2: int) -> jax.Array:
+  """Return True if the two geoms are colliding."""
+  return get_collision_info(state.contact, geom1, geom2)[0] < 0

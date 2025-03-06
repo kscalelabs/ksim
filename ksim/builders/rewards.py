@@ -15,6 +15,7 @@ from mujoco import mjx
 
 from ksim.utils.data import BuilderData
 from ksim.utils.transforms import quat_to_euler
+from ksim.utils.mujoco import geoms_colliding
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class Reward(ABC):
 
         This function is called after the reward has been accumulated over the
         entire epoch. It can be used to normalize the reward, or apply some
-        accumulation function - for example, you might might want to only
+        accumulation function - for example, you might want to only
         start providing the reward or penalty after a certain number of steps
         have passed.
 
@@ -297,6 +298,97 @@ class ActionSmoothnessPenalty(Reward):
         if action_t_minus_1 is None:
             return jnp.zeros_like(get_norm(action_t, self.norm).sum(axis=-1))
         return get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1)
+
+@attrs.define(frozen=True, kw_only=True)
+class FootSlipPenalty(Reward):
+    """Penalty for horizontal movement while feet are contacting the floor."""
+
+    foot_geom_idxs: Array
+    floor_idx: int
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        contacts = jnp.array([
+            geoms_colliding(mjx_data_t_plus_1, geom_idx, self.floor_idx)
+            for geom_idx in self.foot_geom_idxs
+        ])
+
+        # Get x and y velocities
+        body_vel = mjx_data_t_plus_1.qvel[:2]
+
+        return jnp.linalg.norm(body_vel, axis=-1) * contacts
+
+@attrs.define(frozen=True, kw_only=True)
+class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
+    scale: float
+    foot_body_names: list[str]
+
+    def __call__(self, data: BuilderData) -> FootSlipPenalty:
+        illegal_geom_idxs = []
+        for geom_idx, body_name in data.mujoco_mappings.geom_idx_to_body_name.items():
+            if body_name in self.foot_body_names:
+                illegal_geom_idxs.append(geom_idx)
+
+        illegal_geom_idxs = jnp.array(illegal_geom_idxs)
+
+        floor_idx = data.mujoco_mappings.floor_geom_idx
+
+        if floor_idx is None:
+            raise ValueError("No floor geom found in model")
+
+        return FootSlipPenalty(
+            scale=self.scale,
+            foot_geom_idxs=illegal_geom_idxs,
+            floor_idx=floor_idx,
+        )
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetClearancePenalty(Reward):
+    """Penalty for deviation from desired feet clearance."""
+
+    foot_geom_idxs: Array
+    max_foot_height: float
+    norm: NormType = attrs.field(default="l1")
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        feet_heights = mjx_data_t_plus_1.geom_xpos[self.foot_geom_idxs][:, 2]
+
+        # TODO: Look into adding linear feet velocity norm to scale the foot delta
+
+        return get_norm(feet_heights - self.max_foot_height, self.norm)
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetClearancePenaltyBuilder(RewardBuilder[FeetClearancePenalty]):
+    scale: float
+    foot_body_names: list[str]
+    max_foot_height: float
+
+    def __call__(self, data: BuilderData) -> FeetClearancePenalty:
+        illegal_geom_idxs = []
+        for geom_idx, body_name in data.mujoco_mappings.geom_idx_to_body_name.items():
+            if body_name in self.foot_body_names:
+                illegal_geom_idxs.append(geom_idx)
+
+        illegal_geom_idxs = jnp.array(illegal_geom_idxs)
+
+        return FeetClearancePenalty(
+            scale=self.scale,
+            foot_geom_idxs=illegal_geom_idxs,
+            max_foot_height=self.max_foot_height,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
