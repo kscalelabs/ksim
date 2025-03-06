@@ -86,8 +86,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
             self.config,
             terminations=[
                 UnhealthyTermination(
-                    unhealthy_z_lower=1.0,
-                    unhealthy_z_upper=2.0,
+                    unhealthy_z_lower=0.5,
+                    unhealthy_z_upper=1.5,
                 ),
             ],
             resets=[
@@ -97,8 +97,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 DHForwardReward(scale=1.25),
                 DHHealthyReward(
                     scale=5.0,
-                    healthy_z_lower=1.0,
-                    healthy_z_upper=2.0,
+                    healthy_z_lower=0.5,
+                    healthy_z_upper=1.5,
                 ),
                 DHControlPenalty(scale=0.1),
             ],
