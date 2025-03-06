@@ -60,6 +60,10 @@ class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
 # Task Definitions #
 ####################
 
+    # Action latency.
+    min_action_latency: float = xax.field(value=0.0)
+    max_action_latency: float = xax.field(value=0.0)
+
 
 class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
     def get_environment(self) -> MjxEnv:
