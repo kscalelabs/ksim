@@ -5,10 +5,10 @@ from dataclasses import dataclass
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import mujoco
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
-import mujoco
 
 from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.builders.observation import (
