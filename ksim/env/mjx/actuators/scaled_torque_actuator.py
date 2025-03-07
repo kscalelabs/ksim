@@ -39,7 +39,7 @@ class ScaledTorqueActuators(Actuators):
         action_min = self.input_ranges[:, 0]
         action_max = self.input_ranges[:, 1]
         # Scale action from [-1,1] to actuator limits
-        ctrl = (action + 1) * (action_max - action_min) * 0.5 + action_min
+        ctrl = action * (action_max - action_min) * 0.5
         return ctrl
 
     @property

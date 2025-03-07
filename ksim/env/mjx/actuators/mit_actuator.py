@@ -23,7 +23,6 @@ class MITPositionActuators(Actuators):
         self,
         actuators_metadata: dict[str, BaseActuatorMetadata],
         mujoco_mappings: MujocoMappings,
-        max_torque: float | None = None,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         kps_list = [0.0] * len(mujoco_mappings.ctrl_name_to_idx)
@@ -46,15 +45,17 @@ class MITPositionActuators(Actuators):
         if any(self.kps == 0) or any(self.kds == 0):
             raise ValueError("Some kps or kds are 0. Check your actuators_metadata.")
 
-        self.max_torque = max_torque
-
     def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
         """Get the control signal from the (position) action vector."""
         current_pos = mjx_data.qpos[7:]  # NOTE: we assume first 7 are always root pos.
-        ctrl = self.kps * (action - current_pos)  # TODO: explore using velocity as damping...
+        current_vel = mjx_data.qvel[6:]  # NOTE: we assume first 6 are always root vel.
 
-        if self.max_torque is not None:
-            ctrl = jnp.clip(ctrl, -self.max_torque, self.max_torque)
+        target_velocities = jnp.zeros_like(action)
+
+        pos_delta = action - current_pos
+        vel_delta = target_velocities - current_vel
+
+        ctrl = self.kps * pos_delta + self.kds * vel_delta
         return ctrl
 
     @property

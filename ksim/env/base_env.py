@@ -12,7 +12,7 @@ from omegaconf import MISSING
 
 from ksim.builders.rewards import Reward
 from ksim.builders.terminations import Termination
-from ksim.env.types import EnvState, PhysicsData
+from ksim.env.types import EnvState, PhysicsData, PhysicsModel
 from ksim.model.formulations import ActorCriticAgent
 
 
@@ -32,7 +32,12 @@ class BaseEnvConfig(xax.Config):
 
 
 class BaseEnv(ABC):
-    """Base environment class."""
+    """Base environment class with functions designed to be scannable.
+
+    This is why we return the physics carry data from many functions. The way
+    to conceptualize this is that `unroll_trajectories` is the main function.
+    The other functions serve to guide scannable implementations.
+    """
 
     rewards: list[tuple[str, Reward]]
     terminations: list[tuple[str, Termination]]
@@ -42,10 +47,19 @@ class BaseEnv(ABC):
         self.config = config
 
     @abstractmethod
-    def get_dummy_env_state(  # exists for compilation purposes
+    def get_init_physics_model(  # exists for compilation purposes
         self,
-        rng: PRNGKeyArray,
+    ) -> PhysicsModel: ...
+
+    """Get the initial physics model for the environment (L)."""
+
+    @abstractmethod
+    def get_dummy_env_states(
+        self,
+        num_envs: int,
     ) -> EnvState: ...
+
+    """Get the dummy environment states for the environment (EL)."""
 
     @abstractmethod
     def reset(
@@ -53,16 +67,23 @@ class BaseEnv(ABC):
         model: ActorCriticAgent,
         variables: PyTree,
         rng: PRNGKeyArray,
-    ) -> EnvState: ...
+        physics_model_L: PhysicsModel,
+    ) -> tuple[EnvState, PhysicsData | None]: ...
+
+    """Reset the environment (EL)."""
 
     @abstractmethod
     def step(
         self,
         model: ActorCriticAgent,
         variables: PyTree,
-        prev_env_state: EnvState,
+        env_state_L_t_minus_1: EnvState,
         rng: PRNGKeyArray,
-    ) -> EnvState: ...
+        physics_data_L_t: PhysicsData,
+        physics_model_L: PhysicsModel,
+    ) -> tuple[EnvState, PhysicsData | None]: ...
+
+    """Step the environment (EL)."""
 
     @abstractmethod
     def unroll_trajectories(
@@ -72,9 +93,18 @@ class BaseEnv(ABC):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
-        *,
-        return_data: bool = False,
+        env_state_EL_t_minus_1: EnvState,
+        physics_data_EL_t: PhysicsData,
+        physics_model_L: PhysicsModel,
+        return_intermediate_data: bool = False,
     ) -> tuple[EnvState, PhysicsData]: ...
+
+    """Retruns env state trajectory (TEL) and physics data (EL or TEL).
+
+    If return_intermediate_data is True, the physics data is returned as a
+    trajectory (TEL). Otherwise, only the final physics data is returned (for
+    memory efficiency).
+    """
 
     @abstractmethod
     def render_trajectory(
@@ -89,10 +119,16 @@ class BaseEnv(ABC):
         camera: int | None = None,
     ) -> list[np.ndarray]: ...
 
+    """Render trajectory and return list of images."""
+
     @property
     @abstractmethod
     def observation_size(self) -> int: ...
 
+    """Get the size of the observation space."""
+
     @property
     @abstractmethod
     def action_size(self) -> int: ...
+
+    """Get the size of the action space."""

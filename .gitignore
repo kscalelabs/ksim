@@ -22,6 +22,7 @@ out*/
 
 # Development related files.
 scratch/
+refs/
 
 # Training artifacts.
 *.mp4

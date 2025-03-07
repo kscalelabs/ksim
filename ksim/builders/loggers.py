@@ -1,23 +1,22 @@
 """Defines a standard interface for logging metrics."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 import attrs
+import jax
 import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
-from jaxtyping import PyTree
 
 from ksim.env.types import EnvState
 
 
-@attrs.define(frozen=True, kw_only=True)
+@jax.tree_util.register_dataclass
+@dataclass
 class LoggingData:
+    update_metrics: FrozenDict[str, jnp.ndarray]
     trajectory: EnvState | None = None
-    update_metrics: FrozenDict[str, jnp.ndarray] = attrs.field(factory=FrozenDict)
-    gradients: PyTree | None = None
-    loss: float | None = None
-    training_state: xax.State | None = None
 
 
 @attrs.define(frozen=True, kw_only=True)

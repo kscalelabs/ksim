@@ -7,7 +7,7 @@ from jaxtyping import Array
 
 
 @jax.tree_util.register_dataclass
-@dataclass
+@dataclass(frozen=True)
 class RolloutTimeLossComponents:
     """Components of the loss function for a rollout."""
 
@@ -16,7 +16,7 @@ class RolloutTimeLossComponents:
 
 
 @jax.tree_util.register_dataclass
-@dataclass
+@dataclass(frozen=True)
 class PPORolloutTimeLossComponents(RolloutTimeLossComponents):
     """Components of the loss function for a PPO rollout."""
 
