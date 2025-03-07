@@ -318,8 +318,8 @@ class MjxEnv(BaseEnv):
             action_motor_sees = jax.lax.select(
                 step_num >= num_latency_steps, current_action_L, previous_action_L
             )
-            # torques = self.actuators.get_ctrl(data, action_motor_sees)
-            data_with_ctrl = data.replace(ctrl=action_motor_sees)
+            torques = self.actuators.get_ctrl(data, action_motor_sees)
+            data_with_ctrl = data.replace(ctrl=torques)
             data_with_ctrl = mjx_forward(mjx_model_L, data_with_ctrl)
             new_data = mjx_step(mjx_model_L, data_with_ctrl)
             return (new_data, step_num + 1.0), None
@@ -568,6 +568,13 @@ class MjxEnv(BaseEnv):
         data_has_nans = jax.tree_util.tree_reduce(
             lambda a, b: jnp.logical_or(a, b),
             jax.tree_util.tree_map(lambda x: jnp.any(jnp.isnan(x)), step_mjx_data_L_t_plus_1),
+        )
+
+        jax.lax.cond(
+            data_has_nans,
+            lambda _: jax.debug.print("NaNs detected in physics data"),
+            lambda _: None,
+            operand=None,
         )
 
         do_reset = jnp.logical_or(env_state_L_t_minus_1.done, data_has_nans)
