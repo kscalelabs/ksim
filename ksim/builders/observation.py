@@ -120,10 +120,11 @@ class JointVelocityObservation(Observation):
 @attrs.define(frozen=True)
 class LegacyPositionObservation(Observation):
     """Legacy position observation that excludes x,y positions.
-    
+
     In the legacy code, if exclude_current_positions_from_observation is True,
     it skips the first two elements (x,y) of qpos but includes z and all joint positions.
     """
+
     exclude_xy: bool = attrs.field(default=True)
 
     @legit_jit(static_argnames=["self"])
@@ -137,13 +138,15 @@ class LegacyPositionObservation(Observation):
 @attrs.define(frozen=True)
 class LegacyVelocityObservation(Observation):
     """Legacy velocity observation that includes all velocities.
-    
+
     In the legacy code, all velocities (base + joint) are included without any exclusions.
     """
+
     @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         return self.add_noise(state.qvel, rng)
-    
+
+
 @attrs.define(frozen=True)
 class CenterOfMassInertiaObservation(Observation):
     @legit_jit(static_argnames=["self"])
@@ -169,6 +172,7 @@ class ActuatorForceObservation(Observation):
         # Get actuator forces
         qfrc_actuator = state.qfrc_actuator  # Shape will be (nu,)
         return self.add_noise(qfrc_actuator, rng)
+
 
 @attrs.define(frozen=True, kw_only=True)
 class SensorObservation(Observation):

@@ -17,11 +17,6 @@ from ksim.builders.observation import (
     BaseOrientationObservation,
     JointPositionObservation,
     JointVelocityObservation,
-    LegacyPositionObservation,
-    LegacyVelocityObservation,
-    CenterOfMassInertiaObservation,
-    CenterOfMassVelocityObservation,
-    ActuatorForceObservation,
 )
 from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import (
@@ -115,7 +110,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 JointPositionObservation(noise_type="gaussian", noise=0.01),
                 JointVelocityObservation(noise_type="gaussian", noise=0.01),
                 # TODO: default humanoid doesn't have sensors, add them later
-                # Legacy Ksim observation setup 
+                # Legacy Ksim observation setup
                 # LegacyPositionObservation(exclude_xy=True),
                 # LegacyVelocityObservation(),
                 # CenterOfMassInertiaObservation(),
