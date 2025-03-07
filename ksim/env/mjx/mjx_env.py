@@ -278,7 +278,6 @@ class MjxEnv(BaseEnv):
     #####################################
 
     @profile
-    @legit_jit(static_argnames=["self"])
     def apply_physics_steps(
         self,
         mjx_model_L: mjx.Model,
@@ -369,6 +368,7 @@ class MjxEnv(BaseEnv):
         )
 
     @profile
+    @legit_jit(static_argnames=["self", "model"])
     def reset(
         self,
         model: ActorCriticAgent,
@@ -437,6 +437,7 @@ class MjxEnv(BaseEnv):
         return env_state_L_0, mjx_data_L_1
 
     @profile
+    @legit_jit(static_argnames=["self", "model"])
     def step(
         self,
         model: ActorCriticAgent,
