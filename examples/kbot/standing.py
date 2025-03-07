@@ -398,7 +398,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                 TrackAngularVelocityZReward(scale=7.5),
                 ActionSmoothnessPenalty(scale=-0.0),
                 OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
-                JointAccelerationPenalty(scale=-0.1),
+                JointAccelerationPenalty(scale=-2e-7),
                 DefaultPoseDeviationPenaltyBuilder(
                     scale=-0.1,
                     default_positions={
@@ -556,18 +556,20 @@ if __name__ == "__main__":
         KBotStandingConfig(
             num_learning_epochs=8,
             num_env_states_per_minibatch=8192,
-            num_minibatches=32,
+            num_minibatches=64,
             num_envs=2048,
             dt=0.001,
+            max_episode_length=20.0,
             ctrl_dt=0.008,
             learning_rate=5e-5,
             save_every_n_seconds=60 * 4,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,
+            scale_rewards=True,
             # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
             solver_iterations=6,
             solver_ls_iterations=6,
-            actuator_type="scaled_torque",
+            actuator_type="mit",
         ),
     )
