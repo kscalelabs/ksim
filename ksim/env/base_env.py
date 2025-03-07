@@ -47,14 +47,6 @@ class BaseEnv(ABC):
         self.config = config
 
     @abstractmethod
-    def get_init_physics_data(  # exists for compilation purposes
-        self,
-        num_envs: int,
-    ) -> PhysicsData: ...
-
-    """Get the initial physics data for the environment (EL)."""
-
-    @abstractmethod
     def get_init_physics_model(  # exists for compilation purposes
         self,
     ) -> PhysicsModel: ...

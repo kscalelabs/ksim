@@ -557,7 +557,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 burn_in=True,
             )
         )
-        # breakpoint()
         variables = self.update_input_normalization_stats(
             variables=variables,
             trajectories_dataset=dataset_DL,

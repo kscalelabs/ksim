@@ -143,7 +143,8 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
         mj_model = self._override_model_settings(mj_model)
 
         self.default_mj_model = mj_model
@@ -195,7 +196,6 @@ class MjxEnv(BaseEnv):
 
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
-        mj_model = mujoco.MjModel.from_xml_path("/home/michael/ksim/scratch/humanoid.xml")
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.iterations = 6
         mj_model.opt.ls_iterations = 6
@@ -341,18 +341,11 @@ class MjxEnv(BaseEnv):
 
         rngs = jax.random.split(jax.random.PRNGKey(0), num_envs)
         default_data_EL = jax.vmap(get_init_data)(rngs)
-        # breakpoint()
 
         mjx_data_EL_0 = jax.vmap(mjx.forward, in_axes=(None, 0))(
             self.default_mjx_model, default_data_EL
         )
 
-        # mjx_data_EL_0 = jax.vmap(step_mjx, in_axes=(None, 0, 0))(
-        #     self.default_mjx_model,
-        #     default_data_EL,
-        #     jnp.zeros_like(default_data_EL.ctrl),
-        # )
-        # breakpoint()
         return mjx_data_EL_0
 
     def get_init_physics_model(

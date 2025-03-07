@@ -109,9 +109,7 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
             while True:  # Keep running episodes until interrupted
                 logger.info("Starting Episode %d", episode_count)
                 total_reward = 0
-                env_state, _ = env.reset(
-                    model, variables, rng, physics_data_L_0=None, physics_model_L=None
-                )
+                env_state, _ = env.reset(model, variables, rng, physics_model_L=None)
                 episode_length = 0
 
                 while True:

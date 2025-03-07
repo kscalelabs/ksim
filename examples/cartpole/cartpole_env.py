@@ -33,7 +33,7 @@ class CartPoleEnv(BaseEnv):
     ########################
     # Implementing the API #
     ########################
-    def get_init_physics_data(self, num_envs: int) -> None:
+    def get_init_physics_data(self, num_envs: int) -> PhysicsData:
         """CartPole doesn't use physics data."""
         return None
 
@@ -59,7 +59,6 @@ class CartPoleEnv(BaseEnv):
         model: ActorCriticAgent,
         variables: PyTree,
         rng: PRNGKeyArray,
-        physics_data_L_0: PhysicsData,
         physics_model_L: PhysicsModel,
     ) -> tuple[EnvState, PhysicsData | None]:
         """Reset the environment."""
