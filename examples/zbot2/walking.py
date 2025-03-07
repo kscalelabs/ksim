@@ -225,7 +225,7 @@ class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
                 DefaultPoseDeviationPenaltyBuilder(
                     scale=-0.1,
                     default_positions={
-                        "left_shoulder_piitch": 0.0,
+                        "left_shoulder_pitch": 0.0,
                         "left_shoulder_yaw": 0.0,
                         "left_elbow": 0.0,
                         "right_shoulder_pitch": 0.0,
