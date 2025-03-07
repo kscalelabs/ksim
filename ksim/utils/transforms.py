@@ -4,7 +4,6 @@ import jax
 import jax.numpy as jnp
 
 
-# TODO: Check that this math is right
 def quat_to_euler(quat: jax.Array) -> jax.Array:
     """Normalizes and converts a quaternion (w,x,y,z) to euler angles."""
     quat = quat / jnp.linalg.norm(quat)
