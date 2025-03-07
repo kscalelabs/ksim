@@ -23,16 +23,10 @@ from ksim.builders.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
     DefaultPoseDeviationPenaltyBuilder,
-    EnergyPenalty,
-    FeetAirTimeRewardBuilder,
-    FeetClearancePenaltyBuilder,
-    FootContactPenaltyBuilder,
-    FootSlipPenaltyBuilder,
     HeightReward,
     JointAccelerationPenalty,
     LinearVelocityZPenalty,
     OrientationPenalty,
-    TorquePenalty,
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
@@ -357,7 +351,7 @@ class KBotCriticModel(nn.Module):
 
 
 @dataclass
-class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
+class KBotStandingConfig(PPOConfig, MjxEnvConfig):
     # Robot model name to use.
     robot_model_name: str = xax.field(value="kbot-v1-feet")
 
@@ -377,21 +371,11 @@ class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
     actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
 
 
-class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
+class KBotStandingTask(PPOTask[KBotStandingConfig]):
     def get_environment(self) -> MjxEnv:
         return MjxEnv(
             self.config,
             terminations=[
-                # IllegalContactTerminationBuilder(
-                #     body_names=[
-                #         "shoulder",
-                #         "shoulder_2",
-                #         "hand_shell",
-                #         "hand_shell_2",
-                #         "leg0_shell",
-                #         "leg0_shell_2",
-                #     ],
-                # ),
                 RollTooGreatTermination(max_roll=1.04),
                 PitchTooGreatTermination(max_pitch=1.04),
             ],
@@ -402,70 +386,12 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             rewards=[
                 LinearVelocityZPenalty(scale=-0.0),
                 AngularVelocityXYPenalty(scale=-0.15),
-                TrackLinearVelocityXYReward(scale=10.0),
-                HeightReward(scale=0.2, height_target=1.0),
+                TrackLinearVelocityXYReward(scale=2.0),
+                HeightReward(scale=1.0, height_target=1.0),
                 TrackAngularVelocityZReward(scale=7.5),
                 ActionSmoothnessPenalty(scale=-0.0),
-                OrientationPenalty(scale=-0.5, target_orientation=[0.073, 0.0, 1.0]),
-                TorquePenalty(scale=-0.0),
-                EnergyPenalty(scale=-0.0),
-                JointAccelerationPenalty(scale=-0.0),
-                FootSlipPenaltyBuilder(
-                    scale=-0.25,
-                    foot_geom_names=[
-                        "foot1_collision_sphere_1",
-                        "foot1_collision_sphere_2",
-                        "foot1_collision_sphere_3",
-                        "foot1_collision_sphere_4",
-                        "foot1_collision_box",
-                        "foot3_collision_sphere_1",
-                    ],
-                ),
-                FeetClearancePenaltyBuilder(
-                    scale=-0.0,
-                    foot_geom_names=[
-                        "foot1_collision_sphere_1",
-                        "foot1_collision_sphere_2",
-                        "foot1_collision_sphere_3",
-                        "foot1_collision_sphere_4",
-                        "foot1_collision_box",
-                        "foot3_collision_sphere_1",
-                    ],
-                    max_foot_height=0.2,
-                ),
-                FeetAirTimeRewardBuilder(
-                    scale=2.0,
-                    foot_geom_names=[
-                        "foot1_collision_sphere_1",
-                        "foot1_collision_sphere_2",
-                        "foot1_collision_sphere_3",
-                        "foot1_collision_sphere_4",
-                        "foot1_collision_box",
-                        "foot3_collision_sphere_1",
-                    ],
-                    required_air_time_prct=0.3,
-                    skip_if_zero_command=["linear_velocity_command", "angular_velocity_command"],
-                ),
-                FootContactPenaltyBuilder(
-                    scale=-0.1,
-                    foot_geom_names=[
-                        "foot3_collision_sphere_1",
-                        "foot3_collision_sphere_2",
-                        "foot3_collision_sphere_3",
-                        "foot3_collision_sphere_4",
-                        "foot3_collision_box",
-                        "foot1_collision_sphere_1",
-                        "foot1_collision_sphere_2",
-                        "foot1_collision_sphere_3",
-                        "foot1_collision_sphere_4",
-                        "foot1_collision_box",
-                    ],
-                    allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
-                ),
+                OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
+                JointAccelerationPenalty(scale=-0.1),
                 DefaultPoseDeviationPenaltyBuilder(
                     scale=-0.1,
                     default_positions={
@@ -618,8 +544,8 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
 
 if __name__ == "__main__":
     # python -m examples.kbot.walking action=env
-    KBotWalkingTask.launch(
-        KBotWalkingConfig(
+    KBotStandingTask.launch(
+        KBotStandingConfig(
             num_envs=2048,
             num_steps_per_trajectory=600,
             minibatch_size=1024,
