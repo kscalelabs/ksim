@@ -142,7 +142,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             returns=jax.lax.stop_gradient(returns),
         )
 
-    @legit_jit(static_argnames=["self"])
     def _clipped_value_loss(
         self,
         target_values: Array,
@@ -157,7 +156,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         error = values - returns
         return jnp.maximum(error**2, clipped_error**2).mean()
 
-    @legit_jit(static_argnames=["self", "model", "optimizer"])
     def model_update(
         self,
         model: ActorCriticAgent,
@@ -168,7 +166,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rollout_time_loss_components: RolloutTimeLossComponents,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        loss_val, metrics, grads = self._jitted_value_and_grad(
+        loss_val, metrics, grads = self.loss_metrics_grads(
             model, variables, env_state_batch, rollout_time_loss_components
         )
 
@@ -187,7 +185,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             optax.adam(self.config.learning_rate),
         )
 
-    @legit_jit(static_argnames=["self", "initial_step"])
     def update_input_normalization_stats(
         self,
         variables: PyTree,
@@ -214,7 +211,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     # Training Utilities #
     ######################
 
-    @legit_jit(static_argnames=["self", "model"])
     def apply_critic(
         self,
         model: ActorCriticAgent,
@@ -230,7 +226,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    @legit_jit(static_argnames=["self", "model"])
     def compute_ppo_loss(
         self,
         model: ActorCriticAgent,
@@ -340,10 +335,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # But we need to provide an implementation with the correct signature
         raise NotImplementedError(
             "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
-            "PPO tasks use model_update and _jitted_value_and_grad instead."
+            "PPO tasks use model_update and loss_metrics_grads instead."
         )
 
-    @legit_jit(static_argnames=["self"])
     def _compute_advantages(
         self,
         variables: PyTree,
@@ -374,8 +368,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
         return advantages[::-1]
 
-    @legit_jit(static_argnames=["self", "model"])
-    def _jitted_value_and_grad(
+    def loss_metrics_grads(
         self,
         model: ActorCriticAgent,
         variables: PyTree,

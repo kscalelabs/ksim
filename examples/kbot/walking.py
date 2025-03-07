@@ -369,7 +369,6 @@ class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
     init_noise_std: float = xax.field(value=1.0)
 
     # Termination conditions.
-    max_episode_length: float = xax.field(value=10.0)
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
     action_clipping: float = xax.field(value=10.0)
@@ -461,10 +460,54 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                         "foot1_collision_box",
                     ],
                     allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
+                    skip_if_zero_command=("linear_velocity_command", "angular_velocity_command"),
+                ),
+                DefaultPoseDeviationPenaltyBuilder(
+                    scale=-0.1,
+                    default_positions={
+                        "left_shoulder_pitch_03": 0.0,
+                        "left_shoulder_roll_03": 0.0,
+                        "left_shoulder_yaw_02": 0.0,
+                        "left_elbow_02": 0.0,
+                        "left_wrist_02": 0.0,
+                        "right_shoulder_pitch_03": 0.0,
+                        "right_shoulder_roll_03": 0.0,
+                        "right_shoulder_yaw_02": 0.0,
+                        "right_elbow_02": 0.0,
+                        "right_wrist_02": 0.0,
+                        "left_hip_pitch_04": 0.0,
+                        "left_hip_roll_03": 0.0,
+                        "left_hip_yaw_03": 0.0,
+                        "left_knee_04": 0.0,
+                        "left_ankle_02": 0.0,
+                        "right_hip_pitch_04": 0.0,
+                        "right_hip_roll_03": 0.0,
+                        "right_hip_yaw_03": 0.0,
+                        "right_knee_04": 0.0,
+                        "right_ankle_02": 0.0,
+                    },
+                    deviation_weights={
+                        "left_shoulder_pitch_03": 1.0,
+                        "left_shoulder_roll_03": 1.0,
+                        "left_shoulder_yaw_02": 1.0,
+                        "left_elbow_02": 1.0,
+                        "left_wrist_02": 1.0,
+                        "right_shoulder_pitch_03": 1.0,
+                        "right_shoulder_roll_03": 1.0,
+                        "right_shoulder_yaw_02": 1.0,
+                        "right_elbow_02": 1.0,
+                        "right_wrist_02": 1.0,
+                        "left_hip_pitch_04": 2.0,
+                        "left_hip_roll_03": 2.0,
+                        "left_hip_yaw_03": 2.0,
+                        "left_knee_04": 1.0,
+                        "left_ankle_02": 1.0,
+                        "right_hip_pitch_04": 2.0,
+                        "right_hip_roll_03": 2.0,
+                        "right_hip_yaw_03": 2.0,
+                        "right_knee_04": 1.0,
+                        "right_ankle_02": 1.0,
+                    },
                 ),
                 DefaultPoseDeviationPenaltyBuilder(
                     scale=-0.1,

@@ -15,9 +15,9 @@ def test_default_humanoid_training() -> None:
     # Configure a minimal training run
     config = HumanoidWalkingConfig(
         num_envs=4,
-        num_steps_per_trajectory=10,
-        minibatch_size=20,
         num_learning_epochs=1,
+        num_env_states_per_minibatch=4,
+        num_minibatches=1,
         robot_model_name="examples/default_humanoid/",
     )
 
@@ -31,55 +31,31 @@ def test_default_humanoid_training() -> None:
 
     # Initialize model parameters
     key, init_key = jax.random.split(key)
-    dummy_state = env.get_dummy_env_state(init_key)
-    variables = model.init(init_key, dummy_state.obs, dummy_state.command)
+    dummy_states = env.get_dummy_env_states(config.num_envs)
+    variables = model.init(init_key, dummy_states.obs, dummy_states.command)
 
-    key, rollout_key = jax.random.split(key)
-    states, _ = env.unroll_trajectories(
-        model=model,
-        variables=variables,
-        rng=rollout_key,
-        num_steps=config.num_steps_per_trajectory,
-        num_envs=config.num_envs,
-    )
-
-    # Verify that we got valid outputs
-    assert states is not None
-    assert states.obs is not None
-    assert states.reward is not None
-    assert states.done is not None
-    assert states.reward.shape == (
-        config.num_steps_per_trajectory,
-        config.num_envs,
-    )  # Shape is (num_steps, num_envs)
-    assert states.done.shape == (
-        config.num_steps_per_trajectory,
-        config.num_envs,
-    )  # Shape is (num_steps, num_envs)
-
-    # Check for NaN values in outputs
-    # TODO: Switch these to asserts when we fix the NaN issue
-    for k, v in states.obs.items():
-        if jnp.isnan(v).any():
-            print(f"WARNING: NaN values found in observation output '{k}'")
-    if jnp.isnan(states.reward).any():
-        print("WARNING: NaN values found in reward outputs")
-    if jnp.isnan(states.action).any():
-        print("WARNING: NaN values found in action outputs")
-    # Handle FrozenDict structures by checking each array in the dict
-    for k, v in states.command.items():
-        if jnp.isnan(v).any():
-            print(f"WARNING: NaN values found in command output '{k}'")
-
-    # Test a single model update
     # Get optimizer
     optimizer = task.get_optimizer()
     opt_state = optimizer.init(variables["params"])
 
+    # Test a single training iteration
+    physics_model_L = env.get_init_physics_model()
+
+    reset_rngs = jax.random.split(key, config.num_envs)
+    env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, None))(
+        model, variables, reset_rngs, physics_model_L
+    )
+
     # Get a trajectory dataset
     key, rollout_key = jax.random.split(key)
-    trajectories_dataset, rollout_time_loss_components = task.get_trajectory_dataset(
-        model, variables, env, rollout_key
+    trajectories_dataset, rollout_time_loss_components, _, _ = task.get_rl_dataset(
+        model=model,
+        variables=variables,
+        env=env,
+        env_state_EL_t_minus_1=env_state_EL_0,
+        physics_data_EL_t=physics_data_EL_1,
+        physics_model_L=physics_model_L,
+        rng=rollout_key,
     )
 
     # Get a minibatch
@@ -88,13 +64,13 @@ def test_default_humanoid_training() -> None:
     )
 
     # Update the model
-    new_params, new_opt_state, loss_val, metrics = task.model_update(
-        model,
-        variables,
-        optimizer,
-        opt_state,
-        minibatch,
-        minibatch_loss_components,
+    _, _, _, metrics = task.model_update(
+        model=model,
+        variables=variables,
+        optimizer=optimizer,
+        opt_state=opt_state,
+        env_state_batch=minibatch,
+        rollout_time_loss_components=minibatch_loss_components,
     )
 
     # Verify metrics
@@ -109,9 +85,9 @@ def test_default_humanoid_run_method() -> None:
     """Test that the run method of HumanoidWalkingTask works."""
     # Configure a minimal training run
     config = HumanoidWalkingConfig(
-        num_envs=2,
-        num_steps_per_trajectory=10,
-        minibatch_size=20,
+        num_envs=4,
+        num_env_states_per_minibatch=4,
+        num_minibatches=1,
         num_learning_epochs=1,
         robot_model_name="examples/default_humanoid/",
         action="train",
@@ -132,18 +108,18 @@ def test_default_humanoid_run_method() -> None:
 
         # Initialize model parameters
         key, init_key = jax.random.split(key)
-        dummy_state = env.get_dummy_env_state(init_key)
-        variables = model.init(init_key, dummy_state.obs, dummy_state.command)
+        dummy_states = env.get_dummy_env_states(config.num_envs)
+        variables = model.init(init_key, dummy_states.obs, dummy_states.command)
 
         # Check for NaN values in initial state
         # TODO: Switch these to asserts when we fix the NaN issue
-        for k, v in dummy_state.obs.items():
+        for k, v in dummy_states.obs.items():
             if jnp.isnan(v).any():
                 print(f"WARNING: NaN values found in initial observation '{k}'")
-        for k, v in dummy_state.command.items():
+        for k, v in dummy_states.command.items():
             if jnp.isnan(v).any():
                 print(f"WARNING: NaN values found in initial command '{k}'")
-        if jnp.isnan(dummy_state.action).any():
+        if jnp.isnan(dummy_states.action).any():
             print("WARNING: NaN values found in initial action")
 
         # Check for NaN values in model parameters

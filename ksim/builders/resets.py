@@ -126,37 +126,30 @@ class XYPositionResetBuilder(ResetBuilder[XYPositionReset]):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointVelocityReset(Reset):
-    """Resets the joint velocities of the robot to random values.
+class RandomJointPositionReset(Reset):
+    """Adds uniformly sampled noise to default joint positions."""
 
-    Sets random velocities in the range [-max_velocity, max_velocity] for all joints.
-    """
-
-    max_velocity: float = attrs.field(default=1.0)
+    range: tuple[float, float]
 
     def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
-        qvel_j = data.qvel
-        qvel_j = jax.random.uniform(
-            rng, qvel_j.shape, minval=-self.max_velocity, maxval=self.max_velocity
+        qpos = data.qpos
+        qpos = qpos + jax.random.uniform(
+            rng, qpos.shape, minval=self.range[0], maxval=self.range[1]
         )
-        data = data.replace(qvel=qvel_j)
+        data = data.replace(qpos=qpos)
         return data
-
-    def __hash__(self) -> int:
-        """Define hash function for the class."""
-        return hash(self.max_velocity)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointVelocityResetBuilder(ResetBuilder[JointVelocityReset]):
-    """Builds a JointVelocityReset from a MuJoCo model.
+class RandomJointVelocityReset(Reset):
+    """Adds uniformly sampled noise to default joint velocities."""
 
-    Parameters:
-        max_velocity: Maximum velocity for joints (in both positive and negative directions)
-    """
+    range: tuple[float, float]
 
-    max_velocity: float
-
-    def __call__(self, data: BuilderData) -> JointVelocityReset:
-        """Builds a JointVelocityReset from a MuJoCo model."""
-        return JointVelocityReset(max_velocity=self.max_velocity)
+    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+        qvel = data.qvel
+        qvel = qvel + jax.random.uniform(
+            rng, qvel.shape, minval=self.range[0], maxval=self.range[1]
+        )
+        data = data.replace(qvel=qvel)
+        return data
