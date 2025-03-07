@@ -289,11 +289,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_scalar(key, value, namespace="termination")
 
         # Logs the mean episode length.
-        mean_episode_length_steps = (~trajectory.done).sum(axis=-1) / trajectory.done.sum(axis=-1)
-        mean_episode_length_seconds = mean_episode_length_steps * self.config.ctrl_dt
-        self.logger.log_scalar(
-            "mean_episode_length", mean_episode_length_seconds, namespace="stats"
-        )
+        episode_count = jnp.sum(trajectory.done).clip(min=1)
+        mean_episode_length_steps = jnp.sum(~trajectory.done) / episode_count
+        self.logger.log_scalar("mean_episode_seconds", mean_episode_length_steps, namespace="stats")
 
     ########################
     # Training and Running #
@@ -604,6 +602,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 training_state.raw_phase = "train"
                 for log_item in self.log_items:
                     log_item(self.logger, metric_logging_data)
+
+                # logging metrics to info here...
+                for key, value in metrics_mean.items():
+                    assert isinstance(value, jnp.ndarray)
+                    self.logger.log_scalar(key, value, namespace="stats")
 
                 self.logger.write(training_state)
                 training_state.num_steps += 1

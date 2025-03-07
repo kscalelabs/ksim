@@ -196,6 +196,7 @@ class MjxEnv(BaseEnv):
 
         return mj_model
 
+    @legit_jit(static_argnames=["self"])
     def get_observation(self, mjx_data_L: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
         """Compute observations from the pipeline state."""
         observations = {}
@@ -205,6 +206,7 @@ class MjxEnv(BaseEnv):
             observations[observation_name] = observation_value
         return FrozenDict(observations)
 
+    @legit_jit(static_argnames=["self"])
     def get_rewards(
         self,
         action_L_t_minus_1: Array,
@@ -232,6 +234,7 @@ class MjxEnv(BaseEnv):
             rewards[reward_name] = reward_val
         return FrozenDict(rewards)
 
+    @legit_jit(static_argnames=["self"])
     def get_terminations(self, mjx_data_L_t_plus_1: mjx.Data) -> FrozenDict[str, Array]:
         """Compute termination conditions from the pipeline state."""
         terminations = {}
@@ -243,6 +246,7 @@ class MjxEnv(BaseEnv):
             terminations[termination_name] = term_val
         return FrozenDict(terminations)
 
+    @legit_jit(static_argnames=["self"])
     def get_initial_commands(
         self, rng: PRNGKeyArray, initial_time: Array | None
     ) -> FrozenDict[str, Array]:
@@ -256,6 +260,7 @@ class MjxEnv(BaseEnv):
             commands[command_name] = command_val
         return FrozenDict(commands)
 
+    @legit_jit(static_argnames=["self"])
     def get_commands(
         self, prev_commands: FrozenDict[str, Array], rng: PRNGKeyArray, time: Array
     ) -> FrozenDict[str, Array]:
@@ -296,8 +301,8 @@ class MjxEnv(BaseEnv):
             )
             # torques = self.actuators.get_ctrl(data, action_motor_sees)
             data_with_ctrl = data.replace(ctrl=action_motor_sees)
-            data_with_ctrl = mjx.forward(mjx_model_L, data_with_ctrl)
-            new_data = mjx.step(mjx_model_L, data_with_ctrl)
+            data_with_ctrl = legit_jit()(mjx.forward)(mjx_model_L, data_with_ctrl)
+            new_data = legit_jit()(mjx.step)(mjx_model_L, data_with_ctrl)
             return (new_data, step_num + 1.0), None
 
         final_data_L = jax.lax.scan(f, (mjx_data_L, jnp.array(0.0)), None, n_steps)[0][0]
@@ -320,7 +325,7 @@ class MjxEnv(BaseEnv):
         rngs = jax.random.split(jax.random.PRNGKey(0), num_envs)
         default_data_EL = jax.vmap(get_init_data)(rngs)
 
-        mjx_data_EL_0 = jax.vmap(mjx.forward, in_axes=(None, 0))(
+        mjx_data_EL_0 = jax.vmap(legit_jit()(mjx.forward), in_axes=(None, 0))(
             self.default_mjx_model, default_data_EL
         )
 
@@ -386,7 +391,7 @@ class MjxEnv(BaseEnv):
         rng, obs_rng = jax.random.split(rng, 2)
         timestep = jnp.array(0.0)
 
-        mjx_data_L_0 = mjx.forward(mjx_model_L, mjx_data_L_0)
+        mjx_data_L_0 = legit_jit()(mjx.forward)(mjx_model_L, mjx_data_L_0)
         obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
         command_L_0 = self.get_initial_commands(rng, timestep)
 
@@ -533,7 +538,6 @@ class MjxEnv(BaseEnv):
         mjx_model_L = physics_model_L
 
         # Define env_step as a pure function with all dependencies passed explicitly
-        @legit_jit()
         def env_step(
             env_state_L_t_minus_1: EnvState,
             mjx_data_L_t: mjx.Data,
