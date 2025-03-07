@@ -17,7 +17,6 @@ from ksim.builders.observation import (
     JointPositionObservation,
     JointVelocityObservation,
 )
-from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import DHControlPenalty, DHForwardReward, DHHealthyReward
 from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
