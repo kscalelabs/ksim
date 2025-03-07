@@ -109,18 +109,18 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 DHControlPenalty(scale=0.1),
             ],
             observations=[
-                # BaseOrientationObservation(noise_type="gaussian", noise=0.01),
-                # BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
-                # BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
-                # JointPositionObservation(noise_type="gaussian", noise=0.01),
-                # JointVelocityObservation(noise_type="gaussian", noise=0.01),
+                BaseOrientationObservation(noise_type="gaussian", noise=0.01),
+                BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
+                BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
+                JointPositionObservation(noise_type="gaussian", noise=0.01),
+                JointVelocityObservation(noise_type="gaussian", noise=0.01),
                 # TODO: default humanoid doesn't have sensors, add them later
                 # Legacy Ksim observation setup 
-                LegacyPositionObservation(exclude_xy=True),
-                LegacyVelocityObservation(),
-                CenterOfMassInertiaObservation(),
-                CenterOfMassVelocityObservation(),
-                ActuatorForceObservation(),
+                # LegacyPositionObservation(exclude_xy=True),
+                # LegacyVelocityObservation(),
+                # CenterOfMassInertiaObservation(),
+                # CenterOfMassVelocityObservation(),
+                # ActuatorForceObservation(),
             ],
             commands=[
                 LinearVelocityCommand(
