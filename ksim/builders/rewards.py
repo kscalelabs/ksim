@@ -176,9 +176,8 @@ class EnergyPenalty(Reward):
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
         return jnp.sum(
-            get_norm(mjx_data_t_plus_1.qvel[6:], self.norm) * get_norm(
-                mjx_data_t_plus_1.actuator_force, self.norm
-            )
+            get_norm(mjx_data_t_plus_1.qvel[6:], self.norm)
+            * get_norm(mjx_data_t_plus_1.actuator_force, self.norm)
         )
 
 
@@ -356,6 +355,7 @@ class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
             foot_geom_idxs=illegal_geom_idxs,
             floor_idx=floor_idx,
         )
+
 
 # TODO: Look into using bodies instead of geoms where appropriate
 @attrs.define(frozen=True, kw_only=True)

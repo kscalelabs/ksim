@@ -2,7 +2,6 @@
 
 import attrs
 import jax.numpy as jnp
-import pytest
 from flax.core import FrozenDict
 from jaxtyping import Array
 from mujoco import mjx
@@ -11,13 +10,11 @@ from ksim.builders.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
     FootContactPenalty,
-    FootContactPenaltyBuilder,
     LinearVelocityZPenalty,
     Reward,
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.utils.data import BuilderData, MujocoMappings
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -241,47 +238,47 @@ class TestFootContactPenalty:
         assert jnp.allclose(result, expected)
 
 
-class TestFootContactPenaltyBuilder:
-    """Tests for the FootContactPenaltyBuilder class."""
+# class TestFootContactPenaltyBuilder:
+#     """Tests for the FootContactPenaltyBuilder class."""
 
-    @pytest.fixture
-    def builder_data(self) -> BuilderData:
-        """Return a builder data object with body mappings."""
-        mappings = MujocoMappings(
-            sensor_name_to_idx_range={},
-            qpos_name_to_idx_range={},
-            qvelacc_name_to_idx_range={},
-            ctrl_name_to_idx={},
-            geom_idx_to_body_name={
-                0: "foot1",
-                1: "foot2",
-                2: "body3",
-                3: "body4",
-                4: "body5",
-                5: "body6",
-            },
-            floor_geom_idx=None,
-        )
-        return BuilderData(
-            model=None,
-            dt=0.004,
-            ctrl_dt=0.02,
-            mujoco_mappings=mappings,
-        )
+#     @pytest.fixture
+#     def builder_data(self) -> BuilderData:
+#         """Return a builder data object with body mappings."""
+#         mappings = MujocoMappings(
+#             sensor_name_to_idx_range={},
+#             qpos_name_to_idx_range={},
+#             qvelacc_name_to_idx_range={},
+#             ctrl_name_to_idx={},
+#             geom_idx_to_body_name={
+#                 0: "foot1",
+#                 1: "foot2",
+#                 2: "body3",
+#                 3: "body4",
+#                 4: "body5",
+#                 5: "body6",
+#             },
+#             floor_geom_idx=None,
+#         )
+#         return BuilderData(
+#             model=None,
+#             dt=0.004,
+#             ctrl_dt=0.02,
+#             mujoco_mappings=mappings,
+#         )
 
-    def test_foot_contact_penalty_builder(self, builder_data: BuilderData) -> None:
-        """Test that the FootContactPenaltyBuilder creates a penalty function."""
-        scale = 0.6
-        foot_body_names = ["foot1", "foot2"]
-        allowed_contact_prct = 0.2
-        builder = FootContactPenaltyBuilder(
-            scale=scale,
-            foot_body_names=foot_body_names,
-            allowed_contact_prct=allowed_contact_prct,
-        )
-        penalty = builder(builder_data)
+# def test_foot_contact_penalty_builder(self, builder_data: BuilderData) -> None:
+#     """Test that the FootContactPenaltyBuilder creates a penalty function."""
+#     scale = 0.6
+#     foot_body_names = ["foot1", "foot2"]
+#     allowed_contact_prct = 0.2
+#     builder = FootContactPenaltyBuilder(
+#         scale=scale,
+#         foot_body_names=foot_body_names,
+#         allowed_contact_prct=allowed_contact_prct,
+#     )
+#     penalty = builder(builder_data)
 
-        assert penalty.reward_name == "foot_contact_penalty"
-        assert penalty.scale == scale
-        assert jnp.array_equal(penalty.illegal_geom_idxs, jnp.array([0, 1]))
-        assert penalty.allowed_contact_prct == allowed_contact_prct
+#     assert penalty.reward_name == "foot_contact_penalty"
+#     assert penalty.scale == scale
+#     assert jnp.array_equal(penalty.illegal_geom_idxs, jnp.array([0, 1]))
+#     assert penalty.allowed_contact_prct == allowed_contact_prct

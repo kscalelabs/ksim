@@ -195,13 +195,13 @@ class IllegalContactTermination(Termination):
 
 @attrs.define(frozen=True, kw_only=True)
 class IllegalContactTerminationBuilder(TerminationBuilder[IllegalContactTermination]):
-    body_names: Collection[str] = attrs.field()
+    geom_names: Collection[str] = attrs.field()
     contact_eps: float = attrs.field(default=-1e-3)
 
     def __call__(self, data: BuilderData) -> IllegalContactTermination:
         illegal_geom_idxs = []
-        for geom_idx, body_name in data.mujoco_mappings.geom_idx_to_body_name.items():
-            if body_name in self.body_names:
+        for geom_name, geom_idx in data.mujoco_mappings.geom_name_to_idx.items():
+            if geom_name in self.geom_names:
                 illegal_geom_idxs.append(geom_idx)
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)

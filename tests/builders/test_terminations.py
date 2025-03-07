@@ -155,13 +155,21 @@ class TestIllegalContactTerminationBuilder:
             qpos_name_to_idx_range={},
             qvelacc_name_to_idx_range={},
             ctrl_name_to_idx={},
-            geom_idx_to_body_name={
-                0: "body1",
-                1: "body2",
-                2: "body3",
-                3: "body4",
-                4: "body5",
-                5: "body6",
+            geom_name_to_idx={
+                "geom1": 0,
+                "geom2": 1,
+                "geom3": 2,
+                "geom4": 3,
+                "geom5": 4,
+                "geom6": 5,
+            },
+            body_name_to_idx={
+                "body1": 0,
+                "body2": 1,
+                "body3": 2,
+                "body4": 3,
+                "body5": 4,
+                "body6": 5,
             },
             floor_geom_idx=None,
         )
@@ -174,8 +182,8 @@ class TestIllegalContactTerminationBuilder:
 
     def test_illegal_contact_termination_builder(self, builder_data: BuilderData) -> None:
         """Test that the IllegalContactTerminationBuilder creates a termination function."""
-        body_names = ["body1", "body2"]
-        builder = IllegalContactTerminationBuilder(body_names=body_names)
+        geom_names = ["geom1", "geom2"]
+        builder = IllegalContactTerminationBuilder(geom_names=geom_names)
         term = builder(builder_data)
         assert term.termination_name == "illegal_contact_termination"
         assert jnp.array_equal(term.illegal_geom_idxs, jnp.array([0, 1]))

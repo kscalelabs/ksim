@@ -201,6 +201,7 @@ def make_mujoco_mappings(mjx_model: mjx.Model, floor_name: str = "floor") -> Muj
         floor_geom_idx=floor_idx,
     )
 
+
 def get_qpos_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
     """Get the qpos from a name."""
     return data.qpos[mujoco_mappings.qpos_name_to_idx_range[name]]
