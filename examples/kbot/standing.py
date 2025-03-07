@@ -19,8 +19,8 @@ from ksim.builders.observation import (
     SensorObservationBuilder,
 )
 from ksim.builders.resets import (
-    RandomJointPositionReset,
-    RandomJointVelocityReset,
+    RandomizeJointPositions,
+    RandomizeJointVelocities,
     XYPositionResetBuilder,
 )
 from ksim.builders.rewards import (
@@ -387,8 +387,8 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
             ],
             resets=[
                 XYPositionResetBuilder(),
-                RandomJointVelocityReset(range=(-0.1, 0.1)),
-                RandomJointPositionReset(range=(-0.1, 0.1)),
+                RandomizeJointVelocities(scale=0.01),
+                RandomizeJointPositions(scale=0.01),
             ],
             rewards=[
                 LinearVelocityZPenalty(scale=-0.0),
