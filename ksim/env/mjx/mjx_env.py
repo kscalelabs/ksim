@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-@legit_jit()
+# @legit_jit()
 def step_mjx(
     mjx_model_L: mjx.Model,
     mjx_data_L: mjx.Data,
@@ -195,11 +195,16 @@ class MjxEnv(BaseEnv):
 
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
+        mj_model = mujoco.MjModel.from_xml_path("/home/michael/ksim/scratch/humanoid.xml")
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        # mj_model.opt.disableflags = self.config.disable_flags_bitmask
-        mj_model.opt.iterations = self.config.solver_iterations
-        mj_model.opt.ls_iterations = self.config.solver_ls_iterations
-        mj_model.opt.timestep = self.config.dt
+        mj_model.opt.iterations = 6
+        mj_model.opt.ls_iterations = 6
+
+        # mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
+        # mj_model.opt.disableflags = mujoco.
+        # mj_model.opt.iterations = self.config.solver_iterations
+        # mj_model.opt.ls_iterations = self.config.solver_ls_iterations
+        # mj_model.opt.timestep = self.config.dt
 
         return mj_model
 
@@ -286,7 +291,7 @@ class MjxEnv(BaseEnv):
     #####################################
 
     # @legit_jit(static_argnames=["self"])
-    def _apply_physics_steps(
+    def apply_physics_steps(
         self,
         mjx_model_L: mjx.Model,
         mjx_data_L: mjx.Data,
@@ -301,18 +306,20 @@ class MjxEnv(BaseEnv):
         """
         n_steps = self.physics_dt_per_ctrl_dt
 
-        def f(carry: tuple[mjx.Data, int], _: None) -> tuple[tuple[mjx.Data, int], None]:
-            state, step_num = carry
+        def f(carry: tuple[mjx.Data, Array], _: None) -> tuple[tuple[mjx.Data, Array], None]:
+            data, step_num = carry
 
             action_motor_sees = jax.lax.select(
                 step_num >= num_latency_steps, current_action_L, previous_action_L
             )
-            torques = self.actuators.get_ctrl(state, action_motor_sees)
-            new_state = step_mjx(mjx_model_L, state, torques)
-            return (new_state, step_num + 1), None
+            # torques = self.actuators.get_ctrl(data, action_motor_sees)
+            data_with_ctrl = data.replace(ctrl=action_motor_sees)
+            data_with_ctrl = mjx.forward(mjx_model_L, data_with_ctrl)
+            new_data = mjx.step(mjx_model_L, data_with_ctrl)
+            return (new_data, step_num + 1.0), None
 
-        (state, _), _ = jax.lax.scan(f, (mjx_data_L, 0), None, n_steps)
-        return state
+        final_data_L = jax.lax.scan(f, (mjx_data_L, jnp.array(0.0)), None, n_steps)[0][0]
+        return final_data_L
 
     ###########################
     # Main API Implementation #
@@ -323,14 +330,29 @@ class MjxEnv(BaseEnv):
         num_envs: int,
     ) -> mjx.Data:
         """Get initial mjx.Data (EL)."""
-        default_data_EL = jax.tree_util.tree_map(
-            lambda x: jnp.stack([x] * num_envs), self.default_mjx_data
+
+        def get_init_data(rng: jax.Array) -> mjx.Data:
+            data = mjx.make_data(self.default_mjx_model)
+            rng1, rng2 = jax.random.split(rng, 2)
+            low, hi = -0.01, 0.01
+            qpos = data.qpos + jax.random.uniform(rng1, (28,), minval=low, maxval=hi)
+            qvel = data.qvel + jax.random.uniform(rng2, (27,), minval=low, maxval=hi)
+            return data.replace(qpos=qpos, qvel=qvel)
+
+        rngs = jax.random.split(jax.random.PRNGKey(0), num_envs)
+        default_data_EL = jax.vmap(get_init_data)(rngs)
+        # breakpoint()
+
+        mjx_data_EL_0 = jax.vmap(mjx.forward, in_axes=(None, 0))(
+            self.default_mjx_model, default_data_EL
         )
-        mjx_data_EL_0 = jax.vmap(step_mjx, in_axes=(None, 0, 0))(
-            self.default_mjx_model,
-            default_data_EL,
-            jnp.zeros_like(default_data_EL.ctrl),
-        )
+
+        # mjx_data_EL_0 = jax.vmap(step_mjx, in_axes=(None, 0, 0))(
+        #     self.default_mjx_model,
+        #     default_data_EL,
+        #     jnp.zeros_like(default_data_EL.ctrl),
+        # )
+        # breakpoint()
         return mjx_data_EL_0
 
     def get_init_physics_model(
@@ -373,7 +395,6 @@ class MjxEnv(BaseEnv):
         model: ActorCriticAgent,
         variables: PyTree,
         rng: jax.Array,
-        physics_data_L_0: mjx.Data,
         physics_model_L: mjx.Model,
     ) -> tuple[EnvState, mjx.Data]:
         """Using model and variables, returns initial state and data (EL, EL).
@@ -386,19 +407,20 @@ class MjxEnv(BaseEnv):
         efficient unrolling of trajectories.
         """
         mjx_model_L = physics_model_L
-        mjx_data_L_0 = physics_data_L_0
+        mjx_data_L_0 = mjx.make_data(mjx_model_L)
 
         for _, reset_func in self.resets:
             mjx_data_L_0 = reset_func(mjx_data_L_0, rng)
         assert isinstance(mjx_data_L_0, mjx.Data)
 
         rng, obs_rng = jax.random.split(rng, 2)
-        mjx_data_L_0 = step_mjx(
-            mjx_model_L=mjx_model_L,
-            mjx_data_L=mjx_data_L_0,
-            ctrl_L=jnp.zeros_like(mjx_data_L_0.ctrl),
-        )
 
+        low, hi = -0.01, 0.01
+        qpos = mjx_data_L_0.qpos + jax.random.uniform(rng, (28,), minval=low, maxval=hi)
+        qvel = mjx_data_L_0.qvel + jax.random.uniform(rng, (27,), minval=low, maxval=hi)
+        mjx_data_L_0 = mjx_data_L_0.replace(qpos=qpos, qvel=qvel)
+
+        mjx_data_L_0 = mjx.forward(mjx_model_L, mjx_data_L_0)
         timestep = jnp.array(0.0)
         obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
         command_L_0 = self.get_initial_commands(rng, timestep)
@@ -407,8 +429,7 @@ class MjxEnv(BaseEnv):
             variables, obs_L_0, command_L_0, rng, method="actor_sample_and_log_prob"
         )
         assert isinstance(action_log_prob_L_0, Array)
-
-        mjx_data_L_1 = self._apply_physics_steps(
+        mjx_data_L_1 = self.apply_physics_steps(
             mjx_model_L=mjx_model_L,
             mjx_data_L=mjx_data_L_0,
             previous_action_L=action_L_0,  # NOTE: Effectively means no latency for first action.
@@ -487,7 +508,7 @@ class MjxEnv(BaseEnv):
             variables, obs_L_t, command_L_t, rng, method="actor_sample_and_log_prob"
         )
 
-        mjx_data_L_t_plus_1 = self._apply_physics_steps(
+        mjx_data_L_t_plus_1 = self.apply_physics_steps(
             mjx_model_L=mjx_model_L,
             mjx_data_L=mjx_data_L_t,
             previous_action_L=env_state_L_t_minus_1.action,
@@ -567,7 +588,6 @@ class MjxEnv(BaseEnv):
                 model=model,
                 variables=variables,
                 rng=rng,
-                physics_data_L_0=self.default_mjx_data,  # TODO: confirm
                 physics_model_L=mjx_model_L,
             )
 
@@ -593,7 +613,6 @@ class MjxEnv(BaseEnv):
 
             return new_state_L_t, mjx_data_L_t_plus_1
 
-        # @legit_jit()
         def scan_fn(
             carry: tuple[EnvState, mjx.Data, Array], _: None
         ) -> tuple[tuple[EnvState, mjx.Data, Array], tuple[EnvState, mjx.Data]]:
@@ -618,8 +637,6 @@ class MjxEnv(BaseEnv):
             length=num_steps,
         )
 
-        jax.debug.breakpoint()
-
         if return_intermediate_data:
             return env_state_TEL, mjx_data_TEL
         else:
@@ -637,12 +654,11 @@ class MjxEnv(BaseEnv):
         camera: int | None = None,
     ) -> list[np.ndarray]:
         """Render a trajectory of the environment."""
-        physics_data_1L_0 = self.get_init_physics_data(1)
         physics_model_L = self.get_init_physics_model()
         reset_rngs = jax.random.split(rng, 1)
 
-        env_state_1L_0, physics_data_1L_1 = jax.vmap(self.reset, in_axes=(None, None, 0, 0, None))(
-            model, variables, reset_rngs, physics_data_1L_0, physics_model_L
+        env_state_1L_0, physics_data_1L_1 = jax.vmap(self.reset, in_axes=(None, None, 0, None))(
+            model, variables, reset_rngs, physics_model_L
         )
 
         _, traj_data = self.unroll_trajectories(

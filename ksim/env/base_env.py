@@ -75,7 +75,6 @@ class BaseEnv(ABC):
         model: ActorCriticAgent,
         variables: PyTree,
         rng: PRNGKeyArray,
-        physics_data_L_0: PhysicsData,
         physics_model_L: PhysicsModel,
     ) -> tuple[EnvState, PhysicsData | None]: ...
 

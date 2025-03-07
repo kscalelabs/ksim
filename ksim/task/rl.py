@@ -25,6 +25,7 @@ from dpshdl.dataset import Dataset
 from flax import linen as nn
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from mujoco import mjx
 from omegaconf import MISSING
 
 from ksim.builders.loggers import (
@@ -536,14 +537,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng, burn_in_rng, train_rng = jax.random.split(rng, 3)
 
         # getting initial physics data
-        physics_data_EL_0 = env.get_init_physics_data(self.config.num_envs)
         physics_model_L = env.get_init_physics_model()
         reset_rngs = jax.random.split(burn_in_rng, self.config.num_envs)
 
-        env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, 0, None))(
-            model, variables, reset_rngs, physics_data_EL_0, physics_model_L
+        env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, None))(
+            model, variables, reset_rngs, physics_model_L
         )
-
         # Burn in trajectory to get normalization statistics
         # Thorn: carry_data_EL is the state AFTER the final EnvState
         dataset_DL, rollout_loss_components_DL, carry_env_state_EL, carry_data_EL = (
@@ -558,6 +557,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 burn_in=True,
             )
         )
+        # breakpoint()
         variables = self.update_input_normalization_stats(
             variables=variables,
             trajectories_dataset=dataset_DL,
@@ -643,16 +643,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 render_dir = self.exp_dir / self.config.render_dir / render_name
                 logger.info("Rendering to %s", render_dir)
 
-                render_and_save_trajectory(
-                    env=env,
-                    model=model,
-                    variables=variables,
-                    rng=rng,
-                    output_dir=render_dir,
-                    num_steps=self.num_rollout_steps_per_env,
-                    width=self.config.render_width,
-                    height=self.config.render_height,
-                )
+                # render_and_save_trajectory(
+                #     env=env,
+                #     model=model,
+                #     variables=variables,
+                #     rng=rng,
+                #     output_dir=render_dir,
+                #     num_steps=self.num_rollout_steps_per_env,
+                #     width=self.config.render_width,
+                #     height=self.config.render_height,
+                # )
 
                 logger.info("Done rendering to %s", render_dir)
 

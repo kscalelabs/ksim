@@ -25,7 +25,7 @@ from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_OUTPUTS = 17
+NUM_OUTPUTS = 21
 
 
 class HumanoidActorModel(GaussianActionModel):
@@ -145,9 +145,9 @@ if __name__ == "__main__":
             num_learning_epochs=8,
             num_env_states_per_minibatch=8192,
             num_minibatches=32,
-            num_envs=2048,
-            dt=0.001,
-            ctrl_dt=0.01,
+            num_envs=1024,
+            dt=0.005,
+            ctrl_dt=0.02,
             save_every_n_seconds=60 * 4,
             only_save_most_recent=False,
             # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
