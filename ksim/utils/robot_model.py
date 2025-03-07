@@ -111,9 +111,13 @@ async def get_model_and_metadata(model_name: str, cache: bool = True) -> tuple[s
     )
     return str(urdf_path), metadata
 
+
 class NeatKeyError(KeyError):
     """A more informative KeyError that includes available options."""
-    def __init__(self, key: str, options: dict[str, Any], dict_description: str | None = None):
+
+    def __init__(
+        self, key: str, options: dict[str, Any], dict_description: str | None = None
+    ) -> None:
         self.key = key
         self.options = sorted(options.keys())
         self.dict_description = dict_description or "dictionary"
@@ -122,6 +126,5 @@ class NeatKeyError(KeyError):
     def _format_message(self) -> str:
         available_keys = ", ".join(self.options)
         return (
-            f"'{self.key}' not found in {self.dict_description}. "
-            f"Available keys: {available_keys}"
+            f"'{self.key}' not found in {self.dict_description}. Available keys: {available_keys}"
         )

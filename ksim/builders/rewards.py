@@ -645,11 +645,10 @@ class DefaultPoseDeviationPenaltyBuilder(RewardBuilder[DefaultPoseDeviationPenal
                 joint_deviation_weights.append(self.deviation_weights[joint_name])
             except KeyError:
                 raise NeatKeyError(
-                    joint_name, 
-                    data.mujoco_mappings.qpos_name_to_idx_range, 
-                    "model qpos names"
+                    joint_name,
+                    data.mujoco_mappings.qpos_name_to_idx_range,
+                    "model qpos names",
                 )
-
 
         joint_indices_array = jnp.array(joint_indices)
         default_positions_array = jnp.array(default_positions_list)
