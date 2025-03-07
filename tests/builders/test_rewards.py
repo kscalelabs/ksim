@@ -1,6 +1,9 @@
 """Tests for reward builders in the ksim package."""
 
+from dataclasses import dataclass, field
+
 import attrs
+import jax
 import jax.numpy as jnp
 import pytest
 from flax.core import FrozenDict
@@ -35,32 +38,36 @@ class DummyReward(Reward):
         return jnp.zeros((1,), dtype=jnp.float32)
 
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class DummyContact:
+    """Mock mjx.Contact for testing."""
+
+    geom1: Array = field(default_factory=lambda: jnp.array([0, 1, 2]))
+    geom2: Array = field(default_factory=lambda: jnp.array([3, 4, 5]))
+    dist: Array = field(default_factory=lambda: jnp.array([0.01, 0.02, 0.03]))
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
 class DummyMjxData:
     """Mock mjx.Data for testing."""
 
-    def __init__(self) -> None:
-        self.time = 0.0
-        self.qpos = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
-        self.qvel = jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
-        self.ctrl = jnp.array([0.5, -0.5, 0.25])
-        self.body_xpos = jnp.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])
-        self.body_xmat = jnp.array(
+    time: float = 0.0
+    qpos: Array = field(default_factory=lambda: jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]))
+    qvel: Array = field(default_factory=lambda: jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
+    ctrl: Array = field(default_factory=lambda: jnp.array([0.5, -0.5, 0.25]))
+    body_xpos: Array = field(default_factory=lambda: jnp.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]))
+    body_xmat: Array = field(
+        default_factory=lambda: jnp.array(
             [
                 [1.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0],
                 [0.0, 0.0, 1.0],
             ]
         )
-        self.contact = DummyContact()
-
-
-class DummyContact:
-    """Mock mjx.Contact for testing."""
-
-    def __init__(self) -> None:
-        self.geom1 = jnp.array([0, 1, 2])
-        self.geom2 = jnp.array([3, 4, 5])
-        self.dist = jnp.array([0.01, 0.02, 0.03])
+    )
+    contact: DummyContact = field(default_factory=DummyContact)
 
 
 def test_reward_name() -> None:
@@ -79,8 +86,7 @@ class TestLinearVelocityZPenalty:
         reward = LinearVelocityZPenalty(scale=scale)
 
         data_t = DummyMjxData()
-        data_t_plus_1 = DummyMjxData()
-        data_t_plus_1.qvel = jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])  # z velocity is 0.3
+        data_t_plus_1 = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
         command: FrozenDict[str, Array] = FrozenDict({})
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
@@ -102,10 +108,7 @@ class TestAngularVelocityXYPenalty:
         reward = AngularVelocityXYPenalty(scale=scale)
 
         data_t = DummyMjxData()
-        data_t_plus_1 = DummyMjxData()
-        data_t_plus_1.qvel = jnp.array(
-            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
-        )  # xy angular velocities are 0.4, 0.5
+        data_t_plus_1 = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
         command: FrozenDict[str, Array] = FrozenDict({})
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
@@ -127,8 +130,7 @@ class TestTrackAngularVelocityZReward:
         reward = TrackAngularVelocityZReward(scale=scale)
 
         data_t = DummyMjxData()
-        data_t_plus_1 = DummyMjxData()
-        data_t_plus_1.qvel = jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])  # z angular velocity is 0.6
+        data_t_plus_1 = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
         command: FrozenDict[str, Array] = FrozenDict({"angular_velocity_command": jnp.array([0.5])})
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
@@ -151,8 +153,7 @@ class TestTrackLinearVelocityXYReward:
         reward = TrackLinearVelocityXYReward(scale=scale, sensitivity=sensitivity)
 
         data_t = DummyMjxData()
-        data_t_plus_1 = DummyMjxData()
-        data_t_plus_1.qvel = jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])  # xy velocities are 0.1, 0.2
+        data_t_plus_1 = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
         command: FrozenDict[str, Array] = FrozenDict(
             {"linear_velocity_command": jnp.array([0.5, 0.5])}
@@ -180,7 +181,7 @@ class TestActionSmoothnessPenalty:
         reward = ActionSmoothnessPenalty(scale=scale)
 
         data_t = DummyMjxData()
-        data_t_plus_1 = DummyMjxData()
+        data_t_plus_1 = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
         command: FrozenDict[str, Array] = FrozenDict({})
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
@@ -212,13 +213,7 @@ class TestFootContactPenalty:
         )
 
         data_t = DummyMjxData()
-        data_t_plus_1 = DummyMjxData()
-
-        # Set up contact with illegal geom
-        data_t_plus_1.contact.geom1 = jnp.array([0, 3, 5])  # 0 is an illegal geom index
-        data_t_plus_1.contact.dist = jnp.array(
-            [0.001, 0.02, 0.03]
-        )  # Distance for geom 0 is less than contact_eps
+        data_t_plus_1 = DummyMjxData(contact=DummyContact(geom1=jnp.array([0, 3, 5])))
 
         command: FrozenDict[str, Array] = FrozenDict({})
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
@@ -231,8 +226,7 @@ class TestFootContactPenalty:
         assert jnp.allclose(result, expected)
 
         # Test with no illegal contacts
-        data_t_plus_1.contact.geom1 = jnp.array([3, 4, 5])
-        data_t_plus_1.contact.geom2 = jnp.array([3, 4, 5])
+        data_t_plus_1 = DummyMjxData(contact=DummyContact(geom1=jnp.array([3, 4, 5])))
 
         result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1) * scale
 

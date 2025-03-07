@@ -5,10 +5,7 @@ import jax
 from jax import Array
 from jaxtyping import PyTree
 
-from ksim.utils.jit import legit_jit
 
-
-@legit_jit(static_argnames=["slice_length"])
 def slice_array(x: Array, start: Array, slice_length: int) -> Array:
     """Get a slice of an array along the first dimension.
 
@@ -23,7 +20,6 @@ def slice_array(x: Array, start: Array, slice_length: int) -> Array:
     return jax.lax.dynamic_slice(x, start_indices, slice_sizes)
 
 
-@legit_jit(static_argnames=["slice_length"])
 def slice_pytree(pytree: PyTree, start: Array, slice_length: int) -> PyTree:
     """Get a slice of a pytree."""
     return jax.tree_util.tree_map(lambda x: slice_array(x, start, slice_length), pytree)

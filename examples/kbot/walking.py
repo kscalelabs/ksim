@@ -372,7 +372,6 @@ class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
     init_noise_std: float = xax.field(value=1.0)
 
     # Termination conditions.
-    max_episode_length: float = xax.field(value=10.0)
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
 
@@ -408,19 +407,13 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                     scale=-0.1,
                     foot_body_names=["KB_D_501R_R_LEG_FOOT"],
                     allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
+                    skip_if_zero_command=("linear_velocity_command", "angular_velocity_command"),
                 ),
                 FootContactPenaltyBuilder(
                     scale=-0.1,
                     foot_body_names=["KB_D_501L_L_LEG_FOOT"],
                     allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
+                    skip_if_zero_command=("linear_velocity_command", "angular_velocity_command"),
                 ),
             ],
             observations=[
@@ -522,6 +515,5 @@ if __name__ == "__main__":
     KBotWalkingTask.launch(
         KBotWalkingConfig(
             num_envs=1,
-            num_steps_per_trajectory=100,
         ),
     )

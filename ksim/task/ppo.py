@@ -92,13 +92,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Get the critic carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
 
-    @legit_jit(static_argnames=["self", "model", "burn_in"])
+    @legit_jit(static_argnames=["self", "model"])
     def get_rollout_time_loss_components(
         self,
         model: ActorCriticAgent,
         variables: PyTree,
         trajectory_dataset: EnvState,
-        burn_in: bool = False,
     ) -> RolloutTimeLossComponents:
         """Calculating advantages and returns for a rollout."""
         prediction = self.apply_actor(
@@ -115,10 +114,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             method="actor_calc_log_prob",
         )
         assert isinstance(initial_action_log_probs, Array)
-
-        # During the burn-in phase, zero out the log probs.
-        if burn_in:
-            initial_action_log_probs = jnp.zeros_like(initial_action_log_probs)
 
         initial_values = self.apply_critic(
             model,
@@ -142,7 +137,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             returns=jax.lax.stop_gradient(returns),
         )
 
-    @legit_jit(static_argnames=["self"])
     def _clipped_value_loss(
         self,
         target_values: Array,
@@ -157,7 +151,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         error = values - returns
         return jnp.maximum(error**2, clipped_error**2).mean()
 
-    @legit_jit(static_argnames=["self", "model", "optimizer"])
     def model_update(
         self,
         model: ActorCriticAgent,
@@ -168,7 +161,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rollout_time_loss_components: RolloutTimeLossComponents,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        loss_val, metrics, grads = self._jitted_value_and_grad(
+        loss_val, metrics, grads = self.loss_metrics_grads(
             model, variables, env_state_batch, rollout_time_loss_components
         )
 
@@ -187,7 +180,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             optax.adam(self.config.learning_rate),
         )
 
-    @legit_jit(static_argnames=["self", "initial_step"])
     def update_input_normalization_stats(
         self,
         variables: PyTree,
@@ -214,7 +206,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     # Training Utilities #
     ######################
 
-    @legit_jit(static_argnames=["self", "model"])
     def apply_critic(
         self,
         model: ActorCriticAgent,
@@ -230,7 +221,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    @legit_jit(static_argnames=["self", "model"])
     def compute_ppo_loss(
         self,
         model: ActorCriticAgent,
@@ -255,7 +245,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         assert isinstance(rollout_time_loss_components, PPORolloutTimeLossComponents)
 
         log_prob_diff = log_probs - rollout_time_loss_components.initial_action_log_probs
+        # Add numerical stability clipping
+        log_prob_diff = jnp.clip(log_prob_diff, -20.0, 20.0)  # prevents exp() from exploding
         ratio = jnp.exp(log_prob_diff)
+        ratio = jnp.clip(ratio, 0.0, 10.0)  # prevents extreme ratios
 
         # get the state-value estimates
         values = self.apply_critic(model, variables, env_state_batch.obs, env_state_batch.command)
@@ -340,10 +333,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # But we need to provide an implementation with the correct signature
         raise NotImplementedError(
             "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
-            "PPO tasks use model_update and _jitted_value_and_grad instead."
+            "PPO tasks use model_update and loss_metrics_grads instead."
         )
 
-    @legit_jit(static_argnames=["self"])
     def _compute_advantages(
         self,
         variables: PyTree,
@@ -374,8 +366,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
         return advantages[::-1]
 
-    @legit_jit(static_argnames=["self", "model"])
-    def _jitted_value_and_grad(
+    def loss_metrics_grads(
         self,
         model: ActorCriticAgent,
         variables: PyTree,

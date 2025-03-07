@@ -28,3 +28,4 @@ class EnvState:
 
 KScaleActionModelType = Literal["random", "zero", "midpoint"]
 PhysicsData = mjx.Data | None
+PhysicsModel = mjx.Model | None
