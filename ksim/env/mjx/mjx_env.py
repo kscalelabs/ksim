@@ -97,6 +97,9 @@ class MjxEnvConfig(BaseEnvConfig):
     # actuator configuration options
     actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
 
+    # compilation options
+    compile_unroll: bool = xax.field(value=True, help="Whether to compile the entire unroll fn.")
+
 
 # The new stateless environment – note that we do not call any stateful methods.
 class MjxEnv(BaseEnv):
@@ -647,8 +650,16 @@ class MjxEnv(BaseEnv):
         the default model and data will be used.
         """
         rng_E = jax.random.split(rng, num_envs)
+
+        if self.config.compile_unroll:
+            unroll_fn = legit_jit(
+                static_argnames=["model", "num_steps", "return_intermediate_data"],
+            )(self.unroll_trajectory)
+        else:
+            unroll_fn = self.unroll_trajectory
+
         env_state_ETL, physics_data_res = jax.vmap(
-            self.unroll_trajectory, in_axes=(None, None, 0, None, 0, 0, None, None)
+            unroll_fn, in_axes=(None, None, 0, None, 0, 0, None, None)
         )(
             model,
             variables,
