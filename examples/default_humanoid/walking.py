@@ -28,7 +28,7 @@ from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_OUTPUTS = 21
+NUM_OUTPUTS = 17
 
 
 class HumanoidActorModel(GaussianActionModel):

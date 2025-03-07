@@ -44,7 +44,7 @@ from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
 # NUM_OUTPUTS = 20
-NUM_OUTPUTS = 14 # No shoulders
+NUM_OUTPUTS = 14  # No shoulders
 
 # NOTE: implement after MLP is working.
 # class RNNCell(eqx.Module):
