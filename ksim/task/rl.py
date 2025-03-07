@@ -25,7 +25,6 @@ from dpshdl.dataset import Dataset
 from flax import linen as nn
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from mujoco import mjx
 from omegaconf import MISSING
 
 from ksim.builders.loggers import (
@@ -536,7 +535,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng = self.prng_key()
         rng, burn_in_rng, train_rng = jax.random.split(rng, 3)
 
-        # getting initial physics data
+        # getting initial physics model
         physics_model_L = env.get_init_physics_model()
         reset_rngs = jax.random.split(burn_in_rng, self.config.num_envs)
 
@@ -642,16 +641,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 render_dir = self.exp_dir / self.config.render_dir / render_name
                 logger.info("Rendering to %s", render_dir)
 
-                # render_and_save_trajectory(
-                #     env=env,
-                #     model=model,
-                #     variables=variables,
-                #     rng=rng,
-                #     output_dir=render_dir,
-                #     num_steps=self.num_rollout_steps_per_env,
-                #     width=self.config.render_width,
-                #     height=self.config.render_height,
-                # )
+                render_and_save_trajectory(
+                    env=env,
+                    model=model,
+                    variables=variables,
+                    rng=rng,
+                    output_dir=render_dir,
+                    num_steps=self.num_rollout_steps_per_env,
+                    width=self.config.render_width,
+                    height=self.config.render_height,
+                )
 
                 logger.info("Done rendering to %s", render_dir)
 

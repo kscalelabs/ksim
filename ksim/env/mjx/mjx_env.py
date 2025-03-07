@@ -45,18 +45,6 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-# @legit_jit()
-def step_mjx(
-    mjx_model_L: mjx.Model,
-    mjx_data_L: mjx.Data,
-    ctrl_L: Array,
-) -> mjx.Data:
-    """Step the mujoco model."""
-    ctrl_L = jnp.zeros_like(mjx_data_L.ctrl)  # TODO: will need to change back
-    data_with_ctrl_L = mjx_data_L.replace(ctrl=ctrl_L)
-    return mjx.step(mjx_model_L, data_with_ctrl_L)
-
-
 def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
     """Ensures that all names are unique."""
     names: set[str] = set()
@@ -143,8 +131,7 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
-        mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
+        mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
         mj_model = self._override_model_settings(mj_model)
 
         self.default_mj_model = mj_model
@@ -197,18 +184,13 @@ class MjxEnv(BaseEnv):
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
-
-        # mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        # mj_model.opt.disableflags = mujoco.
-        # mj_model.opt.iterations = self.config.solver_iterations
-        # mj_model.opt.ls_iterations = self.config.solver_ls_iterations
-        # mj_model.opt.timestep = self.config.dt
+        mj_model.opt.iterations = self.config.solver_iterations
+        mj_model.opt.ls_iterations = self.config.solver_ls_iterations
+        mj_model.opt.timestep = self.config.dt
+        # mj_model.opt.disableflags = self.config.disable_flags_bitmask
 
         return mj_model
 
-    # @legit_jit(static_argnames=["self"])
     def get_observation(self, mjx_data_L: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
         """Compute observations from the pipeline state."""
         observations = {}
@@ -218,7 +200,6 @@ class MjxEnv(BaseEnv):
             observations[observation_name] = observation_value
         return FrozenDict(observations)
 
-    # @legit_jit(static_argnames=["self"])
     def get_rewards(
         self,
         action_L_t_minus_1: Array,
@@ -246,7 +227,6 @@ class MjxEnv(BaseEnv):
             rewards[reward_name] = reward_val
         return FrozenDict(rewards)
 
-    # @legit_jit(static_argnames=["self"])
     def get_terminations(self, mjx_data_L_t_plus_1: mjx.Data) -> FrozenDict[str, Array]:
         """Compute termination conditions from the pipeline state."""
         terminations = {}
@@ -258,7 +238,6 @@ class MjxEnv(BaseEnv):
             terminations[termination_name] = term_val
         return FrozenDict(terminations)
 
-    # @legit_jit(static_argnames=["self"])
     def get_initial_commands(
         self, rng: PRNGKeyArray, initial_time: Array | None
     ) -> FrozenDict[str, Array]:
@@ -272,7 +251,6 @@ class MjxEnv(BaseEnv):
             commands[command_name] = command_val
         return FrozenDict(commands)
 
-    # @legit_jit(static_argnames=["self"])
     def get_commands(
         self, prev_commands: FrozenDict[str, Array], rng: PRNGKeyArray, time: Array
     ) -> FrozenDict[str, Array]:
@@ -290,7 +268,6 @@ class MjxEnv(BaseEnv):
     # Stepping and Resetting Main Logic #
     #####################################
 
-    # @legit_jit(static_argnames=["self"])
     def apply_physics_steps(
         self,
         mjx_model_L: mjx.Model,
@@ -333,11 +310,7 @@ class MjxEnv(BaseEnv):
 
         def get_init_data(rng: jax.Array) -> mjx.Data:
             data = mjx.make_data(self.default_mjx_model)
-            rng1, rng2 = jax.random.split(rng, 2)
-            low, hi = -0.01, 0.01
-            qpos = data.qpos + jax.random.uniform(rng1, (28,), minval=low, maxval=hi)
-            qvel = data.qvel + jax.random.uniform(rng2, (27,), minval=low, maxval=hi)
-            return data.replace(qpos=qpos, qvel=qvel)
+            return data
 
         rngs = jax.random.split(jax.random.PRNGKey(0), num_envs)
         default_data_EL = jax.vmap(get_init_data)(rngs)
@@ -382,7 +355,6 @@ class MjxEnv(BaseEnv):
             reward_components=FrozenDict(reward_components),
         )
 
-    # @legit_jit(static_argnames=["self", "model"])
     def reset(
         self,
         model: ActorCriticAgent,
@@ -403,17 +375,12 @@ class MjxEnv(BaseEnv):
         mjx_data_L_0 = mjx.make_data(mjx_model_L)
 
         for _, reset_func in self.resets:
-            mjx_data_L_0 = reset_func(mjx_data_L_0, rng)
+            rng, reset_rng = jax.random.split(rng, 2)
+            mjx_data_L_0 = reset_func(mjx_data_L_0, reset_rng)
         assert isinstance(mjx_data_L_0, mjx.Data)
+        mjx_data_L_0 = mjx.forward(mjx_model_L, mjx_data_L_0)
 
         rng, obs_rng = jax.random.split(rng, 2)
-
-        low, hi = -0.01, 0.01
-        qpos = mjx_data_L_0.qpos + jax.random.uniform(rng, (28,), minval=low, maxval=hi)
-        qvel = mjx_data_L_0.qvel + jax.random.uniform(rng, (27,), minval=low, maxval=hi)
-        mjx_data_L_0 = mjx_data_L_0.replace(qpos=qpos, qvel=qvel)
-
-        mjx_data_L_0 = mjx.forward(mjx_model_L, mjx_data_L_0)
         timestep = jnp.array(0.0)
         obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
         command_L_0 = self.get_initial_commands(rng, timestep)
@@ -453,7 +420,6 @@ class MjxEnv(BaseEnv):
         )
         return env_state_L_0, mjx_data_L_1
 
-    # @legit_jit(static_argnames=["self", "model"])
     def step(
         self,
         model: ActorCriticAgent,
@@ -571,7 +537,6 @@ class MjxEnv(BaseEnv):
         mjx_model_L = physics_model_L
 
         # Define env_step as a pure function with all dependencies passed explicitly
-        # @legit_jit()
         def env_step(
             env_state_L_t_minus_1: EnvState,
             mjx_data_L_t: mjx.Data,

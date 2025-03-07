@@ -5,12 +5,11 @@ from dataclasses import dataclass
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import mujoco
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
+from ksim.builders.commands import LinearVelocityCommand
 from ksim.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
@@ -18,6 +17,7 @@ from ksim.builders.observation import (
     JointPositionObservation,
     JointVelocityObservation,
 )
+from ksim.builders.resets import RandomJointPositionReset, RandomJointVelocityReset
 from ksim.builders.rewards import HeightReward, TrackLinearVelocityXYReward
 from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
@@ -25,7 +25,7 @@ from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_OUTPUTS = 21
+NUM_OUTPUTS = 17
 
 
 class HumanoidActorModel(GaussianActionModel):
@@ -78,9 +78,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 RollTooGreatTermination(max_roll=1.04),
                 PitchTooGreatTermination(max_pitch=1.04),
             ],
-            resets=[
-                # XYPositionResetBuilder(),
-            ],
+            resets=[],
             rewards=[
                 TrackLinearVelocityXYReward(scale=0.5),
                 HeightReward(
@@ -98,16 +96,16 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
             ],
             commands=[
                 LinearVelocityCommand(
-                    x_scale=0.0,
-                    y_scale=0.0,
+                    x_scale=1.0,
+                    y_scale=1.0,
                     switch_prob=0.02,
                     zero_prob=0.3,
                 ),
-                AngularVelocityCommand(
-                    scale=1.0,
-                    switch_prob=0.02,
-                    zero_prob=0.8,
-                ),
+                # AngularVelocityCommand(
+                #     scale=1.0,
+                #     switch_prob=0.02,
+                #     zero_prob=0.8,
+                # ),
             ],
         )
 
@@ -146,8 +144,8 @@ if __name__ == "__main__":
             num_env_states_per_minibatch=8192,
             num_minibatches=32,
             num_envs=2048,
-            dt=0.005,
-            ctrl_dt=0.02,
+            dt=0.002,
+            ctrl_dt=0.008,
             learning_rate=5e-5,
             save_every_n_seconds=60 * 4,
             only_save_most_recent=False,

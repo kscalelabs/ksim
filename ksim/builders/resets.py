@@ -123,3 +123,33 @@ class XYPositionResetBuilder(ResetBuilder[XYPositionReset]):
             hfield_data=hfield_data,
             padding_prct=self.padding_prct,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class RandomJointPositionReset(Reset):
+    """Adds uniformly sampled noise to default joint positions."""
+
+    range: tuple[float, float]
+
+    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+        qpos = data.qpos
+        qpos = qpos + jax.random.uniform(
+            rng, qpos.shape, minval=-self.range[0], maxval=self.range[1]
+        )
+        data = data.replace(qpos=qpos)
+        return data
+
+
+@attrs.define(frozen=True, kw_only=True)
+class RandomJointVelocityReset(Reset):
+    """Adds uniformly sampled noise to default joint velocities."""
+
+    range: tuple[float, float]
+
+    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+        qvel = data.qvel
+        qvel = qvel + jax.random.uniform(
+            rng, qvel.shape, minval=-self.range[0], maxval=self.range[1]
+        )
+        data = data.replace(qvel=qvel)
+        return data

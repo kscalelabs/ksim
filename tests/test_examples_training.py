@@ -40,11 +40,10 @@ def test_default_humanoid_training() -> None:
 
     # Test a single training iteration
     physics_model_L = env.get_init_physics_model()
-    physics_data_EL_0 = env.get_init_physics_data(config.num_envs)
 
     reset_rngs = jax.random.split(key, config.num_envs)
-    env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, 0, None))(
-        model, variables, reset_rngs, physics_data_EL_0, physics_model_L
+    env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, None))(
+        model, variables, reset_rngs, physics_model_L
     )
 
     # Get a trajectory dataset
