@@ -18,11 +18,12 @@ class MITPositionActuatorMetadata(BaseActuatorMetadata):
 
 class MITPositionActuators(Actuators):
     """MIT Controller, as used by the Robstride actuators."""
-
+    # TODO: add default position
     def __init__(
         self,
         actuators_metadata: dict[str, BaseActuatorMetadata],
         mujoco_mappings: MujocoMappings,
+        action_scale: float = 0.3,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         kps_list = [0.0] * len(mujoco_mappings.ctrl_name_to_idx)
@@ -42,6 +43,7 @@ class MITPositionActuators(Actuators):
 
         self.kps = jnp.array(kps_list)
         self.kds = jnp.array(kds_list)
+        self.action_scale = jnp.array(action_scale)
         if any(self.kps == 0) or any(self.kds == 0):
             raise ValueError("Some kps or kds are 0. Check your actuators_metadata.")
 
@@ -50,12 +52,14 @@ class MITPositionActuators(Actuators):
         current_pos = mjx_data.qpos[7:]  # NOTE: we assume first 7 are always root pos.
         current_vel = mjx_data.qvel[6:]  # NOTE: we assume first 6 are always root vel.
 
+        position = action * self.action_scale
         target_velocities = jnp.zeros_like(action)
 
-        pos_delta = action - current_pos
+        pos_delta = position - current_pos
         vel_delta = target_velocities - current_vel
 
         ctrl = self.kps * pos_delta + self.kds * vel_delta
+
         return ctrl
 
     @property

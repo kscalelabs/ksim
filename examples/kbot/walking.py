@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
+import mujoco
 
 from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.builders.observation import (
@@ -620,13 +621,18 @@ if __name__ == "__main__":
     # python -m examples.kbot.walking action=env
     KBotWalkingTask.launch(
         KBotWalkingConfig(
-            num_envs=2048,
-            num_steps_per_trajectory=600,
-            minibatch_size=1024,
-            # num_learning_epochs=10,
-            # normalize_advantage=True,
-            # obs_norm_alpha=0.01,
+            num_envs=1024,
+            num_steps_per_trajectory=300,
+            minibatch_size=640,
+            num_learning_epochs=1,
+            save_every_n_seconds=60 * 4,
             only_save_most_recent=False,
+            # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
+            ctrl_dt=0.01,
             dt=0.001,
+            solver_type=mujoco.mjtSolver.mjSOL_CG.value,
+            solver_iterations=15,
+            solver_ls_iterations=15,
+            actuator_type="mit",
         ),
     )
