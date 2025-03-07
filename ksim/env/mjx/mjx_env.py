@@ -232,7 +232,6 @@ class MjxEnv(BaseEnv):
             ctrl_dt=self.config.ctrl_dt,
             mujoco_mappings=self.mujoco_mappings,
         )
-
         # storing the termination, reset, reward, observation, and command builders
         terminations_v = [t(data) if isinstance(t, TerminationBuilder) else t for t in terminations]
         resets_v = [r(data) if isinstance(r, ResetBuilder) else r for r in resets]

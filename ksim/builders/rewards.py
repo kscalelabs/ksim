@@ -136,8 +136,10 @@ class OrientationPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return get_norm(
-            quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - self.target_orientation, self.norm
+        return jnp.sum(
+            get_norm(
+                quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - self.target_orientation, self.norm
+            )
         )
 
 
@@ -155,7 +157,7 @@ class TorquePenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return get_norm(mjx_data_t_plus_1.actuator_force, self.norm)
+        return jnp.sum(get_norm(mjx_data_t_plus_1.actuator_force, self.norm))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -173,8 +175,10 @@ class EnergyPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return get_norm(mjx_data_t_plus_1.qvel[6:], self.norm) * get_norm(
-            mjx_data_t_plus_1.actuator_force, self.norm
+        return jnp.sum(
+            get_norm(mjx_data_t_plus_1.qvel[6:], self.norm) * get_norm(
+                mjx_data_t_plus_1.actuator_force, self.norm
+            )
         )
 
 
@@ -192,7 +196,7 @@ class JointAccelerationPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return get_norm(mjx_data_t_plus_1.qacc[6:], self.norm)
+        return jnp.sum(get_norm(mjx_data_t_plus_1.qacc[6:], self.norm))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -327,7 +331,7 @@ class FootSlipPenalty(Reward):
         # Get x and y velocities
         body_vel = mjx_data_t_plus_1.qvel[:2]
 
-        return jnp.linalg.norm(body_vel, axis=-1) * contacts
+        return jnp.sum(jnp.linalg.norm(body_vel, axis=-1) * contacts)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -374,7 +378,7 @@ class FeetClearancePenalty(Reward):
 
         # TODO: Look into adding linear feet velocity norm to scale the foot delta
 
-        return get_norm(feet_heights - self.max_foot_height, self.norm)
+        return jnp.sum(get_norm(feet_heights - self.max_foot_height, self.norm))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -534,7 +538,7 @@ class FeetAirTimeReward(Reward):
             )
             feet_in_air = jnp.where(commands_are_zero.any(), 0.0, feet_in_air)
 
-        return feet_in_air
+        return jnp.sum(feet_in_air)
 
     def post_accumulate(self, reward: Array) -> Array:
         # Calculate the average number of feet in the air across timesteps
@@ -584,92 +588,93 @@ class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
         )
 
 
-# TODO: Make sure this penalty behaves as expected
-@attrs.define(frozen=True, kw_only=True)
-class ContactForcePenalty(Reward):
-    """Penalty for excessive contact forces on specific body parts.
+# # TODO: Make this actually work
+# @attrs.define(frozen=True, kw_only=True)
+# class ContactForcePenalty(Reward):
+#     """Penalty for excessive contact forces on specific body parts.
 
-    Penalizes contact forces that exceed a specified maximum threshold.
-    This encourages smoother, more controlled movements without harsh impacts.
-    """
+#     Penalizes contact forces that exceed a specified maximum threshold.
+#     This encourages smoother, more controlled movements without harsh impacts.
+#     """
 
-    foot_geom_idxs: Array
-    floor_idx: int
-    max_contact_force: float
-    norm: NormType = attrs.field(default="l1")
+#     foot_geom_idxs: Array
+#     floor_idx: int
+#     max_contact_force: float
+#     norm: NormType = attrs.field(default="l1")
 
-    def __call__(
-        self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-    ) -> Array:
-        total_penalty = jnp.zeros_like(mjx_data_t_plus_1.contact.force)
+#     def __call__(
+#         self,
+#         action_t_minus_1: Array | None,
+#         mjx_data_t: mjx.Data,
+#         command_t: FrozenDict[str, Array],
+#         action_t: Array,
+#         mjx_data_t_plus_1: mjx.Data,
+#     ) -> Array:
+#         total_penalty = jnp.zeros_like(mjx_data_t_plus_1.contact.force)
 
-        for foot_geom_idx in self.foot_geom_idxs:
-            # If colliding, get the force information from contact data
-            # Find all contacts involving this foot and the floor
-            foot_floor_contacts = jnp.logical_or(
-                jnp.logical_and(
-                    mjx_data_t_plus_1.contact.geom1 == foot_geom_idx,
-                    mjx_data_t_plus_1.contact.geom2 == self.floor_idx,
-                ),
-                jnp.logical_and(
-                    mjx_data_t_plus_1.contact.geom1 == self.floor_idx,
-                    mjx_data_t_plus_1.contact.geom2 == foot_geom_idx,
-                ),
-            )
+#         for foot_geom_idx in self.foot_geom_idxs:
+#             # If colliding, get the force information from contact data
+#             # Find all contacts involving this foot and the floor
+#             foot_floor_contacts = jnp.logical_or(
+#                 jnp.logical_and(
+#                     mjx_data_t_plus_1.contact.geom1 == foot_geom_idx,
+#                     mjx_data_t_plus_1.contact.geom2 == self.floor_idx,
+#                 ),
+#                 jnp.logical_and(
+#                     mjx_data_t_plus_1.contact.geom1 == self.floor_idx,
+#                     mjx_data_t_plus_1.contact.geom2 == foot_geom_idx,
+#                 ),
+#             )
 
-            # Extract contact forces for matches
-            # In MJX, contact forces are stored in a 3D array per contact point
-            contact_forces = mjx_data_t_plus_1.contact.force
+#             # Extract contact forces for matches
+#             # In MJX, contact forces are stored in a 3D array per contact point
+#             contact_forces = mjx_data_t_plus_1.contact.force
 
-            # Calculate force magnitude (norm of the force vector)
-            force_magnitudes = jnp.linalg.norm(contact_forces, axis=1)
+#             # Calculate force magnitude (norm of the force vector)
+#             force_magnitudes = jnp.linalg.norm(contact_forces, axis=1)
 
-            # Apply mask to get only forces for this foot-floor contact
-            masked_forces = jnp.where(foot_floor_contacts, force_magnitudes, 0.0)
+#             # Apply mask to get only forces for this foot-floor contact
+#             masked_forces = jnp.where(foot_floor_contacts, force_magnitudes, 0.0)
 
-            # Find the maximum force for this foot-floor contact
-            max_force = jnp.max(masked_forces)
+#             # Find the maximum force for this foot-floor contact
+#             max_force = jnp.max(masked_forces)
 
-            # Penalize only forces exceeding the threshold
-            force_penalty = jnp.clip(max_force - self.max_contact_force, min=0.0)
+#             # Penalize only forces exceeding the threshold
+#             force_penalty = jnp.clip(max_force - self.max_contact_force, min=0.0)
 
-            # Apply the norm and add to total penalty
-            foot_penalty = get_norm(force_penalty, self.norm)
-            total_penalty += foot_penalty
+#             # Apply the norm and add to total penalty
+#             foot_penalty = get_norm(force_penalty, self.norm)
+#             total_penalty += foot_penalty
 
-        return total_penalty
+#         # Return a scalar value
+#         return jnp.sum(total_penalty)
 
 
-@attrs.define(frozen=True, kw_only=True)
-class ContactForcePenaltyBuilder(RewardBuilder[ContactForcePenalty]):
-    scale: float
-    foot_geom_names: list[str]
-    max_contact_force: float
-    norm: NormType = attrs.field(default="l1")
+# @attrs.define(frozen=True, kw_only=True)
+# class ContactForcePenaltyBuilder(RewardBuilder[ContactForcePenalty]):
+#     scale: float
+#     foot_geom_names: list[str]
+#     max_contact_force: float
+#     norm: NormType = attrs.field(default="l1")
 
-    def __call__(self, data: BuilderData) -> ContactForcePenalty:
-        foot_geom_idxs = []
-        for geom_name in self.foot_geom_names:
-            foot_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+#     def __call__(self, data: BuilderData) -> ContactForcePenalty:
+#         foot_geom_idxs = []
+#         for geom_name in self.foot_geom_names:
+#             foot_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
 
-        foot_geom_idxs = jnp.array(foot_geom_idxs)
+#         foot_geom_idxs = jnp.array(foot_geom_idxs)
 
-        floor_idx = data.mujoco_mappings.floor_geom_idx
-        if floor_idx is None:
-            raise ValueError("No floor geom found in model")
+#         floor_idx = data.mujoco_mappings.floor_geom_idx
+#         if floor_idx is None:
+#             raise ValueError("No floor geom found in model")
 
-        return ContactForcePenalty(
-            scale=self.scale,
-            foot_geom_idxs=foot_geom_idxs,
-            floor_idx=floor_idx,
-            max_contact_force=self.max_contact_force,
-            norm=self.norm,
-        )
+#         return ContactForcePenalty(
+#             scale=self.scale,
+#             foot_geom_idxs=foot_geom_idxs,
+#             floor_idx=floor_idx,
+#             max_contact_force=self.max_contact_force,
+#             norm=self.norm,
+#         )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -703,7 +708,7 @@ class DefaultPoseDeviationPenalty(Reward):
         # Apply weights to deviations
         weighted_deviations = deviations * self.joint_deviation_weights
 
-        return get_norm(weighted_deviations, self.norm)
+        return jnp.sum(get_norm(weighted_deviations, self.norm))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -773,7 +778,7 @@ class JointPosLimitPenalty(Reward):
         # Combine violations
         total_violations = lower_violations + upper_violations
 
-        return total_violations
+        return jnp.sum(total_violations)
 
 
 @attrs.define(frozen=True, kw_only=True)
