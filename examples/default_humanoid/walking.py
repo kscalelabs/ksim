@@ -69,7 +69,6 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     actor_num_layers: int = xax.field(value=5)
     critic_hidden_dims: int = xax.field(value=512)
     critic_num_layers: int = xax.field(value=5)
-    init_noise_std: float = xax.field(value=1.0)
 
     # Termination conditions.
     max_episode_length: float = xax.field(value=10.0)
