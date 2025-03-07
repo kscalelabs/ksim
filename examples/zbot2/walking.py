@@ -18,7 +18,7 @@ from ksim.builders.observation import (
     JointVelocityObservation,
     SensorObservationBuilder,
 )
-from ksim.builders.resets import JointVelocityResetBuilder, XYPositionResetBuilder
+from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
@@ -173,7 +173,6 @@ class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
             ],
             resets=[
                 XYPositionResetBuilder(),
-                JointVelocityResetBuilder(max_velocity=1.0),
             ],
             rewards=[
                 LinearVelocityZPenalty(scale=-0.0),
@@ -371,8 +370,7 @@ if __name__ == "__main__":
     ZBot2WalkingTask.launch(
         ZBot2WalkingConfig(
             num_envs=2048,
-            num_steps_per_trajectory=600,
-            minibatch_size=1024,
+            batch_size=1024,
             # num_learning_epochs=10,
             # normalize_advantage=True,
             # obs_norm_alpha=0.01,
