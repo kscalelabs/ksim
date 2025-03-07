@@ -20,12 +20,12 @@ from ksim.builders.observation import (
 )
 from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import (
-    HeightReward,
-    TrackLinearVelocityXYReward,
+    DHControlPenalty,
+    DHForwardReward,
+    DHHealthyReward,
 )
 from ksim.builders.terminations import (
-    PitchTooGreatTermination,
-    RollTooGreatTermination,
+    UnhealthyTermination,
 )
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
@@ -65,9 +65,9 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     robot_model_name: str = xax.field(value="examples/default_humanoid/")
 
     # ML model parameters.
-    actor_hidden_dims: int = xax.field(value=64)
-    actor_num_layers: int = xax.field(value=4)
-    critic_hidden_dims: int = xax.field(value=256)
+    actor_hidden_dims: int = xax.field(value=512)
+    actor_num_layers: int = xax.field(value=5)
+    critic_hidden_dims: int = xax.field(value=512)
     critic_num_layers: int = xax.field(value=5)
 
     # Termination conditions.
@@ -77,24 +77,30 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     pretrained: str | None = xax.field(value=None)
     checkpoint_num: int | None = xax.field(value=None)
 
+    actuator_type: str = xax.field(value="scaled_torque", help="The type of actuator to use.")
+
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
     def get_environment(self) -> MjxEnv:
         return MjxEnv(
             self.config,
             terminations=[
-                RollTooGreatTermination(max_roll=1.04),
-                PitchTooGreatTermination(max_pitch=1.04),
+                UnhealthyTermination(
+                    unhealthy_z_lower=0.5,
+                    unhealthy_z_upper=1.5,
+                ),
             ],
             resets=[
                 XYPositionResetBuilder(),
             ],
             rewards=[
-                TrackLinearVelocityXYReward(scale=0.5),
-                HeightReward(
-                    scale=0.5,
-                    height_target=1.4,
+                DHForwardReward(scale=1.25),
+                DHHealthyReward(
+                    scale=5.0,
+                    healthy_z_lower=0.5,
+                    healthy_z_upper=1.5,
                 ),
+                DHControlPenalty(scale=0.1),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
@@ -103,6 +109,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 JointPositionObservation(noise_type="gaussian", noise=0.01),
                 JointVelocityObservation(noise_type="gaussian", noise=0.01),
                 # TODO: default humanoid doesn't have sensors, add them later
+                # Legacy Ksim observation setup
+                # LegacyPositionObservation(exclude_xy=True),
+                # LegacyVelocityObservation(),
+                # CenterOfMassInertiaObservation(),
+                # CenterOfMassVelocityObservation(),
+                # ActuatorForceObservation(),
             ],
             commands=[
                 LinearVelocityCommand(
@@ -159,7 +171,7 @@ if __name__ == "__main__":
             # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
             ctrl_dt=0.01,
             dt=0.001,
-            solver_type=mujoco.mjtSolver.mjSOL_NEWTON.value,
+            solver_type=mujoco.mjtSolver.mjSOL_CG.value,
             solver_iterations=6,
             solver_ls_iterations=6,
             actuator_type="scaled_torque",

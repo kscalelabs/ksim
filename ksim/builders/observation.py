@@ -117,6 +117,63 @@ class JointVelocityObservation(Observation):
         return self.add_noise(qvel, rng)
 
 
+@attrs.define(frozen=True)
+class LegacyPositionObservation(Observation):
+    """Legacy position observation that excludes x,y positions.
+
+    In the legacy code, if exclude_current_positions_from_observation is True,
+    it skips the first two elements (x,y) of qpos but includes z and all joint positions.
+    """
+
+    exclude_xy: bool = attrs.field(default=True)
+
+    @legit_jit(static_argnames=["self"])
+    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+        position = state.qpos
+        if self.exclude_xy:
+            position = position[2:]  # Skip x,y but include z and all joint positions
+        return self.add_noise(position, rng)
+
+
+@attrs.define(frozen=True)
+class LegacyVelocityObservation(Observation):
+    """Legacy velocity observation that includes all velocities.
+
+    In the legacy code, all velocities (base + joint) are included without any exclusions.
+    """
+
+    @legit_jit(static_argnames=["self"])
+    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+        return self.add_noise(state.qvel, rng)
+
+
+@attrs.define(frozen=True)
+class CenterOfMassInertiaObservation(Observation):
+    @legit_jit(static_argnames=["self"])
+    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+        # Skip the first entry (world body) and flatten
+        cinert = state.cinert[1:].ravel()  # Shape will be (nbody-1, 10)
+        return self.add_noise(cinert, rng)
+
+
+@attrs.define(frozen=True)
+class CenterOfMassVelocityObservation(Observation):
+    @legit_jit(static_argnames=["self"])
+    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+        # Skip the first entry (world body) and flatten
+        cvel = state.cvel[1:].ravel()  # Shape will be (nbody-1, 6)
+        return self.add_noise(cvel, rng)
+
+
+@attrs.define(frozen=True)
+class ActuatorForceObservation(Observation):
+    @legit_jit(static_argnames=["self"])
+    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+        # Get actuator forces
+        qfrc_actuator = state.qfrc_actuator  # Shape will be (nu,)
+        return self.add_noise(qfrc_actuator, rng)
+
+
 @attrs.define(frozen=True, kw_only=True)
 class SensorObservation(Observation):
     sensor_name: str = attrs.field()
