@@ -13,7 +13,6 @@ from jaxtyping import Array
 from mujoco import mjx
 
 from ksim.utils.data import BuilderData
-from ksim.utils.jit import legit_jit
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +104,6 @@ class HeightReward(Reward):
 
     height_target: float = attrs.field(default=1.4)
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -125,7 +123,6 @@ class LinearVelocityZPenalty(Reward):
 
     norm: NormType = attrs.field(default="l2")
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -144,7 +141,6 @@ class AngularVelocityXYPenalty(Reward):
 
     norm: NormType = attrs.field(default="l2")
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -164,7 +160,6 @@ class TrackAngularVelocityZReward(Reward):
     cmd_name: str = attrs.field(default="angular_velocity_command")
     norm: NormType = attrs.field(default="l2")
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -185,7 +180,6 @@ class TrackLinearVelocityXYReward(Reward):
     cmd_name: str = attrs.field(default="linear_velocity_command")
     sensitivity: float = attrs.field(default=1.0)
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -214,7 +208,6 @@ class ActionSmoothnessPenalty(Reward):
 
     norm: NormType = attrs.field(default="l2")
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -254,7 +247,6 @@ class FootContactPenalty(Reward):
         if len(self.skip_if_zero_command) == 0 and self.skip_if_zero_command is not None:
             assert False, "skip_if_zero_command should be None or non-empty"
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,

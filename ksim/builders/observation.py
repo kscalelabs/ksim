@@ -12,7 +12,6 @@ from mujoco import mjx
 
 from ksim.env.types import PhysicsData
 from ksim.utils.data import BuilderData
-from ksim.utils.jit import legit_jit
 
 NoiseType = Literal["gaussian", "uniform"]
 
@@ -71,7 +70,6 @@ class MjxObservation(Observation, ABC):
 
 @attrs.define(frozen=True)
 class BasePositionObservation(MjxObservation):
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[0:3]  # (3,)
         return self.add_noise(qpos, rng)
@@ -79,7 +77,6 @@ class BasePositionObservation(MjxObservation):
 
 @attrs.define(frozen=True)
 class BaseOrientationObservation(Observation):
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[3:7]  # (4,)
         return self.add_noise(qpos, rng)
@@ -87,7 +84,6 @@ class BaseOrientationObservation(Observation):
 
 @attrs.define(frozen=True)
 class BaseLinearVelocityObservation(Observation):
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[0:3]  # (3,)
         return self.add_noise(qvel, rng)
@@ -95,7 +91,6 @@ class BaseLinearVelocityObservation(Observation):
 
 @attrs.define(frozen=True)
 class BaseAngularVelocityObservation(Observation):
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[3:6]  # (3,)
         return self.add_noise(qvel, rng)
@@ -103,7 +98,6 @@ class BaseAngularVelocityObservation(Observation):
 
 @attrs.define(frozen=True)
 class JointPositionObservation(Observation):
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[7:]  # (N,)
         return self.add_noise(qpos, rng)
@@ -111,7 +105,6 @@ class JointPositionObservation(Observation):
 
 @attrs.define(frozen=True)
 class JointVelocityObservation(Observation):
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[6:]  # (N,)
         return self.add_noise(qvel, rng)
@@ -127,7 +120,6 @@ class LegacyPositionObservation(Observation):
 
     exclude_xy: bool = attrs.field(default=True)
 
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         position = state.qpos
         if self.exclude_xy:
@@ -142,14 +134,12 @@ class LegacyVelocityObservation(Observation):
     In the legacy code, all velocities (base + joint) are included without any exclusions.
     """
 
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         return self.add_noise(state.qvel, rng)
 
 
 @attrs.define(frozen=True)
 class CenterOfMassInertiaObservation(Observation):
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         # Skip the first entry (world body) and flatten
         cinert = state.cinert[1:].ravel()  # Shape will be (nbody-1, 10)
@@ -158,7 +148,6 @@ class CenterOfMassInertiaObservation(Observation):
 
 @attrs.define(frozen=True)
 class CenterOfMassVelocityObservation(Observation):
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         # Skip the first entry (world body) and flatten
         cvel = state.cvel[1:].ravel()  # Shape will be (nbody-1, 6)
@@ -167,7 +156,6 @@ class CenterOfMassVelocityObservation(Observation):
 
 @attrs.define(frozen=True)
 class ActuatorForceObservation(Observation):
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         # Get actuator forces
         qfrc_actuator = state.qfrc_actuator  # Shape will be (nu,)
@@ -179,7 +167,6 @@ class SensorObservation(Observation):
     sensor_name: str = attrs.field()
     sensor_idx_range: tuple[int, int | None] | None = attrs.field(default=None)
 
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         assert self.sensor_idx_range is not None
         sensor_data = state.sensordata[self.sensor_idx_range[0] : self.sensor_idx_range[1]].ravel()

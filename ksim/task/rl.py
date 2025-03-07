@@ -105,7 +105,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model: ActorCriticAgent,
         variables: PyTree,
         trajectory_dataset: EnvState,
-        burn_in: bool = False,
     ) -> RolloutTimeLossComponents: ...
 
     @abstractmethod
@@ -290,7 +289,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_scalar(key, value, namespace="termination")
 
         # Logs the mean episode length.
-        mean_episode_length_steps = (~trajectory.done).sum(axis=-1).astype(jnp.float32).mean()
+        mean_episode_length_steps = (~trajectory.done).sum(axis=-1) / trajectory.done.sum(axis=-1)
         mean_episode_length_seconds = mean_episode_length_steps * self.config.ctrl_dt
         self.logger.log_scalar(
             "mean_episode_length", mean_episode_length_seconds, namespace="stats"
@@ -338,7 +337,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    @legit_jit(static_argnames=["self", "model", "env", "burn_in"])
+    @legit_jit(static_argnames=["self", "model", "env"])
     def get_rl_dataset(
         self,
         model: ActorCriticAgent,
@@ -348,7 +347,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         physics_data_EL_t: PhysicsData,
         physics_model_L: PhysicsModel,
         rng: PRNGKeyArray,
-        burn_in: bool = False,
     ) -> tuple[EnvState, RolloutTimeLossComponents, EnvState, PhysicsData]:
         """Returns env state, loss components, carry env state, physics data."""
         # TODO: implement logic to handle randomize model initialization when creating batch
@@ -370,7 +368,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model,
             variables,
             rollout_TEL,
-            burn_in=burn_in,
         )
 
         def flatten_rollout_array(x: Array) -> Array:
@@ -429,7 +426,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         return rollout_BL, rollout_time_loss_components_BL
 
-    @legit_jit(static_argnames=["self", "model", "optimizer"])
     def scannable_minibatch_step(
         self,
         training_state: tuple[PyTree, optax.OptState],
@@ -457,7 +453,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return (variables, opt_state), metrics
 
-    @legit_jit(static_argnames=["self", "model", "optimizer"])
     def scannable_train_epoch(
         self,
         training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
@@ -554,7 +549,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 physics_data_EL_t=physics_data_EL_1,
                 physics_model_L=physics_model_L,
                 rng=burn_in_rng,
-                burn_in=True,
             )
         )
         variables = self.update_input_normalization_stats(
@@ -642,16 +636,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 render_dir = self.exp_dir / self.config.render_dir / render_name
                 logger.info("Rendering to %s", render_dir)
 
-                # render_and_save_trajectory(
-                #     env=env,
-                #     model=model,
-                #     variables=variables,
-                #     rng=rng,
-                #     output_dir=render_dir,
-                #     num_steps=self.num_rollout_steps_per_env,
-                #     width=self.config.render_width,
-                #     height=self.config.render_height,
-                # )
+                render_and_save_trajectory(
+                    env=env,
+                    model=model,
+                    variables=variables,
+                    rng=rng,
+                    output_dir=render_dir,
+                    num_steps=self.num_rollout_steps_per_env,
+                    width=self.config.render_width,
+                    height=self.config.render_height,
+                )
 
                 logger.info("Done rendering to %s", render_dir)
 

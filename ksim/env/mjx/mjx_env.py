@@ -36,25 +36,12 @@ from ksim.env.mjx.actuators.scaled_torque_actuator import ScaledTorqueActuators
 from ksim.env.types import EnvState
 from ksim.model.formulations import ActorCriticAgent
 from ksim.utils.data import BuilderData
-from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
 from ksim.utils.robot_model import get_model_and_metadata
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-# @legit_jit()
-def step_mjx(
-    mjx_model_L: mjx.Model,
-    mjx_data_L: mjx.Data,
-    ctrl_L: Array,
-) -> mjx.Data:
-    """Step the mujoco model."""
-    ctrl_L = jnp.zeros_like(mjx_data_L.ctrl)  # TODO: will need to change back
-    data_with_ctrl_L = mjx_data_L.replace(ctrl=ctrl_L)
-    return mjx.step(mjx_model_L, data_with_ctrl_L)
 
 
 def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
@@ -208,7 +195,6 @@ class MjxEnv(BaseEnv):
 
         return mj_model
 
-    # @legit_jit(static_argnames=["self"])
     def get_observation(self, mjx_data_L: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
         """Compute observations from the pipeline state."""
         observations = {}
@@ -218,7 +204,6 @@ class MjxEnv(BaseEnv):
             observations[observation_name] = observation_value
         return FrozenDict(observations)
 
-    # @legit_jit(static_argnames=["self"])
     def get_rewards(
         self,
         action_L_t_minus_1: Array,
@@ -246,7 +231,6 @@ class MjxEnv(BaseEnv):
             rewards[reward_name] = reward_val
         return FrozenDict(rewards)
 
-    # @legit_jit(static_argnames=["self"])
     def get_terminations(self, mjx_data_L_t_plus_1: mjx.Data) -> FrozenDict[str, Array]:
         """Compute termination conditions from the pipeline state."""
         terminations = {}
@@ -258,7 +242,6 @@ class MjxEnv(BaseEnv):
             terminations[termination_name] = term_val
         return FrozenDict(terminations)
 
-    # @legit_jit(static_argnames=["self"])
     def get_initial_commands(
         self, rng: PRNGKeyArray, initial_time: Array | None
     ) -> FrozenDict[str, Array]:
@@ -272,7 +255,6 @@ class MjxEnv(BaseEnv):
             commands[command_name] = command_val
         return FrozenDict(commands)
 
-    # @legit_jit(static_argnames=["self"])
     def get_commands(
         self, prev_commands: FrozenDict[str, Array], rng: PRNGKeyArray, time: Array
     ) -> FrozenDict[str, Array]:
@@ -290,7 +272,6 @@ class MjxEnv(BaseEnv):
     # Stepping and Resetting Main Logic #
     #####################################
 
-    # @legit_jit(static_argnames=["self"])
     def apply_physics_steps(
         self,
         mjx_model_L: mjx.Model,
@@ -382,7 +363,6 @@ class MjxEnv(BaseEnv):
             reward_components=FrozenDict(reward_components),
         )
 
-    # @legit_jit(static_argnames=["self", "model"])
     def reset(
         self,
         model: ActorCriticAgent,
@@ -453,7 +433,6 @@ class MjxEnv(BaseEnv):
         )
         return env_state_L_0, mjx_data_L_1
 
-    # @legit_jit(static_argnames=["self", "model"])
     def step(
         self,
         model: ActorCriticAgent,
@@ -536,15 +515,6 @@ class MjxEnv(BaseEnv):
 
         return env_state_L_t, mjx_data_L_t_plus_1
 
-    @legit_jit(
-        static_argnames=[
-            "self",
-            "model",
-            "num_steps",
-            "num_envs",
-            "return_intermediate_data",
-        ]
-    )
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
@@ -571,7 +541,6 @@ class MjxEnv(BaseEnv):
         mjx_model_L = physics_model_L
 
         # Define env_step as a pure function with all dependencies passed explicitly
-        # @legit_jit()
         def env_step(
             env_state_L_t_minus_1: EnvState,
             mjx_data_L_t: mjx.Data,

@@ -87,13 +87,13 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 # XYPositionResetBuilder(),
             ],
             rewards=[
-                DHForwardReward(scale=1.25),
+                DHForwardReward(scale=0.125),
                 DHHealthyReward(
-                    scale=5.0,
+                    scale=0.5,
                     healthy_z_lower=0.5,
                     healthy_z_upper=1.5,
                 ),
-                DHControlPenalty(scale=0.1),
+                DHControlPenalty(scale=0.01),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
@@ -116,11 +116,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                     switch_prob=0.02,
                     zero_prob=0.3,
                 ),
-                AngularVelocityCommand(
-                    scale=1.0,
-                    switch_prob=0.02,
-                    zero_prob=0.8,
-                ),
+                # AngularVelocityCommand(
+                #     scale=1.0,
+                #     switch_prob=0.02,
+                #     zero_prob=0.8,
+                # ),
             ],
         )
 
@@ -161,7 +161,7 @@ if __name__ == "__main__":
             num_envs=2048,
             dt=0.005,
             ctrl_dt=0.02,
-            learning_rate=5e-5,
+            learning_rate=0.00001,
             save_every_n_seconds=60 * 4,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
@@ -170,5 +170,14 @@ if __name__ == "__main__":
             solver_iterations=6,
             solver_ls_iterations=6,
             actuator_type="scaled_torque",
+            scale_rewards=True,
+            gamma=0.97,
+            lam=0.95,
+            normalize_advantage=True,
+            normalize_advantage_in_minibatch=True,
+            entropy_coef=1e-4,
+            actor_num_layers=5,
+            critic_num_layers=5,
+            clip_param=0.3,
         ),
     )
