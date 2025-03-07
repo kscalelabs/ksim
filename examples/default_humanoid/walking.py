@@ -151,7 +151,6 @@ if __name__ == "__main__":
             save_every_n_seconds=60 * 4,
             only_save_most_recent=False,
             # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
-            solver_type=mujoco.mjtSolver.mjSOL_NEWTON.value,
             solver_iterations=6,
             solver_ls_iterations=6,
             actuator_type="scaled_torque",

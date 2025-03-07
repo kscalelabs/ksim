@@ -82,7 +82,6 @@ class MjxEnvConfig(BaseEnvConfig):
     max_action_latency: float = xax.field(value=0.0, help="The maximum action latency.")
 
     # solver configuration options
-    solver_type: mujoco.mjtSolver = xax.field(value=mujoco.mjtSolver.mjSOL_CG, help="Solver type.")
     solver_iterations: int = xax.field(value=6, help="Number of main solver iterations.")
     solver_ls_iterations: int = xax.field(value=6, help="Number of line search iterations.")
     disable_flags_bitmask: int = xax.field(
@@ -196,15 +195,15 @@ class MjxEnv(BaseEnv):
 
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
-        mj_model.opt.solver = self.config.solver_type
-        mj_model.opt.disableflags = self.config.disable_flags_bitmask
+        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
+        # mj_model.opt.disableflags = self.config.disable_flags_bitmask
         mj_model.opt.iterations = self.config.solver_iterations
         mj_model.opt.ls_iterations = self.config.solver_ls_iterations
         mj_model.opt.timestep = self.config.dt
 
         return mj_model
 
-    @legit_jit(static_argnames=["self"])
+    # @legit_jit(static_argnames=["self"])
     def get_observation(self, mjx_data_L: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
         """Compute observations from the pipeline state."""
         observations = {}
@@ -214,7 +213,7 @@ class MjxEnv(BaseEnv):
             observations[observation_name] = observation_value
         return FrozenDict(observations)
 
-    @legit_jit(static_argnames=["self"])
+    # @legit_jit(static_argnames=["self"])
     def get_rewards(
         self,
         action_L_t_minus_1: Array,
@@ -242,7 +241,7 @@ class MjxEnv(BaseEnv):
             rewards[reward_name] = reward_val
         return FrozenDict(rewards)
 
-    @legit_jit(static_argnames=["self"])
+    # @legit_jit(static_argnames=["self"])
     def get_terminations(self, mjx_data_L_t_plus_1: mjx.Data) -> FrozenDict[str, Array]:
         """Compute termination conditions from the pipeline state."""
         terminations = {}
@@ -254,7 +253,7 @@ class MjxEnv(BaseEnv):
             terminations[termination_name] = term_val
         return FrozenDict(terminations)
 
-    @legit_jit(static_argnames=["self"])
+    # @legit_jit(static_argnames=["self"])
     def get_initial_commands(
         self, rng: PRNGKeyArray, initial_time: Array | None
     ) -> FrozenDict[str, Array]:
@@ -268,7 +267,7 @@ class MjxEnv(BaseEnv):
             commands[command_name] = command_val
         return FrozenDict(commands)
 
-    @legit_jit(static_argnames=["self"])
+    # @legit_jit(static_argnames=["self"])
     def get_commands(
         self, prev_commands: FrozenDict[str, Array], rng: PRNGKeyArray, time: Array
     ) -> FrozenDict[str, Array]:
@@ -286,7 +285,7 @@ class MjxEnv(BaseEnv):
     # Stepping and Resetting Main Logic #
     #####################################
 
-    @legit_jit(static_argnames=["self"])
+    # @legit_jit(static_argnames=["self"])
     def _apply_physics_steps(
         self,
         mjx_model_L: mjx.Model,
@@ -368,7 +367,7 @@ class MjxEnv(BaseEnv):
             reward_components=FrozenDict(reward_components),
         )
 
-    @legit_jit(static_argnames=["self", "model"])
+    # @legit_jit(static_argnames=["self", "model"])
     def reset(
         self,
         model: ActorCriticAgent,
@@ -440,7 +439,7 @@ class MjxEnv(BaseEnv):
         )
         return env_state_L_0, mjx_data_L_1
 
-    @legit_jit(static_argnames=["self", "model"])
+    # @legit_jit(static_argnames=["self", "model"])
     def step(
         self,
         model: ActorCriticAgent,
@@ -558,7 +557,7 @@ class MjxEnv(BaseEnv):
         mjx_model_L = physics_model_L
 
         # Define env_step as a pure function with all dependencies passed explicitly
-        @legit_jit()
+        # @legit_jit()
         def env_step(
             env_state_L_t_minus_1: EnvState,
             mjx_data_L_t: mjx.Data,
@@ -594,7 +593,7 @@ class MjxEnv(BaseEnv):
 
             return new_state_L_t, mjx_data_L_t_plus_1
 
-        @legit_jit()
+        # @legit_jit()
         def scan_fn(
             carry: tuple[EnvState, mjx.Data, Array], _: None
         ) -> tuple[tuple[EnvState, mjx.Data, Array], tuple[EnvState, mjx.Data]]:
@@ -618,6 +617,8 @@ class MjxEnv(BaseEnv):
             xs=None,
             length=num_steps,
         )
+
+        jax.debug.breakpoint()
 
         if return_intermediate_data:
             return env_state_TEL, mjx_data_TEL
