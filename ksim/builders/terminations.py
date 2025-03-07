@@ -210,3 +210,19 @@ class IllegalContactTerminationBuilder(TerminationBuilder[IllegalContactTerminat
             contact_eps=self.contact_eps,
             illegal_geom_idxs=illegal_geom_idxs,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class UnhealthyTermination(Termination):
+    """Terminates the episode if the robot is unhealthy."""
+
+    unhealthy_z_lower: float = attrs.field(default=1.0)
+    unhealthy_z_upper: float = attrs.field(default=2.0)
+
+    @legit_jit(static_argnames=["self"])
+    def __call__(self, state: mjx.Data) -> Array:
+        height = state.qpos[2]
+        is_healthy = jnp.where(height < self.unhealthy_z_lower, 0.0, 1.0)
+        is_healthy = jnp.where(height > self.unhealthy_z_upper, 0.0, is_healthy)
+        not_healthy = jnp.where(is_healthy == 0.0, 1.0, 0.0)
+        return not_healthy

@@ -726,3 +726,56 @@ class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
             soft_lower_limits=jnp.array(soft_lowers),
             soft_upper_limits=jnp.array(soft_uppers),
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class DHForwardReward(Reward):
+    """Legacy default humanoid forward reward that linearly scales velocity."""
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        # Take just the x velocity component
+        velocity = mjx_data_t_plus_1.qvel[0]
+        return velocity
+
+
+@attrs.define(frozen=True, kw_only=True)
+class DHHealthyReward(Reward):
+    """Legacy default humanoid healthy reward that gives binary reward based on height."""
+
+    healthy_z_lower: float = attrs.field(default=0.5)
+    healthy_z_upper: float = attrs.field(default=1.5)
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        height = mjx_data_t.qpos[2]
+        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
+        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
+        return is_healthy
+
+
+@attrs.define(frozen=True, kw_only=True)
+class DHControlPenalty(Reward):
+    """Legacy default humanoid control cost that penalizes squared action magnitude."""
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        return -jnp.sum(jnp.square(action_t))

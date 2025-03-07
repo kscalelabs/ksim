@@ -11,7 +11,7 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Callable, Collection, TypeVar, cast, get_args
+from typing import Collection, TypeVar
 
 import chex
 import jax
@@ -33,7 +33,7 @@ from ksim.env.base_env import BaseEnv, BaseEnvConfig
 from ksim.env.mjx.actuators.base_actuator import Actuators
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.mjx.actuators.scaled_torque_actuator import ScaledTorqueActuators
-from ksim.env.types import EnvState, KScaleActionModelType
+from ksim.env.types import EnvState
 from ksim.model.formulations import ActorCriticAgent
 from ksim.utils.data import BuilderData
 from ksim.utils.jit import legit_jit
@@ -43,17 +43,6 @@ from ksim.utils.robot_model import get_model_and_metadata
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-@legit_jit()
-def step_mjx(
-    mjx_model: mjx.Model,
-    mjx_data: mjx.Data,
-    ctrl: Array,
-) -> mjx.Data:
-    """Step the mujoco model."""
-    data_with_ctrl = mjx_data.replace(ctrl=ctrl)
-    return mjx.step(mjx_model, data_with_ctrl)
 
 
 def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
@@ -70,68 +59,6 @@ def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
     return return_list
 
 
-# TODO: add these back in.
-@legit_jit()
-def get_random_action(
-    mjx_model: mjx.Model,
-    mjx_data: mjx.Data,
-    rng: PRNGKeyArray,
-) -> tuple[jnp.ndarray, float]:
-    """Get a random action."""
-    ctrl_range = mjx_model.actuator_ctrlrange
-    ctrl_min, ctrl_max = ctrl_range.T
-    action_scale = jax.random.uniform(rng, shape=ctrl_min.shape, dtype=ctrl_min.dtype)
-    ctrl = ctrl_min + (ctrl_max - ctrl_min) * action_scale
-    return ctrl, 1.0
-
-
-@legit_jit()
-def get_midpoint_action(
-    mjx_model: mjx.Model,
-    mjx_data: mjx.Data,
-    rng: PRNGKeyArray,
-) -> tuple[jnp.ndarray, float]:
-    """Get a midpoint action."""
-    ctrl_range = mjx_model.actuator_ctrlrange
-    ctrl_min, ctrl_max = ctrl_range.T
-    ctrl = (ctrl_min + ctrl_max) / 2
-    return ctrl, 1.0
-
-
-@legit_jit()
-def get_zero_action(
-    mjx_model: mjx.Model,
-    mjx_data: mjx.Data,
-    rng: PRNGKeyArray,
-) -> tuple[jnp.ndarray, float]:
-    """Get a zero action."""
-    ctrl = jnp.zeros_like(mjx_model.actuator_ctrlrange[..., 0])
-    return ctrl, 1.0
-
-
-def cast_action_type(action_type: str) -> KScaleActionModelType:
-    """Cast the action type to the correct type."""
-    options = get_args(KScaleActionModelType)
-    if action_type not in options:
-        raise ValueError(f"Invalid action type: {action_type} Choices are {options}")
-    return cast(KScaleActionModelType, action_type)
-
-
-def get_action_fn(
-    action_type: KScaleActionModelType,
-) -> Callable[[mjx.Model, mjx.Data, PRNGKeyArray], tuple[jnp.ndarray, float]]:
-    """Get the action function for the given action type."""
-    match action_type:
-        case "random":
-            return get_random_action
-        case "midpoint":
-            return get_midpoint_action
-        case "zero":
-            return get_zero_action
-        case _:
-            raise ValueError(f"Invalid action type: {action_type}")
-
-
 @jax.tree_util.register_dataclass
 @dataclass
 class MjxEnvConfig(BaseEnvConfig):
@@ -143,9 +70,8 @@ class MjxEnvConfig(BaseEnvConfig):
     max_action_latency: float = xax.field(value=0.0, help="The maximum action latency.")
 
     # solver configuration options
-    solver_type: int = xax.field(value=mujoco.mjtSolver.mjSOL_NEWTON.value, help="Solver type.")
-    solver_iterations: int = xax.field(value=1, help="Number of main solver iterations.")
-    solver_ls_iterations: int = xax.field(value=4, help="Number of line search iterations.")
+    solver_iterations: int = xax.field(value=6, help="Number of main solver iterations.")
+    solver_ls_iterations: int = xax.field(value=6, help="Number of line search iterations.")
     disable_flags_bitmask: int = xax.field(
         value=mujoco.mjtDisableBit.mjDSBL_EULERDAMP.value, help="Bitmask of flags to disable."
     )
@@ -247,7 +173,7 @@ class MjxEnv(BaseEnv):
 
         # For simplicity, assume integer (increase granularity if needed).
         assert self.config.ctrl_dt % self.config.dt == 0, "ctrl_dt must be a multiple of dt"
-        self._expected_dt_per_ctrl_dt = int(self.config.ctrl_dt / self.config.dt)
+        self.physics_dt_per_ctrl_dt = int(self.config.ctrl_dt / self.config.dt)
 
     ###################
     # Post Processing #
@@ -255,69 +181,65 @@ class MjxEnv(BaseEnv):
 
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
-        mj_model.opt.solver = self.config.solver_type
-        mj_model.opt.disableflags = self.config.disable_flags_bitmask
+        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.iterations = self.config.solver_iterations
         mj_model.opt.ls_iterations = self.config.solver_ls_iterations
         mj_model.opt.timestep = self.config.dt
+        mj_model.opt.disableflags = self.config.disable_flags_bitmask
+
         return mj_model
 
-    @legit_jit(static_argnames=["self"])
-    def get_observation(self, mjx_data: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
+    def get_observation(self, mjx_data_L: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
         """Compute observations from the pipeline state."""
         observations = {}
         for observation_name, observation in self.observations:
             rng, obs_rng = jax.random.split(rng)
-            observation_value = observation(mjx_data, obs_rng)
+            observation_value = observation(mjx_data_L, obs_rng)
             observations[observation_name] = observation_value
         return FrozenDict(observations)
 
     def get_rewards(
         self,
-        action_t_minus_1: Array,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-    ) -> list[tuple[str, Array]]:
-        """Compute rewards (each as a scalar) from the state transition.
-
-        ML: we might want to represent rewards as graphs (multiply and sum) or add flags...
-        """
-        rewards = []  # this ensures ordering...
+        action_L_t_minus_1: Array,
+        mjx_data_L_t: mjx.Data,
+        command_L_t: FrozenDict[str, Array],
+        action_L_t: Array,
+        mjx_data_L_t_plus_1: mjx.Data,
+    ) -> FrozenDict[str, Array]:
+        """Compute rewards from the state transition."""
+        rewards = {}
         for reward_name, reward in self.rewards:
             reward_val = (
                 reward(
-                    action_t_minus_1=action_t_minus_1,
-                    mjx_data_t=mjx_data_t,
-                    command_t=command_t,
-                    action_t=action_t,
-                    mjx_data_t_plus_1=mjx_data_t_plus_1,
+                    action_t_minus_1=action_L_t_minus_1,
+                    mjx_data_t=mjx_data_L_t,
+                    command_t=command_L_t,
+                    action_t=action_L_t,
+                    mjx_data_t_plus_1=mjx_data_L_t_plus_1,
                 )
                 * reward.scale
             )
             chex.assert_shape(
                 reward_val, (), custom_message=f"Reward {reward_name} must be a scalar"
             )
-            rewards.append((reward_name, reward_val))
-        return rewards
+            rewards[reward_name] = reward_val
+        return FrozenDict(rewards)
 
-    def get_terminations(self, new_mjx_data: mjx.Data) -> list[tuple[str, Array]]:
-        """Compute termination conditions (each as a scalar) from the pipeline state."""
-        terminations = []
+    def get_terminations(self, mjx_data_L_t_plus_1: mjx.Data) -> FrozenDict[str, Array]:
+        """Compute termination conditions from the pipeline state."""
+        terminations = {}
         for termination_name, termination in self.terminations:
-            term_val = termination(new_mjx_data)
+            term_val = termination(mjx_data_L_t_plus_1)
             chex.assert_shape(
                 term_val, (), custom_message=f"Termination {termination_name} must be a scalar"
             )
-            terminations.append((termination_name, term_val))
-        return terminations
+            terminations[termination_name] = term_val
+        return FrozenDict(terminations)
 
-    @legit_jit(static_argnames=["self"])
     def get_initial_commands(
         self, rng: PRNGKeyArray, initial_time: Array | None
     ) -> FrozenDict[str, Array]:
-        """Compute initial commands from the pipeline state. Assumes consistent ordering."""
+        """Compute initial commands from the pipeline state."""
         commands = {}
         if initial_time is None:
             initial_time = jnp.array(0.0)
@@ -327,11 +249,10 @@ class MjxEnv(BaseEnv):
             commands[command_name] = command_val
         return FrozenDict(commands)
 
-    @legit_jit(static_argnames=["self"])
     def get_commands(
         self, prev_commands: FrozenDict[str, Array], rng: PRNGKeyArray, time: Array
     ) -> FrozenDict[str, Array]:
-        """Compute commands from the pipeline state. Assumes consistent ordering."""
+        """Compute commands from the pipeline state."""
         commands = {}
         for command_name, command_def in self.commands:
             assert isinstance(command_def, Command)
@@ -345,13 +266,12 @@ class MjxEnv(BaseEnv):
     # Stepping and Resetting Main Logic #
     #####################################
 
-    @legit_jit(static_argnames=["self"])
-    def _apply_physics_steps(
+    def apply_physics_steps(
         self,
-        mjx_model: mjx.Model,
-        mjx_data: mjx.Data,
-        previous_action: Array,
-        current_action: Array,
+        mjx_model_L: mjx.Model,
+        mjx_data_L: mjx.Data,
+        previous_action_L: Array,
+        current_action_L: Array,
         num_latency_steps: Array,
     ) -> mjx.Data:
         """A 'step' of the environment on a state composes multiple steps of the actual physics.
@@ -359,225 +279,154 @@ class MjxEnv(BaseEnv):
         We take num_latency_steps (continuing the feedback loop for the previous action), then we
         apply the feedback loop for the current action for the remainder of the physics steps.
         """
-        n_steps = self._expected_dt_per_ctrl_dt  # total number of pipeline steps to take.
+        n_steps = self.physics_dt_per_ctrl_dt
 
-        def f(carry: tuple[mjx.Data, int], _: None) -> tuple[tuple[mjx.Data, int], None]:
-            state, step_num = carry
+        def f(carry: tuple[mjx.Data, Array], _: None) -> tuple[tuple[mjx.Data, Array], None]:
+            data, step_num = carry
 
             action_motor_sees = jax.lax.select(
-                step_num >= num_latency_steps, current_action, previous_action
+                step_num >= num_latency_steps, current_action_L, previous_action_L
             )
-            torques = self.actuators.get_ctrl(state, action_motor_sees)
-            # NOTE: can extend state to include anything from `mjx.Data` here...
-            new_state = step_mjx(mjx_model, state, torques)
-            return (new_state, step_num + 1), None
+            torques = self.actuators.get_ctrl(data, action_motor_sees)
+            data_with_ctrl = data.replace(ctrl=torques)
+            data_with_ctrl = mjx.forward(mjx_model_L, data_with_ctrl)
+            new_data = mjx.step(mjx_model_L, data_with_ctrl)
+            return (new_data, step_num + 1.0), None
 
-        (state, _), _ = jax.lax.scan(f, (mjx_data, 0), None, n_steps)
-        return state
-
-    @legit_jit(static_argnames=["self", "model"])
-    def scannable_reset(
-        self,
-        model: ActorCriticAgent,
-        variables: PyTree,
-        rng: jax.Array,
-        mjx_model: mjx.Model,
-    ) -> tuple[EnvState, mjx.Data]:
-        """A scannable reset function: returns an initial state computed solely from the inputs.
-
-        NOTE: Reset actually takes a step. Trust this makes sense :)
-        """
-        reset_data = self.default_mjx_data
-
-        for _, reset_func in self.resets:
-            reset_data = reset_func(reset_data, rng)
-        assert isinstance(reset_data, mjx.Data)
-
-        rng, obs_rng = jax.random.split(rng, 2)
-        mjx_data_0 = step_mjx(
-            mjx_model=mjx_model,
-            mjx_data=reset_data,
-            ctrl=jnp.zeros_like(reset_data.ctrl),  # NOTE: the MJCF MUST be torque controlled.
-        )
-
-        timestep = mjx_data_0.time
-        obs_0 = self.get_observation(mjx_data_0, obs_rng)
-        command_0 = self.get_initial_commands(rng, timestep)
-
-        # TODO: when we add in historical context to the model, we need to handle burn-in.
-        action_0, action_log_prob_0 = model.apply(
-            variables, obs_0, command_0, rng, method="actor_sample_and_log_prob"
-        )
-        assert isinstance(action_log_prob_0, Array)
-
-        mjx_data_1 = self._apply_physics_steps(
-            mjx_model=mjx_model,
-            mjx_data=mjx_data_0,
-            previous_action=action_0,  # NOTE: Effectively means no latency for first action.
-            current_action=action_0,
-            num_latency_steps=jnp.array(0),  # Enforced here as well...
-        )
-
-        done_0 = jnp.array(False, dtype=jnp.bool_)
-        reward_0 = jnp.array(0.0)
-
-        term_components_0 = {k: v for k, v in self.get_terminations(mjx_data_1)}
-        reward_components_0 = {
-            k: v for k, v in self.get_rewards(action_0, mjx_data_0, command_0, action_0, mjx_data_1)
-        }
-
-        return (
-            EnvState(
-                obs=obs_0,
-                reward=reward_0,
-                done=done_0,
-                command=command_0,
-                action=action_0,
-                timestep=timestep,
-                termination_components=FrozenDict(term_components_0),
-                reward_components=FrozenDict(reward_components_0),
-            ),
-            mjx_data_1,
-        )
-
-    @legit_jit(static_argnames=["self", "model"])
-    def scannable_step(
-        self,
-        model: ActorCriticAgent,
-        variables: PyTree,
-        env_state_t_minus_1: EnvState,
-        mjx_data_t: mjx.Data,
-        mjx_model: mjx.Model,
-        rng: PRNGKeyArray,
-    ) -> tuple[EnvState, mjx.Data]:
-        """A scannable step function: returns a new state computed solely from the inputs."""
-        rng, latency_rng, obs_rng = jax.random.split(rng, 3)
-        timestep = mjx_data_t.time
-        latency_steps = jax.random.randint(
-            key=latency_rng,
-            shape=(),
-            minval=self.min_action_latency_step,
-            maxval=self.max_action_latency_step,
-        )
-
-        obs_t = self.get_observation(mjx_data_t, obs_rng)
-        command_t = self.get_commands(env_state_t_minus_1.command, rng, timestep)
-        action_t, _ = model.apply(
-            variables, obs_t, command_t, rng, method="actor_sample_and_log_prob"
-        )
-
-        mjx_data_t_plus_1 = self._apply_physics_steps(
-            mjx_model=mjx_model,
-            mjx_data=mjx_data_t,
-            previous_action=env_state_t_minus_1.action,
-            current_action=action_t,
-            num_latency_steps=latency_steps,
-        )
-
-        all_dones = self.get_terminations(mjx_data_t_plus_1)
-        done_t = jnp.stack([v for _, v in all_dones]).any()
-        all_rewards = self.get_rewards(
-            env_state_t_minus_1.action, mjx_data_t, command_t, action_t, mjx_data_t_plus_1
-        )
-        reward_t = jnp.stack([v for _, v in all_rewards]).sum()
-
-        term_components_t = {k: v for k, v in all_dones}
-        reward_components_t = {k: v for k, v in all_rewards}
-
-        env_state_t = EnvState(
-            obs=obs_t,
-            command=command_t,
-            action=action_t,
-            reward=reward_t,
-            done=done_t,
-            timestep=timestep,
-            termination_components=FrozenDict(term_components_t),
-            reward_components=FrozenDict(reward_components_t),
-        )
-
-        return env_state_t, mjx_data_t_plus_1
+        final_data_L = jax.lax.scan(f, (mjx_data_L, jnp.array(0.0)), None, n_steps)[0][0]
+        return final_data_L
 
     ###########################
     # Main API Implementation #
     ###########################
 
-    # @legit_jit(static_argnames=["self"])
-    def get_dummy_env_state(
+    def get_init_physics_data(
         self,
-        rng: PRNGKeyArray,
+        num_envs: int,
+    ) -> mjx.Data:
+        """Get initial mjx.Data (EL)."""
+
+        def get_init_data(rng: jax.Array) -> mjx.Data:
+            data = mjx.make_data(self.default_mjx_model)
+            return data
+
+        rngs = jax.random.split(jax.random.PRNGKey(0), num_envs)
+        default_data_EL = jax.vmap(get_init_data)(rngs)
+
+        mjx_data_EL_0 = jax.vmap(mjx.forward, in_axes=(None, 0))(
+            self.default_mjx_model, default_data_EL
+        )
+
+        return mjx_data_EL_0
+
+    def get_init_physics_model(
+        self,
+    ) -> mjx.Model:
+        """Get the initial physics model for the environment (L)."""
+        return self.default_mjx_model
+
+    def get_dummy_env_states(
+        self,
+        num_envs: int,
     ) -> EnvState:
-        """Get a dummy environment state for compilation purposes."""
-        rng, obs_rng = jax.random.split(rng, 2)
-        mjx_data_0 = step_mjx(
-            mjx_model=self.default_mjx_model,
-            mjx_data=self.default_mjx_data,
-            ctrl=jnp.zeros_like(
-                self.default_mjx_data.ctrl
-            ),  # NOTE: the MJCF MUST be torque controlled.
-        )
+        """Get initial environment states (EL)."""
+        rng = jax.random.PRNGKey(0)
+        cmd_rng, obs_rng = jax.random.split(rng, 2)
+        mjx_data_EL_0 = self.get_init_physics_data(num_envs)
+        timestep_E = mjx_data_EL_0.time
+        obs_rng_E = jax.random.split(obs_rng, num_envs)
+        command_rng_E = jax.random.split(cmd_rng, num_envs)
+        obs_dummy_EL = jax.vmap(self.get_observation)(mjx_data_EL_0, obs_rng_E)
+        command_dummy_EL = jax.vmap(self.get_initial_commands)(command_rng_E, timestep_E)
 
-        timestep = mjx_data_0.time
-        obs_dummy = self.get_observation(mjx_data_0, obs_rng)
-        command_dummy = self.get_initial_commands(rng, timestep)
+        termination_components = {name: jnp.zeros((num_envs,)) for name, _ in self.terminations}
+        reward_components = {name: jnp.zeros((num_envs,)) for name, _ in self.rewards}
+
         return EnvState(
-            obs=obs_dummy,
-            command=command_dummy,
-            action=jnp.ones(self.action_size),
-            reward=jnp.ones(()),
-            done=jnp.ones(()),
-            timestep=jnp.ones(()),
-            termination_components=FrozenDict(
-                {k: jnp.zeros_like(v) for k, v in self.get_terminations(mjx_data_0)}
-            ),
-            reward_components=FrozenDict(
-                {
-                    k: jnp.zeros_like(v)
-                    for k, v in self.get_rewards(
-                        jnp.ones(self.action_size),
-                        mjx_data_0,
-                        command_dummy,
-                        jnp.ones(self.action_size),
-                        mjx_data_0,
-                    )
-                }
-            ),
+            obs=obs_dummy_EL,
+            command=command_dummy_EL,
+            action=jnp.ones((num_envs, self.action_size)),
+            reward=jnp.ones((num_envs,)),
+            done=jnp.zeros((num_envs,), dtype=jnp.bool_),
+            timestep=timestep_E,
+            termination_components=FrozenDict(termination_components),
+            reward_components=FrozenDict(reward_components),
         )
 
-    @legit_jit(static_argnames=["self"])
     def reset(
         self,
         model: ActorCriticAgent,
         variables: PyTree,
         rng: jax.Array,
-        *,
-        mjx_model: mjx.Model | None = None,
-    ) -> EnvState:
-        """Pure reset function: returns an initial state computed solely from the inputs.
+        physics_model_L: mjx.Model,
+    ) -> tuple[EnvState, mjx.Data]:
+        """Using model and variables, returns initial state and data (EL, EL).
 
-        We couple the step and actor because we couple the actions with the rest of env state. This
-        ultimately allows for extremely constrained `EnvState`s, which promote correct RL code.
+        We couple the step and actor because we couple the actions with the rest
+        of env state. This ultimately allows for extremely constrained `EnvState`s,
+        which promote correct RL code.
+
+        Additionally, using a carry state for mjx model and data allows for
+        efficient unrolling of trajectories.
         """
-        if mjx_model is None:
-            mjx_model = self.default_mjx_model
-        state, _ = self.scannable_reset(
-            model=model,
-            variables=variables,
-            rng=rng,
-            mjx_model=mjx_model,
-        )
-        return state
+        mjx_model_L = physics_model_L
+        mjx_data_L_0 = mjx.make_data(mjx_model_L)
 
-    @legit_jit(static_argnames=["self", "model"])
+        for _, reset_func in self.resets:
+            rng, reset_rng = jax.random.split(rng, 2)
+            mjx_data_L_0 = reset_func(mjx_data_L_0, reset_rng)
+        assert isinstance(mjx_data_L_0, mjx.Data)
+        mjx_data_L_0 = mjx.forward(mjx_model_L, mjx_data_L_0)
+
+        rng, obs_rng = jax.random.split(rng, 2)
+        timestep = jnp.array(0.0)
+        obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
+        command_L_0 = self.get_initial_commands(rng, timestep)
+
+        action_L_0, action_log_prob_L_0 = model.apply(
+            variables, obs_L_0, command_L_0, rng, method="actor_sample_and_log_prob"
+        )
+        assert isinstance(action_log_prob_L_0, Array)
+        mjx_data_L_1 = self.apply_physics_steps(
+            mjx_model_L=mjx_model_L,
+            mjx_data_L=mjx_data_L_0,
+            previous_action_L=action_L_0,  # NOTE: Effectively means no latency for first action.
+            current_action_L=action_L_0,
+            num_latency_steps=jnp.array(0),  # Enforced here as well...
+        )
+
+        done_L_0 = jnp.array(False, dtype=jnp.bool_)
+        reward_L_0 = jnp.array(0.0)
+
+        term_components_L_0 = {k: v for k, v in self.get_terminations(mjx_data_L_1).items()}
+        reward_components_L_0 = {
+            k: v
+            for k, v in self.get_rewards(
+                action_L_0, mjx_data_L_0, command_L_0, action_L_0, mjx_data_L_1
+            ).items()
+        }
+
+        env_state_L_0 = EnvState(
+            obs=obs_L_0,
+            command=command_L_0,
+            action=action_L_0,
+            reward=reward_L_0,
+            done=done_L_0,
+            timestep=timestep,
+            termination_components=FrozenDict(term_components_L_0),
+            reward_components=FrozenDict(reward_components_L_0),
+        )
+        return env_state_L_0, mjx_data_L_1
+
     def step(
         self,
         model: ActorCriticAgent,
         variables: PyTree,
-        prev_env_state: EnvState,
+        env_state_L_t_minus_1: EnvState,
         rng: PRNGKeyArray,
-        *,
-        mjx_data: mjx.Data | None = None,
-        mjx_model: mjx.Model | None = None,
-    ) -> EnvState:
+        physics_data_L_t: mjx.Data,
+        physics_model_L: mjx.Model,
+    ) -> tuple[EnvState, mjx.Data]:
         """Stepping the environment in a consistent, JIT-able manner. Works on a single environment.
 
         We couple the step and actor because we couple the actions with the rest of env state. This
@@ -598,21 +447,68 @@ class MjxEnv(BaseEnv):
             - Rewards are computed.
             - Terminations are computed.
         """
-        if mjx_model is None:
-            mjx_model = self.default_mjx_model
-        if mjx_data is None:
-            mjx_data = self.default_mjx_data
-        new_state, _ = self.scannable_step(
-            model=model,
-            variables=variables,
-            env_state_t_minus_1=prev_env_state,
-            mjx_data_t=mjx_data,
-            mjx_model=mjx_model,
-            rng=rng,
-        )
-        return new_state
+        mjx_model_L = physics_model_L
+        mjx_data_L_t = physics_data_L_t
 
-    @legit_jit(static_argnames=["self", "model", "num_steps", "num_envs", "return_data"])
+        rng, latency_rng, obs_rng = jax.random.split(rng, 3)
+        timestep = mjx_data_L_t.time
+        latency_steps = jax.random.randint(
+            key=latency_rng,
+            shape=(),
+            minval=self.min_action_latency_step,
+            maxval=self.max_action_latency_step,
+        )
+
+        obs_L_t = self.get_observation(mjx_data_L_t, obs_rng)
+        command_L_t = self.get_commands(env_state_L_t_minus_1.command, rng, timestep)
+        action_L_t, _ = model.apply(
+            variables, obs_L_t, command_L_t, rng, method="actor_sample_and_log_prob"
+        )
+
+        mjx_data_L_t_plus_1 = self.apply_physics_steps(
+            mjx_model_L=mjx_model_L,
+            mjx_data_L=mjx_data_L_t,
+            previous_action_L=env_state_L_t_minus_1.action,
+            current_action_L=action_L_t,
+            num_latency_steps=latency_steps,
+        )
+
+        all_dones = self.get_terminations(mjx_data_L_t_plus_1)
+        done_L_t = jnp.stack([v for _, v in all_dones.items()]).any()
+        all_rewards = self.get_rewards(
+            env_state_L_t_minus_1.action,
+            mjx_data_L_t,
+            command_L_t,
+            action_L_t,
+            mjx_data_L_t_plus_1,
+        )
+        reward_L_t = jnp.stack([v for _, v in all_rewards.items()]).sum()
+
+        term_components_L_t = {k: v for k, v in all_dones.items()}
+        reward_components_L_t = {k: v for k, v in all_rewards.items()}
+
+        env_state_L_t = EnvState(
+            obs=obs_L_t,
+            command=command_L_t,
+            action=action_L_t,
+            reward=reward_L_t,
+            done=done_L_t,
+            timestep=timestep,
+            termination_components=FrozenDict(term_components_L_t),
+            reward_components=FrozenDict(reward_components_L_t),
+        )
+
+        return env_state_L_t, mjx_data_L_t_plus_1
+
+    @legit_jit(
+        static_argnames=[
+            "self",
+            "model",
+            "num_steps",
+            "num_envs",
+            "return_intermediate_data",
+        ]
+    )
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
@@ -620,89 +516,96 @@ class MjxEnv(BaseEnv):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
-        *,
-        return_data: bool = False,
+        env_state_EL_t_minus_1: EnvState,
+        physics_data_EL_t: mjx.Data,
+        physics_model_L: mjx.Model,
+        return_intermediate_data: bool = False,
     ) -> tuple[EnvState, mjx.Data]:
-        """Vectorized rollout of trajectories.
+        """Returns EnvState rollout, final mjx.Data, and mjx.Data rollout.
 
         1. The batched reset (using vmap) initializes a state for each environment.
         2. A vectorized (vmap-ed) env_step function is defined that calls step.
         3. A jax.lax.scan unrolls the trajectory for num_steps.
         4. The resulting trajectory has shape (num_steps, num_envs, ...).
+
+        Note that if `carry_mjx_data` and `carry_mjx_model` are provided, they
+        will be used as the initial state and model, respectively. Otherwise,
+        the default model and data will be used.
         """
-        init_rngs = jax.random.split(rng, num_envs)
-        mjx_model = self.default_mjx_model
-        # TODO: include logic to randomize environment parameters here...
-        init_states, init_mjx_data = jax.vmap(
-            lambda key: self.scannable_reset(
-                model=model,
-                variables=variables,
-                rng=key,
-                mjx_model=mjx_model,
-            )
-        )(init_rngs)
-        rng, _ = jax.random.split(rng)
+        mjx_model_L = physics_model_L
 
         # Define env_step as a pure function with all dependencies passed explicitly
         @legit_jit()
         def env_step(
-            env_state: EnvState,
-            mjx_data: mjx.Data,
+            env_state_L_t_minus_1: EnvState,
+            mjx_data_L_t: mjx.Data,
             rng: Array,
         ) -> tuple[EnvState, mjx.Data]:
-            reset_result = self.scannable_reset(
+            reset_env_state_L_t, reset_mjx_data_L_t_plus_1 = self.reset(
                 model=model,
                 variables=variables,
                 rng=rng,
-                mjx_model=mjx_model,
+                physics_model_L=mjx_model_L,
             )
 
-            step_result = self.scannable_step(
+            step_env_state_L_t, step_mjx_data_L_t_plus_1 = self.step(
                 model=model,
                 variables=variables,
-                env_state_t_minus_1=env_state,
-                mjx_data_t=mjx_data,
-                mjx_model=mjx_model,
+                env_state_L_t_minus_1=env_state_L_t_minus_1,
                 rng=rng,
+                physics_data_L_t=mjx_data_L_t,
+                physics_model_L=mjx_model_L,
             )
 
-            new_state = jax.tree_util.tree_map(
-                lambda r, s: jax.lax.select(env_state.done, r, s), reset_result[0], step_result[0]
+            data_has_nans = jax.tree_util.tree_reduce(
+                lambda a, b: jnp.logical_or(a, b),
+                jax.tree_util.tree_map(lambda x: jnp.any(jnp.isnan(x)), step_mjx_data_L_t_plus_1),
             )
-            new_mjx_data = jax.tree_util.tree_map(
-                lambda r, s: jax.lax.select(env_state.done, r, s), reset_result[1], step_result[1]
+            # prevents robot from exploiting physics and discourages NaNs
+
+            do_reset = jnp.logical_or(env_state_L_t_minus_1.done, data_has_nans)
+
+            state_L_t = jax.tree_util.tree_map(
+                lambda r, s: jax.lax.select(do_reset, r, s),
+                reset_env_state_L_t,
+                step_env_state_L_t,
             )
-            # ML: unintuitive but this is more efficient than `.cond` by keeping consistent path.
+            mjx_data_L_t_plus_1 = jax.tree_util.tree_map(
+                lambda r, s: jax.lax.select(do_reset, r, s),
+                reset_mjx_data_L_t_plus_1,
+                step_mjx_data_L_t_plus_1,
+            )
 
-            return new_state, new_mjx_data
+            return state_L_t, mjx_data_L_t_plus_1
 
-        # Create a partially applied version with fixed arguments
-        def env_step_partial(
-            state: EnvState, data: mjx.Data, key: Array
-        ) -> tuple[EnvState, mjx.Data]:
-            return env_step(state, data, key)
-
-        @legit_jit()
         def scan_fn(
             carry: tuple[EnvState, mjx.Data, Array], _: None
         ) -> tuple[tuple[EnvState, mjx.Data, Array], tuple[EnvState, mjx.Data]]:
-            states, mjx_data, rng = carry
+            env_state_EL_t_minus_1, mjx_data_EL_t, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
-            new_states, new_mjx_data = jax.vmap(env_step_partial)(states, mjx_data, rngs[1:])
+            env_state_EL_t, mjx_data_EL_t_plus_1 = jax.vmap(env_step, in_axes=(0, 0, 0))(
+                env_state_EL_t_minus_1, mjx_data_EL_t, rngs[1:]
+            )
 
-            if return_data:
-                return (new_states, new_mjx_data, rngs[0]), (new_states, new_mjx_data)
+            if return_intermediate_data:
+                return (env_state_EL_t, mjx_data_EL_t_plus_1, rngs[0]), (
+                    env_state_EL_t,
+                    mjx_data_EL_t_plus_1,
+                )
             else:
-                return (new_states, new_mjx_data, rngs[0]), (new_states, None)
+                return (env_state_EL_t, mjx_data_EL_t_plus_1, rngs[0]), (env_state_EL_t, None)
 
-        (_, _, _), traj = jax.lax.scan(
+        (_, final_mjx_data_EL_f_plus_1, _), (env_state_TEL, mjx_data_TEL) = jax.lax.scan(
             f=scan_fn,
-            init=(init_states, init_mjx_data, rng),
+            init=(env_state_EL_t_minus_1, physics_data_EL_t, rng),
             xs=None,
             length=num_steps,
         )
 
-        return traj  # Shape: (num_steps, num_envs, ...)
+        if return_intermediate_data:
+            return env_state_TEL, mjx_data_TEL
+        else:
+            return env_state_TEL, final_mjx_data_EL_f_plus_1
 
     def render_trajectory(
         self,
@@ -715,8 +618,24 @@ class MjxEnv(BaseEnv):
         height: int = 480,
         camera: int | None = None,
     ) -> list[np.ndarray]:
+        """Render a trajectory of the environment."""
+        physics_model_L = self.get_init_physics_model()
+        reset_rngs = jax.random.split(rng, 1)
+
+        env_state_1L_0, physics_data_1L_1 = jax.vmap(self.reset, in_axes=(None, None, 0, None))(
+            model, variables, reset_rngs, physics_model_L
+        )
+
         _, traj_data = self.unroll_trajectories(
-            model, variables, rng, num_steps, 1, return_data=True
+            model=model,
+            variables=variables,
+            rng=rng,
+            num_steps=num_steps,
+            num_envs=1,
+            env_state_EL_t_minus_1=env_state_1L_0,
+            physics_data_EL_t=physics_data_1L_1,
+            physics_model_L=physics_model_L,
+            return_intermediate_data=True,
         )
 
         mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), traj_data)
@@ -747,7 +666,9 @@ class MjxEnv(BaseEnv):
 
         renderer = mujoco.Renderer(self.default_mj_model, height=height, width=width)
         scene_option = mujoco.MjvOption()
+
         frames = []
+
         for data in mjx_data_list:
             frame = render_frame(renderer, data, camera_id)
             frames.append(frame)
@@ -756,8 +677,10 @@ class MjxEnv(BaseEnv):
 
     @property
     def observation_size(self) -> int:
+        """Size of the observation space."""
         raise NotImplementedError("Not implemented yet... need to compile observations?")
 
     @property
     def action_size(self) -> int:
+        """Size of the action space."""
         return self.actuators.actuator_input_size

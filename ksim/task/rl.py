@@ -1,6 +1,10 @@
-"""Defines a standard task interface for training reinforcement learning agents."""
+"""Defines a standard task interface for training reinforcement learning agents.
+
+TODO: need to add SPMD and sharding support for super fast training :)
+"""
 
 import bdb
+import functools
 import logging
 import signal
 import sys
@@ -30,6 +34,7 @@ from ksim.builders.loggers import (
     ModelUpdateLog,
 )
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
+from ksim.env.types import PhysicsData, PhysicsModel
 from ksim.model.formulations import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
@@ -46,29 +51,21 @@ class RLConfig(BaseEnvConfig, xax.Config):
         value="train",
         help="The action to take; should be either `train` or `env`.",
     )
-    max_episode_length: float = xax.field(
+    num_learning_epochs: int = xax.field(
         value=MISSING,
-        help="The maximum episode length, in seconds.",
+        help="Number of learning epochs per dataset.",
     )
-    num_steps_per_trajectory: int = xax.field(
+    num_env_states_per_minibatch: int = xax.field(
         value=MISSING,
-        help="The number of steps in a trajectory.",
+        help="The number of environment states to include in each minibatch.",
+    )
+    num_minibatches: int = xax.field(
+        value=MISSING,
+        help="The number of minibatches to use for training.",
     )
     num_envs: int = xax.field(
         value=MISSING,
         help="The number of training environments to run in parallel.",
-    )
-    default_action_model: str = xax.field(
-        value="zero",
-        help="The default action model to use if `actions` is not specified.",
-    )
-    num_learning_epochs: int = xax.field(
-        value=1,
-        help="Number of learning epochs per PPO update.",
-    )
-    minibatch_size: int = xax.field(
-        value=MISSING,
-        help="The size of each minibatch.",
     )
     pretrained: str | None = xax.field(
         value=None,
@@ -127,18 +124,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     @property
     def dataset_size(self) -> int:
-        """The size of the dataset."""
-        return self.config.num_envs * self.config.num_steps_per_trajectory
+        """The total number of environment states in the current PPO dataset."""
+        return self.config.num_env_states_per_minibatch * self.config.num_minibatches
 
     @property
-    def num_minibatches(self) -> int:
-        """The number of minibatches in the dataset."""
-        msg = (
-            f"Dataset size of {self.dataset_size} must"
-            f" be divisible by minibatch size of {self.config.minibatch_size}."
-        )
-        assert self.dataset_size % self.config.minibatch_size == 0, msg
-        return self.dataset_size // self.config.minibatch_size
+    def num_rollout_steps_per_env(self) -> int:
+        """Number of steps to unroll per environment during dataset creation."""
+        msg = "Dataset size must be divisible by number of envs"
+        assert self.dataset_size % self.config.num_envs == 0, msg
+        return self.dataset_size // self.config.num_envs
 
     ########################
     # XAX-specific methods #
@@ -255,7 +249,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 variables=variables,
                 rng=rng,
                 output_dir=render_dir,
-                num_steps=self.config.num_steps_per_trajectory,
+                num_steps=self.num_rollout_steps_per_env,
                 width=self.config.render_width,
                 height=self.config.render_height,
             )
@@ -266,6 +260,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
 
     def get_reward_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
+        """Get reward statistics from the trajectoryl (D)."""
         reward_stats: dict[str, jnp.ndarray] = {}
 
         terms = trajectory.reward_components
@@ -277,6 +272,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return reward_stats
 
     def get_termination_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
+        """Get termination statistics from the trajectory (D)."""
         termination_stats: dict[str, jnp.ndarray] = {}
 
         terms = trajectory.termination_components
@@ -309,7 +305,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> PyTree:
         """Get the initial parameters as a PyTree: assumes flax-compatible model."""
         env = self.get_environment()
-        state = env.get_dummy_env_state(key)
+        state = env.get_dummy_env_states(self.config.num_envs)
 
         if pretrained is not None:
             _, checkpoint_path = self.get_checkpoint_number_and_path()
@@ -330,7 +326,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         initial_step: bool,
     ) -> PyTree: ...
 
-    @legit_jit(static_argnames=["self", "model"])
     def apply_actor(
         self,
         model: ActorCriticAgent,
@@ -343,58 +338,62 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    def get_trajectory_dataset(
+    def get_rl_dataset(
         self,
         model: ActorCriticAgent,
         variables: PyTree,
         env: BaseEnv,
+        env_state_EL_t_minus_1: EnvState,
+        physics_data_EL_t: PhysicsData,
+        physics_model_L: PhysicsModel,
         rng: PRNGKeyArray,
         burn_in: bool = False,
-    ) -> tuple[EnvState, RolloutTimeLossComponents]:
-        """Rollout a batch of trajectory data.
-
-        To avoid confusion, batch comprises 1 or more unrolled trajectory states stacked
-        along the first axis, and minibatches are sampled from this batch.
-        """
+    ) -> tuple[EnvState, RolloutTimeLossComponents, EnvState, PhysicsData]:
+        """Returns env state, loss components, carry env state, physics data."""
         # TODO: implement logic to handle randomize model initialization when creating batch
-        rollout, _ = env.unroll_trajectories(
+        rollout_TEL, data_EL_f_plus_1 = env.unroll_trajectories(
             model=model,
             variables=variables,
             rng=rng,
-            num_steps=self.config.num_steps_per_trajectory,
+            num_steps=self.num_rollout_steps_per_env,
             num_envs=self.config.num_envs,
+            env_state_EL_t_minus_1=env_state_EL_t_minus_1,
+            physics_data_EL_t=physics_data_EL_t,
+            physics_model_L=physics_model_L,
+            return_intermediate_data=False,
         )
 
-        rollout_time_loss_components = self.get_rollout_time_loss_components(
+        rollout_EL_f = jax.tree_util.tree_map(lambda x: x[-1], rollout_TEL)
+
+        rollout_time_loss_components_TEL = self.get_rollout_time_loss_components(
             model,
             variables,
-            rollout,
+            rollout_TEL,
             burn_in=burn_in,
         )
 
         @legit_jit()
         def flatten_rollout_array(x: Array) -> Array:
             """Flatten a rollout array."""
-            reshaped = jnp.reshape(x, (x.shape[0] * x.shape[1], *x.shape[2:]))
-            assert reshaped.shape[0] == self.config.num_steps_per_trajectory * self.config.num_envs
+            reshaped = jnp.reshape(x, (self.dataset_size, *x.shape[2:]))
+            assert reshaped.shape[0] == self.dataset_size
             return reshaped
 
-        # flattening (num_steps, num_envs, ...) -> (num_steps * num_envs, ...) in leaves
-        flattened_rollout = jax.tree_util.tree_map(flatten_rollout_array, rollout)
-        flattened_rollout_time_loss_components = jax.tree_util.tree_map(
-            flatten_rollout_array, rollout_time_loss_components
+        # flattening (num_steps, num_envs, ...) -> (dataset_size, ...) in leaves
+        rollout_DL = jax.tree_util.tree_map(flatten_rollout_array, rollout_TEL)
+        rollout_time_loss_components_DL = jax.tree_util.tree_map(
+            flatten_rollout_array, rollout_time_loss_components_TEL
         )
 
-        return flattened_rollout, flattened_rollout_time_loss_components
+        return rollout_DL, rollout_time_loss_components_DL, rollout_EL_f, data_EL_f_plus_1
 
-    @legit_jit(static_argnames=["self"])
     def reshuffle_rollout(
         self,
-        rollout_dataset: EnvState,
-        rollout_time_loss_components: RolloutTimeLossComponents,
+        rollout_dataset_DL: EnvState,
+        rollout_time_loss_components_DL: RolloutTimeLossComponents,
         rng: PRNGKeyArray,
     ) -> tuple[EnvState, RolloutTimeLossComponents]:
-        """Reshuffle a rollout array."""
+        """Reshuffle a rollout array (DL)."""
         # Generate permutation indices
         batch_size = self.dataset_size
         permutation = jax.random.choice(rng, jnp.arange(batch_size), (batch_size,))
@@ -407,27 +406,122 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return x
 
         # Apply permutation to both structures
-        reshuffled_rollout_dataset = jax.tree_util.tree_map(permute_array, rollout_dataset)
-        reshuffled_rollout_time_loss_components = jax.tree_util.tree_map(
-            permute_array, rollout_time_loss_components
+        reshuffled_rollout_dataset_DL = jax.tree_util.tree_map(permute_array, rollout_dataset_DL)
+        reshuffled_rollout_time_loss_components_DL = jax.tree_util.tree_map(
+            permute_array, rollout_time_loss_components_DL
         )
 
-        return reshuffled_rollout_dataset, reshuffled_rollout_time_loss_components
+        return reshuffled_rollout_dataset_DL, reshuffled_rollout_time_loss_components_DL
 
-    @legit_jit(static_argnames=["self"])
     def get_minibatch(
         self,
-        rollout: EnvState,
-        rollout_time_loss_components: RolloutTimeLossComponents,
+        rollout_DL: EnvState,
+        rollout_time_loss_components_DL: RolloutTimeLossComponents,
         minibatch_idx: Array,
     ) -> tuple[EnvState, RolloutTimeLossComponents]:
-        """Get a minibatch from the rollout."""
-        starting_idx = minibatch_idx * self.config.minibatch_size
-        minibatched_rollout = slice_pytree(rollout, starting_idx, self.config.minibatch_size)
-        minibatched_rollout_time_loss_components = slice_pytree(
-            rollout_time_loss_components, starting_idx, self.config.minibatch_size
+        """Get a minibatch from the rollout (B)."""
+        starting_idx = minibatch_idx * self.config.num_env_states_per_minibatch
+        rollout_BL = slice_pytree(
+            rollout_DL, starting_idx, self.config.num_env_states_per_minibatch
         )
-        return minibatched_rollout, minibatched_rollout_time_loss_components
+        rollout_time_loss_components_BL = slice_pytree(
+            rollout_time_loss_components_DL, starting_idx, self.config.num_env_states_per_minibatch
+        )
+        return rollout_BL, rollout_time_loss_components_BL
+
+    @legit_jit(static_argnames=["self", "model", "optimizer"])
+    def scannable_minibatch_step(
+        self,
+        training_state: tuple[PyTree, optax.OptState],
+        minibatch_idx: Array,
+        *,
+        model: ActorCriticAgent,
+        optimizer: optax.GradientTransformation,
+        dataset_DL: EnvState,
+        rollout_time_loss_components_DL: RolloutTimeLossComponents,
+    ) -> tuple[tuple[PyTree, optax.OptState], FrozenDict[str, Array]]:
+        """Perform a single minibatch update step."""
+        variables, opt_state = training_state
+        minibatch_BL, rollout_time_minibatch_loss_components_BL = self.get_minibatch(
+            dataset_DL, rollout_time_loss_components_DL, minibatch_idx
+        )
+        params, opt_state, _, metrics = self.model_update(
+            model=model,
+            variables=variables,
+            optimizer=optimizer,
+            opt_state=opt_state,
+            env_state_batch=minibatch_BL,
+            rollout_time_loss_components=rollout_time_minibatch_loss_components_BL,
+        )
+        variables["params"] = params
+
+        return (variables, opt_state), metrics
+
+    @legit_jit(static_argnames=["self", "model", "optimizer"])
+    def scannable_train_epoch(
+        self,
+        training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
+        _: None,
+        *,
+        model: ActorCriticAgent,
+        optimizer: optax.GradientTransformation,
+        dataset_DL: EnvState,
+        rollout_time_loss_components_DL: RolloutTimeLossComponents,
+    ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+        """Train a minibatch, returns the updated variables, optimizer state, loss, and metrics."""
+        variables = training_state[0]
+        opt_state = training_state[1]
+        reshuffle_rng = training_state[2]
+
+        dataset_DL, rollout_time_loss_components_DL = self.reshuffle_rollout(
+            dataset_DL, rollout_time_loss_components_DL, reshuffle_rng
+        )
+        reshuffle_rng, _ = jax.random.split(reshuffle_rng)
+
+        partial_fn = functools.partial(
+            self.scannable_minibatch_step,
+            model=model,
+            optimizer=optimizer,
+            dataset_DL=dataset_DL,
+            rollout_time_loss_components_DL=rollout_time_loss_components_DL,
+        )
+
+        (variables, opt_state), metrics = jax.lax.scan(
+            partial_fn, (variables, opt_state), jnp.arange(self.config.num_minibatches)
+        )
+
+        # note that variables, opt_state are just the final values
+        # metrics is stacked over the minibatches
+        return (variables, opt_state, reshuffle_rng), metrics
+
+    @legit_jit(static_argnames=["self", "model", "optimizer"])
+    def rl_pass(
+        self,
+        variables: PyTree,
+        opt_state: optax.OptState,
+        reshuffle_rng: PRNGKeyArray,
+        model: ActorCriticAgent,
+        optimizer: optax.GradientTransformation,
+        dataset_DL: EnvState,
+        rollout_time_loss_components_DL: RolloutTimeLossComponents,
+    ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+        """Perform multiple epochs of RL training on the current dataset."""
+        partial_fn = functools.partial(
+            self.scannable_train_epoch,
+            model=model,
+            optimizer=optimizer,
+            dataset_DL=dataset_DL,
+            rollout_time_loss_components_DL=rollout_time_loss_components_DL,
+        )
+
+        (variables, opt_state, reshuffle_rng), metrics = jax.lax.scan(
+            partial_fn,
+            (variables, opt_state, reshuffle_rng),
+            None,
+            length=self.config.num_learning_epochs,
+        )
+        metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
+        return (variables, opt_state, reshuffle_rng), metrics
 
     def rl_train_loop(
         self,
@@ -442,20 +536,31 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng = self.prng_key()
         rng, burn_in_rng, train_rng = jax.random.split(rng, 3)
 
+        # getting initial physics model
+        physics_model_L = env.get_init_physics_model()
+        reset_rngs = jax.random.split(burn_in_rng, self.config.num_envs)
+
+        env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, None))(
+            model, variables, reset_rngs, physics_model_L
+        )
         # Burn in trajectory to get normalization statistics
-        burn_in_trajectories_dataset, burn_in_rollout_time_loss_components = (
-            self.get_trajectory_dataset(
-                model,
-                variables,
-                env,
-                burn_in_rng,
+        # Thorn: carry_data_EL is the state AFTER the final EnvState
+        dataset_DL, rollout_loss_components_DL, carry_env_state_EL, carry_data_EL = (
+            self.get_rl_dataset(
+                model=model,
+                variables=variables,
+                env=env,
+                env_state_EL_t_minus_1=env_state_EL_0,
+                physics_data_EL_t=physics_data_EL_1,
+                physics_model_L=physics_model_L,
+                rng=burn_in_rng,
                 burn_in=True,
             )
         )
         variables = self.update_input_normalization_stats(
             variables=variables,
-            trajectories_dataset=burn_in_trajectories_dataset,
-            rollout_time_loss_components=burn_in_rollout_time_loss_components,
+            trajectories_dataset=dataset_DL,
+            rollout_time_loss_components=rollout_loss_components_DL,
             initial_step=True,
         )
         while not self.is_training_over(training_state):
@@ -465,71 +570,64 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Unrolls a trajectory.
             start_time = time.time()
             reshuffle_rng, rollout_rng = jax.random.split(train_rng)
-            trajectories_dataset, rollout_time_loss_components = self.get_trajectory_dataset(
-                model, variables, env, rollout_rng
+            dataset_DL, rollout_loss_components_DL, carry_env_state_EL, carry_data_EL = (
+                self.get_rl_dataset(
+                    model=model,
+                    variables=variables,
+                    env=env,
+                    env_state_EL_t_minus_1=carry_env_state_EL,
+                    physics_data_EL_t=carry_data_EL,
+                    physics_model_L=physics_model_L,
+                    rng=rollout_rng,
+                )
             )
             rollout_time = time.time() - start_time
-            self.log_trajectory_stats(env, trajectories_dataset)
+            print(f"Rollout time: {rollout_time}")
+            self.log_trajectory_stats(env, dataset_DL)
 
             # running training on minibatches
             start_time = time.time()
-            for epoch_idx in range(self.config.num_learning_epochs):
-                trajectories_dataset, rollout_time_loss_components = self.reshuffle_rollout(
-                    trajectories_dataset, rollout_time_loss_components, reshuffle_rng
-                )
-                reshuffle_rng, _ = jax.random.split(reshuffle_rng)
-                for minibatch_idx in range(self.num_minibatches):
-                    minibatch_idx_array = jnp.array(
-                        minibatch_idx
-                    )  # TODO: scanning will do this anyways
-                    minibatch, rollout_time_minibatch_loss_components = self.get_minibatch(
-                        trajectories_dataset, rollout_time_loss_components, minibatch_idx_array
-                    )
-                    with self.step_context("update_state"):
-                        params, opt_state, loss_val, metrics = self.model_update(
-                            model,
-                            variables,
-                            optimizer,
-                            opt_state,
-                            minibatch,
-                            rollout_time_minibatch_loss_components,
-                        )
-                        variables["params"] = params
-                        logger.debug("loss: %s", loss_val)
-                        logger.debug("metrics: %s", metrics)
+            (variables, opt_state, reshuffle_rng), metrics_mean = self.rl_pass(
+                variables=variables,
+                opt_state=opt_state,
+                reshuffle_rng=reshuffle_rng,
+                model=model,
+                optimizer=optimizer,
+                dataset_DL=dataset_DL,
+                rollout_time_loss_components_DL=rollout_loss_components_DL,
+            )
+            update_time = time.time() - start_time
+            print(f"Update time: {update_time}")
+            print(f"Metrics: {metrics_mean}")
 
-                        # log metrics from the model update
-                        metric_logging_data = LoggingData(
-                            trajectory=trajectories_dataset,
-                            update_metrics=metrics,
-                            gradients=None,
-                            loss=float(loss_val),
-                            training_state=training_state,
-                        )
+            # TODO: we probably want a way of tracking how loss evolves within
+            # an epoch, and across epochs, not just the final metrics.
+            metric_logging_data = LoggingData(
+                trajectory=dataset_DL,
+                update_metrics=metrics_mean,
+            )
 
-                        with self.step_context("write_logs"):
-                            training_state.raw_phase = "train"
-                            for log_item in self.log_items:
-                                log_item(self.logger, metric_logging_data)
+            with self.step_context("write_logs"):
+                training_state.raw_phase = "train"
+                for log_item in self.log_items:
+                    log_item(self.logger, metric_logging_data)
 
-                            self.logger.write(training_state)
-                            training_state.num_steps += 1
-
-            model_update_time = time.time() - start_time
+                self.logger.write(training_state)
+                training_state.num_steps += self.dataset_size
 
             # updating normalization statistics for the next rollout
             # NOTE: for the first step, the normalization stats are not updated
             variables = self.update_input_normalization_stats(
                 variables=variables,
-                trajectories_dataset=trajectories_dataset,
-                rollout_time_loss_components=rollout_time_loss_components,
+                trajectories_dataset=dataset_DL,
+                rollout_time_loss_components=rollout_loss_components_DL,
                 initial_step=False,
             )
 
             # Log the time taken for the model update.
             with self.step_context("write_logs"):
                 self.logger.log_scalar("rollout_time", rollout_time, namespace="⏰")
-                self.logger.log_scalar("model_update_time", model_update_time, namespace="⏰")
+                self.logger.log_scalar("update_time", update_time, namespace="⏰")
                 self.logger.write(training_state)
 
             with self.step_context("on_step_end"):
@@ -550,7 +648,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     variables=variables,
                     rng=rng,
                     output_dir=render_dir,
-                    num_steps=self.config.num_steps_per_trajectory,
+                    num_steps=self.num_rollout_steps_per_env,
                     width=self.config.render_width,
                     height=self.config.render_height,
                 )

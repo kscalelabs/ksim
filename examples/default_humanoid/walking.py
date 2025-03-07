@@ -5,12 +5,11 @@ from dataclasses import dataclass
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import mujoco
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
+from ksim.builders.commands import LinearVelocityCommand
 from ksim.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
@@ -18,15 +17,8 @@ from ksim.builders.observation import (
     JointPositionObservation,
     JointVelocityObservation,
 )
-from ksim.builders.resets import XYPositionResetBuilder
-from ksim.builders.rewards import (
-    HeightReward,
-    TrackLinearVelocityXYReward,
-)
-from ksim.builders.terminations import (
-    PitchTooGreatTermination,
-    RollTooGreatTermination,
-)
+from ksim.builders.rewards import DHControlPenalty, DHForwardReward, DHHealthyReward
+from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActionModel, ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
@@ -82,17 +74,18 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     robot_model_name: str = xax.field(value="examples/default_humanoid/")
 
     # ML model parameters.
-    actor_hidden_dims: int = xax.field(value=64)
-    actor_num_layers: int = xax.field(value=4)
-    critic_hidden_dims: int = xax.field(value=256)
+    actor_hidden_dims: int = xax.field(value=512)
+    actor_num_layers: int = xax.field(value=5)
+    critic_hidden_dims: int = xax.field(value=512)
     critic_num_layers: int = xax.field(value=5)
 
     # Termination conditions.
-    max_episode_length: float = xax.field(value=10.0)
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
     pretrained: str | None = xax.field(value=None)
     checkpoint_num: int | None = xax.field(value=None)
+
+    actuator_type: str = xax.field(value="scaled_torque", help="The type of actuator to use.")
 
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
@@ -100,18 +93,23 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                RollTooGreatTermination(max_roll=1.04),
-                PitchTooGreatTermination(max_pitch=1.04),
+                UnhealthyTermination(
+                    unhealthy_z_lower=0.5,
+                    unhealthy_z_upper=1.5,
+                ),
             ],
             resets=[
-                XYPositionResetBuilder(),
+                # RandomJointPositionReset(range=(-0.01, 0.01)),
+                # RandomJointVelocityReset(range=(-0.01, 0.01)),
             ],
             rewards=[
-                TrackLinearVelocityXYReward(scale=0.5),
-                HeightReward(
-                    scale=0.5,
-                    height_target=1.4,
+                DHForwardReward(scale=1.25),
+                DHHealthyReward(
+                    scale=5.0,
+                    healthy_z_lower=0.5,
+                    healthy_z_upper=1.5,
                 ),
+                DHControlPenalty(scale=0.1),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
@@ -120,18 +118,19 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 JointPositionObservation(noise_type="gaussian", noise=0.01),
                 JointVelocityObservation(noise_type="gaussian", noise=0.01),
                 # TODO: default humanoid doesn't have sensors, add them later
+                # Legacy Ksim observation setup
+                # LegacyPositionObservation(exclude_xy=True),
+                # LegacyVelocityObservation(),
+                # CenterOfMassInertiaObservation(),
+                # CenterOfMassVelocityObservation(),
+                # ActuatorForceObservation(),
             ],
             commands=[
                 LinearVelocityCommand(
-                    x_scale=0.0,
-                    y_scale=0.0,
+                    x_scale=1.0,
+                    y_scale=1.0,
                     switch_prob=0.02,
                     zero_prob=0.3,
-                ),
-                AngularVelocityCommand(
-                    scale=1.0,
-                    switch_prob=0.02,
-                    zero_prob=0.8,
                 ),
             ],
         )
@@ -214,16 +213,18 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking
     HumanoidWalkingTask.launch(
         HumanoidWalkingConfig(
-            num_envs=1024,
-            num_steps_per_trajectory=300,
-            minibatch_size=640,
-            num_learning_epochs=1,
+            num_learning_epochs=8,
+            num_env_states_per_minibatch=8192,
+            num_minibatches=32,
+            num_envs=2048,
+            dt=0.002,
+            ctrl_dt=0.008,
+            learning_rate=5e-5,
             save_every_n_seconds=60 * 4,
             only_save_most_recent=False,
+            reward_scaling_alpha=0.0,
+            obs_norm_alpha=0.0,
             # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
-            ctrl_dt=0.01,
-            dt=0.001,
-            solver_type=mujoco.mjtSolver.mjSOL_NEWTON.value,
             solver_iterations=6,
             solver_ls_iterations=6,
             actuator_type="scaled_torque",
