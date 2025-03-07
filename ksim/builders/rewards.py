@@ -333,13 +333,12 @@ class FootSlipPenalty(Reward):
 @attrs.define(frozen=True, kw_only=True)
 class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
     scale: float
-    foot_body_names: list[str]
+    foot_geom_names: list[str]
 
     def __call__(self, data: BuilderData) -> FootSlipPenalty:
         illegal_geom_idxs = []
-        for geom_idx, body_name in data.mujoco_mappings.geom_idx_to_body_name.items():
-            if body_name in self.foot_body_names:
-                illegal_geom_idxs.append(geom_idx)
+        for geom_name in self.foot_geom_names:
+            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -354,7 +353,7 @@ class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
             floor_idx=floor_idx,
         )
 
-
+# TODO: Look into using bodies instead of geoms where appropriate
 @attrs.define(frozen=True, kw_only=True)
 class FeetClearancePenalty(Reward):
     """Penalty for deviation from desired feet clearance."""
@@ -381,14 +380,13 @@ class FeetClearancePenalty(Reward):
 @attrs.define(frozen=True, kw_only=True)
 class FeetClearancePenaltyBuilder(RewardBuilder[FeetClearancePenalty]):
     scale: float
-    foot_body_names: list[str]
+    foot_geom_names: list[str]
     max_foot_height: float
 
     def __call__(self, data: BuilderData) -> FeetClearancePenalty:
         illegal_geom_idxs = []
-        for geom_idx, body_name in data.mujoco_mappings.geom_idx_to_body_name.items():
-            if body_name in self.foot_body_names:
-                illegal_geom_idxs.append(geom_idx)
+        for geom_name in self.foot_geom_names:
+            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -464,16 +462,15 @@ class FootContactPenalty(Reward):
 @attrs.define(frozen=True, kw_only=True)
 class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     scale: float
-    foot_body_names: list[str]
+    foot_geom_names: list[str]
     allowed_contact_prct: float
     contact_eps: float = attrs.field(default=1e-2)
     skip_if_zero_command: list[str] | None = attrs.field(default=None)
 
     def __call__(self, data: BuilderData) -> FootContactPenalty:
         illegal_geom_idxs = []
-        for geom_idx, body_name in data.mujoco_mappings.geom_idx_to_body_name.items():
-            if body_name in self.foot_body_names:
-                illegal_geom_idxs.append(geom_idx)
+        for geom_name in self.foot_geom_names:
+            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -563,15 +560,14 @@ class FeetAirTimeReward(Reward):
 @attrs.define(frozen=True, kw_only=True)
 class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
     scale: float
-    foot_body_names: list[str]
+    foot_geom_names: list[str]
     required_air_time_prct: float
     skip_if_zero_command: list[str] | None = attrs.field(default=None)
 
     def __call__(self, data: BuilderData) -> FeetAirTimeReward:
         foot_geom_idxs = []
-        for geom_idx, body_name in data.mujoco_mappings.geom_idx_to_body_name.items():
-            if body_name in self.foot_body_names:
-                foot_geom_idxs.append(geom_idx)
+        for geom_name in self.foot_geom_names:
+            foot_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
 
         foot_geom_idxs = jnp.array(foot_geom_idxs)
 
@@ -652,15 +648,14 @@ class ContactForcePenalty(Reward):
 @attrs.define(frozen=True, kw_only=True)
 class ContactForcePenaltyBuilder(RewardBuilder[ContactForcePenalty]):
     scale: float
-    foot_body_names: list[str]
+    foot_geom_names: list[str]
     max_contact_force: float
     norm: NormType = attrs.field(default="l1")
 
     def __call__(self, data: BuilderData) -> ContactForcePenalty:
         foot_geom_idxs = []
-        for geom_idx, body_name in data.mujoco_mappings.geom_idx_to_body_name.items():
-            if body_name in self.foot_body_names:
-                foot_geom_idxs.append(geom_idx)
+        for geom_name in self.foot_geom_names:
+            foot_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
 
         foot_geom_idxs = jnp.array(foot_geom_idxs)
 

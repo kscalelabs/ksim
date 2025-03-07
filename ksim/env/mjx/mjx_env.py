@@ -212,7 +212,6 @@ class MjxEnv(BaseEnv):
         self.default_mj_data = mujoco.MjData(mj_model)
         self.default_mjx_model = mjx.put_model(mj_model)
         self.default_mjx_data = mjx.make_data(self.default_mjx_model)
-
         self.mujoco_mappings = make_mujoco_mappings(self.default_mjx_model)
         match self.config.actuator_type:
             case "mit":

@@ -117,7 +117,8 @@ class MujocoMappings:
     qpos_name_to_idx_range: dict[str, tuple[int, int | None]]
     qvelacc_name_to_idx_range: dict[str, tuple[int, int | None]]
     ctrl_name_to_idx: dict[str, int]
-    geom_idx_to_body_name: dict[int, str]
+    geom_name_to_idx: dict[str, int]
+    body_name_to_idx: dict[str, int]
     floor_geom_idx: int | None
 
 
@@ -171,20 +172,23 @@ def make_mujoco_mappings(mjx_model: mjx.Model, floor_name: str = "floor") -> Muj
         name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
         ctrl_name_to_idx[name] = i
 
-    floor_idx = None
-    # doing the same for geom_id_to_body_name
-    geom_idx_to_body_name = {}
-    for i in range(len(mjx_model.geom_bodyid)):
-        body_id = mjx_model.geom_bodyid[i]
-
-        name_start = mjx_model.name_bodyadr[body_id]
+    geom_name_to_idx = {}
+    for i in range(mjx_model.ngeom):
+        name_start = mjx_model.name_geomadr[i]
         name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
-        geom_idx_to_body_name[i] = name
+        geom_name_to_idx[name] = i
 
-        if name == floor_name:
-            floor_idx = i
+    body_name_to_idx = {}
+    for i in range(mjx_model.nbody):
+        name_start = mjx_model.name_bodyadr[i]
+        name = bytes(mjx_model.names[name_start:]).decode("utf-8").split("\x00")[0]
+        body_name_to_idx[name] = i
 
-    if not floor_idx:
+    floor_idx = None
+
+    try:
+        floor_idx = geom_name_to_idx[floor_name]
+    except KeyError:
         logger.warning("No floor geom %s found in model", floor_name)
 
     return MujocoMappings(
@@ -192,10 +196,10 @@ def make_mujoco_mappings(mjx_model: mjx.Model, floor_name: str = "floor") -> Muj
         qpos_name_to_idx_range=qpos_name_to_idx_range,
         qvelacc_name_to_idx_range=qvelacc_name_to_idx_range,
         ctrl_name_to_idx=ctrl_name_to_idx,
-        geom_idx_to_body_name=geom_idx_to_body_name,
+        geom_name_to_idx=geom_name_to_idx,
+        body_name_to_idx=body_name_to_idx,
         floor_geom_idx=floor_idx,
     )
-
 
 def get_qpos_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
     """Get the qpos from a name."""
