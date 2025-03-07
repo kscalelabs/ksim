@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from typing import Generic, Literal, TypeVar
 
 import attrs
-import jax
 import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
@@ -126,7 +125,7 @@ class OrientationPenalty(Reward):
     """Penalty for how well the robot is oriented."""
 
     norm: NormType = attrs.field(default="l2")
-    target_orientation: jax.Array = attrs.field(default=jnp.array([0.073, 0.0, 1.0]))
+    target_orientation: list = attrs.field(default=[0.073, 0.0, 1.0])
 
     def __call__(
         self,
@@ -138,7 +137,8 @@ class OrientationPenalty(Reward):
     ) -> Array:
         return jnp.sum(
             get_norm(
-                quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - self.target_orientation, self.norm
+                quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - jnp.array(self.target_orientation),
+                self.norm,
             )
         )
 
