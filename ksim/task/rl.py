@@ -39,6 +39,7 @@ from ksim.env.types import PhysicsData, PhysicsModel
 from ksim.model.formulations import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
+from ksim.utils.profile import profile
 from ksim.utils.pytree import slice_pytree
 from ksim.utils.visualization import render_and_save_trajectory
 
@@ -297,6 +298,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     # Training and Running #
     ########################
 
+    @profile
     def get_init_variables(
         self, key: PRNGKeyArray, pretrained: str | None = None, checkpoint_num: int | None = None
     ) -> PyTree:
@@ -335,6 +337,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
+    @profile
     def get_rl_dataset(
         self,
         model: ActorCriticAgent,
@@ -381,6 +384,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return rollout_DL, rollout_time_loss_components_DL, rollout_EL_f, data_EL_f_plus_1
 
+    @profile
     def reshuffle_rollout(
         self,
         rollout_dataset_DL: EnvState,
@@ -407,6 +411,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return reshuffled_rollout_dataset_DL, reshuffled_rollout_time_loss_components_DL
 
+    @profile
     def get_minibatch(
         self,
         rollout_DL: EnvState,
@@ -423,6 +428,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         return rollout_BL, rollout_time_loss_components_BL
 
+    @profile
     @legit_jit(static_argnames=["self", "model", "optimizer"])
     def scannable_minibatch_step(
         self,
@@ -451,6 +457,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return (variables, opt_state), metrics
 
+    @profile
     def scannable_train_epoch(
         self,
         training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
@@ -487,6 +494,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # metrics is stacked over the minibatches
         return (variables, opt_state, reshuffle_rng), metrics
 
+    @profile
     def rl_pass(
         self,
         variables: PyTree,

@@ -38,6 +38,7 @@ from ksim.model.formulations import ActorCriticAgent
 from ksim.utils.data import BuilderData
 from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
+from ksim.utils.profile import profile
 from ksim.utils.robot_model import get_model_and_metadata
 
 logger = logging.getLogger(__name__)
@@ -196,6 +197,7 @@ class MjxEnv(BaseEnv):
 
         return mj_model
 
+    @profile
     @legit_jit(static_argnames=["self"])
     def get_observation(self, mjx_data_L: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
         """Compute observations from the pipeline state."""
@@ -206,6 +208,7 @@ class MjxEnv(BaseEnv):
             observations[observation_name] = observation_value
         return FrozenDict(observations)
 
+    @profile
     @legit_jit(static_argnames=["self"])
     def get_rewards(
         self,
@@ -234,6 +237,7 @@ class MjxEnv(BaseEnv):
             rewards[reward_name] = reward_val
         return FrozenDict(rewards)
 
+    @profile
     @legit_jit(static_argnames=["self"])
     def get_terminations(self, mjx_data_L_t_plus_1: mjx.Data) -> FrozenDict[str, Array]:
         """Compute termination conditions from the pipeline state."""
@@ -246,6 +250,7 @@ class MjxEnv(BaseEnv):
             terminations[termination_name] = term_val
         return FrozenDict(terminations)
 
+    @profile
     @legit_jit(static_argnames=["self"])
     def get_initial_commands(
         self, rng: PRNGKeyArray, initial_time: Array | None
@@ -260,6 +265,7 @@ class MjxEnv(BaseEnv):
             commands[command_name] = command_val
         return FrozenDict(commands)
 
+    @profile
     @legit_jit(static_argnames=["self"])
     def get_commands(
         self, prev_commands: FrozenDict[str, Array], rng: PRNGKeyArray, time: Array
@@ -278,6 +284,8 @@ class MjxEnv(BaseEnv):
     # Stepping and Resetting Main Logic #
     #####################################
 
+    @profile
+    @legit_jit(static_argnames=["self"])
     def apply_physics_steps(
         self,
         mjx_model_L: mjx.Model,
@@ -301,8 +309,8 @@ class MjxEnv(BaseEnv):
             )
             # torques = self.actuators.get_ctrl(data, action_motor_sees)
             data_with_ctrl = data.replace(ctrl=action_motor_sees)
-            data_with_ctrl = legit_jit()(mjx.forward)(mjx_model_L, data_with_ctrl)
-            new_data = legit_jit()(mjx.step)(mjx_model_L, data_with_ctrl)
+            data_with_ctrl = mjx.forward(mjx_model_L, data_with_ctrl)
+            new_data = mjx.step(mjx_model_L, data_with_ctrl)
             return (new_data, step_num + 1.0), None
 
         final_data_L = jax.lax.scan(f, (mjx_data_L, jnp.array(0.0)), None, n_steps)[0][0]
@@ -312,6 +320,7 @@ class MjxEnv(BaseEnv):
     # Main API Implementation #
     ###########################
 
+    @profile
     def get_init_physics_data(
         self,
         num_envs: int,
@@ -325,7 +334,7 @@ class MjxEnv(BaseEnv):
         rngs = jax.random.split(jax.random.PRNGKey(0), num_envs)
         default_data_EL = jax.vmap(get_init_data)(rngs)
 
-        mjx_data_EL_0 = jax.vmap(legit_jit()(mjx.forward), in_axes=(None, 0))(
+        mjx_data_EL_0 = jax.vmap(mjx.forward, in_axes=(None, 0))(
             self.default_mjx_model, default_data_EL
         )
 
@@ -337,6 +346,7 @@ class MjxEnv(BaseEnv):
         """Get the initial physics model for the environment (L)."""
         return self.default_mjx_model
 
+    @profile
     def get_dummy_env_states(
         self,
         num_envs: int,
@@ -365,6 +375,7 @@ class MjxEnv(BaseEnv):
             reward_components=FrozenDict(reward_components),
         )
 
+    @profile
     def reset(
         self,
         model: ActorCriticAgent,
@@ -391,7 +402,7 @@ class MjxEnv(BaseEnv):
         rng, obs_rng = jax.random.split(rng, 2)
         timestep = jnp.array(0.0)
 
-        mjx_data_L_0 = legit_jit()(mjx.forward)(mjx_model_L, mjx_data_L_0)
+        mjx_data_L_0 = mjx.forward(mjx_model_L, mjx_data_L_0)
         obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
         command_L_0 = self.get_initial_commands(rng, timestep)
 
@@ -430,6 +441,7 @@ class MjxEnv(BaseEnv):
         )
         return env_state_L_0, mjx_data_L_1
 
+    @profile
     def step(
         self,
         model: ActorCriticAgent,
@@ -512,6 +524,7 @@ class MjxEnv(BaseEnv):
 
         return env_state_L_t, mjx_data_L_t_plus_1
 
+    @profile
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
@@ -601,6 +614,7 @@ class MjxEnv(BaseEnv):
         else:
             return env_state_TEL, final_mjx_data_EL_f_plus_1
 
+    @profile
     def render_trajectory(
         self,
         model: ActorCriticAgent,
