@@ -45,7 +45,8 @@ def profile(fn: Callable[P, R]) -> Callable[P, R]:
             class_name = ""
 
         print(
-            f"{class_name}{fn.__name__} - call #{ProfileState.call_count}, took {runtime:.6f}s, total: {ProfileState.total_time:.6f}s"
+            f"{class_name}{fn.__name__} - call #{ProfileState.call_count}, "
+            f"took {runtime:.6f}s, total: {ProfileState.total_time:.6f}s"
         )
 
         return res

@@ -25,7 +25,6 @@ from dpshdl.dataset import Dataset
 from flax import linen as nn
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from mujoco import mjx
 from omegaconf import MISSING
 
 from ksim.builders.loggers import (
@@ -131,9 +130,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @property
     def num_rollout_steps_per_env(self) -> int:
         """Number of steps to unroll per environment during dataset creation."""
-        assert (
-            self.dataset_size % self.config.num_envs == 0
-        ), "Dataset size must be divisible by number of envs"
+        msg = "Dataset size must be divisible by number of envs"
+        assert self.dataset_size % self.config.num_envs == 0, msg
         return self.dataset_size // self.config.num_envs
 
     ########################

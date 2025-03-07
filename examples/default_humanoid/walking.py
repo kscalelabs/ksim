@@ -5,12 +5,11 @@ from dataclasses import dataclass
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import mujoco
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
+from ksim.builders.commands import LinearVelocityCommand
 from ksim.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
@@ -21,7 +20,6 @@ from ksim.builders.observation import (
 from ksim.builders.resets import (
     RandomizeJointPositions,
     RandomizeJointVelocities,
-    XYPositionResetBuilder,
 )
 from ksim.builders.rewards import DHControlPenalty, DHForwardReward, DHHealthyReward
 from ksim.builders.terminations import UnhealthyTermination
