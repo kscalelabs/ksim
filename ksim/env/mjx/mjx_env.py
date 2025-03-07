@@ -185,7 +185,7 @@ class MjxEnv(BaseEnv):
         mj_model.opt.iterations = self.config.solver_iterations
         mj_model.opt.ls_iterations = self.config.solver_ls_iterations
         mj_model.opt.timestep = self.config.dt
-        # mj_model.opt.disableflags = self.config.disable_flags_bitmask
+        mj_model.opt.disableflags = self.config.disable_flags_bitmask
 
         return mj_model
 
@@ -287,8 +287,8 @@ class MjxEnv(BaseEnv):
             action_motor_sees = jax.lax.select(
                 step_num >= num_latency_steps, current_action_L, previous_action_L
             )
-            # torques = self.actuators.get_ctrl(data, action_motor_sees)
-            data_with_ctrl = data.replace(ctrl=action_motor_sees)
+            torques = self.actuators.get_ctrl(data, action_motor_sees)
+            data_with_ctrl = data.replace(ctrl=torques)
             data_with_ctrl = mjx.forward(mjx_model_L, data_with_ctrl)
             new_data = mjx.step(mjx_model_L, data_with_ctrl)
             return (new_data, step_num + 1.0), None
@@ -535,6 +535,7 @@ class MjxEnv(BaseEnv):
         mjx_model_L = physics_model_L
 
         # Define env_step as a pure function with all dependencies passed explicitly
+        @legit_jit()
         def env_step(
             env_state_L_t_minus_1: EnvState,
             mjx_data_L_t: mjx.Data,
@@ -563,8 +564,6 @@ class MjxEnv(BaseEnv):
             # prevents robot from exploiting physics and discourages NaNs
 
             do_reset = jnp.logical_or(env_state_L_t_minus_1.done, data_has_nans)
-
-            jax.debug.breakpoint()
 
             state_L_t = jax.tree_util.tree_map(
                 lambda r, s: jax.lax.select(do_reset, r, s),
