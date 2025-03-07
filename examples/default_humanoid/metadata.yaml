@@ -1,8 +1,8 @@
 # Metadata for default humanoid model
-# Note that the kp kd values are currently guestimated. Initial trainins is performed with the
+# Note that the kp kd values are currently guestimated. Initial training is performed with the
 # ScaledTorqueActuators, so the values are not yet tuned.
 
-control_frequency: 333.333  # Based on timestep 0.003 in MJCF file
+control_frequency: 200.0  # Based on timestep 0.005 in MJCF file
 
 actuators:
   # Torso actuators
@@ -10,88 +10,108 @@ actuators:
     kp: 100.0
     kd: 10.0
     input_range: [-0.4, 0.4]
-    gear_ratio: 100.0
+    gear_ratio: 40.0
   abdomen_z:
     kp: 100.0
     kd: 10.0
     input_range: [-0.4, 0.4]
-    gear_ratio: 100.0
+    gear_ratio: 40.0
   abdomen_x:
     kp: 100.0
     kd: 10.0
     input_range: [-0.4, 0.4]
-    gear_ratio: 100.0
+    gear_ratio: 40.0
   
   # Leg actuators
-  right_hip_x:
+  hip_x_right:
     kp: 100.0
     kd: 10.0
     input_range: [-0.4, 0.4]
-    gear_ratio: 100.0
-  right_hip_z:
+    gear_ratio: 40.0
+  hip_z_right:
     kp: 100.0
     kd: 10.0
     input_range: [-0.4, 0.4]
-    gear_ratio: 100.0
-  right_hip_y:
+    gear_ratio: 40.0
+  hip_y_right:
     kp: 300.0
     kd: 30.0
     input_range: [-0.4, 0.4]
-    gear_ratio: 300.0
-  right_knee:
+    gear_ratio: 120.0
+  knee_right:
     kp: 200.0
     kd: 20.0
     input_range: [-0.4, 0.4]
-    gear_ratio: 200.0
-  left_hip_x:
+    gear_ratio: 80.0
+  ankle_x_right:
+    kp: 50.0
+    kd: 5.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 20.0
+  ankle_y_right:
+    kp: 50.0
+    kd: 5.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 20.0
+  hip_x_left:
     kp: 100.0
     kd: 10.0
     input_range: [-0.4, 0.4]
-    gear_ratio: 100.0
-  left_hip_z:
+    gear_ratio: 40.0
+  hip_z_left:
     kp: 100.0
     kd: 10.0
     input_range: [-0.4, 0.4]
-    gear_ratio: 100.0
-  left_hip_y:
+    gear_ratio: 40.0
+  hip_y_left:
     kp: 300.0
     kd: 30.0
     input_range: [-0.4, 0.4]
-    gear_ratio: 300.0
-  left_knee:
+    gear_ratio: 120.0
+  knee_left:
     kp: 200.0
     kd: 20.0
     input_range: [-0.4, 0.4]
-    gear_ratio: 200.0
+    gear_ratio: 80.0
+  ankle_x_left:
+    kp: 50.0
+    kd: 5.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 20.0
+  ankle_y_left:
+    kp: 50.0
+    kd: 5.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 20.0
   
   # Arm actuators
-  right_shoulder1:
+  shoulder1_right:
     kp: 25.0
     kd: 2.5
     input_range: [-0.4, 0.4]
-    gear_ratio: 25.0
-  right_shoulder2:
+    gear_ratio: 20.0
+  shoulder2_right:
     kp: 25.0
     kd: 2.5
     input_range: [-0.4, 0.4]
-    gear_ratio: 25.0
-  right_elbow:
+    gear_ratio: 20.0
+  elbow_right:
     kp: 25.0
     kd: 2.5
     input_range: [-0.4, 0.4]
-    gear_ratio: 25.0
-  left_shoulder1:
+    gear_ratio: 40.0
+  shoulder1_left:
     kp: 25.0
     kd: 2.5
     input_range: [-0.4, 0.4]
-    gear_ratio: 25.0
-  left_shoulder2:
+    gear_ratio: 20.0
+  shoulder2_left:
     kp: 25.0
     kd: 2.5
     input_range: [-0.4, 0.4]
-    gear_ratio: 25.0
-  left_elbow:
+    gear_ratio: 20.0
+  elbow_left:
     kp: 25.0
     kd: 2.5
     input_range: [-0.4, 0.4]
-    gear_ratio: 25.0
+    gear_ratio: 40.0

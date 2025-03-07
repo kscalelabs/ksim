@@ -25,6 +25,7 @@ from dpshdl.dataset import Dataset
 from flax import linen as nn
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from mujoco import mjx
 from omegaconf import MISSING
 
 from ksim.builders.loggers import (
@@ -38,6 +39,7 @@ from ksim.env.types import PhysicsData, PhysicsModel
 from ksim.model.formulations import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
+from ksim.utils.profile import profile
 from ksim.utils.pytree import slice_pytree
 from ksim.utils.visualization import render_and_save_trajectory
 
@@ -104,7 +106,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model: ActorCriticAgent,
         variables: PyTree,
         trajectory_dataset: EnvState,
-        burn_in: bool = False,
     ) -> RolloutTimeLossComponents: ...
 
     @abstractmethod
@@ -130,8 +131,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @property
     def num_rollout_steps_per_env(self) -> int:
         """Number of steps to unroll per environment during dataset creation."""
-        msg = "Dataset size must be divisible by number of envs"
-        assert self.dataset_size % self.config.num_envs == 0, msg
+        assert (
+            self.dataset_size % self.config.num_envs == 0
+        ), "Dataset size must be divisible by number of envs"
         return self.dataset_size // self.config.num_envs
 
     ########################
@@ -223,7 +225,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             render_dir = self.exp_dir / self.config.render_dir / render_name
 
             end_time = time.time()
-            logger.info("Time taken for environment setup: %s seconds", end_time - start_time)
+            print(f"Time taken for environment setup: {end_time - start_time} seconds")
 
             logger.log(logging.INFO, "Rendering to %s", render_dir)
 
@@ -236,9 +238,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 key, pretrained=self.config.pretrained, checkpoint_num=self.config.checkpoint_num
             )
             end_time = time.time()
-            logger.info(
-                "Time taken for parameter initialization: %s seconds", end_time - start_time
-            )
+            print(f"Time taken for parameter initialization: {end_time - start_time} seconds")
 
             # Unroll trajectories and collect the frames for rendering
             logger.info("Unrolling trajectories")
@@ -290,16 +290,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_scalar(key, value, namespace="termination")
 
         # Logs the mean episode length.
-        mean_episode_length_steps = (~trajectory.done).sum(axis=-1).astype(jnp.float32).mean()
-        mean_episode_length_seconds = mean_episode_length_steps * self.config.ctrl_dt
-        self.logger.log_scalar(
-            "mean_episode_length", mean_episode_length_seconds, namespace="stats"
-        )
+        episode_count = jnp.sum(trajectory.done).clip(min=1)
+        mean_episode_length_steps = jnp.sum(~trajectory.done) / episode_count
+        self.logger.log_scalar("mean_episode_seconds", mean_episode_length_steps, namespace="stats")
 
     ########################
     # Training and Running #
     ########################
 
+    @profile
     def get_init_variables(
         self, key: PRNGKeyArray, pretrained: str | None = None, checkpoint_num: int | None = None
     ) -> PyTree:
@@ -338,6 +337,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
+    @profile
     def get_rl_dataset(
         self,
         model: ActorCriticAgent,
@@ -347,7 +347,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         physics_data_EL_t: PhysicsData,
         physics_model_L: PhysicsModel,
         rng: PRNGKeyArray,
-        burn_in: bool = False,
     ) -> tuple[EnvState, RolloutTimeLossComponents, EnvState, PhysicsData]:
         """Returns env state, loss components, carry env state, physics data."""
         # TODO: implement logic to handle randomize model initialization when creating batch
@@ -369,10 +368,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model,
             variables,
             rollout_TEL,
-            burn_in=burn_in,
         )
 
-        @legit_jit()
         def flatten_rollout_array(x: Array) -> Array:
             """Flatten a rollout array."""
             reshaped = jnp.reshape(x, (self.dataset_size, *x.shape[2:]))
@@ -387,6 +384,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return rollout_DL, rollout_time_loss_components_DL, rollout_EL_f, data_EL_f_plus_1
 
+    @profile
     def reshuffle_rollout(
         self,
         rollout_dataset_DL: EnvState,
@@ -413,6 +411,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return reshuffled_rollout_dataset_DL, reshuffled_rollout_time_loss_components_DL
 
+    @profile
     def get_minibatch(
         self,
         rollout_DL: EnvState,
@@ -429,6 +428,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         return rollout_BL, rollout_time_loss_components_BL
 
+    @profile
     @legit_jit(static_argnames=["self", "model", "optimizer"])
     def scannable_minibatch_step(
         self,
@@ -457,7 +457,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return (variables, opt_state), metrics
 
-    @legit_jit(static_argnames=["self", "model", "optimizer"])
+    @profile
     def scannable_train_epoch(
         self,
         training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
@@ -494,7 +494,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # metrics is stacked over the minibatches
         return (variables, opt_state, reshuffle_rng), metrics
 
-    @legit_jit(static_argnames=["self", "model", "optimizer"])
+    @profile
     def rl_pass(
         self,
         variables: PyTree,
@@ -536,7 +536,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng = self.prng_key()
         rng, burn_in_rng, train_rng = jax.random.split(rng, 3)
 
-        # getting initial physics model
+        # getting initial physics data
         physics_model_L = env.get_init_physics_model()
         reset_rngs = jax.random.split(burn_in_rng, self.config.num_envs)
 
@@ -554,7 +554,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 physics_data_EL_t=physics_data_EL_1,
                 physics_model_L=physics_model_L,
                 rng=burn_in_rng,
-                burn_in=True,
             )
         )
         variables = self.update_input_normalization_stats(
@@ -612,8 +611,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 for log_item in self.log_items:
                     log_item(self.logger, metric_logging_data)
 
+                # logging metrics to info here...
+                for key, value in metrics_mean.items():
+                    assert isinstance(value, jnp.ndarray)
+                    self.logger.log_scalar(key, value, namespace="stats")
+
                 self.logger.write(training_state)
-                training_state.num_steps += self.dataset_size
+                training_state.num_steps += 1
+                training_state.num_samples += self.dataset_size
 
             # updating normalization statistics for the next rollout
             # NOTE: for the first step, the normalization stats are not updated
@@ -669,6 +674,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model, optimizer, opt_state, training_state = self.load_initial_state(model_key)
 
             training_state = self.on_training_start(training_state)
+            training_state.num_samples = 1  # prevents from checkpointing at start
 
             def on_exit() -> None:
                 self.save_checkpoint(model, optimizer, opt_state, training_state)

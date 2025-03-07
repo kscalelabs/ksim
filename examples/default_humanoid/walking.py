@@ -5,11 +5,12 @@ from dataclasses import dataclass
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import mujoco
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.builders.commands import LinearVelocityCommand
+from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.builders.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
@@ -17,14 +18,19 @@ from ksim.builders.observation import (
     JointPositionObservation,
     JointVelocityObservation,
 )
+from ksim.builders.resets import (
+    RandomizeJointPositions,
+    RandomizeJointVelocities,
+    XYPositionResetBuilder,
+)
 from ksim.builders.rewards import DHControlPenalty, DHForwardReward, DHHealthyReward
 from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.formulations import ActionModel, ActorCriticAgent, GaussianActionModel
+from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_OUTPUTS = 17
+NUM_OUTPUTS = 21
 
 
 class HumanoidActorModel(GaussianActionModel):
@@ -36,23 +42,6 @@ class HumanoidActorModel(GaussianActionModel):
         x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
         actions_n = self.mlp(x_n)
         return actions_n
-
-
-class HumanoidZeroActions(GaussianActionModel):
-    mlp: MLP
-
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        x_n = jnp.concatenate([obs_array for obs_array in obs.values()], axis=-1)
-        cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
-        x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
-        actions_n = self.mlp(x_n)
-        return jnp.zeros_like(actions_n)
-
-    def sample_and_log_prob(
-        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> tuple[Array, Array]:
-        mean = self(obs, cmd)
-        return mean, mean
 
 
 class HumanoidCriticModel(nn.Module):
@@ -99,17 +88,17 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 ),
             ],
             resets=[
-                # RandomJointPositionReset(range=(-0.01, 0.01)),
-                # RandomJointVelocityReset(range=(-0.01, 0.01)),
+                RandomizeJointPositions(scale=0.01),
+                RandomizeJointVelocities(scale=0.01),
             ],
             rewards=[
-                DHForwardReward(scale=1.25),
+                DHForwardReward(scale=0.125),
                 DHHealthyReward(
-                    scale=5.0,
+                    scale=0.5,
                     healthy_z_lower=0.5,
                     healthy_z_upper=1.5,
                 ),
-                DHControlPenalty(scale=0.1),
+                DHControlPenalty(scale=0.01),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
@@ -127,11 +116,16 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
             ],
             commands=[
                 LinearVelocityCommand(
-                    x_scale=1.0,
-                    y_scale=1.0,
+                    x_scale=0.0,
+                    y_scale=0.0,
                     switch_prob=0.02,
                     zero_prob=0.3,
                 ),
+                # AngularVelocityCommand(
+                #     scale=1.0,
+                #     switch_prob=0.02,
+                #     zero_prob=0.8,
+                # ),
             ],
         )
 
@@ -161,53 +155,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
     def get_init_critic_carry(self) -> None:
         return None
 
-    # Overloading to run KBotZeroActions instead of default Actor model
-    def run(self) -> None:
-        """Highest level entry point for RL tasks, determines what to run."""
-        match self.config.action:
-            case "train":
-                self.run_training()
-
-            case "env":
-                mlp = MLP(
-                    num_hidden_layers=self.config.actor_num_layers,
-                    hidden_features=self.config.actor_hidden_dims,
-                    out_features=NUM_OUTPUTS,
-                )
-                actor: ActionModel
-                match self.config.viz_action:
-                    case "policy":
-                        actor = HumanoidActorModel(
-                            mlp=mlp, init_log_std=-0.7, num_outputs=NUM_OUTPUTS
-                        )
-                    case "zero":
-                        actor = HumanoidZeroActions(
-                            mlp=mlp, init_log_std=-0.7, num_outputs=NUM_OUTPUTS
-                        )
-                    case _:
-                        raise ValueError(
-                            f"Invalid action: {self.config.viz_action}. "
-                            f"Should be one of `policy` or `zero`."
-                        )
-
-                model = ActorCriticAgent(
-                    actor_module=actor,
-                    critic_module=HumanoidCriticModel(
-                        mlp=MLP(
-                            num_hidden_layers=self.config.critic_num_layers,
-                            hidden_features=self.config.critic_hidden_dims,
-                            out_features=1,
-                        ),
-                    ),
-                )
-
-                self.run_environment(model)
-
-            case _:
-                raise ValueError(
-                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
-                )
-
 
 if __name__ == "__main__":
     # python -m examples.default_humanoid.walking
@@ -217,10 +164,10 @@ if __name__ == "__main__":
             num_env_states_per_minibatch=8192,
             num_minibatches=32,
             num_envs=2048,
-            dt=0.002,
-            ctrl_dt=0.008,
-            learning_rate=5e-5,
-            save_every_n_seconds=60 * 4,
+            dt=0.005,
+            ctrl_dt=0.02,
+            learning_rate=0.00001,
+            save_every_n_steps=50,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,
@@ -228,5 +175,14 @@ if __name__ == "__main__":
             solver_iterations=6,
             solver_ls_iterations=6,
             actuator_type="scaled_torque",
+            scale_rewards=True,
+            gamma=0.97,
+            lam=0.95,
+            normalize_advantage=True,
+            normalize_advantage_in_minibatch=True,
+            entropy_coef=1e-4,
+            actor_num_layers=5,
+            critic_num_layers=5,
+            clip_param=0.3,
         ),
     )

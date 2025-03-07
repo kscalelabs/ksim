@@ -126,30 +126,26 @@ class XYPositionResetBuilder(ResetBuilder[XYPositionReset]):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class RandomJointPositionReset(Reset):
-    """Adds uniformly sampled noise to default joint positions."""
+class RandomizeJointPositions(Reset):
+    """Resets the joint positions of the robot to random values."""
 
-    range: tuple[float, float]
+    scale: float = attrs.field(default=0.01)
 
     def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
         qpos = data.qpos
-        qpos = qpos + jax.random.uniform(
-            rng, qpos.shape, minval=self.range[0], maxval=self.range[1]
-        )
+        qpos = qpos + jax.random.uniform(rng, qpos.shape, minval=-self.scale, maxval=self.scale)
         data = data.replace(qpos=qpos)
         return data
 
 
 @attrs.define(frozen=True, kw_only=True)
-class RandomJointVelocityReset(Reset):
-    """Adds uniformly sampled noise to default joint velocities."""
+class RandomizeJointVelocities(Reset):
+    """Resets the joint velocities of the robot to random values."""
 
-    range: tuple[float, float]
+    scale: float = attrs.field(default=0.01)
 
     def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
         qvel = data.qvel
-        qvel = qvel + jax.random.uniform(
-            rng, qvel.shape, minval=self.range[0], maxval=self.range[1]
-        )
+        qvel = qvel + jax.random.uniform(rng, qvel.shape, minval=-self.scale, maxval=self.scale)
         data = data.replace(qvel=qvel)
         return data

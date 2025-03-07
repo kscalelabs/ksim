@@ -13,7 +13,6 @@ from jaxtyping import Array
 from mujoco import mjx
 
 from ksim.utils.data import BuilderData
-from ksim.utils.jit import legit_jit
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +50,6 @@ class PitchTooGreatTermination(Termination):
 
     max_pitch: float
 
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data) -> Array:
         quat = state.qpos[3:7]
         pitch = jnp.arctan2(
@@ -66,7 +64,6 @@ class RollTooGreatTermination(Termination):
 
     max_roll: float
 
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data) -> Array:
         quat = state.qpos[3:7]
         roll = jnp.arctan2(
@@ -81,7 +78,6 @@ class MinimumHeightTermination(Termination):
 
     min_height: float
 
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data) -> Array:
         return state.qpos[2] < self.min_height
 
@@ -210,7 +206,6 @@ class UnhealthyTermination(Termination):
     unhealthy_z_lower: float = attrs.field(default=1.0)
     unhealthy_z_upper: float = attrs.field(default=2.0)
 
-    @legit_jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data) -> Array:
         height = state.qpos[2]
         is_healthy = jnp.where(height < self.unhealthy_z_lower, 0.0, 1.0)
