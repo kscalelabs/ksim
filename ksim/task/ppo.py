@@ -17,9 +17,8 @@ from ksim.env.types import EnvState
 from ksim.model.formulations import ActorCriticAgent, update_actor_critic_normalization
 from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
+from ksim.utils.constants import EPSILON
 from ksim.utils.jit import legit_jit
-
-EPSILON = 1e-5
 
 
 @jax.tree_util.register_dataclass

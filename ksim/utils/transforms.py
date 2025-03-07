@@ -3,10 +3,12 @@
 import jax
 import jax.numpy as jnp
 
+from ksim.utils.constants import EPSILON
+
 
 def quat_to_euler(quat: jax.Array) -> jax.Array:
     """Normalizes and converts a quaternion (w,x,y,z) to euler angles."""
-    quat = quat / jnp.linalg.norm(quat)
+    quat = quat / (jnp.linalg.norm(quat) + EPSILON)
     w, x, y, z = quat
 
     # Roll (x-axis rotation)

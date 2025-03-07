@@ -52,6 +52,7 @@ class Reward(ABC):
                 "Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale
             )
 
+    # TODO: Use post_accumulate after unrolling
     def post_accumulate(self, reward: Array) -> Array:
         """Runs a post-epoch accumulation step.
 

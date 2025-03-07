@@ -82,28 +82,7 @@ class KBotZeroActions(GaussianActionModel):
     mlp: MLP
 
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        lin_vel_cmd_2 = cmd["linear_velocity_command"]
-        ang_vel_cmd_1 = cmd["angular_velocity_command"]
-        joint_pos_j = obs["joint_position_observation"]
-        joint_vel_j = obs["joint_velocity_observation"]
-        imu_acc_3 = obs["imu_acc_sensor_observation"]
-        imu_gyro_3 = obs["imu_gyro_sensor_observation"]
-
-        x_n = jnp.concatenate(
-            [
-                lin_vel_cmd_2,
-                ang_vel_cmd_1,
-                imu_acc_3,
-                imu_gyro_3,
-                joint_pos_j,
-                joint_vel_j,
-            ],
-            axis=-1,
-        )
-
-        actions_n = self.mlp(x_n)
-
-        return jnp.zeros_like(actions_n)
+        return jnp.zeros_like(NUM_OUTPUTS)
 
     def sample_and_log_prob(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
