@@ -220,4 +220,19 @@
     <framelinvel name="base_link_vel" objtype="site" objname="imu_site" />
     <frameangvel name="base_link_ang_vel" objtype="site" objname="imu_site" />
   </sensor>
+
+  <contact>
+    <!-- Enable specific contacts between foot collision geoms and floor -->
+    <pair geom1="foot1_collision_sphere_1" geom2="floor"/>
+    <pair geom1="foot1_collision_sphere_2" geom2="floor"/>
+    <pair geom1="foot1_collision_sphere_3" geom2="floor"/>
+    <pair geom1="foot1_collision_sphere_4" geom2="floor"/>
+    <pair geom1="foot1_collision_box" geom2="floor"/>
+    
+    <pair geom1="foot3_collision_sphere_1" geom2="floor"/>
+    <pair geom1="foot3_collision_sphere_2" geom2="floor"/>
+    <pair geom1="foot3_collision_sphere_3" geom2="floor"/>
+    <pair geom1="foot3_collision_sphere_4" geom2="floor"/>
+    <pair geom1="foot3_collision_box" geom2="floor"/>
+  </contact>
 </mujoco>
