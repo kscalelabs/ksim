@@ -14,6 +14,7 @@ from mujoco import mjx
 
 from ksim.utils.data import BuilderData
 from ksim.utils.jit import legit_jit
+from ksim.utils.robot_model import NeatKeyError
 
 logger = logging.getLogger(__name__)
 
@@ -145,14 +146,22 @@ class FallTerminationBuilder(TerminationBuilder[FallTermination]):
                 sensor_name = self.quaternion_sensor
                 sensor_type = "quaternion_orientation"
             except KeyError:
-                raise ValueError(f"Quaternion sensor {self.quaternion_sensor} not found.")
+                raise NeatKeyError(
+                    self.quaternion_sensor,
+                    data.mujoco_mappings.sensor_name_to_idx_range,
+                    "model sensor names",
+                )
         elif self.projected_gravity_sensor:
             try:
                 _ = data.mujoco_mappings.sensor_name_to_idx_range[self.projected_gravity_sensor]
                 sensor_name = self.projected_gravity_sensor
                 sensor_type = "gravity_vector"
             except KeyError:
-                raise ValueError(f"Gravity sensor {self.projected_gravity_sensor} not found.")
+                raise NeatKeyError(
+                    self.projected_gravity_sensor,
+                    data.mujoco_mappings.sensor_name_to_idx_range,
+                    "model sensor names",
+                )
         return FallTermination(
             sensor_name=sensor_name,
             sensor_type=sensor_type,

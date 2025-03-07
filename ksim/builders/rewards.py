@@ -14,6 +14,7 @@ from mujoco import mjx
 
 from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import geoms_colliding
+from ksim.utils.robot_model import NeatKeyError
 from ksim.utils.transforms import quat_to_euler
 
 logger = logging.getLogger(__name__)
@@ -643,7 +644,12 @@ class DefaultPoseDeviationPenaltyBuilder(RewardBuilder[DefaultPoseDeviationPenal
                 default_positions_list.append(position)
                 joint_deviation_weights.append(self.deviation_weights[joint_name])
             except KeyError:
-                raise ValueError(f"Joint '{joint_name}' not found in model")
+                raise NeatKeyError(
+                    joint_name, 
+                    data.mujoco_mappings.qpos_name_to_idx_range, 
+                    "model qpos names"
+                )
+
 
         joint_indices_array = jnp.array(joint_indices)
         default_positions_array = jnp.array(default_positions_list)

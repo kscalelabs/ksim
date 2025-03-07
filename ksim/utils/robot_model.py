@@ -76,9 +76,12 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
                         gear_ratio=cast(float, actuator_metadata.gear_ratio),
                     )
                 elif hasattr(actuator_metadata, "kp") and hasattr(actuator_metadata, "kd"):
+                    kp = actuator_metadata.kp if actuator_metadata.kp is not None else 200.0
+                    kd = actuator_metadata.kd if actuator_metadata.kd is not None else 5.0
+
                     actuators_metadata[name] = MITPositionActuatorMetadata(
-                        kp=cast(float, actuator_metadata.kp),
-                        kd=cast(float, actuator_metadata.kd),
+                        kp=cast(float, kp),
+                        kd=cast(float, kd),
                     )
                 else:
                     raise ValueError(f"Unknown actuator metadata: {actuator_metadata}")
@@ -107,3 +110,18 @@ async def get_model_and_metadata(model_name: str, cache: bool = True) -> tuple[s
         ),
     )
     return str(urdf_path), metadata
+
+class NeatKeyError(KeyError):
+    """A more informative KeyError that includes available options."""
+    def __init__(self, key: str, options: dict[str, Any], dict_description: str | None = None):
+        self.key = key
+        self.options = sorted(options.keys())
+        self.dict_description = dict_description or "dictionary"
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        available_keys = ", ".join(self.options)
+        return (
+            f"'{self.key}' not found in {self.dict_description}. "
+            f"Available keys: {available_keys}"
+        )
