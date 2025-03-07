@@ -199,15 +199,11 @@ class MjxEnv(BaseEnv):
 
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
+        mj_model.opt.iterations = self.config.solver_iterations
+        mj_model.opt.ls_iterations = self.config.solver_ls_iterations
+        mj_model.opt.timestep = self.config.dt
+        mj_model.opt.disableflags = self.config.disable_flags_bitmask
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
-
-        # mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        # mj_model.opt.disableflags = mujoco.
-        # mj_model.opt.iterations = self.config.solver_iterations
-        # mj_model.opt.ls_iterations = self.config.solver_ls_iterations
-        # mj_model.opt.timestep = self.config.dt
 
         return mj_model
 
@@ -320,8 +316,8 @@ class MjxEnv(BaseEnv):
             action_motor_sees = jax.lax.select(
                 step_num >= num_latency_steps, current_action_L, previous_action_L
             )
-            # torques = self.actuators.get_ctrl(data, action_motor_sees)
-            data_with_ctrl = data.replace(ctrl=action_motor_sees)
+            torques = self.actuators.get_ctrl(data, action_motor_sees)
+            data_with_ctrl = data.replace(ctrl=torques)
             data_with_ctrl = mjx_forward(mjx_model_L, data_with_ctrl)
             new_data = mjx_step(mjx_model_L, data_with_ctrl)
             return (new_data, step_num + 1.0), None
