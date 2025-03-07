@@ -39,6 +39,7 @@ from ksim.utils.data import BuilderData
 from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
 from ksim.utils.robot_model import get_model_and_metadata
+from ksim.utils.visualization import render_frame_debug
 
 logger = logging.getLogger(__name__)
 
@@ -676,6 +677,11 @@ class MjxEnv(BaseEnv):
             )
             # ML: unintuitive but this is more efficient than `.cond` by keeping consistent path.
 
+            # For debugging:
+            render_func = render_frame_debug
+            jax.debug.breakpoint()
+            # Now from within jdb, you can call:
+            # render_func(self.default_mj_model, new_mjx_data, self.config)
             return new_state, new_mjx_data
 
         # Create a partially applied version with fixed arguments
