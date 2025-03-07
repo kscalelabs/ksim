@@ -17,6 +17,7 @@ from ksim.env.types import EnvState
 from ksim.model.formulations import ActorCriticAgent, update_actor_critic_normalization
 from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
+from ksim.utils.jit import legit_jit
 
 EPSILON = 1e-5
 
@@ -91,6 +92,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Get the critic carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
 
+    @legit_jit(static_argnames=["self", "model", "burn_in"])
     def get_rollout_time_loss_components(
         self,
         model: ActorCriticAgent,

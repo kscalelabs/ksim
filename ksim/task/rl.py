@@ -337,7 +337,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    @legit_jit(static_argnames=["self", "model", "env", "burn_in"])
     def get_rl_dataset(
         self,
         model: ActorCriticAgent,
@@ -372,6 +371,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             burn_in=burn_in,
         )
 
+        @legit_jit()
         def flatten_rollout_array(x: Array) -> Array:
             """Flatten a rollout array."""
             reshaped = jnp.reshape(x, (self.dataset_size, *x.shape[2:]))

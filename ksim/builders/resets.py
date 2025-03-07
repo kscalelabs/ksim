@@ -134,7 +134,7 @@ class RandomJointPositionReset(Reset):
     def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
         qpos = data.qpos
         qpos = qpos + jax.random.uniform(
-            rng, qpos.shape, minval=-self.range[0], maxval=self.range[1]
+            rng, qpos.shape, minval=self.range[0], maxval=self.range[1]
         )
         data = data.replace(qpos=qpos)
         return data
@@ -149,7 +149,7 @@ class RandomJointVelocityReset(Reset):
     def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
         qvel = data.qvel
         qvel = qvel + jax.random.uniform(
-            rng, qvel.shape, minval=-self.range[0], maxval=self.range[1]
+            rng, qvel.shape, minval=self.range[0], maxval=self.range[1]
         )
         data = data.replace(qvel=qvel)
         return data

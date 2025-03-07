@@ -78,7 +78,10 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 RollTooGreatTermination(max_roll=1.04),
                 PitchTooGreatTermination(max_pitch=1.04),
             ],
-            resets=[],
+            resets=[
+                # RandomJointPositionReset(range=(-0.01, 0.01)),
+                # RandomJointVelocityReset(range=(-0.01, 0.01)),
+            ],
             rewards=[
                 TrackLinearVelocityXYReward(scale=0.5),
                 HeightReward(
@@ -101,11 +104,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                     switch_prob=0.02,
                     zero_prob=0.3,
                 ),
-                # AngularVelocityCommand(
-                #     scale=1.0,
-                #     switch_prob=0.02,
-                #     zero_prob=0.8,
-                # ),
             ],
         )
 

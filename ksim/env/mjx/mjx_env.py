@@ -558,18 +558,28 @@ class MjxEnv(BaseEnv):
                 physics_model_L=mjx_model_L,
             )
 
-            new_state_L_t = jax.tree_util.tree_map(
-                lambda r, s: jax.lax.select(env_state_L_t_minus_1.done, r, s),
+            data_has_nans = jax.tree_util.tree_reduce(
+                lambda a, b: jnp.logical_or(a, b),
+                jax.tree_util.tree_map(lambda x: jnp.any(jnp.isnan(x)), step_mjx_data_L_t_plus_1),
+            )
+            # prevents robot from exploiting physics and discourages NaNs
+
+            do_reset = jnp.logical_or(env_state_L_t_minus_1.done, data_has_nans)
+
+            jax.debug.breakpoint()
+
+            state_L_t = jax.tree_util.tree_map(
+                lambda r, s: jax.lax.select(do_reset, r, s),
                 reset_env_state_L_t,
                 step_env_state_L_t,
             )
             mjx_data_L_t_plus_1 = jax.tree_util.tree_map(
-                lambda r, s: jax.lax.select(env_state_L_t_minus_1.done, r, s),
+                lambda r, s: jax.lax.select(do_reset, r, s),
                 reset_mjx_data_L_t_plus_1,
                 step_mjx_data_L_t_plus_1,
             )
 
-            return new_state_L_t, mjx_data_L_t_plus_1
+            return state_L_t, mjx_data_L_t_plus_1
 
         def scan_fn(
             carry: tuple[EnvState, mjx.Data, Array], _: None
