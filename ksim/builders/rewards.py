@@ -13,7 +13,6 @@ from jaxtyping import Array
 from mujoco import mjx
 
 from ksim.utils.data import BuilderData
-from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import geoms_colliding
 from ksim.utils.transforms import quat_to_euler
 
@@ -107,7 +106,6 @@ class HeightReward(Reward):
 
     height_target: float = attrs.field(default=1.4)
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -121,9 +119,88 @@ class HeightReward(Reward):
         return reward
 
 
+# TODO: Check that this is correct
+@attrs.define(frozen=True, kw_only=True)
+class OrientationPenalty(Reward):
+    """Penalty for how well the robot is oriented."""
+
+    norm: NormType = attrs.field(default="l2")
+    target_orientation: list = attrs.field(default=[0.073, 0.0, 1.0])
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        return jnp.sum(
+            get_norm(
+                quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - jnp.array(self.target_orientation),
+                self.norm,
+            )
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TorquePenalty(Reward):
+    """Penalty for high torques."""
+
+    norm: NormType = attrs.field(default="l1")
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        return jnp.sum(get_norm(mjx_data_t_plus_1.actuator_force, self.norm))
+
+
+@attrs.define(frozen=True, kw_only=True)
+class EnergyPenalty(Reward):
+    """Penalty for high energies."""
+
+    norm: NormType = attrs.field(default="l1")
+
+    # NOTE: I think this is actually penalizing power (?). Rename if needed
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        return jnp.sum(
+            get_norm(mjx_data_t_plus_1.qvel[6:], self.norm)
+            * get_norm(mjx_data_t_plus_1.actuator_force, self.norm)
+        )
+
+
 @attrs.define(frozen=True, kw_only=True)
 class JointAccelerationPenalty(Reward):
     """Penalty for high joint accelerations."""
+
+    norm: NormType = attrs.field(default="l2")
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        return jnp.sum(get_norm(mjx_data_t_plus_1.qacc[6:], self.norm))
+
+
+@attrs.define(frozen=True, kw_only=True)
+class LinearVelocityZPenalty(Reward):
+    """Penalty for how fast the robot is moving in the z-direction."""
 
     norm: NormType = attrs.field(default="l2")
 
@@ -145,7 +222,6 @@ class AngularVelocityXYPenalty(Reward):
 
     norm: NormType = attrs.field(default="l2")
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -165,7 +241,6 @@ class TrackAngularVelocityZReward(Reward):
     cmd_name: str = attrs.field(default="angular_velocity_command")
     norm: NormType = attrs.field(default="l2")
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -186,7 +261,6 @@ class TrackLinearVelocityXYReward(Reward):
     cmd_name: str = attrs.field(default="linear_velocity_command")
     sensitivity: float = attrs.field(default=1.0)
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -215,7 +289,6 @@ class ActionSmoothnessPenalty(Reward):
 
     norm: NormType = attrs.field(default="l2")
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -343,7 +416,7 @@ class FootContactPenalty(Reward):
     illegal_geom_idxs: Array
     allowed_contact_prct: float
     contact_eps: float = attrs.field(default=1e-2)
-    skip_if_zero_command: tuple[str, ...] = attrs.field(factory=tuple)
+    skip_if_zero_command: list[str] = attrs.field(factory=list)
     eps: float = attrs.field(default=1e-6)
 
     def __post_init__(self) -> None:
@@ -351,7 +424,6 @@ class FootContactPenalty(Reward):
         if len(self.skip_if_zero_command) == 0 and self.skip_if_zero_command is not None:
             assert False, "skip_if_zero_command should be None or non-empty"
 
-    @legit_jit(static_argnames=["self"])
     def __call__(
         self,
         action_t_minus_1: Array | None,
@@ -387,16 +459,6 @@ class FootContactPenalty(Reward):
         multiplier = 1 - (mean_contact - self.allowed_contact_prct).clip(min=0)
         return reward * multiplier
 
-    def __hash__(self) -> int:
-        return hash(
-            (
-                self.allowed_contact_prct,
-                self.contact_eps,
-                self.skip_if_zero_command,
-                self.eps,
-            )
-        )
-
     def get_name(self) -> str:
         return super().get_name()
 
@@ -407,7 +469,7 @@ class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     foot_geom_names: list[str]
     allowed_contact_prct: float
     contact_eps: float = attrs.field(default=1e-2)
-    skip_if_zero_command: tuple[str, ...] | None = attrs.field(default=None)
+    skip_if_zero_command: list[str] | None = attrs.field(default=None)
 
     def __call__(self, data: BuilderData) -> FootContactPenalty:
         illegal_geom_idxs = []
@@ -659,6 +721,7 @@ class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
             soft_lower_limits=jnp.array(soft_lowers),
             soft_upper_limits=jnp.array(soft_uppers),
         )
+
 
 @attrs.define(frozen=True, kw_only=True)
 class DHForwardReward(Reward):

@@ -18,7 +18,11 @@ from ksim.builders.observation import (
     JointVelocityObservation,
     SensorObservationBuilder,
 )
-from ksim.builders.resets import JointVelocityResetBuilder, XYPositionResetBuilder
+from ksim.builders.resets import (
+    RandomJointPositionReset,
+    RandomJointVelocityReset,
+    XYPositionResetBuilder,
+)
 from ksim.builders.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
@@ -383,7 +387,8 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
             ],
             resets=[
                 XYPositionResetBuilder(),
-                JointVelocityResetBuilder(max_velocity=1.0),
+                RandomJointVelocityReset(range=(-0.1, 0.1)),
+                RandomJointPositionReset(range=(-0.1, 0.1)),
             ],
             rewards=[
                 LinearVelocityZPenalty(scale=-0.0),
@@ -549,13 +554,20 @@ if __name__ == "__main__":
     # python -m examples.kbot.walking action=env
     KBotStandingTask.launch(
         KBotStandingConfig(
+            num_learning_epochs=8,
+            num_env_states_per_minibatch=8192,
+            num_minibatches=32,
             num_envs=2048,
-            num_steps_per_trajectory=600,
-            minibatch_size=1024,
-            # num_learning_epochs=10,
-            # normalize_advantage=True,
-            # obs_norm_alpha=0.01,
-            only_save_most_recent=False,
             dt=0.001,
+            ctrl_dt=0.008,
+            learning_rate=5e-5,
+            save_every_n_seconds=60 * 4,
+            only_save_most_recent=False,
+            reward_scaling_alpha=0.0,
+            obs_norm_alpha=0.0,
+            # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
+            solver_iterations=6,
+            solver_ls_iterations=6,
+            actuator_type="scaled_torque",
         ),
     )
