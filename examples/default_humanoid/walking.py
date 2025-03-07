@@ -17,6 +17,11 @@ from ksim.builders.observation import (
     BaseOrientationObservation,
     JointPositionObservation,
     JointVelocityObservation,
+    LegacyPositionObservation,
+    LegacyVelocityObservation,
+    CenterOfMassInertiaObservation,
+    CenterOfMassVelocityObservation,
+    ActuatorForceObservation,
 )
 from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import (
@@ -65,10 +70,11 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     robot_model_name: str = xax.field(value="examples/default_humanoid/")
 
     # ML model parameters.
-    actor_hidden_dims: int = xax.field(value=64)
-    actor_num_layers: int = xax.field(value=4)
-    critic_hidden_dims: int = xax.field(value=256)
+    actor_hidden_dims: int = xax.field(value=512)
+    actor_num_layers: int = xax.field(value=5)
+    critic_hidden_dims: int = xax.field(value=512)
     critic_num_layers: int = xax.field(value=5)
+    init_noise_std: float = xax.field(value=1.0)
 
     # Termination conditions.
     max_episode_length: float = xax.field(value=10.0)
@@ -76,6 +82,8 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     max_roll: float = xax.field(value=0.1)
     pretrained: str | None = xax.field(value=None)
     checkpoint_num: int | None = xax.field(value=None)
+
+    actuator_type: str = xax.field(value="scaled_torque", help="The type of actuator to use.")
 
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
@@ -101,12 +109,18 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 DHControlPenalty(scale=0.1),
             ],
             observations=[
-                BaseOrientationObservation(noise_type="gaussian", noise=0.01),
-                BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
-                BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
-                JointPositionObservation(noise_type="gaussian", noise=0.01),
-                JointVelocityObservation(noise_type="gaussian", noise=0.01),
+                # BaseOrientationObservation(noise_type="gaussian", noise=0.01),
+                # BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
+                # BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
+                # JointPositionObservation(noise_type="gaussian", noise=0.01),
+                # JointVelocityObservation(noise_type="gaussian", noise=0.01),
                 # TODO: default humanoid doesn't have sensors, add them later
+                # Legacy Ksim observation setup 
+                LegacyPositionObservation(exclude_xy=True),
+                LegacyVelocityObservation(),
+                CenterOfMassInertiaObservation(),
+                CenterOfMassVelocityObservation(),
+                ActuatorForceObservation(),
             ],
             commands=[
                 LinearVelocityCommand(
