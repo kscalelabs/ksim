@@ -429,7 +429,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return rollout_BL, rollout_time_loss_components_BL
 
     @profile
-    @legit_jit(static_argnames=["self", "model", "optimizer"])
     def scannable_minibatch_step(
         self,
         training_state: tuple[PyTree, optax.OptState],
@@ -495,6 +494,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return (variables, opt_state, reshuffle_rng), metrics
 
     @profile
+    @legit_jit(static_argnames=["self", "model", "optimizer"])
     def rl_pass(
         self,
         variables: PyTree,
@@ -597,7 +597,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
             update_time = time.time() - start_time
             print(f"Update time: {update_time}")
-            print(f"Metrics: {metrics_mean}")
 
             # TODO: we probably want a way of tracking how loss evolves within
             # an epoch, and across epochs, not just the final metrics.
