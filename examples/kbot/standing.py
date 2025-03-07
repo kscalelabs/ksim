@@ -270,6 +270,7 @@ NUM_OUTPUTS = 20
 class KBotActorModel(GaussianActionModel):
     mlp: MLP
     action_clipping: float = 20.0
+    action_scale: float = 0.5
 
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         lin_vel_cmd_2 = cmd["linear_velocity_command"]
@@ -294,7 +295,7 @@ class KBotActorModel(GaussianActionModel):
         actions_n = self.mlp(x_n)
 
         actions_n = jnp.clip(actions_n, -self.action_clipping, self.action_clipping)
-
+        actions_n = actions_n * self.action_scale
         return actions_n
 
 
@@ -367,6 +368,7 @@ class KBotStandingConfig(PPOConfig, MjxEnvConfig):
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
     action_clipping: float = xax.field(value=10.0)
+    action_scale: float = xax.field(value=0.3)
 
     actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
 
@@ -481,6 +483,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                 init_log_std=-0.7,
                 num_outputs=NUM_OUTPUTS,
                 action_clipping=self.config.action_clipping,
+                action_scale=self.config.action_scale,
             ),
             critic_module=KBotCriticModel(
                 mlp=MLP(

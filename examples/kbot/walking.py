@@ -406,7 +406,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 HeightReward(scale=0.2, height_target=1.0),
                 TrackAngularVelocityZReward(scale=7.5),
                 ActionSmoothnessPenalty(scale=-0.0),
-                OrientationPenalty(scale=-0.5, target_orientation=[0.073, 0.0, 1.0]),
+                OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
                 TorquePenalty(scale=-0.0),
                 EnergyPenalty(scale=-0.0),
                 JointAccelerationPenalty(scale=-0.0),
@@ -434,7 +434,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                     max_foot_height=0.2,
                 ),
                 FeetAirTimeRewardBuilder(
-                    scale=2.0,
+                    scale=1.0,
                     foot_geom_names=[
                         "foot1_collision_sphere_1",
                         "foot1_collision_sphere_2",
@@ -531,7 +531,7 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
             ],
             commands=[
                 LinearVelocityCommand(
-                    x_scale=0.0,
+                    x_scale=1.0,
                     y_scale=0.0,
                     switch_prob=0.02,
                     zero_prob=0.3,
