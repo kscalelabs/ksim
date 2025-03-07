@@ -398,7 +398,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                 TrackAngularVelocityZReward(scale=1.0),
                 ActionSmoothnessPenalty(scale=-0.0),
                 OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
-                JointAccelerationPenalty(scale=-2e-7),
+                JointAccelerationPenalty(scale=0.0), #-2e-7),
                 DefaultPoseDeviationPenaltyBuilder(
                     scale=-0.1,
                     default_positions={
