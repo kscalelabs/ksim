@@ -87,15 +87,6 @@ class MinimumHeightTermination(Termination):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class PhysicsNaNTermination(Termination):
-    """Terminates the episode if the physics are NaN."""
-
-    @legit_jit(static_argnames=["self"])
-    def __call__(self, state: mjx.Data) -> Array:
-        return jnp.isnan(state.qpos).any() | jnp.isnan(state.qvel).any()
-
-
-@attrs.define(frozen=True, kw_only=True)
 class FallTermination(Termination):
     """Terminates the episode if the robot falls."""
 

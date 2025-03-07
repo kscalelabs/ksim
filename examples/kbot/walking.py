@@ -446,21 +446,6 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                     required_air_time_prct=0.3,
                     skip_if_zero_command=["linear_velocity_command", "angular_velocity_command"],
                 ),
-                # ContactForcePenaltyBuilder(
-                #     scale=-0.1,
-                #     foot_geom_names=["foot3_collision_sphere_1",
-                #                      "foot3_collision_sphere_2",
-                #                      "foot3_collision_sphere_3",
-                #                      "foot3_collision_sphere_4",
-                #                      "foot3_collision_box",
-                #                      "foot1_collision_sphere_1",
-                #                      "foot1_collision_sphere_2",
-                #                      "foot1_collision_sphere_3",
-                #                      "foot1_collision_sphere_4",
-                #                      "foot1_collision_box",
-                #                      ],
-                #     max_contact_force=100.0,
-                # ),
                 FootContactPenaltyBuilder(
                     scale=-0.1,
                     foot_geom_names=[
@@ -481,7 +466,6 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                         "angular_velocity_command",
                     ],
                 ),
-                # JointPosLimitPenaltyBuilder(scale=-0.1, joint_limits={}),
                 DefaultPoseDeviationPenaltyBuilder(
                     scale=-0.1,
                     default_positions={
