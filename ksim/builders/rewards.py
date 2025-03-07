@@ -416,7 +416,7 @@ class FootContactPenalty(Reward):
     illegal_geom_idxs: Array
     allowed_contact_prct: float
     contact_eps: float = attrs.field(default=1e-2)
-    skip_if_zero_command: list[str] = attrs.field(factory=list)
+    skip_if_zero_command: tuple[str, ...] = attrs.field(factory=tuple)
     eps: float = attrs.field(default=1e-6)
 
     def __post_init__(self) -> None:
@@ -459,6 +459,16 @@ class FootContactPenalty(Reward):
         multiplier = 1 - (mean_contact - self.allowed_contact_prct).clip(min=0)
         return reward * multiplier
 
+    def __hash__(self) -> int:
+        return hash(
+            (
+                self.allowed_contact_prct,
+                self.contact_eps,
+                self.skip_if_zero_command,
+                self.eps,
+            )
+        )
+
     def get_name(self) -> str:
         return super().get_name()
 
@@ -469,7 +479,7 @@ class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     foot_geom_names: list[str]
     allowed_contact_prct: float
     contact_eps: float = attrs.field(default=1e-2)
-    skip_if_zero_command: list[str] | None = attrs.field(default=None)
+    skip_if_zero_command: tuple[str, ...] | None = attrs.field(default=None)
 
     def __call__(self, data: BuilderData) -> FootContactPenalty:
         illegal_geom_idxs = []
@@ -483,7 +493,7 @@ class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
             illegal_geom_idxs=illegal_geom_idxs,
             allowed_contact_prct=self.allowed_contact_prct,
             contact_eps=self.contact_eps,
-            skip_if_zero_command=self.skip_if_zero_command if self.skip_if_zero_command else [],
+            skip_if_zero_command=self.skip_if_zero_command if self.skip_if_zero_command else (),
         )
 
 
@@ -759,6 +769,27 @@ class DHHealthyReward(Reward):
         is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
         is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
         return is_healthy
+
+
+@attrs.define(frozen=True, kw_only=True)
+class DHTerminationPenalty(Reward):
+    """Penalty for terminating the episode."""
+
+    healthy_z_lower: float = attrs.field(default=0.5)
+    healthy_z_upper: float = attrs.field(default=1.5)
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        height = mjx_data_t.qpos[2]
+        is_unhealthy = jnp.where(height < self.healthy_z_lower, 1.0, 0.0)
+        is_unhealthy = jnp.where(height > self.healthy_z_upper, 1.0, is_unhealthy)
+        return is_unhealthy
 
 
 @attrs.define(frozen=True, kw_only=True)

@@ -13,7 +13,6 @@ from jaxtyping import Array
 from mujoco import mjx
 
 from ksim.utils.data import BuilderData
-from ksim.utils.jit import legit_jit
 
 logger = logging.getLogger(__name__)
 

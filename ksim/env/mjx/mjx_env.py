@@ -9,6 +9,7 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 """
 
 import asyncio
+import functools
 import logging
 from dataclasses import dataclass
 from typing import Collection, TypeVar
@@ -22,7 +23,6 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
-from mujoco_scenes.mjcf import load_mjmodel
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
@@ -44,6 +44,20 @@ from ksim.utils.robot_model import get_model_and_metadata
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+@profile
+@legit_jit()
+def mjx_forward(mjx_model: mjx.Model, mjx_data: mjx.Data) -> mjx.Data:
+    """Forward pass of the mjx model."""
+    return mjx.forward(mjx_model, mjx_data)
+
+
+@profile
+@legit_jit()
+def mjx_step(mjx_model: mjx.Model, mjx_data: mjx.Data) -> mjx.Data:
+    """Step pass of the mjx model."""
+    return mjx.step(mjx_model, mjx_data)
 
 
 def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
@@ -132,13 +146,15 @@ class MjxEnv(BaseEnv):
         )
 
         logger.info("Loading robot model %s", robot_model_path)
-        mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
+        mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
         mj_model = self._override_model_settings(mj_model)
 
         self.default_mj_model = mj_model
         self.default_mj_data = mujoco.MjData(mj_model)
         self.default_mjx_model = mjx.put_model(mj_model)
         self.default_mjx_data = mjx.make_data(self.default_mjx_model)
+
         self.mujoco_mappings = make_mujoco_mappings(self.default_mjx_model)
         match self.config.actuator_type:
             case "mit":
@@ -159,6 +175,7 @@ class MjxEnv(BaseEnv):
             ctrl_dt=self.config.ctrl_dt,
             mujoco_mappings=self.mujoco_mappings,
         )
+
         # storing the termination, reset, reward, observation, and command builders
         terminations_v = [t(data) if isinstance(t, TerminationBuilder) else t for t in terminations]
         resets_v = [r(data) if isinstance(r, ResetBuilder) else r for r in resets]
@@ -183,10 +200,14 @@ class MjxEnv(BaseEnv):
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        mj_model.opt.iterations = self.config.solver_iterations
-        mj_model.opt.ls_iterations = self.config.solver_ls_iterations
-        mj_model.opt.timestep = self.config.dt
-        mj_model.opt.disableflags = self.config.disable_flags_bitmask
+        mj_model.opt.iterations = 6
+        mj_model.opt.ls_iterations = 6
+
+        # mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
+        # mj_model.opt.disableflags = mujoco.
+        # mj_model.opt.iterations = self.config.solver_iterations
+        # mj_model.opt.ls_iterations = self.config.solver_ls_iterations
+        # mj_model.opt.timestep = self.config.dt
 
         return mj_model
 
@@ -299,10 +320,10 @@ class MjxEnv(BaseEnv):
             action_motor_sees = jax.lax.select(
                 step_num >= num_latency_steps, current_action_L, previous_action_L
             )
-            torques = self.actuators.get_ctrl(data, action_motor_sees)
-            data_with_ctrl = data.replace(ctrl=torques)
-            data_with_ctrl = mjx.forward(mjx_model_L, data_with_ctrl)
-            new_data = mjx.step(mjx_model_L, data_with_ctrl)
+            # torques = self.actuators.get_ctrl(data, action_motor_sees)
+            data_with_ctrl = data.replace(ctrl=action_motor_sees)
+            data_with_ctrl = mjx_forward(mjx_model_L, data_with_ctrl)
+            new_data = mjx_step(mjx_model_L, data_with_ctrl)
             return (new_data, step_num + 1.0), None
 
         final_data_L = jax.lax.scan(f, (mjx_data_L, jnp.array(0.0)), None, n_steps)[0][0]
@@ -326,7 +347,7 @@ class MjxEnv(BaseEnv):
         rngs = jax.random.split(jax.random.PRNGKey(0), num_envs)
         default_data_EL = jax.vmap(get_init_data)(rngs)
 
-        mjx_data_EL_0 = jax.vmap(mjx.forward, in_axes=(None, 0))(
+        mjx_data_EL_0 = jax.vmap(mjx_forward, in_axes=(None, 0))(
             self.default_mjx_model, default_data_EL
         )
 
@@ -368,7 +389,6 @@ class MjxEnv(BaseEnv):
         )
 
     @profile
-    @legit_jit(static_argnames=["self", "model"])
     def reset(
         self,
         model: ActorCriticAgent,
@@ -389,15 +409,13 @@ class MjxEnv(BaseEnv):
         mjx_data_L_0 = mjx.make_data(mjx_model_L)
 
         for _, reset_func in self.resets:
-            rng, reset_rng = jax.random.split(rng, 2)
-            mjx_data_L_0 = reset_func(mjx_data_L_0, reset_rng)
+            mjx_data_L_0 = reset_func(mjx_data_L_0, rng)
         assert isinstance(mjx_data_L_0, mjx.Data)
-        mjx_data_L_0 = mjx.forward(mjx_model_L, mjx_data_L_0)
 
         rng, obs_rng = jax.random.split(rng, 2)
         timestep = jnp.array(0.0)
 
-        mjx_data_L_0 = mjx.forward(mjx_model_L, mjx_data_L_0)
+        mjx_data_L_0 = mjx_forward(mjx_model_L, mjx_data_L_0)
         obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
         command_L_0 = self.get_initial_commands(rng, timestep)
 
@@ -437,7 +455,6 @@ class MjxEnv(BaseEnv):
         return env_state_L_0, mjx_data_L_1
 
     @profile
-    @legit_jit(static_argnames=["self", "model"])
     def step(
         self,
         model: ActorCriticAgent,
@@ -521,6 +538,55 @@ class MjxEnv(BaseEnv):
         return env_state_L_t, mjx_data_L_t_plus_1
 
     @profile
+    @legit_jit(static_argnames=["self", "model"])
+    def step_with_automatic_reset(
+        self,
+        env_state_L_t_minus_1: EnvState,
+        physics_data_L_t: mjx.Data,
+        rng: Array,
+        *,
+        physics_model_L: mjx.Model,
+        model: ActorCriticAgent,
+        variables: PyTree,
+    ) -> tuple[EnvState, mjx.Data]:
+        """Steps the environment and resets if needed."""
+        reset_env_state_L_t, reset_mjx_data_L_t_plus_1 = self.reset(
+            model=model,
+            variables=variables,
+            rng=rng,
+            physics_model_L=physics_model_L,
+        )
+
+        step_env_state_L_t, step_mjx_data_L_t_plus_1 = self.step(
+            model=model,
+            variables=variables,
+            env_state_L_t_minus_1=env_state_L_t_minus_1,
+            rng=rng,
+            physics_data_L_t=physics_data_L_t,
+            physics_model_L=physics_model_L,
+        )
+
+        data_has_nans = jax.tree_util.tree_reduce(
+            lambda a, b: jnp.logical_or(a, b),
+            jax.tree_util.tree_map(lambda x: jnp.any(jnp.isnan(x)), step_mjx_data_L_t_plus_1),
+        )
+
+        do_reset = jnp.logical_or(env_state_L_t_minus_1.done, data_has_nans)
+
+        new_state_L_t = jax.tree_util.tree_map(
+            lambda r, s: jax.lax.select(do_reset, r, s),
+            reset_env_state_L_t,
+            step_env_state_L_t,
+        )
+        mjx_data_L_t_plus_1 = jax.tree_util.tree_map(
+            lambda r, s: jax.lax.select(do_reset, r, s),
+            reset_mjx_data_L_t_plus_1,
+            step_mjx_data_L_t_plus_1,
+        )
+
+        return new_state_L_t, mjx_data_L_t_plus_1
+
+    @profile
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
@@ -544,57 +610,20 @@ class MjxEnv(BaseEnv):
         will be used as the initial state and model, respectively. Otherwise,
         the default model and data will be used.
         """
-        mjx_model_L = physics_model_L
+        step_fn = functools.partial(
+            self.step_with_automatic_reset,
+            model=model,
+            variables=variables,
+            physics_model_L=physics_model_L,
+        )
 
         # Define env_step as a pure function with all dependencies passed explicitly
-        def env_step(
-            env_state_L_t_minus_1: EnvState,
-            mjx_data_L_t: mjx.Data,
-            rng: Array,
-        ) -> tuple[EnvState, mjx.Data]:
-            reset_env_state_L_t, reset_mjx_data_L_t_plus_1 = self.reset(
-                model=model,
-                variables=variables,
-                rng=rng,
-                physics_model_L=mjx_model_L,
-            )
-
-            step_env_state_L_t, step_mjx_data_L_t_plus_1 = self.step(
-                model=model,
-                variables=variables,
-                env_state_L_t_minus_1=env_state_L_t_minus_1,
-                rng=rng,
-                physics_data_L_t=mjx_data_L_t,
-                physics_model_L=mjx_model_L,
-            )
-
-            data_has_nans = jax.tree_util.tree_reduce(
-                lambda a, b: jnp.logical_or(a, b),
-                jax.tree_util.tree_map(lambda x: jnp.any(jnp.isnan(x)), step_mjx_data_L_t_plus_1),
-            )
-            # prevents robot from exploiting physics and discourages NaNs
-
-            do_reset = jnp.logical_or(env_state_L_t_minus_1.done, data_has_nans)
-
-            state_L_t = jax.tree_util.tree_map(
-                lambda r, s: jax.lax.select(do_reset, r, s),
-                reset_env_state_L_t,
-                step_env_state_L_t,
-            )
-            mjx_data_L_t_plus_1 = jax.tree_util.tree_map(
-                lambda r, s: jax.lax.select(do_reset, r, s),
-                reset_mjx_data_L_t_plus_1,
-                step_mjx_data_L_t_plus_1,
-            )
-
-            return state_L_t, mjx_data_L_t_plus_1
-
         def scan_fn(
             carry: tuple[EnvState, mjx.Data, Array], _: None
         ) -> tuple[tuple[EnvState, mjx.Data, Array], tuple[EnvState, mjx.Data]]:
             env_state_EL_t_minus_1, mjx_data_EL_t, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
-            env_state_EL_t, mjx_data_EL_t_plus_1 = jax.vmap(env_step, in_axes=(0, 0, 0))(
+            env_state_EL_t, mjx_data_EL_t_plus_1 = jax.vmap(step_fn, in_axes=(0, 0, 0))(
                 env_state_EL_t_minus_1, mjx_data_EL_t, rngs[1:]
             )
 
@@ -678,9 +707,7 @@ class MjxEnv(BaseEnv):
 
         renderer = mujoco.Renderer(self.default_mj_model, height=height, width=width)
         scene_option = mujoco.MjvOption()
-
         frames = []
-
         for data in mjx_data_list:
             frame = render_frame(renderer, data, camera_id)
             frames.append(frame)

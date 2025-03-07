@@ -43,6 +43,16 @@ actuators:
     kd: 20.0
     input_range: [-0.4, 0.4]
     gear_ratio: 80.0
+  ankle_x_right:
+    kp: 50.0
+    kd: 5.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 20.0
+  ankle_y_right:
+    kp: 50.0
+    kd: 5.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 20.0
   hip_x_left:
     kp: 100.0
     kd: 10.0
@@ -63,6 +73,16 @@ actuators:
     kd: 20.0
     input_range: [-0.4, 0.4]
     gear_ratio: 80.0
+  ankle_x_left:
+    kp: 50.0
+    kd: 5.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 20.0
+  ankle_y_left:
+    kp: 50.0
+    kd: 5.0
+    input_range: [-0.4, 0.4]
+    gear_ratio: 20.0
   
   # Arm actuators
   shoulder1_right:
