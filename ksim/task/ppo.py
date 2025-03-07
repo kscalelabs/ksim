@@ -100,6 +100,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: ActorCriticAgent,
         variables: PyTree[Array],
         trajectory_dataset: EnvState,
+        last_obs: Array,
+        burn_in: bool = False,
     ) -> RolloutTimeLossComponents:
         """Calculating advantages and returns for a rollout."""
         # we recompute here because we update the normalization stats before the
@@ -139,6 +141,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             dones=trajectory_dataset.done,
             gamma=self.config.gamma,
         )
+        last_values = self.apply_critic(
+            model, variables, last_obs, trajectory_dataset.command
+        ).squeeze(axis=-1)
+
+        # We squeeze because last dimension is a singleton, advantages expects (batch_dims,)
+        advantages = self._compute_advantages(variables, initial_values, last_values, trajectory_dataset)
+        returns = advantages + initial_values
 
         # normalizing at the trajectory dataset level
         if self.config.normalize_advantage and not self.config.normalize_advantage_in_minibatch:
@@ -373,6 +382,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         self,
         variables: PyTree[Array],
         values: Array,
+        last_values: Array,
         env_state_batch: EnvState,
     ) -> tuple[Array, Array]:
         """Computes the advantages using Generalized Advantage Estimation (GAE).
@@ -393,8 +403,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             adv_t = delta + self.config.gamma * self.config.lam * mask * adv_t_plus_1
             return adv_t, adv_t
 
-        values_shifted = jnp.concatenate([values[1:], values[-1:]], axis=0)
         # just repeating the last value for the last time step (should zero it out mathematically)
+        values_shifted = jnp.concatenate([values[1:], jnp.expand_dims(last_values, 0)], axis=0)
         mask = jnp.where(done, 0.0, 1.0)
 
         # getting td residuals
