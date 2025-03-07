@@ -199,15 +199,11 @@ class MjxEnv(BaseEnv):
 
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
+        mj_model.opt.iterations = self.config.solver_iterations
+        mj_model.opt.ls_iterations = self.config.solver_ls_iterations
+        mj_model.opt.timestep = self.config.dt
+        mj_model.opt.disableflags = self.config.disable_flags_bitmask
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
-
-        # mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        # mj_model.opt.disableflags = mujoco.
-        # mj_model.opt.iterations = self.config.solver_iterations
-        # mj_model.opt.ls_iterations = self.config.solver_ls_iterations
-        # mj_model.opt.timestep = self.config.dt
 
         return mj_model
 

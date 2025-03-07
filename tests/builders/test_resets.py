@@ -64,7 +64,9 @@ class TestXYPositionResetBuilder:
             qpos_name_to_idx_range={},
             qvelacc_name_to_idx_range={},
             ctrl_name_to_idx={},
-            geom_idx_to_body_name={},
+            geom_name_to_idx={},
+            body_name_to_idx={},
+            floor_geom_idx=None,
         )
         return BuilderData(
             model=DummyModel(),

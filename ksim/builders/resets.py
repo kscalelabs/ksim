@@ -133,7 +133,7 @@ class RandomizeJointPositions(Reset):
 
     def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
         qpos = data.qpos
-        qpos = qpos + jax.random.uniform(rng, qpos.shape, minval=-self.scale, maxval=self.scale)
+        qpos = jax.random.uniform(rng, qpos.shape, minval=-self.scale, maxval=self.scale)
         data = data.replace(qpos=qpos)
         return data
 
@@ -146,6 +146,6 @@ class RandomizeJointVelocities(Reset):
 
     def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
         qvel = data.qvel
-        qvel = qvel + jax.random.uniform(rng, qvel.shape, minval=-self.scale, maxval=self.scale)
+        qvel = jax.random.uniform(rng, qvel.shape, minval=-self.scale, maxval=self.scale)
         data = data.replace(qvel=qvel)
         return data
