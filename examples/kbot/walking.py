@@ -28,7 +28,6 @@ from ksim.builders.rewards import (
     AngularVelocityXYPenalty,
     DefaultPoseDeviationPenaltyBuilder,
     EnergyPenalty,
-    FeetAirTimeRewardBuilder,
     FeetClearancePenaltyBuilder,
     FootContactPenaltyBuilder,
     FootSlipPenaltyBuilder,
@@ -436,19 +435,6 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                         "foot3_collision_sphere_1",
                     ],
                     max_foot_height=0.2,
-                ),
-                FeetAirTimeRewardBuilder(
-                    scale=1.0,
-                    foot_geom_names=[
-                        "foot1_collision_sphere_1",
-                        "foot1_collision_sphere_2",
-                        "foot1_collision_sphere_3",
-                        "foot1_collision_sphere_4",
-                        "foot1_collision_box",
-                        "foot3_collision_sphere_1",
-                    ],
-                    required_air_time_prct=0.3,
-                    skip_if_zero_command=["linear_velocity_command", "angular_velocity_command"],
                 ),
                 FootContactPenaltyBuilder(
                     scale=-0.1,
