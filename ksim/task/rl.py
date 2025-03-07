@@ -229,7 +229,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             render_dir = self.exp_dir / self.config.render_dir / render_name
 
             end_time = time.time()
-            print(f"Time taken for environment setup: {end_time - start_time} seconds")
+            logger.info("Time taken for environment setup: %s seconds", end_time - start_time)
 
             logger.log(logging.INFO, "Rendering to %s", render_dir)
 
@@ -242,7 +242,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 key, pretrained=self.config.pretrained, checkpoint_num=self.config.checkpoint_num
             )
             end_time = time.time()
-            print(f"Time taken for parameter initialization: {end_time - start_time} seconds")
+            logger.info(
+                "Time taken for parameter initialization: %s seconds", end_time - start_time
+            )
 
             # Unroll trajectories and collect the frames for rendering
             logger.info("Unrolling trajectories")
@@ -493,8 +495,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             rollout_time_minibatch_loss_components,
                         )
                         variables["params"] = params
-                        print(f"loss: {loss_val}")
-                        # print(f"metrics: {metrics}")
+                        logger.debug("loss: %s", loss_val)
+                        logger.debug("metrics: %s", metrics)
 
                         # log metrics from the model update
                         metric_logging_data = LoggingData(
@@ -504,8 +506,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             loss=float(loss_val),
                             training_state=training_state,
                         )
-
-                        # print(f"{epoch_idx}, {minibatch_idx}: {metrics}")
 
                         with self.step_context("write_logs"):
                             training_state.raw_phase = "train"
