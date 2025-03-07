@@ -123,3 +123,29 @@ class XYPositionResetBuilder(ResetBuilder[XYPositionReset]):
             hfield_data=hfield_data,
             padding_prct=self.padding_prct,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class RandomizeJointPositions(Reset):
+    """Resets the joint positions of the robot to random values."""
+
+    scale: float = attrs.field(default=0.01)
+
+    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+        qpos = data.qpos
+        qpos = qpos + jax.random.uniform(rng, qpos.shape, minval=-self.scale, maxval=self.scale)
+        data = data.replace(qpos=qpos)
+        return data
+
+
+@attrs.define(frozen=True, kw_only=True)
+class RandomizeJointVelocities(Reset):
+    """Resets the joint velocities of the robot to random values."""
+
+    scale: float = attrs.field(default=0.01)
+
+    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+        qvel = data.qvel
+        qvel = qvel + jax.random.uniform(rng, qvel.shape, minval=-self.scale, maxval=self.scale)
+        data = data.replace(qvel=qvel)
+        return data

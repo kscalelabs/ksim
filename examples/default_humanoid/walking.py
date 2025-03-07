@@ -18,7 +18,11 @@ from ksim.builders.observation import (
     JointPositionObservation,
     JointVelocityObservation,
 )
-from ksim.builders.resets import XYPositionResetBuilder
+from ksim.builders.resets import (
+    RandomizeJointPositions,
+    RandomizeJointVelocities,
+    XYPositionResetBuilder,
+)
 from ksim.builders.rewards import DHControlPenalty, DHForwardReward, DHHealthyReward
 from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
@@ -84,7 +88,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 ),
             ],
             resets=[
-                # XYPositionResetBuilder(),
+                RandomizeJointPositions(scale=0.01),
+                RandomizeJointVelocities(scale=0.01),
             ],
             rewards=[
                 DHForwardReward(scale=0.125),
@@ -162,7 +167,7 @@ if __name__ == "__main__":
             dt=0.005,
             ctrl_dt=0.02,
             learning_rate=0.00001,
-            save_every_n_seconds=60 * 4,
+            save_every_n_steps=50,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,

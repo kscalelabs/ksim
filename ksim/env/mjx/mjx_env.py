@@ -36,6 +36,7 @@ from ksim.env.mjx.actuators.scaled_torque_actuator import ScaledTorqueActuators
 from ksim.env.types import EnvState
 from ksim.model.formulations import ActorCriticAgent
 from ksim.utils.data import BuilderData
+from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
 from ksim.utils.robot_model import get_model_and_metadata
 
@@ -314,11 +315,7 @@ class MjxEnv(BaseEnv):
 
         def get_init_data(rng: jax.Array) -> mjx.Data:
             data = mjx.make_data(self.default_mjx_model)
-            rng1, rng2 = jax.random.split(rng, 2)
-            low, hi = -0.01, 0.01
-            qpos = data.qpos + jax.random.uniform(rng1, (28,), minval=low, maxval=hi)
-            qvel = data.qvel + jax.random.uniform(rng2, (27,), minval=low, maxval=hi)
-            return data.replace(qpos=qpos, qvel=qvel)
+            return data
 
         rngs = jax.random.split(jax.random.PRNGKey(0), num_envs)
         default_data_EL = jax.vmap(get_init_data)(rngs)
@@ -387,14 +384,9 @@ class MjxEnv(BaseEnv):
         assert isinstance(mjx_data_L_0, mjx.Data)
 
         rng, obs_rng = jax.random.split(rng, 2)
-
-        low, hi = -0.01, 0.01
-        qpos = mjx_data_L_0.qpos + jax.random.uniform(rng, (28,), minval=low, maxval=hi)
-        qvel = mjx_data_L_0.qvel + jax.random.uniform(rng, (27,), minval=low, maxval=hi)
-        mjx_data_L_0 = mjx_data_L_0.replace(qpos=qpos, qvel=qvel)
+        timestep = jnp.array(0.0)
 
         mjx_data_L_0 = mjx.forward(mjx_model_L, mjx_data_L_0)
-        timestep = jnp.array(0.0)
         obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
         command_L_0 = self.get_initial_commands(rng, timestep)
 
@@ -541,6 +533,7 @@ class MjxEnv(BaseEnv):
         mjx_model_L = physics_model_L
 
         # Define env_step as a pure function with all dependencies passed explicitly
+        @legit_jit()
         def env_step(
             env_state_L_t_minus_1: EnvState,
             mjx_data_L_t: mjx.Data,

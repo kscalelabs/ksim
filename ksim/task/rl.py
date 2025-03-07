@@ -337,7 +337,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         assert isinstance(res, Array)
         return res
 
-    @legit_jit(static_argnames=["self", "model", "env"])
     def get_rl_dataset(
         self,
         model: ActorCriticAgent,
@@ -426,6 +425,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         return rollout_BL, rollout_time_loss_components_BL
 
+    @legit_jit(static_argnames=["self", "model", "optimizer"])
     def scannable_minibatch_step(
         self,
         training_state: tuple[PyTree, optax.OptState],
@@ -489,7 +489,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # metrics is stacked over the minibatches
         return (variables, opt_state, reshuffle_rng), metrics
 
-    @legit_jit(static_argnames=["self", "model", "optimizer"])
     def rl_pass(
         self,
         variables: PyTree,
@@ -607,7 +606,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     log_item(self.logger, metric_logging_data)
 
                 self.logger.write(training_state)
-                training_state.num_steps += self.dataset_size
+                training_state.num_steps += 1
+                training_state.num_samples += self.dataset_size
 
             # updating normalization statistics for the next rollout
             # NOTE: for the first step, the normalization stats are not updated
@@ -663,6 +663,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model, optimizer, opt_state, training_state = self.load_initial_state(model_key)
 
             training_state = self.on_training_start(training_state)
+            training_state.num_samples = 1  # prevents from checkpointing at start
 
             def on_exit() -> None:
                 self.save_checkpoint(model, optimizer, opt_state, training_state)
