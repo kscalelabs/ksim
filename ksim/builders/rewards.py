@@ -551,10 +551,10 @@ class FeetAirTimeReward(Reward):
 
         # Only apply reward when average feet in air exceeds the required amount,
         # and scale it by how much it exceeds the requirement
-        excess_feet = (mean_feet_in_air - min_required_feet).clip(min=0)
+        excess_feet = (mean_feet_in_air - jnp.array(min_required_feet)).clip(min=0)
 
         # Normalize by the maximum possible excess
-        max_possible_excess = max_feet - min_required_feet
+        max_possible_excess = jnp.array(max_feet - min_required_feet)
         normalized_multiplier = excess_feet / max_possible_excess.clip(min=1e-6)
 
         return reward * normalized_multiplier
@@ -809,5 +809,4 @@ class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
             joint_indices=jnp.array(joint_indices),
             soft_lower_limits=jnp.array(soft_lowers),
             soft_upper_limits=jnp.array(soft_uppers),
-            norm=self.norm,
         )
