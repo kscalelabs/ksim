@@ -470,7 +470,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                     zero_prob=0.3,
                 ),
                 AngularVelocityCommand(
-                    scale=1.0,
+                    scale=0.0,
                     switch_prob=0.02,
                     zero_prob=0.8,
                 ),
