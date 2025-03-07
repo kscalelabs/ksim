@@ -9,6 +9,7 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 """
 
 import asyncio
+import functools
 import logging
 from dataclasses import dataclass
 from typing import Collection, TypeVar
@@ -375,7 +376,6 @@ class MjxEnv(BaseEnv):
         )
 
     @profile
-    @legit_jit(static_argnames=["self", "model"])
     def reset(
         self,
         model: ActorCriticAgent,
@@ -442,7 +442,6 @@ class MjxEnv(BaseEnv):
         return env_state_L_0, mjx_data_L_1
 
     @profile
-    @legit_jit(static_argnames=["self", "model"])
     def step(
         self,
         model: ActorCriticAgent,
@@ -526,6 +525,64 @@ class MjxEnv(BaseEnv):
         return env_state_L_t, mjx_data_L_t_plus_1
 
     @profile
+    @legit_jit(static_argnames=["self", "model"])
+    def step_with_automatic_reset(
+        self,
+        env_state_L_t_minus_1: EnvState,
+        physics_data_L_t: mjx.Data,
+        rng: Array,
+        *,
+        physics_model_L: mjx.Model,
+        model: ActorCriticAgent,
+        variables: PyTree,
+    ) -> tuple[EnvState, mjx.Data]:
+        """Steps the environment forward, automatically resetting if needed.
+
+        Args:
+            env_state_L_t_minus_1: Environment state before stepping
+            mjx_data_L_t: MuJoCo X data before stepping
+            rng: Random number generator state
+
+        Returns:
+            Tuple of (new environment state, new MJX data)
+        """
+        reset_env_state_L_t, reset_mjx_data_L_t_plus_1 = self.reset(
+            model=model,
+            variables=variables,
+            rng=rng,
+            physics_model_L=physics_model_L,
+        )
+
+        step_env_state_L_t, step_mjx_data_L_t_plus_1 = self.step(
+            model=model,
+            variables=variables,
+            env_state_L_t_minus_1=env_state_L_t_minus_1,
+            rng=rng,
+            physics_data_L_t=physics_data_L_t,
+            physics_model_L=physics_model_L,
+        )
+
+        data_has_nans = jax.tree_util.tree_reduce(
+            lambda a, b: jnp.logical_or(a, b),
+            jax.tree_util.tree_map(lambda x: jnp.any(jnp.isnan(x)), step_mjx_data_L_t_plus_1),
+        )
+
+        do_reset = jnp.logical_or(env_state_L_t_minus_1.done, data_has_nans)
+
+        new_state_L_t = jax.tree_util.tree_map(
+            lambda r, s: jax.lax.select(do_reset, r, s),
+            reset_env_state_L_t,
+            step_env_state_L_t,
+        )
+        mjx_data_L_t_plus_1 = jax.tree_util.tree_map(
+            lambda r, s: jax.lax.select(do_reset, r, s),
+            reset_mjx_data_L_t_plus_1,
+            step_mjx_data_L_t_plus_1,
+        )
+
+        return new_state_L_t, mjx_data_L_t_plus_1
+
+    @profile
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
@@ -549,49 +606,21 @@ class MjxEnv(BaseEnv):
         will be used as the initial state and model, respectively. Otherwise,
         the default model and data will be used.
         """
-        mjx_model_L = physics_model_L
+
+        step_fn = functools.partial(
+            self.step_with_automatic_reset,
+            model=model,
+            variables=variables,
+            physics_model_L=physics_model_L,
+        )
 
         # Define env_step as a pure function with all dependencies passed explicitly
-        def env_step(
-            env_state_L_t_minus_1: EnvState,
-            mjx_data_L_t: mjx.Data,
-            rng: Array,
-        ) -> tuple[EnvState, mjx.Data]:
-            reset_env_state_L_t, reset_mjx_data_L_t_plus_1 = self.reset(
-                model=model,
-                variables=variables,
-                rng=rng,
-                physics_model_L=mjx_model_L,
-            )
-
-            step_env_state_L_t, step_mjx_data_L_t_plus_1 = self.step(
-                model=model,
-                variables=variables,
-                env_state_L_t_minus_1=env_state_L_t_minus_1,
-                rng=rng,
-                physics_data_L_t=mjx_data_L_t,
-                physics_model_L=mjx_model_L,
-            )
-
-            new_state_L_t = jax.tree_util.tree_map(
-                lambda r, s: jax.lax.select(env_state_L_t_minus_1.done, r, s),
-                reset_env_state_L_t,
-                step_env_state_L_t,
-            )
-            mjx_data_L_t_plus_1 = jax.tree_util.tree_map(
-                lambda r, s: jax.lax.select(env_state_L_t_minus_1.done, r, s),
-                reset_mjx_data_L_t_plus_1,
-                step_mjx_data_L_t_plus_1,
-            )
-
-            return new_state_L_t, mjx_data_L_t_plus_1
-
         def scan_fn(
             carry: tuple[EnvState, mjx.Data, Array], _: None
         ) -> tuple[tuple[EnvState, mjx.Data, Array], tuple[EnvState, mjx.Data]]:
             env_state_EL_t_minus_1, mjx_data_EL_t, rng = carry
             rngs = jax.random.split(rng, num_envs + 1)
-            env_state_EL_t, mjx_data_EL_t_plus_1 = jax.vmap(env_step, in_axes=(0, 0, 0))(
+            env_state_EL_t, mjx_data_EL_t_plus_1 = jax.vmap(step_fn, in_axes=(0, 0, 0))(
                 env_state_EL_t_minus_1, mjx_data_EL_t, rngs[1:]
             )
 

@@ -291,7 +291,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Logs the mean episode length.
         episode_count = jnp.sum(trajectory.done).clip(min=1)
-        mean_episode_length_steps = jnp.sum(~trajectory.done) / episode_count
+        mean_episode_length_steps = jnp.sum(~trajectory.done) / episode_count * self.config.ctrl_dt
         self.logger.log_scalar("mean_episode_seconds", mean_episode_length_steps, namespace="stats")
 
     ########################

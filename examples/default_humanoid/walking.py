@@ -23,7 +23,12 @@ from ksim.builders.resets import (
     RandomizeJointVelocities,
     XYPositionResetBuilder,
 )
-from ksim.builders.rewards import DHControlPenalty, DHForwardReward, DHHealthyReward
+from ksim.builders.rewards import (
+    DHControlPenalty,
+    DHForwardReward,
+    DHHealthyReward,
+    DHTerminationPenalty,
+)
 from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
@@ -95,6 +100,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 DHForwardReward(scale=0.125),
                 DHHealthyReward(
                     scale=0.5,
+                    healthy_z_lower=0.5,
+                    healthy_z_upper=1.5,
+                ),
+                DHTerminationPenalty(
+                    scale=-2.0,
                     healthy_z_lower=0.5,
                     healthy_z_upper=1.5,
                 ),

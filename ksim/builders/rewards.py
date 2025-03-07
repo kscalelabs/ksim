@@ -360,6 +360,27 @@ class DHHealthyReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class DHTerminationPenalty(Reward):
+    """Penalty for terminating the episode."""
+
+    healthy_z_lower: float = attrs.field(default=0.5)
+    healthy_z_upper: float = attrs.field(default=1.5)
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        height = mjx_data_t.qpos[2]
+        is_unhealthy = jnp.where(height < self.healthy_z_lower, 1.0, 0.0)
+        is_unhealthy = jnp.where(height > self.healthy_z_upper, 1.0, is_unhealthy)
+        return is_unhealthy
+
+
+@attrs.define(frozen=True, kw_only=True)
 class DHControlPenalty(Reward):
     """Legacy default humanoid control cost that penalizes squared action magnitude."""
 
