@@ -23,7 +23,6 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
-from mujoco_scenes.mjcf import load_mjmodel
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
@@ -45,6 +44,20 @@ from ksim.utils.robot_model import get_model_and_metadata
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+@profile
+@legit_jit()
+def mjx_forward(mjx_model: mjx.Model, mjx_data: mjx.Data) -> mjx.Data:
+    """Forward pass of the mjx model."""
+    return mjx.forward(mjx_model, mjx_data)
+
+
+@profile
+@legit_jit()
+def mjx_step(mjx_model: mjx.Model, mjx_data: mjx.Data) -> mjx.Data:
+    """Step pass of the mjx model."""
+    return mjx.step(mjx_model, mjx_data)
 
 
 def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
@@ -309,8 +322,8 @@ class MjxEnv(BaseEnv):
             )
             # torques = self.actuators.get_ctrl(data, action_motor_sees)
             data_with_ctrl = data.replace(ctrl=action_motor_sees)
-            data_with_ctrl = mjx.forward(mjx_model_L, data_with_ctrl)
-            new_data = mjx.step(mjx_model_L, data_with_ctrl)
+            data_with_ctrl = mjx_forward(mjx_model_L, data_with_ctrl)
+            new_data = mjx_step(mjx_model_L, data_with_ctrl)
             return (new_data, step_num + 1.0), None
 
         final_data_L = jax.lax.scan(f, (mjx_data_L, jnp.array(0.0)), None, n_steps)[0][0]
@@ -334,7 +347,7 @@ class MjxEnv(BaseEnv):
         rngs = jax.random.split(jax.random.PRNGKey(0), num_envs)
         default_data_EL = jax.vmap(get_init_data)(rngs)
 
-        mjx_data_EL_0 = jax.vmap(mjx.forward, in_axes=(None, 0))(
+        mjx_data_EL_0 = jax.vmap(mjx_forward, in_axes=(None, 0))(
             self.default_mjx_model, default_data_EL
         )
 
@@ -402,7 +415,7 @@ class MjxEnv(BaseEnv):
         rng, obs_rng = jax.random.split(rng, 2)
         timestep = jnp.array(0.0)
 
-        mjx_data_L_0 = mjx.forward(mjx_model_L, mjx_data_L_0)
+        mjx_data_L_0 = mjx_forward(mjx_model_L, mjx_data_L_0)
         obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
         command_L_0 = self.get_initial_commands(rng, timestep)
 
@@ -536,16 +549,7 @@ class MjxEnv(BaseEnv):
         model: ActorCriticAgent,
         variables: PyTree,
     ) -> tuple[EnvState, mjx.Data]:
-        """Steps the environment forward, automatically resetting if needed.
-
-        Args:
-            env_state_L_t_minus_1: Environment state before stepping
-            mjx_data_L_t: MuJoCo X data before stepping
-            rng: Random number generator state
-
-        Returns:
-            Tuple of (new environment state, new MJX data)
-        """
+        """Steps the environment and resets if needed."""
         reset_env_state_L_t, reset_mjx_data_L_t_plus_1 = self.reset(
             model=model,
             variables=variables,
@@ -606,7 +610,6 @@ class MjxEnv(BaseEnv):
         will be used as the initial state and model, respectively. Otherwise,
         the default model and data will be used.
         """
-
         step_fn = functools.partial(
             self.step_with_automatic_reset,
             model=model,

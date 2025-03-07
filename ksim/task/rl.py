@@ -25,7 +25,6 @@ from dpshdl.dataset import Dataset
 from flax import linen as nn
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from mujoco import mjx
 from omegaconf import MISSING
 
 from ksim.builders.loggers import (
