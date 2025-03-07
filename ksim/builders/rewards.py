@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from typing import Generic, Literal, TypeVar
 
 import attrs
-import jax
 import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
@@ -14,8 +13,8 @@ from jaxtyping import Array
 from mujoco import mjx
 
 from ksim.utils.data import BuilderData
-from ksim.utils.transforms import quat_to_euler
 from ksim.utils.mujoco import geoms_colliding
+from ksim.utils.transforms import quat_to_euler
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +125,7 @@ class OrientationPenalty(Reward):
     """Penalty for how well the robot is oriented."""
 
     norm: NormType = attrs.field(default="l2")
-    target_orientation: jax.Array = attrs.field(default=jnp.array([0.073, 0.0, 1.0]))
+    target_orientation: list = attrs.field(default=[0.073, 0.0, 1.0])
 
     def __call__(
         self,
@@ -136,8 +135,11 @@ class OrientationPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return get_norm(
-            quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - self.target_orientation, self.norm
+        return jnp.sum(
+            get_norm(
+                quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - jnp.array(self.target_orientation),
+                self.norm,
+            )
         )
 
 
@@ -155,7 +157,7 @@ class TorquePenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return get_norm(mjx_data_t_plus_1.actuator_force, self.norm)
+        return jnp.sum(get_norm(mjx_data_t_plus_1.actuator_force, self.norm))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -173,9 +175,11 @@ class EnergyPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return get_norm(mjx_data_t_plus_1.qvel[6:], self.norm) * get_norm(
-            mjx_data_t_plus_1.actuator_force, self.norm
+        return jnp.sum(
+            get_norm(mjx_data_t_plus_1.qvel[6:], self.norm)
+            * get_norm(mjx_data_t_plus_1.actuator_force, self.norm)
         )
+
 
 @attrs.define(frozen=True, kw_only=True)
 class JointAccelerationPenalty(Reward):
@@ -191,7 +195,8 @@ class JointAccelerationPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return get_norm(mjx_data_t_plus_1.qacc[6:], self.norm)
+        return jnp.sum(get_norm(mjx_data_t_plus_1.qacc[6:], self.norm))
+
 
 @attrs.define(frozen=True, kw_only=True)
 class LinearVelocityZPenalty(Reward):
@@ -299,6 +304,7 @@ class ActionSmoothnessPenalty(Reward):
             return jnp.zeros_like(get_norm(action_t, self.norm).sum(axis=-1))
         return get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1)
 
+
 @attrs.define(frozen=True, kw_only=True)
 class FootSlipPenalty(Reward):
     """Penalty for horizontal movement while feet are contacting the floor."""
@@ -314,26 +320,28 @@ class FootSlipPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        contacts = jnp.array([
-            geoms_colliding(mjx_data_t_plus_1, geom_idx, self.floor_idx)
-            for geom_idx in self.foot_geom_idxs
-        ])
+        contacts = jnp.array(
+            [
+                geoms_colliding(mjx_data_t_plus_1, geom_idx, self.floor_idx)
+                for geom_idx in self.foot_geom_idxs
+            ]
+        )
 
         # Get x and y velocities
         body_vel = mjx_data_t_plus_1.qvel[:2]
 
-        return jnp.linalg.norm(body_vel, axis=-1) * contacts
+        return jnp.sum(jnp.linalg.norm(body_vel, axis=-1) * contacts)
+
 
 @attrs.define(frozen=True, kw_only=True)
 class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
     scale: float
-    foot_body_names: list[str]
+    foot_geom_names: list[str]
 
     def __call__(self, data: BuilderData) -> FootSlipPenalty:
         illegal_geom_idxs = []
-        for geom_idx, body_name in data.mujoco_mappings.geom_idx_to_body_name.items():
-            if body_name in self.foot_body_names:
-                illegal_geom_idxs.append(geom_idx)
+        for geom_name in self.foot_geom_names:
+            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -348,6 +356,8 @@ class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
             floor_idx=floor_idx,
         )
 
+
+# TODO: Look into using bodies instead of geoms where appropriate
 @attrs.define(frozen=True, kw_only=True)
 class FeetClearancePenalty(Reward):
     """Penalty for deviation from desired feet clearance."""
@@ -368,19 +378,19 @@ class FeetClearancePenalty(Reward):
 
         # TODO: Look into adding linear feet velocity norm to scale the foot delta
 
-        return get_norm(feet_heights - self.max_foot_height, self.norm)
+        return jnp.sum(get_norm(feet_heights - self.max_foot_height, self.norm))
+
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetClearancePenaltyBuilder(RewardBuilder[FeetClearancePenalty]):
     scale: float
-    foot_body_names: list[str]
+    foot_geom_names: list[str]
     max_foot_height: float
 
     def __call__(self, data: BuilderData) -> FeetClearancePenalty:
         illegal_geom_idxs = []
-        for geom_idx, body_name in data.mujoco_mappings.geom_idx_to_body_name.items():
-            if body_name in self.foot_body_names:
-                illegal_geom_idxs.append(geom_idx)
+        for geom_name in self.foot_geom_names:
+            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -456,16 +466,15 @@ class FootContactPenalty(Reward):
 @attrs.define(frozen=True, kw_only=True)
 class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     scale: float
-    foot_body_names: list[str]
+    foot_geom_names: list[str]
     allowed_contact_prct: float
     contact_eps: float = attrs.field(default=1e-2)
     skip_if_zero_command: list[str] | None = attrs.field(default=None)
 
     def __call__(self, data: BuilderData) -> FootContactPenalty:
         illegal_geom_idxs = []
-        for geom_idx, body_name in data.mujoco_mappings.geom_idx_to_body_name.items():
-            if body_name in self.foot_body_names:
-                illegal_geom_idxs.append(geom_idx)
+        for geom_name in self.foot_geom_names:
+            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -475,4 +484,240 @@ class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
             allowed_contact_prct=self.allowed_contact_prct,
             contact_eps=self.contact_eps,
             skip_if_zero_command=self.skip_if_zero_command if self.skip_if_zero_command else [],
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetAirTimeReward(Reward):
+    """Reward for keeping the robot's feet in the air.
+
+    If the robot's feet are in the air for more than `required_air_time_prct`
+    percent of the time, the reward will be applied proportionally.
+
+    We additionally specify a list of commands which, if set to zero, will
+    cause the reward to be ignored. This is to avoid rewarding air time
+    if the robot is being commanded to stay still.
+    """
+
+    foot_geom_idxs: Array
+    floor_idx: int
+    required_air_time_prct: float
+    skip_if_zero_command: list[str] = attrs.field(factory=list)
+    eps: float = attrs.field(default=1e-6)
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        assert 0 <= self.required_air_time_prct <= 1
+        if len(self.skip_if_zero_command) == 0 and self.skip_if_zero_command is not None:
+            assert False, "skip_if_zero_command should be None or non-empty"
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        # Check if each foot is in contact with the floor
+        contacts = jnp.array(
+            [
+                geoms_colliding(mjx_data_t_plus_1, geom_idx, self.floor_idx)
+                for geom_idx in self.foot_geom_idxs
+            ]
+        )
+
+        # Count how many feet are off the ground (not in contact)
+        feet_in_air = (~contacts).sum().astype(jnp.float32)
+
+        # Skip the reward if specified commands are zero
+        if self.skip_if_zero_command:
+            commands_are_zero = jnp.stack(
+                [(command_t[cmd] < self.eps).all() for cmd in self.skip_if_zero_command],
+                axis=0,
+            )
+            feet_in_air = jnp.where(commands_are_zero.any(), 0.0, feet_in_air)
+
+        return jnp.sum(feet_in_air)
+
+    def post_accumulate(self, reward: Array) -> Array:
+        # Calculate the average number of feet in the air across timesteps
+        mean_feet_in_air = reward.mean()
+
+        # Calculate the maximum possible feet in air (length of foot_geom_idxs)
+        max_feet = len(self.foot_geom_idxs)
+
+        # Calculate the minimum required average feet in air
+        min_required_feet = self.required_air_time_prct * max_feet
+
+        # Only apply reward when average feet in air exceeds the required amount,
+        # and scale it by how much it exceeds the requirement
+        excess_feet = (mean_feet_in_air - jnp.array(min_required_feet)).clip(min=0)
+
+        # Normalize by the maximum possible excess
+        max_possible_excess = jnp.array(max_feet - min_required_feet)
+        normalized_multiplier = excess_feet / max_possible_excess.clip(min=1e-6)
+
+        return reward * normalized_multiplier
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
+    scale: float
+    foot_geom_names: list[str]
+    required_air_time_prct: float
+    skip_if_zero_command: list[str] | None = attrs.field(default=None)
+
+    def __call__(self, data: BuilderData) -> FeetAirTimeReward:
+        foot_geom_idxs = []
+        for geom_name in self.foot_geom_names:
+            foot_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+
+        foot_geom_idxs = jnp.array(foot_geom_idxs)
+
+        floor_idx = data.mujoco_mappings.floor_geom_idx
+        if floor_idx is None:
+            raise ValueError("No floor geom found in model")
+
+        return FeetAirTimeReward(
+            scale=self.scale,
+            foot_geom_idxs=foot_geom_idxs,
+            floor_idx=floor_idx,
+            required_air_time_prct=self.required_air_time_prct,
+            skip_if_zero_command=self.skip_if_zero_command if self.skip_if_zero_command else [],
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class DefaultPoseDeviationPenalty(Reward):
+    """Penalty for deviating from a default/reference pose.
+
+    Penalizes joint positions that deviate from specified default values.
+    This helps maintain proper posture during movement.
+    """
+
+    joint_indices: Array
+    default_positions: Array
+    joint_deviation_weights: Array
+    norm: NormType = attrs.field(default="l2")
+    exclude_base_pose: bool = attrs.field(default=True)
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        # Get current joint positions
+        current_positions = mjx_data_t_plus_1.qpos[self.joint_indices]
+
+        # Calculate deviation from default pose
+        deviations = current_positions - self.default_positions
+
+        # Apply weights to deviations
+        weighted_deviations = deviations * self.joint_deviation_weights
+
+        return jnp.sum(get_norm(weighted_deviations, self.norm))
+
+
+@attrs.define(frozen=True, kw_only=True)
+class DefaultPoseDeviationPenaltyBuilder(RewardBuilder[DefaultPoseDeviationPenalty]):
+    scale: float
+    default_positions: dict[str, float]
+    deviation_weights: dict[str, float]
+    norm: NormType = attrs.field(default="l2")
+
+    def __call__(self, data: BuilderData) -> DefaultPoseDeviationPenalty:
+        # Convert joint names to indices
+        joint_indices = []
+        default_positions_list = []
+        joint_deviation_weights = []
+
+        for joint_name, position in self.default_positions.items():
+            try:
+                idx_range = data.mujoco_mappings.qpos_name_to_idx_range[joint_name]
+                start_idx = idx_range[0]
+                joint_indices.append(start_idx)
+                default_positions_list.append(position)
+                joint_deviation_weights.append(self.deviation_weights[joint_name])
+            except KeyError:
+                raise ValueError(f"Joint '{joint_name}' not found in model")
+
+        joint_indices_array = jnp.array(joint_indices)
+        default_positions_array = jnp.array(default_positions_list)
+        joint_deviation_weights_array = jnp.array(joint_deviation_weights)
+
+        return DefaultPoseDeviationPenalty(
+            scale=self.scale,
+            joint_indices=joint_indices_array,
+            default_positions=default_positions_array,
+            joint_deviation_weights=joint_deviation_weights_array,
+            norm=self.norm,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointPosLimitPenalty(Reward):
+    """Penalty for joint positions exceeding soft limits.
+
+    Penalizes joint positions that exceed specified soft lower and upper bounds.
+    This encourages the robot to stay within a safe range of motion and avoid
+    hitting hard joint limits which can cause instability.
+    """
+
+    joint_indices: Array
+    soft_lower_limits: Array
+    soft_upper_limits: Array
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        # Get current joint positions
+        joint_positions = mjx_data_t_plus_1.qpos[self.joint_indices]
+
+        # Calculate violations of soft limits
+        lower_violations = -jnp.clip(joint_positions - self.soft_lower_limits, None, 0.0)
+        upper_violations = jnp.clip(joint_positions - self.soft_upper_limits, 0.0, None)
+
+        # Combine violations
+        total_violations = lower_violations + upper_violations
+
+        return jnp.sum(total_violations)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
+    scale: float
+    joint_limits: dict[str, tuple[float, float]]
+
+    def __call__(self, data: BuilderData) -> JointPosLimitPenalty:
+        joint_indices = []
+        soft_lowers = []
+        soft_uppers = []
+
+        for joint_name, (lower, upper) in self.joint_limits.items():
+            if joint_name in data.mujoco_mappings.qpos_name_to_idx_range:
+                idx_range = data.mujoco_mappings.qpos_name_to_idx_range[joint_name]
+                start_idx = idx_range[0]
+                joint_indices.append(start_idx)
+                soft_lowers.append(lower)
+                soft_uppers.append(upper)
+            else:
+                raise ValueError(f"Joint '{joint_name}' not found in model")
+
+        if not joint_indices:
+            raise ValueError("No valid joints specified for JointPosLimitPenalty")
+
+        return JointPosLimitPenalty(
+            scale=self.scale,
+            joint_indices=jnp.array(joint_indices),
+            soft_lower_limits=jnp.array(soft_lowers),
+            soft_upper_limits=jnp.array(soft_uppers),
         )

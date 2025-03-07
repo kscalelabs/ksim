@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 
-import attrs
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -23,14 +22,21 @@ from ksim.builders.resets import JointVelocityResetBuilder, XYPositionResetBuild
 from ksim.builders.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
+    DefaultPoseDeviationPenaltyBuilder,
+    EnergyPenalty,
+    FeetAirTimeRewardBuilder,
+    FeetClearancePenaltyBuilder,
     FootContactPenaltyBuilder,
+    FootSlipPenaltyBuilder,
     HeightReward,
+    JointAccelerationPenalty,
     LinearVelocityZPenalty,
+    OrientationPenalty,
+    TorquePenalty,
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
 from ksim.builders.terminations import (
-    IllegalContactTerminationBuilder,
     PitchTooGreatTermination,
     RollTooGreatTermination,
 )
@@ -338,7 +344,9 @@ class KBotCriticModel(nn.Module):
     @nn.compact
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> jax.Array:
         # Concatenate all observations and commands (critic has privileged information)
-        clean_obs = FrozenDict({k: v for k, v in obs.items() if "_noisy" not in k})
+        clean_obs: FrozenDict[str, Array] = FrozenDict(
+            {k: v for k, v in obs.items() if "_noisy" not in k}
+        )
         x_n = jnp.concatenate([obs_array for obs_array in clean_obs.values()], axis=-1)
         cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
         x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
@@ -392,30 +400,119 @@ class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
                 JointVelocityResetBuilder(max_velocity=1.0),
             ],
             rewards=[
-                # LinearVelocityZPenalty(scale=-0.1),
-                # AngularVelocityXYPenalty(scale=-0.1),
-                TrackLinearVelocityXYReward(scale=0.1),
-                HeightReward(scale=0.1, height_target=1.5),
-                # TrackAngularVelocityZReward(scale=0.1),
-                # ActionSmoothnessPenalty(scale=-0.1),
-                # FootContactPenaltyBuilder(
-                #     scale=-0.1,
-                #     foot_body_names=["KB_D_501R_R_LEG_FOOT"],
-                #     allowed_contact_prct=0.7,
-                #     skip_if_zero_command=[
-                #         "linear_velocity_command",
-                #         "angular_velocity_command",
-                #     ],
-                # ),
-                # FootContactPenaltyBuilder(
-                #     scale=-0.1,
-                #     foot_body_names=["KB_D_501L_L_LEG_FOOT"],
-                #     allowed_contact_prct=0.7,
-                #     skip_if_zero_command=[
-                #         "linear_velocity_command",
-                #         "angular_velocity_command",
-                #     ],
-                # ),
+                LinearVelocityZPenalty(scale=-0.0),
+                AngularVelocityXYPenalty(scale=-0.15),
+                TrackLinearVelocityXYReward(scale=1.0),
+                HeightReward(scale=0.0, height_target=1.5),
+                TrackAngularVelocityZReward(scale=0.75),
+                ActionSmoothnessPenalty(scale=-0.0),
+                OrientationPenalty(scale=-2.0, target_orientation=[0.073, 0.0, 1.0]),
+                TorquePenalty(scale=-0.0),
+                EnergyPenalty(scale=-0.0),
+                JointAccelerationPenalty(scale=-0.0),
+                FootSlipPenaltyBuilder(
+                    scale=-0.25,
+                    foot_geom_names=[
+                        "foot1_collision_sphere_1",
+                        "foot1_collision_sphere_2",
+                        "foot1_collision_sphere_3",
+                        "foot1_collision_sphere_4",
+                        "foot1_collision_box",
+                        "foot3_collision_sphere_1",
+                    ],
+                ),
+                FeetClearancePenaltyBuilder(
+                    scale=-0.0,
+                    foot_geom_names=[
+                        "foot1_collision_sphere_1",
+                        "foot1_collision_sphere_2",
+                        "foot1_collision_sphere_3",
+                        "foot1_collision_sphere_4",
+                        "foot1_collision_box",
+                        "foot3_collision_sphere_1",
+                    ],
+                    max_foot_height=0.2,
+                ),
+                FeetAirTimeRewardBuilder(
+                    scale=2.0,
+                    foot_geom_names=[
+                        "foot1_collision_sphere_1",
+                        "foot1_collision_sphere_2",
+                        "foot1_collision_sphere_3",
+                        "foot1_collision_sphere_4",
+                        "foot1_collision_box",
+                        "foot3_collision_sphere_1",
+                    ],
+                    required_air_time_prct=0.3,
+                    skip_if_zero_command=["linear_velocity_command", "angular_velocity_command"],
+                ),
+                FootContactPenaltyBuilder(
+                    scale=-0.1,
+                    foot_geom_names=[
+                        "foot3_collision_sphere_1",
+                        "foot3_collision_sphere_2",
+                        "foot3_collision_sphere_3",
+                        "foot3_collision_sphere_4",
+                        "foot3_collision_box",
+                        "foot1_collision_sphere_1",
+                        "foot1_collision_sphere_2",
+                        "foot1_collision_sphere_3",
+                        "foot1_collision_sphere_4",
+                        "foot1_collision_box",
+                    ],
+                    allowed_contact_prct=0.7,
+                    skip_if_zero_command=[
+                        "linear_velocity_command",
+                        "angular_velocity_command",
+                    ],
+                ),
+                DefaultPoseDeviationPenaltyBuilder(
+                    scale=-0.1,
+                    default_positions={
+                        "left_shoulder_pitch_03": 0.0,
+                        "left_shoulder_roll_03": 0.0,
+                        "left_shoulder_yaw_02": 0.0,
+                        "left_elbow_02": 0.0,
+                        "left_wrist_02": 0.0,
+                        "right_shoulder_pitch_03": 0.0,
+                        "right_shoulder_roll_03": 0.0,
+                        "right_shoulder_yaw_02": 0.0,
+                        "right_elbow_02": 0.0,
+                        "right_wrist_02": 0.0,
+                        "left_hip_pitch_04": 0.0,
+                        "left_hip_roll_03": 0.0,
+                        "left_hip_yaw_03": 0.0,
+                        "left_knee_04": 0.0,
+                        "left_ankle_02": 0.0,
+                        "right_hip_pitch_04": 0.0,
+                        "right_hip_roll_03": 0.0,
+                        "right_hip_yaw_03": 0.0,
+                        "right_knee_04": 0.0,
+                        "right_ankle_02": 0.0,
+                    },
+                    deviation_weights={
+                        "left_shoulder_pitch_03": 1.0,
+                        "left_shoulder_roll_03": 1.0,
+                        "left_shoulder_yaw_02": 1.0,
+                        "left_elbow_02": 1.0,
+                        "left_wrist_02": 1.0,
+                        "right_shoulder_pitch_03": 1.0,
+                        "right_shoulder_roll_03": 1.0,
+                        "right_shoulder_yaw_02": 1.0,
+                        "right_elbow_02": 1.0,
+                        "right_wrist_02": 1.0,
+                        "left_hip_pitch_04": 2.0,
+                        "left_hip_roll_03": 2.0,
+                        "left_hip_yaw_03": 2.0,
+                        "left_knee_04": 1.0,
+                        "left_ankle_02": 1.0,
+                        "right_hip_pitch_04": 2.0,
+                        "right_hip_roll_03": 2.0,
+                        "right_hip_yaw_03": 2.0,
+                        "right_knee_04": 1.0,
+                        "right_ankle_02": 1.0,
+                    },
+                ),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),

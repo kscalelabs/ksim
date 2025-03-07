@@ -28,7 +28,7 @@ from ksim.builders.terminations import (
     RollTooGreatTermination,
 )
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
+from ksim.model.formulations import ActionModel, ActorCriticAgent, GaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
@@ -45,6 +45,7 @@ class HumanoidActorModel(GaussianActionModel):
         actions_n = self.mlp(x_n)
         return actions_n
 
+
 class HumanoidZeroActions(GaussianActionModel):
     mlp: MLP
 
@@ -54,7 +55,6 @@ class HumanoidZeroActions(GaussianActionModel):
         x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
         actions_n = self.mlp(x_n)
         return jnp.zeros_like(actions_n)
-
 
     def sample_and_log_prob(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
@@ -175,14 +175,20 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                     hidden_features=self.config.actor_hidden_dims,
                     out_features=NUM_OUTPUTS,
                 )
+                actor: ActionModel
                 match self.config.viz_action:
                     case "policy":
-                        actor = HumanoidActorModel(mlp=mlp, init_log_std=-0.7, num_outputs=NUM_OUTPUTS)
+                        actor = HumanoidActorModel(
+                            mlp=mlp, init_log_std=-0.7, num_outputs=NUM_OUTPUTS
+                        )
                     case "zero":
-                        actor = HumanoidZeroActions(mlp=mlp, init_log_std=-0.7, num_outputs=NUM_OUTPUTS)
+                        actor = HumanoidZeroActions(
+                            mlp=mlp, init_log_std=-0.7, num_outputs=NUM_OUTPUTS
+                        )
                     case _:
                         raise ValueError(
-                            f"Invalid action: {self.config.viz_action}. Should be one of `policy` or `zero`."
+                            f"Invalid action: {self.config.viz_action}. "
+                            f"Should be one of `policy` or `zero`."
                         )
 
                 model = ActorCriticAgent(

@@ -212,7 +212,6 @@ class MjxEnv(BaseEnv):
         self.default_mj_data = mujoco.MjData(mj_model)
         self.default_mjx_model = mjx.put_model(mj_model)
         self.default_mjx_data = mjx.make_data(self.default_mjx_model)
-
         self.mujoco_mappings = make_mujoco_mappings(self.default_mjx_model)
         match self.config.actuator_type:
             case "mit":
@@ -233,7 +232,6 @@ class MjxEnv(BaseEnv):
             ctrl_dt=self.config.ctrl_dt,
             mujoco_mappings=self.mujoco_mappings,
         )
-
         # storing the termination, reset, reward, observation, and command builders
         terminations_v = [t(data) if isinstance(t, TerminationBuilder) else t for t in terminations]
         resets_v = [r(data) if isinstance(r, ResetBuilder) else r for r in resets]
