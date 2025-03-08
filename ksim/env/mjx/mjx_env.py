@@ -11,7 +11,6 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 import asyncio
 import functools
 import logging
-import time
 from dataclasses import dataclass
 from typing import Collection, TypeVar
 
@@ -97,9 +96,6 @@ class MjxEnvConfig(BaseEnvConfig):
 
     # actuator configuration options
     actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
-
-    # compilation options
-    compile_unroll: bool = xax.field(value=True, help="Whether to compile the entire unroll fn.")
 
 
 # The new stateless environment – note that we do not call any stateful methods.
