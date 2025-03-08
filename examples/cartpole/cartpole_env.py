@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from flax.core import FrozenDict
-from jaxtyping import PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.env.types import PhysicsData, PhysicsModel
@@ -89,7 +89,7 @@ class CartPoleEnv(BaseEnv):
         physics_data_EL_t: PhysicsData | None = None,
         physics_model_L: PhysicsModel | None = None,
         return_intermediate_data: bool = False,
-    ) -> tuple[EnvState, PhysicsData]:
+    ) -> tuple[EnvState, PhysicsData, Array]:
         """Rollout the model for a given number of steps."""
         assert num_envs == 1, "CartPoleEnv only supports a single environment"
         observations = []
@@ -141,6 +141,7 @@ class CartPoleEnv(BaseEnv):
                 reward_components=FrozenDict({}),
             ),
             None,
+            jnp.array(False),
         )
 
     @property

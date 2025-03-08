@@ -7,7 +7,7 @@ from pathlib import Path
 import jax
 import numpy as np
 import xax
-from jaxtyping import PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING
 
 from ksim.builders.rewards import Reward
@@ -97,7 +97,7 @@ class BaseEnv(ABC):
         physics_data_EL_t: PhysicsData,
         physics_model_L: PhysicsModel,
         return_intermediate_data: bool = False,
-    ) -> tuple[EnvState, PhysicsData]: ...
+    ) -> tuple[EnvState, PhysicsData, Array]: ...
 
     """Retruns env state trajectory (TEL) and physics data (EL or TEL).
 
