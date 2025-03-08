@@ -39,7 +39,11 @@ class Observation(ABC):
                 raise ValueError(f"Invalid noise type: {self.noise_type}")
 
     def get_name(self) -> str:
-        return xax.camelcase_to_snakecase(self.__class__.__name__)
+        # We append `_noisy` to the name if the noise is non-zero.
+        # This is to distinguish between ideal and non-ideal
+        # observations for the actor-critic formulation
+        noisy = "_noisy" if self.noise > 0.0 else ""
+        return xax.camelcase_to_snakecase(self.__class__.__name__) + noisy
 
     @functools.cached_property
     def observation_name(self) -> str:

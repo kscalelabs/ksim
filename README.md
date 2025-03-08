@@ -45,7 +45,7 @@ Dimension suffixes:
 - `T`: the time dimension during rollout.
 - `E`: the env dimension during rollout.
 - `L`: leaf dimension of a pytree (e.g. joint position vector size in an obs), 
-       shoould not be used if the variable's final dimension is a scalar.
+       should not be used if the variable's final dimension is a scalar.
 
 Timestamp suffixes:
 - `t`: current timestep

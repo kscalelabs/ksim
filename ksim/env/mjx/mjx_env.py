@@ -202,10 +202,11 @@ class MjxEnv(BaseEnv):
 
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
-        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.iterations = self.config.solver_iterations
         mj_model.opt.ls_iterations = self.config.solver_ls_iterations
         mj_model.opt.timestep = self.config.dt
+        mj_model.opt.disableflags = self.config.disable_flags_bitmask
+        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
 
         return mj_model
 
@@ -568,6 +569,13 @@ class MjxEnv(BaseEnv):
         data_has_nans = jax.tree_util.tree_reduce(
             lambda a, b: jnp.logical_or(a, b),
             jax.tree_util.tree_map(lambda x: jnp.any(jnp.isnan(x)), step_mjx_data_L_t_plus_1),
+        )
+
+        jax.lax.cond(
+            data_has_nans,
+            lambda _: jax.debug.print("NaNs detected in physics data"),
+            lambda _: None,
+            operand=None,
         )
 
         do_reset = jnp.logical_or(env_state_L_t_minus_1.done, data_has_nans)
