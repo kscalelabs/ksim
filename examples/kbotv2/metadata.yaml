@@ -1,0 +1,111 @@
+# Metadata for kbotv2 robot model
+control_frequency: 200.0  # Standard control frequency for fine-grained control
+
+actuators:
+  # Right arm actuators
+  right_shoulder_pitch_03_ctrl:
+    kp: 150.0
+    kd: 15.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 60.0
+  right_shoulder_roll_03_ctrl:
+    kp: 150.0
+    kd: 15.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 60.0
+  right_shoulder_yaw_02_ctrl:
+    kp: 100.0
+    kd: 10.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 17.0
+  right_elbow_02_ctrl:
+    kp: 100.0
+    kd: 10.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 17.0
+  right_wrist_02_ctrl:
+    kp: 50.0
+    kd: 5.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 17.0
+
+  # Left arm actuators
+  left_shoulder_pitch_03_ctrl:
+    kp: 150.0
+    kd: 15.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 60.0
+  left_shoulder_roll_03_ctrl:
+    kp: 150.0
+    kd: 15.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 60.0
+  left_shoulder_yaw_02_ctrl:
+    kp: 100.0
+    kd: 10.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 17.0
+  left_elbow_02_ctrl:
+    kp: 100.0
+    kd: 10.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 17.0
+  left_wrist_02_ctrl:
+    kp: 50.0
+    kd: 5.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 17.0
+
+  # Right leg actuators
+  right_hip_pitch_04_ctrl:
+    kp: 300.0
+    kd: 30.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 120.0
+  right_hip_roll_03_ctrl:
+    kp: 200.0
+    kd: 20.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 60.0
+  right_hip_yaw_03_ctrl:
+    kp: 150.0
+    kd: 15.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 60.0
+  right_knee_04_ctrl:
+    kp: 300.0
+    kd: 30.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 120.0
+  right_ankle_02_ctrl:
+    kp: 100.0
+    kd: 10.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 17.0
+
+  # Left leg actuators  
+  left_hip_pitch_04_ctrl:
+    kp: 300.0
+    kd: 30.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 120.0
+  left_hip_roll_03_ctrl:
+    kp: 200.0
+    kd: 20.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 60.0
+  left_hip_yaw_03_ctrl:
+    kp: 150.0
+    kd: 15.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 60.0
+  left_knee_04_ctrl:
+    kp: 300.0
+    kd: 30.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 120.0
+  left_ankle_02_ctrl:
+    kp: 100.0
+    kd: 10.0
+    input_range: [-1.0, 1.0]
+    gear_ratio: 17.0
