@@ -571,13 +571,6 @@ class MjxEnv(BaseEnv):
             jax.tree_util.tree_map(lambda x: jnp.any(jnp.isnan(x)), step_mjx_data_L_t_plus_1),
         )
 
-        jax.lax.cond(
-            data_has_nans,
-            lambda _: jax.debug.print("NaNs detected in physics data"),
-            lambda _: None,
-            operand=None,
-        )
-
         do_reset = jnp.logical_or(env_state_L_t_minus_1.done, data_has_nans)
 
         env_state_L_t = jax.tree_util.tree_map(
