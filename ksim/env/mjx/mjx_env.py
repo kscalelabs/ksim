@@ -11,6 +11,7 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 import asyncio
 import functools
 import logging
+import time
 from dataclasses import dataclass
 from typing import Collection, TypeVar
 
@@ -656,15 +657,8 @@ class MjxEnv(BaseEnv):
         """
         rng_E = jax.random.split(rng, num_envs)
 
-        if self.config.compile_unroll:
-            unroll_fn = legit_jit(
-                static_argnames=["model", "num_steps", "return_intermediate_data"],
-            )(self.unroll_trajectory)
-        else:
-            unroll_fn = self.unroll_trajectory
-
         env_state_ETL, physics_data_res, has_nans_ETL = jax.vmap(
-            unroll_fn, in_axes=(None, None, 0, None, 0, 0, None, None)
+            self.unroll_trajectory, in_axes=(None, None, 0, None, 0, 0, None, None)
         )(
             model,
             variables,

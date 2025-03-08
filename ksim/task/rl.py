@@ -76,6 +76,10 @@ class RLConfig(BaseEnvConfig, xax.Config):
         value=None,
         help="The checkpoint number to load. Otherwise the latest checkpoint is loaded.",
     )
+    compile_unroll: bool = xax.field(
+        value=True,
+        help="Whether to compile the entire unroll fn.",
+    )
 
 
 Config = TypeVar("Config", bound=RLConfig)
@@ -232,9 +236,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             key, _ = jax.random.split(rng)
 
             start_time = time.time()
-            variables = self.get_init_variables(
-                key, pretrained=self.config.pretrained, checkpoint_num=self.config.checkpoint_num
-            )
+            variables = self.get_init_variables(key)
             end_time = time.time()
             print(f"Time taken for parameter initialization: {end_time - start_time} seconds")
 
@@ -297,14 +299,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ########################
 
     @profile
-    def get_init_variables(
-        self, key: PRNGKeyArray, pretrained: str | None = None, checkpoint_num: int | None = None
-    ) -> PyTree:
+    def get_init_variables(self, key: PRNGKeyArray) -> PyTree:
         """Get the initial parameters as a PyTree: assumes flax-compatible model."""
         env = self.get_environment()
         state = env.get_dummy_env_states(self.config.num_envs)
 
-        if pretrained is not None:
+        if self.config.pretrained is not None:
             _, checkpoint_path = self.get_checkpoint_number_and_path()
             logger.info("Loading pretrained checkpoint from %s", checkpoint_path)
             return self.load_checkpoint(checkpoint_path, part="model")
@@ -549,13 +549,32 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, None))(
             model, variables, reset_rngs, physics_model_L
         )
-        # Burn in trajectory to get normalization statistics
-        # Thorn: carry_data_EL is the state AFTER the final EnvState
-        dataset_DL, rollout_loss_components_DL, carry_env_state_EL, carry_data_EL, has_nans = (
-            self.get_rl_dataset(
+
+        def dataset_fn(
+            variables: PyTree,
+            env_state_EL_t_minus_1: EnvState,
+            physics_data_EL_t: PhysicsData,
+            physics_model_L: PhysicsModel,
+            rng: PRNGKeyArray,
+        ) -> tuple[EnvState, RolloutTimeLossComponents, EnvState, PhysicsData, Array]:
+            return self.get_rl_dataset(
                 model=model,
                 variables=variables,
                 env=env,
+                env_state_EL_t_minus_1=env_state_EL_t_minus_1,
+                physics_data_EL_t=physics_data_EL_t,
+                physics_model_L=physics_model_L,
+                rng=rng,
+            )
+
+        if self.config.compile_unroll:
+            dataset_fn = legit_jit()(dataset_fn)
+
+        # Burn in trajectory to get normalization statistics
+        # Thorn: carry_data_EL is the state AFTER the final EnvState
+        dataset_DL, rollout_loss_components_DL, carry_env_state_EL, carry_data_EL, has_nans = (
+            dataset_fn(
+                variables=variables,
                 env_state_EL_t_minus_1=env_state_EL_0,
                 physics_data_EL_t=physics_data_EL_1,
                 physics_model_L=physics_model_L,
@@ -574,12 +593,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Unrolls a trajectory.
             start_time = time.time()
-            reshuffle_rng, rollout_rng = jax.random.split(train_rng)
+            reshuffle_rng, rollout_rng, train_rng = jax.random.split(train_rng, 3)
             dataset_DL, rollout_loss_components_DL, carry_env_state_EL, carry_data_EL, has_nans = (
-                self.get_rl_dataset(
-                    model=model,
+                dataset_fn(
                     variables=variables,
-                    env=env,
                     env_state_EL_t_minus_1=carry_env_state_EL,
                     physics_data_EL_t=carry_data_EL,
                     physics_model_L=physics_model_L,
