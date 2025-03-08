@@ -346,10 +346,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         physics_data_EL_t: PhysicsData,
         physics_model_L: PhysicsModel,
         rng: PRNGKeyArray,
-    ) -> tuple[EnvState, RolloutTimeLossComponents, EnvState, PhysicsData]:
-        """Returns env state, loss components, carry env state, physics data."""
-        # TODO: implement logic to handle randomize model initialization when creating batch
-        rollout_TEL, data_EL_f_plus_1 = env.unroll_trajectories(
+    ) -> tuple[EnvState, RolloutTimeLossComponents, EnvState, PhysicsData, Array]:
+        """Returns all data needed to train a minibatch.
+
+        This includes:
+        - env state trajectory (TEL)
+        - physics data trajectory (TEL)
+        - rollout time loss components (TEL)
+        - final env state (EL)
+        - final physics data (EL)
+        - has_nans flags (ETL)
+        """
+        rollout_TEL, data_EL_f_plus_1, has_nans = env.unroll_trajectories(
             model=model,
             variables=variables,
             rng=rng,
@@ -381,7 +389,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             flatten_rollout_array, rollout_time_loss_components_TEL
         )
 
-        return rollout_DL, rollout_time_loss_components_DL, rollout_EL_f, data_EL_f_plus_1
+        return rollout_DL, rollout_time_loss_components_DL, rollout_EL_f, data_EL_f_plus_1, has_nans
 
     @profile
     def reshuffle_rollout(
@@ -544,7 +552,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         # Burn in trajectory to get normalization statistics
         # Thorn: carry_data_EL is the state AFTER the final EnvState
-        dataset_DL, rollout_loss_components_DL, carry_env_state_EL, carry_data_EL = (
+        dataset_DL, rollout_loss_components_DL, carry_env_state_EL, carry_data_EL, has_nans = (
             self.get_rl_dataset(
                 model=model,
                 variables=variables,
@@ -568,7 +576,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Unrolls a trajectory.
             start_time = time.time()
             reshuffle_rng, rollout_rng = jax.random.split(train_rng)
-            dataset_DL, rollout_loss_components_DL, carry_env_state_EL, carry_data_EL = (
+            dataset_DL, rollout_loss_components_DL, carry_env_state_EL, carry_data_EL, has_nans = (
                 self.get_rl_dataset(
                     model=model,
                     variables=variables,
@@ -613,6 +621,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 for key, value in metrics_mean.items():
                     assert isinstance(value, jnp.ndarray)
                     self.logger.log_scalar(key, value, namespace="stats")
+
+                # logging has_nans to info here...
+                self.logger.log_scalar("has_nans", has_nans, namespace="stats")
 
                 self.logger.write(training_state)
                 training_state.num_steps += 1
