@@ -65,3 +65,35 @@ These should absolutely be annotated:
 
 ### Sharp Bits
 - Add all sharp bits or unorthodox (yet correct) design decisions here.
+
+### Development Tools
+
+#### Reward Visualization
+
+The reward visualizer is a tool for visualizing the rewards of an RL task. It is
+designed to be used in conjunction with the `ksim.utils.reward_visualization.base.RewardVisualizer`
+base class.
+
+To use the reward visualizer, you need to subclass the base class and implement the
+`setup_environment` and `run` methods.
+
+The `setup_environment` method should return an instance of the environment
+that you want to visualize the rewards of.
+
+The `run` method should contain the logic for running the reward visualizer.
+
+To see an example of how to use the reward visualizer, see the `ksim.utils.reward_visualization.mujoco.MujocoRewardVisualizer`
+class. This class is used in the `examples/kbot/viz_standing.py` example.
+
+Key Commands:
+- `Space`: Pause/Resume the simulation
+- `S`: Suspend the model in place
+- Arrow Keys: Modify the model position in place
+  - `up`: increase x position
+  - `down`: decrease x position
+  - `right`: increase y position
+  - `left`: decrease y position
+- `P`: increase z position
+- `L`: decrease z position
+- `N`: Step the simulation forward
+- `R`: Reset joint positions and robot orientation to initial conditions
