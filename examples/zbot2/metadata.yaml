@@ -1,0 +1,56 @@
+actuators:
+  left_shoulder_yaw:
+    kp: 200.0
+    kd: 5.0
+  left_shoulder_pitch:
+    kp: 200.0
+    kd: 5.0
+  left_elbow:
+    kp: 200.0
+    kd: 5.0
+  left_gripper:
+    kp: 200.0
+    kd: 5.0
+  right_shoulder_yaw:
+    kp: 200.0
+    kd: 5.0
+  right_shoulder_pitch:
+    kp: 200.0
+    kd: 5.0
+  right_elbow:
+    kp: 200.0
+    kd: 5.0
+  right_gripper:
+    kp: 200.0
+    kd: 5.0
+  left_hip_yaw:
+    kp: 200.0
+    kd: 5.0
+  left_hip_roll:
+    kp: 200.0
+    kd: 5.0
+  left_hip_pitch:
+    kp: 200.0
+    kd: 5.0
+  left_knee:
+    kp: 200.0
+    kd: 5.0
+  left_ankle:
+    kp: 200.0
+    kd: 5.0
+  right_hip_yaw:
+    kp: 200.0
+    kd: 5.0
+  right_hip_roll:
+    kp: 200.0
+    kd: 5.0
+  right_hip_pitch:
+    kp: 200.0
+    kd: 5.0
+  right_knee:
+    kp: 200.0
+    kd: 5.0
+  right_ankle:
+    kp: 200.0
+    kd: 5.0
+control_frequency: 50.0
