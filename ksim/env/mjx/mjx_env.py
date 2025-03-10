@@ -427,16 +427,13 @@ class MjxEnv(BaseEnv):
             num_latency_steps=jnp.array(0),  # Enforced here as well...
         )
 
-        done_L_0 = jnp.array(False, dtype=jnp.bool_)
-        reward_L_0 = jnp.array(0.0)
+        term_components_L_0 = self.get_terminations(mjx_data_L_1)
+        reward_components_L_0 = self.get_rewards(
+            action_L_0, mjx_data_L_0, command_L_0, action_L_0, mjx_data_L_1
+        )
 
-        term_components_L_0 = {k: v for k, v in self.get_terminations(mjx_data_L_1).items()}
-        reward_components_L_0 = {
-            k: v
-            for k, v in self.get_rewards(
-                action_L_0, mjx_data_L_0, command_L_0, action_L_0, mjx_data_L_1
-            ).items()
-        }
+        done_L_0 = jnp.stack([v for _, v in term_components_L_0.items()]).any()
+        reward_L_0 = jnp.stack([v for _, v in reward_components_L_0.items()]).sum()
 
         env_state_L_0 = EnvState(
             obs=obs_L_0,
@@ -506,19 +503,16 @@ class MjxEnv(BaseEnv):
             num_latency_steps=latency_steps,
         )
 
-        all_dones = self.get_terminations(mjx_data_L_t_plus_1)
-        done_L_t = jnp.stack([v for _, v in all_dones.items()]).any()
-        all_rewards = self.get_rewards(
+        term_components_L_t = self.get_terminations(mjx_data_L_t_plus_1)
+        done_L_t = jnp.stack([v for _, v in term_components_L_t.items()]).any()
+        reward_components_L_t = self.get_rewards(
             env_state_L_t_minus_1.action,
             mjx_data_L_t,
             command_L_t,
             action_L_t,
             mjx_data_L_t_plus_1,
         )
-        reward_L_t = jnp.stack([v for _, v in all_rewards.items()]).sum()
-
-        term_components_L_t = {k: v for k, v in all_dones.items()}
-        reward_components_L_t = {k: v for k, v in all_rewards.items()}
+        reward_L_t = jnp.stack([v for _, v in reward_components_L_t.items()]).sum()
 
         env_state_L_t = EnvState(
             obs=obs_L_t,
@@ -527,8 +521,8 @@ class MjxEnv(BaseEnv):
             reward=reward_L_t,
             done=done_L_t,
             timestep=timestep,
-            termination_components=FrozenDict(term_components_L_t),
-            reward_components=FrozenDict(reward_components_L_t),
+            termination_components=term_components_L_t,
+            reward_components=reward_components_L_t,
         )
 
         return env_state_L_t, mjx_data_L_t_plus_1
