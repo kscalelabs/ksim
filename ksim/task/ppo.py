@@ -167,15 +167,22 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # while other variables might be present in comp graph, only update params...
         params = variables["params"]
         grads = grads["params"]
+
+        grad_norm = optax.global_norm(grads)
+        assert isinstance(grad_norm, Array)
+        metrics["loss"] = loss_val
+        metrics["grad_norm"] = grad_norm
+        frozen_metrics: FrozenDict[str, Array] = FrozenDict(metrics)
+
         updates, new_opt_state = optimizer.update(grads, opt_state, params)
         new_params = optax.apply_updates(params, updates)
 
-        return new_params, new_opt_state, loss_val, metrics
+        return new_params, new_opt_state, loss_val, frozen_metrics
 
     def get_optimizer(self) -> optax.GradientTransformation:
         """Get the optimizer: handled by XAX."""
         return optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
+            # optax.clip_by_global_norm(self.config.max_grad_norm),
             optax.adam(self.config.learning_rate),
         )
 
@@ -226,7 +233,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         variables: PyTree,
         env_state_batch: EnvState,
         rollout_time_loss_components: RolloutTimeLossComponents,
-    ) -> tuple[Array, FrozenDict[str, Array]]:
+    ) -> tuple[Array, dict[str, Array]]:
         """Compute the PPO loss."""
         # get the log probs of the current model
         prediction = self.apply_actor(
@@ -298,22 +305,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
         total_loss = -total_objective
 
-        metrics_to_log: FrozenDict[str, Array] = FrozenDict(
-            {
-                "policy_objective": policy_objective,
-                "value_objective": value_objective,
-                "entropy_objective": entropy_objective,
-                "total_objective": total_objective,
-                "average_ratio": jnp.mean(ratio),
-                "log_prob_diff_mean": jnp.mean(log_prob_diff),
-                "advantage_norm_mean": jnp.mean(jnp.abs(rollout_time_loss_components.advantages)),
-                "prediction_std": jnp.std(prediction),
-                "prediction_mean": jnp.mean(prediction),
-                "log_prob_mean": jnp.mean(log_probs),
-                "values_std": jnp.std(values),
-                "values_mean": jnp.mean(values),
-            }
-        )
+        metrics_to_log: dict[str, Array] = {
+            "policy_objective": policy_objective,
+            "value_objective": value_objective,
+            "entropy_objective": entropy_objective,
+            "total_objective": total_objective,
+            "average_ratio": jnp.mean(ratio),
+            "log_prob_diff_mean": jnp.mean(log_prob_diff),
+            "advantage_norm_mean": jnp.mean(jnp.abs(rollout_time_loss_components.advantages)),
+            "prediction_std": jnp.std(prediction),
+            "prediction_mean": jnp.mean(prediction),
+            "log_prob_mean": jnp.mean(log_probs),
+            "values_std": jnp.std(values),
+            "values_mean": jnp.mean(values),
+        }
 
         use_debug = os.environ.get("DEBUG", "0") == "1"
         if use_debug and jnp.isnan(total_loss):  # should skip compilation
@@ -354,7 +359,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             new_carry = d + self.config.gamma * self.config.lam * m * carry
             return new_carry, new_carry
 
-        next_values = jnp.roll(values, shift=-1, axis=0)  # TODO: concat not roll...
+        next_values = jnp.concatenate([values[1:], values[-1:]], axis=0)
+        # just repeating the last value for the last time step (should zero it out mathematically)
         mask = jnp.where(done, 0.0, 1.0)
 
         # getting td residuals
@@ -371,10 +377,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         variables: PyTree,
         env_state_batch: EnvState,
         rollout_time_loss_components: RolloutTimeLossComponents,
-    ) -> tuple[Array, FrozenDict[str, Array], PyTree]:
+    ) -> tuple[Array, dict[str, Array], PyTree]:
         """Jitted version of value_and_grad computation."""
 
-        def loss_fn(p: PyTree) -> tuple[Array, FrozenDict[str, Array]]:
+        def loss_fn(p: PyTree) -> tuple[Array, dict[str, Array]]:
             return self.compute_ppo_loss(model, p, env_state_batch, rollout_time_loss_components)
 
         (loss_val, metrics), grads = jax.value_and_grad(loss_fn, has_aux=True)(variables)
