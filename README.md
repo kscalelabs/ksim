@@ -85,6 +85,8 @@ The `run` method should contain the logic for running the reward visualizer.
 To see an example of how to use the reward visualizer, see the `ksim.utils.reward_visualization.mujoco.MujocoRewardVisualizer`
 class. This class is used in the `examples/kbot/viz_standing.py` example.
 
+Currently, the live plot for the reward visualizer is saved to a file which can be specified in the `RewardVisualizerConfig` class. It is by default saved to `/tmp/rewards_plots`. To see the live plot, open it in a viewer that supports live updates (e.g. opening in a VS Code tab)
+
 Key Commands:
 - `Space`: Pause/Resume the simulation
 - `S`: Suspend the model in place
