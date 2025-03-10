@@ -206,10 +206,7 @@ class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
                         "FOOT_2_collision",
                     ],
                     allowed_contact_prct=0.7,
-                    skip_if_zero_command=[
-                        "linear_velocity_command",
-                        "angular_velocity_command",
-                    ],
+                    skip_if_zero_command=("linear_velocity_command", "angular_velocity_command"),
                 ),
                 DefaultPoseDeviationPenaltyBuilder(
                     scale=-0.1,
