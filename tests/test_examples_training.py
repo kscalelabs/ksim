@@ -48,7 +48,7 @@ def test_default_humanoid_training() -> None:
 
     # Get a trajectory dataset
     key, rollout_key = jax.random.split(key)
-    trajectories_dataset, rollout_time_loss_components, _, _ = task.get_rl_dataset(
+    trajectories_dataset, rollout_time_loss_components, _, _, _ = task.get_rl_dataset(
         model=model,
         variables=variables,
         env=env,

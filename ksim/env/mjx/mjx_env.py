@@ -427,16 +427,13 @@ class MjxEnv(BaseEnv):
             num_latency_steps=jnp.array(0),  # Enforced here as well...
         )
 
-        done_L_0 = jnp.array(False, dtype=jnp.bool_)
-        reward_L_0 = jnp.array(0.0)
+        term_components_L_0 = self.get_terminations(mjx_data_L_1)
+        reward_components_L_0 = self.get_rewards(
+            action_L_0, mjx_data_L_0, command_L_0, action_L_0, mjx_data_L_1
+        )
 
-        term_components_L_0 = {k: v for k, v in self.get_terminations(mjx_data_L_1).items()}
-        reward_components_L_0 = {
-            k: v
-            for k, v in self.get_rewards(
-                action_L_0, mjx_data_L_0, command_L_0, action_L_0, mjx_data_L_1
-            ).items()
-        }
+        done_L_0 = jnp.stack([v for _, v in term_components_L_0.items()]).any()
+        reward_L_0 = jnp.stack([v for _, v in reward_components_L_0.items()]).sum()
 
         env_state_L_0 = EnvState(
             obs=obs_L_0,
@@ -506,19 +503,16 @@ class MjxEnv(BaseEnv):
             num_latency_steps=latency_steps,
         )
 
-        all_dones = self.get_terminations(mjx_data_L_t_plus_1)
-        done_L_t = jnp.stack([v for _, v in all_dones.items()]).any()
-        all_rewards = self.get_rewards(
+        term_components_L_t = self.get_terminations(mjx_data_L_t_plus_1)
+        done_L_t = jnp.stack([v for _, v in term_components_L_t.items()]).any()
+        reward_components_L_t = self.get_rewards(
             env_state_L_t_minus_1.action,
             mjx_data_L_t,
             command_L_t,
             action_L_t,
             mjx_data_L_t_plus_1,
         )
-        reward_L_t = jnp.stack([v for _, v in all_rewards.items()]).sum()
-
-        term_components_L_t = {k: v for k, v in all_dones.items()}
-        reward_components_L_t = {k: v for k, v in all_rewards.items()}
+        reward_L_t = jnp.stack([v for _, v in reward_components_L_t.items()]).sum()
 
         env_state_L_t = EnvState(
             obs=obs_L_t,
@@ -527,25 +521,26 @@ class MjxEnv(BaseEnv):
             reward=reward_L_t,
             done=done_L_t,
             timestep=timestep,
-            termination_components=FrozenDict(term_components_L_t),
-            reward_components=FrozenDict(reward_components_L_t),
+            termination_components=term_components_L_t,
+            reward_components=reward_components_L_t,
         )
 
         return env_state_L_t, mjx_data_L_t_plus_1
 
     @profile
-    @legit_jit(static_argnames=["self", "model"])
-    def step_with_automatic_reset(
+    @legit_jit(static_argnames=["self", "model", "return_intermediate_data"])
+    def scannable_step_with_automatic_reset(
         self,
-        env_state_L_t_minus_1: EnvState,
-        physics_data_L_t: mjx.Data,
-        rng: Array,
+        carry: tuple[EnvState, mjx.Data, PRNGKeyArray],
+        _: None,
         *,
         physics_model_L: mjx.Model,
         model: ActorCriticAgent,
         variables: PyTree,
-    ) -> tuple[EnvState, mjx.Data]:
+        return_intermediate_data: bool = False,
+    ) -> tuple[tuple[EnvState, mjx.Data, PRNGKeyArray], tuple[EnvState, mjx.Data | None, Array]]:
         """Steps the environment and resets if needed."""
+        env_state_L_t_minus_1, mjx_data_L_t, rng = carry
         reset_env_state_L_t, reset_mjx_data_L_t_plus_1 = self.reset(
             model=model,
             variables=variables,
@@ -558,7 +553,7 @@ class MjxEnv(BaseEnv):
             variables=variables,
             env_state_L_t_minus_1=env_state_L_t_minus_1,
             rng=rng,
-            physics_data_L_t=physics_data_L_t,
+            physics_data_L_t=mjx_data_L_t,
             physics_model_L=physics_model_L,
         )
 
@@ -567,16 +562,9 @@ class MjxEnv(BaseEnv):
             jax.tree_util.tree_map(lambda x: jnp.any(jnp.isnan(x)), step_mjx_data_L_t_plus_1),
         )
 
-        jax.lax.cond(
-            data_has_nans,
-            lambda _: jax.debug.print("NaNs detected in physics data"),
-            lambda _: None,
-            operand=None,
-        )
-
         do_reset = jnp.logical_or(env_state_L_t_minus_1.done, data_has_nans)
 
-        new_state_L_t = jax.tree_util.tree_map(
+        env_state_L_t = jax.tree_util.tree_map(
             lambda r, s: jax.lax.select(do_reset, r, s),
             reset_env_state_L_t,
             step_env_state_L_t,
@@ -587,7 +575,51 @@ class MjxEnv(BaseEnv):
             step_mjx_data_L_t_plus_1,
         )
 
-        return new_state_L_t, mjx_data_L_t_plus_1
+        rng = jax.random.split(rng)[0]
+
+        if return_intermediate_data:
+            return (env_state_L_t, mjx_data_L_t_plus_1, rng), (
+                env_state_L_t,
+                mjx_data_L_t_plus_1,
+                do_reset,
+            )
+        else:
+            return (env_state_L_t, mjx_data_L_t_plus_1, rng), (env_state_L_t, None, data_has_nans)
+
+    @profile
+    def unroll_trajectory(
+        self,
+        model: ActorCriticAgent,
+        variables: PyTree,
+        rng: PRNGKeyArray,
+        num_steps: int,
+        env_state_L_t_minus_1: EnvState,
+        physics_data_L_t: mjx.Data,
+        physics_model_L: mjx.Model,
+        return_intermediate_data: bool = False,
+    ) -> tuple[EnvState, mjx.Data, Array]:
+        """Returns EnvState rollout, final mjx.Data, and mjx.Data rollout."""
+        step_fn = functools.partial(
+            self.scannable_step_with_automatic_reset,
+            model=model,
+            variables=variables,
+            physics_model_L=physics_model_L,
+            return_intermediate_data=return_intermediate_data,
+        )
+
+        carry = (env_state_L_t_minus_1, physics_data_L_t, rng)
+        (_, final_mjx_data_L_f_plus_1, _), (env_state_TL, mjx_data_TL, has_nans_TL) = jax.lax.scan(
+            f=step_fn,
+            init=carry,
+            xs=None,
+            length=num_steps,
+        )
+
+        if return_intermediate_data:
+            assert isinstance(mjx_data_TL, mjx.Data)
+            return env_state_TL, mjx_data_TL, has_nans_TL
+        else:
+            return env_state_TL, final_mjx_data_L_f_plus_1, has_nans_TL
 
     @profile
     def unroll_trajectories(
@@ -601,8 +633,8 @@ class MjxEnv(BaseEnv):
         physics_data_EL_t: mjx.Data,
         physics_model_L: mjx.Model,
         return_intermediate_data: bool = False,
-    ) -> tuple[EnvState, mjx.Data]:
-        """Returns EnvState rollout, final mjx.Data, and mjx.Data rollout.
+    ) -> tuple[EnvState, mjx.Data, Array]:
+        """Returns EnvState rollout, final / stacked mjx.Data, and array of has_nans flags.
 
         1. The batched reset (using vmap) initializes a state for each environment.
         2. A vectorized (vmap-ed) env_step function is defined that calls step.
@@ -613,42 +645,35 @@ class MjxEnv(BaseEnv):
         will be used as the initial state and model, respectively. Otherwise,
         the default model and data will be used.
         """
-        step_fn = functools.partial(
-            self.step_with_automatic_reset,
-            model=model,
-            variables=variables,
-            physics_model_L=physics_model_L,
+        rng_E = jax.random.split(rng, num_envs)
+
+        env_state_ETL, physics_data_res, has_nans_ETL = jax.vmap(
+            self.unroll_trajectory, in_axes=(None, None, 0, None, 0, 0, None, None)
+        )(
+            model,
+            variables,
+            rng_E,
+            num_steps,
+            env_state_EL_t_minus_1,
+            physics_data_EL_t,
+            physics_model_L,
+            return_intermediate_data,
         )
 
-        # Define env_step as a pure function with all dependencies passed explicitly
-        def scan_fn(
-            carry: tuple[EnvState, mjx.Data, Array], _: None
-        ) -> tuple[tuple[EnvState, mjx.Data, Array], tuple[EnvState, mjx.Data]]:
-            env_state_EL_t_minus_1, mjx_data_EL_t, rng = carry
-            rngs = jax.random.split(rng, num_envs + 1)
-            env_state_EL_t, mjx_data_EL_t_plus_1 = jax.vmap(step_fn, in_axes=(0, 0, 0))(
-                env_state_EL_t_minus_1, mjx_data_EL_t, rngs[1:]
-            )
+        # Transpose from (env, time, ...) to (time, env, ...)
+        # TODO: update GAE to support (env, time, ...) to avoid an extra transpose here
+        def transpose_time_and_env_dims(x: Array) -> Array:
+            return jnp.transpose(x, (1, 0) + tuple(range(2, x.ndim)))
 
-            if return_intermediate_data:
-                return (env_state_EL_t, mjx_data_EL_t_plus_1, rngs[0]), (
-                    env_state_EL_t,
-                    mjx_data_EL_t_plus_1,
-                )
-            else:
-                return (env_state_EL_t, mjx_data_EL_t_plus_1, rngs[0]), (env_state_EL_t, None)
-
-        (_, final_mjx_data_EL_f_plus_1, _), (env_state_TEL, mjx_data_TEL) = jax.lax.scan(
-            f=scan_fn,
-            init=(env_state_EL_t_minus_1, physics_data_EL_t, rng),
-            xs=None,
-            length=num_steps,
-        )
+        env_state_TEL = jax.tree_util.tree_map(transpose_time_and_env_dims, env_state_ETL)
 
         if return_intermediate_data:
-            return env_state_TEL, mjx_data_TEL
-        else:
-            return env_state_TEL, final_mjx_data_EL_f_plus_1
+            # Only transpose physics data if it contains trajectory information
+            physics_data_res = jax.tree_util.tree_map(transpose_time_and_env_dims, physics_data_res)
+
+        has_nans = jnp.any(has_nans_ETL)
+
+        return env_state_TEL, physics_data_res, has_nans
 
     @profile
     def render_trajectory(
@@ -670,7 +695,7 @@ class MjxEnv(BaseEnv):
             model, variables, reset_rngs, physics_model_L
         )
 
-        env_state_TEL, traj_data = self.unroll_trajectories(
+        env_state_TEL, traj_data, _ = self.unroll_trajectories(
             model=model,
             variables=variables,
             rng=rng,

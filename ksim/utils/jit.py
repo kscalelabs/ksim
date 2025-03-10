@@ -57,6 +57,15 @@ def legit_jit(
             if os.environ.get("DEBUG", "0") == "1":  # skipping during debug
                 return fn(*args, **kwargs)
 
+            do_profile = os.environ.get("JIT_PROFILE", "0") == "1"
+
+            if do_profile:
+                class_name = (args[0].__class__.__name__) + "." if fn.__name__ == "__call__" else ""
+                print(
+                    f"Currently running {class_name}{fn.__name__} "
+                    f"(count: {JitState.compilation_count})"
+                )
+
             start_time = time.time()
             res = jitted_fn(*args, **kwargs)
             end_time = time.time()
@@ -64,7 +73,7 @@ def legit_jit(
 
             # if this is true, if runtime is higher than COMPILE_TIMEOUT, we recompile
             # TODO: we should probably reimplement the lower-level jitting logic to avoid this
-            if os.environ.get("JIT_PROFILE", "0") == "1":
+            if do_profile:
                 arg_dict = {}
                 for i, arg in enumerate(args):
                     if i < len(param_names):
@@ -72,11 +81,6 @@ def legit_jit(
                 for k, v in kwargs.items():
                     arg_dict[k] = get_hash(v)
 
-                if fn.__name__ == "__call__":
-                    class_name = (args[0].__class__.__name__) + "."
-                else:
-                    class_name = ""
-                print(f"Running {class_name}{fn.__name__} (count: {JitState.compilation_count})")
                 print(f"- took {runtime} seconds")
                 JitState.compilation_count += 1
 
