@@ -354,7 +354,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             new_carry = d + self.config.gamma * self.config.lam * m * carry
             return new_carry, new_carry
 
-        next_values = jnp.roll(values, shift=-1, axis=0)  # TODO: concat not roll...
+        # We use the last value as the bootstrap value (although it is not fully correct)
+        next_values = jnp.concatenate([values[1:], jnp.expand_dims(values[-1], 0)], axis=0)
         mask = jnp.where(done, 0.0, 1.0)
 
         # getting td residuals
