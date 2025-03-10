@@ -117,7 +117,7 @@ class BaseEnv(ABC):
         width: int = 640,
         height: int = 480,
         camera: int | None = None,
-    ) -> list[np.ndarray]: ...
+    ) -> tuple[list[np.ndarray], EnvState]: ...
 
     """Render trajectory and return list of images."""
 

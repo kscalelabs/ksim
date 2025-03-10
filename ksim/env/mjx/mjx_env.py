@@ -740,6 +740,7 @@ class MjxEnv(BaseEnv):
             frame = render_frame(renderer, data, camera_id)
             frames.append(frame)
         renderer.close()
+
         return frames, env_state_TEL
 
     @property

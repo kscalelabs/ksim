@@ -47,7 +47,7 @@ def save_video_with_rewards(
         2, 1, gridspec_kw={"height_ratios": [1, 2]}, figsize=(8, 8)
     )
 
-    def _plot_rewards_with_frames(frame_idx: int) -> None:
+    def _plot_rewards_with_frames(frame_idx: int) -> list[plt.Artist]:
         ax_reward.clear()
         ax_video.clear()
 
@@ -61,10 +61,12 @@ def save_video_with_rewards(
         ax_video.imshow(frames[frame_idx])
         ax_video.axis("off")
 
+        return [ax_reward, ax_video]
+
     ani = animation.FuncAnimation(
         fig, _plot_rewards_with_frames, frames=num_frames, interval=1000 / fps
     )
-    ani.save(output_path, writer="ffmpeg", fps=fps)
+    ani.save(output_path, writer="ffmpeg", fps=int(fps))
     plt.close(fig)
 
 
@@ -72,10 +74,10 @@ def save_trajectory_visualization(
     frames: Sequence[np.ndarray],
     output_dir: Path,
     fps: float,
+    rewards: FrozenDict[str, Array],
     *,
     save_frames: bool = True,
     save_video: bool = True,
-    rewards: FrozenDict[str, Array] | None = None,
 ) -> None:
     """Save trajectory visualization as individual frames and/or video."""
     frames_dir = output_dir / "frames"
