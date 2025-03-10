@@ -67,6 +67,67 @@ class GaussianActionModel(ActionModel, ABC):
         return action, log_prob
 
 
+class TanhGaussianActionModel(GaussianActionModel, ABC):
+    """Gaussian action model with tanh transformation."""
+
+    init_log_std: float
+
+    def setup(self) -> None:
+        self.log_std = self.param(
+            "log_std", nn.initializers.constant(self.init_log_std), (self.num_outputs,)
+        )
+
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        """Forward pass of the model returning the means before tanh is applied."""
+        mean = self(obs, cmd)
+        return jnp.tanh(mean)
+
+    def calc_log_prob(self, prediction: Array, action: Array) -> Array:
+        """Calculate the log probability of the tanh-transformed action."""
+        mean = prediction
+        std = jnp.exp(self.log_std)
+
+        # inverse of tanh transformation (artanh/atanh) to get pre-tanh action
+        # add numerical stability clipping to avoid log(1-x^2) when x is close to ±1
+        action_clipped = jnp.clip(action, -0.999, 0.999)
+        pre_tanh_action = jnp.arctanh(action_clipped)
+
+        # gaussian log prob of the pre-tanh action
+        log_prob_gaussian = (
+            -0.5 * jnp.square((pre_tanh_action - mean) / std)
+            - jnp.log(std)
+            - 0.5 * jnp.log(2 * jnp.pi)
+        )
+
+        # log determinant of the jacobian for the tanh transformation
+        # d/dx tanh(x) = 1 - tanh^2(x), so log|det J| = sum(log(1 - tanh^2(x)))
+        log_det_jacobian = jnp.sum(jnp.log(1 - jnp.square(action_clipped) + 1e-6), axis=-1)
+
+        # total log prob is gaussian log prob minus log det jacobian (by change of variables formula)
+        log_prob = jnp.sum(log_prob_gaussian, axis=-1) - log_det_jacobian
+
+        return log_prob
+
+    def sample_and_log_prob(
+        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+    ) -> tuple[Array, Array]:
+        """Sample and calculate the log probability of the tanh-transformed action."""
+        mean = self(obs, cmd)
+        std = jnp.exp(self.log_std)
+
+        # Sample from the Gaussian
+        noise = jax.random.normal(rng, mean.shape)
+        pre_tanh_action = mean + noise * std
+
+        # Apply tanh to constrain actions to [-1, 1]
+        action = jnp.tanh(pre_tanh_action)
+
+        # Calculate log probability accounting for the tanh transformation
+        log_prob = self.calc_log_prob(mean, action)
+
+        return action, log_prob
+
+
 class CategoricalActionModel(ActionModel, ABC):
     """Categorical action model.
 

@@ -17,10 +17,7 @@ from ksim.builders.observation import (
     JointPositionObservation,
     JointVelocityObservation,
 )
-from ksim.builders.resets import (
-    RandomizeJointPositions,
-    RandomizeJointVelocities,
-)
+from ksim.builders.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.builders.rewards import (
     DHControlPenalty,
     DHForwardReward,
@@ -29,14 +26,14 @@ from ksim.builders.rewards import (
 )
 from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.formulations import ActorCriticAgent, GaussianActionModel
+from ksim.model.formulations import ActorCriticAgent, TanhGaussianActionModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
 NUM_OUTPUTS = 21
 
 
-class HumanoidActorModel(GaussianActionModel):
+class HumanoidActorModel(TanhGaussianActionModel):
     mlp: MLP
 
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
@@ -66,9 +63,9 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     robot_model_name: str = xax.field(value="examples/default_humanoid/")
 
     # ML model parameters.
-    actor_hidden_dims: int = xax.field(value=512)
+    actor_hidden_dims: int = xax.field(value=64)
     actor_num_layers: int = xax.field(value=5)
-    critic_hidden_dims: int = xax.field(value=512)
+    critic_hidden_dims: int = xax.field(value=64)
     critic_num_layers: int = xax.field(value=5)
 
     # Termination conditions.
@@ -174,7 +171,7 @@ if __name__ == "__main__":
             num_envs=2048,
             dt=0.005,
             ctrl_dt=0.02,
-            learning_rate=0.00001,
+            learning_rate=0.0003,
             save_every_n_steps=50,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
@@ -188,7 +185,7 @@ if __name__ == "__main__":
             lam=0.95,
             normalize_advantage=True,
             normalize_advantage_in_minibatch=True,
-            entropy_coef=1e-4,
+            entropy_coef=0.001,
             actor_num_layers=5,
             critic_num_layers=5,
             clip_param=0.3,
