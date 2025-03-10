@@ -6,27 +6,27 @@ import time
 from pathlib import Path
 from typing import Sequence
 
+import matplotlib.pyplot as plt
 import numpy as np
+from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from matplotlib import animation
 from PIL import Image
+from scipy.interpolate import interp1d
 
 from ksim.env.base_env import BaseEnv
 from ksim.model.formulations import ActorCriticAgent
 
 logger = logging.getLogger(__name__)
 
-from pathlib import Path
-from typing import Sequence
-
-import matplotlib.animation as animation
-import matplotlib.pyplot as plt
-import numpy as np
-from scipy.interpolate import interp1d
-
 
 def save_video_with_rewards(
-    frames: Sequence[np.ndarray], reward_components: dict[str, Array], fps: float, output_path: Path
-):
+    frames: Sequence[np.ndarray],
+    reward_components: FrozenDict[str, Array],
+    fps: float,
+    output_path: Path,
+) -> None:
+    """Save video with rewards."""
     num_frames = len(frames)
     reward_keys = list(reward_components.keys())
 
@@ -47,23 +47,23 @@ def save_video_with_rewards(
         2, 1, gridspec_kw={"height_ratios": [1, 2]}, figsize=(8, 8)
     )
 
-    def _update(frame_idx):
+    def _plot_rewards_with_frames(frame_idx: int) -> None:
         ax_reward.clear()
         ax_video.clear()
 
-        # Plot interpolated rewards
         for i, key in enumerate(reward_keys):
             ax_reward.plot(range(frame_idx + 1), reward_data[: frame_idx + 1, i], label=key)
-        # ax_reward.legend(loc="upper right")
-        ax_reward.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+
+        ax_reward.legend(loc="center", bbox_to_anchor=(1, 0.5))
         ax_reward.set_xlim(0, num_frames)
         ax_reward.set_ylabel("Reward Components")
 
-        # Display video frame
         ax_video.imshow(frames[frame_idx])
         ax_video.axis("off")
 
-    ani = animation.FuncAnimation(fig, _update, frames=num_frames, interval=1000 / fps)
+    ani = animation.FuncAnimation(
+        fig, _plot_rewards_with_frames, frames=num_frames, interval=1000 / fps
+    )
     ani.save(output_path, writer="ffmpeg", fps=fps)
     plt.close(fig)
 
@@ -75,17 +75,9 @@ def save_trajectory_visualization(
     *,
     save_frames: bool = True,
     save_video: bool = True,
-    rewards: dict[str, Array] | None = None,
+    rewards: FrozenDict[str, Array] | None = None,
 ) -> None:
-    """Save trajectory visualization as individual frames and/or video.
-
-    Args:
-        frames: List of frames to save
-        output_dir: Directory to save the visualization to
-        fps: Frames per second for the video
-        save_frames: Whether to save individual frames
-        save_video: Whether to save video file
-    """
+    """Save trajectory visualization as individual frames and/or video."""
     frames_dir = output_dir / "frames"
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(frames_dir, exist_ok=True)
@@ -135,7 +127,7 @@ def render_and_save_trajectory(
         save_frames: Whether to save individual frames
         save_video: Whether to save video file
     """
-    frames, rewards = env.render_trajectory(
+    frames, env_state_TEL = env.render_trajectory(
         model=model,
         variables=variables,
         rng=rng,
@@ -151,5 +143,5 @@ def render_and_save_trajectory(
         fps=1 / env.config.ctrl_dt,
         save_frames=save_frames,
         save_video=save_video,
-        rewards=rewards,
+        rewards=env_state_TEL.reward_components,
     )
