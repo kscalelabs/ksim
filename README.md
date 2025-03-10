@@ -18,6 +18,10 @@ PID1=$!
 export DISPLAY=:100.0
 ```
 
+### Possible sources of NaNs
+
+- The XLA Triton gemm kernel is buggy. To fix, try disabling with `export XLA_FLAGS="--xla_gpu_enable_triton_gemm=false"`
+
 
 ### Terminology
 The following terminology is relevant to understanding RL tasks.
