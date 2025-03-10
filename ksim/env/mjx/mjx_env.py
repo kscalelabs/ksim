@@ -686,7 +686,7 @@ class MjxEnv(BaseEnv):
         width: int = 640,
         height: int = 480,
         camera: int | None = None,
-    ) -> list[np.ndarray]:
+    ) -> tuple[list[np.ndarray], EnvState]:
         """Render a trajectory of the environment."""
         physics_model_L = self.get_init_physics_model()
         reset_rngs = jax.random.split(rng, 1)
@@ -695,7 +695,7 @@ class MjxEnv(BaseEnv):
             model, variables, reset_rngs, physics_model_L
         )
 
-        _, traj_data, _ = self.unroll_trajectories(
+        env_state_TEL, traj_data, _ = self.unroll_trajectories(
             model=model,
             variables=variables,
             rng=rng,
@@ -740,7 +740,8 @@ class MjxEnv(BaseEnv):
             frame = render_frame(renderer, data, camera_id)
             frames.append(frame)
         renderer.close()
-        return frames
+
+        return frames, env_state_TEL
 
     @property
     def observation_size(self) -> int:
