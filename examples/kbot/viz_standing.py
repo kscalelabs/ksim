@@ -10,7 +10,10 @@ from ksim.utils.reward_visualization.mujoco import MujocoRewardVisualizer
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
+# mjpython -m examples.kbot.viz_standing
+# Because we use the passive launcher, we need to run
+# this with the mjpython command instead of regular python.
+# Luckily, mjpython is installed with `mujoco`
 if __name__ == "__main__":
     args = argparse.ArgumentParser()
     args.add_argument("--debug", action="store_true")
