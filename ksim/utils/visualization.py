@@ -6,15 +6,66 @@ import time
 from pathlib import Path
 from typing import Sequence
 
-import mediapy as mp
 import numpy as np
-from jaxtyping import PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray, PyTree
 from PIL import Image
 
 from ksim.env.base_env import BaseEnv
 from ksim.model.formulations import ActorCriticAgent
 
 logger = logging.getLogger(__name__)
+
+from pathlib import Path
+from typing import Sequence
+
+import matplotlib.animation as animation
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.interpolate import interp1d
+
+
+def save_video_with_rewards(
+    frames: Sequence[np.ndarray], reward_components: dict[str, Array], fps: float, output_path: Path
+):
+    num_frames = len(frames)
+    reward_keys = list(reward_components.keys())
+
+    # Interpolate rewards to match the number of frames
+    reward_data_raw = np.hstack([reward_components[key] for key in reward_keys])
+    original_timesteps = np.linspace(0, num_frames, reward_data_raw.shape[0])
+    interpolated_timesteps = np.arange(num_frames)
+    reward_data = np.vstack(
+        [
+            interp1d(
+                original_timesteps, reward_data_raw[:, i], kind="linear", fill_value="extrapolate"
+            )(interpolated_timesteps)
+            for i in range(reward_data_raw.shape[1])
+        ]
+    ).T
+
+    fig, (ax_reward, ax_video) = plt.subplots(
+        2, 1, gridspec_kw={"height_ratios": [1, 2]}, figsize=(8, 8)
+    )
+
+    def _update(frame_idx):
+        ax_reward.clear()
+        ax_video.clear()
+
+        # Plot interpolated rewards
+        for i, key in enumerate(reward_keys):
+            ax_reward.plot(range(frame_idx + 1), reward_data[: frame_idx + 1, i], label=key)
+        # ax_reward.legend(loc="upper right")
+        ax_reward.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+        ax_reward.set_xlim(0, num_frames)
+        ax_reward.set_ylabel("Reward Components")
+
+        # Display video frame
+        ax_video.imshow(frames[frame_idx])
+        ax_video.axis("off")
+
+    ani = animation.FuncAnimation(fig, _update, frames=num_frames, interval=1000 / fps)
+    ani.save(output_path, writer="ffmpeg", fps=fps)
+    plt.close(fig)
 
 
 def save_trajectory_visualization(
@@ -24,6 +75,7 @@ def save_trajectory_visualization(
     *,
     save_frames: bool = True,
     save_video: bool = True,
+    rewards: dict[str, Array] | None = None,
 ) -> None:
     """Save trajectory visualization as individual frames and/or video.
 
@@ -49,7 +101,7 @@ def save_trajectory_visualization(
 
     if save_video:
         start_time = time.time()
-        mp.write_video(output_dir / "trajectory.mp4", frames, fps=fps)
+        save_video_with_rewards(frames, rewards, fps, output_dir / "trajectory.mp4")
         end_time = time.time()
         logger.info("Time taken for video creation: %.2f seconds", end_time - start_time)
 
@@ -83,7 +135,7 @@ def render_and_save_trajectory(
         save_frames: Whether to save individual frames
         save_video: Whether to save video file
     """
-    frames = env.render_trajectory(
+    frames, rewards = env.render_trajectory(
         model=model,
         variables=variables,
         rng=rng,
@@ -99,4 +151,5 @@ def render_and_save_trajectory(
         fps=1 / env.config.ctrl_dt,
         save_frames=save_frames,
         save_video=save_video,
+        rewards=rewards,
     )

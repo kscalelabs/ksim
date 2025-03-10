@@ -99,7 +99,7 @@ class BaseEnv(ABC):
         return_intermediate_data: bool = False,
     ) -> tuple[EnvState, PhysicsData]: ...
 
-    """Retruns env state trajectory (TEL) and physics data (EL or TEL).
+    """Returns env state trajectory (TEL) and physics data (EL or TEL).
 
     If return_intermediate_data is True, the physics data is returned as a
     trajectory (TEL). Otherwise, only the final physics data is returned (for

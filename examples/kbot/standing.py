@@ -305,7 +305,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot.walking action=env
+    # python -m examples.kbot.standing
     KBotStandingTask.launch(
         KBotStandingConfig(
             num_learning_epochs=8,
@@ -321,7 +321,6 @@ if __name__ == "__main__":
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,
             scale_rewards=True,
-            # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
             solver_iterations=6,
             solver_ls_iterations=6,
             actuator_type="mit",
