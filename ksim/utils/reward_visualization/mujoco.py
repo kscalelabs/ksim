@@ -17,6 +17,7 @@ matplotlib.use("Agg")  # Use non-interactive backend
 import matplotlib.lines
 import matplotlib.pyplot as plt
 import mujoco
+from mujoco import viewer as mujoco_viewer
 
 jax.config.update("jax_disable_jit", True)
 
@@ -82,7 +83,7 @@ class MujocoRewardVisualizer(RewardVisualizer):
         assert isinstance(self.viz_config, MujocoRewardVisualizerConfig)
 
         # Create a viewer
-        with mujoco.viewer.launch_passive(
+        with mujoco_viewer.launch_passive(
             model=self.model, data=self.data, key_callback=self.key_callback
         ) as viewer:
             data_last = self.data
