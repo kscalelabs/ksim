@@ -233,5 +233,5 @@ class CartPoleEnv(BaseEnv):
         width: int = 640,
         height: int = 480,
         camera: int | None = None,
-    ) -> list[np.ndarray]:
+    ) -> tuple[list[np.ndarray], EnvState]:
         raise NotImplementedError("Not implemented for this environment.")
