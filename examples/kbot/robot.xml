@@ -1,6 +1,7 @@
 <mujoco model="k-bot_sim">
   <default>
     <default class="robot">
+    <joint damping="1" armature="0.1"/>
       <default class="motor_00">
         <joint armature="0.0005" frictionloss="0.1" actuatorfrcrange="-20.0 20.0" />
         <motor ctrlrange="-20.0 20.0" />
@@ -21,14 +22,15 @@
         <geom material="visualgeom" contype="0" conaffinity="0" group="2" />
       </default>
       <default class="collision">
-        <geom condim="6" friction="0.8 0.02 0.01" group="3" />
+        <geom condim="6" mass="0" density="0" friction="0.8 0.02 0.01" group="3" />
       </default>
     </default>
   </default>
 
-  <compiler angle="radian" />
+  <compiler angle="radian" autolimits="true"/>
 
   <asset>
+    <material name="visualgeom" rgba="0.7 0.7 0.7 1" />
     <material name="floating_base_link_material" rgba="1 0 0 1" />
     <material name="body1-part_material" rgba="1 1 1 1" />
     <material name="imu_material" rgba="0.615686 0.811765 0.929412 1" />
@@ -50,13 +52,11 @@
     <mesh name="leg1_shell.stl" file="meshes/leg1_shell.stl" />
     <mesh name="leg2_shell.stl" file="meshes/leg2_shell.stl" />
     <mesh name="leg3_shell1.stl" file="meshes/leg3_shell1.stl" />
-    <mesh name="foot1.collision.stl" file="meshes/foot1.collision.stl" />
     <mesh name="foot1.stl" file="meshes/foot1.stl" />
     <mesh name="leg0_shell_2.stl" file="meshes/leg0_shell_2.stl" />
     <mesh name="leg1_shell3.stl" file="meshes/leg1_shell3.stl" />
     <mesh name="leg2_shell_2.stl" file="meshes/leg2_shell_2.stl" />
     <mesh name="leg3_shell11.stl" file="meshes/leg3_shell11.stl" />
-    <mesh name="foot3.collision.stl" file="meshes/foot3.collision.stl" />
     <mesh name="foot3.stl" file="meshes/foot3.stl" />
   </asset>
 
@@ -142,11 +142,10 @@
                   <joint name="left_ankle_02" type="hinge" class="motor_02" range="-0.698132 0.698132" axis="0 0 -1" />
                   <inertial pos="0.021350 -0.019419 -0.019276" mass="0.582091" diaginertia="0.000284 0.002188 0.002024" />
                   <geom name="foot1_visual" material="arm1_top_material" type="mesh" mesh="foot1.stl" class="visual" />
-                  <geom name="foot1_collision_sphere_1" type="sphere" pos="0.129856 -0.027021 -0.045503" size="0.010000" class="collision" />
-                  <geom name="foot1_collision_sphere_2" type="sphere" pos="-0.070000 -0.027021 -0.045503" size="0.010000" class="collision" />
-                  <geom name="foot1_collision_sphere_3" type="sphere" pos="0.129856 -0.026979 0.006510" size="0.010000" class="collision" />
-                  <geom name="foot1_collision_sphere_4" type="sphere" pos="-0.070000 -0.026979 0.006510" size="0.010000" class="collision" />
-                  <geom name="foot1_collision_box" type="box" pos="0.029928 -0.009880 -0.019510" size="0.099928 0.027120 0.026006" class="collision" />
+                  <geom name="foot1_collision_box" type="box" pos="0.029910 -0.01876 -0.023516" size="0.099910 0.013124 0.036000" class="collision" />
+                    <geom name="foot1_collision_box_visual" type="box" pos="0.029910 -0.01876 -0.023516" size="0.099910 0.013124 0.036000" class="visual" />
+                  <!-- <geom name="foot1_collision_box" type="capsule" size="0.045" fromto="-0.06 -0.015 -0.03 0.14 -0.015 -0.03" class="collision" />
+                  <geom name="foot1_collision_box_visual" type="capsule" size="0.045" fromto="-0.06 -0.015 -0.03 0.14 -0.015 -0.03" class="visual" /> -->
                 </body>
               </body>
             </body>
@@ -172,11 +171,10 @@
                   <joint name="right_ankle_02" type="hinge" class="motor_02" range="-0.698132 0.698132" axis="0 0 1.0" />
                   <inertial pos="0.021350 -0.019419 -0.023724" mass="0.582091" diaginertia="0.000284 0.002188 0.002024" />
                   <geom name="foot3_visual" material="arm1_top_material" type="mesh" mesh="foot3.stl" class="visual" />
-                  <geom name="foot3_collision_sphere_1" type="sphere" pos="0.129820 -0.027021 -0.049503" size="0.010000" class="collision" />
-                  <geom name="foot3_collision_sphere_2" type="sphere" pos="-0.070000 -0.027021 -0.049503" size="0.010000" class="collision" />
-                  <geom name="foot3_collision_sphere_3" type="sphere" pos="0.129820 -0.026979 0.002497" size="0.010000" class="collision" />
-                  <geom name="foot3_collision_sphere_4" type="sphere" pos="-0.070000 -0.026979 0.002497" size="0.010000" class="collision" />
-                  <geom name="foot3_collision_box" type="box" pos="0.029910 -0.009876 -0.023516" size="0.099910 0.027124 0.026000" class="collision" />
+                  <!-- <geom name="foot3_collision_box" type="capsule" size="0.045" fromto="-0.06 -0.015 -0.03 0.14 -0.015 -0.03"  class="collision" />
+                  <geom name="foot3_collision_box_visual" type="capsule" size="0.045" fromto="-0.06 -0.015 -0.03 0.14 -0.015 -0.03"  class="visual" /> -->
+                  <geom name="foot3_collision_box" type="box" pos="0.029910 -0.01876 -0.023516" size="0.099910 0.013124 0.036000" class="collision" />
+                  <geom name="foot3_collision_box_visual" type="box" pos="0.029910 -0.01876 -0.023516" size="0.099910 0.013124 0.036000" class="visual" />
                 </body>
               </body>
             </body>
@@ -222,16 +220,16 @@
   </sensor>
 
   <contact>
-    <pair geom1="foot1_collision_sphere_1" geom2="floor"/>
+    <!-- <pair geom1="foot1_collision_sphere_1" geom2="floor"/>
     <pair geom1="foot1_collision_sphere_2" geom2="floor"/>
     <pair geom1="foot1_collision_sphere_3" geom2="floor"/>
-    <pair geom1="foot1_collision_sphere_4" geom2="floor"/>
+    <pair geom1="foot1_collision_sphere_4" geom2="floor"/> -->
     <pair geom1="foot1_collision_box" geom2="floor"/>
     
-    <pair geom1="foot3_collision_sphere_1" geom2="floor"/>
+    <!-- <pair geom1="foot3_collision_sphere_1" geom2="floor"/>
     <pair geom1="foot3_collision_sphere_2" geom2="floor"/>
     <pair geom1="foot3_collision_sphere_3" geom2="floor"/>
-    <pair geom1="foot3_collision_sphere_4" geom2="floor"/>
+    <pair geom1="foot3_collision_sphere_4" geom2="floor"/> -->
     <pair geom1="foot3_collision_box" geom2="floor"/>
   </contact>
 </mujoco>
