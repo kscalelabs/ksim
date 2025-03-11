@@ -14,7 +14,7 @@ from mujoco import mjx
 
 from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import geoms_colliding
-from ksim.utils.transforms import quat_to_euler
+from ksim.utils.transforms import get_projected_gravity_vector_from_quat, quat_to_euler
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,8 @@ class OrientationPenalty(Reward):
     ) -> Array:
         return jnp.sum(
             get_norm(
-                quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - jnp.array(self.target_orientation),
+                get_projected_gravity_vector_from_quat(mjx_data_t_plus_1.qpos[3:7])
+                - jnp.array(self.target_orientation),
                 self.norm,
             )
         )

@@ -31,3 +31,63 @@ def quat_to_euler(quat: jax.Array) -> jax.Array:
     yaw = jnp.arctan2(siny_cosp, cosy_cosp)
 
     return jnp.array([roll, pitch, yaw])
+
+
+def get_projected_gravity_vector_from_quat(quat: jax.Array) -> jax.Array:
+    """Calculates the gravity vector projected onto the local frame given a quaternion orientation.
+
+    Args:
+        quat: A quaternion (w,x,y,z) representing the orientation.
+
+    Returns:
+        A 3D vector representing the gravity in the local frame.
+    """
+    # Normalize quaternion
+    quat = quat / (jnp.linalg.norm(quat) + EPSILON)
+    w, x, y, z = quat
+
+    # Gravity vector in world frame is [0, 0, -1] (pointing down)
+    # Rotate gravity vector using quaternion rotation
+
+    # Calculate quaternion rotation: q * [0,0,-1] * q^-1
+    gx = 2 * (x * z - w * y)
+    gy = 2 * (y * z + w * x)
+    gz = w * w - x * x - y * y + z * z
+
+    # Note: We're rotating [0,0,-1], so we negate gz to match the expected direction
+    return jnp.array([gx, gy, -gz])
+
+
+def get_projected_gravity_vector_from_euler(euler: jax.Array) -> jax.Array:
+    """Calculates the gravity vector projected onto the local frame given Euler angles.
+
+    Args:
+        euler: An array of [roll, pitch, yaw] angles in radians.
+
+    Returns:
+        A 3D vector representing the gravity in the local frame.
+    """
+    roll, pitch, yaw = euler
+
+    # Create rotation matrices for each axis
+    # Roll (X-axis rotation)
+    cr, sr = jnp.cos(roll), jnp.sin(roll)
+    rx = jnp.array([[1.0, 0.0, 0.0], [0.0, cr, -sr], [0.0, sr, cr]])
+
+    # Pitch (Y-axis rotation)
+    cp, sp = jnp.cos(pitch), jnp.sin(pitch)
+    ry = jnp.array([[cp, 0.0, sp], [0.0, 1.0, 0.0], [-sp, 0.0, cp]])
+
+    # Yaw (Z-axis rotation)
+    cy, sy = jnp.cos(yaw), jnp.sin(yaw)
+    rz = jnp.array([[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]])
+
+    # Combine rotations (order: yaw -> pitch -> roll)
+    r = rx @ (ry @ rz)
+
+    # Gravity vector in world frame is [0, 0, -1]
+    # Apply rotation matrix
+    gravity_world = jnp.array([0.0, 0.0, -1.0])
+    gravity_local = r @ gravity_world
+
+    return gravity_local
