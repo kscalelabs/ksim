@@ -25,8 +25,9 @@ class InteractiveVisualizerConfig:
     window_size: int = 5000
     fig_save_dir: Path = Path("/tmp/rewards_plots")
     reward_when_paused: bool = True
-    pos_step_size: float = 0.01  # Size of step when manually modifying position
-
+    pos_step_size: float = 0.01  # Size of step when manually modifying position (meters)
+    vel_step_size: float = 0.1  # Size of step when manually modifying velocity (meters/second)
+    angle_step_size: float = 0.01  # Size of step when manually modifying angles (radians)
 
 class InteractiveVisualizer(abc.ABC):
     """Base class for visualizing rewards in RL environments."""
@@ -41,6 +42,12 @@ class InteractiveVisualizer(abc.ABC):
         "l": ord("L"),
         "n": ord("N"),
         "r": ord("R"),
+        "q": ord("Q"),
+        "e": ord("E"),
+        "semicolon": ord(";"),
+        "apostrophe": ord("'"),
+        "period": ord("."),
+        "slash": ord("/"),
     }
 
     def __init__(self, task: RLTask, config: InteractiveVisualizerConfig | None = None) -> None:
@@ -58,12 +65,15 @@ class InteractiveVisualizer(abc.ABC):
             setattr(self, f"key_{key}", value)
 
         self.viz_config = config
+        self.pos_step_size = self.viz_config.pos_step_size
+        self.vel_step_size = self.viz_config.vel_step_size
 
         self.task = task
 
         # Add pause state variables
         self.paused = False
         self.suspended = False
+        self.alternate_controls = False
         self.data_modifying_keycode: int | None = None
 
         # Set up reward history
@@ -105,8 +115,8 @@ class InteractiveVisualizer(abc.ABC):
         Args:
             keycode: The keycode of the pressed key
         """
-        logger.debug("Key pressed: %s", chr(keycode))
-        logger.debug("Keycode: %d", keycode)
+        logger.info("Key pressed: %s", chr(keycode))
+        logger.info("Keycode: %d", keycode)
 
         if chr(keycode) == " ":  # Space key
             self.paused = not self.paused
@@ -117,6 +127,12 @@ class InteractiveVisualizer(abc.ABC):
             self.suspended = not self.suspended
             status = "SUSPENDED" if self.suspended else "RUNNING"
             logger.info("Simulation %s", status)
+
+        # Shift key
+        if keycode == 340:
+            self.alternate_controls = not self.alternate_controls
+            status = "ALTERNATE CONTROLS" if self.alternate_controls else "NORMAL CONTROLS"
+            logger.info("Controls %s", status)
 
         if keycode in self.ENV_STATE_KEYCODES.values():
             self.data_modifying_keycode = keycode

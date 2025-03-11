@@ -142,6 +142,12 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
         assert hasattr(self, "key_l"), msg
         assert hasattr(self, "key_n"), msg
         assert hasattr(self, "key_r"), msg
+        assert hasattr(self, "key_q"), msg
+        assert hasattr(self, "key_e"), msg
+        assert hasattr(self, "key_semicolon"), msg
+        assert hasattr(self, "key_apostrophe"), msg
+        assert hasattr(self, "key_period"), msg
+        assert hasattr(self, "key_slash"), msg
 
         assert isinstance(self.viz_config, MujocoInteractiveVisualizerConfig)
 
@@ -176,35 +182,77 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                         with viewer.lock():
                             match self.data_modifying_keycode:
                                 case self.key_up:
-                                    self.data.qpos[0] += self.viz_config.pos_step_size
-                                    logger.info(
-                                        "Moving x position by %.3f", self.viz_config.pos_step_size
-                                    )
+                                    if self.alternate_controls:
+                                        self.data.qvel[0] += self.viz_config.vel_step_size
+                                        msg = f"Moving x velocity by {self.viz_config.vel_step_size}"
+                                    else:
+                                        self.data.qpos[0] += self.viz_config.pos_step_size
+                                        msg = f"Moving x position by {self.viz_config.pos_step_size}"
+                                    logger.info(msg)
                                 case self.key_down:
-                                    self.data.qpos[0] -= self.viz_config.pos_step_size
-                                    logger.info(
-                                        "Moving x position by -%.3f", self.viz_config.pos_step_size
-                                    )
+                                    if self.alternate_controls:
+                                        self.data.qvel[0] -= self.viz_config.vel_step_size
+                                        msg = f"Moving x velocity by {-self.viz_config.vel_step_size}"
+                                    else:
+                                        self.data.qpos[0] -= self.viz_config.pos_step_size
+                                        msg = f"Moving x position by {-self.viz_config.pos_step_size}"
+                                    logger.info(msg)
                                 case self.key_right:
-                                    self.data.qpos[1] += self.viz_config.pos_step_size
-                                    logger.info(
-                                        "Moving y position by %.3f", self.viz_config.pos_step_size
-                                    )
+                                    if self.alternate_controls:
+                                        self.data.qvel[1] += self.viz_config.vel_step_size
+                                        msg = f"Moving y velocity by {self.viz_config.vel_step_size}"
+                                    else:
+                                        self.data.qpos[1] += self.viz_config.pos_step_size
+                                        msg = f"Moving y position by {self.viz_config.pos_step_size}"
+                                    logger.info(msg)
                                 case self.key_left:
-                                    self.data.qpos[1] -= self.viz_config.pos_step_size
-                                    logger.info(
-                                        "Moving y position by -%.3f", self.viz_config.pos_step_size
-                                    )
+                                    if self.alternate_controls:
+                                        self.data.qvel[1] -= self.viz_config.vel_step_size
+                                        msg = f"Moving y velocity by {-self.viz_config.vel_step_size}"
+                                    else:
+                                        self.data.qpos[1] -= self.viz_config.pos_step_size
+                                        msg = f"Moving y position by {-self.viz_config.pos_step_size}"
+                                    logger.info(msg)
                                 case self.key_p:
-                                    self.data.qpos[2] += self.viz_config.pos_step_size
-                                    logger.info(
-                                        "Moving z position by %.3f", self.viz_config.pos_step_size
-                                    )
+                                    if self.alternate_controls:
+                                        self.data.qvel[2] += self.viz_config.vel_step_size
+                                        msg = f"Moving z velocity by {self.viz_config.vel_step_size}"
+                                    else:
+                                        self.data.qpos[2] += self.viz_config.pos_step_size
+                                        msg = f"Moving z position by {self.viz_config.pos_step_size}"
+                                    logger.info(msg)
                                 case self.key_l:
-                                    self.data.qpos[2] -= self.viz_config.pos_step_size
-                                    logger.info(
-                                        "Moving z position by -%.3f", self.viz_config.pos_step_size
-                                    )
+                                    if self.alternate_controls:
+                                        self.data.qvel[2] -= self.viz_config.vel_step_size
+                                        msg = f"Moving z velocity by {-self.viz_config.vel_step_size}"
+                                    else:
+                                        self.data.qpos[2] -= self.viz_config.pos_step_size
+                                        msg = f"Moving z position by {-self.viz_config.pos_step_size}"
+                                    logger.info(msg)
+                                case self.key_q:
+                                    self.data.qpos[6] += self.viz_config.angle_step_size
+                                    msg = f"Rotating yaw by {self.viz_config.angle_step_size}"
+                                    logger.info(msg)
+                                case self.key_e:
+                                    self.data.qpos[6] -= self.viz_config.angle_step_size
+                                    msg = f"Rotating yaw by {-self.viz_config.angle_step_size}"
+                                    logger.info(msg)
+                                case self.key_semicolon:
+                                    self.data.qpos[4] += self.viz_config.angle_step_size
+                                    msg = f"Rotating roll by {self.viz_config.angle_step_size}"
+                                    logger.info(msg)
+                                case self.key_apostrophe:
+                                    self.data.qpos[4] -= self.viz_config.angle_step_size
+                                    msg = f"Rotating roll by {-self.viz_config.angle_step_size}"
+                                    logger.info(msg)
+                                case self.key_period:
+                                    self.data.qpos[5] += self.viz_config.angle_step_size
+                                    msg = f"Rotating pitch by {self.viz_config.angle_step_size}"
+                                    logger.info(msg)
+                                case self.key_slash:
+                                    self.data.qpos[5] -= self.viz_config.angle_step_size
+                                    msg = f"Rotating pitch by {-self.viz_config.angle_step_size}"
+                                    logger.info(msg)
                                 case self.key_n:
                                     logger.info("Stepping forward by one frame")
                                 case self.key_r:
