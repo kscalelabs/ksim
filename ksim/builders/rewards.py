@@ -331,7 +331,6 @@ class FootSlipPenalty(Reward):
 
         # Get x and y velocities
         body_vel = mjx_data_t_plus_1.qvel[:2]
-
         return jnp.sum(jnp.linalg.norm(body_vel, axis=-1) * contacts)
 
 
@@ -343,7 +342,13 @@ class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
     def __call__(self, data: BuilderData) -> FootSlipPenalty:
         illegal_geom_idxs = []
         for geom_name in self.foot_geom_names:
-            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            try:
+                illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            except KeyError:
+                raise ValueError(
+                    f"Geom '{geom_name}' not found in model. Possible options are:",
+                    f"{list(data.mujoco_mappings.geom_name_to_idx.keys())}"
+                )
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -392,7 +397,13 @@ class FeetClearancePenaltyBuilder(RewardBuilder[FeetClearancePenalty]):
     def __call__(self, data: BuilderData) -> FeetClearancePenalty:
         illegal_geom_idxs = []
         for geom_name in self.foot_geom_names:
-            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            try:
+                illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            except KeyError:
+                raise ValueError(
+                    f"Geom '{geom_name}' not found in model. Possible options are:",
+                    f"{list(data.mujoco_mappings.geom_name_to_idx.keys())}"
+                )
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -486,7 +497,13 @@ class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     def __call__(self, data: BuilderData) -> FootContactPenalty:
         illegal_geom_idxs = []
         for geom_name in self.foot_geom_names:
-            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            try:
+                illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            except KeyError:
+                raise ValueError(
+                    f"Geom '{geom_name}' not found in model. Possible options are:",
+                    f"{list(data.mujoco_mappings.geom_name_to_idx.keys())}"
+                )
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -554,7 +571,10 @@ class DefaultPoseDeviationPenaltyBuilder(RewardBuilder[DefaultPoseDeviationPenal
                 default_positions_list.append(position)
                 joint_deviation_weights.append(self.deviation_weights[joint_name])
             except KeyError:
-                raise ValueError(f"Joint '{joint_name}' not found in model")
+                raise ValueError(
+                    f"Joint '{joint_name}' not found in model. Possible options are:",
+                    f"{list(data.mujoco_mappings.qpos_name_to_idx_range.keys())}"
+                )
 
         joint_indices_array = jnp.array(joint_indices)
         default_positions_array = jnp.array(default_positions_list)
@@ -621,7 +641,10 @@ class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
                 soft_lowers.append(lower)
                 soft_uppers.append(upper)
             else:
-                raise ValueError(f"Joint '{joint_name}' not found in model")
+                raise ValueError(
+                    f"Joint '{joint_name}' not found in model. Possible options are:",
+                    f"{list(data.mujoco_mappings.qpos_name_to_idx_range.keys())}"
+                )
 
         if not joint_indices:
             raise ValueError("No valid joints specified for JointPosLimitPenalty")
