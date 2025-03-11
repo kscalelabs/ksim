@@ -73,8 +73,8 @@ class KBotActorModel(GaussianActionModel):
 
         actions_n = self.mlp(x_n)
 
-        actions_n = jnp.clip(actions_n, -self.action_clipping, self.action_clipping)
         actions_n = actions_n * self.action_scale
+        actions_n = jnp.clip(actions_n, -self.action_clipping, self.action_clipping)
         return actions_n
 
 
@@ -126,7 +126,7 @@ class KBotStandingConfig(PPOConfig, MjxEnvConfig):
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
     action_clipping: float = xax.field(value=10.0)
-    action_scale: float = xax.field(value=0.3)
+    action_scale: float = xax.field(value=0.5)
 
     actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
 
