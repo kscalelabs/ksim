@@ -167,6 +167,7 @@ class MujocoRewardVisualizer(RewardVisualizer):
                                     )
 
                             dx = self.step_physics(mx, dx, step_fn)
+                            dx_last = dx 
 
                         self.data_modifying_keycode = None
 
@@ -174,10 +175,10 @@ class MujocoRewardVisualizer(RewardVisualizer):
                         with viewer.lock():
                             rewards = self.env.get_rewards(
                                 self.dummy_action,
-                                data_last,
+                                dx_last,
                                 self.command,
                                 self.dummy_action,
-                                self.data,
+                                dx,
                             )
 
                         self.timestamps.append(time.time() - self.start_time)
@@ -189,6 +190,7 @@ class MujocoRewardVisualizer(RewardVisualizer):
 
                     if not self.paused:
                         dx = self.step_physics(mx, dx, step_fn)
+                        dx_last = dx 
 
                         if self.suspended:
                             self.data.qpos[:7] = self.viz_config.suspended_pos
@@ -197,10 +199,10 @@ class MujocoRewardVisualizer(RewardVisualizer):
                         with viewer.lock():
                             rewards = self.env.get_rewards(
                                 self.dummy_action,
-                                data_last,
+                                dx_last,
                                 self.command,
                                 self.dummy_action,
-                                self.data,
+                                dx,
                             )
 
                         # Store the current time
