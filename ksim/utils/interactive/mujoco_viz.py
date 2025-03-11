@@ -184,50 +184,74 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                                 case self.key_up:
                                     if self.alternate_controls:
                                         self.data.qvel[0] += self.viz_config.vel_step_size
-                                        msg = f"Moving x velocity by {self.viz_config.vel_step_size}"
+                                        msg = (
+                                            f"Moving x velocity by {self.viz_config.vel_step_size}"
+                                        )
                                     else:
                                         self.data.qpos[0] += self.viz_config.pos_step_size
-                                        msg = f"Moving x position by {self.viz_config.pos_step_size}"
+                                        msg = (
+                                            f"Moving x position by {self.viz_config.pos_step_size}"
+                                        )
                                     logger.info(msg)
                                 case self.key_down:
                                     if self.alternate_controls:
                                         self.data.qvel[0] -= self.viz_config.vel_step_size
-                                        msg = f"Moving x velocity by {-self.viz_config.vel_step_size}"
+                                        msg = (
+                                            f"Moving x velocity by {-self.viz_config.vel_step_size}"
+                                        )
                                     else:
                                         self.data.qpos[0] -= self.viz_config.pos_step_size
-                                        msg = f"Moving x position by {-self.viz_config.pos_step_size}"
+                                        msg = (
+                                            f"Moving x position by {-self.viz_config.pos_step_size}"
+                                        )
                                     logger.info(msg)
                                 case self.key_right:
                                     if self.alternate_controls:
                                         self.data.qvel[1] += self.viz_config.vel_step_size
-                                        msg = f"Moving y velocity by {self.viz_config.vel_step_size}"
+                                        msg = (
+                                            f"Moving y velocity by {self.viz_config.vel_step_size}"
+                                        )
                                     else:
                                         self.data.qpos[1] += self.viz_config.pos_step_size
-                                        msg = f"Moving y position by {self.viz_config.pos_step_size}"
+                                        msg = (
+                                            f"Moving y position by {self.viz_config.pos_step_size}"
+                                        )
                                     logger.info(msg)
                                 case self.key_left:
                                     if self.alternate_controls:
                                         self.data.qvel[1] -= self.viz_config.vel_step_size
-                                        msg = f"Moving y velocity by {-self.viz_config.vel_step_size}"
+                                        msg = (
+                                            f"Moving y velocity by {-self.viz_config.vel_step_size}"
+                                        )
                                     else:
                                         self.data.qpos[1] -= self.viz_config.pos_step_size
-                                        msg = f"Moving y position by {-self.viz_config.pos_step_size}"
+                                        msg = (
+                                            f"Moving y position by {-self.viz_config.pos_step_size}"
+                                        )
                                     logger.info(msg)
                                 case self.key_p:
                                     if self.alternate_controls:
                                         self.data.qvel[2] += self.viz_config.vel_step_size
-                                        msg = f"Moving z velocity by {self.viz_config.vel_step_size}"
+                                        msg = (
+                                            f"Moving z velocity by {self.viz_config.vel_step_size}"
+                                        )
                                     else:
                                         self.data.qpos[2] += self.viz_config.pos_step_size
-                                        msg = f"Moving z position by {self.viz_config.pos_step_size}"
+                                        msg = (
+                                            f"Moving z position by {self.viz_config.pos_step_size}"
+                                        )
                                     logger.info(msg)
                                 case self.key_l:
                                     if self.alternate_controls:
                                         self.data.qvel[2] -= self.viz_config.vel_step_size
-                                        msg = f"Moving z velocity by {-self.viz_config.vel_step_size}"
+                                        msg = (
+                                            f"Moving z velocity by {-self.viz_config.vel_step_size}"
+                                        )
                                     else:
                                         self.data.qpos[2] -= self.viz_config.pos_step_size
-                                        msg = f"Moving z position by {-self.viz_config.pos_step_size}"
+                                        msg = (
+                                            f"Moving z position by {-self.viz_config.pos_step_size}"
+                                        )
                                     logger.info(msg)
                                 case self.key_q:
                                     self.data.qpos[6] += self.viz_config.angle_step_size
