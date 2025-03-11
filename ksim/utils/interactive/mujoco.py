@@ -1,6 +1,6 @@
-"""Reward visualizer for Mujoco environments.
+"""Interactive visualizer for Mujoco environments.
 
-This module provides visualization capabilities for Mujoco-based environments,
+This module provides interactive visualization capabilities for Mujoco-based environments,
 supporting both regular Mujoco and MJX physics backends. It allows interactive
 visualization of rewards and states during environment execution.
 """
@@ -16,7 +16,7 @@ from jaxtyping import Array, PyTree
 
 from ksim.env.mjx.mjx_env import MjxEnv
 from ksim.task.rl import RLTask
-from ksim.utils.reward_visualization.base import RewardVisualizer, RewardVisualizerConfig
+from ksim.utils.interactive.base import InteractiveVisualizer, InteractiveVisualizerConfig
 
 matplotlib.use("Agg")  # Use non-interactive backend
 
@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class MujocoRewardVisualizerConfig(RewardVisualizerConfig):
-    """Configuration for the Mujoco reward visualizer."""
+class MujocoInteractiveVisualizerConfig(InteractiveVisualizerConfig):
+    """Configuration for the Mujoco interactive visualizer."""
 
     suspended_pos: Array = attrs.field(
         factory=lambda: jnp.array([0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0])
@@ -41,20 +41,22 @@ class MujocoRewardVisualizerConfig(RewardVisualizerConfig):
     physics_backend: str = attrs.field(default="mjx")
 
 
-class MujocoRewardVisualizer(RewardVisualizer):
+class MujocoInteractiveVisualizer(InteractiveVisualizer):
     """Visualizer for Mujoco-based environments supporting both Mujoco and MJX backends."""
 
-    viz_config: MujocoRewardVisualizerConfig
+    viz_config: MujocoInteractiveVisualizerConfig
 
-    def __init__(self, task: RLTask, config: MujocoRewardVisualizerConfig | None = None) -> None:
-        """Initialize the Mujoco reward visualizer.
+    def __init__(
+        self, task: RLTask, config: MujocoInteractiveVisualizerConfig | None = None
+    ) -> None:
+        """Initialize the Mujoco interactive visualizer.
 
         Args:
             task: The RL task to visualize
             config: Configuration for the visualizer
         """
         if config is None:
-            config = MujocoRewardVisualizerConfig()
+            config = MujocoInteractiveVisualizerConfig()
 
         super().__init__(task, config)
         if config.physics_backend != "mjx":
@@ -144,7 +146,7 @@ class MujocoRewardVisualizer(RewardVisualizer):
         assert hasattr(self, "key_n"), msg
         assert hasattr(self, "key_r"), msg
 
-        assert isinstance(self.viz_config, MujocoRewardVisualizerConfig)
+        assert isinstance(self.viz_config, MujocoInteractiveVisualizerConfig)
 
         # Set up MJX objects only if using the MJX backend.
         if self.viz_config.physics_backend == "mjx":

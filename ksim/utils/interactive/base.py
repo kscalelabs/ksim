@@ -1,4 +1,4 @@
-"""Base class for reward visualizers."""
+"""Base class for interactive visualizers."""
 
 import abc
 import collections
@@ -21,14 +21,14 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class RewardVisualizerConfig:
+class InteractiveVisualizerConfig:
     window_size: int = 5000
     fig_save_dir: Path = Path("/tmp/rewards_plots")
     reward_when_paused: bool = True
     pos_step_size: float = 0.01  # Size of step when manually modifying position
 
 
-class RewardVisualizer(abc.ABC):
+class InteractiveVisualizer(abc.ABC):
     """Base class for visualizing rewards in RL environments."""
 
     # Mapping of key names to keycodes for commands that modify the environment state
@@ -43,7 +43,7 @@ class RewardVisualizer(abc.ABC):
         "r": ord("R"),
     }
 
-    def __init__(self, task: RLTask, config: RewardVisualizerConfig | None = None) -> None:
+    def __init__(self, task: RLTask, config: InteractiveVisualizerConfig | None = None) -> None:
         """Initialize the reward visualizer.
 
         Args:
@@ -51,7 +51,7 @@ class RewardVisualizer(abc.ABC):
             config: Configuration for the visualizer
         """
         if config is None:
-            config = RewardVisualizerConfig()
+            config = InteractiveVisualizerConfig()
 
         for key, value in self.ENV_STATE_KEYCODES.items():
             # Register key bindings for environment state control
