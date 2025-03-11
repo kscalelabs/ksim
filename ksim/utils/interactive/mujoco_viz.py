@@ -168,10 +168,9 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
         ) as viewer:
             # Initialize the "previous state" appropriately.
             state_t_minus_1 = state
-
+            target_time = time.time()
             try:
                 while viewer.is_running():
-                    start = time.time()
                     # Process key inputs.
                     if self.data_modifying_keycode is not None:
                         with viewer.lock():
@@ -221,7 +220,6 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
 
                             # Call the unified physics step function.
                             state = self._step(mx, state, step_fn, viewer)
-                            state_t_minus_1 = state
 
                         self.data_modifying_keycode = None
 
@@ -242,7 +240,6 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                         state_t_minus_1 = state
 
                     if not self.paused:
-                        state_t_minus_1 = state
                         state = self._step(mx, state, step_fn, viewer)
                         if self.suspended:
                             self.data.qpos[:7] = self.viz_config.suspended_pos
@@ -262,9 +259,13 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                         for reward_name, value in rewards.items():
                             self.reward_history[reward_name].append(float(value))
 
-                    elapsed = time.time() - start
-                    if elapsed < self.model.opt.timestep:
-                        time.sleep(self.model.opt.timestep - elapsed)
+                        state_t_minus_1 = state
+
+                    viewer.sync()
+                    target_time += self.model.opt.timestep
+                    if target_time > current_time:
+                        time.sleep(target_time - current_time)
+
             finally:
                 self.cleanup()
 
