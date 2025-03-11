@@ -244,7 +244,6 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                     if not self.paused:
                         state_t_minus_1 = state
                         state = self._step(mx, state, step_fn, viewer)
-                        breakpoint()
                         if self.suspended:
                             self.data.qpos[:7] = self.viz_config.suspended_pos
                             self.data.qvel[:6] = self.viz_config.suspended_vel
