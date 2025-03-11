@@ -263,6 +263,7 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
 
                     viewer.sync()
                     target_time += self.model.opt.timestep
+                    current_time = time.time()
                     if target_time > current_time:
                         time.sleep(target_time - current_time)
 
