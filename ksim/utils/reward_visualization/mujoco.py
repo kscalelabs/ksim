@@ -33,7 +33,7 @@ class MujocoRewardVisualizerConfig(RewardVisualizerConfig):
         default_factory=lambda: jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     )
     # New flag to select physics backend: "mujoco" or "mjx"
-    physics_backend: str = "mujoco"
+    physics_backend: str = "mjx"
 
 
 class MujocoRewardVisualizer(RewardVisualizer):
@@ -49,6 +49,7 @@ class MujocoRewardVisualizer(RewardVisualizer):
 
         super().__init__(task, config)
         if config.physics_backend != "mjx":
+            # Disable JIT for regular MuJoCo stepping
             jax.config.update("jax_disable_jit", True)
         logger.info("Using physics backend: %s", config.physics_backend)
 
@@ -70,19 +71,22 @@ class MujocoRewardVisualizer(RewardVisualizer):
         assert isinstance(env, MjxEnv), "MujocoRewardVisualizer only works with MjxEnv"
         return env
 
-    def _step(self, mx, dx, step_fn):
-        """Unified physics step function that always returns an MJX data object.
+    def _step(self, mx, dx, step_fn, viewer):
+        """Unified physics step function that returns a state object.
+        
+        For 'mjx' backend, returns an MJX data object; for 'mujoco' backend, returns self.data (an MjData).
         
         Args:
-            mx: The MJX model.
-            dx: The current MJX data object.
-            step_fn: The compiled physics step function (for MJX).
+            mx: The MJX model (or None for mujoco backend).
+            dx: The current state (MJX data object for mjx, self.data for mujoco).
+            step_fn: The compiled physics step function (for mjx; None for mujoco).
+            viewer: The viewer instance.
         
         Returns:
-            Updated MJX data object.
+            The updated state (MJX data for mjx, or self.data for mujoco).
         """
         if self.viz_config.physics_backend == "mjx":
-            # For MJX, update dx with current state from self.data, step, and update self.data.
+            # Update dx from self.data and step using MJX.
             dx = dx.replace(
                 qpos=jnp.array(self.data.qpos),
                 qvel=jnp.array(self.data.qvel),
@@ -93,12 +97,13 @@ class MujocoRewardVisualizer(RewardVisualizer):
             )
             dx = step_fn(mx, dx)
             mjx.get_data_into(self.data, self.model, dx)
+            viewer.sync()
             return dx
         else:
-            # For MuJoCo physics, perform a standard step and then convert self.data into MJX format.
+            # For regular MuJoCo stepping, simply call mj_step and return self.data.
             mujoco.mj_step(self.model, self.data)
-            dx_new = mjx.put_data(self.model, self.data)
-            return dx_new
+            viewer.sync()
+            return self.data
 
     def run(self) -> None:
         """Run the Mujoco visualization loop."""
@@ -115,7 +120,7 @@ class MujocoRewardVisualizer(RewardVisualizer):
 
         assert isinstance(self.viz_config, MujocoRewardVisualizerConfig)
         
-        # Set up MJX objects if needed.
+        # Set up MJX objects only if using the MJX backend.
         if self.viz_config.physics_backend == "mjx":
             mx = mjx.put_model(self.model)
             dx = mjx.put_data(self.model, self.data)
@@ -127,20 +132,21 @@ class MujocoRewardVisualizer(RewardVisualizer):
             compile_time = time.time() - start_compile
             logger.info("Compilation took %.4fs", compile_time)
         else:
-            # For the MuJoCo backend, we still create dummy variables for consistency.
             mx = None
-            dx = mjx.put_data(self.model, self.data)
+            # Use self.data directly for the mujoco backend.
+            dx = self.data
             step_fn = None
 
         # Create a viewer.
         with mujoco_viewer.launch_passive(
             model=self.model, data=self.data, key_callback=self.key_callback
         ) as viewer:
-            # Initialize the "previous state" as an MJX data object.
+            # Initialize the "previous state" appropriately.
             dx_last = dx
 
             try:
                 while viewer.is_running():
+                    start = time.time()
                     # Process key inputs.
                     if self.data_modifying_keycode is not None:
                         with viewer.lock():
@@ -175,7 +181,7 @@ class MujocoRewardVisualizer(RewardVisualizer):
                                     logger.warning("Unknown keycode: %d", self.data_modifying_keycode)
 
                             # Call the unified physics step function.
-                            dx = self._step(mx, dx, step_fn)
+                            dx = self._step(mx, dx, step_fn, viewer)
                             dx_last = dx
 
                         self.data_modifying_keycode = None
@@ -194,11 +200,10 @@ class MujocoRewardVisualizer(RewardVisualizer):
                         self.timestamps.append(time.time() - self.start_time)
                         for reward_name, value in rewards.items():
                             self.reward_history[reward_name].append(float(value))
-                        # Update previous state.
                         dx_last = dx
 
                     if not self.paused:
-                        dx = self._step(mx, dx, step_fn)
+                        dx = self._step(mx, dx, step_fn, viewer)
                         dx_last = dx
 
                         if self.suspended:
@@ -220,9 +225,9 @@ class MujocoRewardVisualizer(RewardVisualizer):
                             self.reward_history[reward_name].append(float(value))
                         dx_last = dx
 
-                    # Update the viewer.
-                    viewer.sync()
-                    time.sleep(0.0001)
+                    elapsed = time.time() - start
+                    if elapsed < self.model.opt.timestep:
+                        time.sleep(self.model.opt.timestep - elapsed)
             finally:
                 self.cleanup()
 
