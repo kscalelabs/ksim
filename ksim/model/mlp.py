@@ -9,23 +9,17 @@ import jax
 class MLP(nn.Module):
     """A multi-layer perceptron."""
 
-    num_hidden_layers: int
-    """The number of hidden layers in the MLP."""
-
-    hidden_features: int
-    """The number of features in the hidden layers."""
-
-    out_features: int
+    out_dim: int
     """The number of features in the output layer."""
 
-    activation: Callable[[jax.Array], jax.Array] = nn.relu
+    hidden_dims: tuple[int, ...]
+    """The number of features in the hidden layers."""
+
+    activation: Callable[[jax.Array], jax.Array] = nn.swish
     """The activation function to use in the MLP."""
 
     bias_init: nn.initializers.Initializer = nn.initializers.zeros
     """The initializer to use for the bias of the dense layers."""
-
-    output_layer_scale: float = 0.01
-    """The scale to use for the output layer."""
 
     @nn.compact
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -37,15 +31,15 @@ class MLP(nn.Module):
         Returns:
             The output of the MLP [..., out_features]
         """
-        for _ in range(self.num_hidden_layers):
+        for hidden_dim in self.hidden_dims:
             x = nn.Dense(
-                features=self.hidden_features,
+                features=hidden_dim,
                 kernel_init=nn.initializers.lecun_uniform(),
             )(x)
             x = self.activation(x)
 
         x = nn.Dense(
-            features=self.out_features,
+            features=self.out_dim,
             kernel_init=nn.initializers.lecun_uniform(),
             bias_init=self.bias_init,
         )(x)

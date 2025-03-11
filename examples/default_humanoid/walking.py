@@ -11,11 +11,17 @@ from jaxtyping import Array, PRNGKeyArray
 
 from ksim.builders.commands import LinearVelocityCommand
 from ksim.builders.observation import (
+    ActuatorForceObservation,
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,
+    BasePositionObservation,
+    CenterOfMassInertiaObservation,
+    CenterOfMassVelocityObservation,
     JointPositionObservation,
     JointVelocityObservation,
+    LegacyPositionObservation,
+    LegacyVelocityObservation,
 )
 from ksim.builders.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.builders.rewards import (
@@ -26,55 +32,90 @@ from ksim.builders.rewards import (
 )
 from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.formulations import ActorCriticAgent, TanhGaussianActionModel
+from ksim.model.distributions import GaussianDistribution, TanhGaussianDistribution
+from ksim.model.factory import create_mlp_tanh_gaussian_actor_critic
+from ksim.model.formulations import ActorCriticAgent, ActorModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
+
+######################
+# Static Definitions #
+######################
 
 NUM_OUTPUTS = 21
 
 
-class HumanoidActorModel(TanhGaussianActionModel):
-    mlp: MLP
-
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        x_n = jnp.concatenate([obs_array for obs_array in obs.values()], axis=-1)
-        cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
-        x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
-        actions_n = self.mlp(x_n)
-        return actions_n
-
-
-class HumanoidCriticModel(nn.Module):
-    mlp: MLP
-
-    @nn.compact
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> jax.Array:
-        x_n = jnp.concatenate([obs_array for obs_array in obs.values()], axis=-1)
-        cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
-        x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
-        value_estimate = self.mlp(x_n)
-
-        return value_estimate
-
-
 @dataclass
 class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
-    # Robot model name to use.
-    robot_model_name: str = xax.field(value="examples/default_humanoid/")
+    """Combining configs for the humanoid walking task and fixing params."""
 
-    # ML model parameters.
-    actor_hidden_dims: int = xax.field(value=64)
-    actor_num_layers: int = xax.field(value=5)
-    critic_hidden_dims: int = xax.field(value=64)
-    critic_num_layers: int = xax.field(value=5)
+    robot_model_name: str = "examples/default_humanoid/"
+    actuator_type: str = "scaled_torque"
 
-    # Termination conditions.
-    max_pitch: float = xax.field(value=0.1)
-    max_roll: float = xax.field(value=0.1)
-    pretrained: str | None = xax.field(value=None)
-    checkpoint_num: int | None = xax.field(value=None)
 
-    actuator_type: str = xax.field(value="scaled_torque", help="The type of actuator to use.")
+#####################
+# Model Definitions #
+#####################
+
+
+class DefaultHumanoidActor(ActorModel):
+    """Default humanoid actor."""
+
+    underlying_actor: MLP
+
+    @nn.compact
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        """Forward pass of the actor model."""
+        # x = jnp.concatenate(list(obs.values()) + list(cmd.values()), axis=-1)
+        x = jnp.concatenate(list(obs.values()), axis=-1)
+        return self.underlying_actor(x)
+
+
+class DefaultHumanoidCritic(nn.Module):
+    """Default humanoid critic."""
+
+    underlying_critic: MLP
+
+    @nn.compact
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        """Forward pass of the critic model."""
+        # x = jnp.concatenate(list(obs.values()) + list(cmd.values()), axis=-1)
+        x = jnp.concatenate(list(obs.values()), axis=-1)
+        res = self.underlying_critic(x)
+        return res
+
+
+class DefaultHumanoidAgent(ActorCriticAgent):
+    """Default humanoid agent."""
+
+    actor_module: DefaultHumanoidActor
+    critic_module: DefaultHumanoidCritic
+
+    def actor_obs(self, obs: FrozenDict[str, Array]) -> FrozenDict[str, Array]:
+        """Sees all except base pos."""
+        # return FrozenDict(
+        #     {
+        #         "joint_position_observation_noisy": obs["joint_position_observation_noisy"],
+        #         "joint_velocity_observation_noisy": obs["joint_velocity_observation_noisy"],
+        #         "base_orientation_observation_noisy": obs["base_orientation_observation_noisy"],
+        #         "base_angular_velocity_observation_noisy": obs[
+        #             "base_angular_velocity_observation_noisy"
+        #         ],
+        #         "base_linear_velocity_observation_noisy": obs[
+        #             "base_linear_velocity_observation_noisy"
+        #         ],
+        #     }
+        # )
+        return obs
+
+    def critic_obs(self, obs: FrozenDict[str, Array]) -> FrozenDict[str, Array]:
+        """Full pass through."""
+        return obs
+
+
+##########################
+# Experiment Definitions #
+##########################
 
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
@@ -83,8 +124,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
             self.config,
             terminations=[
                 UnhealthyTermination(
-                    unhealthy_z_lower=0.5,
-                    unhealthy_z_upper=1.5,
+                    unhealthy_z_lower=1.0,
+                    unhealthy_z_upper=2.0,
                 ),
             ],
             resets=[
@@ -95,29 +136,30 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 DHForwardReward(scale=0.125),
                 DHHealthyReward(
                     scale=0.5,
-                    healthy_z_lower=0.5,
-                    healthy_z_upper=1.5,
+                    healthy_z_lower=1.0,
+                    healthy_z_upper=2.0,
                 ),
-                DHTerminationPenalty(
-                    scale=-2.0,
-                    healthy_z_lower=0.5,
-                    healthy_z_upper=1.5,
-                ),
-                DHControlPenalty(scale=0.01),
+                # DHTerminationPenalty(
+                #     scale=-2.0,
+                #     healthy_z_lower=0.5,
+                #     healthy_z_upper=1.5,
+                # ),
+                # DHControlPenalty(scale=-0.001),
             ],
             observations=[
-                BaseOrientationObservation(noise_type="gaussian", noise=0.01),
-                BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
-                BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
-                JointPositionObservation(noise_type="gaussian", noise=0.01),
-                JointVelocityObservation(noise_type="gaussian", noise=0.01),
+                # JointPositionObservation(noise_type="gaussian", noise=0.01),
+                # JointVelocityObservation(noise_type="gaussian", noise=0.01),
+                # BaseOrientationObservation(noise_type="gaussian", noise=0.01),
+                # BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
+                # BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
+                # BasePositionObservation(noise_type="gaussian", noise=0.01),
                 # TODO: default humanoid doesn't have sensors, add them later
                 # Legacy Ksim observation setup
-                # LegacyPositionObservation(exclude_xy=True),
-                # LegacyVelocityObservation(),
-                # CenterOfMassInertiaObservation(),
-                # CenterOfMassVelocityObservation(),
-                # ActuatorForceObservation(),
+                LegacyPositionObservation(exclude_xy=True),
+                LegacyVelocityObservation(),
+                CenterOfMassInertiaObservation(),
+                CenterOfMassVelocityObservation(),
+                ActuatorForceObservation(),
             ],
             commands=[
                 LinearVelocityCommand(
@@ -135,23 +177,24 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         )
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
-        return ActorCriticAgent(
-            actor_module=HumanoidActorModel(
-                mlp=MLP(
-                    num_hidden_layers=self.config.actor_num_layers,
-                    hidden_features=self.config.actor_hidden_dims,
-                    out_features=NUM_OUTPUTS,
-                ),
-                init_log_std=-0.7,
-                num_outputs=NUM_OUTPUTS,
-            ),
-            critic_module=HumanoidCriticModel(
-                mlp=MLP(
-                    num_hidden_layers=self.config.critic_num_layers,
-                    hidden_features=self.config.critic_hidden_dims,
-                    out_features=1,
+        return DefaultHumanoidAgent(
+            actor_module=DefaultHumanoidActor(
+                MLP(
+                    out_dim=NUM_OUTPUTS * 2,
+                    hidden_dims=(64,) * 5,
+                    activation=nn.swish,
+                    bias_init=nn.initializers.zeros,
                 ),
             ),
+            critic_module=DefaultHumanoidCritic(
+                MLP(
+                    out_dim=1,
+                    hidden_dims=(64,) * 5,
+                    activation=nn.swish,
+                    bias_init=nn.initializers.zeros,
+                ),
+            ),
+            distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:
@@ -171,7 +214,7 @@ if __name__ == "__main__":
             num_envs=2048,
             dt=0.005,
             ctrl_dt=0.02,
-            learning_rate=0.0003,
+            learning_rate=0.00005,
             save_every_n_steps=50,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
@@ -180,14 +223,13 @@ if __name__ == "__main__":
             solver_iterations=6,
             solver_ls_iterations=6,
             actuator_type="scaled_torque",
-            scale_rewards=True,
+            scale_rewards=False,
             gamma=0.97,
             lam=0.95,
             normalize_advantage=True,
             normalize_advantage_in_minibatch=True,
             entropy_coef=0.001,
-            actor_num_layers=5,
-            critic_num_layers=5,
             clip_param=0.3,
+            use_clipped_value_loss=False,
         ),
     )

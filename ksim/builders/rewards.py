@@ -704,4 +704,4 @@ class DHControlPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return -jnp.sum(jnp.square(action_t))
+        return jnp.sum(jnp.square(action_t))
