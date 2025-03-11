@@ -4,7 +4,7 @@ import argparse
 import logging
 
 # Import a K-Bot task definition that contains the environment and model
-from examples.kbot.standing import KBotStandingConfig, KBotStandingTask
+from examples.zbot2.walking import ZBot2WalkingConfig, ZBot2WalkingTask
 from ksim.utils.interactive.mujoco_viz import (
     MujocoInteractiveVisualizer,
     MujocoInteractiveVisualizerConfig,
@@ -14,8 +14,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# python -m examples.kbot.viz_standing
-# python -m examples.kbot.viz_standing --physics-backend mujoco
+# python -m examples.zbot2.interactive_viz
+# python -m examples.zbot2.interactive_viz --physics-backend mujoco
 # Use mjpython if using a Mac, see
 # https://mujoco.readthedocs.io/en/stable/python.html#passive-viewer
 if __name__ == "__main__":
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
-    task = KBotStandingTask(KBotStandingConfig(num_envs=1))
+    task = ZBot2WalkingTask(ZBot2WalkingConfig(num_envs=1))
     config = MujocoInteractiveVisualizerConfig(physics_backend=args.physics_backend)
     interactive_visualizer = MujocoInteractiveVisualizer(task, config=config)
     logger.info(
