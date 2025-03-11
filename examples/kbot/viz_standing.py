@@ -5,7 +5,7 @@ import logging
 
 # Import a K-Bot task definition that contains the environment and model
 from examples.kbot.standing import KBotStandingConfig, KBotStandingTask
-from ksim.ksim.utils.interactive.mujoco_viz import (
+from ksim.utils.interactive.mujoco_viz import (
     MujocoInteractiveVisualizer,
     MujocoInteractiveVisualizerConfig,
 )
