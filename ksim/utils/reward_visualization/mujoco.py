@@ -18,8 +18,9 @@ import matplotlib.lines
 import matplotlib.pyplot as plt
 import mujoco
 from mujoco import viewer as mujoco_viewer
+from mujoco import mjx  # NEW: Import mjx
 
-jax.config.update("jax_disable_jit", True)
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -66,6 +67,22 @@ class MujocoRewardVisualizer(RewardVisualizer):
         env = self.task.get_environment()
         assert isinstance(env, MjxEnv), "MujocoRewardVisualizer only works with MjxEnv"
         return env
+    
+    def step_physics(self, mx, dx, step_fn):
+        # Update dx with the current values from self.data.
+        dx = dx.replace(
+            qpos=jnp.array(self.data.qpos),
+            qvel=jnp.array(self.data.qvel),
+            time=jnp.array(self.data.time),
+            ctrl=jnp.array(self.data.ctrl),
+            act=jnp.array(self.data.act),
+            xfrc_applied=jnp.array(self.data.xfrc_applied),
+        )
+        # Step the physics using the compiled function.
+        dx = step_fn(mx, dx)
+        # Update self.data with the new state from dx.
+        mjx.get_data_into(self.data, self.model, dx)
+        return dx
 
     def run(self) -> None:
         """Run the Mujoco visualization loop."""
@@ -81,6 +98,18 @@ class MujocoRewardVisualizer(RewardVisualizer):
         assert hasattr(self, "key_r"), msg
 
         assert isinstance(self.viz_config, MujocoRewardVisualizerConfig)
+        
+        # Set up MJX: convert your model and data to MJX objects.
+        mx = mjx.put_model(self.model)
+        dx = mjx.put_data(self.model, self.data)
+
+        # Compile the physics step function with JIT.
+        step_fn = mjx.step
+        logger.info("JIT-compiling the physics step function...")
+        start_compile = time.time()
+        step_fn = jax.jit(step_fn).lower(mx, dx).compile()
+        compile_time = time.time() - start_compile
+        logger.info("Compilation took %.4fs", compile_time)
 
         # Create a viewer
         with mujoco_viewer.launch_passive(
@@ -136,7 +165,8 @@ class MujocoRewardVisualizer(RewardVisualizer):
                                     logger.warning(
                                         "Unknown keycode: %d", self.data_modifying_keycode
                                     )
-                            mujoco.mj_step(self.model, self.data)
+
+                            dx = self.step_physics(mx, dx, step_fn)
 
                         self.data_modifying_keycode = None
 
@@ -158,7 +188,7 @@ class MujocoRewardVisualizer(RewardVisualizer):
                         data_last = self.data
 
                     if not self.paused:
-                        mujoco.mj_step(self.model, self.data)
+                        dx = self.step_physics(mx, dx, step_fn)
 
                         if self.suspended:
                             self.data.qpos[:7] = self.viz_config.suspended_pos
