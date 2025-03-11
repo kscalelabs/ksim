@@ -51,6 +51,9 @@ python -m examples.kbot.viz_standing
 python -m examples.kbot.viz_standing --physics-backend mujoco # default is mjx
 ```
 
+Use `mjpython` if using a Mac, see
+[mujoco passive-viewer docs](https://mujoco.readthedocs.io/en/stable/python.html#passive-viewer)
+
 The interactive visualizer is a tool for visualizing the state of an RL task. It is
 designed to be used in conjunction with the `ksim.utils.interactive.base.InteractiveVisualizer`
 base class.
