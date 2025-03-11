@@ -81,7 +81,7 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
     def _step(
         self,
         mx: mjx.Model | None,
-        dx: mjx.Data | mujoco.MjData,
+        state: mjx.Data | mujoco.MjData,
         step_fn: PyTree | None,
         viewer: Handle,
     ) -> mjx.Data | mujoco.MjData:
@@ -91,7 +91,7 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
 
         Args:
             mx: The MJX model (or None for mujoco backend)
-            dx: The current state (MJX data object for mjx, self.data for mujoco)
+            state: The current state (MJX data object for mjx, self.data for mujoco)
             step_fn: The compiled physics step function (for mjx; None for mujoco)
             viewer: The viewer instance
 
@@ -102,8 +102,8 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
             # For MJX backend, step_fn must be callable
             assert step_fn is not None, "step_fn cannot be None when using mjx backend"
 
-            # Update dx from self.data and step using MJX.
-            dx = dx.replace(
+            # Update state from self.data and step using MJX.
+            state = state.replace(
                 qpos=jnp.array(self.data.qpos),
                 qvel=jnp.array(self.data.qvel),
                 time=jnp.array(self.data.time),
@@ -111,10 +111,10 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                 act=jnp.array(self.data.act),
                 xfrc_applied=jnp.array(self.data.xfrc_applied),
             )
-            dx = step_fn(mx, dx)
-            mjx.get_data_into(self.data, self.model, dx)
+            state = step_fn(mx, state)
+            mjx.get_data_into(self.data, self.model, state)
             viewer.sync()
-            return dx
+            return state
         else:
             # For regular MuJoCo stepping, simply call mj_step and return self.data.
             mujoco.mj_step(self.model, self.data)
@@ -131,11 +131,8 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
         4. Manages suspended state and paused state
 
         The loop continues until the viewer is closed or an error occurs.
-
-        Raises:
-            AssertionError: If required keycodes are not set
         """
-        # Assert that keycodes are set.
+        # For static typing, we need to assert that keycodes are set.
         msg = "All keycodes must be set"
         assert hasattr(self, "key_up"), msg
         assert hasattr(self, "key_down"), msg
@@ -151,18 +148,18 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
         # Set up MJX objects only if using the MJX backend.
         if self.viz_config.physics_backend == "mjx":
             mx = mjx.put_model(self.model)
-            dx = mjx.put_data(self.model, self.data)
+            state = mjx.put_data(self.model, self.data)
             # Compile the physics step function with JIT.
             step_fn = mjx.step
             logger.info("JIT-compiling the physics step function...")
             start_compile = time.time()
-            step_fn = jax.jit(step_fn).lower(mx, dx).compile()
+            step_fn = jax.jit(step_fn).lower(mx, state).compile()
             compile_time = time.time() - start_compile
             logger.info("Compilation took %.4fs", compile_time)
         else:
             mx = None
             # Use self.data directly for the mujoco backend.
-            dx = self.data
+            state = self.data
             step_fn = None
 
         # Create a viewer.
@@ -170,7 +167,7 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
             model=self.model, data=self.data, key_callback=self.key_callback
         ) as viewer:
             # Initialize the "previous state" appropriately.
-            dx_last = dx
+            state_t_minus_1 = state
 
             try:
                 while viewer.is_running():
@@ -223,8 +220,8 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                                     )
 
                             # Call the unified physics step function.
-                            dx = self._step(mx, dx, step_fn, viewer)
-                            dx_last = dx
+                            state = self._step(mx, state, step_fn, viewer)
+                            state_t_minus_1 = state
 
                         self.data_modifying_keycode = None
 
@@ -233,21 +230,21 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                         with viewer.lock():
                             rewards = self.env.get_rewards(
                                 self.dummy_action,
-                                dx_last,
+                                state_t_minus_1,
                                 self.command,
                                 self.dummy_action,
-                                dx,
+                                state,
                             )
 
                         self.timestamps.append(time.time() - self.start_time)
                         for reward_name, value in rewards.items():
                             self.reward_history[reward_name].append(float(value))
-                        dx_last = dx
+                        state_t_minus_1 = state
 
                     if not self.paused:
-                        dx = self._step(mx, dx, step_fn, viewer)
-                        dx_last = dx
-
+                        state_t_minus_1 = state
+                        state = self._step(mx, state, step_fn, viewer)
+                        breakpoint()
                         if self.suspended:
                             self.data.qpos[:7] = self.viz_config.suspended_pos
                             self.data.qvel[:6] = self.viz_config.suspended_vel
@@ -255,17 +252,16 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                         with viewer.lock():
                             rewards = self.env.get_rewards(
                                 self.dummy_action,
-                                dx_last,
+                                state_t_minus_1,
                                 self.command,
                                 self.dummy_action,
-                                dx,
+                                state,
                             )
 
                         current_time = time.time() - self.start_time
                         self.timestamps.append(current_time)
                         for reward_name, value in rewards.items():
                             self.reward_history[reward_name].append(float(value))
-                        dx_last = dx
 
                     elapsed = time.time() - start
                     if elapsed < self.model.opt.timestep:
