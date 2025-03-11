@@ -21,7 +21,7 @@ Optional: Verify GPU backend: `python -c "import jax; print(jax.default_backend(
 Next, install the ksim python package locally
 ```bash
 cd ksim # make sure you are in the root folder of this repo (ls should show a pyproect.toml file)
-pip install -e .[all]
+pip install -e .\[all\]
 ```
 You should be alll set! See the troubleshooting section below for tips if something isn't working.
 
