@@ -5,7 +5,10 @@ import logging
 
 # Import a K-Bot task definition that contains the environment and model
 from examples.kbot.standing import KBotStandingConfig, KBotStandingTask
-from ksim.utils.reward_visualization.mujoco import MujocoRewardVisualizer, MujocoRewardVisualizerConfig
+from ksim.utils.reward_visualization.mujoco import (
+    MujocoRewardVisualizer,
+    MujocoRewardVisualizerConfig,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

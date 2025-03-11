@@ -1,12 +1,18 @@
-"""Reward visualizer for Mujoco environments."""
+"""Reward visualizer for Mujoco environments.
+
+This module provides visualization capabilities for Mujoco-based environments,
+supporting both regular Mujoco and MJX physics backends. It allows interactive
+visualization of rewards and states during environment execution.
+"""
 
 import logging
 import time
-from dataclasses import dataclass, field
 
+import attrs
 import jax
 import jax.numpy as jnp
 import matplotlib
+from jaxtyping import Array, PyTree
 
 from ksim.env.mjx.mjx_env import MjxEnv
 from ksim.task.rl import RLTask
@@ -17,26 +23,29 @@ matplotlib.use("Agg")  # Use non-interactive backend
 import matplotlib.lines
 import matplotlib.pyplot as plt
 import mujoco
-from mujoco import viewer as mujoco_viewer
-from mujoco import mjx  # NEW: Import mjx
+from mujoco import mjx, viewer as mujoco_viewer
+from mujoco.viewer import Handle
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@attrs.define(frozen=True, kw_only=True)
 class MujocoRewardVisualizerConfig(RewardVisualizerConfig):
-    suspended_pos: jnp.ndarray = field(
-        default_factory=lambda: jnp.array([0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+    """Configuration for the Mujoco reward visualizer."""
+
+    suspended_pos: Array = attrs.field(
+        factory=lambda: jnp.array([0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0])
     )
-    suspended_vel: jnp.ndarray = field(
-        default_factory=lambda: jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    )
-    # New flag to select physics backend: "mujoco" or "mjx"
-    physics_backend: str = "mjx"
+    suspended_vel: Array = attrs.field(factory=lambda: jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    physics_backend: str = attrs.field(default="mjx")
 
 
 class MujocoRewardVisualizer(RewardVisualizer):
+    """Visualizer for Mujoco-based environments supporting both Mujoco and MJX backends."""
+
+    viz_config: MujocoRewardVisualizerConfig
+
     def __init__(self, task: RLTask, config: MujocoRewardVisualizerConfig | None = None) -> None:
         """Initialize the Mujoco reward visualizer.
 
@@ -62,30 +71,35 @@ class MujocoRewardVisualizer(RewardVisualizer):
         self.dummy_action = jnp.zeros(self.env.action_size)
 
     def setup_environment(self) -> MjxEnv:
-        """Set up the MjxEnv environment for visualization.
-
-        Returns:
-            The MjxEnv environment instance
-        """
+        """Set up the MjxEnv environment for visualization."""
         env = self.task.get_environment()
         assert isinstance(env, MjxEnv), "MujocoRewardVisualizer only works with MjxEnv"
         return env
 
-    def _step(self, mx, dx, step_fn, viewer):
+    def _step(
+        self,
+        mx: mjx.Model | None,
+        dx: mjx.Data | mujoco.MjData,
+        step_fn: PyTree | None,
+        viewer: Handle,
+    ) -> mjx.Data | mujoco.MjData:
         """Unified physics step function that returns a state object.
-        
-        For 'mjx' backend, returns an MJX data object; for 'mujoco' backend, returns self.data (an MjData).
-        
+
+        This function uses either Mujoco or MJX physics step depending on the config.
+
         Args:
-            mx: The MJX model (or None for mujoco backend).
-            dx: The current state (MJX data object for mjx, self.data for mujoco).
-            step_fn: The compiled physics step function (for mjx; None for mujoco).
-            viewer: The viewer instance.
-        
+            mx: The MJX model (or None for mujoco backend)
+            dx: The current state (MJX data object for mjx, self.data for mujoco)
+            step_fn: The compiled physics step function (for mjx; None for mujoco)
+            viewer: The viewer instance
+
         Returns:
-            The updated state (MJX data for mjx, or self.data for mujoco).
+            The updated state (MJX data for mjx, or self.data for mujoco)
         """
         if self.viz_config.physics_backend == "mjx":
+            # For MJX backend, step_fn must be callable
+            assert step_fn is not None, "step_fn cannot be None when using mjx backend"
+
             # Update dx from self.data and step using MJX.
             dx = dx.replace(
                 qpos=jnp.array(self.data.qpos),
@@ -106,7 +120,19 @@ class MujocoRewardVisualizer(RewardVisualizer):
             return self.data
 
     def run(self) -> None:
-        """Run the Mujoco visualization loop."""
+        """Run the Mujoco visualization loop.
+
+        This method starts the visualization loop that:
+        1. Handles keyboard input for controlling visualization
+        2. Steps the physics simulation
+        3. Updates rewards and plots in real-time
+        4. Manages suspended state and paused state
+
+        The loop continues until the viewer is closed or an error occurs.
+
+        Raises:
+            AssertionError: If required keycodes are not set
+        """
         # Assert that keycodes are set.
         msg = "All keycodes must be set"
         assert hasattr(self, "key_up"), msg
@@ -119,7 +145,7 @@ class MujocoRewardVisualizer(RewardVisualizer):
         assert hasattr(self, "key_r"), msg
 
         assert isinstance(self.viz_config, MujocoRewardVisualizerConfig)
-        
+
         # Set up MJX objects only if using the MJX backend.
         if self.viz_config.physics_backend == "mjx":
             mx = mjx.put_model(self.model)
@@ -153,22 +179,34 @@ class MujocoRewardVisualizer(RewardVisualizer):
                             match self.data_modifying_keycode:
                                 case self.key_up:
                                     self.data.qpos[0] += self.viz_config.pos_step_size
-                                    logger.info("Moving x position by %.3f", self.viz_config.pos_step_size)
+                                    logger.info(
+                                        "Moving x position by %.3f", self.viz_config.pos_step_size
+                                    )
                                 case self.key_down:
                                     self.data.qpos[0] -= self.viz_config.pos_step_size
-                                    logger.info("Moving x position by -%.3f", self.viz_config.pos_step_size)
+                                    logger.info(
+                                        "Moving x position by -%.3f", self.viz_config.pos_step_size
+                                    )
                                 case self.key_right:
                                     self.data.qpos[1] += self.viz_config.pos_step_size
-                                    logger.info("Moving y position by %.3f", self.viz_config.pos_step_size)
+                                    logger.info(
+                                        "Moving y position by %.3f", self.viz_config.pos_step_size
+                                    )
                                 case self.key_left:
                                     self.data.qpos[1] -= self.viz_config.pos_step_size
-                                    logger.info("Moving y position by -%.3f", self.viz_config.pos_step_size)
+                                    logger.info(
+                                        "Moving y position by -%.3f", self.viz_config.pos_step_size
+                                    )
                                 case self.key_p:
                                     self.data.qpos[2] += self.viz_config.pos_step_size
-                                    logger.info("Moving z position by %.3f", self.viz_config.pos_step_size)
+                                    logger.info(
+                                        "Moving z position by %.3f", self.viz_config.pos_step_size
+                                    )
                                 case self.key_l:
                                     self.data.qpos[2] -= self.viz_config.pos_step_size
-                                    logger.info("Moving z position by -%.3f", self.viz_config.pos_step_size)
+                                    logger.info(
+                                        "Moving z position by -%.3f", self.viz_config.pos_step_size
+                                    )
                                 case self.key_n:
                                     logger.info("Stepping forward by one frame")
                                 case self.key_r:
@@ -178,7 +216,9 @@ class MujocoRewardVisualizer(RewardVisualizer):
                                     self.data.qacc[6:] = self.env.default_mj_data.qacc[6:]
                                     self.data.ctrl[:] = self.env.default_mj_data.ctrl
                                 case _:
-                                    logger.warning("Unknown keycode: %d", self.data_modifying_keycode)
+                                    logger.warning(
+                                        "Unknown keycode: %d", self.data_modifying_keycode
+                                    )
 
                             # Call the unified physics step function.
                             dx = self._step(mx, dx, step_fn, viewer)
@@ -232,7 +272,7 @@ class MujocoRewardVisualizer(RewardVisualizer):
                 self.cleanup()
 
     def cleanup(self) -> None:
-        # Clean up.
+        """Clean up resources used by the visualizer."""
         self.is_running = False
         self.plot_thread.join(timeout=1.0)
         plt.close(self.fig)
