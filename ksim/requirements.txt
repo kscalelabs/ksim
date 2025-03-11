@@ -17,4 +17,5 @@ mujoco
 mujoco-mjx
 mujoco-scenes
 optax
+scipy
 xax

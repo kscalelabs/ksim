@@ -2,24 +2,90 @@
 
 This is K-Scale's library for running simulation experiments.
 
-### Notes
+## Installation
 
-When you try to render a trajectory while on a headless system, you may get an error like the following:
-
-```bash
-mujoco.FatalError: an OpenGL platform library has not been loaded into this process, this most likely means that a valid OpenGL context has not been created before mjr_makeContext was called
-```
-
-The fix is to create a virtual display:
+Clone the repo
 
 ```bash
-Xvfb :100 -ac &
-PID1=$!
-export DISPLAY=:100.0
+git clone git@github.com:kscalelabs/ksim.git
+```
+
+Create a new python environment. We reccomend using [conda](https://www.anaconda.com/docs/getting-started/miniconda/main) for this.
+
+```bash
+conda create -n ksim python=3.11
+conda activate ksim
+pip install -U "jax[cuda12]"
+```
+Optional: Verify GPU backend: `python -c "import jax; print(jax.default_backend())"` should print gpu
+Next, install the ksim python package locally
+```bash
+cd ksim # make sure you are in the root folder of this repo (ls should show a pyproect.toml file)
+pip install -e .[all]
+```
+You should be alll set! See the troubleshooting section below for tips if something isn't working.
+
+
+## Usage
+
+### Training 
+
+Run training on any of the example environments by their task name, for example:
+```bash
+python -m examples.kbot.standing
+```
+
+### Evaluation
+To evaluate (save a video of) a saved checkpoint use `action=env` and `pretrained=path/to/run` and optionally `checkpoint_num=n`, for example:
+```bash
+python -m examples.kbot.standing action=env pretrained=examples/kbot/kbot_standing_task/run_6 checkpoint_num=5
 ```
 
 
-### Terminology
+### Interactive Visualization
+
+To run the interactive visualizer, use the following command:
+```bash
+python -m examples.kbot.viz_standing
+# or
+python -m examples.kbot.viz_standing --physics-backend mujoco # default is mjx
+```
+
+Use `mjpython` if using a Mac, see
+[mujoco passive-viewer docs](https://mujoco.readthedocs.io/en/stable/python.html#passive-viewer)
+
+The interactive visualizer is a tool for visualizing the state of an RL task. It is
+designed to be used in conjunction with the `ksim.utils.interactive.base.InteractiveVisualizer`
+base class.
+
+To use the interactive visualizer, you need to subclass the base class and implement the
+`setup_environment` and `run` methods.
+
+The `setup_environment` method should return an instance of the environment
+that you want to visualize the state of.
+
+The `run` method should contain the logic for running the interactive visualizer.
+
+To see an example of how to use the interactive visualizer, see the `ksim.utils.interactive.mujoco.MujocoInteractiveVisualizer`
+class. This class is used in the `examples/kbot/viz_standing.py` example.
+
+Currently, the live plot for the reward is saved to a file which can be specified in the `InteractiveVisualizerConfig` class. It is by default saved to `/tmp/rewards_plots`. To see the live plot, open it in a viewer that supports live updates (e.g. opening in a VS Code tab)
+
+Key Commands:
+- `Space`: Pause/Resume the simulation
+- `S`: Suspend the model in place
+- Arrow Keys: Modify the model position in place
+  - `up`: increase x position
+  - `down`: decrease x position
+  - `right`: increase y position
+  - `left`: decrease y position
+- `P`: increase z position
+- `L`: decrease z position
+- `N`: Step the simulation forward
+- `R`: Reset joint positions and robot orientation to initial conditions
+
+
+## Terminology
 The following terminology is relevant to understanding RL tasks.
 - `EnvState`: includes obs, command, action, reward, and done. The latter two are
   conditioned on the transition produced by the action.
@@ -61,3 +127,42 @@ These should absolutely be annotated:
 
 ### Sharp Bits
 - Add all sharp bits or unorthodox (yet correct) design decisions here.
+
+
+
+
+## Troublehsooting
+
+### Headless Systems
+
+When you try to render a trajectory while on a headless system, you may get an error like the following:
+
+```bash
+mujoco.FatalError: an OpenGL platform library has not been loaded into this process, this most likely means that a valid OpenGL context has not been created before mjr_makeContext was called
+```
+
+The fix is to create a virtual display:
+
+```bash
+Xvfb :100 -ac &
+PID1=$!
+export DISPLAY=:100.0
+```
+
+You may also need to tell mujoco to use GPU accelereated off-screen rendering via 
+```
+export MUJOCO_GL="egl"
+```
+
+### Possible sources of NaNs
+
+- The XLA Triton gemm kernel is buggy. To fix, try disabling with `export XLA_FLAGS="--xla_gpu_enable_triton_gemm=false"`
+
+### Long run / wait times 
+Prefix your commands with JIT_PROFILE=1 to enable prints for what is taking long to compile and run.
+
+### Clear cache
+We've often found that jax reuses caches when its not supposed to. We reccomend clearing your jax cache after changing any function
+```bash
+rm -rf ~/.cache/jax/jaxcache
+```

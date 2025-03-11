@@ -99,7 +99,7 @@ class BaseEnv(ABC):
         return_intermediate_data: bool = False,
     ) -> tuple[EnvState, PhysicsData, Array]: ...
 
-    """Retruns env state trajectory (TEL) and physics data (EL or TEL).
+    """Returns env state trajectory (TEL) and physics data (EL or TEL).
 
     If return_intermediate_data is True, the physics data is returned as a
     trajectory (TEL). Otherwise, only the final physics data is returned (for
@@ -117,7 +117,7 @@ class BaseEnv(ABC):
         width: int = 640,
         height: int = 480,
         camera: int | None = None,
-    ) -> list[np.ndarray]: ...
+    ) -> tuple[list[np.ndarray], EnvState]: ...
 
     """Render trajectory and return list of images."""
 
