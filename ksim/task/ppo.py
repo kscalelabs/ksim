@@ -21,6 +21,7 @@ from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
 from ksim.utils.constants import EPSILON
 from ksim.utils.jit import legit_jit
+from ksim.utils.pytree import compute_nan_ratio
 
 
 @jax.tree_util.register_dataclass
@@ -337,6 +338,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "log_prob_min": jnp.min(log_probs),
             "values_std": jnp.std(values),
             "values_mean": jnp.mean(values),
+            "obs_nans_ratio": compute_nan_ratio(env_state_batch.obs),
+            "action_nans_ratio": compute_nan_ratio(env_state_batch.action),
         }
 
         if isinstance(model.distribution, GaussianDistribution):

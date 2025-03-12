@@ -7,6 +7,8 @@ import jax.numpy as jnp
 import pytest
 
 from examples.default_humanoid.walking import HumanoidWalkingConfig, HumanoidWalkingTask
+from ksim.utils.jit import legit_jit
+from ksim.utils.pytree import flatten_pytree, slice_pytree
 
 
 @pytest.mark.slow
@@ -30,7 +32,7 @@ def test_default_humanoid_training() -> None:
     model = task.get_model(key)
 
     # Initialize model parameters
-    key, init_key = jax.random.split(key)
+    burn_in_rng, key, init_key = jax.random.split(key, 3)
     dummy_states = env.get_dummy_env_states(config.num_envs)
     variables = model.init(init_key, dummy_states.obs, dummy_states.command)
 
@@ -45,32 +47,47 @@ def test_default_humanoid_training() -> None:
     env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, None))(
         model, variables, reset_rngs, physics_model_L
     )
+    static_args = ["model", "num_steps", "num_envs", "return_intermediate_data"]
+    env_rollout_fn = legit_jit(static_argnames=static_args)(env.unroll_trajectories)
 
     # Get a trajectory dataset
     key, rollout_key = jax.random.split(key)
-    trajectories_dataset, rollout_time_loss_components, _, _, _ = task.get_rl_dataset(
+    env_state_TEL, _, _ = env_rollout_fn(
         model=model,
         variables=variables,
-        env=env,
+        rng=burn_in_rng,
+        num_steps=task.num_rollout_steps_per_env,
+        num_envs=config.num_envs,
         env_state_EL_t_minus_1=env_state_EL_0,
         physics_data_EL_t=physics_data_EL_1,
         physics_model_L=physics_model_L,
-        rng=rollout_key,
+        return_intermediate_data=False,
+    )
+    env_state_DL = flatten_pytree(env_state_TEL, flatten_size=task.dataset_size)
+
+    variables = task.update_input_normalization_stats(
+        variables=variables,
+        trajectories_dataset=env_state_TEL,
+        initial_step=False,
+    )
+    rollout_loss_components_TEL = task.get_rollout_time_loss_components(
+        model, variables, env_state_TEL
     )
 
-    # Get a minibatch
-    minibatch, minibatch_loss_components = task.get_minibatch(
-        trajectories_dataset, rollout_time_loss_components, jnp.array(0)
+    rollout_loss_components_DL = flatten_pytree(
+        rollout_loss_components_TEL, flatten_size=task.dataset_size
     )
 
     # Update the model
-    _, _, _, metrics = task.model_update(
-        model=model,
+    key, reshuffle_rng = jax.random.split(key)
+    (_, _, _), metrics = task.rl_pass(
         variables=variables,
-        optimizer=optimizer,
         opt_state=opt_state,
-        env_state_batch=minibatch,
-        rollout_time_loss_components=minibatch_loss_components,
+        reshuffle_rng=reshuffle_rng,
+        model=model,
+        optimizer=optimizer,
+        dataset_DL=env_state_DL,
+        rollout_time_loss_components_DL=rollout_loss_components_DL,
     )
 
     # Verify metrics

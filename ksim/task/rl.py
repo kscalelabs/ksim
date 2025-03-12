@@ -594,7 +594,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             print(f"Update time: {update_time}")
 
             # TODO: we probably want a way of tracking how loss evolves within
-            # an epoch, and across epochs, not just the final metrics.pyt
+            # an epoch, and across epochs, not just the final metrics.
             metric_logging_data = LoggingData(
                 trajectory=env_state_DL,
                 update_metrics=metrics_mean,
