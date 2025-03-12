@@ -575,9 +575,13 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
                 actor: ActionModel
                 match self.config.viz_action:
                     case "policy":
-                        actor = KBotV2ActorModel(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
+                        actor = KBotV2ActorModel(
+                            num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7
+                        )
                     case "zero":
-                        actor = KBotV2ZeroActions(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
+                        actor = KBotV2ZeroActions(
+                            num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7
+                        )
                     case _:
                         raise ValueError(
                             f"Invalid action: {self.config.viz_action}."
