@@ -52,7 +52,7 @@ class Reward(ABC):
                 "Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale
             )
 
-    def post_accumulate(self, reward: Array) -> Array:
+    def post_accumulate(self, reward: Array, done: Array) -> Array:
         """Runs a post-epoch accumulation step.
 
         This function is called after the reward has been accumulated over the
@@ -61,8 +61,11 @@ class Reward(ABC):
         start providing the reward or penalty after a certain number of steps
         have passed.
 
+        The done array is needed for post_accumulate functions that also need to be reset.
+
         Args:
             reward: The accumulated reward over the epoch.
+            done: Termination flag for each environment at every timestep
         """
         return reward
 
@@ -670,7 +673,6 @@ class DHForwardReward(Reward):
         # Take just the x velocity component
         velocity = mjx_data_t_plus_1.qvel[0]
         return velocity
-
 
 @attrs.define(frozen=True, kw_only=True)
 class DHHealthyReward(Reward):

@@ -638,7 +638,7 @@ class MjxEnv(BaseEnv):
 
         1. The batched reset (using vmap) initializes a state for each environment.
         2. A vectorized (vmap-ed) env_step function is defined that calls step.
-        3. A jax.lax.scan unrolls the trajectory for num_steps.
+    3. A jax.lax.scan unrolls the trajectory for num_steps.
         4. The resulting trajectory has shape (num_steps, num_envs, ...).
 
         Note that if `carry_mjx_data` and `carry_mjx_model` are provided, they
@@ -774,11 +774,10 @@ class MjxEnv(BaseEnv):
         updated_reward_components = {}
         
         for reward_name, reward_func in self.rewards:
-            # Extract the reward component for this reward function
             reward_component = env_state_TEL.reward_components[reward_name]
             
             # Apply post_accumulate to the reward component
-            updated_reward = reward_func.post_accumulate(reward_component)
+            updated_reward = reward_func.post_accumulate(reward_component, env_state_TEL.done)
             
             # Store the updated reward
             updated_reward_components[reward_name] = updated_reward
