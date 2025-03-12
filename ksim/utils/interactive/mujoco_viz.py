@@ -46,6 +46,22 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
 
     viz_config: MujocoInteractiveVisualizerConfig
 
+    # Key definitions for controls
+    key_up: int = ord("w")  # Move forward in x
+    key_down: int = ord("s")  # Move backward in x
+    key_right: int = ord("d")  # Move right in y
+    key_left: int = ord("a")  # Move left in y
+    key_p: int = ord("p")  # Move up in z
+    key_l: int = ord("l")  # Move down in z
+    key_q: int = ord("q")  # Rotate yaw positive
+    key_e: int = ord("e")  # Rotate yaw negative
+    key_semicolon: int = ord(";")  # Rotate roll positive
+    key_apostrophe: int = ord("'")  # Rotate roll negative
+    key_period: int = ord(".")  # Rotate pitch positive
+    key_slash: int = ord("/")  # Rotate pitch negative
+    key_n: int = ord("n")  # Step forward one frame
+    key_r: int = ord("r")  # Reset joints and orientation
+
     def __init__(
         self, task: RLTask, config: MujocoInteractiveVisualizerConfig | None = None
     ) -> None:
@@ -121,6 +137,59 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
             viewer.sync()
             return self.data
 
+    def _update_translation(self, axis: int, sign: int, axis_name: str) -> str:
+        """Update translation for given axis."""
+        if self.alternate_controls:
+            self.data.qvel[axis] += sign * self.viz_config.vel_step_size
+            return f"Moving {axis_name} velocity by {sign * self.viz_config.vel_step_size}"
+        else:
+            self.data.qpos[axis] += sign * self.viz_config.pos_step_size
+            return f"Moving {axis_name} position by {sign * self.viz_config.pos_step_size}"
+
+    def _update_rotation(self, axis: int, sign: int, axis_name: str) -> str:
+        """Update rotation for given axis."""
+        self.data.qpos[axis] += sign * self.viz_config.angle_step_size
+        return f"Rotating {axis_name} by {sign * self.viz_config.angle_step_size}"
+
+    def _handle_key_action(self, key: int) -> str:
+        """Handle keyboard action using match-case."""
+        match key:
+            case self.key_up:
+                return self._update_translation(axis=0, sign=1, axis_name="x")
+            case self.key_down:
+                return self._update_translation(axis=0, sign=-1, axis_name="x")
+            case self.key_right:
+                return self._update_translation(axis=1, sign=1, axis_name="y")
+            case self.key_left:
+                return self._update_translation(axis=1, sign=-1, axis_name="y")
+            case self.key_p:
+                return self._update_translation(axis=2, sign=1, axis_name="z")
+            case self.key_l:
+                return self._update_translation(axis=2, sign=-1, axis_name="z")
+            case self.key_q:
+                return self._update_rotation(axis=6, sign=1, axis_name="yaw")
+            case self.key_e:
+                return self._update_rotation(axis=6, sign=-1, axis_name="yaw")
+            case self.key_semicolon:
+                return self._update_rotation(axis=4, sign=1, axis_name="roll")
+            case self.key_apostrophe:
+                return self._update_rotation(axis=4, sign=-1, axis_name="roll")
+            case self.key_period:
+                return self._update_rotation(axis=5, sign=1, axis_name="pitch")
+            case self.key_slash:
+                return self._update_rotation(axis=5, sign=-1, axis_name="pitch")
+            case self.key_n:
+                return "Stepping forward by one frame"
+            case self.key_r:
+                self.data.qpos[3:] = self.env.default_mj_data.qpos[3:]
+                self.data.qvel[6:] = self.env.default_mj_data.qvel[6:]
+                self.data.qacc[6:] = self.env.default_mj_data.qacc[6:]
+                self.data.ctrl[:] = self.env.default_mj_data.ctrl
+                return "Resetting joints and orientation to initial state"
+            case _:
+                logger.warning("Unknown keycode: %d", key)
+                return f"Unknown keycode: {key}"
+
     def run(self) -> None:
         """Run the Mujoco visualization loop.
 
@@ -179,120 +248,9 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                 while viewer.is_running():
                     # Process key inputs.
                     if self.data_modifying_keycode is not None:
-                        with viewer.lock():
-                            match self.data_modifying_keycode:
-                                case self.key_up:
-                                    if self.alternate_controls:
-                                        self.data.qvel[0] += self.viz_config.vel_step_size
-                                        msg = (
-                                            f"Moving x velocity by {self.viz_config.vel_step_size}"
-                                        )
-                                    else:
-                                        self.data.qpos[0] += self.viz_config.pos_step_size
-                                        msg = (
-                                            f"Moving x position by {self.viz_config.pos_step_size}"
-                                        )
-                                    logger.info(msg)
-                                case self.key_down:
-                                    if self.alternate_controls:
-                                        self.data.qvel[0] -= self.viz_config.vel_step_size
-                                        msg = (
-                                            f"Moving x velocity by {-self.viz_config.vel_step_size}"
-                                        )
-                                    else:
-                                        self.data.qpos[0] -= self.viz_config.pos_step_size
-                                        msg = (
-                                            f"Moving x position by {-self.viz_config.pos_step_size}"
-                                        )
-                                    logger.info(msg)
-                                case self.key_right:
-                                    if self.alternate_controls:
-                                        self.data.qvel[1] += self.viz_config.vel_step_size
-                                        msg = (
-                                            f"Moving y velocity by {self.viz_config.vel_step_size}"
-                                        )
-                                    else:
-                                        self.data.qpos[1] += self.viz_config.pos_step_size
-                                        msg = (
-                                            f"Moving y position by {self.viz_config.pos_step_size}"
-                                        )
-                                    logger.info(msg)
-                                case self.key_left:
-                                    if self.alternate_controls:
-                                        self.data.qvel[1] -= self.viz_config.vel_step_size
-                                        msg = (
-                                            f"Moving y velocity by {-self.viz_config.vel_step_size}"
-                                        )
-                                    else:
-                                        self.data.qpos[1] -= self.viz_config.pos_step_size
-                                        msg = (
-                                            f"Moving y position by {-self.viz_config.pos_step_size}"
-                                        )
-                                    logger.info(msg)
-                                case self.key_p:
-                                    if self.alternate_controls:
-                                        self.data.qvel[2] += self.viz_config.vel_step_size
-                                        msg = (
-                                            f"Moving z velocity by {self.viz_config.vel_step_size}"
-                                        )
-                                    else:
-                                        self.data.qpos[2] += self.viz_config.pos_step_size
-                                        msg = (
-                                            f"Moving z position by {self.viz_config.pos_step_size}"
-                                        )
-                                    logger.info(msg)
-                                case self.key_l:
-                                    if self.alternate_controls:
-                                        self.data.qvel[2] -= self.viz_config.vel_step_size
-                                        msg = (
-                                            f"Moving z velocity by {-self.viz_config.vel_step_size}"
-                                        )
-                                    else:
-                                        self.data.qpos[2] -= self.viz_config.pos_step_size
-                                        msg = (
-                                            f"Moving z position by {-self.viz_config.pos_step_size}"
-                                        )
-                                    logger.info(msg)
-                                case self.key_q:
-                                    self.data.qpos[6] += self.viz_config.angle_step_size
-                                    msg = f"Rotating yaw by {self.viz_config.angle_step_size}"
-                                    logger.info(msg)
-                                case self.key_e:
-                                    self.data.qpos[6] -= self.viz_config.angle_step_size
-                                    msg = f"Rotating yaw by {-self.viz_config.angle_step_size}"
-                                    logger.info(msg)
-                                case self.key_semicolon:
-                                    self.data.qpos[4] += self.viz_config.angle_step_size
-                                    msg = f"Rotating roll by {self.viz_config.angle_step_size}"
-                                    logger.info(msg)
-                                case self.key_apostrophe:
-                                    self.data.qpos[4] -= self.viz_config.angle_step_size
-                                    msg = f"Rotating roll by {-self.viz_config.angle_step_size}"
-                                    logger.info(msg)
-                                case self.key_period:
-                                    self.data.qpos[5] += self.viz_config.angle_step_size
-                                    msg = f"Rotating pitch by {self.viz_config.angle_step_size}"
-                                    logger.info(msg)
-                                case self.key_slash:
-                                    self.data.qpos[5] -= self.viz_config.angle_step_size
-                                    msg = f"Rotating pitch by {-self.viz_config.angle_step_size}"
-                                    logger.info(msg)
-                                case self.key_n:
-                                    logger.info("Stepping forward by one frame")
-                                case self.key_r:
-                                    logger.info("Resetting joints and orientation to initial state")
-                                    self.data.qpos[3:] = self.env.default_mj_data.qpos[3:]
-                                    self.data.qvel[6:] = self.env.default_mj_data.qvel[6:]
-                                    self.data.qacc[6:] = self.env.default_mj_data.qacc[6:]
-                                    self.data.ctrl[:] = self.env.default_mj_data.ctrl
-                                case _:
-                                    logger.warning(
-                                        "Unknown keycode: %d", self.data_modifying_keycode
-                                    )
-
-                            # Call the unified physics step function.
-                            state = self._step(mx, state, step_fn, viewer)
-
+                        self._handle_key_action(self.data_modifying_keycode)
+                        # Call the unified physics step function.
+                        state = self._step(mx, state, step_fn, viewer)
                         self.data_modifying_keycode = None
 
                     # When paused and if rewards are updated during pause.
