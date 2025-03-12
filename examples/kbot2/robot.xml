@@ -141,8 +141,13 @@
                 <body name="KB_D_501R_R_LEG_FOOT" pos="-0.031300 0.292500 0.034000">
                   <joint name="right_ankle_02" type="hinge" class="motor_02" range="-0.296706 0.785398" axis="0 0 1" />
                   <inertial pos="-0.013265 0.028578 -0.016056" mass="0.492747" diaginertia="0.000283 0.00156 0.001485" />
-                  <geom name="KB_D_501R_R_LEG_FOOT_collision" type="mesh" mesh="KB_D_501R_R_LEG_FOOT.collision.stl" class="collision" />
-                  <geom name="KB_D_501R_R_LEG_FOOT_visual" material="KB_D_501R_R_LEG_FOOT_material" type="mesh" mesh="KB_D_501R_R_LEG_FOOT.stl" class="visual" />
+                  <!-- Original mesh-based collision (commented out) -->
+                  <!-- <geom name="KB_D_501R_R_LEG_FOOT_collision" type="mesh" mesh="KB_D_501R_R_LEG_FOOT.collision.stl" class="collision" />
+                  <geom name="KB_D_501R_R_LEG_FOOT_visual" material="KB_D_501R_R_LEG_FOOT_material" type="mesh" mesh="KB_D_501R_R_LEG_FOOT.collision.stl" class="visual" /> -->
+
+                  <!-- Box-based collision using computed center and half-extents -->
+                  <geom name="KB_D_501R_R_LEG_FOOT_box_collision" type="box" pos="-0.02848 0.0431438 -0.01400" size="0.10099 0.00602 0.03600" class="collision" />
+                  <geom name="KB_D_501R_R_LEG_FOOT_box_visual" type="box" pos="-0.02848 0.0431438 -0.01400" size="0.10099 0.00602 0.03600" material="KB_D_501R_R_LEG_FOOT_material" class="visual" />
                 </body>
               </body>
             </body>
@@ -167,8 +172,13 @@
                 <body name="KB_D_501L_L_LEG_FOOT" pos="-0.031300 -0.292500 -0.057200">
                   <joint name="left_ankle_02" type="hinge" class="motor_02" range="-0.785398 0.296706" axis="0 0 1.0" />
                   <inertial pos="-0.013265 -0.028578 0.011944" mass="0.492748" diaginertia="0.000283 0.00156 0.001485" />
-                  <geom name="KB_D_501L_L_LEG_FOOT_collision" type="mesh" mesh="KB_D_501L_L_LEG_FOOT.collision.stl" class="collision" />
-                  <geom name="KB_D_501L_L_LEG_FOOT_visual" material="KB_D_501R_R_LEG_FOOT_material" type="mesh" mesh="KB_D_501L_L_LEG_FOOT.stl" class="visual" />
+                  <!-- Original mesh-based collision (commented out) -->
+                  <!-- <geom name="KB_D_501L_L_LEG_FOOT_collision" type="mesh" mesh="KB_D_501L_L_LEG_FOOT.collision.stl" class="collision" />
+                  <geom name="KB_D_501L_L_LEG_FOOT_visual" material="KB_D_501R_R_LEG_FOOT_material" type="mesh" mesh="KB_D_501L_L_LEG_FOOT.collision.stl" class="visual" />
+                   -->
+                  <!-- Box-based collision using adjusted center and half-extents (mirror y coordinate) -->
+                  <geom name="KB_D_501L_L_LEG_FOOT_box_collision" type="box" pos="-0.02848 -0.0431438 0.0135400" size="0.10099 0.00602 0.03600" class="collision" />
+                  <geom name="KB_D_501L_L_LEG_FOOT_box_visual" type="box" pos="-0.02848 -0.0431438 0.0135400" size="0.10099 0.00602 0.03600" material="KB_D_501R_R_LEG_FOOT_material" class="visual" />
                 </body>
               </body>
             </body>
