@@ -147,7 +147,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
             ],
             rewards=[
                 LinearVelocityZPenalty(scale=-0.0),
-                AngularVelocityXYPenalty(scale=-0.15),
+                AngularVelocityXYPenalty(scale=-0.02),
                 TrackLinearVelocityXYReward(scale=1.0),
                 HeightReward(scale=5.0, height_target=0.98),
                 TrackAngularVelocityZReward(scale=1.0),
@@ -165,7 +165,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                                                     "foot3_collision_sphere_4",
                                                     "foot3_collision_box"]),
                 DefaultPoseDeviationPenaltyBuilder(
-                    scale=-0.1,
+                    scale=-0.01,
                     default_positions={
                         # "left_shoulder_pitch_03": 0.0,
                         # "left_shoulder_roll_03": 0.0,

@@ -115,8 +115,8 @@ class InteractiveVisualizer(abc.ABC):
         Args:
             keycode: The keycode of the pressed key
         """
-        logger.info("Key pressed: %s", chr(keycode))
-        logger.info("Keycode: %d", keycode)
+        logger.debug("Key pressed: %s", chr(keycode))
+        logger.debug("Keycode: %d", keycode)
 
         if chr(keycode) == " ":  # Space key
             self.paused = not self.paused
