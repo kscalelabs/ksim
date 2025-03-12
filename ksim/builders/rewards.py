@@ -675,6 +675,22 @@ class DHForwardReward(Reward):
         return velocity
 
 @attrs.define(frozen=True, kw_only=True)
+class XPosReward(Reward):
+    """Reward for how far the robot has moved in the x direction."""
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        x_pos = mjx_data_t_plus_1.qpos[0]
+        return x_pos
+
+
+@attrs.define(frozen=True, kw_only=True)
 class DHHealthyReward(Reward):
     """Legacy default humanoid healthy reward that gives binary reward based on height."""
 
@@ -689,10 +705,7 @@ class DHHealthyReward(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        height = mjx_data_t.qpos[2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
+        return jnp.array(1.0)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -728,4 +741,4 @@ class DHControlPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return -jnp.sum(jnp.square(action_t))
+        return jnp.sum(jnp.square(action_t))
