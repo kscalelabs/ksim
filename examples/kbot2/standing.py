@@ -43,7 +43,7 @@ from ksim.model.formulations import ActionModel, ActorCriticAgent, GaussianActio
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_OUTPUTS = 14  # No shoulders
+NUM_OUTPUTS = 20  # Updated to match number of actuators in kbot2
 
 
 class KBotV2ActorModel(GaussianActionModel):
@@ -305,7 +305,7 @@ class KBotV2StandingTask(PPOTask[KBotV2StandingConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot.standing
+    # python -m examples.kbot2.standing
     KBotV2StandingTask.launch(
         KBotV2StandingConfig(
             num_learning_epochs=8,
