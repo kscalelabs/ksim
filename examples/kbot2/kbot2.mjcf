@@ -1,4 +1,4 @@
-<mujoco model="k-bot_sim smooth scene">
+<mujoco model="k-bot_v2_sim smooth scene">
   <include file="robot.xml" />
 
   <statistic center="0.15 0.1 0.38" extent=".8" meansize="0.05" />
