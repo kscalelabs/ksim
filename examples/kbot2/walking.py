@@ -51,8 +51,6 @@ from ksim.task.ppo import PPOConfig, PPOTask
 NUM_OUTPUTS = 20
 
 
-
-
 class KBotV2ActorModel(GaussianActionModel):
     mlp: MLP
     action_clipping: float = 20.0

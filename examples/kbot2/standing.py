@@ -43,7 +43,7 @@ from ksim.model.formulations import ActionModel, ActorCriticAgent, GaussianActio
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_OUTPUTS = 20  # Updated to match number of actuators in kbot2
+NUM_OUTPUTS = 20
 
 
 class KBotV2ActorModel(GaussianActionModel):
@@ -156,14 +156,14 @@ class KBotV2StandingTask(PPOTask[KBotV2StandingConfig]):
                 DefaultPoseDeviationPenaltyBuilder(
                     scale=-0.1,
                     default_positions={
-                        # "left_shoulder_pitch_03": 0.0,
-                        # "left_shoulder_roll_03": 0.0,
-                        # "left_shoulder_yaw_02": 0.0,
+                        "left_shoulder_pitch_03": 0.0,
+                        "left_shoulder_roll_03": 0.0,
+                        "left_shoulder_yaw_02": 0.0,
                         "left_elbow_02": 0.0,
                         "left_wrist_02": 0.0,
-                        # "right_shoulder_pitch_03": 0.0,
-                        # "right_shoulder_roll_03": 0.0,
-                        # "right_shoulder_yaw_02": 0.0,
+                        "right_shoulder_pitch_03": 0.0,
+                        "right_shoulder_roll_03": 0.0,
+                        "right_shoulder_yaw_02": 0.0,
                         "right_elbow_02": 0.0,
                         "right_wrist_02": 0.0,
                         "left_hip_pitch_04": 0.0,
@@ -178,14 +178,14 @@ class KBotV2StandingTask(PPOTask[KBotV2StandingConfig]):
                         "right_ankle_02": 0.0,
                     },
                     deviation_weights={
-                        # "left_shoulder_pitch_03": 1.0,
-                        # "left_shoulder_roll_03": 1.0,
-                        # "left_shoulder_yaw_02": 1.0,
+                        "left_shoulder_pitch_03": 1.0,
+                        "left_shoulder_roll_03": 1.0,
+                        "left_shoulder_yaw_02": 1.0,
                         "left_elbow_02": 1.0,
                         "left_wrist_02": 1.0,
-                        # "right_shoulder_pitch_03": 1.0,
-                        # "right_shoulder_roll_03": 1.0,
-                        # "right_shoulder_yaw_02": 1.0,
+                        "right_shoulder_pitch_03": 1.0,
+                        "right_shoulder_roll_03": 1.0,
+                        "right_shoulder_yaw_02": 1.0,
                         "right_elbow_02": 1.0,
                         "right_wrist_02": 1.0,
                         "left_hip_pitch_04": 2.0,
