@@ -3,7 +3,6 @@
 from abc import abstractmethod
 
 import flax.linen as nn
-import jax
 import jax.numpy as jnp
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
@@ -133,7 +132,7 @@ def update_actor_critic_normalization(
 ) -> PyTree:
     """Update the normalization parameters for the observations and returns.
 
-    High alpha means more weight is given to the new data.
+    High alpha means more weight is given to the old data.
     """
     # update the returns normalization parameters
     returns = compute_returns(trajectories_dataset.reward, trajectories_dataset.done, gamma)

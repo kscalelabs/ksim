@@ -665,10 +665,7 @@ class DHHealthyReward(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        height = mjx_data_t.qpos[2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
+        return jnp.array(1.0)
 
 
 @attrs.define(frozen=True, kw_only=True)

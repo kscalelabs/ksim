@@ -309,7 +309,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         value_objective = self.config.value_loss_coef * value_mse
 
         # entropy bonus term
-        entropies = model.distribution.entropy(prediction, rng=rng)
+        entropies = model.distribution.entropy(prediction, rng)
         entropy_objective = self.config.entropy_coef * jnp.mean(entropies)
 
         total_objective = policy_objective - value_objective + entropy_objective

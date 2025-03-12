@@ -495,11 +495,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         ########################
 
         rng = self.prng_key()
-        rng, burn_in_rng, train_rng = jax.random.split(rng, 3)
+        burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 3)
 
         # getting initial physics data
         physics_model_L = env.get_init_physics_model()
-        reset_rngs = jax.random.split(burn_in_rng, self.config.num_envs)
+        reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
 
         # NOTE: env_state_EL_t and physics_data_EL_t_plus_1 are the carry data
         # structures used to efficiently unroll and resume trajectory rollouts
@@ -510,6 +510,26 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if self.config.compile_unroll:
             static_args = ["model", "num_steps", "num_envs", "return_intermediate_data"]
             env_rollout_fn = legit_jit(static_argnames=static_args)(env.unroll_trajectories)
+
+        #################
+        # Burn in Stage #
+        #################
+        burn_in_env_state_TEL, _, _ = env_rollout_fn(
+            model=model,
+            variables=variables,
+            rng=burn_in_rng,
+            num_steps=self.num_rollout_steps_per_env,
+            num_envs=self.config.num_envs,
+            env_state_EL_t_minus_1=env_state_EL_t,
+            physics_data_EL_t=physics_data_EL_t_plus_1,
+            physics_model_L=physics_model_L,
+            return_intermediate_data=False,
+        )
+        variables = self.update_input_normalization_stats(
+            variables=variables,
+            trajectories_dataset=burn_in_env_state_TEL,
+            initial_step=False,
+        )
 
         ##################
         # Training Stage #
@@ -541,18 +561,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rollout_time = time.time() - start_time
             print(f"Rollout time: {rollout_time}")
             self.log_trajectory_stats(env, env_state_EL_t)
-
-            # it's important that we update normalization stats before we run
-            # the minibatch training loop:
-            # 1) ensures initial rollout has representative log probs
-            # 2) any distribution shift is equivalent to a random perturbation
-            #    in the model params before training, which is easier to handle
-            #    than a distribution shift during rollout collection.
-            variables = self.update_input_normalization_stats(
-                variables=variables,
-                trajectories_dataset=env_state_TEL,
-                initial_step=False,
-            )
 
             env_state_DL = flatten_pytree(env_state_TEL, flatten_size=self.dataset_size)
 
@@ -597,8 +605,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 for log_item in self.log_items:
                     log_item(self.logger, metric_logging_data)
 
-                print(metrics)
-
                 # logging metrics to info here...
                 for key, value in metrics_mean.items():
                     assert isinstance(value, jnp.ndarray)
@@ -610,15 +616,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.logger.write(training_state)
                 training_state.num_steps += 1
                 training_state.num_samples += self.dataset_size
-
-            # # updating normalization statistics for the next rollout
-            # # NOTE: for the first step, the normalization stats are not updated
-            # variables = self.update_input_normalization_stats(
-            #     variables=variables,
-            #     trajectories_dataset=dataset_DL,
-            #     rollout_time_loss_components=rollout_loss_components_DL,
-            #     initial_step=False,
-            # )
 
             # Log the time taken for the model update.
             with self.step_context("write_logs"):
@@ -650,6 +647,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
 
                 logger.info("Done rendering to %s", render_dir)
+
+            variables = self.update_input_normalization_stats(
+                variables=variables,
+                trajectories_dataset=env_state_TEL,
+                initial_step=False,
+            )
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""

@@ -33,7 +33,6 @@ from ksim.builders.rewards import (
 from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.distributions import GaussianDistribution, TanhGaussianDistribution
-from ksim.model.factory import create_mlp_tanh_gaussian_actor_critic
 from ksim.model.formulations import ActorCriticAgent, ActorModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -62,11 +61,39 @@ class DefaultHumanoidActor(ActorModel):
     """Default humanoid actor."""
 
     underlying_actor: MLP
+    std_range: tuple[float, float] = (0.1, 0.9)
+    std_init: float = 0.3
 
     @nn.compact
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Forward pass of the actor model."""
         # x = jnp.concatenate(list(obs.values()) + list(cmd.values()), axis=-1)
+        x = jnp.concatenate(list(obs.values()), axis=-1)
+        mean = self.underlying_actor(x)
+
+        # using a single std for all actions for stability
+        std = self.param(
+            "std",
+            nn.initializers.constant(self.std_init),
+            (NUM_OUTPUTS,),
+        )
+        std = jnp.clip(std, self.std_range[0], self.std_range[1])
+        std = jnp.tile(std, (*mean.shape[:-1], 1))
+
+        # concatting because Gaussian-like distributions expect the parameters
+        # to be mean concat std
+        res = jnp.concatenate([mean, std], axis=-1)
+        return res
+
+
+class DefaultHumanoidLearnedStdActor(ActorModel):
+    """Default humanoid actor with learned std."""
+
+    underlying_actor: MLP
+
+    @nn.compact
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        """Forward pass of the actor model."""
         x = jnp.concatenate(list(obs.values()), axis=-1)
         return self.underlying_actor(x)
 
@@ -88,24 +115,11 @@ class DefaultHumanoidCritic(nn.Module):
 class DefaultHumanoidAgent(ActorCriticAgent):
     """Default humanoid agent."""
 
-    actor_module: DefaultHumanoidActor
+    actor_module: DefaultHumanoidActor | DefaultHumanoidLearnedStdActor
     critic_module: DefaultHumanoidCritic
 
     def actor_obs(self, obs: FrozenDict[str, Array]) -> FrozenDict[str, Array]:
         """Sees all except base pos."""
-        # return FrozenDict(
-        #     {
-        #         "joint_position_observation_noisy": obs["joint_position_observation_noisy"],
-        #         "joint_velocity_observation_noisy": obs["joint_velocity_observation_noisy"],
-        #         "base_orientation_observation_noisy": obs["base_orientation_observation_noisy"],
-        #         "base_angular_velocity_observation_noisy": obs[
-        #             "base_angular_velocity_observation_noisy"
-        #         ],
-        #         "base_linear_velocity_observation_noisy": obs[
-        #             "base_linear_velocity_observation_noisy"
-        #         ],
-        #     }
-        # )
         return obs
 
     def critic_obs(self, obs: FrozenDict[str, Array]) -> FrozenDict[str, Array]:
@@ -124,7 +138,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
             self.config,
             terminations=[
                 UnhealthyTermination(
-                    unhealthy_z_lower=1.0,
+                    unhealthy_z_lower=0.8,
                     unhealthy_z_upper=2.0,
                 ),
             ],
@@ -136,8 +150,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 DHForwardReward(scale=0.125),
                 DHHealthyReward(
                     scale=0.5,
-                    healthy_z_lower=1.0,
-                    healthy_z_upper=2.0,
                 ),
                 # DHTerminationPenalty(
                 #     scale=-2.0,
@@ -180,21 +192,31 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         return DefaultHumanoidAgent(
             actor_module=DefaultHumanoidActor(
                 MLP(
-                    out_dim=NUM_OUTPUTS * 2,
+                    out_dim=NUM_OUTPUTS,
                     hidden_dims=(64,) * 5,
-                    activation=nn.swish,
+                    activation=nn.relu,
                     bias_init=nn.initializers.zeros,
                 ),
+                std_range=(0.1, 0.9),
+                std_init=0.3,
             ),
+            # actor_module=DefaultHumanoidLearnedStdActor(
+            #     MLP(
+            #         out_dim=NUM_OUTPUTS * 2,
+            #         hidden_dims=(64,) * 5,
+            #         activation=nn.relu,
+            #         bias_init=nn.initializers.zeros,
+            #     ),
+            # ),
             critic_module=DefaultHumanoidCritic(
                 MLP(
                     out_dim=1,
                     hidden_dims=(64,) * 5,
-                    activation=nn.swish,
+                    activation=nn.relu,
                     bias_init=nn.initializers.zeros,
                 ),
             ),
-            distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
+            distribution=GaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:
