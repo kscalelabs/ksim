@@ -121,8 +121,11 @@
                 <body name="FOOT" pos="0.100000 0 0.000800" quat="-1.2247452309842457e-07 -0.7071068967259713 -0.7071066656470838 -1.22474483074382e-07">
                   <joint name="left_ankle" type="hinge" class="motor" range="-1.570796 1.570796" axis="0 0 1" />
                   <inertial pos="-0.015078 0.027835 0.018700" mass="0.278140" diaginertia="4.5e-05 0.000205 0.000182" />
+                  <!-- NOTE: With stl feet collisions, we get ~ 1887 samples per second -->
                   <!-- <geom name="FOOT_collision" type="mesh" mesh="FOOT.collision.stl" class="collision" />
                   <geom name="FOOT_visual" material="L_ARM_MIRROR_1_material" type="mesh" mesh="FOOT.collision.stl" class="visual" /> -->
+                  <!-- NOTE: With box collisions, we get ~ 11,036 samples per second, i.e. it is ~5.8 times faster than stl collisions -->
+                  <!-- See https://github.com/kscalelabs/ksim/pull/49 for more details  -->
                   <!-- Replace the mesh-based collision with a box using computed center and half-extents -->
                   <geom name="FOOT_box_collision" type="box" pos="-0.01606 0.02992 0.01870" size="0.04094 0.00572 0.009" class="collision" />
                   <geom name="FOOT_box_visual" type="box" pos="-0.01606 0.03992 0.01870" size="0.04094 0.00572 0.009" material="L_ARM_MIRROR_1_material" class="visual" />
@@ -152,8 +155,11 @@
                 <body name="FOOT_2" pos="0.100000 0 0.001000" quat="-1.2247452309842457e-07 -0.7071068967259713 0.7071066656470838 1.22474483074382e-07">
                   <joint name="right_ankle" type="hinge" class="motor" range="-1.570796 1.570796" axis="0 0 1" />
                   <inertial pos="-0.015078 -0.027835 0.018700" mass="0.278140" diaginertia="4.5e-05 0.000205 0.000182" />
+                  <!-- NOTE: With stl feet collisions, we get ~ 1887 samples per second -->
                   <!-- <geom name="FOOT_2_collision" type="mesh" mesh="FOOT_2.collision.stl" class="collision" />
                   <geom name="FOOT_2_visual" material="L_ARM_MIRROR_1_material" type="mesh" mesh="FOOT_2.stl" class="visual" /> -->
+                  <!-- NOTE: With box collisions, we get ~ 11,036 samples per second, i.e. it is ~5.8 times faster than stl collisions -->
+                  <!-- See https://github.com/kscalelabs/ksim/pull/49 for more details  -->
                   <!-- Replace the mesh-based collision with a box using computed center and half-extents -->
                   <geom name="FOOT_2_box_collision" type="box" pos="-0.01606 -0.02992 0.01870" size="0.04094 0.00572 0.009" class="collision" />
                   <!-- Use the same box for visual inspection -->
