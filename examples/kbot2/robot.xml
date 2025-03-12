@@ -174,8 +174,8 @@
                   <inertial pos="-0.013265 -0.028578 0.011944" mass="0.492748" diaginertia="0.000283 0.00156 0.001485" />
                   <!-- Original mesh-based collision (commented out) -->
                   <!-- <geom name="KB_D_501L_L_LEG_FOOT_collision" type="mesh" mesh="KB_D_501L_L_LEG_FOOT.collision.stl" class="collision" />
-                  <geom name="KB_D_501L_L_LEG_FOOT_visual" material="KB_D_501R_R_LEG_FOOT_material" type="mesh" mesh="KB_D_501L_L_LEG_FOOT.collision.stl" class="visual" />
-                   -->
+                  <geom name="KB_D_501L_L_LEG_FOOT_visual" material="KB_D_501R_R_LEG_FOOT_material" type="mesh" mesh="KB_D_501L_L_LEG_FOOT.collision.stl" class="visual" /> -->
+                  
                   <!-- Box-based collision using adjusted center and half-extents (mirror y coordinate) -->
                   <geom name="KB_D_501L_L_LEG_FOOT_box_collision" type="box" pos="-0.02848 -0.0431438 0.0135400" size="0.10099 0.00602 0.03600" class="collision" />
                   <geom name="KB_D_501L_L_LEG_FOOT_box_visual" type="box" pos="-0.02848 -0.0431438 0.0135400" size="0.10099 0.00602 0.03600" material="KB_D_501R_R_LEG_FOOT_material" class="visual" />
