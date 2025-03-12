@@ -105,19 +105,39 @@ class XYPositionResetBuilder(ResetBuilder[XYPositionReset]):
     padding_prct: float = attrs.field(default=0.1)
 
     def __call__(self, data: BuilderData) -> XYPositionReset:
-        x, y, ztop, zbottom = data.model.hfield_size.flatten().tolist()
-        # Convert to integers properly to avoid deprecation warning
-        nx = (
-            int(data.model.hfield_nrow.item())
-            if hasattr(data.model.hfield_nrow, "item")
-            else int(data.model.hfield_nrow)
-        )
-        ny = (
-            int(data.model.hfield_ncol.item())
-            if hasattr(data.model.hfield_ncol, "item")
-            else int(data.model.hfield_ncol)
-        )
-        hfield_data = data.model.hfield_data.reshape(nx, ny)
+        # Check if we have a heightfield by looking at hfield_size
+        has_hfield = hasattr(data.model, "hfield_size") and data.model.hfield_size.size > 0
+
+        if has_hfield:
+            x, y, ztop, zbottom = data.model.hfield_size.flatten().tolist()
+            # Convert to integers properly to avoid deprecation warning
+            nx = (
+                int(data.model.hfield_nrow.item())
+                if hasattr(data.model.hfield_nrow, "item")
+                else int(data.model.hfield_nrow)
+            )
+            ny = (
+                int(data.model.hfield_ncol.item())
+                if hasattr(data.model.hfield_ncol, "item")
+                else int(data.model.hfield_ncol)
+            )
+            hfield_data = data.model.hfield_data.reshape(nx, ny)
+        else:
+            # Find plane geom (type 0)
+            plane_indices = [i for i, t in enumerate(data.model.geom_type) if t == 0]
+
+            if not plane_indices:
+                raise ValueError(
+                    "No heightfield or plane geom found in the model. Mujoco scene missing floor!"
+                )
+
+            floor_idx = plane_indices[0]
+            x, y = data.model.geom_size[floor_idx][:2]
+            z_pos = data.model.geom_pos[floor_idx][2]
+
+            ztop = z_pos + 0.05
+            zbottom = z_pos - 0.05
+            hfield_data = jnp.full((2, 2), z_pos)
         return XYPositionReset(
             bounds=(x, y, ztop, zbottom),
             hfield_data=hfield_data,
