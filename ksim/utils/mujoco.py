@@ -240,6 +240,7 @@ def get_collision_info(contact: mjx.Contact, geom1: int, geom2: int) -> tuple[ja
     mask |= (jnp.array([geom2, geom1]) == contact.geom).all(axis=1)
     idx = jnp.where(mask, contact.dist, 1e4).argmin()
     dist = contact.dist[idx] * mask[idx]
+    # This reshape is nedded because contact.frame's shape depends on how many envs there are.
     normal = (dist < 0) * jnp.reshape(contact.frame[idx], (-1,))[:3]
     return dist, normal
 
