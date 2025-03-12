@@ -651,6 +651,22 @@ class DHForwardReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class XPosReward(Reward):
+    """Reward for how far the robot has moved in the x direction."""
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        x_pos = mjx_data_t_plus_1.qpos[0]
+        return x_pos
+
+
+@attrs.define(frozen=True, kw_only=True)
 class DHHealthyReward(Reward):
     """Legacy default humanoid healthy reward that gives binary reward based on height."""
 

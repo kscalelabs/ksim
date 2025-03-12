@@ -29,6 +29,7 @@ from ksim.builders.rewards import (
     DHForwardReward,
     DHHealthyReward,
     DHTerminationPenalty,
+    XPosReward,
 )
 from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
@@ -155,10 +156,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 RandomizeJointVelocities(scale=0.01),
             ],
             rewards=[
-                DHForwardReward(scale=0.125),
+                # XPosReward(scale=0.01),
                 DHHealthyReward(
                     scale=0.5,
                 ),
+                DHForwardReward(scale=0.3),
                 # DHTerminationPenalty(
                 #     scale=-2.0,
                 #     healthy_z_lower=0.5,
