@@ -46,7 +46,7 @@ from ksim.task.ppo import PPOConfig, PPOTask
 NUM_OUTPUTS = 14  # No shoulders
 
 
-class KBotActorModel(GaussianActionModel):
+class KBotV2ActorModel(GaussianActionModel):
     mlp: MLP
     action_clipping: float = 20.0
     action_scale: float = 0.5
@@ -78,7 +78,7 @@ class KBotActorModel(GaussianActionModel):
         return actions_n
 
 
-class KBotZeroActions(GaussianActionModel):
+class KBotV2ZeroActions(GaussianActionModel):
     mlp: MLP
 
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
@@ -91,7 +91,7 @@ class KBotZeroActions(GaussianActionModel):
         return mean, mean
 
 
-class KBotCriticModel(nn.Module):
+class KBotV2CriticModel(nn.Module):
     mlp: MLP
 
     @nn.compact
@@ -110,9 +110,9 @@ class KBotCriticModel(nn.Module):
 
 
 @dataclass
-class KBotStandingConfig(PPOConfig, MjxEnvConfig):
+class KBotV2StandingConfig(PPOConfig, MjxEnvConfig):
     # Robot model name to use.
-    robot_model_name: str = xax.field(value="examples/kbot/")
+    robot_model_name: str = xax.field(value="examples/kbot2/")
 
     # ML model parameters.
     actor_hidden_dims: int = xax.field(value=512)
@@ -131,7 +131,7 @@ class KBotStandingConfig(PPOConfig, MjxEnvConfig):
     actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
 
 
-class KBotStandingTask(PPOTask[KBotStandingConfig]):
+class KBotV2StandingTask(PPOTask[KBotV2StandingConfig]):
     def get_environment(self) -> MjxEnv:
         return MjxEnv(
             self.config,
@@ -233,7 +233,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         return ActorCriticAgent(
-            actor_module=KBotActorModel(
+            actor_module=KBotV2ActorModel(
                 mlp=MLP(
                     num_hidden_layers=self.config.actor_num_layers,
                     hidden_features=self.config.actor_hidden_dims,
@@ -244,7 +244,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                 action_clipping=self.config.action_clipping,
                 action_scale=self.config.action_scale,
             ),
-            critic_module=KBotCriticModel(
+            critic_module=KBotV2CriticModel(
                 mlp=MLP(
                     num_hidden_layers=self.config.critic_num_layers,
                     hidden_features=self.config.critic_hidden_dims,
@@ -276,9 +276,9 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                 actor: ActionModel
                 match self.config.viz_action:
                     case "policy":
-                        actor = KBotActorModel(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
+                        actor = KBotV2ActorModel(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
                     case "zero":
-                        actor = KBotZeroActions(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
+                        actor = KBotV2ZeroActions(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
                     case _:
                         raise ValueError(
                             f"Invalid action: {self.config.viz_action}."
@@ -287,7 +287,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
 
                 model = ActorCriticAgent(
                     actor_module=actor,
-                    critic_module=KBotCriticModel(
+                    critic_module=KBotV2CriticModel(
                         mlp=MLP(
                             num_hidden_layers=self.config.critic_num_layers,
                             hidden_features=self.config.critic_hidden_dims,
@@ -306,8 +306,8 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
 
 if __name__ == "__main__":
     # python -m examples.kbot.standing
-    KBotStandingTask.launch(
-        KBotStandingConfig(
+    KBotV2StandingTask.launch(
+        KBotV2StandingConfig(
             num_learning_epochs=8,
             num_env_states_per_minibatch=8192,
             num_minibatches=64,
