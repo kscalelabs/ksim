@@ -228,4 +228,10 @@
     <framelinvel name="base_link_vel" objtype="site" objname="imu_site" />
     <frameangvel name="base_link_ang_vel" objtype="site" objname="imu_site" />
   </sensor>
+
+  <contact>
+  <pair geom1="KB_D_501R_R_LEG_FOOT_box_collision" geom2="floor"/>
+  <pair geom1="KB_D_501L_L_LEG_FOOT_box_collision" geom2="floor"/>
+  </contact>
+
 </mujoco>
