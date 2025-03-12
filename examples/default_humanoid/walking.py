@@ -5,35 +5,22 @@ from dataclasses import dataclass
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.builders.commands import LinearVelocityCommand
 from ksim.builders.observation import (
     ActuatorForceObservation,
-    BaseAngularVelocityObservation,
-    BaseLinearVelocityObservation,
-    BaseOrientationObservation,
-    BasePositionObservation,
     CenterOfMassInertiaObservation,
     CenterOfMassVelocityObservation,
-    JointPositionObservation,
-    JointVelocityObservation,
     LegacyPositionObservation,
     LegacyVelocityObservation,
 )
 from ksim.builders.resets import RandomizeJointPositions, RandomizeJointVelocities
-from ksim.builders.rewards import (
-    DHControlPenalty,
-    DHForwardReward,
-    DHHealthyReward,
-    DHTerminationPenalty,
-    XPosReward,
-)
+from ksim.builders.rewards import DHForwardReward, DHHealthyReward
 from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.distributions import GaussianDistribution, TanhGaussianDistribution
+from ksim.model.distributions import TanhGaussianDistribution
 from ksim.model.formulations import ActorCriticAgent, ActorModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -50,7 +37,6 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     """Combining configs for the humanoid walking task and fixing params."""
 
     robot_model_name: str = "examples/default_humanoid/"
-    actuator_type: str = "scaled_torque"
 
 
 #####################
@@ -61,16 +47,15 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
 class DefaultHumanoidActor(ActorModel):
     """Default humanoid actor."""
 
-    underlying_actor: MLP
+    network: MLP
     std_range: tuple[float, float] = (0.1, 0.9)
     std_init: float = 0.3
 
     @nn.compact
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Forward pass of the actor model."""
-        # x = jnp.concatenate(list(obs.values()) + list(cmd.values()), axis=-1)
         x = jnp.concatenate(list(obs.values()), axis=-1)
-        mean = self.underlying_actor(x)
+        mean = self.network(x)
 
         # using a single std for all actions for stability
         std = self.param(
@@ -90,7 +75,7 @@ class DefaultHumanoidActor(ActorModel):
 class DefaultHumanoidLearnedStdActor(ActorModel):
     """Default humanoid actor with learned std."""
 
-    underlying_actor: MLP
+    network: MLP
     min_std: float = 0.01
     max_std: float = 1.0
     var_scale: float = 1.0
@@ -99,7 +84,7 @@ class DefaultHumanoidLearnedStdActor(ActorModel):
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Forward pass of the actor model."""
         x = jnp.concatenate(list(obs.values()), axis=-1)
-        predictions = self.underlying_actor(x)
+        predictions = self.network(x)
         mean = predictions[..., :NUM_OUTPUTS]
         std = predictions[..., NUM_OUTPUTS:]
         std = (jax.nn.softplus(std) + self.min_std) * self.var_scale
@@ -110,15 +95,14 @@ class DefaultHumanoidLearnedStdActor(ActorModel):
 class DefaultHumanoidCritic(nn.Module):
     """Default humanoid critic."""
 
-    underlying_critic: MLP
+    network: MLP
 
     @nn.compact
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Forward pass of the critic model."""
-        # x = jnp.concatenate(list(obs.values()) + list(cmd.values()), axis=-1)
         x = jnp.concatenate(list(obs.values()), axis=-1)
-        res = self.underlying_critic(x)
-        return res
+        value_estimate = self.network(x)
+        return value_estimate
 
 
 class DefaultHumanoidAgent(ActorCriticAgent):
@@ -136,9 +120,9 @@ class DefaultHumanoidAgent(ActorCriticAgent):
         return obs
 
 
-##########################
-# Experiment Definitions #
-##########################
+####################
+# Task Definitions #
+####################
 
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
@@ -156,27 +140,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 RandomizeJointVelocities(scale=0.01),
             ],
             rewards=[
-                # XPosReward(scale=0.01),
                 DHHealthyReward(
                     scale=0.5,
                 ),
-                DHForwardReward(scale=0.3),
-                # DHTerminationPenalty(
-                #     scale=-2.0,
-                #     healthy_z_lower=0.5,
-                #     healthy_z_upper=1.5,
-                # ),
-                # DHControlPenalty(scale=-0.001),
+                DHForwardReward(scale=0.125),
             ],
             observations=[
-                # JointPositionObservation(noise_type="gaussian", noise=0.01),
-                # JointVelocityObservation(noise_type="gaussian", noise=0.01),
-                # BaseOrientationObservation(noise_type="gaussian", noise=0.01),
-                # BaseAngularVelocityObservation(noise_type="gaussian", noise=0.01),
-                # BaseLinearVelocityObservation(noise_type="gaussian", noise=0.01),
-                # BasePositionObservation(noise_type="gaussian", noise=0.01),
-                # TODO: default humanoid doesn't have sensors, add them later
-                # Legacy Ksim observation setup
                 LegacyPositionObservation(exclude_xy=True),
                 LegacyVelocityObservation(),
                 CenterOfMassInertiaObservation(),
@@ -190,26 +159,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                     switch_prob=0.02,
                     zero_prob=0.3,
                 ),
-                # AngularVelocityCommand(
-                #     scale=1.0,
-                #     switch_prob=0.02,
-                #     zero_prob=0.8,
-                # ),
             ],
         )
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         return DefaultHumanoidAgent(
-            # actor_module=DefaultHumanoidActor(
-            #     MLP(
-            #         out_dim=NUM_OUTPUTS,
-            #         hidden_dims=(64,) * 5,
-            #         activation=nn.relu,
-            #         bias_init=nn.initializers.zeros,
-            #     ),
-            #     std_range=(0.1, 0.9),
-            #     std_init=0.3,
-            # ),
             actor_module=DefaultHumanoidLearnedStdActor(
                 MLP(
                     out_dim=NUM_OUTPUTS * 2,

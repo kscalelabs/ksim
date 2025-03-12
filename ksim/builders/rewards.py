@@ -646,8 +646,8 @@ class DHForwardReward(Reward):
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
         # Take just the x velocity component
-        velocity = mjx_data_t_plus_1.qvel[0]
-        return velocity
+        x_delta = mjx_data_t_plus_1.qvel[0]
+        return x_delta
 
 
 @attrs.define(frozen=True, kw_only=True)

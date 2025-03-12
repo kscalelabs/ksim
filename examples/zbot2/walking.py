@@ -1,4 +1,4 @@
-"""Defines simple task for training a walking policy for ZBot2."""
+"""defines simple task for training a walking policy for zbot2."""
 
 from dataclasses import dataclass
 
@@ -11,141 +11,98 @@ from jaxtyping import Array, PRNGKeyArray
 
 from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.builders.observation import (
+    ActuatorForceObservation,
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,
+    CenterOfMassInertiaObservation,
+    CenterOfMassVelocityObservation,
     JointPositionObservation,
     JointVelocityObservation,
     SensorObservationBuilder,
 )
-from ksim.builders.resets import (
-    XYPositionResetBuilder,
-)
+from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import (
     AngularVelocityXYPenalty,
     DefaultPoseDeviationPenaltyBuilder,
+    DHForwardReward,
+    DHHealthyReward,
     HeightReward,
     OrientationPenalty,
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.builders.terminations import (
-    PitchTooGreatTermination,
-    RollTooGreatTermination,
-)
+from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.formulations import ActionModel, ActorCriticAgent, GaussianActionModel
+from ksim.model.distributions import TanhGaussianDistribution
+from ksim.model.formulations import ActorCriticAgent, ActorModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
+
+######################
+# Static Definitions #
+######################
 
 NUM_OUTPUTS = 18
 
 
-class ZBot2ActorModel(GaussianActionModel):
-    mlp: MLP
-    action_clipping: float = 20.0
+@dataclass
+class ZBot2WalkingConfig(PPOConfig, MjxEnvConfig):
+    """Combining configs for the ZBot2 walking task and fixing params."""
+
+    robot_model_name: str = "examples/zbot2/"
+
+
+#####################
+# Model Definitions #
+#####################
+
+
+class ZBot2LearnedStdActorModel(ActorModel):
+    network: MLP
+    min_std: float = 0.01
+    max_std: float = 1.0
+    var_scale: float = 1.0
 
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        lin_vel_cmd_2 = cmd["linear_velocity_command"]
-        ang_vel_cmd_1 = cmd["angular_velocity_command"]
-        joint_pos_j = obs["joint_position_observation_noisy"]
-        joint_vel_j = obs["joint_velocity_observation_noisy"]
+        """Forward pass of the actor model."""
+        x = jnp.concatenate(list(obs.values()), axis=-1)
+        predictions = self.network(x)
 
-        x_n = jnp.concatenate(
-            [
-                lin_vel_cmd_2,
-                ang_vel_cmd_1,
-                # imu_acc_3,
-                # imu_gyro_3,
-                joint_pos_j,
-                joint_vel_j,
-                # TODO: Past action
-            ],
-            axis=-1,
-        )
+        mean = predictions[..., :NUM_OUTPUTS]
+        std = predictions[..., NUM_OUTPUTS:]
 
-        actions_n = self.mlp(x_n)
+        # need to do this for stability
+        std = (jax.nn.softplus(std) + self.min_std) * self.var_scale
+        std = jnp.clip(std, self.min_std, self.max_std)
 
-        actions_n = jnp.clip(actions_n, -self.action_clipping, self.action_clipping)
+        # concat because Gaussian-like distributions expect the parameters
+        # to be mean concat std
+        actions_n = jnp.concatenate([mean, std], axis=-1)
 
         return actions_n
 
 
-class ZBot2ZeroActions(GaussianActionModel):
-    mlp: MLP
-
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        lin_vel_cmd_2 = cmd["linear_velocity_command"]
-        ang_vel_cmd_1 = cmd["angular_velocity_command"]
-        joint_pos_j = obs["joint_position_observation"]
-        joint_vel_j = obs["joint_velocity_observation"]
-        imu_acc_3 = obs["imu_acc_sensor_observation"]
-        imu_gyro_3 = obs["imu_gyro_sensor_observation"]
-
-        x_n = jnp.concatenate(
-            [
-                lin_vel_cmd_2,
-                ang_vel_cmd_1,
-                imu_acc_3,
-                imu_gyro_3,
-                joint_pos_j,
-                joint_vel_j,
-            ],
-            axis=-1,
-        )
-
-        actions_n = self.mlp(x_n)
-
-        return jnp.zeros_like(actions_n)
-
-    def sample_and_log_prob(
-        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> tuple[Array, Array]:
-        mean = self(obs, cmd)
-        return mean, mean
-
-
 class ZBot2CriticModel(nn.Module):
-    mlp: MLP
+    network: MLP
 
     @nn.compact
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> jax.Array:
-        # Concatenate all observations and commands (critic has privileged information)
-        clean_obs: FrozenDict[str, Array] = FrozenDict(
-            {k: v for k, v in obs.items() if "_noisy" not in k}
-        )
-        x_n = jnp.concatenate([obs_array for obs_array in clean_obs.values()], axis=-1)
-        cmd_n = jnp.concatenate([cmd_array for cmd_array in cmd.values()], axis=-1)
-        x_n = jnp.concatenate([x_n, cmd_n], axis=-1)
-
-        value_estimate = self.mlp(x_n)
+        """Forward pass of the critic model."""
+        x = jnp.concatenate(list(obs.values()), axis=-1)
+        value_estimate = self.network(x)
 
         return value_estimate
 
 
-@dataclass
-class ZBot2WalkingConfig(PPOConfig, MjxEnvConfig):
-    # Robot model name to use.
-    robot_model_name: str = xax.field(value="examples/zbot2/")
-
-    # ML model parameters.
-    actor_hidden_dims: int = xax.field(value=512)
-    actor_num_layers: int = xax.field(value=2)
-    critic_hidden_dims: int = xax.field(value=512)
-    critic_num_layers: int = xax.field(value=4)
-    init_noise_std: float = xax.field(value=1.0)
-
-    # Termination conditions.
-    max_episode_length: float = xax.field(value=10.0)
-    max_pitch: float = xax.field(value=0.1)
-    max_roll: float = xax.field(value=0.1)
-    action_clipping: float = xax.field(value=10.0)
-
-    actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
+####################
+# Task Definitions #
+####################
 
 
 class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
     def get_environment(self) -> MjxEnv:
+        """Get the environment."""
         return MjxEnv(
             self.config,
             terminations=[
@@ -156,65 +113,66 @@ class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
                 XYPositionResetBuilder(),
             ],
             rewards=[
-                AngularVelocityXYPenalty(scale=-0.15),
-                TrackLinearVelocityXYReward(scale=1.0),
-                HeightReward(scale=1.0, height_target=0.42),
-                TrackAngularVelocityZReward(scale=1.0),
-                OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
-                DefaultPoseDeviationPenaltyBuilder(
-                    scale=-0.1,
-                    default_positions={
-                        "left_shoulder_pitch": 0.0,
-                        "left_shoulder_yaw": 0.0,
-                        "left_elbow": 0.0,
-                        "right_shoulder_pitch": 0.0,
-                        "right_shoulder_yaw": 0.0,
-                        "right_elbow": 0.0,
-                        "left_hip_pitch": 0.0,
-                        "left_hip_roll": 0.0,
-                        "left_hip_yaw": 0.0,
-                        "left_knee": 0.0,
-                        "left_ankle": 0.0,
-                        "right_hip_pitch": 0.0,
-                        "right_hip_roll": 0.0,
-                        "right_hip_yaw": 0.0,
-                        "right_knee": 0.0,
-                        "right_ankle": 0.0,
-                    },
-                    deviation_weights={
-                        "left_shoulder_pitch": 1.0,
-                        "left_shoulder_yaw": 1.0,
-                        "left_elbow": 1.0,
-                        "right_shoulder_pitch": 1.0,
-                        "right_shoulder_yaw": 1.0,
-                        "right_elbow": 1.0,
-                        "left_hip_pitch": 2.0,
-                        "left_hip_roll": 2.0,
-                        "left_hip_yaw": 2.0,
-                        "left_knee": 1.0,
-                        "left_ankle": 1.0,
-                        "right_hip_pitch": 2.0,
-                        "right_hip_roll": 2.0,
-                        "right_hip_yaw": 2.0,
-                        "right_knee": 1.0,
-                        "right_ankle": 1.0,
-                    },
+                # AngularVelocityXYPenalty(scale=-0.15),
+                # TrackLinearVelocityXYReward(scale=1.0),
+                # HeightReward(scale=1.0, height_target=0.42),
+                # TrackAngularVelocityZReward(scale=1.0),
+                # OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
+                # DefaultPoseDeviationPenaltyBuilder(
+                #     scale=-0.1,
+                #     default_positions={
+                #         "left_shoulder_pitch": 0.0,
+                #         "left_shoulder_yaw": 0.0,
+                #         "left_elbow": 0.0,
+                #         "right_shoulder_pitch": 0.0,
+                #         "right_shoulder_yaw": 0.0,
+                #         "right_elbow": 0.0,
+                #         "left_hip_pitch": 0.0,
+                #         "left_hip_roll": 0.0,
+                #         "left_hip_yaw": 0.0,
+                #         "left_knee": 0.0,
+                #         "left_ankle": 0.0,
+                #         "right_hip_pitch": 0.0,
+                #         "right_hip_roll": 0.0,
+                #         "right_hip_yaw": 0.0,
+                #         "right_knee": 0.0,
+                #         "right_ankle": 0.0,
+                #     },
+                #     deviation_weights={
+                #         "left_shoulder_pitch": 1.0,
+                #         "left_shoulder_yaw": 1.0,
+                #         "left_elbow": 1.0,
+                #         "right_shoulder_pitch": 1.0,
+                #         "right_shoulder_yaw": 1.0,
+                #         "right_elbow": 1.0,
+                #         "left_hip_pitch": 2.0,
+                #         "left_hip_roll": 2.0,
+                #         "left_hip_yaw": 2.0,
+                #         "left_knee": 1.0,
+                #         "left_ankle": 1.0,
+                #         "right_hip_pitch": 2.0,
+                #         "right_hip_roll": 2.0,
+                #         "right_hip_yaw": 2.0,
+                #         "right_knee": 1.0,
+                #         "right_ankle": 1.0,
+                #     },
+                # ),
+                DHHealthyReward(
+                    scale=0.5,
                 ),
+                DHForwardReward(scale=0.2),
             ],
             observations=[
-                BaseOrientationObservation(noise_type="gaussian", noise=0.01),
-                JointPositionObservation(noise_type="gaussian", noise=0.01),
-                JointVelocityObservation(noise_type="gaussian", noise=0.01),
+                BaseOrientationObservation(noise_type="gaussian"),
+                BaseLinearVelocityObservation(noise_type="gaussian"),
+                BaseAngularVelocityObservation(noise_type="gaussian"),
+                JointPositionObservation(noise_type="gaussian"),
+                JointVelocityObservation(noise_type="gaussian"),
+                CenterOfMassInertiaObservation(noise_type="gaussian"),
+                CenterOfMassVelocityObservation(noise_type="gaussian"),
+                ActuatorForceObservation(noise_type="gaussian"),
                 SensorObservationBuilder(sensor_name="IMU_acc"),  # Sensor has noise already.
                 SensorObservationBuilder(sensor_name="IMU_gyro"),  # Sensor has noise already.
-                # Clean observations
-                # NOTE: Depending on much we value flexibility vs cleanliness
-                # we might want to abstract this `clean` logic in `MjxEnv`
-                BaseOrientationObservation(noise_type="gaussian", noise=0.0),
-                BaseLinearVelocityObservation(noise_type="gaussian", noise=0.0),
-                BaseAngularVelocityObservation(noise_type="gaussian", noise=0.0),
-                JointPositionObservation(noise_type="gaussian", noise=0.0),
-                JointVelocityObservation(noise_type="gaussian", noise=0.0),
             ],
             commands=[
                 LinearVelocityCommand(
@@ -232,77 +190,34 @@ class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
         )
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
+        """Get the model."""
         return ActorCriticAgent(
-            actor_module=ZBot2ActorModel(
-                mlp=MLP(
-                    num_hidden_layers=self.config.actor_num_layers,
-                    hidden_features=self.config.actor_hidden_dims,
-                    out_features=NUM_OUTPUTS,
+            actor_module=ZBot2LearnedStdActorModel(
+                MLP(
+                    out_dim=NUM_OUTPUTS * 2,  # 2x for std prediction
+                    hidden_dims=(64,) * 5,
+                    activation=nn.relu,
+                    bias_init=nn.initializers.zeros,
                 ),
-                init_log_std=-0.7,
-                num_outputs=NUM_OUTPUTS,
-                action_clipping=self.config.action_clipping,
             ),
             critic_module=ZBot2CriticModel(
-                mlp=MLP(
-                    num_hidden_layers=self.config.critic_num_layers,
-                    hidden_features=self.config.critic_hidden_dims,
-                    out_features=1,
+                MLP(
+                    out_dim=1,
+                    hidden_dims=(64,) * 5,
+                    activation=nn.relu,
+                    bias_init=nn.initializers.zeros,
                 ),
             ),
+            distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:
-        # return jnp.zeros((self.config.actor_num_layers, self.config.actor_hidden_dims))
+        """Get the initial actor carry."""
         return None
 
     def get_init_critic_carry(self) -> None:
+        """Get the initial critic carry."""
         return None
-
-    # Overloading to run ZBot2ZeroActions instead of default Actor model
-    def run(self) -> None:
-        """Highest level entry point for RL tasks, determines what to run."""
-        match self.config.action:
-            case "train":
-                self.run_training()
-
-            case "env":
-                mlp = MLP(
-                    num_hidden_layers=self.config.actor_num_layers,
-                    hidden_features=self.config.actor_hidden_dims,
-                    out_features=NUM_OUTPUTS,
-                )
-                actor: ActionModel
-                match self.config.viz_action:
-                    case "policy":
-                        actor = ZBot2ActorModel(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
-                    case "zero":
-                        actor = ZBot2ZeroActions(
-                            num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7
-                        )
-                    case _:
-                        raise ValueError(
-                            f"Invalid action: {self.config.viz_action}."
-                            f" Should be one of `policy` or `zero`."
-                        )
-
-                model = ActorCriticAgent(
-                    actor_module=actor,
-                    critic_module=ZBot2CriticModel(
-                        mlp=MLP(
-                            num_hidden_layers=self.config.critic_num_layers,
-                            hidden_features=self.config.critic_hidden_dims,
-                            out_features=1,
-                        ),
-                    ),
-                )
-
-                self.run_environment(model)
-
-            case _:
-                raise ValueError(
-                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
-                )
 
 
 if __name__ == "__main__":
@@ -311,18 +226,26 @@ if __name__ == "__main__":
         ZBot2WalkingConfig(
             num_learning_epochs=8,
             num_env_states_per_minibatch=8192,
-            num_minibatches=64,
+            num_minibatches=32,
             num_envs=2048,
             dt=0.001,
-            ctrl_dt=0.008,
-            learning_rate=5e-5,
-            save_every_n_seconds=60 * 4,
+            ctrl_dt=0.005,
+            learning_rate=0.00005,
+            save_every_n_steps=50,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,
-            scale_rewards=True,
             solver_iterations=6,
             solver_ls_iterations=6,
             actuator_type="mit",
+            scale_rewards=False,
+            gamma=0.97,
+            lam=0.95,
+            normalize_advantage=True,
+            normalize_advantage_in_minibatch=True,
+            entropy_coef=0.001,
+            clip_param=0.2,
+            use_clipped_value_loss=False,
+            max_grad_norm=1.0,
         ),
     )
