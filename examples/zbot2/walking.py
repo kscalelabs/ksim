@@ -314,7 +314,6 @@ if __name__ == "__main__":
             num_minibatches=64,
             num_envs=2048,
             dt=0.001,
-            max_episode_length=20.0,
             ctrl_dt=0.008,
             learning_rate=5e-5,
             save_every_n_seconds=60 * 4,
@@ -322,7 +321,6 @@ if __name__ == "__main__":
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,
             scale_rewards=True,
-            # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
             solver_iterations=6,
             solver_ls_iterations=6,
             actuator_type="mit",
