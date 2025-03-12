@@ -252,7 +252,7 @@ if __name__ == "__main__":
             # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
             solver_iterations=6,
             solver_ls_iterations=6,
-            actuator_type="scaled_torque",
+            actuator_type="mit",
             scale_rewards=False,
             gamma=0.97,
             lam=0.95,
@@ -261,5 +261,6 @@ if __name__ == "__main__":
             entropy_coef=0.001,
             clip_param=0.3,
             use_clipped_value_loss=False,
+            max_grad_norm=1.0,
         ),
     )
