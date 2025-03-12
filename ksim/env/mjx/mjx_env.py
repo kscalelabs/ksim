@@ -418,7 +418,6 @@ class MjxEnv(BaseEnv):
         action_L_0, action_log_prob_L_0 = model.apply(
             variables, obs_L_0, command_L_0, rng, method="actor_sample_and_log_prob"
         )
-        action_L_0 = jnp.zeros_like(action_L_0)
         assert isinstance(action_log_prob_L_0, Array)
         mjx_data_L_1 = self.apply_physics_steps(
             mjx_model_L=mjx_model_L,
@@ -495,7 +494,6 @@ class MjxEnv(BaseEnv):
         action_L_t, _ = model.apply(
             variables, obs_L_t, command_L_t, rng, method="actor_sample_and_log_prob"
         )
-        action_L_t = jnp.zeros_like(action_L_t)
 
         mjx_data_L_t_plus_1 = self.apply_physics_steps(
             mjx_model_L=mjx_model_L,
