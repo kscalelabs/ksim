@@ -2,21 +2,42 @@
 
 This is K-Scale's library for running simulation experiments.
 
-### Notes
+## Installation
 
-When you try to render a trajectory while on a headless system, you may get an error like the following:
-
-```bash
-mujoco.FatalError: an OpenGL platform library has not been loaded into this process, this most likely means that a valid OpenGL context has not been created before mjr_makeContext was called
-```
-
-The fix is to create a virtual display:
+Clone the repo
 
 ```bash
-Xvfb :100 -ac &
-PID1=$!
-export DISPLAY=:100.0
+git clone git@github.com:kscalelabs/ksim.git
 ```
+
+Create a new python environment. We reccomend using [conda](https://www.anaconda.com/docs/getting-started/miniconda/main) for this.
+
+```bash
+conda create -n ksim python=3.11
+conda activate ksim
+pip install -U "jax[cuda12]"
+```
+Optional: Verify GPU backend: `python -c "import jax; print(jax.default_backend())"` should print gpu
+Next, install the ksim python package locally
+```bash
+cd ksim # make sure you are in the root folder of this repo (ls should show a pyproect.toml file)
+pip install -e .[all]
+```
+You should be all set! See the troubleshooting section below for tips if something isn't working.
+
+
+## Usage
+
+Run training on any of the example environments by their task name, for example:
+```bash
+python -m examples.kbot.standing
+```
+
+To evaluate (save a video of) a saved checkpoint use `action=env` and `pretrained=path/to/run` and optionally `checkpoint_num=n`, for example:
+```bash
+python -m examples.kbot.standing action=env pretrained=examples/kbot/kbot_standing_task/run_6 checkpoint_num=5
+```
+
 
 
 ### Terminology
@@ -61,3 +82,41 @@ These should absolutely be annotated:
 
 ### Sharp Bits
 - Add all sharp bits or unorthodox (yet correct) design decisions here.
+
+
+
+## Troubleshooting
+
+### Headless Systems
+
+When you try to render a trajectory while on a headless system, you may get an error like the following:
+
+```bash
+mujoco.FatalError: an OpenGL platform library has not been loaded into this process, this most likely means that a valid OpenGL context has not been created before mjr_makeContext was called
+```
+
+The fix is to create a virtual display:
+
+```bash
+Xvfb :100 -ac &
+PID1=$!
+export DISPLAY=:100.0
+```
+
+You may also need to tell MuJoCo to use GPU accelerated off-screen rendering via 
+```
+export MUJOCO_GL="egl"
+```
+
+### Possible sources of NaNs
+
+- The XLA Triton gemm kernel is buggy. To fix, try disabling with `export XLA_FLAGS="--xla_gpu_enable_triton_gemm=false"`
+
+### Long run / wait times 
+Prefix your commands with `JIT_PROFILE=1` to enable prints for what is taking long to compile and run.
+
+### Clear cache
+We've often found that jax reuses caches when its not supposed to. We recommend clearing your Jax cache after changing any function
+```bash
+rm -rf ~/.cache/jax/jaxcache
+```

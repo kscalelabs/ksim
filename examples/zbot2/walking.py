@@ -1,4 +1,4 @@
-"""Defines simple task for training a walking policy for K-Bot."""
+"""Defines simple task for training a walking policy for ZBot2."""
 
 from dataclasses import dataclass
 
@@ -19,17 +19,12 @@ from ksim.builders.observation import (
     SensorObservationBuilder,
 )
 from ksim.builders.resets import (
-    RandomizeJointPositions,
-    RandomizeJointVelocities,
     XYPositionResetBuilder,
 )
 from ksim.builders.rewards import (
-    ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
     DefaultPoseDeviationPenaltyBuilder,
     HeightReward,
-    JointAccelerationPenalty,
-    LinearVelocityZPenalty,
     OrientationPenalty,
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
@@ -43,19 +38,47 @@ from ksim.model.formulations import ActionModel, ActorCriticAgent, GaussianActio
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_OUTPUTS = 14  # No shoulders
+NUM_OUTPUTS = 18
 
 
-class KBotActorModel(GaussianActionModel):
+class ZBot2ActorModel(GaussianActionModel):
     mlp: MLP
     action_clipping: float = 20.0
-    action_scale: float = 0.5
 
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         lin_vel_cmd_2 = cmd["linear_velocity_command"]
         ang_vel_cmd_1 = cmd["angular_velocity_command"]
         joint_pos_j = obs["joint_position_observation_noisy"]
         joint_vel_j = obs["joint_velocity_observation_noisy"]
+
+        x_n = jnp.concatenate(
+            [
+                lin_vel_cmd_2,
+                ang_vel_cmd_1,
+                # imu_acc_3,
+                # imu_gyro_3,
+                joint_pos_j,
+                joint_vel_j,
+                # TODO: Past action
+            ],
+            axis=-1,
+        )
+
+        actions_n = self.mlp(x_n)
+
+        actions_n = jnp.clip(actions_n, -self.action_clipping, self.action_clipping)
+
+        return actions_n
+
+
+class ZBot2ZeroActions(GaussianActionModel):
+    mlp: MLP
+
+    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        lin_vel_cmd_2 = cmd["linear_velocity_command"]
+        ang_vel_cmd_1 = cmd["angular_velocity_command"]
+        joint_pos_j = obs["joint_position_observation"]
+        joint_vel_j = obs["joint_velocity_observation"]
         imu_acc_3 = obs["imu_acc_sensor_observation"]
         imu_gyro_3 = obs["imu_gyro_sensor_observation"]
 
@@ -73,16 +96,7 @@ class KBotActorModel(GaussianActionModel):
 
         actions_n = self.mlp(x_n)
 
-        actions_n = jnp.clip(actions_n, -self.action_clipping, self.action_clipping)
-        actions_n = actions_n * self.action_scale
-        return actions_n
-
-
-class KBotZeroActions(GaussianActionModel):
-    mlp: MLP
-
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        return jnp.zeros_like(NUM_OUTPUTS)
+        return jnp.zeros_like(actions_n)
 
     def sample_and_log_prob(
         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
@@ -91,7 +105,7 @@ class KBotZeroActions(GaussianActionModel):
         return mean, mean
 
 
-class KBotCriticModel(nn.Module):
+class ZBot2CriticModel(nn.Module):
     mlp: MLP
 
     @nn.compact
@@ -110,9 +124,9 @@ class KBotCriticModel(nn.Module):
 
 
 @dataclass
-class KBotStandingConfig(PPOConfig, MjxEnvConfig):
+class ZBot2WalkingConfig(PPOConfig, MjxEnvConfig):
     # Robot model name to use.
-    robot_model_name: str = xax.field(value="examples/kbot/")
+    robot_model_name: str = xax.field(value="examples/zbot2/")
 
     # ML model parameters.
     actor_hidden_dims: int = xax.field(value=512)
@@ -126,12 +140,11 @@ class KBotStandingConfig(PPOConfig, MjxEnvConfig):
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
     action_clipping: float = xax.field(value=10.0)
-    action_scale: float = xax.field(value=0.3)
 
     actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
 
 
-class KBotStandingTask(PPOTask[KBotStandingConfig]):
+class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
     def get_environment(self) -> MjxEnv:
         return MjxEnv(
             self.config,
@@ -141,63 +154,50 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
             ],
             resets=[
                 XYPositionResetBuilder(),
-                RandomizeJointVelocities(scale=0.01),
-                RandomizeJointPositions(scale=0.01),
             ],
             rewards=[
-                LinearVelocityZPenalty(scale=-0.0),
                 AngularVelocityXYPenalty(scale=-0.15),
                 TrackLinearVelocityXYReward(scale=1.0),
-                HeightReward(scale=1.0, height_target=1.0),
+                HeightReward(scale=1.0, height_target=0.42),
                 TrackAngularVelocityZReward(scale=1.0),
-                ActionSmoothnessPenalty(scale=-0.0),
                 OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
-                JointAccelerationPenalty(scale=0.0),  # -2e-7),
                 DefaultPoseDeviationPenaltyBuilder(
                     scale=-0.1,
                     default_positions={
-                        # "left_shoulder_pitch_03": 0.0,
-                        # "left_shoulder_roll_03": 0.0,
-                        # "left_shoulder_yaw_02": 0.0,
-                        "left_elbow_02": 0.0,
-                        "left_wrist_02": 0.0,
-                        # "right_shoulder_pitch_03": 0.0,
-                        # "right_shoulder_roll_03": 0.0,
-                        # "right_shoulder_yaw_02": 0.0,
-                        "right_elbow_02": 0.0,
-                        "right_wrist_02": 0.0,
-                        "left_hip_pitch_04": 0.0,
-                        "left_hip_roll_03": 0.0,
-                        "left_hip_yaw_03": 0.0,
-                        "left_knee_04": 0.0,
-                        "left_ankle_02": 0.0,
-                        "right_hip_pitch_04": 0.0,
-                        "right_hip_roll_03": 0.0,
-                        "right_hip_yaw_03": 0.0,
-                        "right_knee_04": 0.0,
-                        "right_ankle_02": 0.0,
+                        "left_shoulder_pitch": 0.0,
+                        "left_shoulder_yaw": 0.0,
+                        "left_elbow": 0.0,
+                        "right_shoulder_pitch": 0.0,
+                        "right_shoulder_yaw": 0.0,
+                        "right_elbow": 0.0,
+                        "left_hip_pitch": 0.0,
+                        "left_hip_roll": 0.0,
+                        "left_hip_yaw": 0.0,
+                        "left_knee": 0.0,
+                        "left_ankle": 0.0,
+                        "right_hip_pitch": 0.0,
+                        "right_hip_roll": 0.0,
+                        "right_hip_yaw": 0.0,
+                        "right_knee": 0.0,
+                        "right_ankle": 0.0,
                     },
                     deviation_weights={
-                        # "left_shoulder_pitch_03": 1.0,
-                        # "left_shoulder_roll_03": 1.0,
-                        # "left_shoulder_yaw_02": 1.0,
-                        "left_elbow_02": 1.0,
-                        "left_wrist_02": 1.0,
-                        # "right_shoulder_pitch_03": 1.0,
-                        # "right_shoulder_roll_03": 1.0,
-                        # "right_shoulder_yaw_02": 1.0,
-                        "right_elbow_02": 1.0,
-                        "right_wrist_02": 1.0,
-                        "left_hip_pitch_04": 2.0,
-                        "left_hip_roll_03": 2.0,
-                        "left_hip_yaw_03": 2.0,
-                        "left_knee_04": 1.0,
-                        "left_ankle_02": 1.0,
-                        "right_hip_pitch_04": 2.0,
-                        "right_hip_roll_03": 2.0,
-                        "right_hip_yaw_03": 2.0,
-                        "right_knee_04": 1.0,
-                        "right_ankle_02": 1.0,
+                        "left_shoulder_pitch": 1.0,
+                        "left_shoulder_yaw": 1.0,
+                        "left_elbow": 1.0,
+                        "right_shoulder_pitch": 1.0,
+                        "right_shoulder_yaw": 1.0,
+                        "right_elbow": 1.0,
+                        "left_hip_pitch": 2.0,
+                        "left_hip_roll": 2.0,
+                        "left_hip_yaw": 2.0,
+                        "left_knee": 1.0,
+                        "left_ankle": 1.0,
+                        "right_hip_pitch": 2.0,
+                        "right_hip_roll": 2.0,
+                        "right_hip_yaw": 2.0,
+                        "right_knee": 1.0,
+                        "right_ankle": 1.0,
                     },
                 ),
             ],
@@ -205,8 +205,8 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                 BaseOrientationObservation(noise_type="gaussian", noise=0.01),
                 JointPositionObservation(noise_type="gaussian", noise=0.01),
                 JointVelocityObservation(noise_type="gaussian", noise=0.01),
-                SensorObservationBuilder(sensor_name="imu_acc"),  # Sensor has noise already.
-                SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
+                SensorObservationBuilder(sensor_name="IMU_acc"),  # Sensor has noise already.
+                SensorObservationBuilder(sensor_name="IMU_gyro"),  # Sensor has noise already.
                 # Clean observations
                 # NOTE: Depending on much we value flexibility vs cleanliness
                 # we might want to abstract this `clean` logic in `MjxEnv`
@@ -233,7 +233,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         return ActorCriticAgent(
-            actor_module=KBotActorModel(
+            actor_module=ZBot2ActorModel(
                 mlp=MLP(
                     num_hidden_layers=self.config.actor_num_layers,
                     hidden_features=self.config.actor_hidden_dims,
@@ -242,9 +242,8 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                 init_log_std=-0.7,
                 num_outputs=NUM_OUTPUTS,
                 action_clipping=self.config.action_clipping,
-                action_scale=self.config.action_scale,
             ),
-            critic_module=KBotCriticModel(
+            critic_module=ZBot2CriticModel(
                 mlp=MLP(
                     num_hidden_layers=self.config.critic_num_layers,
                     hidden_features=self.config.critic_hidden_dims,
@@ -260,7 +259,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
     def get_init_critic_carry(self) -> None:
         return None
 
-    # Overloading to run KBotZeroActions instead of default Actor model
+    # Overloading to run ZBot2ZeroActions instead of default Actor model
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
         match self.config.action:
@@ -276,9 +275,11 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                 actor: ActionModel
                 match self.config.viz_action:
                     case "policy":
-                        actor = KBotActorModel(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
+                        actor = ZBot2ActorModel(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
                     case "zero":
-                        actor = KBotZeroActions(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
+                        actor = ZBot2ZeroActions(
+                            num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7
+                        )
                     case _:
                         raise ValueError(
                             f"Invalid action: {self.config.viz_action}."
@@ -287,7 +288,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
 
                 model = ActorCriticAgent(
                     actor_module=actor,
-                    critic_module=KBotCriticModel(
+                    critic_module=ZBot2CriticModel(
                         mlp=MLP(
                             num_hidden_layers=self.config.critic_num_layers,
                             hidden_features=self.config.critic_hidden_dims,
@@ -305,15 +306,14 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot.standing
-    KBotStandingTask.launch(
-        KBotStandingConfig(
+    # python -m examples.zbot2.walking
+    ZBot2WalkingTask.launch(
+        ZBot2WalkingConfig(
             num_learning_epochs=8,
             num_env_states_per_minibatch=8192,
             num_minibatches=64,
             num_envs=2048,
             dt=0.001,
-            max_episode_length=20.0,
             ctrl_dt=0.008,
             learning_rate=5e-5,
             save_every_n_seconds=60 * 4,
