@@ -154,7 +154,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                 ActionSmoothnessPenalty(scale=-0.0),
                 OrientationPenalty(scale=-1.0, target_orientation=[0.0, 0.0, -1.0]),
                 JointAccelerationPenalty(scale=0.0),  # -2e-7),
-                FootSlipPenaltyBuilder(scale=-1.0, foot_geom_names=["foot1_collision_sphere_1",
+                FootSlipPenaltyBuilder(scale=-0.25, foot_geom_names=["foot1_collision_sphere_1",
                                                     "foot1_collision_sphere_2",
                                                     "foot1_collision_sphere_3",
                                                     "foot1_collision_sphere_4",
