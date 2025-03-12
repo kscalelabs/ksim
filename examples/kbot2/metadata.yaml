@@ -1,0 +1,62 @@
+actuators:
+  left_shoulder_pitch_03:
+    kp: 75.0
+    kd: 8.716509055671445
+  left_shoulder_roll_03:
+    kp: 75.0
+    kd: 8.702631954383971
+  left_shoulder_yaw_02:
+    kp: 20.0
+    kd: 0.5828485010474788
+  right_shoulder_pitch_03:
+    kp: 75.0
+    kd: 8.713696628966721
+  right_shoulder_roll_03:
+    kp: 75.0
+    kd: 8.699698712207375
+  right_shoulder_yaw_02:
+    kp: 20.0
+    kd: 0.5827897201598906
+  left_hip_pitch_04:
+    kp: 100.0
+    kd: 15.851
+  left_knee_04:
+    kp: 100.0
+    kd: 6.1504
+  right_hip_pitch_04:
+    kp: 100.0
+    kd: 15.851
+  right_ankle_02:
+    kp: 20.0
+    kd: 0.60059
+  right_wrist_02:
+    kp: 20.0
+    kd: 0.51228
+  right_hip_yaw_03:
+    kp: 50.0
+    kd: 1.4617
+  right_hip_roll_03:
+    kp: 50.0
+    kd: 11.152
+  right_knee_04:
+    kp: 100.0
+    kd: 6.1504
+  right_elbow_02:
+    kp: 20.0
+    kd: 2.3667
+  left_elbow_02:
+    kp: 20.0
+    kd: 2.3667
+  left_wrist_02:
+    kp: 20.0
+    kd: 0.51228
+  left_hip_roll_03:
+    kp: 50.0
+    kd: 11.152
+  left_hip_yaw_03:
+    kp: 50.0
+    kd: 1.4643
+  left_ankle_02:
+    kp: 20.0
+    kd: 0.60059
+control_frequency: 50.0
