@@ -1,4 +1,22 @@
 actuators:
+  left_shoulder_pitch_03:
+    kp: 75.0
+    kd: 8.716509055671445
+  left_shoulder_roll_03:
+    kp: 75.0
+    kd: 8.702631954383971
+  left_shoulder_yaw_02:
+    kp: 20.0
+    kd: 0.5828485010474788
+  right_shoulder_pitch_03:
+    kp: 75.0
+    kd: 8.713696628966721
+  right_shoulder_roll_03:
+    kp: 75.0
+    kd: 8.699698712207375
+  right_shoulder_yaw_02:
+    kp: 20.0
+    kd: 0.5827897201598906
   left_hip_pitch_04:
     kp: 100.0
     kd: 15.851
