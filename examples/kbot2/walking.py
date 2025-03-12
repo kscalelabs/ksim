@@ -159,16 +159,6 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                # IllegalContactTerminationBuilder(
-                #     body_names=[
-                #         "shoulder",
-                #         "shoulder_2",
-                #         "hand_shell",
-                #         "hand_shell_2",
-                #         "leg0_shell",
-                #         "leg0_shell_2",
-                #     ],
-                # ),
                 RollTooGreatTermination(max_roll=1.04),
                 PitchTooGreatTermination(max_pitch=1.04),
             ],
