@@ -23,7 +23,7 @@ Next, install the ksim python package locally
 cd ksim # make sure you are in the root folder of this repo (ls should show a pyproect.toml file)
 pip install -e .[all]
 ```
-You should be alll set! See the troubleshooting section below for tips if something isn't working.
+You should be all set! See the troubleshooting section below for tips if something isn't working.
 
 
 ## Usage
@@ -85,7 +85,7 @@ These should absolutely be annotated:
 
 
 
-## Troublehsooting
+## Troubleshooting
 
 ### Headless Systems
 
@@ -103,7 +103,7 @@ PID1=$!
 export DISPLAY=:100.0
 ```
 
-You may also need to tell mujoco to use GPU accelereated off-screen rendering via 
+You may also need to tell MuJoCo to use GPU accelerated off-screen rendering via 
 ```
 export MUJOCO_GL="egl"
 ```
@@ -113,10 +113,10 @@ export MUJOCO_GL="egl"
 - The XLA Triton gemm kernel is buggy. To fix, try disabling with `export XLA_FLAGS="--xla_gpu_enable_triton_gemm=false"`
 
 ### Long run / wait times 
-Prefix your commands with JIT_PROFILE=1 to enable prints for what is taking long to compile and run.
+Prefix your commands with `JIT_PROFILE=1` to enable prints for what is taking long to compile and run.
 
 ### Clear cache
-We've often found that jax reuses caches when its not supposed to. We reccomend clearing your jax cache after changing any function
+We've often found that jax reuses caches when its not supposed to. We recommend clearing your Jax cache after changing any function
 ```bash
 rm -rf ~/.cache/jax/jaxcache
 ```
