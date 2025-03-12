@@ -50,8 +50,6 @@ class ZBot2ActorModel(GaussianActionModel):
         ang_vel_cmd_1 = cmd["angular_velocity_command"]
         joint_pos_j = obs["joint_position_observation_noisy"]
         joint_vel_j = obs["joint_velocity_observation_noisy"]
-        # imu_acc_3 = obs["imu_acc_sensor_observation"]
-        # imu_gyro_3 = obs["imu_gyro_sensor_observation"]
 
         x_n = jnp.concatenate(
             [
@@ -151,59 +149,18 @@ class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                # IllegalContactTerminationBuilder(
-                #     body_names=[
-                #         "shoulder",
-                #         "shoulder_2",
-                #         "hand_shell",
-                #         "hand_shell_2",
-                #         "leg0_shell",
-                #         "leg0_shell_2",
-                #     ],
-                # ),
                 RollTooGreatTermination(max_roll=1.04),
                 PitchTooGreatTermination(max_pitch=1.04),
             ],
             resets=[
                 XYPositionResetBuilder(),
-                # RandomizeJointVelocities(scale=0.01),
-                # RandomizeJointPositions(scale=0.01),
             ],
             rewards=[
-                # LinearVelocityZPenalty(scale=-0.0),
                 AngularVelocityXYPenalty(scale=-0.15),
                 TrackLinearVelocityXYReward(scale=1.0),
                 HeightReward(scale=1.0, height_target=0.42),
                 TrackAngularVelocityZReward(scale=1.0),
-                # ActionSmoothnessPenalty(scale=-0.0),
                 OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
-                # TorquePenalty(scale=-0.0),
-                # EnergyPenalty(scale=-0.0),
-                # JointAccelerationPenalty(scale=-0.0),
-                # FootSlipPenaltyBuilder(
-                #     scale=-0.25,
-                #     foot_geom_names=[
-                #         "FOOT_collision",
-                #         "FOOT_2_collision",
-                #     ],
-                # ),
-                # FeetClearancePenaltyBuilder(
-                #     scale=-0.0,
-                #     foot_geom_names=[
-                #         "FOOT_collision",
-                #         "FOOT_2_collision",
-                #     ],
-                #     max_foot_height=0.2,
-                # ),
-                # FootContactPenaltyBuilder(
-                #     scale=-0.1,
-                #     foot_geom_names=[
-                #         "FOOT_collision",
-                #         "FOOT_2_collision",
-                #     ],
-                #     allowed_contact_prct=0.7,
-                #     skip_if_zero_command=("linear_velocity_command", "angular_velocity_command"),
-                # ),
                 DefaultPoseDeviationPenaltyBuilder(
                     scale=-0.1,
                     default_positions={
