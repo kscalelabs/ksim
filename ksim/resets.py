@@ -155,7 +155,7 @@ class XYPositionResetBuilder(ResetBuilder[Reset]):
             names = data.model.names.decode().split("\x00")
             base_idx = names.index("floating_base_link") - 1  # Adjust for body index.
             robot_base_height = data.model.body_pos[base_idx][2]
-            logger.info(f"Robot base height: {robot_base_height}")
+            logger.info("Robot base height: %s", robot_base_height)
         except ValueError:
             raise ValueError("Could not find floating_base_link in the model.")
 
@@ -173,7 +173,7 @@ class XYPositionResetBuilder(ResetBuilder[Reset]):
                 else int(data.robot_model.hfield_ncol)
             )
             hfield_data = data.model.hfield_data.reshape(nx, ny)
-            logger.info(f"Using heightfield based floor with shape: {hfield_data.shape}")
+            logger.info("Using heightfield based floor with shape: %s", hfield_data.shape)
             padded_bounds = compute_padded_bounds(
                 x_bound, y_bound, self.x_edge_padding, self.y_edge_padding
             )
@@ -194,7 +194,7 @@ class XYPositionResetBuilder(ResetBuilder[Reset]):
             floor_idx = plane_indices[0]
             x_bound, y_bound = 5.0, 5.0
             z_pos = data.model.geom_pos[floor_idx][2]
-            logger.info(f"Using plane based floor with bounds: {x_bound}, {y_bound}, {z_pos}")
+            logger.info("Using plane based floor with bounds: %s, %s, %s", x_bound, y_bound, z_pos)
             padded_bounds = compute_padded_bounds(
                 x_bound, y_bound, self.x_edge_padding, self.y_edge_padding
             )
