@@ -196,7 +196,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Get the optimizer: handled by XAX."""
         return optax.chain(
-            # optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.clip_by_global_norm(self.config.max_grad_norm),
             optax.adam(self.config.learning_rate),
         )
 

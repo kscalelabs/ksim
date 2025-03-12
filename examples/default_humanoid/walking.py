@@ -90,12 +90,20 @@ class DefaultHumanoidLearnedStdActor(ActorModel):
     """Default humanoid actor with learned std."""
 
     underlying_actor: MLP
+    min_std: float = 0.01
+    max_std: float = 1.0
+    var_scale: float = 1.0
 
     @nn.compact
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
         """Forward pass of the actor model."""
         x = jnp.concatenate(list(obs.values()), axis=-1)
-        return self.underlying_actor(x)
+        predictions = self.underlying_actor(x)
+        mean = predictions[..., :NUM_OUTPUTS]
+        std = predictions[..., NUM_OUTPUTS:]
+        std = (jax.nn.softplus(std) + self.min_std) * self.var_scale
+        std = jnp.clip(std, self.min_std, self.max_std)
+        return jnp.concatenate([mean, std], axis=-1)
 
 
 class DefaultHumanoidCritic(nn.Module):
@@ -190,24 +198,24 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         return DefaultHumanoidAgent(
-            actor_module=DefaultHumanoidActor(
-                MLP(
-                    out_dim=NUM_OUTPUTS,
-                    hidden_dims=(64,) * 5,
-                    activation=nn.relu,
-                    bias_init=nn.initializers.zeros,
-                ),
-                std_range=(0.1, 0.9),
-                std_init=0.3,
-            ),
-            # actor_module=DefaultHumanoidLearnedStdActor(
+            # actor_module=DefaultHumanoidActor(
             #     MLP(
-            #         out_dim=NUM_OUTPUTS * 2,
+            #         out_dim=NUM_OUTPUTS,
             #         hidden_dims=(64,) * 5,
             #         activation=nn.relu,
             #         bias_init=nn.initializers.zeros,
             #     ),
+            #     std_range=(0.1, 0.9),
+            #     std_init=0.3,
             # ),
+            actor_module=DefaultHumanoidLearnedStdActor(
+                MLP(
+                    out_dim=NUM_OUTPUTS * 2,
+                    hidden_dims=(64,) * 5,
+                    activation=nn.relu,
+                    bias_init=nn.initializers.zeros,
+                ),
+            ),
             critic_module=DefaultHumanoidCritic(
                 MLP(
                     out_dim=1,
@@ -216,7 +224,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                     bias_init=nn.initializers.zeros,
                 ),
             ),
-            distribution=GaussianDistribution(action_dim=NUM_OUTPUTS),
+            distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:
