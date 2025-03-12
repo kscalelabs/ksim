@@ -672,6 +672,9 @@ class MjxEnv(BaseEnv):
             physics_data_res = jax.tree_util.tree_map(transpose_time_and_env_dims, physics_data_res)
 
         has_nans = jnp.any(has_nans_ETL)
+        
+        # Apply post_accumulate to the reward components
+        env_state_TEL = self.apply_post_accumulate(env_state_TEL)
 
         return env_state_TEL, physics_data_res, has_nans
 
@@ -752,3 +755,45 @@ class MjxEnv(BaseEnv):
     def action_size(self) -> int:
         """Size of the action space."""
         return self.actuators.actuator_input_size
+
+    @profile
+    @legit_jit(static_argnames=["self"])
+    def apply_post_accumulate(self, env_state_TEL: EnvState) -> EnvState:
+        """Apply post_accumulate to all reward components in a trajectory.
+        
+        This is called after a full trajectory has been unrolled to apply any
+        post-processing to the reward components.
+        
+        Args:
+            env_state_TEL: The environment state trajectory of shape (time, env, ...)
+            
+        Returns:
+            The updated environment state trajectory with post-accumulated rewards.
+        """
+        # Create a new reward_components dict with post-accumulated values
+        updated_reward_components = {}
+        
+        for reward_name, reward_func in self.rewards:
+            # Extract the reward component for this reward function
+            reward_component = env_state_TEL.reward_components[reward_name]
+            
+            # Apply post_accumulate to the reward component
+            updated_reward = reward_func.post_accumulate(reward_component)
+            
+            # Store the updated reward
+            updated_reward_components[reward_name] = updated_reward
+        
+        # Recalculate the total reward based on updated components
+        updated_total_reward = jnp.stack([v for _, v in updated_reward_components.items()]).sum(axis=0)
+        
+        # Create a new EnvState with the updated reward components and total reward
+        return EnvState(
+            obs=env_state_TEL.obs,
+            command=env_state_TEL.command,
+            action=env_state_TEL.action,
+            reward=updated_total_reward,
+            done=env_state_TEL.done,
+            timestep=env_state_TEL.timestep,
+            termination_components=env_state_TEL.termination_components,
+            reward_components=FrozenDict(updated_reward_components),
+        )
