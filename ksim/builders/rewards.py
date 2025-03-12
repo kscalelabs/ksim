@@ -656,7 +656,6 @@ class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
             soft_upper_limits=jnp.array(soft_uppers),
         )
 
-
 @attrs.define(frozen=True, kw_only=True)
 class DHForwardReward(Reward):
     """Legacy default humanoid forward reward that linearly scales velocity."""

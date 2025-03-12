@@ -270,7 +270,6 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                             state = self._step(mx, state, step_fn, viewer)
 
                         self.data_modifying_keycode = None
-
                     # When paused and if rewards are updated during pause.
                     if self.paused and self.viz_config.reward_when_paused:
                         with viewer.lock():

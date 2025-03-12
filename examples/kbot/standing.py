@@ -146,7 +146,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
             ],
             rewards=[
                 LinearVelocityZPenalty(scale=-0.0),
-                AngularVelocityXYPenalty(scale=-0.15),
+                AngularVelocityXYPenalty(scale=-0.02),
                 TrackLinearVelocityXYReward(scale=1.0),
                 HeightReward(scale=5.0, height_target=0.98),
                 TrackAngularVelocityZReward(scale=1.0),
@@ -154,7 +154,7 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                 OrientationPenalty(scale=-1.0, target_orientation=[0.0, 0.0, -1.0]),
                 JointAccelerationPenalty(scale=0.0),  # -2e-7),
                 DefaultPoseDeviationPenaltyBuilder(
-                    scale=-0.1,
+                    scale=-0.01,
                     default_positions={
                         # "left_shoulder_pitch_03": 0.0,
                         # "left_shoulder_roll_03": 0.0,
