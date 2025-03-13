@@ -26,8 +26,7 @@ matplotlib.use("Agg")  # Use non-interactive backend
 import matplotlib.lines
 import matplotlib.pyplot as plt
 import mujoco
-from mujoco import mjx
-from mujoco import viewer as mujoco_viewer
+from mujoco import mjx, viewer as mujoco_viewer
 from mujoco.viewer import Handle
 
 logging.basicConfig(level=logging.INFO)
