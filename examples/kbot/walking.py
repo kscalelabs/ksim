@@ -58,9 +58,9 @@ class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
     # Robot model name to use.
     robot_model_name: str = xax.field(value="kbot-v1-feet")
 
-    # Action latency.
-    min_action_latency: float = xax.field(value=0.0)
-    max_action_latency: float = xax.field(value=0.0)
+    ####################
+    # Task Definitions #
+    ####################
 
 
 class KBotWalkingTask(PPOTask[KBotWalkingConfig]):
@@ -233,7 +233,7 @@ if __name__ == "__main__":
             num_envs=2048,
             dt=0.001,
             ctrl_dt=0.005,
-            learning_rate=0.00005,
+            learning_rate=1e-5,
             save_every_n_steps=50,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
@@ -250,5 +250,7 @@ if __name__ == "__main__":
             clip_param=0.2,
             use_clipped_value_loss=False,
             max_grad_norm=1.0,
+            max_action_latency=0.0,
+            min_action_latency=0.0,
         ),
     )

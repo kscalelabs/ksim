@@ -23,7 +23,6 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
-from omegaconf import MISSING
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
@@ -86,11 +85,11 @@ class MjxEnvConfig(BaseEnvConfig):
 
     # Action.
     min_action_latency: float = xax.field(
-        value=MISSING,
+        value=0.0,
         help="The minimum action latency.",
     )
     max_action_latency: float = xax.field(
-        value=MISSING,
+        value=0.0,
         help="The maximum action latency.",
     )
 
