@@ -14,7 +14,6 @@ from mujoco import mjx
 
 from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import geoms_colliding
-from ksim.utils.transforms import quat_to_euler
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +119,6 @@ class HeightReward(Reward):
         return reward
 
 
-# TODO: Check that this is correct
 @attrs.define(frozen=True, kw_only=True)
 class OrientationPenalty(Reward):
     """Penalty for how well the robot is oriented."""
@@ -138,7 +136,7 @@ class OrientationPenalty(Reward):
     ) -> Array:
         return jnp.sum(
             get_norm(
-                quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - jnp.array(self.target_orientation),
+                xax.quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - jnp.array(self.target_orientation),
                 self.norm,
             )
         )
@@ -345,9 +343,7 @@ class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
             illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
-
         floor_idx = data.mujoco_mappings.floor_geom_idx
-
         if floor_idx is None:
             raise ValueError("No floor geom found in model")
 
@@ -392,7 +388,6 @@ class FeetClearancePenaltyBuilder(RewardBuilder[FeetClearancePenalty]):
         illegal_geom_idxs = []
         for geom_name in self.foot_geom_names:
             illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
-
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
         return FeetClearancePenalty(
@@ -520,15 +515,9 @@ class DefaultPoseDeviationPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        # Get current joint positions
         current_positions = mjx_data_t_plus_1.qpos[self.joint_indices]
-
-        # Calculate deviation from default pose
         deviations = current_positions - self.default_positions
-
-        # Apply weights to deviations
         weighted_deviations = deviations * self.joint_deviation_weights
-
         return jnp.sum(get_norm(weighted_deviations, self.norm))
 
 
@@ -608,6 +597,7 @@ class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
     joint_limits: dict[str, tuple[float, float]]
 
     def __call__(self, data: BuilderData) -> JointPosLimitPenalty:
+        # Convert joint names to indices
         joint_indices = []
         soft_lowers = []
         soft_uppers = []

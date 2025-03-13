@@ -67,6 +67,7 @@ def split_and_pad_trajectories(
         padded_trajectories,
         trajectory_masks,
     )
+
     (_, _, padded_trajectories, trajectory_masks), _ = jax.lax.scan(
         scan_fn, init_carry, trajectory_lengths
     )

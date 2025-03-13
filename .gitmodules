@@ -1,0 +1,3 @@
+[submodule "examples/kscale-assets"]
+	path = examples/kscale-assets
+	url = git@github.com:kscalelabs/kscale-assets.git
