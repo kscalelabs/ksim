@@ -23,7 +23,6 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
-from omegaconf import MISSING
 
 from ksim.builders.commands import Command, CommandBuilder
 from ksim.builders.observation import Observation, ObservationBuilder
