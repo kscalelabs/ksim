@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import flax.linen as nn
 import jax.numpy as jnp
+import xax
 from jaxtyping import PRNGKeyArray
 
 from ksim.builders.commands import LinearVelocityCommand
@@ -14,9 +15,17 @@ from ksim.builders.observation import (
     LegacyPositionObservation,
     LegacyVelocityObservation,
 )
-from ksim.builders.resets import RandomizeJointPositions, RandomizeJointVelocities
-from ksim.builders.rewards import DHForwardReward, DHHealthyReward
-from ksim.builders.terminations import UnhealthyTermination
+from ksim.builders.resets import (
+    RandomizeJointPositions,
+    RandomizeJointVelocities,
+)
+from ksim.builders.rewards import (
+    DHForwardReward,
+    DHHealthyReward,
+)
+from ksim.builders.terminations import (
+    UnhealthyTermination,
+)
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.base import ActorCriticAgent
 from ksim.model.factory import mlp_actor_critic_agent
@@ -34,6 +43,12 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     """Combining configs for the humanoid walking task and fixing params."""
 
     robot_model_name: str = "examples/default_humanoid/"
+
+    # Action latency.
+    min_action_latency: float = xax.field(value=0.0)
+    max_action_latency: float = xax.field(value=0.0)
+
+    actuator_type: str = xax.field(value="scaled_torque", help="The type of actuator to use.")
 
 
 ####################
