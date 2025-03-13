@@ -188,8 +188,7 @@ class ActorCriticAgent(nn.Module):
         recurrent_state: Array | None,
     ) -> Array:
         """Actor forward pass."""
-        transformed_obs = self.actor_obs(obs)
-        normalized_obs = self.normalize_obs(transformed_obs)
+        normalized_obs = self.normalize_obs(obs)
         return self.actor_module(
             normalized_obs, cmd, prev_action, prev_model_input, recurrent_state
         )
@@ -204,8 +203,7 @@ class ActorCriticAgent(nn.Module):
         recurrent_state: Array | None,
     ) -> Array:
         """Critic forward pass."""
-        transformed_obs = self.critic_obs(obs)
-        normalized_obs = self.normalize_obs(transformed_obs)
+        normalized_obs = self.normalize_obs(obs)
         return self.critic_module(
             normalized_obs, cmd, prev_action, prev_model_input, recurrent_state
         )
@@ -225,8 +223,7 @@ class ActorCriticAgent(nn.Module):
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         """Sample and calculate the log probability of the action."""
-        transformed_obs = self.actor_obs(obs)
-        normalized_obs = self.normalize_obs(transformed_obs)
+        normalized_obs = self.normalize_obs(obs)
         distribution_params = self.actor_module(
             normalized_obs, cmd, prev_action, prev_model_input, recurrent_state
         )
