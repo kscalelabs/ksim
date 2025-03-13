@@ -19,3 +19,4 @@ mujoco-scenes
 optax
 scipy
 xax
+orbax-export
