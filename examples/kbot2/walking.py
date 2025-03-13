@@ -9,9 +9,12 @@ from jaxtyping import PRNGKeyArray
 
 from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.builders.observation import (
+    ActuatorForceObservation,
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,
+    CenterOfMassInertiaObservation,
+    CenterOfMassVelocityObservation,
     JointPositionObservation,
     JointVelocityObservation,
     SensorObservationBuilder,
@@ -170,19 +173,16 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
                 ),
             ],
             observations=[
-                BaseOrientationObservation(noise_type="gaussian", noise=0.01),
-                JointPositionObservation(noise_type="gaussian", noise=0.01),
-                JointVelocityObservation(noise_type="gaussian", noise=0.01),
+                BaseOrientationObservation(noise_type="gaussian"),
+                BaseLinearVelocityObservation(noise_type="gaussian"),
+                BaseAngularVelocityObservation(noise_type="gaussian"),
+                JointPositionObservation(noise_type="gaussian"),
+                JointVelocityObservation(noise_type="gaussian"),
+                CenterOfMassInertiaObservation(noise_type="gaussian"),
+                CenterOfMassVelocityObservation(noise_type="gaussian"),
+                ActuatorForceObservation(noise_type="gaussian"),
                 SensorObservationBuilder(sensor_name="imu_acc"),  # Sensor has noise already.
                 SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
-                # Clean observations
-                # NOTE: Depending on much we value flexibility vs cleanliness
-                # we might want to abstract this `clean` logic in `MjxEnv`
-                BaseOrientationObservation(noise_type="gaussian", noise=0.0),
-                BaseLinearVelocityObservation(noise_type="gaussian", noise=0.0),
-                BaseAngularVelocityObservation(noise_type="gaussian", noise=0.0),
-                JointPositionObservation(noise_type="gaussian", noise=0.0),
-                JointVelocityObservation(noise_type="gaussian", noise=0.0),
             ],
             commands=[
                 LinearVelocityCommand(
