@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import PRNGKeyArray
 
+from ksim.actuators import MITPositionActuatorsBuilder
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.base import ActorCriticAgent
@@ -50,7 +51,7 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
         return MjxEnv(
             self.config,
             robot_dir_path=self.config.robot_model_name,
-            actuators=Actuators(),
+            actuators=MITPositionActuatorsBuilder(),
             terminations=[
                 RollTooGreatTermination(max_roll=0.3),
                 PitchTooGreatTermination(max_pitch=0.3),

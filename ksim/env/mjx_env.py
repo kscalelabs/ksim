@@ -133,7 +133,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         self,
         config: Config,
         robot_dir_path: str | Path,
-        actuators: Actuators,
+        actuators: Actuators | ActuatorsBuilder,
         terminations: Collection[Termination | TerminationBuilder],
         resets: Collection[Reset | ResetBuilder],
         rewards: Collection[Reward | RewardBuilder],

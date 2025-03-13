@@ -111,13 +111,3 @@ class BaseEnv(ABC, Generic[Config]):
         camera: int | None = None,
     ) -> tuple[list[np.ndarray], EnvState]:
         """Render trajectory and return list of images."""
-
-    @property
-    @abstractmethod
-    def observation_size(self) -> int:
-        """Get the size of the observation space."""
-
-    @property
-    @abstractmethod
-    def action_size(self) -> int:
-        """Get the size of the action space."""
