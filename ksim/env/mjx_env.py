@@ -23,9 +23,10 @@ import numpy as np
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from kscale.web.gen.api import RobotURDFMetadataOutput
 from mujoco import mjx
 
-from ksim.actuators import Actuators
+from ksim.actuators import Actuators, ActuatorsBuilder
 from ksim.commands import Command, CommandBuilder
 from ksim.env.base_env import BaseEnv, BaseEnvConfig
 from ksim.env.types import EnvState
@@ -131,7 +132,7 @@ class MjxEnv(BaseEnv[Config], ABC):
     def __init__(
         self,
         config: Config,
-        robot_model_path: str | Path,
+        robot_dir_path: str | Path,
         actuators: Actuators,
         terminations: Collection[Termination | TerminationBuilder],
         resets: Collection[Reset | ResetBuilder],
@@ -150,15 +151,19 @@ class MjxEnv(BaseEnv[Config], ABC):
                 f"Action latency ({self.config.min_action_latency}) must be non-negative"
             )
 
-        self.robot_model_path = robot_model_path
-        self.actuators = actuators
         self.min_action_latency_step = round(self.config.min_action_latency / self.config.dt)
         self.max_action_latency_step = round(self.config.max_action_latency / self.config.dt)
 
-        logger.info("Loading robot model %s", robot_model_path)
-        # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
-        mj_model = mujoco.MjModel.from_xml_path(robot_model_path)
+        # ML: we will probably overhaul all of this in due time.
+        # right now loading model and metadata from kscale-assets submodule directly.
+        # when we have clarity on where the assets should come from, we should rewrite.
+        logger.info("Loading robot model %s", robot_dir_path)
+        mjcf_path = Path(robot_dir_path) / "robot.mjcf"
+        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
         mj_model = self._override_model_settings(mj_model)
+        metadata_path = Path(robot_dir_path) / "metadata.json"
+        with open(metadata_path, "r") as f:
+            robot_metadata = RobotURDFMetadataOutput.model_validate_json(f.read())
 
         self.default_mj_model = mj_model
         self.default_mj_data = mujoco.MjData(mj_model)
@@ -169,11 +174,18 @@ class MjxEnv(BaseEnv[Config], ABC):
 
         # preparing builder data.
         data = BuilderData(
-            model=self.default_mjx_model,
+            robot_model=self.default_mjx_model,
+            robot_metadata=robot_metadata,
             dt=self.config.dt,
             ctrl_dt=self.config.ctrl_dt,
             mujoco_mappings=self.mujoco_mappings,
         )
+
+        # creating actuators with metadata (if required)
+        if isinstance(actuators, ActuatorsBuilder):
+            self.actuators = actuators(data)
+        else:
+            self.actuators = actuators
 
         # storing the termination, reset, reward, observation, and command builders
         terminations_v = [t(data) if isinstance(t, TerminationBuilder) else t for t in terminations]

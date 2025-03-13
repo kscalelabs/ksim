@@ -49,7 +49,7 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
     def get_environment(self) -> MjxEnv:
         return MjxEnv(
             self.config,
-            robot_model_path=self.config.robot_model_name,
+            robot_dir_path=self.config.robot_model_name,
             actuators=Actuators(),
             terminations=[
                 RollTooGreatTermination(max_roll=0.3),

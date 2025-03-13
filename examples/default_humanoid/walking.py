@@ -37,7 +37,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
     def get_environment(self) -> MjxEnv:
         return MjxEnv(
             self.config,
-            robot_model_path=self.config.robot_model_name,
+            robot_dir_path=self.config.robot_model_name,
             actuators=TorqueActuators(),
             terminations=[
                 UnhealthyTermination(
