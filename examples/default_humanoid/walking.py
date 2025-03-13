@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import flax.linen as nn
 import jax.numpy as jnp
-import xax
 from jaxtyping import PRNGKeyArray
 
 from ksim.builders.commands import LinearVelocityCommand

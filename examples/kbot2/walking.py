@@ -25,22 +25,8 @@ from ksim.builders.resets import (
     XYPositionResetBuilder,
 )
 from ksim.builders.rewards import (
-    ActionSmoothnessPenalty,
-    AngularVelocityXYPenalty,
-    DefaultPoseDeviationPenaltyBuilder,
     DHForwardReward,
     DHHealthyReward,
-    EnergyPenalty,
-    FeetClearancePenaltyBuilder,
-    FootContactPenaltyBuilder,
-    FootSlipPenaltyBuilder,
-    HeightReward,
-    JointAccelerationPenalty,
-    LinearVelocityZPenalty,
-    OrientationPenalty,
-    TorquePenalty,
-    TrackAngularVelocityZReward,
-    TrackLinearVelocityXYReward,
 )
 from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
