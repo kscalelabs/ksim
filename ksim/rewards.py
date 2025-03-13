@@ -632,6 +632,9 @@ class SinusoidalFeetHeightReward(Reward):
     sinusoidal_feet_height: Callable[[Array], Array]
     vertical_offset: float
     norm: NormType = attrs.field(default="l1")
+    sensitivity: float = attrs.field(default=2.0)
+    penalty_scale: float = attrs.field(default=0.2)
+    error_clamp: float = attrs.field(default=0.5)
 
     def __call__(
         self,
@@ -658,7 +661,16 @@ class SinusoidalFeetHeightReward(Reward):
         left_foot_error = get_norm(left_foot_height - left_foot_target, self.norm)
         right_foot_error = get_norm(right_foot_height - right_foot_target, self.norm)
 
-        return left_foot_error + right_foot_error
+        # Total error
+        total_error = left_foot_error + right_foot_error
+
+        # Calculate reward using both exponential reward and linear penalty components
+        exp_reward = jnp.exp(-self.sensitivity * total_error)
+        linear_penalty = self.penalty_scale * jnp.minimum(total_error, self.error_clamp)
+
+        reward = exp_reward - linear_penalty
+
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -669,6 +681,9 @@ class SinusoidalFeetHeightRewardBuilder(RewardBuilder[SinusoidalFeetHeightReward
     vertical_offset: float = attrs.field(default=0.0)
     period: float  # seconds
     scale: float
+    sensitivity: float = attrs.field(default=2.0)
+    penalty_scale: float = attrs.field(default=0.2)
+    error_clamp: float = attrs.field(default=0.5)
 
     def __call__(self, data: BuilderData) -> SinusoidalFeetHeightReward:
         try:
@@ -690,6 +705,9 @@ class SinusoidalFeetHeightRewardBuilder(RewardBuilder[SinusoidalFeetHeightReward
             right_foot_geom_idx=right_foot_geom_idx,
             sinusoidal_feet_height=sinusoidal_feet_height,
             vertical_offset=self.vertical_offset,
+            sensitivity=self.sensitivity,
+            penalty_scale=self.penalty_scale,
+            error_clamp=self.error_clamp,
         )
 
 
