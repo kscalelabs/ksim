@@ -24,10 +24,7 @@ from ksim.builders.resets import (
     RandomizeJointVelocities,
     XYPositionResetBuilder,
 )
-from ksim.builders.rewards import (
-    DHForwardReward,
-    DHHealthyReward,
-)
+from ksim.builders.rewards import DHForwardReward, DHHealthyReward
 from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.base import ActorCriticAgent
@@ -53,8 +50,8 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
         return MjxEnv(
             self.config,
             terminations=[
-                RollTooGreatTermination(max_roll=1.04),
-                PitchTooGreatTermination(max_pitch=1.04),
+                RollTooGreatTermination(max_roll=0.3),
+                PitchTooGreatTermination(max_pitch=0.3),
             ],
             resets=[
                 XYPositionResetBuilder(),
@@ -66,78 +63,6 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
                     scale=0.5,
                 ),
                 DHForwardReward(scale=0.2),
-                # LinearVelocityZPenalty(scale=-0.0),
-                # AngularVelocityXYPenalty(scale=-0.15),
-                # TrackLinearVelocityXYReward(scale=10.0),
-                # HeightReward(scale=0.2, height_target=1.0),
-                # TrackAngularVelocityZReward(scale=7.5),
-                # ActionSmoothnessPenalty(scale=-0.0),
-                # OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
-                # TorquePenalty(scale=-0.0),
-                # EnergyPenalty(scale=-0.0),
-                # JointAccelerationPenalty(scale=-0.0),
-                # FootSlipPenaltyBuilder(
-                #     scale=-0.25,
-                #     foot_geom_names=["foot1_collision_box"],
-                # ),
-                # FeetClearancePenaltyBuilder(
-                #     scale=-0.0,
-                #     foot_geom_names=["foot1_collision_box"],
-                #     max_foot_height=0.2,
-                # ),
-                # FootContactPenaltyBuilder(
-                #     scale=-0.1,
-                #     foot_geom_names=["foot1_collision_box"],
-                #     allowed_contact_prct=0.7,
-                #     skip_if_zero_command=("linear_velocity_command", "angular_velocity_command"),
-                # ),
-                # DefaultPoseDeviationPenaltyBuilder(
-                #     scale=-0.1,
-                #     default_positions={
-                #         "left_shoulder_pitch_03": 0.0,
-                #         "left_shoulder_roll_03": 0.0,
-                #         "left_shoulder_yaw_02": 0.0,
-                #         "left_elbow_02": 0.0,
-                #         "left_wrist_02": 0.0,
-                #         "right_shoulder_pitch_03": 0.0,
-                #         "right_shoulder_roll_03": 0.0,
-                #         "right_shoulder_yaw_02": 0.0,
-                #         "right_elbow_02": 0.0,
-                #         "right_wrist_02": 0.0,
-                #         "left_hip_pitch_04": 0.0,
-                #         "left_hip_roll_03": 0.0,
-                #         "left_hip_yaw_03": 0.0,
-                #         "left_knee_04": 0.0,
-                #         "left_ankle_02": 0.0,
-                #         "right_hip_pitch_04": 0.0,
-                #         "right_hip_roll_03": 0.0,
-                #         "right_hip_yaw_03": 0.0,
-                #         "right_knee_04": 0.0,
-                #         "right_ankle_02": 0.0,
-                #     },
-                #     deviation_weights={
-                #         "left_shoulder_pitch_03": 1.0,
-                #         "left_shoulder_roll_03": 1.0,
-                #         "left_shoulder_yaw_02": 1.0,
-                #         "left_elbow_02": 1.0,
-                #         "left_wrist_02": 1.0,
-                #         "right_shoulder_pitch_03": 1.0,
-                #         "right_shoulder_roll_03": 1.0,
-                #         "right_shoulder_yaw_02": 1.0,
-                #         "right_elbow_02": 1.0,
-                #         "right_wrist_02": 1.0,
-                #         "left_hip_pitch_04": 2.0,
-                #         "left_hip_roll_03": 2.0,
-                #         "left_hip_yaw_03": 2.0,
-                #         "left_knee_04": 1.0,
-                #         "left_ankle_02": 1.0,
-                #         "right_hip_pitch_04": 2.0,
-                #         "right_hip_roll_03": 2.0,
-                #         "right_hip_yaw_03": 2.0,
-                #         "right_knee_04": 1.0,
-                #         "right_ankle_02": 1.0,
-                #     },
-                # ),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian"),
@@ -152,17 +77,8 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
                 SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
             ],
             commands=[
-                LinearVelocityCommand(
-                    x_scale=1.0,
-                    y_scale=0.0,
-                    switch_prob=0.02,
-                    zero_prob=0.3,
-                ),
-                AngularVelocityCommand(
-                    scale=1.0,
-                    switch_prob=0.02,
-                    zero_prob=0.8,
-                ),
+                LinearVelocityCommand(x_scale=1.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
+                AngularVelocityCommand(scale=1.0, switch_prob=0.02, zero_prob=0.8),
             ],
         )
 
@@ -195,7 +111,7 @@ if __name__ == "__main__":
             dt=0.001,
             ctrl_dt=0.005,
             learning_rate=1e-5,
-            save_every_n_steps=50,
+            save_every_n_steps=25,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,
@@ -213,5 +129,6 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            eval_rollout_length=1000,
         ),
     )

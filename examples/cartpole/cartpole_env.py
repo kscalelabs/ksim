@@ -30,7 +30,7 @@ class CartPoleEnv(BaseEnv):
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
 
-        # Empty rewards and terminations lists since CartPole's Gym environment handles these internally.
+        # Empty rewards and terminations lists since CartPole's Gym environment is stateful.
         self.rewards = []
         self.terminations = []
 

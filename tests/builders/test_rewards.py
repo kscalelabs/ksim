@@ -129,14 +129,18 @@ class TestTrackAngularVelocityZReward:
         data_t = DummyMjxData()
         data_t_plus_1 = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
-        command: FrozenDict[str, Array] = FrozenDict({"angular_velocity_command": jnp.array([0.5])})
+        command: FrozenDict[str, Array] = FrozenDict(
+            {"angular_velocity_command_vector": jnp.array([0.5])}
+        )
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
         action_t = jnp.array([0.1, 0.1, 0.1])
 
         result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1) * scale
 
         # Expected reward is scale * (z_angular_velocity * command)^2 for L2 norm
-        expected = scale * (data_t_plus_1.qvel[5] * command["angular_velocity_command"][0]) ** 2
+        expected = (
+            scale * (data_t_plus_1.qvel[5] * command["angular_velocity_command_vector"][0]) ** 2
+        )
         assert jnp.allclose(result, expected)
 
 
@@ -153,7 +157,7 @@ class TestTrackLinearVelocityXYReward:
         data_t_plus_1 = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
         command: FrozenDict[str, Array] = FrozenDict(
-            {"linear_velocity_command": jnp.array([0.5, 0.5])}
+            {"linear_velocity_command_vector": jnp.array([0.5, 0.5])}
         )
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
         action_t = jnp.array([0.1, 0.1, 0.1])
@@ -162,7 +166,7 @@ class TestTrackLinearVelocityXYReward:
 
         # Expected reward uses exponential decay based on L2 tracking error
         tracking_error = jnp.linalg.norm(
-            command["linear_velocity_command"] - data_t_plus_1.qvel[:2]
+            command["linear_velocity_command_vector"] - data_t_plus_1.qvel[:2]
         )
         expected = scale * jnp.exp(-sensitivity * tracking_error)
 
