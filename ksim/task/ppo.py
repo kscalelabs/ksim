@@ -341,8 +341,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "log_prob_min": jnp.min(log_probs),
             "values_std": jnp.std(values),
             "values_mean": jnp.mean(values),
-            "obs_nans_ratio": compute_nan_ratio(env_state_batch.obs),
-            "action_nans_ratio": compute_nan_ratio(env_state_batch.action),
+            "obs_nans_ratio": jnp.array(compute_nan_ratio(env_state_batch.obs)),
+            "action_nans_ratio": jnp.array(compute_nan_ratio(env_state_batch.action)),
         }
 
         if isinstance(model.distribution, GaussianDistribution):

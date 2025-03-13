@@ -86,9 +86,11 @@ class KSimModel(nn.Module):
         # TODO: implement way of adding history to the input
 
         return ModelInput(
-            obs_proprio_vec=jnp.concatenate(obs_proprios, axis=-1) if obs_proprios else None,
+            obs_proprio_vec=(
+                jnp.concatenate(obs_proprios, axis=-1) if obs_proprios else jnp.zeros(0)
+            ),
             obs_image_tensor=jnp.concatenate(obs_images, axis=-1) if obs_images else None,
-            command_vec=jnp.concatenate(cmd_vecs, axis=-1) if cmd_vecs else None,
+            command_vec=jnp.concatenate(cmd_vecs, axis=-1) if cmd_vecs else jnp.zeros(0),
             command_text_tokens=jnp.concatenate(cmd_tokens, axis=-1) if cmd_tokens else None,
             action_history_vec=prev_action,
             recurrent_state=recurrent_state,

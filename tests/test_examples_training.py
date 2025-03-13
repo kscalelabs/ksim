@@ -8,7 +8,7 @@ import pytest
 
 from examples.default_humanoid.walking import HumanoidWalkingConfig, HumanoidWalkingTask
 from ksim.utils.jit import legit_jit
-from ksim.utils.pytree import flatten_pytree, slice_pytree
+from ksim.utils.pytree import flatten_pytree
 
 
 @pytest.mark.slow
