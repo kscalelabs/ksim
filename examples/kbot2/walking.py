@@ -32,7 +32,11 @@ from ksim.resets import (
     RandomizeJointVelocities,
     XYPositionResetBuilder,
 )
-from ksim.rewards import DHForwardReward, DHHealthyReward
+from ksim.rewards import (
+    DHForwardReward,
+    DHHealthyReward,
+    SinusoidalFeetHeightRewardBuilder,
+)
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import PitchTooGreatTermination, RollTooGreatTermination
 
@@ -136,6 +140,14 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
                     scale=0.5,
                 ),
                 DHForwardReward(scale=0.2),
+                SinusoidalFeetHeightRewardBuilder(
+                    left_foot_geom_name="KB_D_501L_L_LEG_FOOT_box_collision",
+                    right_foot_geom_name="KB_D_501R_R_LEG_FOOT_box_collision",
+                    amplitude=0.1,
+                    period=0.4,
+                    scale=2.0,
+                    vertical_offset=-0.09,
+                ),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian"),

@@ -3,7 +3,7 @@
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Generic, Literal, TypeVar
+from typing import Callable, Generic, Literal, TypeVar
 
 import attrs
 import jax.numpy as jnp
@@ -620,6 +620,69 @@ class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
             joint_indices=jnp.array(joint_indices),
             soft_lower_limits=jnp.array(soft_lowers),
             soft_upper_limits=jnp.array(soft_uppers),
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class SinusoidalFeetHeightReward(Reward):
+    """Reward for matching the feet to a sinusoidal pattern."""
+
+    left_foot_geom_idx: int
+    right_foot_geom_idx: int
+    sinusoidal_feet_height: Callable[[Array], Array]
+    vertical_offset: float
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        # Get the height of the feet
+        left_foot_height = mjx_data_t_plus_1.geom_xpos[self.left_foot_geom_idx][2]
+        right_foot_height = mjx_data_t_plus_1.geom_xpos[self.right_foot_geom_idx][2]
+        # Calculate the sinusoidal pattern
+        sin_pos = self.sinusoidal_feet_height(mjx_data_t_plus_1.time)
+
+        sin_pos_left = sin_pos[sin_pos > 0] + self.vertical_offset
+        sin_pos_right = -sin_pos[sin_pos < 0] + self.vertical_offset  # take the opposite phase of the left foot
+
+        return jnp.sum(jnp.abs(left_foot_height - sin_pos_left)) + jnp.sum(
+            jnp.abs(right_foot_height - sin_pos_right)
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class SinusoidalFeetHeightRewardBuilder(RewardBuilder[SinusoidalFeetHeightReward]):
+    left_foot_geom_name: str
+    right_foot_geom_name: str
+    amplitude: float  # radians
+    vertical_offset: float = attrs.field(default=0.0)
+    period: float  # seconds
+    scale: float
+
+    def __call__(self, data: BuilderData) -> SinusoidalFeetHeightReward:
+        try:
+            left_foot_geom_idx = data.mujoco_mappings.geom_name_to_idx[self.left_foot_geom_name]
+            right_foot_geom_idx = data.mujoco_mappings.geom_name_to_idx[self.right_foot_geom_name]
+        except KeyError:
+            raise ValueError(
+                f"Foot geom '{self.left_foot_geom_name}' or "
+                f"'{self.right_foot_geom_name}' not found in model. "
+                f"Available geoms: {data.mujoco_mappings.geom_name_to_idx.keys()}"
+            )
+
+        def sinusoidal_feet_height(time: Array) -> Array:
+            return self.amplitude * jnp.sin(2 * jnp.pi * time / self.period)
+
+        return SinusoidalFeetHeightReward(
+            scale=self.scale,
+            left_foot_geom_idx=left_foot_geom_idx,
+            right_foot_geom_idx=right_foot_geom_idx,
+            sinusoidal_feet_height=sinusoidal_feet_height,
+            vertical_offset=self.vertical_offset,
         )
 
 

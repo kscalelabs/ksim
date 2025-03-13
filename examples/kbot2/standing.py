@@ -35,6 +35,7 @@ from ksim.rewards import (
     JointAccelerationPenalty,
     LinearVelocityZPenalty,
     OrientationPenalty,
+    SinusoidalFeetHeightRewardBuilder,
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
