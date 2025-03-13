@@ -149,6 +149,28 @@ class ActorCriticAgent(nn.Module):
                 shape=obs_vec.shape[-1],
             )
 
+        obs_count = {}
+        for obs_name, obs_vec in obs.items():
+            assert isinstance(obs_vec, Array)
+            obs_count[obs_name] = self.variable(
+                "normalization",
+                f"obs_count_{obs_name}",
+                nn.initializers.zeros,
+                key=(),
+                shape=(),
+            )
+
+        obs_summed_variance = {}
+        for obs_name, obs_vec in obs.items():
+            assert isinstance(obs_vec, Array)
+            obs_summed_variance[obs_name] = self.variable(
+                "normalization",
+                f"obs_summed_variance_{obs_name}",
+                nn.initializers.zeros,
+                key=(),
+                shape=obs_vec.shape[-1],
+            )
+
         # do normalization on inputs
         normalized_obs_dict = {}
         for obs_name, obs_vec in obs.items():
@@ -318,6 +340,8 @@ def update_actor_critic_normalization(
     obs_norm_alpha: float,
     trajectories_dataset: EnvState,
     gamma: float,
+    std_min_value: float = 1e-6,
+    std_max_value: float = 1e6,
 ) -> PyTree[Array]:
     """Update the normalization parameters for the observations and returns.
 
@@ -335,17 +359,36 @@ def update_actor_critic_normalization(
 
     # update the observations normalization parameters
     for obs_name, obs_vec in trajectories_dataset.obs.items():
-        assert isinstance(obs_vec, Array)
-        obs_mean = jnp.mean(obs_vec, axis=tuple(range(obs_vec.ndim - 1)))
-        obs_std = jnp.std(obs_vec, axis=tuple(range(obs_vec.ndim - 1)))
-        old_obs_mean = variables["normalization"][f"obs_mean_{obs_name}"]
-        old_obs_std = variables["normalization"][f"obs_std_{obs_name}"]
+        # The mean and the sum of past variances are updated with Welford's
+        # algorithm using batches (see https://stackoverflow.com/q/56402955).
 
-        variables["normalization"][f"obs_mean_{obs_name}"] = (
-            old_obs_mean * obs_norm_alpha + obs_mean * (1 - obs_norm_alpha)
-        )
-        variables["normalization"][f"obs_std_{obs_name}"] = (
-            old_obs_std * obs_norm_alpha + obs_std * (1 - obs_norm_alpha)
-        )
+        # new count
+        batch_dims = obs_vec.shape[:-1]
+        step_increment = jnp.prod(jnp.array(batch_dims))
+        variables["normalization"][f"obs_count_{obs_name}"] += step_increment
+        count = variables["normalization"][f"obs_count_{obs_name}"]
+
+        # new mean
+        old_mean = variables["normalization"][f"obs_mean_{obs_name}"]
+        batch_axis = range(len(batch_dims))
+        diff_to_old_mean = obs_vec - old_mean
+        mean_update = jnp.sum(diff_to_old_mean, axis=batch_axis) / count
+        mean = old_mean + mean_update
+
+        # new summed variance
+        summed_variance = variables["normalization"][f"obs_summed_variance_{obs_name}"]
+        diff_to_new_mean = obs_vec - mean
+        variance_update = diff_to_old_mean * diff_to_new_mean
+        variance_update = jnp.sum(variance_update, axis=batch_axis)
+        summed_variance = summed_variance + variance_update
+
+        # new std
+        # Summed variance can get negative due to rounding errors.
+        summed_variance = jnp.maximum(summed_variance, 0)
+        std = jnp.sqrt(summed_variance / count)
+        std = jnp.clip(std, std_min_value, std_max_value)
+
+        variables["normalization"][f"obs_std_{obs_name}"] = std
+        variables["normalization"][f"obs_mean_{obs_name}"] = mean
 
     return variables
