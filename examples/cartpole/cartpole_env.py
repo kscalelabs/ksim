@@ -1,6 +1,5 @@
 """CartPole environment."""
 
-import gymnasium as gym
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -10,6 +9,11 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.env.types import PhysicsData, PhysicsModel
 from ksim.model.base import ActorCriticAgent
+
+try:
+    import gymnasium as gym
+except ImportError:
+    raise ImportError("gymnasium is required to use this environment.")
 
 
 class CartPoleEnv(BaseEnv):
@@ -26,13 +30,10 @@ class CartPoleEnv(BaseEnv):
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
 
-        # Empty rewards and terminations lists since CartPole handles these internally
+        # Empty rewards and terminations lists since CartPole's Gym environment handles these internally.
         self.rewards = []
         self.terminations = []
 
-    ########################
-    # Implementing the API #
-    ########################
     def get_init_physics_data(self, num_envs: int) -> PhysicsData:
         """CartPole doesn't use physics data."""
         return None
