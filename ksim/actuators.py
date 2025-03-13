@@ -18,7 +18,6 @@ class Actuators(ABC):
     @abstractmethod
     def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
         """Get the control signal from the action vector."""
-        ...
 
 
 class TorqueActuators(Actuators):

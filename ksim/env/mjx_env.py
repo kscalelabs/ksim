@@ -25,7 +25,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 
-from ksim.actuators.base import Actuators
+from ksim.actuators import Actuators
 from ksim.commands import Command, CommandBuilder
 from ksim.env.base_env import BaseEnv, BaseEnvConfig
 from ksim.env.types import EnvState
@@ -104,7 +104,10 @@ class MjxEnvConfig(BaseEnvConfig):
     )
 
 
-class MjxEnv(BaseEnv, ABC):
+Config = TypeVar("Config", bound=MjxEnvConfig)
+
+
+class MjxEnv(BaseEnv[Config], ABC):
     """Wraps the MuJoCo MJX model.
 
     Args:
@@ -117,12 +120,17 @@ class MjxEnv(BaseEnv, ABC):
         observations: The observations for the environment.
     """
 
-    config: MjxEnvConfig
+    config: Config
+    terminations: list[tuple[str, Termination]]
+    resets: list[tuple[str, Reset]]
+    rewards: list[tuple[str, Reward]]
+    observations: list[tuple[str, Observation]]
+    commands: list[tuple[str, Command]]
     actuators: Actuators
 
     def __init__(
         self,
-        config: MjxEnvConfig,
+        config: Config,
         robot_model_path: str | Path,
         actuators: Actuators,
         terminations: Collection[Termination | TerminationBuilder],

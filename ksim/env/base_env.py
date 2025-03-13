@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Generic, TypeVar
 
 import jax
 import numpy as np
@@ -31,7 +32,10 @@ class BaseEnvConfig(xax.Config):
     dt: float = xax.field(value=0.001, help="The simulation time step.")
 
 
-class BaseEnv(ABC):
+Config = TypeVar("Config", bound=BaseEnvConfig)
+
+
+class BaseEnv(ABC, Generic[Config]):
     """Base environment class with functions designed to be scannable.
 
     This is why we return the physics carry data from many functions. The way
@@ -39,11 +43,9 @@ class BaseEnv(ABC):
     The other functions serve to guide scannable implementations.
     """
 
-    rewards: list[tuple[str, Reward]]
-    terminations: list[tuple[str, Termination]]
-    config: BaseEnvConfig
+    config: Config
 
-    def __init__(self, config: BaseEnvConfig) -> None:
+    def __init__(self, config: Config) -> None:
         self.config = config
 
     @abstractmethod

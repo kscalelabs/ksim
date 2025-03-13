@@ -6,7 +6,7 @@ import flax.linen as nn
 import jax.numpy as jnp
 from jaxtyping import PRNGKeyArray
 
-from ksim.actuators.torque import TorqueActuators
+from ksim.actuators import TorqueActuators
 from ksim.commands import LinearVelocityCommand
 from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.base import ActorCriticAgent
