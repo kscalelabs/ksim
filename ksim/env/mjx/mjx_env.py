@@ -78,25 +78,47 @@ def _unique_list(things: list[tuple[str, T]]) -> list[tuple[str, T]]:
 @jax.tree_util.register_dataclass
 @dataclass
 class MjxEnvConfig(BaseEnvConfig):
-    # environment configuration options
-    debug_env: bool = xax.field(value=False, help="Whether to enable debug mode for the env.")
-
-    # action configuration options
-    min_action_latency: float = xax.field(value=MISSING, help="The minimum action latency.")
-    max_action_latency: float = xax.field(value=MISSING, help="The maximum action latency.")
-
-    # solver configuration options
-    solver_iterations: int = xax.field(value=6, help="Number of main solver iterations.")
-    solver_ls_iterations: int = xax.field(value=6, help="Number of line search iterations.")
-    disable_flags_bitmask: int = xax.field(
-        value=mujoco.mjtDisableBit.mjDSBL_EULERDAMP.value, help="Bitmask of flags to disable."
+    # Environment.
+    debug_env: bool = xax.field(
+        value=False,
+        help="Whether to enable debug mode for the env.",
     )
 
-    # simulation artifact options
-    ignore_cached_urdf: bool = xax.field(value=False, help="Whether to ignore the cached URDF.")
+    # Action.
+    min_action_latency: float = xax.field(
+        value=MISSING,
+        help="The minimum action latency.",
+    )
+    max_action_latency: float = xax.field(
+        value=MISSING,
+        help="The maximum action latency.",
+    )
 
-    # actuator configuration options
-    actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
+    # Solver.
+    solver_iterations: int = xax.field(
+        value=6,
+        help="Number of main solver iterations.",
+    )
+    solver_ls_iterations: int = xax.field(
+        value=6,
+        help="Number of line search iterations.",
+    )
+    disable_flags_bitmask: int = xax.field(
+        value=mujoco.mjtDisableBit.mjDSBL_EULERDAMP.value,
+        help="Bitmask of flags to disable.",
+    )
+
+    # Simulation.
+    ignore_cached_urdf: bool = xax.field(
+        value=False,
+        help="Whether to ignore the cached URDF.",
+    )
+
+    # Actuator.
+    actuator_type: str = xax.field(
+        value="mit",
+        help="The type of actuator to use.",
+    )
 
 
 # The new stateless environment – note that we do not call any stateful methods.

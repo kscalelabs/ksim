@@ -227,7 +227,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             render_dir = self.exp_dir / self.config.render_dir / render_name
 
             end_time = time.time()
-            print(f"Time taken for environment setup: {end_time - start_time} seconds")
+            logger.info("Time taken for environment setup: %s seconds", end_time - start_time)
 
             logger.log(logging.INFO, "Rendering to %s", render_dir)
 
@@ -238,7 +238,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             start_time = time.time()
             variables = self.get_init_variables(key)
             end_time = time.time()
-            print(f"Time taken for parameter initialization: {end_time - start_time} seconds")
+            logger.info(
+                "Time taken for parameter initialization: %s seconds", end_time - start_time
+            )
 
             # Unroll trajectories and collect the frames for rendering
             logger.info("Unrolling trajectories")
@@ -546,7 +548,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             env_state_EL_t = jax.tree_util.tree_map(lambda x: x[-1], env_state_TEL)
 
             rollout_time = time.time() - start_time
-            print(f"Rollout time: {rollout_time}")
+            logger.info("Rollout time: %s seconds", rollout_time)
             self.log_trajectory_stats(env, env_state_EL_t)
 
             env_state_DL = flatten_pytree(env_state_TEL, flatten_size=self.dataset_size)
@@ -578,7 +580,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
             metrics_mean = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
             update_time = time.time() - start_time
-            print(f"Update time: {update_time}")
+            logger.info("Update time: %s seconds", update_time)
 
             # TODO: we probably want a way of tracking how loss evolves within
             # an epoch, and across epochs, not just the final metrics.

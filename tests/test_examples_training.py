@@ -5,6 +5,7 @@ from unittest.mock import patch
 import jax
 import jax.numpy as jnp
 import pytest
+import xax
 
 from examples.default_humanoid.walking import HumanoidWalkingConfig, HumanoidWalkingTask
 from ksim.utils.jit import legit_jit
@@ -132,15 +133,18 @@ def test_default_humanoid_run_method() -> None:
         # TODO: Switch these to asserts when we fix the NaN issue
         for k, v in dummy_states.obs.items():
             if jnp.isnan(v).any():
-                print(f"WARNING: NaN values found in initial observation '{k}'")
+                xax.show_warning(f"NaN values found in initial observation '{k}'", important=True)
         for k, v in dummy_states.command.items():
             if jnp.isnan(v).any():
-                print(f"WARNING: NaN values found in initial command '{k}'")
+                xax.show_warning(f"NaN values found in initial command '{k}'", important=True)
         if jnp.isnan(dummy_states.action).any():
-            print("WARNING: NaN values found in initial action")
+            xax.show_warning("NaN values found in initial action", important=True)
 
         # Check for NaN values in model parameters
         for param_key, param_value in jax.tree_util.tree_leaves_with_path(variables["params"]):
             if jnp.isnan(param_value).any():
                 param_path = "/".join(str(p) for p in param_key)
-                print(f"WARNING: NaN values found in model parameter '{param_path}'")
+                xax.show_warning(
+                    f"NaN values found in model parameter '{param_path}'",
+                    important=True,
+                )

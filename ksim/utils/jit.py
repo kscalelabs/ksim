@@ -1,12 +1,15 @@
 """JIT utilities."""
 
 import inspect
+import logging
 import os
 import time
 from functools import wraps
 from typing import Any, Callable, ParamSpec, TypeVar, cast
 
 import jax
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_COMPILE_TIMEOUT = 1.0
 
@@ -61,9 +64,10 @@ def legit_jit(
 
             if do_profile:
                 class_name = (args[0].__class__.__name__) + "." if fn.__name__ == "__call__" else ""
-                print(
-                    f"Currently running {class_name}{fn.__name__} "
-                    f"(count: {JitState.compilation_count})"
+                logger.info(
+                    "Currently running %s (count: %s)",
+                    f"{class_name}{fn.__name__}",
+                    JitState.compilation_count,
                 )
 
             start_time = time.time()
@@ -81,7 +85,7 @@ def legit_jit(
                 for k, v in kwargs.items():
                     arg_dict[k] = get_hash(v)
 
-                print(f"- took {runtime} seconds")
+                logger.info("- took %s seconds", runtime)
                 JitState.compilation_count += 1
 
                 if JitState.last_arg_dict is not None:
@@ -91,7 +95,7 @@ def legit_jit(
                         curr = arg_dict.get(k, "N/A")
 
                         if prev != curr:
-                            print(f"- Arg '{k}' hash changed: {prev} -> {curr}")
+                            logger.info("- Arg '%s' hash changed: %s -> %s", k, prev, curr)
 
                 JitState.last_arg_dict = arg_dict
 

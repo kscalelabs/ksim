@@ -16,14 +16,18 @@ from jaxtyping import Array, PyTree
 
 from ksim.env.mjx.mjx_env import MjxEnv
 from ksim.task.rl import RLTask
-from ksim.utils.interactive.base import InteractiveVisualizer, InteractiveVisualizerConfig
+from ksim.utils.interactive.base import (
+    InteractiveVisualizer,
+    InteractiveVisualizerConfig,
+)
 
 matplotlib.use("Agg")  # Use non-interactive backend
 
 import matplotlib.lines
 import matplotlib.pyplot as plt
 import mujoco
-from mujoco import mjx, viewer as mujoco_viewer
+from mujoco import mjx
+from mujoco import viewer as mujoco_viewer
 from mujoco.viewer import Handle
 
 logging.basicConfig(level=logging.INFO)
@@ -35,9 +39,11 @@ class MujocoInteractiveVisualizerConfig(InteractiveVisualizerConfig):
     """Configuration for the Mujoco interactive visualizer."""
 
     suspended_pos: Array = attrs.field(
-        factory=lambda: jnp.array([0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+        factory=lambda: jnp.array([0, 0, 1, 1, 0, 0, 0], dtype=jnp.float32)
     )
-    suspended_vel: Array = attrs.field(factory=lambda: jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    suspended_vel: Array = attrs.field(
+        factory=lambda: jnp.array([0, 0, 0, 0, 0, 0], dtype=jnp.float32)
+    )
     physics_backend: str = attrs.field(default="mjx")
 
 
@@ -63,7 +69,9 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
     key_r: int = ord("r")  # Reset joints and orientation
 
     def __init__(
-        self, task: RLTask, config: MujocoInteractiveVisualizerConfig | None = None
+        self,
+        task: RLTask,
+        config: MujocoInteractiveVisualizerConfig | None = None,
     ) -> None:
         """Initialize the Mujoco interactive visualizer.
 
