@@ -3,10 +3,8 @@
 from dataclasses import dataclass
 
 import flax.linen as nn
-import jax
 import jax.numpy as jnp
-from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import PRNGKeyArray
 
 from ksim.builders.commands import LinearVelocityCommand
 from ksim.builders.observation import (
@@ -20,9 +18,8 @@ from ksim.builders.resets import RandomizeJointPositions, RandomizeJointVelociti
 from ksim.builders.rewards import DHForwardReward, DHHealthyReward
 from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.distributions import TanhGaussianDistribution
-from ksim.model.formulations import ActorCriticAgent, ActorModel
-from ksim.model.mlp import MLP
+from ksim.model.base import ActorCriticAgent
+from ksim.model.factory import mlp_actor_critic_agent
 from ksim.task.ppo import PPOConfig, PPOTask
 
 ######################
@@ -37,87 +34,6 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     """Combining configs for the humanoid walking task and fixing params."""
 
     robot_model_name: str = "examples/default_humanoid/"
-
-
-#####################
-# Model Definitions #
-#####################
-
-
-class DefaultHumanoidActor(ActorModel):
-    """Default humanoid actor."""
-
-    network: MLP
-    std_range: tuple[float, float] = (0.1, 0.9)
-    std_init: float = 0.3
-
-    @nn.compact
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        """Forward pass of the actor model."""
-        x = jnp.concatenate(list(obs.values()), axis=-1)
-        mean = self.network(x)
-
-        # using a single std for all actions for stability
-        std = self.param(
-            "std",
-            nn.initializers.constant(self.std_init),
-            (NUM_OUTPUTS,),
-        )
-        std = jnp.clip(std, self.std_range[0], self.std_range[1])
-        std = jnp.tile(std, (*mean.shape[:-1], 1))
-
-        # concatting because Gaussian-like distributions expect the parameters
-        # to be mean concat std
-        res = jnp.concatenate([mean, std], axis=-1)
-        return res
-
-
-class DefaultHumanoidLearnedStdActor(ActorModel):
-    """Default humanoid actor with learned std."""
-
-    network: MLP
-    min_std: float = 0.01
-    max_std: float = 1.0
-    var_scale: float = 1.0
-
-    @nn.compact
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        """Forward pass of the actor model."""
-        x = jnp.concatenate(list(obs.values()), axis=-1)
-        predictions = self.network(x)
-        mean = predictions[..., :NUM_OUTPUTS]
-        std = predictions[..., NUM_OUTPUTS:]
-        std = (jax.nn.softplus(std) + self.min_std) * self.var_scale
-        std = jnp.clip(std, self.min_std, self.max_std)
-        return jnp.concatenate([mean, std], axis=-1)
-
-
-class DefaultHumanoidCritic(nn.Module):
-    """Default humanoid critic."""
-
-    network: MLP
-
-    @nn.compact
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        """Forward pass of the critic model."""
-        x = jnp.concatenate(list(obs.values()), axis=-1)
-        value_estimate = self.network(x)
-        return value_estimate
-
-
-class DefaultHumanoidAgent(ActorCriticAgent):
-    """Default humanoid agent."""
-
-    actor_module: DefaultHumanoidActor | DefaultHumanoidLearnedStdActor
-    critic_module: DefaultHumanoidCritic
-
-    def actor_obs(self, obs: FrozenDict[str, Array]) -> FrozenDict[str, Array]:
-        """Sees all except base pos."""
-        return obs
-
-    def critic_obs(self, obs: FrozenDict[str, Array]) -> FrozenDict[str, Array]:
-        """Full pass through."""
-        return obs
 
 
 ####################
@@ -153,34 +69,19 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
                 ActuatorForceObservation(),
             ],
             commands=[
-                LinearVelocityCommand(
-                    x_scale=0.0,
-                    y_scale=0.0,
-                    switch_prob=0.02,
-                    zero_prob=0.3,
-                ),
+                LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
             ],
         )
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
-        return DefaultHumanoidAgent(
-            actor_module=DefaultHumanoidLearnedStdActor(
-                MLP(
-                    out_dim=NUM_OUTPUTS * 2,
-                    hidden_dims=(64,) * 5,
-                    activation=nn.relu,
-                    bias_init=nn.initializers.zeros,
-                ),
-            ),
-            critic_module=DefaultHumanoidCritic(
-                MLP(
-                    out_dim=1,
-                    hidden_dims=(64,) * 5,
-                    activation=nn.relu,
-                    bias_init=nn.initializers.zeros,
-                ),
-            ),
-            distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
+        return mlp_actor_critic_agent(
+            num_actions=NUM_OUTPUTS,
+            prediction_type="mean_std",
+            distribution_type="tanh_gaussian",
+            actor_hidden_dims=(64,) * 5,
+            critic_hidden_dims=(64,) * 5,
+            kernel_initialization=nn.initializers.lecun_normal(),
+            post_process_kwargs={"min_std": 0.01, "max_std": 1.0, "var_scale": 1.0},
         )
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:

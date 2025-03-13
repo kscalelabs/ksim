@@ -9,7 +9,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.env.types import PhysicsData, PhysicsModel
-from ksim.model.formulations import ActorCriticAgent
+from ksim.model.base import ActorCriticAgent
 
 
 class CartPoleEnv(BaseEnv):
@@ -57,7 +57,7 @@ class CartPoleEnv(BaseEnv):
     def reset(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         rng: PRNGKeyArray,
         physics_model_L: PhysicsModel,
     ) -> tuple[EnvState, PhysicsData | None]:
@@ -68,7 +68,7 @@ class CartPoleEnv(BaseEnv):
     def step(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         env_state_L_t_minus_1: EnvState,
         rng: PRNGKeyArray,
         physics_data_L_t: PhysicsData,
@@ -81,7 +81,7 @@ class CartPoleEnv(BaseEnv):
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
@@ -158,7 +158,7 @@ class CartPoleEnv(BaseEnv):
     def reset_and_give_obs(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         rng: PRNGKeyArray,
     ) -> tuple[EnvState, np.ndarray]:
         """Reset the environment and return the observation."""
@@ -167,12 +167,14 @@ class CartPoleEnv(BaseEnv):
             {"observations": jnp.array(gym_obs_0)[None, :]}
         )
         command: FrozenDict[str, jax.Array] = FrozenDict({})
-        action_0, _ = model.apply(
-            variables,
-            obs_0,
-            command,
-            rng,
-            method="actor_sample_and_log_prob",
+        action_0, _ = model.apply_actor_sample_and_log_prob(
+            variables=variables,
+            obs=obs_0,
+            cmd=command,
+            prev_action=None,
+            prev_model_input=None,
+            recurrent_state=None,
+            rng=rng,
         )
         gym_obs_1 = self.env.step(action_0.item())[0]
         env_state_0 = EnvState(
@@ -190,7 +192,7 @@ class CartPoleEnv(BaseEnv):
     def step_given_gym_obs(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
         *,
@@ -205,7 +207,15 @@ class CartPoleEnv(BaseEnv):
             {"observations": jnp.array(current_gym_obs)[None, :]}
         )
         command: FrozenDict[str, jax.Array] = FrozenDict({})
-        action, _ = model.apply(variables, obs, command, rng, method="actor_sample_and_log_prob")
+        action, _ = model.apply_actor_sample_and_log_prob(
+            variables=variables,
+            obs=obs,
+            cmd=command,
+            prev_action=prev_env_state.action,
+            prev_model_input=None,
+            recurrent_state=None,
+            rng=rng,
+        )
 
         gym_obs, gym_reward, gym_terminated, gym_truncated, _ = self.env.step(action.item())
         done = bool(gym_terminated or gym_truncated)
@@ -226,7 +236,7 @@ class CartPoleEnv(BaseEnv):
     def render_trajectory(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         rng: PRNGKeyArray,
         *,
         num_steps: int,

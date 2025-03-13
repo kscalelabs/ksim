@@ -2,7 +2,7 @@
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Generic, Literal, TypeVar
+from typing import Generic, TypeVar, get_args
 
 import attrs
 import jax
@@ -11,9 +11,8 @@ from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
 from ksim.env.types import PhysicsData
+from ksim.types import NoiseType, ObsType
 from ksim.utils.data import BuilderData
-
-NoiseType = Literal["gaussian", "uniform"]
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -22,10 +21,29 @@ class Observation(ABC):
 
     noise: float = attrs.field(default=0.0)
     noise_type: NoiseType = attrs.field(default="gaussian")
+    obs_type: ObsType = attrs.field(default="proprio")
+
+    def __attrs_post_init__(self) -> None:
+        """Ensuring protected attributes are not present in the class name."""
+        obs_types = get_args(ObsType)
+        noise_types = get_args(NoiseType)
+        name = self.__class__.__name__
+        if "_" in name:
+            raise ValueError("Class name cannot contain underscores")
+        for obs_type in obs_types:
+            if f"{obs_type}" in name.lower():
+                raise ValueError(f"Class name cannot contain protected string: {obs_type}")
+        for noise_type in noise_types:
+            if f"{noise_type}" in name.lower():
+                raise ValueError(f"Class name cannot contain protected string: {noise_type}")
 
     @abstractmethod
-    def __call__(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         """Gets the observation from the state."""
+
+    def __call__(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        raw_observation = self.observe(state, rng)
+        return self.add_noise(raw_observation, rng)
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
         match self.noise_type:
@@ -39,11 +57,10 @@ class Observation(ABC):
                 raise ValueError(f"Invalid noise type: {self.noise_type}")
 
     def get_name(self) -> str:
-        # We append `_noisy` to the name if the noise is non-zero.
-        # This is to distinguish between ideal and non-ideal
-        # observations for the actor-critic formulation
-        noisy = "_noisy" if self.noise > 0.0 else ""
-        return xax.camelcase_to_snakecase(self.__class__.__name__) + noisy
+        """Get the name of the observation."""
+        name = xax.camelcase_to_snakecase(self.__class__.__name__)
+        name += f"_{self.obs_type}_{self.noise_type}"
+        return name
 
     @functools.cached_property
     def observation_name(self) -> str:
@@ -67,68 +84,84 @@ class ObservationBuilder(ABC, Generic[T]):
 
 
 class MjxObservation(Observation, ABC):
+    obs_type: ObsType = "proprio"
+
     @abstractmethod
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         """Gets the observation from the state."""
 
 
 @attrs.define(frozen=True)
 class BasePositionObservation(MjxObservation):
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    obs_type: ObsType = "proprio"
+
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[0:3]  # (3,)
-        return self.add_noise(qpos, rng)
+        return qpos
 
 
 @attrs.define(frozen=True)
-class BaseOrientationObservation(Observation):
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+class BaseOrientationObservation(MjxObservation):
+    obs_type: ObsType = "proprio"
+
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[3:7]  # (4,)
-        return self.add_noise(qpos, rng)
+        return qpos
 
 
 @attrs.define(frozen=True)
-class BaseLinearVelocityObservation(Observation):
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+class BaseLinearVelocityObservation(MjxObservation):
+    obs_type: ObsType = "proprio"
+
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[0:3]  # (3,)
-        return self.add_noise(qvel, rng)
+        return qvel
 
 
 @attrs.define(frozen=True)
-class BaseAngularVelocityObservation(Observation):
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+class BaseAngularVelocityObservation(MjxObservation):
+    obs_type: ObsType = "proprio"
+
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[3:6]  # (3,)
-        return self.add_noise(qvel, rng)
+        return qvel
 
 
 @attrs.define(frozen=True)
-class JointPositionObservation(Observation):
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+class JointPositionObservation(MjxObservation):
+    obs_type: ObsType = "proprio"
+
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[7:]  # (N,)
-        return self.add_noise(qpos, rng)
+        return qpos
 
 
 @attrs.define(frozen=True)
-class JointVelocityObservation(Observation):
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+class JointVelocityObservation(MjxObservation):
+    obs_type: ObsType = "proprio"
+
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[6:]  # (N,)
-        return self.add_noise(qvel, rng)
+        return qvel
 
 
 @attrs.define(frozen=True)
-class LegacyPositionObservation(Observation):
+class LegacyPositionObservation(MjxObservation):
     """Legacy position observation that excludes x,y positions.
 
     In the legacy code, if exclude_current_positions_from_observation is True,
     it skips the first two elements (x,y) of qpos but includes z and all joint positions.
     """
 
+    obs_type: ObsType = "proprio"
+
     exclude_xy: bool = attrs.field(default=True)
 
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         position = state.qpos
         if self.exclude_xy:
             position = position[2:]  # Skip x,y but include z and all joint positions
-        return self.add_noise(position, rng)
+        return position
 
 
 @attrs.define(frozen=True)
@@ -138,32 +171,32 @@ class LegacyVelocityObservation(Observation):
     In the legacy code, all velocities (base + joint) are included without any exclusions.
     """
 
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
-        return self.add_noise(state.qvel, rng)
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+        return state.qvel
 
 
 @attrs.define(frozen=True)
 class CenterOfMassInertiaObservation(Observation):
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         # Skip the first entry (world body) and flatten
         cinert = state.cinert[1:].ravel()  # Shape will be (nbody-1, 10)
-        return self.add_noise(cinert, rng)
+        return cinert
 
 
 @attrs.define(frozen=True)
 class CenterOfMassVelocityObservation(Observation):
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         # Skip the first entry (world body) and flatten
         cvel = state.cvel[1:].ravel()  # Shape will be (nbody-1, 6)
-        return self.add_noise(cvel, rng)
+        return cvel
 
 
 @attrs.define(frozen=True)
 class ActuatorForceObservation(Observation):
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         # Get actuator forces
         qfrc_actuator = state.qfrc_actuator  # Shape will be (nu,)
-        return self.add_noise(qfrc_actuator, rng)
+        return qfrc_actuator
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -171,10 +204,10 @@ class SensorObservation(Observation):
     sensor_name: str = attrs.field()
     sensor_idx_range: tuple[int, int | None] | None = attrs.field(default=None)
 
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         assert self.sensor_idx_range is not None
         sensor_data = state.sensordata[self.sensor_idx_range[0] : self.sensor_idx_range[1]].ravel()
-        return self.add_noise(sensor_data, rng)
+        return sensor_data
 
     def get_name(self) -> str:
         base_name = super().get_name()

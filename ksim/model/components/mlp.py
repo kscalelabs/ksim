@@ -3,7 +3,7 @@
 from typing import Callable
 
 import flax.linen as nn
-import jax
+from jaxtyping import Array
 
 
 class MLP(nn.Module):
@@ -15,32 +15,29 @@ class MLP(nn.Module):
     hidden_dims: tuple[int, ...]
     """The number of features in the hidden layers."""
 
-    activation: Callable[[jax.Array], jax.Array] = nn.swish
+    activation: Callable[[Array], Array] = nn.relu
     """The activation function to use in the MLP."""
 
-    bias_init: nn.initializers.Initializer = nn.initializers.zeros
+    kernel_initialization: nn.initializers.Initializer = nn.initializers.lecun_normal()
+    """The initializer to use for the kernel of the dense layers."""
+
+    bias_initialization: nn.initializers.Initializer = nn.initializers.zeros
     """The initializer to use for the bias of the dense layers."""
 
     @nn.compact
-    def __call__(self, x: jax.Array) -> jax.Array:
-        """Forward pass of the MLP.
-
-        Args:
-            x: The input to the MLP [..., in_features]
-
-        Returns:
-            The output of the MLP [..., out_features]
-        """
+    def __call__(self, x: Array) -> Array:
+        """Forward pass of the MLP."""
         for hidden_dim in self.hidden_dims:
             x = nn.Dense(
                 features=hidden_dim,
-                kernel_init=nn.initializers.lecun_uniform(),
+                kernel_init=self.kernel_initialization,
+                bias_init=self.bias_initialization,
             )(x)
             x = self.activation(x)
 
         x = nn.Dense(
             features=self.out_dim,
-            kernel_init=nn.initializers.lecun_uniform(),
-            bias_init=self.bias_init,
+            kernel_init=self.kernel_initialization,
+            bias_init=self.bias_initialization,
         )(x)
         return x

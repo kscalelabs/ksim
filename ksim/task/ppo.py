@@ -14,8 +14,8 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from xax.task.mixins.train import Batch, Output
 
 from ksim.env.types import EnvState
+from ksim.model.base import ActorCriticAgent, update_actor_critic_normalization
 from ksim.model.distributions import GaussianDistribution
-from ksim.model.formulations import ActorCriticAgent, update_actor_critic_normalization
 from ksim.task.loss_helpers import compute_returns
 from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
@@ -98,33 +98,35 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def get_rollout_time_loss_components(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         trajectory_dataset: EnvState,
     ) -> RolloutTimeLossComponents:
         """Calculating advantages and returns for a rollout."""
-
         # we recompute here because we update the normalization stats before the
         # minibatch training loop
-        prediction = self.apply_actor(
-            model,
-            variables,
-            trajectory_dataset.obs,
-            trajectory_dataset.command,
+        prediction = model.apply_actor(
+            variables=variables,
+            obs=trajectory_dataset.obs,
+            cmd=trajectory_dataset.command,
+            prev_action=None,
+            prev_model_input=None,
+            recurrent_state=None,
         )
 
-        initial_action_log_probs = model.apply(
+        initial_action_log_probs = model.apply_actor_calc_log_prob(
             variables=variables,
             prediction=prediction,
             action=trajectory_dataset.action,
-            method="actor_calc_log_prob",
         )
         assert isinstance(initial_action_log_probs, Array)
 
-        initial_values = self.apply_critic(
-            model,
-            variables,
-            trajectory_dataset.obs,
-            trajectory_dataset.command,
+        initial_values = model.apply_critic(
+            variables=variables,
+            obs=trajectory_dataset.obs,
+            cmd=trajectory_dataset.command,
+            prev_action=None,
+            prev_model_input=None,
+            recurrent_state=None,
         ).squeeze(axis=-1)
 
         advantages, value_targets = self._compute_advantages_and_value_targets(
@@ -167,7 +169,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def model_update(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         env_state_batch: EnvState,
@@ -203,7 +205,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
     def update_input_normalization_stats(
         self,
-        variables: PyTree,
+        variables: PyTree[Array],
         trajectories_dataset: EnvState,
         initial_step: bool,
     ) -> PyTree:
@@ -225,39 +227,28 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     # Training Utilities #
     ######################
 
-    def apply_critic(
-        self,
-        model: ActorCriticAgent,
-        variables: PyTree,
-        obs: FrozenDict[str, Array],
-        cmd: FrozenDict[str, Array],
-    ) -> Array:
-        """Apply the critic model to inputs. Used by all actor-critic tasks.
-
-        TODO: it might be worth creating another Task abstraction that requires `apply_critic`
-        """
-        res = model.apply(variables, obs=obs, cmd=cmd, method="critic")
-        assert isinstance(res, Array)
-        return res
-
     def compute_ppo_loss(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         env_state_batch: EnvState,
         rollout_time_loss_components: RolloutTimeLossComponents,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array]]:
         """Compute the PPO loss."""
         # get the log probs of the current model
-        prediction = self.apply_actor(
-            model, variables, env_state_batch.obs, env_state_batch.command
+        prediction = model.apply_actor(
+            variables=variables,
+            obs=env_state_batch.obs,
+            cmd=env_state_batch.command,
+            prev_action=None,
+            prev_model_input=None,
+            recurrent_state=None,
         )
-        log_probs = model.apply(
+        log_probs = model.apply_actor_calc_log_prob(
             variables=variables,
             prediction=prediction,
             action=env_state_batch.action,
-            method="actor_calc_log_prob",
         )
 
         assert isinstance(prediction, Array)
@@ -271,7 +262,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # ratio = jnp.clip(ratio, 0.0, 10.0)  # prevents extreme ratios
 
         # get the state-value estimates
-        values = self.apply_critic(model, variables, env_state_batch.obs, env_state_batch.command)
+        values = model.apply_critic(
+            variables=variables,
+            obs=env_state_batch.obs,
+            cmd=env_state_batch.command,
+            prev_action=None,
+            prev_model_input=None,
+            recurrent_state=None,
+        )
         assert isinstance(values, Array)
         values = values.squeeze(axis=-1)  # values is (time, env)
 
@@ -293,8 +291,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         value_targets = rollout_time_loss_components.value_targets
 
         # value loss term
-        value_pred = self.apply_critic(
-            model, variables, env_state_batch.obs, env_state_batch.command
+        value_pred = model.apply_critic(
+            variables=variables,
+            obs=env_state_batch.obs,
+            cmd=env_state_batch.command,
+            prev_action=None,
+            prev_model_input=None,
+            recurrent_state=None,
         )
         value_pred = value_pred.squeeze(axis=-1)  # (time, env)
         value_mse = jax.lax.cond(
@@ -371,7 +374,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
     def _compute_advantages_and_value_targets(
         self,
-        variables: PyTree,
+        variables: PyTree[Array],
         values: Array,
         env_state_batch: EnvState,
     ) -> tuple[Array, Array]:
@@ -414,7 +417,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def loss_metrics_grads(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         env_state_batch: EnvState,
         rollout_time_loss_components: RolloutTimeLossComponents,
         rng: PRNGKeyArray,

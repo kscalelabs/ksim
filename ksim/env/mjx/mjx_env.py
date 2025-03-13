@@ -34,7 +34,7 @@ from ksim.env.mjx.actuators.base_actuator import Actuators
 from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
 from ksim.env.mjx.actuators.scaled_torque_actuator import ScaledTorqueActuators
 from ksim.env.types import EnvState
-from ksim.model.formulations import ActorCriticAgent
+from ksim.model.base import ActorCriticAgent
 from ksim.utils.data import BuilderData
 from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
@@ -388,7 +388,7 @@ class MjxEnv(BaseEnv):
     def reset(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         rng: jax.Array,
         physics_model_L: mjx.Model,
     ) -> tuple[EnvState, mjx.Data]:
@@ -415,8 +415,14 @@ class MjxEnv(BaseEnv):
         obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
         command_L_0 = self.get_initial_commands(rng, timestep)
 
-        action_L_0, action_log_prob_L_0 = model.apply(
-            variables, obs_L_0, command_L_0, rng, method="actor_sample_and_log_prob"
+        action_L_0, action_log_prob_L_0 = model.apply_actor_sample_and_log_prob(
+            variables=variables,
+            obs=obs_L_0,
+            cmd=command_L_0,
+            prev_action=None,
+            prev_model_input=None,
+            recurrent_state=None,
+            rng=rng,
         )
         assert isinstance(action_log_prob_L_0, Array)
         mjx_data_L_1 = self.apply_physics_steps(
@@ -451,7 +457,7 @@ class MjxEnv(BaseEnv):
     def step(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         env_state_L_t_minus_1: EnvState,
         rng: PRNGKeyArray,
         physics_data_L_t: mjx.Data,
@@ -491,8 +497,14 @@ class MjxEnv(BaseEnv):
 
         obs_L_t = self.get_observation(mjx_data_L_t, obs_rng)
         command_L_t = self.get_commands(env_state_L_t_minus_1.command, rng, timestep)
-        action_L_t, _ = model.apply(
-            variables, obs_L_t, command_L_t, rng, method="actor_sample_and_log_prob"
+        action_L_t, _ = model.apply_actor_sample_and_log_prob(
+            variables=variables,
+            obs=obs_L_t,
+            cmd=command_L_t,
+            prev_action=env_state_L_t_minus_1.action,
+            prev_model_input=None,
+            recurrent_state=None,
+            rng=rng,
         )
 
         mjx_data_L_t_plus_1 = self.apply_physics_steps(
@@ -536,7 +548,7 @@ class MjxEnv(BaseEnv):
         *,
         physics_model_L: mjx.Model,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         return_intermediate_data: bool = False,
     ) -> tuple[tuple[EnvState, mjx.Data, PRNGKeyArray], tuple[EnvState, mjx.Data | None, Array]]:
         """Steps the environment and resets if needed."""
@@ -590,7 +602,7 @@ class MjxEnv(BaseEnv):
     def unroll_trajectory(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         rng: PRNGKeyArray,
         num_steps: int,
         env_state_L_t_minus_1: EnvState,
@@ -625,7 +637,7 @@ class MjxEnv(BaseEnv):
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
@@ -679,7 +691,7 @@ class MjxEnv(BaseEnv):
     def render_trajectory(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         rng: PRNGKeyArray,
         *,
         num_steps: int,

@@ -2,7 +2,7 @@
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, get_args
 
 import attrs
 import jax
@@ -10,12 +10,25 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
+from ksim.types import CmdType
 from ksim.utils.data import BuilderData
 
 
 @attrs.define(frozen=True)
 class Command(ABC):
     """Base class for commands."""
+
+    cmd_type: CmdType = attrs.field(default="vector")
+
+    def __attrs_post_init__(self) -> None:
+        """Ensuring protected attributes are not present in the class name."""
+        cmd_types = get_args(CmdType)
+        name = self.__class__.__name__
+        if "_" in name:
+            raise ValueError("Class name cannot contain underscores")
+        for cmd_type in cmd_types:
+            if f"{cmd_type}" in name.lower():
+                raise ValueError(f"Class name cannot contain protected string: {cmd_type}")
 
     @abstractmethod
     def __call__(self, rng: PRNGKeyArray, time: Array) -> Array:
@@ -27,7 +40,9 @@ class Command(ABC):
 
     def get_name(self) -> str:
         """Get the name of the command."""
-        return xax.camelcase_to_snakecase(self.__class__.__name__)
+        name = xax.camelcase_to_snakecase(self.__class__.__name__)
+        name += f"_{self.cmd_type}"
+        return name
 
     @functools.cached_property
     def command_name(self) -> str:
@@ -52,6 +67,8 @@ class LinearVelocityCommand(Command):
     the probability of the command being zero - this can be used to turn off
     any command.
     """
+
+    cmd_type: CmdType = "vector"
 
     x_scale: float = attrs.field(default=1.0)
     y_scale: float = attrs.field(default=1.0)
@@ -83,6 +100,8 @@ class LinearVelocityCommand(Command):
 @attrs.define(frozen=True)
 class AngularVelocityCommand(Command):
     """Command to turn the robot."""
+
+    cmd_type: CmdType = "vector"
 
     scale: float = attrs.field(default=1.0)
     switch_prob: float = attrs.field(default=0.0)

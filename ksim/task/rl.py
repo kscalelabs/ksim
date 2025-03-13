@@ -34,8 +34,7 @@ from ksim.builders.loggers import (
     ModelUpdateLog,
 )
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
-from ksim.env.types import PhysicsData, PhysicsModel
-from ksim.model.formulations import ActorCriticAgent
+from ksim.model.base import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
 from ksim.utils.profile import profile
@@ -107,7 +106,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_rollout_time_loss_components(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         trajectory_dataset: EnvState,
     ) -> RolloutTimeLossComponents: ...
 
@@ -115,7 +114,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def model_update(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         env_state_batch: EnvState,
@@ -314,27 +313,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model_key, init_key = jax.random.split(key, 2)
         model = self.get_model(model_key)
         assert isinstance(model, nn.Module), "Model must be an Flax linen module."
-        return model.init(init_key, state.obs, state.command)
+        # TODO: support prev_action, prev_model_input, recurrent_state
+        return model.init(init_key, state.obs, state.command, None, None, None)
 
     @abstractmethod
     def update_input_normalization_stats(
         self,
-        variables: PyTree,
+        variables: PyTree[Array],
         trajectories_dataset: EnvState,
         initial_step: bool,
     ) -> PyTree: ...
-
-    def apply_actor(
-        self,
-        model: ActorCriticAgent,
-        variables: PyTree,
-        obs: FrozenDict[str, Array],
-        cmd: FrozenDict[str, Array],
-    ) -> Array:
-        """Apply the actor model to inputs."""
-        res = model.apply(variables, obs=obs, cmd=cmd, method="actor")
-        assert isinstance(res, Array)
-        return res
 
     @profile
     def reshuffle_rollout(
@@ -453,7 +441,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @legit_jit(static_argnames=["self", "model", "optimizer"])
     def rl_pass(
         self,
-        variables: PyTree,
+        variables: PyTree[Array],
         opt_state: optax.OptState,
         reshuffle_rng: PRNGKeyArray,
         model: ActorCriticAgent,
@@ -482,14 +470,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def rl_train_loop(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         env: BaseEnv,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         training_state: xax.State,
     ) -> None:
         """Runs the main RL training loop."""
-
         ########################
         # Initialization stage #
         ########################

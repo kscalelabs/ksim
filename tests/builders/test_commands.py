@@ -23,8 +23,8 @@ class DummyCommand(Command):
 def test_command_name() -> None:
     """Test that command names are correctly generated."""
     cmd = DummyCommand()
-    assert cmd.get_name() == "dummy_command"
-    assert cmd.command_name == "dummy_command"
+    assert cmd.get_name() == "dummy_command_vector"
+    assert cmd.command_name == "dummy_command_vector"
 
 
 class TestLinearVelocityCommand:

@@ -1,7 +1,6 @@
 """Base Types for Environments."""
 
 from dataclasses import dataclass
-from typing import Literal
 
 import jax
 from flax.core import FrozenDict
@@ -26,6 +25,5 @@ class EnvState:
     reward_components: FrozenDict[str, Array]  # Reward terms at same timestep as reward
 
 
-KScaleActionModelType = Literal["random", "zero", "midpoint"]
 PhysicsData = mjx.Data | None
 PhysicsModel = mjx.Model | None

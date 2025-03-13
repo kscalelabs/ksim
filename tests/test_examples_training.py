@@ -34,7 +34,7 @@ def test_default_humanoid_training() -> None:
     # Initialize model parameters
     burn_in_rng, key, init_key = jax.random.split(key, 3)
     dummy_states = env.get_dummy_env_states(config.num_envs)
-    variables = model.init(init_key, dummy_states.obs, dummy_states.command)
+    variables = model.init(init_key, dummy_states.obs, dummy_states.command, None, None, None)
 
     # Get optimizer
     optimizer = task.get_optimizer()
@@ -126,7 +126,7 @@ def test_default_humanoid_run_method() -> None:
         # Initialize model parameters
         key, init_key = jax.random.split(key)
         dummy_states = env.get_dummy_env_states(config.num_envs)
-        variables = model.init(init_key, dummy_states.obs, dummy_states.command)
+        variables = model.init(init_key, dummy_states.obs, dummy_states.command, None, None, None)
 
         # Check for NaN values in initial state
         # TODO: Switch these to asserts when we fix the NaN issue

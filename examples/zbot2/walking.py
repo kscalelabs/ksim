@@ -3,11 +3,8 @@
 from dataclasses import dataclass
 
 import flax.linen as nn
-import jax
 import jax.numpy as jnp
-import xax
-from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import PRNGKeyArray
 
 from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.builders.observation import (
@@ -22,21 +19,11 @@ from ksim.builders.observation import (
     SensorObservationBuilder,
 )
 from ksim.builders.resets import XYPositionResetBuilder
-from ksim.builders.rewards import (
-    AngularVelocityXYPenalty,
-    DefaultPoseDeviationPenaltyBuilder,
-    DHForwardReward,
-    DHHealthyReward,
-    HeightReward,
-    OrientationPenalty,
-    TrackAngularVelocityZReward,
-    TrackLinearVelocityXYReward,
-)
+from ksim.builders.rewards import DHForwardReward, DHHealthyReward
 from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.distributions import TanhGaussianDistribution
-from ksim.model.formulations import ActorCriticAgent, ActorModel
-from ksim.model.mlp import MLP
+from ksim.model.base import ActorCriticAgent
+from ksim.model.factory import mlp_actor_critic_agent
 from ksim.task.ppo import PPOConfig, PPOTask
 
 ######################
@@ -51,48 +38,6 @@ class ZBot2WalkingConfig(PPOConfig, MjxEnvConfig):
     """Combining configs for the ZBot2 walking task and fixing params."""
 
     robot_model_name: str = "examples/zbot2/"
-
-
-#####################
-# Model Definitions #
-#####################
-
-
-class ZBot2LearnedStdActorModel(ActorModel):
-    network: MLP
-    min_std: float = 0.01
-    max_std: float = 1.0
-    var_scale: float = 1.0
-
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        """Forward pass of the actor model."""
-        x = jnp.concatenate(list(obs.values()), axis=-1)
-        predictions = self.network(x)
-
-        mean = predictions[..., :NUM_OUTPUTS]
-        std = predictions[..., NUM_OUTPUTS:]
-
-        # need to do this for stability
-        std = (jax.nn.softplus(std) + self.min_std) * self.var_scale
-        std = jnp.clip(std, self.min_std, self.max_std)
-
-        # concat because Gaussian-like distributions expect the parameters
-        # to be mean concat std
-        actions_n = jnp.concatenate([mean, std], axis=-1)
-
-        return actions_n
-
-
-class ZBot2CriticModel(nn.Module):
-    network: MLP
-
-    @nn.compact
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> jax.Array:
-        """Forward pass of the critic model."""
-        x = jnp.concatenate(list(obs.values()), axis=-1)
-        value_estimate = self.network(x)
-
-        return value_estimate
 
 
 ####################
@@ -175,40 +120,21 @@ class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
                 SensorObservationBuilder(sensor_name="IMU_gyro"),  # Sensor has noise already.
             ],
             commands=[
-                LinearVelocityCommand(
-                    x_scale=0.0,
-                    y_scale=0.0,
-                    switch_prob=0.02,
-                    zero_prob=0.3,
-                ),
-                AngularVelocityCommand(
-                    scale=0.0,
-                    switch_prob=0.02,
-                    zero_prob=0.8,
-                ),
+                LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
+                AngularVelocityCommand(scale=0.0, switch_prob=0.02, zero_prob=0.8),
             ],
         )
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         """Get the model."""
-        return ActorCriticAgent(
-            actor_module=ZBot2LearnedStdActorModel(
-                MLP(
-                    out_dim=NUM_OUTPUTS * 2,  # 2x for std prediction
-                    hidden_dims=(64,) * 5,
-                    activation=nn.relu,
-                    bias_init=nn.initializers.zeros,
-                ),
-            ),
-            critic_module=ZBot2CriticModel(
-                MLP(
-                    out_dim=1,
-                    hidden_dims=(64,) * 5,
-                    activation=nn.relu,
-                    bias_init=nn.initializers.zeros,
-                ),
-            ),
-            distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
+        return mlp_actor_critic_agent(
+            num_actions=NUM_OUTPUTS,
+            prediction_type="mean_std",
+            distribution_type="tanh_gaussian",
+            actor_hidden_dims=(64,) * 5,
+            critic_hidden_dims=(64,) * 5,
+            kernel_initialization=nn.initializers.lecun_normal(),
+            post_process_kwargs={"min_std": 0.01, "max_std": 1.0, "var_scale": 1.0},
         )
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:

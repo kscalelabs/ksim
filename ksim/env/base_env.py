@@ -13,7 +13,7 @@ from omegaconf import MISSING
 from ksim.builders.rewards import Reward
 from ksim.builders.terminations import Termination
 from ksim.env.types import EnvState, PhysicsData, PhysicsModel
-from ksim.model.formulations import ActorCriticAgent
+from ksim.model.base import ActorCriticAgent
 
 
 @jax.tree_util.register_dataclass
@@ -65,7 +65,7 @@ class BaseEnv(ABC):
     def reset(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         rng: PRNGKeyArray,
         physics_model_L: PhysicsModel,
     ) -> tuple[EnvState, PhysicsData | None]: ...
@@ -76,7 +76,7 @@ class BaseEnv(ABC):
     def step(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         env_state_L_t_minus_1: EnvState,
         rng: PRNGKeyArray,
         physics_data_L_t: PhysicsData,
@@ -89,7 +89,7 @@ class BaseEnv(ABC):
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
@@ -110,7 +110,7 @@ class BaseEnv(ABC):
     def render_trajectory(
         self,
         model: ActorCriticAgent,
-        variables: PyTree,
+        variables: PyTree[Array],
         rng: PRNGKeyArray,
         *,
         num_steps: int,

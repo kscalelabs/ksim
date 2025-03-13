@@ -27,7 +27,8 @@ _TOL = 1e-4
 
 
 class DummyObservation(Observation):
-    def __call__(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+
+    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         return jnp.zeros((3,))
 
 
@@ -51,8 +52,8 @@ default_mjx_data = DummyMjxData(
 class BaseObservationTest(chex.TestCase):
     def test_observation_name(self) -> None:
         obs = DummyObservation(noise=0.0, noise_type="gaussian")
-        self.assertEqual(obs.get_name(), "dummy_observation")
-        self.assertEqual(obs.observation_name, "dummy_observation")
+        self.assertEqual(obs.get_name(), "dummy_observation_proprio_gaussian")
+        self.assertEqual(obs.observation_name, "dummy_observation_proprio_gaussian")
 
     def test_add_gaussian_noise(self) -> None:
         rng = jax.random.PRNGKey(0)
@@ -254,7 +255,7 @@ class SensorObservationTest(chex.TestCase):
             sensor_name="test_sensor",
             sensor_idx_range=(1, 4),
         )
-        self.assertEqual(obs.get_name(), "test_sensor_sensor_observation")
+        self.assertEqual(obs.get_name(), "test_sensor_sensor_observation_proprio_gaussian")
 
     def test_noise_consistency(self) -> None:
         # Test that the same RNG key produces the same noise
