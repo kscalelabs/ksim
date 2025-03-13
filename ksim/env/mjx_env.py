@@ -22,7 +22,7 @@ import mujoco
 import numpy as np
 import xax
 from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import RobotURDFMetadataOutput
 from mujoco import mjx
 
@@ -30,7 +30,8 @@ from ksim.actuators import Actuators, ActuatorsBuilder
 from ksim.commands import Command, CommandBuilder
 from ksim.env.base_env import BaseEnv, BaseEnvConfig
 from ksim.env.types import EnvState
-from ksim.model.base import ActorCriticAgent
+from ksim.model.base import Agent
+from ksim.model.types import ModelInput
 from ksim.observation import Observation, ObservationBuilder
 from ksim.resets import Reset, ResetBuilder
 from ksim.rewards import Reward, RewardBuilder
@@ -122,11 +123,6 @@ class MjxEnv(BaseEnv[Config], ABC):
     """
 
     config: Config
-    terminations: list[tuple[str, Termination]]
-    resets: list[tuple[str, Reset]]
-    rewards: list[tuple[str, Reward]]
-    observations: list[tuple[str, Observation]]
-    commands: list[tuple[str, Command]]
     actuators: Actuators
 
     def __init__(
@@ -380,7 +376,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         return EnvState(
             obs=obs_dummy_EL,
             command=command_dummy_EL,
-            action=jnp.ones((num_envs, self.action_size)),
+            action=jnp.ones((num_envs, self.default_mjx_model.nu)),
             reward=jnp.ones((num_envs,)),
             done=jnp.zeros((num_envs,), dtype=jnp.bool_),
             timestep=timestep_E,
@@ -391,12 +387,11 @@ class MjxEnv(BaseEnv[Config], ABC):
     @xax.profile
     def reset(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         rng: jax.Array,
         physics_model_L: mjx.Model,
     ) -> tuple[EnvState, mjx.Data]:
-        """Using model and variables, returns initial state and data (EL, EL).
+        """Using agent, returns initial state and data (EL, EL).
 
         We couple the step and actor because we couple the actions with the rest
         of env state. This ultimately allows for extremely constrained `EnvState`s,
@@ -419,16 +414,16 @@ class MjxEnv(BaseEnv[Config], ABC):
         obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
         command_L_0 = self.get_initial_commands(rng, timestep)
 
-        action_L_0, action_log_prob_L_0 = model.apply_actor_sample_and_log_prob(
-            variables=variables,
+        model_input = ModelInput(
             obs=obs_L_0,
-            cmd=command_L_0,
-            prev_action=None,
-            prev_model_input=None,
+            command=command_L_0,
+            action_history=None,
             recurrent_state=None,
-            rng=rng,
         )
-        assert isinstance(action_log_prob_L_0, Array)
+
+        prediction = agent.actor_model.forward(model_input)
+        action_L_0 = agent.action_distribution.sample(rng, prediction)
+
         mjx_data_L_1 = self.apply_physics_steps(
             mjx_model_L=mjx_model_L,
             mjx_data_L=mjx_data_L_0,
@@ -460,8 +455,7 @@ class MjxEnv(BaseEnv[Config], ABC):
     @xax.profile
     def step(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         env_state_L_t_minus_1: EnvState,
         rng: PRNGKeyArray,
         physics_data_L_t: mjx.Data,
@@ -501,15 +495,14 @@ class MjxEnv(BaseEnv[Config], ABC):
 
         obs_L_t = self.get_observation(mjx_data_L_t, obs_rng)
         command_L_t = self.get_commands(env_state_L_t_minus_1.command, rng, timestep)
-        action_L_t, _ = model.apply_actor_sample_and_log_prob(
-            variables=variables,
+        model_input = ModelInput(
             obs=obs_L_t,
-            cmd=command_L_t,
-            prev_action=env_state_L_t_minus_1.action,
-            prev_model_input=None,
+            command=command_L_t,
+            action_history=None,
             recurrent_state=None,
-            rng=rng,
         )
+        prediction = agent.actor_model.forward(model_input)
+        action_L_t = agent.action_distribution.sample(rng, prediction)
 
         mjx_data_L_t_plus_1 = self.apply_physics_steps(
             mjx_model_L=mjx_model_L,
@@ -551,22 +544,19 @@ class MjxEnv(BaseEnv[Config], ABC):
         _: None,
         *,
         physics_model_L: mjx.Model,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         return_intermediate_data: bool = False,
     ) -> tuple[tuple[EnvState, mjx.Data, PRNGKeyArray], tuple[EnvState, mjx.Data | None, Array]]:
         """Steps the environment and resets if needed."""
         env_state_L_t_minus_1, mjx_data_L_t, rng = carry
         reset_env_state_L_t, reset_mjx_data_L_t_plus_1 = self.reset(
-            model=model,
-            variables=variables,
+            agent=agent,
             rng=rng,
             physics_model_L=physics_model_L,
         )
 
         step_env_state_L_t, step_mjx_data_L_t_plus_1 = self.step(
-            model=model,
-            variables=variables,
+            agent=agent,
             env_state_L_t_minus_1=env_state_L_t_minus_1,
             rng=rng,
             physics_data_L_t=mjx_data_L_t,
@@ -605,8 +595,7 @@ class MjxEnv(BaseEnv[Config], ABC):
     @xax.profile
     def unroll_trajectory(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         rng: PRNGKeyArray,
         num_steps: int,
         env_state_L_t_minus_1: EnvState,
@@ -617,8 +606,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         """Returns EnvState rollout, final mjx.Data, and mjx.Data rollout."""
         step_fn = functools.partial(
             self.scannable_step_with_automatic_reset,
-            model=model,
-            variables=variables,
+            agent=agent,
             physics_model_L=physics_model_L,
             return_intermediate_data=return_intermediate_data,
         )
@@ -640,8 +628,7 @@ class MjxEnv(BaseEnv[Config], ABC):
     @xax.profile
     def unroll_trajectories(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
@@ -664,10 +651,9 @@ class MjxEnv(BaseEnv[Config], ABC):
         rng_E = jax.random.split(rng, num_envs)
 
         env_state_ETL, physics_data_res, has_nans_ETL = jax.vmap(
-            self.unroll_trajectory, in_axes=(None, None, 0, None, 0, 0, None, None)
+            self.unroll_trajectory, in_axes=(None, 0, 0, None, 0, 0, None, None)
         )(
-            model,
-            variables,
+            agent,
             rng_E,
             num_steps,
             env_state_EL_t_minus_1,
@@ -694,8 +680,7 @@ class MjxEnv(BaseEnv[Config], ABC):
     @xax.profile
     def render_trajectory(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         rng: PRNGKeyArray,
         *,
         num_steps: int,
@@ -708,12 +693,11 @@ class MjxEnv(BaseEnv[Config], ABC):
         reset_rngs = jax.random.split(rng, 1)
 
         env_state_1L_0, physics_data_1L_1 = jax.vmap(self.reset, in_axes=(None, None, 0, None))(
-            model, variables, reset_rngs, physics_model_L
+            agent, reset_rngs, physics_model_L
         )
 
         env_state_TEL, traj_data, _ = self.unroll_trajectories(
-            model=model,
-            variables=variables,
+            agent=agent,
             rng=rng,
             num_steps=num_steps,
             num_envs=1,

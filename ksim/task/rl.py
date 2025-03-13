@@ -29,7 +29,7 @@ from omegaconf import MISSING
 
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
-from ksim.model.base import ActorCriticAgent
+from ksim.model.base import Agent
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.visualization import render_and_save_trajectory
 
@@ -101,22 +101,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @abstractmethod
     def get_rollout_time_loss_components(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         trajectory_dataset: EnvState,
     ) -> RolloutTimeLossComponents: ...
 
     @abstractmethod
     def model_update(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         env_state_batch: EnvState,
         rollout_time_loss_components: RolloutTimeLossComponents,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]: ...
+    ) -> tuple[Agent, optax.OptState, Array, FrozenDict[str, Array]]: ...
 
     ##############
     # Properties #
@@ -154,8 +152,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.run_training()
 
             case "env":
-                model, _, _, _ = self.load_initial_state(self.prng_key())
-                self.run_environment(model)
+                agent, _, _, _ = self.load_initial_state(self.prng_key())
+                self.run_environment(agent)
 
             case _:
                 raise ValueError(
@@ -211,7 +209,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run_environment(
         self,
-        model: ActorCriticAgent,
+        agent: Agent,
         state: xax.State | None = None,
     ) -> None:
         """Run the environment with rendering and logging."""
@@ -229,22 +227,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             self.set_loggers()
 
-            key, _ = jax.random.split(rng)
-
-            start_time = time.time()
-            variables = self.get_init_variables(key)
-            end_time = time.time()
-            logger.info(
-                "Time taken for parameter initialization: %s seconds", end_time - start_time
-            )
-
             # Unroll trajectories and collect the frames for rendering
             logger.info("Unrolling trajectories")
 
             render_and_save_trajectory(
                 env=env,
-                model=model,
-                variables=variables,
+                agent=agent,
                 rng=rng,
                 output_dir=render_dir,
                 num_steps=self.num_rollout_steps_per_env,
@@ -321,31 +309,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
     @xax.profile
-    def get_init_variables(self, key: PRNGKeyArray) -> PyTree:
-        """Get the initial parameters as a PyTree: assumes flax-compatible model."""
-        env = self.get_environment()
-        state = env.get_dummy_env_states(self.config.num_envs)
-
-        if self.config.pretrained is not None:
-            _, checkpoint_path = self.get_checkpoint_number_and_path()
-            logger.info("Loading pretrained checkpoint from %s", checkpoint_path)
-            return self.load_checkpoint(checkpoint_path, part="model")
-
-        model_key, init_key = jax.random.split(key, 2)
-        model = self.get_model(model_key)
-        assert isinstance(model, nn.Module), "Model must be an Flax linen module."
-        # TODO: support prev_action, prev_model_input, recurrent_state
-        return model.init(init_key, state.obs, state.command, None, None, None)
-
-    @abstractmethod
-    def update_input_normalization_stats(
-        self,
-        variables: PyTree[Array],
-        trajectories_dataset: EnvState,
-        initial_step: bool,
-    ) -> PyTree: ...
-
-    @xax.profile
     def reshuffle_rollout(
         self,
         rollout_dataset_DL: EnvState,
@@ -396,46 +359,42 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @xax.profile
     def scannable_minibatch_step(
         self,
-        training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
+        training_state: tuple[Agent, optax.OptState, PRNGKeyArray],
         minibatch_idx: Array,
         *,
-        model: ActorCriticAgent,
         optimizer: optax.GradientTransformation,
         dataset_DL: EnvState,
         rollout_time_loss_components_DL: RolloutTimeLossComponents,
-    ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+    ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Perform a single minibatch update step."""
-        variables, opt_state, rng = training_state
+        agent, opt_state, rng = training_state
         minibatch_BL, rollout_time_minibatch_loss_components_BL = self.get_minibatch(
             dataset_DL, rollout_time_loss_components_DL, minibatch_idx
         )
-        params, opt_state, _, metrics = self.model_update(
-            model=model,
-            variables=variables,
+        agent, opt_state, _, metrics = self.model_update(
+            agent=agent,
             optimizer=optimizer,
             opt_state=opt_state,
             env_state_batch=minibatch_BL,
             rollout_time_loss_components=rollout_time_minibatch_loss_components_BL,
             rng=rng,
         )
-        variables["params"] = params
         rng, _ = jax.random.split(rng)
 
-        return (variables, opt_state, rng), metrics
+        return (agent, opt_state, rng), metrics
 
     @xax.profile
     def scannable_train_epoch(
         self,
-        training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
+        training_state: tuple[Agent, optax.OptState, PRNGKeyArray],
         _: None,
         *,
-        model: ActorCriticAgent,
         optimizer: optax.GradientTransformation,
         dataset_DL: EnvState,
         rollout_time_loss_components_DL: RolloutTimeLossComponents,
-    ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
-        """Train a minibatch, returns the updated variables, optimizer state, loss, and metrics."""
-        variables = training_state[0]
+    ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+        """Train a minibatch, returns the updated agent, optimizer state, loss, and metrics."""
+        agent = training_state[0]
         opt_state = training_state[1]
         rng = training_state[2]
 
@@ -446,30 +405,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         partial_fn = functools.partial(
             self.scannable_minibatch_step,
-            model=model,
             optimizer=optimizer,
             dataset_DL=dataset_DL,
             rollout_time_loss_components_DL=rollout_time_loss_components_DL,
         )
 
-        (variables, opt_state, _), metrics = jax.lax.scan(
+        (agent, opt_state, _), metrics = jax.lax.scan(
             partial_fn,
-            (variables, opt_state, minibatch_rng),
+            (agent, opt_state, minibatch_rng),
             jnp.arange(self.config.num_minibatches),
         )
 
         # note that variables, opt_state are just the final values
         # metrics is stacked over the minibatches
-        return (variables, opt_state, rng), metrics
+        return (agent, opt_state, rng), metrics
 
     @xax.profile
     @xax.jit(static_argnames=["self", "model", "optimizer"])
     def rl_pass(
         self,
-        variables: PyTree[Array],
+        agent: Agent,
         opt_state: optax.OptState,
         reshuffle_rng: PRNGKeyArray,
-        model: ActorCriticAgent,
         optimizer: optax.GradientTransformation,
         dataset_DL: EnvState,
         rollout_time_loss_components_DL: RolloutTimeLossComponents,
@@ -477,25 +434,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Perform multiple epochs of RL training on the current dataset."""
         partial_fn = functools.partial(
             self.scannable_train_epoch,
-            model=model,
             optimizer=optimizer,
             dataset_DL=dataset_DL,
             rollout_time_loss_components_DL=rollout_time_loss_components_DL,
         )
 
-        (variables, opt_state, reshuffle_rng), metrics = jax.lax.scan(
+        (agent, opt_state, reshuffle_rng), metrics = jax.lax.scan(
             partial_fn,
-            (variables, opt_state, reshuffle_rng),
+            (agent, opt_state, reshuffle_rng),
             None,
             length=self.config.num_learning_epochs,
         )
         # metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
-        return (variables, opt_state, reshuffle_rng), metrics
+        return (agent, opt_state, reshuffle_rng), metrics
 
     def rl_train_loop(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         env: BaseEnv,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
@@ -513,8 +468,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # structures used to efficiently unroll and resume trajectory rollouts
         env_state_EL_t, physics_data_EL_t_plus_1 = jax.vmap(
             env.reset,
-            in_axes=(None, None, 0, None),
-        )(model, variables, reset_rngs, physics_model_L)
+            in_axes=(None, 0, None),
+        )(agent, reset_rngs, physics_model_L)
 
         if self.config.compile_unroll:
             static_args = ["model", "num_steps", "num_envs", "return_intermediate_data"]
@@ -523,9 +478,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         #################
         # Burn in Stage #
         #################
+
         burn_in_env_state_TEL, _, _ = env_rollout_fn(
-            model=model,
-            variables=variables,
+            agent=agent,
             rng=burn_in_rng,
             num_steps=self.num_rollout_steps_per_env,
             num_envs=self.config.num_envs,
@@ -534,11 +489,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             physics_model_L=physics_model_L,
             return_intermediate_data=False,
         )
-        variables = self.update_input_normalization_stats(
-            variables=variables,
-            trajectories_dataset=burn_in_env_state_TEL,
-            initial_step=False,
-        )
+        # self.update_input_normalization_stats(
+        #     agent=agent,
+        #     trajectories_dataset=burn_in_env_state_TEL,
+        #     initial_step=False,
+        # )
 
         ##################
         # Training Stage #
@@ -555,8 +510,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             reshuffle_rng, rollout_rng, train_rng = jax.random.split(train_rng, 3)
 
             env_state_TEL, physics_data_EL_t_plus_1, has_nans = env_rollout_fn(
-                model=model,
-                variables=variables,
+                agent=agent,
                 rng=rollout_rng,
                 num_steps=self.num_rollout_steps_per_env,
                 num_envs=self.config.num_envs,
@@ -584,7 +538,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # (e.g. advantages) and flattening them for efficiency, thus
             # the name "rollout_time" loss components
             rollout_loss_components_TEL = self.get_rollout_time_loss_components(
-                model, variables, env_state_TEL
+                agent, env_state_TEL
             )
             rollout_loss_components_DL = xax.flatten_pytree(
                 rollout_loss_components_TEL,
@@ -592,11 +546,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             # running training on minibatches
-            (variables, opt_state, reshuffle_rng), metrics = self.rl_pass(
-                variables=variables,
+            (agent, opt_state, reshuffle_rng), metrics = self.rl_pass(
+                agent=agent,
                 opt_state=opt_state,
                 reshuffle_rng=reshuffle_rng,
-                model=model,
                 optimizer=optimizer,
                 dataset_DL=env_state_DL,
                 rollout_time_loss_components_DL=rollout_loss_components_DL,
@@ -622,7 +575,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             if self.should_checkpoint(training_state):
                 self.save_checkpoint(
-                    model=variables,
+                    model=agent,
                     optimizer=optimizer,
                     opt_state=opt_state,
                     state=training_state,
@@ -634,8 +587,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 eval_env_state_T1L = render_and_save_trajectory(
                     env=env,
-                    model=model,
-                    variables=variables,
+                    agent=agent,
                     rng=rng,
                     output_dir=render_dir,
                     num_steps=self.config.eval_rollout_length,
@@ -647,11 +599,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 with self.step_context("write_logs"):
                     self.log_trajectory_stats(env, eval_env_state_T1L, eval=True)
 
-            variables = self.update_input_normalization_stats(
-                variables=variables,
-                trajectories_dataset=env_state_TEL,
-                initial_step=False,
-            )
+            # TODO: fix
+            # variables = self.update_input_normalization_stats(
+            #     agent=agent,
+            #     trajectories_dataset=env_state_TEL,
+            #     initial_step=False,
+            # )
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
@@ -664,24 +617,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 Thread(target=self.log_state, daemon=True).start()
 
             key, model_key = jax.random.split(key)
-            model, optimizer, opt_state, training_state = self.load_initial_state(model_key)
+            agent, optimizer, opt_state, training_state = self.load_initial_state(model_key)
 
             training_state = self.on_training_start(training_state)
             training_state.num_samples = 1  # prevents from checkpointing at start
 
             def on_exit() -> None:
-                self.save_checkpoint(model, optimizer, opt_state, training_state)
+                self.save_checkpoint(agent, optimizer, opt_state, training_state)
 
             # Handle user-defined interrupts during the training loop.
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
 
-            variables = self.get_init_variables(key)
-            opt_state = optimizer.init(variables["params"])
-
             try:
                 self.rl_train_loop(
-                    model=model,
-                    variables=variables,
+                    agent=agent,
                     env=env,
                     optimizer=optimizer,
                     opt_state=opt_state,
@@ -695,7 +644,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         f"steps and {training_state.num_samples} samples"
                     )
                     xax.show_info(msg, important=True)
-                self.save_checkpoint(model, optimizer, opt_state, training_state)
+                self.save_checkpoint(agent, optimizer, opt_state, training_state)
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 if xax.is_master():
@@ -707,7 +656,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
-                self.save_checkpoint(model, optimizer, opt_state, training_state)
+                self.save_checkpoint(agent, optimizer, opt_state, training_state)
 
             finally:
                 training_state = self.on_training_end(training_state)

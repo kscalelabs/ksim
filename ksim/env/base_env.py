@@ -8,11 +8,14 @@ from typing import Generic, TypeVar
 import jax
 import numpy as np
 import xax
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray
 from omegaconf import MISSING
 
+from ksim.commands import Command
 from ksim.env.types import EnvState, PhysicsData, PhysicsModel
-from ksim.model.base import ActorCriticAgent
+from ksim.model.base import Agent
+from ksim.observation import Observation
+from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
 
@@ -45,6 +48,14 @@ class BaseEnv(ABC, Generic[Config]):
 
     config: Config
 
+    # Terminations, resets, rewards, observations, and commands form the core
+    # of `EnvState` and should not be coupled with MJX.
+    terminations: list[tuple[str, Termination]]
+    resets: list[tuple[str, Reset]]
+    rewards: list[tuple[str, Reward]]
+    observations: list[tuple[str, Observation]]
+    commands: list[tuple[str, Command]]
+
     def __init__(self, config: Config) -> None:
         self.config = config
 
@@ -59,8 +70,7 @@ class BaseEnv(ABC, Generic[Config]):
     @abstractmethod
     def reset(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         rng: PRNGKeyArray,
         physics_model_L: PhysicsModel,
     ) -> tuple[EnvState, PhysicsData | None]:
@@ -69,8 +79,7 @@ class BaseEnv(ABC, Generic[Config]):
     @abstractmethod
     def step(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         env_state_L_t_minus_1: EnvState,
         rng: PRNGKeyArray,
         physics_data_L_t: PhysicsData,
@@ -81,8 +90,7 @@ class BaseEnv(ABC, Generic[Config]):
     @abstractmethod
     def unroll_trajectories(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
@@ -101,8 +109,7 @@ class BaseEnv(ABC, Generic[Config]):
     @abstractmethod
     def render_trajectory(
         self,
-        model: ActorCriticAgent,
-        variables: PyTree[Array],
+        agent: Agent,
         rng: PRNGKeyArray,
         *,
         num_steps: int,
