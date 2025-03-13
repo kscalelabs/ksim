@@ -86,11 +86,11 @@ class MjxEnvConfig(BaseEnvConfig):
 
     # Action.
     min_action_latency: float = xax.field(
-        value=MISSING,
+        value=0.0,
         help="The minimum action latency.",
     )
     max_action_latency: float = xax.field(
-        value=MISSING,
+        value=0.0,
         help="The maximum action latency.",
     )
 
