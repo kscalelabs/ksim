@@ -36,7 +36,6 @@ from ksim.env.mjx.actuators.scaled_torque_actuator import ScaledTorqueActuators
 from ksim.env.types import EnvState
 from ksim.model.base import ActorCriticAgent
 from ksim.utils.data import BuilderData
-from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
 from ksim.utils.profile import profile
 from ksim.utils.robot_model import get_model_and_metadata
@@ -47,14 +46,14 @@ T = TypeVar("T")
 
 
 @profile
-@legit_jit()
+@xax.jit()
 def mjx_forward(mjx_model: mjx.Model, mjx_data: mjx.Data) -> mjx.Data:
     """Forward pass of the mjx model."""
     return mjx.forward(mjx_model, mjx_data)
 
 
 @profile
-@legit_jit()
+@xax.jit()
 def mjx_step(mjx_model: mjx.Model, mjx_data: mjx.Data) -> mjx.Data:
     """Step pass of the mjx model."""
     return mjx.step(mjx_model, mjx_data)
@@ -230,7 +229,7 @@ class MjxEnv(BaseEnv):
         return mj_model
 
     @profile
-    @legit_jit(static_argnames=["self"])
+    @xax.jit(static_argnames=["self"])
     def get_observation(self, mjx_data_L: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
         """Compute observations from the pipeline state."""
         observations = {}
@@ -241,7 +240,7 @@ class MjxEnv(BaseEnv):
         return FrozenDict(observations)
 
     @profile
-    @legit_jit(static_argnames=["self"])
+    @xax.jit(static_argnames=["self"])
     def get_rewards(
         self,
         action_L_t_minus_1: Array,
@@ -270,7 +269,7 @@ class MjxEnv(BaseEnv):
         return FrozenDict(rewards)
 
     @profile
-    @legit_jit(static_argnames=["self"])
+    @xax.jit(static_argnames=["self"])
     def get_terminations(self, mjx_data_L_t_plus_1: mjx.Data) -> FrozenDict[str, Array]:
         """Compute termination conditions from the pipeline state."""
         terminations = {}
@@ -283,7 +282,7 @@ class MjxEnv(BaseEnv):
         return FrozenDict(terminations)
 
     @profile
-    @legit_jit(static_argnames=["self"])
+    @xax.jit(static_argnames=["self"])
     def get_initial_commands(
         self, rng: PRNGKeyArray, initial_time: Array | None
     ) -> FrozenDict[str, Array]:
@@ -298,7 +297,7 @@ class MjxEnv(BaseEnv):
         return FrozenDict(commands)
 
     @profile
-    @legit_jit(static_argnames=["self"])
+    @xax.jit(static_argnames=["self"])
     def get_commands(
         self, prev_commands: FrozenDict[str, Array], rng: PRNGKeyArray, time: Array
     ) -> FrozenDict[str, Array]:
@@ -562,7 +561,7 @@ class MjxEnv(BaseEnv):
         return env_state_L_t, mjx_data_L_t_plus_1
 
     @profile
-    @legit_jit(static_argnames=["self", "model", "return_intermediate_data"])
+    @xax.jit(static_argnames=["self", "model", "return_intermediate_data"])
     def scannable_step_with_automatic_reset(
         self,
         carry: tuple[EnvState, mjx.Data, PRNGKeyArray],

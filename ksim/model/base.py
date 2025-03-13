@@ -32,17 +32,15 @@ class KSimModel(nn.Module):
     as a `KSimForwardMixin` class that provides the `forward` method.
     """
 
-    obs_names: tuple[str, ...] | None = xax.field(value=None)
-    """List of observation names accessible to the model."""
+    obs_names: tuple[str, ...] | None = xax.field(
+        value=None,
+        help="List of observation names accessible to the model.",
+    )
 
-    distribution: ActionDistribution = xax.field(value=MISSING)
-    """Distribution to use for the actor model."""
-
-    # TODO: implement means of specifying history length
-
-    ################
-    # Abstract API #
-    ################
+    distribution: ActionDistribution = xax.field(
+        value=MISSING,
+        help="Distribution to use for the actor model.",
+    )
 
     @abstractmethod
     def forward(self, x: ModelInput) -> Array:
@@ -53,10 +51,6 @@ class KSimModel(nn.Module):
     def post_process(self, prediction: Array) -> Array:
         """Post-process the output of the network."""
         ...
-
-    ########################
-    # Base Implementations #
-    ########################
 
     def get_input(
         self,
@@ -82,8 +76,6 @@ class KSimModel(nn.Module):
                 cmd_vecs.append(cmd_value)
             elif "text" in cmd_name:
                 cmd_tokens.append(cmd_value)
-
-        # TODO: implement way of adding history to the input
 
         return ModelInput(
             obs_proprio_vec=(

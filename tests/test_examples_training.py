@@ -8,7 +8,6 @@ import pytest
 import xax
 
 from examples.default_humanoid.walking import HumanoidWalkingConfig, HumanoidWalkingTask
-from ksim.utils.jit import legit_jit
 from ksim.utils.pytree import flatten_pytree
 
 
@@ -49,7 +48,7 @@ def test_default_humanoid_training() -> None:
         model, variables, reset_rngs, physics_model_L
     )
     static_args = ["model", "num_steps", "num_envs", "return_intermediate_data"]
-    env_rollout_fn = legit_jit(static_argnames=static_args)(env.unroll_trajectories)
+    env_rollout_fn = xax.jit(static_argnames=static_args)(env.unroll_trajectories)
 
     # Get a trajectory dataset
     key, rollout_key = jax.random.split(key)

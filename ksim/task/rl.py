@@ -35,7 +35,6 @@ from ksim.builders.loggers import (
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.model.base import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
-from ksim.utils.jit import legit_jit
 from ksim.utils.profile import profile
 from ksim.utils.pytree import flatten_pytree, slice_pytree
 from ksim.utils.visualization import render_and_save_trajectory
@@ -327,10 +326,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 namespace="update",
             )
 
-    ########################
-    # Training and Running #
-    ########################
-
     @profile
     def get_init_variables(self, key: PRNGKeyArray) -> PyTree:
         """Get the initial parameters as a PyTree: assumes flax-compatible model."""
@@ -393,10 +388,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Get a minibatch from the rollout (B)."""
         starting_idx = minibatch_idx * self.config.num_env_states_per_minibatch
         rollout_BL = slice_pytree(
-            rollout_DL, starting_idx, self.config.num_env_states_per_minibatch
+            rollout_DL,
+            start=starting_idx,
+            slice_length=self.config.num_env_states_per_minibatch,
         )
         rollout_time_loss_components_BL = slice_pytree(
-            rollout_time_loss_components_DL, starting_idx, self.config.num_env_states_per_minibatch
+            rollout_time_loss_components_DL,
+            start=starting_idx,
+            slice_length=self.config.num_env_states_per_minibatch,
         )
         return rollout_BL, rollout_time_loss_components_BL
 
@@ -470,7 +469,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return (variables, opt_state, rng), metrics
 
     @profile
-    @legit_jit(static_argnames=["self", "model", "optimizer"])
+    @xax.jit(static_argnames=["self", "model", "optimizer"])
     def rl_pass(
         self,
         variables: PyTree[Array],
@@ -509,10 +508,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         training_state: xax.State,
     ) -> None:
         """Runs the main RL training loop."""
-        ########################
-        # Initialization stage #
-        ########################
-
         rng = self.prng_key()
         burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 3)
 
@@ -523,12 +518,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # NOTE: env_state_EL_t and physics_data_EL_t_plus_1 are the carry data
         # structures used to efficiently unroll and resume trajectory rollouts
         env_state_EL_t, physics_data_EL_t_plus_1 = jax.vmap(
-            env.reset, in_axes=(None, None, 0, None)
+            env.reset,
+            in_axes=(None, None, 0, None),
         )(model, variables, reset_rngs, physics_model_L)
 
         if self.config.compile_unroll:
             static_args = ["model", "num_steps", "num_envs", "return_intermediate_data"]
-            env_rollout_fn = legit_jit(static_argnames=static_args)(env.unroll_trajectories)
+            env_rollout_fn = xax.jit(static_argnames=static_args)(env.unroll_trajectories)
 
         #################
         # Burn in Stage #

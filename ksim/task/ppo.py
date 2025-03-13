@@ -11,7 +11,6 @@ import optax
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from xax.task.mixins.train import Batch, Output
 
 from ksim.env.types import EnvState
 from ksim.model.base import ActorCriticAgent, update_actor_critic_normalization
@@ -20,7 +19,6 @@ from ksim.task.loss_helpers import compute_returns
 from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
 from ksim.utils.constants import EPSILON
-from ksim.utils.jit import legit_jit
 from ksim.utils.pytree import compute_nan_ratio
 
 
@@ -94,7 +92,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Get the critic carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
 
-    @legit_jit(static_argnames=["self", "model"])
+    @xax.jit(static_argnames=["self", "model"])
     def get_rollout_time_loss_components(
         self,
         model: ActorCriticAgent,
@@ -355,7 +353,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return total_loss, metrics_to_log
 
-    def compute_loss(self, model: PyTree, batch: Batch, output: Output) -> Array:
+    def compute_loss(self, model: PyTree, batch: xax.Batch, output: xax.Output) -> Array:
         """Implementation to satisfy the TrainMixin interface.
 
         In reinforcement learning context, this method is not expected to be called
