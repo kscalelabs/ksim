@@ -27,7 +27,6 @@ _TOL = 1e-4
 
 
 class DummyObservation(Observation):
-
     def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
         return jnp.zeros((3,))
 
