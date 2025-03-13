@@ -42,6 +42,9 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
             distribution_type="categorical",
             actor_hidden_dims=(self.config.actor_hidden_dims,) * self.config.actor_num_layers,
             critic_hidden_dims=(self.config.critic_hidden_dims,) * self.config.critic_num_layers,
+            distribution_kwargs={
+                "sampling_temperature": 1.0,
+            },
         )
 
     def viz_environment(self) -> None:

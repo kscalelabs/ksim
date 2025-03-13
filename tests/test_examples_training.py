@@ -8,8 +8,6 @@ import pytest
 import xax
 
 from examples.default_humanoid.walking import HumanoidWalkingConfig, HumanoidWalkingTask
-from ksim.utils.jit import legit_jit
-from ksim.utils.pytree import flatten_pytree
 
 
 @pytest.mark.slow
@@ -49,7 +47,7 @@ def test_default_humanoid_training() -> None:
         model, variables, reset_rngs, physics_model_L
     )
     static_args = ["model", "num_steps", "num_envs", "return_intermediate_data"]
-    env_rollout_fn = legit_jit(static_argnames=static_args)(env.unroll_trajectories)
+    env_rollout_fn = xax.jit(static_argnames=static_args)(env.unroll_trajectories)
 
     # Get a trajectory dataset
     key, rollout_key = jax.random.split(key)
@@ -64,19 +62,26 @@ def test_default_humanoid_training() -> None:
         physics_model_L=physics_model_L,
         return_intermediate_data=False,
     )
-    env_state_DL = flatten_pytree(env_state_TEL, flatten_size=task.dataset_size)
+    env_state_DL = xax.flatten_pytree(
+        env_state_TEL,
+        flatten_size=task.dataset_size,
+    )
 
     variables = task.update_input_normalization_stats(
         variables=variables,
         trajectories_dataset=env_state_TEL,
         initial_step=False,
     )
+
     rollout_loss_components_TEL = task.get_rollout_time_loss_components(
-        model, variables, env_state_TEL
+        model=model,
+        variables=variables,
+        trajectory_dataset=env_state_TEL,
     )
 
-    rollout_loss_components_DL = flatten_pytree(
-        rollout_loss_components_TEL, flatten_size=task.dataset_size
+    rollout_loss_components_DL = xax.flatten_pytree(
+        rollout_loss_components_TEL,
+        flatten_size=task.dataset_size,
     )
 
     # Update the model

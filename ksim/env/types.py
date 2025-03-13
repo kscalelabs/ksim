@@ -13,16 +13,15 @@ from mujoco import mjx
 class EnvState:
     """Base environment state class."""
 
-    # Data attributes
-    obs: FrozenDict[str, Array]
-    command: FrozenDict[str, Array]
-    action: Array
-    reward: Array  # R(prev_state, action_at_prev_state, current_state)
-    done: Array
-    timestep: Array
+    obs: FrozenDict[str, Array]  # Observations derived from the state.
+    command: FrozenDict[str, Array]  # Command provided to the actor and critic.
+    action: Array  # The action that the actor should take
+    reward: Array  # The total reward.
+    done: Array  # Whether the episode has terminated for any reason.
+    timestep: Array  # The current timestep.
 
-    termination_components: FrozenDict[str, Array]  # Termination terms at same timestep as done
-    reward_components: FrozenDict[str, Array]  # Reward terms at same timestep as reward
+    termination_components: FrozenDict[str, Array]  # The specific reasons the episode terminated.
+    reward_components: FrozenDict[str, Array]  # The individual reward components, scaled.
 
 
 PhysicsData = mjx.Data | None

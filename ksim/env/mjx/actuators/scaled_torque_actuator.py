@@ -1,36 +1,29 @@
 """Direct torque control, scaled to a specifiable input range and gear ratio."""
 
 from dataclasses import dataclass
+from typing import Mapping
 
 import jax.numpy as jnp
 from jaxtyping import Array
 from mujoco import mjx
 
-from ksim.env.mjx.actuators.base_actuator import Actuators, BaseActuatorMetadata
+from ksim.env.mjx.actuators.base_actuator import Actuators
 from ksim.utils.mujoco import MujocoMappings
-
-
-@dataclass
-class ScaledTorqueActuatorMetadata(BaseActuatorMetadata):
-    input_range: tuple[float, float]
-    gear_ratio: float
 
 
 class ScaledTorqueActuators(Actuators):
     def __init__(
         self,
-        actuators_metadata: dict[str, BaseActuatorMetadata],
+        joint_to_gear_ratios: Mapping[str, float],
+        joint_to_input_ranges: Mapping[str, tuple[float, float]],
         mujoco_mappings: MujocoMappings,
     ) -> None:
         """Creates an instance of ScaledTorqueActuators."""
         self.gear_ratios = jnp.array(
-            [getattr(metadata, "gear_ratio", 1.0) for metadata in actuators_metadata.values()]
+            [joint_to_gear_ratios[m] for m in mujoco_mappings.ctrl_name_to_idx]
         )
         self.input_ranges = jnp.array(
-            [
-                getattr(metadata, "input_range", (-1.0, 1.0))
-                for metadata in actuators_metadata.values()
-            ]
+            [joint_to_input_ranges[m] for m in mujoco_mappings.ctrl_name_to_idx]
         )
 
     def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:

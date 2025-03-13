@@ -13,7 +13,6 @@ from jaxtyping import Array
 from mujoco import mjx
 
 from ksim.utils.data import BuilderData
-from ksim.utils.jit import legit_jit
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +92,7 @@ class FallTermination(Termination):
 
     # TODO: Check that this logic is correct.
     # Also need to account for sensor transformations...
-    @legit_jit(static_argnames=["self"])
+    @xax.jit(static_argnames=["self"])
     def __call__(self, state: mjx.Data) -> Array:
         match self.sensor_type:
             case "quaternion_orientation":

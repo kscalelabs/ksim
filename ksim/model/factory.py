@@ -62,12 +62,14 @@ def mlp_actor_critic_agent(
     elif distribution_type == "tanh_gaussian":
         distribution = TanhGaussianDistribution(action_dim=num_actions, **distribution_kwargs)
     elif distribution_type == "categorical":
-        assert "sampling_temperature" in distribution_kwargs
+        if "sampling_temperature" not in distribution_kwargs:
+            raise ValueError("sampling_temperature must be provided for categorical distribution.")
         distribution = CategoricalDistribution(
-            action_dim=num_actions, sampling_temperature=distribution_kwargs["sampling_temperature"]
+            action_dim=num_actions,
+            sampling_temperature=distribution_kwargs["sampling_temperature"],
         )
 
-    # then create the actor module
+    # Then create the actor module.
     actor_module: KSimModel
     if prediction_type == "mean_std":
         actor_module = MLPMeanStdActor(

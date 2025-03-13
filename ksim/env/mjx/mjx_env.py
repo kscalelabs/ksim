@@ -8,10 +8,11 @@ Philosophy:
 Rollouts return a trajectory of shape (time, num_envs, ).
 """
 
-import asyncio
 import functools
 import logging
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Collection, TypeVar
 
 import chex
@@ -31,30 +32,25 @@ from ksim.builders.rewards import Reward, RewardBuilder
 from ksim.builders.terminations import Termination, TerminationBuilder
 from ksim.env.base_env import BaseEnv, BaseEnvConfig
 from ksim.env.mjx.actuators.base_actuator import Actuators
-from ksim.env.mjx.actuators.mit_actuator import MITPositionActuators
-from ksim.env.mjx.actuators.scaled_torque_actuator import ScaledTorqueActuators
 from ksim.env.types import EnvState
 from ksim.model.base import ActorCriticAgent
 from ksim.utils.data import BuilderData
-from ksim.utils.jit import legit_jit
 from ksim.utils.mujoco import make_mujoco_mappings
-from ksim.utils.profile import profile
-from ksim.utils.robot_model import get_model_and_metadata
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
 
-@profile
-@legit_jit()
+@xax.profile
+@xax.jit()
 def mjx_forward(mjx_model: mjx.Model, mjx_data: mjx.Data) -> mjx.Data:
     """Forward pass of the mjx model."""
     return mjx.forward(mjx_model, mjx_data)
 
 
-@profile
-@legit_jit()
+@xax.profile
+@xax.jit()
 def mjx_step(mjx_model: mjx.Model, mjx_data: mjx.Data) -> mjx.Data:
     """Step pass of the mjx model."""
     return mjx.step(mjx_model, mjx_data)
@@ -107,37 +103,28 @@ class MjxEnvConfig(BaseEnvConfig):
         help="Bitmask of flags to disable.",
     )
 
-    # Simulation.
-    ignore_cached_urdf: bool = xax.field(
-        value=False,
-        help="Whether to ignore the cached URDF.",
-    )
 
-    # Actuator.
-    actuator_type: str = xax.field(
-        value="mit",
-        help="The type of actuator to use.",
-    )
+class MjxEnv(BaseEnv, ABC):
+    """Wraps the MuJoCo MJX model.
 
-
-# The new stateless environment – note that we do not call any stateful methods.
-class MjxEnv(BaseEnv):
-    """An environment for massively parallel rollouts, stateless to obj state and system parameters.
-
-    In this design:
-      - All state (a EnvState) is passed in and returned by reset and step.
-      - The underlying Mujoco model (here referred to as `mjx_model`) is provided to step/reset.
-      - Rollouts are performed by vectorizing (vmap) the reset and step functions,
-        with a final trajectory of shape (time, num_envs, ...).
-      - The step wrapper only computes a reset (via jax.lax.cond) if the done flag is True.
+    Args:
+        config: The configuration for the environment.
+        robot_model_path: The path to the robot model.
+        actuators: The actuators for the environment.
+        terminations: The terminations for the environment.
+        resets: The resets for the environment.
+        rewards: The rewards for the environment.
+        observations: The observations for the environment.
     """
 
-    actuators: Actuators
     config: MjxEnvConfig
+    actuators: Actuators
 
     def __init__(
         self,
         config: MjxEnvConfig,
+        robot_model_path: str | Path,
+        actuators: Actuators,
         terminations: Collection[Termination | TerminationBuilder],
         resets: Collection[Reset | ResetBuilder],
         rewards: Collection[Reward | RewardBuilder],
@@ -145,7 +132,6 @@ class MjxEnv(BaseEnv):
         commands: Collection[Command | CommandBuilder] = (),
     ) -> None:
         self.config = config
-
         if self.config.max_action_latency < self.config.min_action_latency:
             raise ValueError(
                 f"Maximum action latency ({self.config.max_action_latency}) must be greater than "
@@ -156,16 +142,10 @@ class MjxEnv(BaseEnv):
                 f"Action latency ({self.config.min_action_latency}) must be non-negative"
             )
 
+        self.robot_model_path = robot_model_path
+        self.actuators = actuators
         self.min_action_latency_step = round(self.config.min_action_latency / self.config.dt)
         self.max_action_latency_step = round(self.config.max_action_latency / self.config.dt)
-
-        # getting the robot model and metadata
-        robot_model_path, robot_model_metadata = asyncio.run(
-            get_model_and_metadata(
-                self.config.robot_model_name,
-                cache=not self.config.ignore_cached_urdf,
-            )
-        )
 
         logger.info("Loading robot model %s", robot_model_path)
         # mj_model = load_mjmodel(robot_model_path, self.config.robot_model_scene)
@@ -178,17 +158,6 @@ class MjxEnv(BaseEnv):
         self.default_mjx_data = mjx.make_data(self.default_mjx_model)
 
         self.mujoco_mappings = make_mujoco_mappings(self.default_mjx_model)
-        match self.config.actuator_type:
-            case "mit":
-                self.actuators = MITPositionActuators(
-                    actuators_metadata=robot_model_metadata.actuators,
-                    mujoco_mappings=self.mujoco_mappings,
-                )
-            case "scaled_torque":
-                self.actuators = ScaledTorqueActuators(
-                    actuators_metadata=robot_model_metadata.actuators,
-                    mujoco_mappings=self.mujoco_mappings,
-                )
 
         # preparing builder data.
         data = BuilderData(
@@ -215,10 +184,6 @@ class MjxEnv(BaseEnv):
         assert self.config.ctrl_dt % self.config.dt == 0, "ctrl_dt must be a multiple of dt"
         self.physics_dt_per_ctrl_dt = int(self.config.ctrl_dt / self.config.dt)
 
-    ###################
-    # Post Processing #
-    ###################
-
     def _override_model_settings(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
         """Override default sim settings."""
         mj_model.opt.iterations = self.config.solver_iterations
@@ -226,11 +191,10 @@ class MjxEnv(BaseEnv):
         mj_model.opt.timestep = self.config.dt
         mj_model.opt.disableflags = self.config.disable_flags_bitmask
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-
         return mj_model
 
-    @profile
-    @legit_jit(static_argnames=["self"])
+    @xax.profile
+    @xax.jit(static_argnames=["self"])
     def get_observation(self, mjx_data_L: mjx.Data, rng: jax.Array) -> FrozenDict[str, Array]:
         """Compute observations from the pipeline state."""
         observations = {}
@@ -240,8 +204,8 @@ class MjxEnv(BaseEnv):
             observations[observation_name] = observation_value
         return FrozenDict(observations)
 
-    @profile
-    @legit_jit(static_argnames=["self"])
+    @xax.profile
+    @xax.jit(static_argnames=["self"])
     def get_rewards(
         self,
         action_L_t_minus_1: Array,
@@ -264,13 +228,15 @@ class MjxEnv(BaseEnv):
                 * reward.scale
             )
             chex.assert_shape(
-                reward_val, (), custom_message=f"Reward {reward_name} must be a scalar"
+                reward_val,
+                (),
+                custom_message=f"Reward {reward_name} must be a scalar",
             )
             rewards[reward_name] = reward_val
         return FrozenDict(rewards)
 
-    @profile
-    @legit_jit(static_argnames=["self"])
+    @xax.profile
+    @xax.jit(static_argnames=["self"])
     def get_terminations(self, mjx_data_L_t_plus_1: mjx.Data) -> FrozenDict[str, Array]:
         """Compute termination conditions from the pipeline state."""
         terminations = {}
@@ -282,8 +248,8 @@ class MjxEnv(BaseEnv):
             terminations[termination_name] = term_val
         return FrozenDict(terminations)
 
-    @profile
-    @legit_jit(static_argnames=["self"])
+    @xax.profile
+    @xax.jit(static_argnames=["self"])
     def get_initial_commands(
         self, rng: PRNGKeyArray, initial_time: Array | None
     ) -> FrozenDict[str, Array]:
@@ -297,8 +263,8 @@ class MjxEnv(BaseEnv):
             commands[command_name] = command_val
         return FrozenDict(commands)
 
-    @profile
-    @legit_jit(static_argnames=["self"])
+    @xax.profile
+    @xax.jit(static_argnames=["self"])
     def get_commands(
         self, prev_commands: FrozenDict[str, Array], rng: PRNGKeyArray, time: Array
     ) -> FrozenDict[str, Array]:
@@ -316,7 +282,7 @@ class MjxEnv(BaseEnv):
     # Stepping and Resetting Main Logic #
     #####################################
 
-    @profile
+    @xax.profile
     def apply_physics_steps(
         self,
         mjx_model_L: mjx.Model,
@@ -336,7 +302,9 @@ class MjxEnv(BaseEnv):
             data, step_num = carry
 
             action_motor_sees = jax.lax.select(
-                step_num >= num_latency_steps, current_action_L, previous_action_L
+                step_num >= num_latency_steps,
+                current_action_L,
+                previous_action_L,
             )
             torques = self.actuators.get_ctrl(data, action_motor_sees)
             data_with_ctrl = data.replace(ctrl=torques)
@@ -347,11 +315,7 @@ class MjxEnv(BaseEnv):
         final_data_L = jax.lax.scan(f, (mjx_data_L, jnp.array(0.0)), None, n_steps)[0][0]
         return final_data_L
 
-    ###########################
-    # Main API Implementation #
-    ###########################
-
-    @profile
+    @xax.profile
     def get_init_physics_data(
         self,
         num_envs: int,
@@ -371,13 +335,11 @@ class MjxEnv(BaseEnv):
 
         return mjx_data_EL_0
 
-    def get_init_physics_model(
-        self,
-    ) -> mjx.Model:
+    def get_init_physics_model(self) -> mjx.Model:
         """Get the initial physics model for the environment (L)."""
         return self.default_mjx_model
 
-    @profile
+    @xax.profile
     def get_dummy_env_states(
         self,
         num_envs: int,
@@ -406,7 +368,7 @@ class MjxEnv(BaseEnv):
             reward_components=FrozenDict(reward_components),
         )
 
-    @profile
+    @xax.profile
     def reset(
         self,
         model: ActorCriticAgent,
@@ -475,7 +437,7 @@ class MjxEnv(BaseEnv):
         )
         return env_state_L_0, mjx_data_L_1
 
-    @profile
+    @xax.profile
     def step(
         self,
         model: ActorCriticAgent,
@@ -561,8 +523,8 @@ class MjxEnv(BaseEnv):
 
         return env_state_L_t, mjx_data_L_t_plus_1
 
-    @profile
-    @legit_jit(static_argnames=["self", "model", "return_intermediate_data"])
+    @xax.profile
+    @xax.jit(static_argnames=["self", "model", "return_intermediate_data"])
     def scannable_step_with_automatic_reset(
         self,
         carry: tuple[EnvState, mjx.Data, PRNGKeyArray],
@@ -620,7 +582,7 @@ class MjxEnv(BaseEnv):
         else:
             return (env_state_L_t, mjx_data_L_t_plus_1, rng), (env_state_L_t, None, data_has_nans)
 
-    @profile
+    @xax.profile
     def unroll_trajectory(
         self,
         model: ActorCriticAgent,
@@ -655,7 +617,7 @@ class MjxEnv(BaseEnv):
         else:
             return env_state_TL, final_mjx_data_L_f_plus_1, has_nans_TL
 
-    @profile
+    @xax.profile
     def unroll_trajectories(
         self,
         model: ActorCriticAgent,
@@ -709,7 +671,7 @@ class MjxEnv(BaseEnv):
 
         return env_state_TEL, physics_data_res, has_nans
 
-    @profile
+    @xax.profile
     def render_trajectory(
         self,
         model: ActorCriticAgent,

@@ -19,7 +19,7 @@ from omegaconf import MISSING
 from ksim.env.types import EnvState
 from ksim.model.distributions import ActionDistribution
 from ksim.model.types import ModelInput
-from ksim.task.loss_helpers import compute_returns
+from ksim.task.ppo import compute_returns
 from ksim.utils.constants import EPSILON
 
 
@@ -32,17 +32,15 @@ class KSimModel(nn.Module):
     as a `KSimForwardMixin` class that provides the `forward` method.
     """
 
-    obs_names: tuple[str, ...] | None = xax.field(value=None)
-    """List of observation names accessible to the model."""
+    obs_names: tuple[str, ...] | None = xax.field(
+        value=None,
+        help="List of observation names accessible to the model.",
+    )
 
-    distribution: ActionDistribution = xax.field(value=MISSING)
-    """Distribution to use for the actor model."""
-
-    # TODO: implement means of specifying history length
-
-    ################
-    # Abstract API #
-    ################
+    distribution: ActionDistribution = xax.field(
+        value=MISSING,
+        help="Distribution to use for the actor model.",
+    )
 
     @abstractmethod
     def forward(self, x: ModelInput) -> Array:
@@ -53,10 +51,6 @@ class KSimModel(nn.Module):
     def post_process(self, prediction: Array) -> Array:
         """Post-process the output of the network."""
         ...
-
-    ########################
-    # Base Implementations #
-    ########################
 
     def get_input(
         self,
@@ -82,8 +76,6 @@ class KSimModel(nn.Module):
                 cmd_vecs.append(cmd_value)
             elif "text" in cmd_name:
                 cmd_tokens.append(cmd_value)
-
-        # TODO: implement way of adding history to the input
 
         return ModelInput(
             obs_proprio_vec=(
@@ -323,7 +315,7 @@ def update_actor_critic_normalization(
 
     High alpha means more weight is given to the old data.
     """
-    # update the returns normalization parameters
+    # Update the returns normalization parameters.
     returns = compute_returns(trajectories_dataset.reward, trajectories_dataset.done, gamma)
     returns_std = jnp.std(returns)
     old_returns_std = variables["normalization"]["returns_std"]
@@ -333,7 +325,7 @@ def update_actor_critic_normalization(
         old_returns_std * returns_norm_alpha + returns_std * (1 - returns_norm_alpha)
     )
 
-    # update the observations normalization parameters
+    # Update the observations normalization parameters.
     for obs_name, obs_vec in trajectories_dataset.obs.items():
         assert isinstance(obs_vec, Array)
         obs_mean = jnp.mean(obs_vec, axis=tuple(range(obs_vec.ndim - 1)))
