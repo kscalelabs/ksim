@@ -5,6 +5,7 @@ import logging
 
 # Import a K-Bot task definition that contains the environment and model
 from examples.kbot2.standing import KBotV2StandingConfig, KBotV2StandingTask
+from examples.kbot2.walking import KBotV2WalkingConfig, KBotV2WalkingTask
 from ksim.utils.interactive.mujoco_viz import (
     MujocoInteractiveVisualizer,
     MujocoInteractiveVisualizerConfig,
@@ -22,12 +23,20 @@ if __name__ == "__main__":
     args = argparse.ArgumentParser()
     args.add_argument("--debug", action="store_true")
     args.add_argument("--physics-backend", type=str, default="mjx")
+    args.add_argument("--task", type=str, default="standing")
     args = args.parse_args()
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
-    task = KBotV2StandingTask(KBotV2StandingConfig(num_envs=1))
+    match args.task:
+        case "standing": 
+            task = KBotV2StandingTask(KBotV2StandingConfig(num_envs=1))
+        case "walking":
+            task = KBotV2WalkingTask(KBotV2WalkingConfig(num_envs=1))
+        case _:
+            raise ValueError(f"Invalid task: {args.task}. Must be one of: standing, walking.")
+
     config = MujocoInteractiveVisualizerConfig(physics_backend=args.physics_backend)
     interactive_visualizer = MujocoInteractiveVisualizer(task, config=config)
     logger.info(
