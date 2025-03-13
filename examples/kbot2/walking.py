@@ -145,7 +145,7 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
                     right_foot_geom_name="KB_D_501R_R_LEG_FOOT_box_collision",
                     amplitude=0.1,
                     period=0.4,
-                    scale=2.0,
+                    scale=1.0,
                     vertical_offset=-0.09,
                 ),
             ],

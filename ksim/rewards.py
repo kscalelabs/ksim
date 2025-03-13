@@ -631,6 +631,7 @@ class SinusoidalFeetHeightReward(Reward):
     right_foot_geom_idx: int
     sinusoidal_feet_height: Callable[[Array], Array]
     vertical_offset: float
+    norm: NormType = attrs.field(default="l1")
 
     def __call__(
         self,
@@ -645,13 +646,19 @@ class SinusoidalFeetHeightReward(Reward):
         right_foot_height = mjx_data_t_plus_1.geom_xpos[self.right_foot_geom_idx][2]
         # Calculate the sinusoidal pattern
         sin_pos = self.sinusoidal_feet_height(mjx_data_t_plus_1.time)
+        
+        sin_pos_left_mask = jnp.maximum(sin_pos, 0.0)
+        sin_pos_right_mask = jnp.maximum(-sin_pos, 0.0)
+        
+        # Compute targets for left and right feet
+        left_foot_target = jnp.sum(sin_pos_left_mask) + self.vertical_offset
+        right_foot_target = jnp.sum(sin_pos_right_mask) + self.vertical_offset
 
-        sin_pos_left = sin_pos[sin_pos > 0] + self.vertical_offset
-        sin_pos_right = -sin_pos[sin_pos < 0] + self.vertical_offset  # take the opposite phase of the left foot
+        # Compute error
+        left_foot_error = get_norm(left_foot_height - left_foot_target, self.norm)
+        right_foot_error = get_norm(right_foot_height - right_foot_target, self.norm)
 
-        return jnp.sum(jnp.abs(left_foot_height - sin_pos_left)) + jnp.sum(
-            jnp.abs(right_foot_height - sin_pos_right)
-        )
+        return left_foot_error + right_foot_error
 
 
 @attrs.define(frozen=True, kw_only=True)
