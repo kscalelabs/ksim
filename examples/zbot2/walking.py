@@ -156,7 +156,7 @@ if __name__ == "__main__":
             num_envs=2048,
             dt=0.001,
             ctrl_dt=0.005,
-            learning_rate=0.00005,
+            learning_rate=0.000005,
             save_every_n_steps=50,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,

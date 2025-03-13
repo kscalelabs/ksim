@@ -163,20 +163,6 @@ class ActorCriticAgent(nn.Module):
 
         return normalized_obs
 
-    def actor_obs(self, obs: FrozenDict[str, Array]) -> FrozenDict[str, Array]:
-        """Transform the observations for the actor.
-
-        NOTE: override this if you need flexibility.
-        """
-        return obs
-
-    def critic_obs(self, obs: FrozenDict[str, Array]) -> FrozenDict[str, Array]:
-        """Transform the observations for the critic.
-
-        NOTE: override this if you need flexibility.
-        """
-        return obs
-
     @nn.compact
     def __call__(
         self,

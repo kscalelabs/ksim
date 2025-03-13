@@ -256,10 +256,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         assert isinstance(rollout_time_loss_components, PPORolloutTimeLossComponents)
 
         log_prob_diff = log_probs - rollout_time_loss_components.initial_action_log_probs
-        # Add numerical stability clipping
-        # log_prob_diff = jnp.clip(log_prob_diff, -20.0, 20.0)  # prevents exp() from exploding
         ratio = jnp.exp(log_prob_diff)
-        # ratio = jnp.clip(ratio, 0.0, 10.0)  # prevents extreme ratios
 
         # get the state-value estimates
         values = model.apply_critic(
@@ -341,8 +338,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "log_prob_min": jnp.min(log_probs),
             "values_std": jnp.std(values),
             "values_mean": jnp.mean(values),
-            "obs_nans_ratio": jnp.array(compute_nan_ratio(env_state_batch.obs)),
-            "action_nans_ratio": jnp.array(compute_nan_ratio(env_state_batch.action)),
+            "obs_nans_ratio": compute_nan_ratio(env_state_batch.obs),
+            "action_nans_ratio": compute_nan_ratio(env_state_batch.action),
         }
 
         if isinstance(model.distribution, GaussianDistribution):
