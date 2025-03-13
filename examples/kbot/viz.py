@@ -3,15 +3,17 @@
 import argparse
 import logging
 
-# Import a K-Bot task definition that contains the environment and model
+import colorlogging
+
 from examples.kbot.standing import KBotStandingConfig, KBotStandingTask
 from ksim.utils.interactive.mujoco_viz import (
     MujocoInteractiveVisualizer,
     MujocoInteractiveVisualizerConfig,
 )
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+colorlogging.configure()
 
 
 # python -m examples.kbot.viz
@@ -27,7 +29,13 @@ if __name__ == "__main__":
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
-    task = KBotStandingTask(KBotStandingConfig(num_envs=1))
+    task = KBotStandingTask.get_task(
+        KBotStandingConfig(
+            num_envs=1,
+            min_action_latency=0.0,
+            max_action_latency=0.0,
+        )
+    )
     config = MujocoInteractiveVisualizerConfig(physics_backend=args.physics_backend)
     interactive_visualizer = MujocoInteractiveVisualizer(task, config=config)
     logger.info(

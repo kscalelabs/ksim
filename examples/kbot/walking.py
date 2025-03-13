@@ -58,10 +58,6 @@ class KBotWalkingConfig(PPOConfig, MjxEnvConfig):
     # Robot model name to use.
     robot_model_name: str = xax.field(value="kbot-v1-feet")
 
-    ####################
-    # Task Definitions #
-    ####################
-
     # Action latency.
     min_action_latency: float = xax.field(value=0.0)
     max_action_latency: float = xax.field(value=0.0)

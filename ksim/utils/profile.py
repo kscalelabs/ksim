@@ -1,9 +1,12 @@
 """Profiling utilities."""
 
+import logging
 import os
 import time
 from functools import wraps
 from typing import Callable, ParamSpec, TypeVar
+
+logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")  # For function parameters
 R = TypeVar("R")  # For function return type
@@ -44,10 +47,14 @@ def profile(fn: Callable[P, R]) -> Callable[P, R]:
         else:
             class_name = ""
 
-        to_print = f"{class_name}{fn.__name__} - call #{ProfileState.call_count},"
-        to_print += f" took {runtime:.6f}s, total: {ProfileState.total_time:.6f}s"
-
-        print(to_print)
+        logger.info(
+            "%s %s - call #%s, took %s seconds, total: %s seconds",
+            class_name,
+            fn.__name__,
+            ProfileState.call_count,
+            runtime,
+            ProfileState.total_time,
+        )
 
         return res
 
