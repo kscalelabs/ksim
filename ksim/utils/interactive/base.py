@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib
+import numpy as np
 
 from ksim.env.base_env import BaseEnv
 from ksim.task.rl import RLTask
@@ -29,26 +30,35 @@ class InteractiveVisualizerConfig:
     vel_step_size: float = 0.1  # Size of step when manually modifying velocity (meters/second)
     angle_step_size: float = 0.01  # Size of step when manually modifying angles (radians)
 
+@dataclass
+class Keyframe:
+    """A keyframe for the interactive visualizer."""
+    name: str
+    position: np.ndarray | None = None
+    velocity: np.ndarray | None = None
+    joint_positions: np.ndarray | None = None
+    joint_velocities: np.ndarray | None = None
 
 class InteractiveVisualizer(abc.ABC):
     """Base class for visualizing rewards in RL environments."""
 
     # Mapping of key names to keycodes for commands that modify the environment state
     ENV_STATE_KEYCODES = {
-        "up": 265,
-        "down": 264,
-        "right": 262,
-        "left": 263,
-        "p": ord("P"),
-        "l": ord("L"),
-        "n": ord("N"),
-        "r": ord("R"),
-        "q": ord("Q"),
-        "e": ord("E"),
-        "semicolon": ord(";"),
-        "apostrophe": ord("'"),
-        "period": ord("."),
-        "slash": ord("/"),
+        "up": (265, "Move forward in x"),
+        "down": (264, "Move backward in x"),
+        "right": (262, "Move right in y"),
+        "left": (263, "Move left in y"),
+        "p": (ord("P"), "Move up in z"),
+        "l": (ord("L"), "Move down in z"),
+        "n": (ord("N"), "Step forward one frame"),
+        "r": (ord("R"), "Reset joints and orientation"),
+        "q": (ord("Q"), "Rotate yaw positive"),
+        "e": (ord("E"), "Rotate yaw negative"),
+        "semicolon": (ord(";"), "Rotate roll positive"),
+        "apostrophe": (ord("'"), "Rotate roll negative"),
+        "period": (ord("."), "Rotate pitch positive"),
+        "slash": (ord("/"), "Rotate pitch negative"),
+        "h": (ord("H"), "Switch keyframes"),
     }
 
     def __init__(self, task: RLTask, config: InteractiveVisualizerConfig | None = None) -> None:
@@ -61,10 +71,17 @@ class InteractiveVisualizer(abc.ABC):
         if config is None:
             config = InteractiveVisualizerConfig()
 
+        bar_width = 47
+        print("-" * bar_width)
+        print("ENV_STATE_KEYCODES")
+        print("-" * bar_width)
+        key_col_width = 14
+        desc_col_width = 46
         for key, value in self.ENV_STATE_KEYCODES.items():
             # Register key bindings for environment state control
-            setattr(self, f"key_{key}", value)
-
+            setattr(self, f"key_{key}", value[0])
+            print(f"|{key.center(key_col_width - 1)}| {value[1]}".ljust(desc_col_width) + "|")
+        print("-" * bar_width)
         self.viz_config = config
         self.pos_step_size = self.viz_config.pos_step_size
         self.vel_step_size = self.viz_config.vel_step_size
@@ -76,6 +93,8 @@ class InteractiveVisualizer(abc.ABC):
         self.suspended = False
         self.alternate_controls = False
         self.data_modifying_keycode: int | None = None
+        self.keyframes: list[Keyframe] = []
+        self.current_keyframe_idx: int = 0
 
         # Set up reward history
         self.reward_history: dict[str, collections.deque[float]] = collections.defaultdict(
@@ -140,13 +159,33 @@ class InteractiveVisualizer(abc.ABC):
             status = "ALTERNATE CONTROLS" if self.alternate_controls else "NORMAL CONTROLS"
             logger.info("Controls %s", status)
 
-        if keycode in self.ENV_STATE_KEYCODES.values():
+        if keycode in [v[0] for v in self.ENV_STATE_KEYCODES.values()]:
             self.data_modifying_keycode = keycode
 
     @abc.abstractmethod
     def run(self) -> None:
         """Run the visualization loop."""
         pass
+
+    def add_keyframe(self, keyframe: Keyframe) -> None:
+        """Add a keyframe to the visualizer."""
+        self.keyframes.append(keyframe)
+
+    def remove_keyframe(self, name: str) -> None:
+        """Remove a keyframe from the visualizer."""
+        for keyframe in self.keyframes:
+            if keyframe.name == name:
+                self.keyframes.remove(keyframe)
+                return
+        logger.warning("Keyframe %s not found", name)
+
+    def get_keyframe(self, name: str) -> Keyframe | None:
+        """Get a keyframe by name."""
+        for keyframe in self.keyframes:
+            if keyframe.name == name:
+                return keyframe
+        logger.warning("Keyframe %s not found", name)
+        return None
 
     def update_plot(self) -> None:
         """Update plot and save to disk."""

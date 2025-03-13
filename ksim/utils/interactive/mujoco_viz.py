@@ -13,6 +13,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib
 from jaxtyping import Array, PyTree
+import numpy as np
 
 from ksim.env.mjx_env import MjxEnv
 from ksim.task.rl import RLTask
@@ -50,22 +51,6 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
     """Visualizer for Mujoco-based environments supporting both Mujoco and MJX backends."""
 
     viz_config: MujocoInteractiveVisualizerConfig
-
-    # Key definitions for controls
-    key_up: int = ord("w")  # Move forward in x
-    key_down: int = ord("s")  # Move backward in x
-    key_right: int = ord("d")  # Move right in y
-    key_left: int = ord("a")  # Move left in y
-    key_p: int = ord("p")  # Move up in z
-    key_l: int = ord("l")  # Move down in z
-    key_q: int = ord("q")  # Rotate yaw positive
-    key_e: int = ord("e")  # Rotate yaw negative
-    key_semicolon: int = ord(";")  # Rotate roll positive
-    key_apostrophe: int = ord("'")  # Rotate roll negative
-    key_period: int = ord(".")  # Rotate pitch positive
-    key_slash: int = ord("/")  # Rotate pitch negative
-    key_n: int = ord("n")  # Step forward one frame
-    key_r: int = ord("r")  # Reset joints and orientation
 
     def __init__(
         self,
@@ -160,6 +145,24 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
 
     def _handle_key_action(self, key: int) -> str:
         """Handle keyboard action using match-case."""
+        # For static typing, we need to assert that keycodes are set.
+        msg = "All keycodes must be set"
+        assert hasattr(self, "key_up"), msg
+        assert hasattr(self, "key_down"), msg
+        assert hasattr(self, "key_right"), msg
+        assert hasattr(self, "key_left"), msg
+        assert hasattr(self, "key_p"), msg
+        assert hasattr(self, "key_l"), msg
+        assert hasattr(self, "key_n"), msg
+        assert hasattr(self, "key_r"), msg
+        assert hasattr(self, "key_q"), msg
+        assert hasattr(self, "key_e"), msg
+        assert hasattr(self, "key_semicolon"), msg
+        assert hasattr(self, "key_apostrophe"), msg
+        assert hasattr(self, "key_period"), msg
+        assert hasattr(self, "key_slash"), msg
+        assert hasattr(self, "key_h"), msg
+
         match key:
             case self.key_up:
                 return self._update_translation(axis=0, sign=1, axis_name="x")
@@ -193,6 +196,50 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                 self.data.qacc[6:] = self.env.default_mj_data.qacc[6:]
                 self.data.ctrl[:] = self.env.default_mj_data.ctrl
                 return "Resetting joints and orientation to initial state"
+            case self.key_h:
+                if self.keyframes:
+                    self.current_keyframe_idx = (self.current_keyframe_idx + 1) % len(
+                        self.keyframes
+                    )
+                    keyframe = self.keyframes[self.current_keyframe_idx]
+                    position, velocity, joint_pos, joint_vel = (
+                        keyframe.position,
+                        keyframe.velocity,
+                        keyframe.joint_positions,
+                        keyframe.joint_velocities,
+                    )
+                    if position is None:
+                        position = self.data.qpos[:3]
+                    elif position.shape != 3:
+                        raise ValueError(
+                            f"Position shape mismatch: {position.shape} != 3 (x, y, z)"
+                        )
+                    if velocity is None:
+                        velocity = self.data.qvel[:3]
+                    elif velocity.shape != 3:
+                        raise ValueError(
+                            f"Velocity shape mismatch: {velocity.shape} != 3 (x, y, z)"
+                        )
+                    if joint_pos is None:
+                        joint_pos = self.data.qpos[7:]
+                    elif joint_pos.shape != self.data.qpos[7:].shape:
+                        raise ValueError(
+                            f"Joint positions shape mismatch: "
+                            f"{joint_pos.shape} != {self.data.qpos[7:].shape}"
+                        )
+                    if joint_vel is None:
+                        joint_vel = self.data.qvel[6:]
+                    elif joint_vel.shape != self.data.qvel[6:].shape:
+                        raise ValueError(
+                            f"Joint velocities shape mismatch: "
+                            f"{joint_vel.shape} != {self.data.qvel[6:].shape}"
+                        )
+
+                    self.data.qpos = jnp.concatenate([position, self.data.qpos[3:7], joint_pos])
+                    self.data.qvel = jnp.concatenate([velocity, self.data.qvel[3:6], joint_vel])
+                    return f"Resetting to keyframe {keyframe.name}"
+                else:
+                    logger.warning("No keyframes to reset to")
             case _:
                 logger.warning("Unknown keycode: %d", key)
                 return f"Unknown keycode: {key}"
@@ -208,23 +255,6 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
 
         The loop continues until the viewer is closed or an error occurs.
         """
-        # For static typing, we need to assert that keycodes are set.
-        msg = "All keycodes must be set"
-        assert hasattr(self, "key_up"), msg
-        assert hasattr(self, "key_down"), msg
-        assert hasattr(self, "key_right"), msg
-        assert hasattr(self, "key_left"), msg
-        assert hasattr(self, "key_p"), msg
-        assert hasattr(self, "key_l"), msg
-        assert hasattr(self, "key_n"), msg
-        assert hasattr(self, "key_r"), msg
-        assert hasattr(self, "key_q"), msg
-        assert hasattr(self, "key_e"), msg
-        assert hasattr(self, "key_semicolon"), msg
-        assert hasattr(self, "key_apostrophe"), msg
-        assert hasattr(self, "key_period"), msg
-        assert hasattr(self, "key_slash"), msg
-
         assert isinstance(self.viz_config, MujocoInteractiveVisualizerConfig)
 
         # Set up MJX objects only if using the MJX backend.
