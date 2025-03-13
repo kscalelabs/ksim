@@ -14,7 +14,7 @@ from mujoco import mjx
 
 from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import geoms_colliding
-from ksim.utils.transforms import quat_to_euler
+from ksim.utils.transforms import get_projected_gravity_vector_from_quat, quat_to_euler
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,7 @@ class Reward(ABC):
                 "Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale
             )
 
-    # TODO: Use post_accumulate after unrolling
-    def post_accumulate(self, reward: Array) -> Array:
+    def post_accumulate(self, reward: Array, done: Array) -> Array:
         """Runs a post-epoch accumulation step.
 
         This function is called after the reward has been accumulated over the
@@ -62,8 +61,11 @@ class Reward(ABC):
         start providing the reward or penalty after a certain number of steps
         have passed.
 
+        The done array is needed for post_accumulate functions that also need to be reset.
+
         Args:
             reward: The accumulated reward over the epoch.
+            done: Termination flag for each environment at every timestep
         """
         return reward
 
@@ -138,7 +140,8 @@ class OrientationPenalty(Reward):
     ) -> Array:
         return jnp.sum(
             get_norm(
-                quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - jnp.array(self.target_orientation),
+                get_projected_gravity_vector_from_quat(mjx_data_t_plus_1.qpos[3:7])
+                - jnp.array(self.target_orientation),
                 self.norm,
             )
         )
@@ -330,7 +333,6 @@ class FootSlipPenalty(Reward):
 
         # Get x and y velocities
         body_vel = mjx_data_t_plus_1.qvel[:2]
-
         return jnp.sum(jnp.linalg.norm(body_vel, axis=-1) * contacts)
 
 
@@ -342,7 +344,13 @@ class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
     def __call__(self, data: BuilderData) -> FootSlipPenalty:
         illegal_geom_idxs = []
         for geom_name in self.foot_geom_names:
-            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            try:
+                illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            except KeyError:
+                raise ValueError(
+                    f"Geom '{geom_name}' not found in model. Possible options are:",
+                    f"{list(data.mujoco_mappings.geom_name_to_idx.keys())}"
+                )
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -391,7 +399,13 @@ class FeetClearancePenaltyBuilder(RewardBuilder[FeetClearancePenalty]):
     def __call__(self, data: BuilderData) -> FeetClearancePenalty:
         illegal_geom_idxs = []
         for geom_name in self.foot_geom_names:
-            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            try:
+                illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            except KeyError:
+                raise ValueError(
+                    f"Geom '{geom_name}' not found in model. Possible options are:",
+                    f"{list(data.mujoco_mappings.geom_name_to_idx.keys())}"
+                )
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -485,7 +499,13 @@ class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     def __call__(self, data: BuilderData) -> FootContactPenalty:
         illegal_geom_idxs = []
         for geom_name in self.foot_geom_names:
-            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            try:
+                illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            except KeyError:
+                raise ValueError(
+                    f"Geom '{geom_name}' not found in model. Possible options are:",
+                    f"{list(data.mujoco_mappings.geom_name_to_idx.keys())}"
+                )
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -553,7 +573,10 @@ class DefaultPoseDeviationPenaltyBuilder(RewardBuilder[DefaultPoseDeviationPenal
                 default_positions_list.append(position)
                 joint_deviation_weights.append(self.deviation_weights[joint_name])
             except KeyError:
-                raise ValueError(f"Joint '{joint_name}' not found in model")
+                raise ValueError(
+                    f"Joint '{joint_name}' not found in model. Possible options are:",
+                    f"{list(data.mujoco_mappings.qpos_name_to_idx_range.keys())}"
+                )
 
         joint_indices_array = jnp.array(joint_indices)
         default_positions_array = jnp.array(default_positions_list)
@@ -620,7 +643,10 @@ class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
                 soft_lowers.append(lower)
                 soft_uppers.append(upper)
             else:
-                raise ValueError(f"Joint '{joint_name}' not found in model")
+                raise ValueError(
+                    f"Joint '{joint_name}' not found in model. Possible options are:",
+                    f"{list(data.mujoco_mappings.qpos_name_to_idx_range.keys())}"
+                )
 
         if not joint_indices:
             raise ValueError("No valid joints specified for JointPosLimitPenalty")
@@ -631,7 +657,6 @@ class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
             soft_lower_limits=jnp.array(soft_lowers),
             soft_upper_limits=jnp.array(soft_uppers),
         )
-
 
 @attrs.define(frozen=True, kw_only=True)
 class DHForwardReward(Reward):
@@ -649,6 +674,21 @@ class DHForwardReward(Reward):
         velocity = mjx_data_t_plus_1.qvel[0]
         return velocity
 
+@attrs.define(frozen=True, kw_only=True)
+class XPosReward(Reward):
+    """Reward for how far the robot has moved in the x direction."""
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        x_pos = mjx_data_t_plus_1.qpos[0]
+        return x_pos
+
 
 @attrs.define(frozen=True, kw_only=True)
 class DHHealthyReward(Reward):
@@ -665,10 +705,7 @@ class DHHealthyReward(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        height = mjx_data_t.qpos[2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
+        return jnp.array(1.0)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -704,4 +741,4 @@ class DHControlPenalty(Reward):
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
     ) -> Array:
-        return -jnp.sum(jnp.square(action_t))
+        return jnp.sum(jnp.square(action_t))

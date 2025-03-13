@@ -13,6 +13,7 @@ class RolloutTimeLossComponents:
 
     initial_action_log_probs: Array
     initial_values: Array
+    value_targets: Array
 
 
 @jax.tree_util.register_dataclass

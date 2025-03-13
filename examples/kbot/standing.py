@@ -27,6 +27,7 @@ from ksim.builders.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
     DefaultPoseDeviationPenaltyBuilder,
+    FootSlipPenaltyBuilder,
     HeightReward,
     JointAccelerationPenalty,
     LinearVelocityZPenalty,
@@ -39,19 +40,56 @@ from ksim.builders.terminations import (
     RollTooGreatTermination,
 )
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.formulations import ActionModel, ActorCriticAgent, GaussianActionModel
+from ksim.model.distributions import TanhGaussianDistribution
+from ksim.model.formulations import ActorCriticAgent, ActorModel
 from ksim.model.mlp import MLP
 from ksim.task.ppo import PPOConfig, PPOTask
 
 NUM_OUTPUTS = 14  # No shoulders
 
 
-class KBotActorModel(GaussianActionModel):
-    mlp: MLP
-    action_clipping: float = 20.0
-    action_scale: float = 0.5
+# class KBotActorModel(GaussianActionModel):
+#     mlp: MLP
+#     action_clipping: float = 20.0
+#     action_scale: float = 0.5
 
+#     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+#         lin_vel_cmd_2 = cmd["linear_velocity_command"]
+#         ang_vel_cmd_1 = cmd["angular_velocity_command"]
+#         joint_pos_j = obs["joint_position_observation_noisy"]
+#         joint_vel_j = obs["joint_velocity_observation_noisy"]
+#         imu_acc_3 = obs["imu_acc_sensor_observation"]
+#         imu_gyro_3 = obs["imu_gyro_sensor_observation"]
+
+#         x_n = jnp.concatenate(
+#             [
+#                 lin_vel_cmd_2,
+#                 ang_vel_cmd_1,
+#                 imu_acc_3,
+#                 imu_gyro_3,
+#                 joint_pos_j,
+#                 joint_vel_j,
+#             ],
+#             axis=-1,
+#         )
+
+#         actions_n = self.mlp(x_n)
+
+#         actions_n = actions_n * self.action_scale
+#         actions_n = jnp.clip(actions_n, -self.action_clipping, self.action_clipping)
+#         return actions_n
+    
+class KBotLearnedStdActor(ActorModel):
+    """K-Bot actor with learned std."""
+
+    underlying_actor: MLP
+    min_std: float = 0.01
+    max_std: float = 5.0
+    var_scale: float = 0.5
+
+    @nn.compact
     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+        """Forward pass of the actor model."""
         lin_vel_cmd_2 = cmd["linear_velocity_command"]
         ang_vel_cmd_1 = cmd["angular_velocity_command"]
         joint_pos_j = obs["joint_position_observation_noisy"]
@@ -71,24 +109,25 @@ class KBotActorModel(GaussianActionModel):
             axis=-1,
         )
 
-        actions_n = self.mlp(x_n)
+        predictions = self.underlying_actor(x_n)
+        mean = predictions[..., :NUM_OUTPUTS]
+        std = predictions[..., NUM_OUTPUTS:]
+        std = (jax.nn.softplus(std) + self.min_std) * self.var_scale
+        std = jnp.clip(std, self.min_std, self.max_std)
+        return jnp.concatenate([mean, std], axis=-1)
 
-        actions_n = jnp.clip(actions_n, -self.action_clipping, self.action_clipping)
-        actions_n = actions_n * self.action_scale
-        return actions_n
 
+# class KBotZeroActions(GaussianActionModel):
+#     mlp: MLP
 
-class KBotZeroActions(GaussianActionModel):
-    mlp: MLP
+#     def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
+#         return jnp.zeros_like(NUM_OUTPUTS)
 
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        return jnp.zeros_like(NUM_OUTPUTS)
-
-    def sample_and_log_prob(
-        self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
-    ) -> tuple[Array, Array]:
-        mean = self(obs, cmd)
-        return mean, mean
+#     def sample_and_log_prob(
+#         self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array], rng: PRNGKeyArray
+#     ) -> tuple[Array, Array]:
+#         mean = self(obs, cmd)
+#         return mean, mean
 
 
 class KBotCriticModel(nn.Module):
@@ -125,8 +164,6 @@ class KBotStandingConfig(PPOConfig, MjxEnvConfig):
     max_episode_length: float = xax.field(value=10.0)
     max_pitch: float = xax.field(value=0.1)
     max_roll: float = xax.field(value=0.1)
-    action_clipping: float = xax.field(value=10.0)
-    action_scale: float = xax.field(value=0.3)
 
     actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
 
@@ -146,36 +183,46 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
             ],
             rewards=[
                 LinearVelocityZPenalty(scale=-0.0),
-                AngularVelocityXYPenalty(scale=-0.15),
+                AngularVelocityXYPenalty(scale=-0.02),
                 TrackLinearVelocityXYReward(scale=1.0),
-                HeightReward(scale=1.0, height_target=1.0),
+                HeightReward(scale=5.0, height_target=0.98),
                 TrackAngularVelocityZReward(scale=1.0),
                 ActionSmoothnessPenalty(scale=-0.0),
-                OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
+                OrientationPenalty(scale=-1.0, target_orientation=[0.0, 0.0, -1.0]),
                 JointAccelerationPenalty(scale=0.0),  # -2e-7),
+                FootSlipPenaltyBuilder(scale=-0.25, foot_geom_names=["foot1_collision_sphere_1",
+                                                    "foot1_collision_sphere_2",
+                                                    "foot1_collision_sphere_3",
+                                                    "foot1_collision_sphere_4",
+                                                    "foot1_collision_box",
+                                                    "foot3_collision_sphere_1",
+                                                    "foot3_collision_sphere_2",
+                                                    "foot3_collision_sphere_3",
+                                                    "foot3_collision_sphere_4",
+                                                    "foot3_collision_box"]),
                 DefaultPoseDeviationPenaltyBuilder(
-                    scale=-0.1,
+                    scale=-0.01,
                     default_positions={
                         # "left_shoulder_pitch_03": 0.0,
                         # "left_shoulder_roll_03": 0.0,
                         # "left_shoulder_yaw_02": 0.0,
-                        "left_elbow_02": 0.0,
+                        "left_elbow_02": -1.57,
                         "left_wrist_02": 0.0,
                         # "right_shoulder_pitch_03": 0.0,
                         # "right_shoulder_roll_03": 0.0,
                         # "right_shoulder_yaw_02": 0.0,
-                        "right_elbow_02": 0.0,
+                        "right_elbow_02": 1.57,
                         "right_wrist_02": 0.0,
-                        "left_hip_pitch_04": 0.0,
+                        "left_hip_pitch_04": 0.23,
                         "left_hip_roll_03": 0.0,
                         "left_hip_yaw_03": 0.0,
-                        "left_knee_04": 0.0,
-                        "left_ankle_02": 0.0,
-                        "right_hip_pitch_04": 0.0,
+                        "left_knee_04": 0.441,
+                        "left_ankle_02": -0.195,
+                        "right_hip_pitch_04": -0.23,
                         "right_hip_roll_03": 0.0,
                         "right_hip_yaw_03": 0.0,
-                        "right_knee_04": 0.0,
-                        "right_ankle_02": 0.0,
+                        "right_knee_04": -0.441,
+                        "right_ankle_02": 0.195,
                     },
                     deviation_weights={
                         # "left_shoulder_pitch_03": 1.0,
@@ -233,24 +280,34 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         return ActorCriticAgent(
-            actor_module=KBotActorModel(
-                mlp=MLP(
-                    num_hidden_layers=self.config.actor_num_layers,
-                    hidden_features=self.config.actor_hidden_dims,
-                    out_features=NUM_OUTPUTS,
+            # actor_module=KBotActorModel(
+            #     mlp=MLP(
+            #         num_hidden_layers=self.config.actor_num_layers,
+            #         hidden_features=self.config.actor_hidden_dims,
+            #         out_features=NUM_OUTPUTS,
+            #     ),
+            #     init_log_std=-0.7,
+            #     num_outputs=NUM_OUTPUTS,
+            #     action_clipping=self.config.action_clipping,
+            #     action_scale=self.config.action_scale,
+            # ),
+            actor_module=KBotLearnedStdActor(
+                underlying_actor=MLP(
+                    out_dim=NUM_OUTPUTS * 2,
+                    hidden_dims=(64,) * 5,
+                    activation=nn.relu,
+                    bias_init=nn.initializers.zeros,
                 ),
-                init_log_std=-0.7,
-                num_outputs=NUM_OUTPUTS,
-                action_clipping=self.config.action_clipping,
-                action_scale=self.config.action_scale,
             ),
             critic_module=KBotCriticModel(
                 mlp=MLP(
-                    num_hidden_layers=self.config.critic_num_layers,
-                    hidden_features=self.config.critic_hidden_dims,
-                    out_features=1,
+                    out_dim=1,
+                    hidden_dims=(64,) * 5,
+                    activation=nn.relu,
+                    bias_init=nn.initializers.zeros,
                 ),
             ),
+            distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:
@@ -269,16 +326,19 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
 
             case "env":
                 mlp = MLP(
-                    num_hidden_layers=self.config.actor_num_layers,
-                    hidden_features=self.config.actor_hidden_dims,
-                    out_features=NUM_OUTPUTS,
+                    out_dim=NUM_OUTPUTS * 2,
+                    hidden_dims=(64,) * 5,
+                    activation=nn.relu,
+                    bias_init=nn.initializers.zeros,
                 )
-                actor: ActionModel
+                actor: ActorModel
                 match self.config.viz_action:
                     case "policy":
-                        actor = KBotActorModel(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
+                        actor = KBotLearnedStdActor(underlying_actor=mlp)
+                        # actor = KBotActorModel(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
                     case "zero":
-                        actor = KBotZeroActions(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
+                        actor = KBotLearnedStdActor(underlying_actor=mlp)
+                        # actor = KBotZeroActions(num_outputs=NUM_OUTPUTS, mlp=mlp, init_log_std=-0.7)
                     case _:
                         raise ValueError(
                             f"Invalid action: {self.config.viz_action}."
@@ -289,9 +349,10 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                     actor_module=actor,
                     critic_module=KBotCriticModel(
                         mlp=MLP(
-                            num_hidden_layers=self.config.critic_num_layers,
-                            hidden_features=self.config.critic_hidden_dims,
-                            out_features=1,
+                            out_dim=1,
+                            hidden_dims=(64,) * 5,
+                            activation=nn.relu,
+                            bias_init=nn.initializers.zeros,
                         ),
                     ),
                 )
@@ -314,9 +375,9 @@ if __name__ == "__main__":
             num_envs=2048,
             dt=0.001,
             max_episode_length=20.0,
-            ctrl_dt=0.008,
-            learning_rate=5e-5,
-            save_every_n_seconds=60 * 4,
+            ctrl_dt=0.01,
+            learning_rate=1e-4,
+            save_every_n_seconds=60 * 10,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,

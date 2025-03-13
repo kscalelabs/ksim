@@ -248,8 +248,7 @@ def get_collision_info(contact: mjx.Contact, geom1: int, geom2: int) -> tuple[ja
 def geoms_colliding(state: mjx.Data, geom1: int, geom2: int) -> jax.Array:
     """Return True if the two geoms are colliding."""
     return jax.lax.cond(
-        jnp.equal(state.contact.geom.shape[0], 0),  # if no contacts, return False
-        lambda _: jnp.array(False),
-        lambda _: get_collision_info(state.contact, geom1, geom2)[0] < 0,
-        operand=None,
+        jnp.equal(state.contact.geom.shape[0], 0),  # If no contacts, return False
+        lambda: jnp.array(False),
+        lambda: get_collision_info(state.contact, geom1, geom2)[0] < 0,  # Otherwise, check if colliding
     )
