@@ -1,10 +1,9 @@
-"""Defines simple task for training a walking policy for K-Bot."""
+"""defines simple task for training a walking policy for zbot2."""
 
 from dataclasses import dataclass
 
 import flax.linen as nn
 import jax.numpy as jnp
-import xax
 from jaxtyping import PRNGKeyArray
 
 from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
@@ -19,21 +18,13 @@ from ksim.builders.observation import (
     JointVelocityObservation,
     SensorObservationBuilder,
 )
-from ksim.builders.resets import (
-    RandomizeJointPositions,
-    RandomizeJointVelocities,
-    XYPositionResetBuilder,
-)
+from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import (
-    ActionSmoothnessPenalty,
-    AngularVelocityXYPenalty,
     DefaultPoseDeviationPenaltyBuilder,
+    DHForwardReward,
+    DHHealthyReward,
     HeightReward,
-    JointAccelerationPenalty,
-    LinearVelocityZPenalty,
     OrientationPenalty,
-    TrackAngularVelocityZReward,
-    TrackLinearVelocityXYReward,
 )
 from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
@@ -41,18 +32,18 @@ from ksim.model.base import ActorCriticAgent
 from ksim.model.factory import mlp_actor_critic_agent
 from ksim.task.ppo import PPOConfig, PPOTask
 
-NUM_OUTPUTS = 14  # No shoulders
-
 ######################
 # Static Definitions #
 ######################
 
+NUM_OUTPUTS = 18
+
 
 @dataclass
-class KBotStandingConfig(PPOConfig, MjxEnvConfig):
-    """Combining configs for the KBot standing task and fixing params."""
+class ZBot2WalkingConfig(PPOConfig, MjxEnvConfig):
+    """Combining configs for the ZBot2 walking task and fixing params."""
 
-    robot_model_name: str = xax.field(value="examples/kbot/")
+    robot_model_name: str = "examples/zbot2/"
 
 
 ####################
@@ -60,7 +51,7 @@ class KBotStandingConfig(PPOConfig, MjxEnvConfig):
 ####################
 
 
-class KBotStandingTask(PPOTask[KBotStandingConfig]):
+class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
     def get_environment(self) -> MjxEnv:
         """Get the environment."""
         return MjxEnv(
@@ -71,64 +62,51 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
             ],
             resets=[
                 XYPositionResetBuilder(),
-                RandomizeJointVelocities(scale=0.01),
-                RandomizeJointPositions(scale=0.01),
             ],
             rewards=[
-                LinearVelocityZPenalty(scale=-0.0),
-                AngularVelocityXYPenalty(scale=-0.15),
-                TrackLinearVelocityXYReward(scale=1.0),
-                HeightReward(scale=1.0, height_target=1.0),
-                TrackAngularVelocityZReward(scale=1.0),
-                ActionSmoothnessPenalty(scale=-0.0),
+                # HeightReward(scale=1.0, height_target=0.42),
                 OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
-                JointAccelerationPenalty(scale=0.0),  # -2e-7),
                 DefaultPoseDeviationPenaltyBuilder(
                     scale=-0.1,
                     default_positions={
-                        # "left_shoulder_pitch_03": 0.0,
-                        # "left_shoulder_roll_03": 0.0,
-                        # "left_shoulder_yaw_02": 0.0,
-                        "left_elbow_02": 0.0,
-                        "left_wrist_02": 0.0,
-                        # "right_shoulder_pitch_03": 0.0,
-                        # "right_shoulder_roll_03": 0.0,
-                        # "right_shoulder_yaw_02": 0.0,
-                        "right_elbow_02": 0.0,
-                        "right_wrist_02": 0.0,
-                        "left_hip_pitch_04": 0.0,
-                        "left_hip_roll_03": 0.0,
-                        "left_hip_yaw_03": 0.0,
-                        "left_knee_04": 0.0,
-                        "left_ankle_02": 0.0,
-                        "right_hip_pitch_04": 0.0,
-                        "right_hip_roll_03": 0.0,
-                        "right_hip_yaw_03": 0.0,
-                        "right_knee_04": 0.0,
-                        "right_ankle_02": 0.0,
+                        "left_shoulder_pitch": 0.0,
+                        "left_shoulder_yaw": 0.0,
+                        "left_elbow": 0.0,
+                        "right_shoulder_pitch": 0.0,
+                        "right_shoulder_yaw": 0.0,
+                        "right_elbow": 0.0,
+                        "left_hip_pitch": 0.0,
+                        "left_hip_roll": 0.0,
+                        "left_hip_yaw": 0.0,
+                        "left_knee": 0.0,
+                        "left_ankle": 0.0,
+                        "right_hip_pitch": 0.0,
+                        "right_hip_roll": 0.0,
+                        "right_hip_yaw": 0.0,
+                        "right_knee": 0.0,
+                        "right_ankle": 0.0,
                     },
                     deviation_weights={
-                        # "left_shoulder_pitch_03": 1.0,
-                        # "left_shoulder_roll_03": 1.0,
-                        # "left_shoulder_yaw_02": 1.0,
-                        "left_elbow_02": 1.0,
-                        "left_wrist_02": 1.0,
-                        # "right_shoulder_pitch_03": 1.0,
-                        # "right_shoulder_roll_03": 1.0,
-                        # "right_shoulder_yaw_02": 1.0,
-                        "right_elbow_02": 1.0,
-                        "right_wrist_02": 1.0,
-                        "left_hip_pitch_04": 2.0,
-                        "left_hip_roll_03": 2.0,
-                        "left_hip_yaw_03": 2.0,
-                        "left_knee_04": 1.0,
-                        "left_ankle_02": 1.0,
-                        "right_hip_pitch_04": 2.0,
-                        "right_hip_roll_03": 2.0,
-                        "right_hip_yaw_03": 2.0,
-                        "right_knee_04": 1.0,
-                        "right_ankle_02": 1.0,
+                        "left_shoulder_pitch": 1.0,
+                        "left_shoulder_yaw": 1.0,
+                        "left_elbow": 1.0,
+                        "right_shoulder_pitch": 1.0,
+                        "right_shoulder_yaw": 1.0,
+                        "right_elbow": 1.0,
+                        "left_hip_pitch": 2.0,
+                        "left_hip_roll": 2.0,
+                        "left_hip_yaw": 2.0,
+                        "left_knee": 1.0,
+                        "left_ankle": 1.0,
+                        "right_hip_pitch": 2.0,
+                        "right_hip_roll": 2.0,
+                        "right_hip_yaw": 2.0,
+                        "right_knee": 1.0,
+                        "right_ankle": 1.0,
                     },
+                ),
+                DHHealthyReward(
+                    scale=0.5,
                 ),
             ],
             observations=[
@@ -140,8 +118,8 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
                 CenterOfMassInertiaObservation(noise_type="gaussian"),
                 CenterOfMassVelocityObservation(noise_type="gaussian"),
                 ActuatorForceObservation(noise_type="gaussian"),
-                SensorObservationBuilder(sensor_name="imu_acc"),  # Sensor has noise already.
-                SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
+                SensorObservationBuilder(sensor_name="IMU_acc"),  # Sensor has noise already.
+                SensorObservationBuilder(sensor_name="IMU_gyro"),  # Sensor has noise already.
             ],
             commands=[
                 LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
@@ -171,9 +149,9 @@ class KBotStandingTask(PPOTask[KBotStandingConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot.standing
-    KBotStandingTask.launch(
-        KBotStandingConfig(
+    # python -m examples.zbot2.walking
+    ZBot2WalkingTask.launch(
+        ZBot2WalkingConfig(
             num_learning_epochs=8,
             num_env_states_per_minibatch=8192,
             num_minibatches=32,

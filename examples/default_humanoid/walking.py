@@ -15,17 +15,9 @@ from ksim.builders.observation import (
     LegacyPositionObservation,
     LegacyVelocityObservation,
 )
-from ksim.builders.resets import (
-    RandomizeJointPositions,
-    RandomizeJointVelocities,
-)
-from ksim.builders.rewards import (
-    DHForwardReward,
-    DHHealthyReward,
-)
-from ksim.builders.terminations import (
-    UnhealthyTermination,
-)
+from ksim.builders.resets import RandomizeJointPositions, RandomizeJointVelocities
+from ksim.builders.rewards import DHForwardReward, DHHealthyReward
+from ksim.builders.terminations import UnhealthyTermination
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.base import ActorCriticAgent
 from ksim.model.factory import mlp_actor_critic_agent
@@ -43,12 +35,6 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     """Combining configs for the humanoid walking task and fixing params."""
 
     robot_model_name: str = "examples/default_humanoid/"
-
-    # Action latency.
-    min_action_latency: float = xax.field(value=0.0)
-    max_action_latency: float = xax.field(value=0.0)
-
-    actuator_type: str = xax.field(value="scaled_torque", help="The type of actuator to use.")
 
 
 ####################
@@ -116,7 +102,7 @@ if __name__ == "__main__":
             num_envs=2048,
             dt=0.005,
             ctrl_dt=0.02,
-            learning_rate=0.00005,
+            learning_rate=5e-5,
             save_every_n_steps=50,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
@@ -134,5 +120,7 @@ if __name__ == "__main__":
             clip_param=0.3,
             use_clipped_value_loss=False,
             max_grad_norm=1.0,
+            max_action_latency=0.0,
+            min_action_latency=0.0,
         ),
     )
