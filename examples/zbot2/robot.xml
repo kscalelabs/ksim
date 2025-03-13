@@ -51,7 +51,7 @@
   </asset>
 
   <worldbody>
-    <body name="floating_base_link" pos="0.00000000 0.00000000 0.42" childclass="robot">
+    <body name="floating_base_link" pos="0.00000000 0.00000000 0.42181800" quat="0.7071 0 0 0.7071" childclass="robot">
       <freejoint name="floating_base" />
       <geom name="floating_base_link_visual" material="floating_base_link_material" type="sphere" size="0.01" class="visual" />
       <body name="Z_BOT2_MASTER_BODY_SKELETON">
