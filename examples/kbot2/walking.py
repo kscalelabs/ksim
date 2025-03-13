@@ -7,8 +7,11 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import PRNGKeyArray
 
-from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.builders.observation import (
+from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
+from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
+from ksim.model.base import ActorCriticAgent
+from ksim.model.factory import mlp_actor_critic_agent
+from ksim.observation import (
     ActuatorForceObservation,
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
@@ -19,17 +22,14 @@ from ksim.builders.observation import (
     JointVelocityObservation,
     SensorObservationBuilder,
 )
-from ksim.builders.resets import (
+from ksim.resets import (
     RandomizeJointPositions,
     RandomizeJointVelocities,
     XYPositionResetBuilder,
 )
-from ksim.builders.rewards import DHForwardReward, DHHealthyReward
-from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
-from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.base import ActorCriticAgent
-from ksim.model.factory import mlp_actor_critic_agent
+from ksim.rewards import DHForwardReward, DHHealthyReward
 from ksim.task.ppo import PPOConfig, PPOTask
+from ksim.terminations import PitchTooGreatTermination, RollTooGreatTermination
 
 ######################
 # Static Definitions #
@@ -49,6 +49,8 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
     def get_environment(self) -> MjxEnv:
         return MjxEnv(
             self.config,
+            robot_model_path=self.config.robot_model_name,
+            actuators=Actuators(),
             terminations=[
                 RollTooGreatTermination(max_roll=0.3),
                 PitchTooGreatTermination(max_pitch=0.3),
@@ -117,7 +119,6 @@ if __name__ == "__main__":
             obs_norm_alpha=0.0,
             solver_iterations=6,
             solver_ls_iterations=6,
-            actuator_type="mit",
             scale_rewards=False,
             gamma=0.97,
             lam=0.95,

@@ -10,10 +10,10 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING
 
-from ksim.builders.rewards import Reward
-from ksim.builders.terminations import Termination
 from ksim.env.types import EnvState, PhysicsData, PhysicsModel
 from ksim.model.base import ActorCriticAgent
+from ksim.rewards import Reward
+from ksim.terminations import Termination
 
 
 @jax.tree_util.register_dataclass

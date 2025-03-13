@@ -3,40 +3,34 @@
 from abc import ABC, abstractmethod
 
 import attrs
+import distrax
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
-
-from ksim.utils.constants import EPSILON
 
 
 @attrs.define(kw_only=True, frozen=True)
 class ActionDistribution(ABC):
     """Abstract class for parametrized action distribution."""
 
-    action_dim: int = attrs.field()
-    """Shape of the distribution's output vector."""
+    action_dim: int = attrs.field(metadata={"help": "Shape of the distribution's output vector."})
 
     @property
     @abstractmethod
     def num_params(self) -> int:
         """Number of parameters of the distribution. Function of action_dim."""
-        ...
 
     @abstractmethod
     def sample(self, parameters: Array, rng: Array) -> Array:
         """Returns a sample from the postprocessed distribution."""
-        ...
 
     @abstractmethod
     def mode(self, parameters: Array) -> Array:
         """Returns the mode of the postprocessed distribution."""
-        ...
 
     @abstractmethod
     def log_prob(self, parameters: Array, actions: Array) -> Array:
         """Compute the log probability of actions."""
-        ...
 
     @abstractmethod
     def entropy(self, parameters: Array, rng: Array) -> Array:
@@ -45,7 +39,6 @@ class ActionDistribution(ABC):
         Note that we pass in rng because some distributions may require
         sampling to compute the entropy.
         """
-        ...
 
 
 @attrs.define(kw_only=True, frozen=True)
@@ -114,6 +107,8 @@ class GaussianDistribution(ActionDistribution):
 class TanhGaussianDistribution(GaussianDistribution):
     """Normal distribution followed by tanh."""
 
+    eps: float = attrs.field(default=1e-6, metadata={"help": "Epsilon for numerical stability."})
+
     def _log_det_jacobian(self, actions: Array) -> Array:
         """Compute the log determinant of the jacobian of the tanh transform.
 
@@ -146,14 +141,14 @@ class TanhGaussianDistribution(GaussianDistribution):
         """
         mean, std = self.get_mean_std(parameters)
         # Compute the pre-tanh values from the actions (with clipping for stability)
-        pre_tanh = jnp.arctanh(jnp.clip(actions, -1 + EPSILON, 1 - EPSILON))
+        pre_tanh = jnp.arctanh(jnp.clip(actions, -1 + self.eps, 1 - self.eps))
         # Compute the base log probability from the Gaussian density
         base_log_prob = (
             -0.5 * jnp.square((pre_tanh - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
         )
         base_log_prob = jnp.sum(base_log_prob, axis=-1)
         # Compute the log-determinant of the Jacobian for the tanh transformation
-        jacobian_correction = jnp.sum(jnp.log(1 - jnp.square(actions) + EPSILON), axis=-1)
+        jacobian_correction = jnp.sum(jnp.log(1 - jnp.square(actions) + self.eps), axis=-1)
         return base_log_prob - jacobian_correction
 
     def entropy(self, parameters: Array, rng: Array) -> Array:
@@ -177,8 +172,10 @@ class TanhGaussianDistribution(GaussianDistribution):
 class CategoricalDistribution(ActionDistribution):
     """Categorical distribution."""
 
-    sampling_temperature: float = attrs.field(default=1.0)
-    """Temperature for the sampling distribution."""
+    sampling_temperature: float = attrs.field(
+        default=1.0,
+        metadata={"help": "Temperature for sampling. Higher means more exploration."},
+    )
 
     @property
     def num_params(self) -> int:

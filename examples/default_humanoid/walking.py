@@ -6,25 +6,22 @@ import flax.linen as nn
 import jax.numpy as jnp
 from jaxtyping import PRNGKeyArray
 
-from ksim.builders.commands import LinearVelocityCommand
-from ksim.builders.observation import (
+from ksim.actuators.torque import TorqueActuators
+from ksim.commands import LinearVelocityCommand
+from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
+from ksim.model.base import ActorCriticAgent
+from ksim.model.factory import mlp_actor_critic_agent
+from ksim.observation import (
     ActuatorForceObservation,
     CenterOfMassInertiaObservation,
     CenterOfMassVelocityObservation,
     LegacyPositionObservation,
     LegacyVelocityObservation,
 )
-from ksim.builders.resets import RandomizeJointPositions, RandomizeJointVelocities
-from ksim.builders.rewards import DHForwardReward, DHHealthyReward
-from ksim.builders.terminations import UnhealthyTermination
-from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.base import ActorCriticAgent
-from ksim.model.factory import mlp_actor_critic_agent
+from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
+from ksim.rewards import DHForwardReward, DHHealthyReward
 from ksim.task.ppo import PPOConfig, PPOTask
-
-######################
-# Static Definitions #
-######################
+from ksim.terminations import UnhealthyTermination
 
 NUM_OUTPUTS = 21
 
@@ -36,15 +33,12 @@ class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     robot_model_name: str = "examples/default_humanoid/"
 
 
-####################
-# Task Definitions #
-####################
-
-
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
     def get_environment(self) -> MjxEnv:
         return MjxEnv(
             self.config,
+            robot_model_path=self.config.robot_model_name,
+            actuators=TorqueActuators(),
             terminations=[
                 UnhealthyTermination(
                     unhealthy_z_lower=0.8,
@@ -109,7 +103,6 @@ if __name__ == "__main__":
             # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
             solver_iterations=6,
             solver_ls_iterations=6,
-            actuator_type="mit",
             scale_rewards=False,
             gamma=0.97,
             lam=0.95,

@@ -1,13 +1,12 @@
 """MIT Controller, as used by the Robstride actuators."""
 
-from dataclasses import dataclass
 from typing import Mapping, TypedDict
 
 import jax.numpy as jnp
 from jaxtyping import Array
 from mujoco import mjx
 
-from ksim.env.mjx.actuators.base_actuator import Actuators
+from ksim.actuators.base import Actuators
 from ksim.utils.mujoco import MujocoMappings
 
 
@@ -45,8 +44,8 @@ class MITPositionActuators(Actuators):
 
     def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
         """Get the control signal from the (position) action vector."""
-        current_pos = mjx_data.qpos[7:]  # NOTE: we assume first 7 are always root pos.
-        current_vel = mjx_data.qvel[6:]  # NOTE: we assume first 6 are always root vel.
+        current_pos = mjx_data.qpos[7:]  # First 7 are always root pos.
+        current_vel = mjx_data.qvel[6:]  # First 6 are always root vel.
         target_velocities = jnp.zeros_like(action)
 
         pos_delta = action - current_pos
@@ -54,8 +53,3 @@ class MITPositionActuators(Actuators):
 
         ctrl = self.kps * pos_delta + self.kds * vel_delta
         return ctrl
-
-    @property
-    def actuator_input_size(self) -> int:
-        """Get the size of the actuator input vector."""
-        return self.kps.shape[0]

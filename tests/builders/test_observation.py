@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
-from ksim.builders.observation import (
+from ksim.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
     BaseOrientationObservation,

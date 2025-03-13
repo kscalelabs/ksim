@@ -6,10 +6,7 @@ import pytest
 from jaxtyping import Array
 from mujoco import mjx
 
-from ksim.builders.resets import (
-    Reset,
-    XYPositionResetBuilder,
-)
+from ksim.resets import Reset, XYPositionResetBuilder
 from ksim.utils.data import BuilderData, MujocoMappings
 
 

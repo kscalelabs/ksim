@@ -7,8 +7,11 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import PRNGKeyArray
 
-from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.builders.observation import (
+from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
+from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
+from ksim.model.base import ActorCriticAgent
+from ksim.model.factory import mlp_actor_critic_agent
+from ksim.observation import (
     ActuatorForceObservation,
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
@@ -19,12 +22,12 @@ from ksim.builders.observation import (
     JointVelocityObservation,
     SensorObservationBuilder,
 )
-from ksim.builders.resets import (
+from ksim.resets import (
     RandomizeJointPositions,
     RandomizeJointVelocities,
     XYPositionResetBuilder,
 )
-from ksim.builders.rewards import (
+from ksim.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
     DefaultPoseDeviationPenaltyBuilder,
@@ -35,11 +38,8 @@ from ksim.builders.rewards import (
     TrackAngularVelocityZReward,
     TrackLinearVelocityXYReward,
 )
-from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
-from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.base import ActorCriticAgent
-from ksim.model.factory import mlp_actor_critic_agent
 from ksim.task.ppo import PPOConfig, PPOTask
+from ksim.terminations import PitchTooGreatTermination, RollTooGreatTermination
 
 ######################
 # Static Definitions #

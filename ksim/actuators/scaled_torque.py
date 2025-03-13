@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jaxtyping import Array
 from mujoco import mjx
 
-from ksim.env.mjx.actuators.base_actuator import Actuators
+from ksim.actuators.base import Actuators
 from ksim.utils.mujoco import MujocoMappings
 
 
@@ -34,8 +34,3 @@ class ScaledTorqueActuators(Actuators):
         # Scale action from [-1,1] to actuator limits
         ctrl = action * (action_max - action_min) * 0.5
         return ctrl
-
-    @property
-    def actuator_input_size(self) -> int:
-        """Get the size of the actuator input vector."""
-        return self.input_ranges.shape[0]

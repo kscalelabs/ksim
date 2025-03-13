@@ -10,7 +10,7 @@ Rollouts return a trajectory of shape (time, num_envs, ).
 
 import functools
 import logging
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Collection, TypeVar
@@ -25,15 +25,15 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 
-from ksim.builders.commands import Command, CommandBuilder
-from ksim.builders.observation import Observation, ObservationBuilder
-from ksim.builders.resets import Reset, ResetBuilder
-from ksim.builders.rewards import Reward, RewardBuilder
-from ksim.builders.terminations import Termination, TerminationBuilder
+from ksim.actuators.base import Actuators
+from ksim.commands import Command, CommandBuilder
 from ksim.env.base_env import BaseEnv, BaseEnvConfig
-from ksim.env.mjx.actuators.base_actuator import Actuators
 from ksim.env.types import EnvState
 from ksim.model.base import ActorCriticAgent
+from ksim.observation import Observation, ObservationBuilder
+from ksim.resets import Reset, ResetBuilder
+from ksim.rewards import Reward, RewardBuilder
+from ksim.terminations import Termination, TerminationBuilder
 from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import make_mujoco_mappings
 
@@ -738,13 +738,3 @@ class MjxEnv(BaseEnv, ABC):
         renderer.close()
 
         return frames, env_state_TEL
-
-    @property
-    def observation_size(self) -> int:
-        """Size of the observation space."""
-        raise NotImplementedError("Not implemented yet... need to compile observations?")
-
-    @property
-    def action_size(self) -> int:
-        """Size of the action space."""
-        return self.actuators.actuator_input_size

@@ -8,7 +8,7 @@ import pytest
 from jaxtyping import Array
 from mujoco import mjx
 
-from ksim.builders.terminations import (
+from ksim.terminations import (
     IllegalContactTermination,
     IllegalContactTerminationBuilder,
     MinimumHeightTermination,

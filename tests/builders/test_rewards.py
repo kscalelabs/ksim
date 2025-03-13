@@ -9,7 +9,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array
 from mujoco import mjx
 
-from ksim.builders.rewards import (
+from ksim.rewards import (
     ActionSmoothnessPenalty,
     AngularVelocityXYPenalty,
     FootContactPenalty,

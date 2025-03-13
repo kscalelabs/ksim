@@ -27,8 +27,8 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING
 
-from ksim.builders.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
+from ksim.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
 from ksim.model.base import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.visualization import render_and_save_trajectory
