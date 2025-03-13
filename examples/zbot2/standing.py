@@ -21,9 +21,7 @@ from ksim.builders.observation import (
 from ksim.builders.resets import XYPositionResetBuilder
 from ksim.builders.rewards import (
     DefaultPoseDeviationPenaltyBuilder,
-    DHForwardReward,
     DHHealthyReward,
-    HeightReward,
     OrientationPenalty,
 )
 from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
@@ -40,8 +38,8 @@ NUM_OUTPUTS = 18
 
 
 @dataclass
-class ZBot2WalkingConfig(PPOConfig, MjxEnvConfig):
-    """Combining configs for the ZBot2 walking task and fixing params."""
+class ZBot2StandingConfig(PPOConfig, MjxEnvConfig):
+    """Combining configs for the ZBot2 standing task and fixing params."""
 
     robot_model_name: str = "examples/zbot2/"
 
@@ -51,7 +49,7 @@ class ZBot2WalkingConfig(PPOConfig, MjxEnvConfig):
 ####################
 
 
-class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
+class ZBot2StandingTask(PPOTask[ZBot2StandingConfig]):
     def get_environment(self) -> MjxEnv:
         """Get the environment."""
         return MjxEnv(
@@ -149,16 +147,16 @@ class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.zbot2.walking
-    ZBot2WalkingTask.launch(
-        ZBot2WalkingConfig(
+    # python -m examples.zbot2.standing
+    ZBot2StandingTask.launch(
+        ZBot2StandingConfig(
             num_learning_epochs=8,
             num_env_states_per_minibatch=8192,
             num_minibatches=32,
             num_envs=2048,
             dt=0.001,
             ctrl_dt=0.005,
-            learning_rate=5e-5,
+            learning_rate=1e-5,
             save_every_n_steps=50,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
