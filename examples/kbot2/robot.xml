@@ -66,7 +66,7 @@
   </asset>
 
   <worldbody>
-    <body name="floating_base_link" pos="0.00000000 0.00000000 0.80024304" childclass="robot">
+    <body name="floating_base_link" pos="0.00000000 0.00000000 0.80024304" quat="0.7071 0 0 0.7071" childclass="robot">
       <freejoint name="floating_base" />
       <geom name="floating_base_link_visual" quat="0.0007963267107332633 0.0 0.0 0.9999996829318346" material="floating_base_link_material" type="sphere" size="0.01" class="visual" />
       <body name="KB_B_102B_TORSO_BOTTOM" quat="0.0007963267107332633 0.0 0.0 0.9999996829318346">
