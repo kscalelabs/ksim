@@ -143,17 +143,8 @@ class KBotV2StandingTask(PPOTask[KBotV2StandingConfig]):
                 SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
             ],
             commands=[
-                LinearVelocityCommand(
-                    x_scale=0.0,
-                    y_scale=0.0,
-                    switch_prob=0.02,
-                    zero_prob=0.3,
-                ),
-                AngularVelocityCommand(
-                    scale=0.0,
-                    switch_prob=0.02,
-                    zero_prob=0.8,
-                ),
+                LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.03),
+                AngularVelocityCommand(scale=0.0, switch_prob=0.02, zero_prob=0.8),
             ],
         )
 
@@ -169,7 +160,6 @@ class KBotV2StandingTask(PPOTask[KBotV2StandingConfig]):
         )
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:
-        # return jnp.zeros((self.config.actor_num_layers, self.config.actor_hidden_dims))
         return None
 
     def get_init_critic_carry(self) -> None:
@@ -187,7 +177,7 @@ if __name__ == "__main__":
             dt=0.001,
             ctrl_dt=0.005,
             learning_rate=1e-5,
-            save_every_n_steps=50,
+            save_every_n_steps=25,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,
@@ -205,5 +195,6 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            eval_rollout_length=1000,
         ),
     )

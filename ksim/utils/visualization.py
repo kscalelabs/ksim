@@ -15,6 +15,7 @@ from PIL import Image
 from scipy.interpolate import interp1d
 
 from ksim.env.base_env import BaseEnv
+from ksim.env.types import EnvState
 from ksim.model.base import ActorCriticAgent
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ def render_and_save_trajectory(
     camera: int | None = None,
     save_frames: bool = True,
     save_video: bool = True,
-) -> None:
+) -> EnvState:
     """Render a trajectory and save it as frames and/or video.
 
     Args:
@@ -129,7 +130,7 @@ def render_and_save_trajectory(
         save_frames: Whether to save individual frames
         save_video: Whether to save video file
     """
-    frames, env_state_TEL = env.render_trajectory(
+    frames, env_state_T1L = env.render_trajectory(
         model=model,
         variables=variables,
         rng=rng,
@@ -145,5 +146,7 @@ def render_and_save_trajectory(
         fps=1 / env.config.ctrl_dt,
         save_frames=save_frames,
         save_video=save_video,
-        rewards=env_state_TEL.reward_components,
+        rewards=env_state_T1L.reward_components,
     )
+
+    return env_state_T1L

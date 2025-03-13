@@ -10,7 +10,6 @@ kscale
 # Jax
 brax
 distrax
-gymnasium
 jax
 mediapy
 mujoco

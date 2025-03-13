@@ -30,7 +30,6 @@ from omegaconf import MISSING
 from ksim.builders.loggers import (
     AverageRewardLog,
     EpisodeLengthLog,
-    LoggingData,
     ModelUpdateLog,
 )
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
@@ -66,6 +65,10 @@ class RLConfig(BaseEnvConfig, xax.Config):
     num_envs: int = xax.field(
         value=MISSING,
         help="The number of training environments to run in parallel.",
+    )
+    eval_rollout_length: int = xax.field(
+        value=MISSING,
+        help="The number of ctrl steps to rollout the model for evaluation.",
     )
     pretrained: str | None = xax.field(
         value=None,
@@ -286,16 +289,43 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return termination_stats
 
-    def log_trajectory_stats(self, env: BaseEnv, trajectory: EnvState) -> None:
-        for key, value in self.get_reward_stats(trajectory, env).items():
-            self.logger.log_scalar(key, value, namespace="reward")
-        for key, value in self.get_termination_stats(trajectory, env).items():
-            self.logger.log_scalar(key, value, namespace="termination")
+    def log_trajectory_stats(
+        self, env: BaseEnv, env_state_TEL: EnvState, eval: bool = False
+    ) -> None:
+        """Logs the reward and termination stats for the trajectory."""
+        for key, value in self.get_reward_stats(env_state_TEL, env).items():
+            self.logger.log_scalar(
+                key=key,
+                value=value,
+                namespace="reward" if not eval else "eval/reward",
+            )
+        for key, value in self.get_termination_stats(env_state_TEL, env).items():
+            self.logger.log_scalar(
+                key=key,
+                value=value,
+                namespace="termination" if not eval else "eval/termination",
+            )
 
         # Logs the mean episode length.
-        episode_count = jnp.sum(trajectory.done).clip(min=1)
-        mean_episode_length_steps = jnp.sum(~trajectory.done) / episode_count * self.config.ctrl_dt
-        self.logger.log_scalar("mean_episode_seconds", mean_episode_length_steps, namespace="stats")
+        episode_num_per_env = jnp.sum(env_state_TEL.done, axis=0) + (1 - env_state_TEL.done[-1])
+        episode_count = jnp.sum(episode_num_per_env)
+        num_env_states = jnp.prod(jnp.array(env_state_TEL.done.shape))
+        mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
+        self.logger.log_scalar(
+            key="mean_episode_seconds",
+            value=mean_episode_length_steps,
+            namespace="stats" if not eval else "eval/stats",
+        )
+
+    def log_update_metrics(self, metrics: FrozenDict[str, Array]) -> None:
+        """Logs the update stats for the current update."""
+        for key, value in metrics.items():
+            assert isinstance(value, Array)
+            self.logger.log_scalar(
+                key=key,
+                value=value,
+                namespace="update",
+            )
 
     ########################
     # Training and Running #
@@ -549,7 +579,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             rollout_time = time.time() - start_time
             logger.info("Rollout time: %s seconds", rollout_time)
-            self.log_trajectory_stats(env, env_state_EL_t)
 
             env_state_DL = flatten_pytree(env_state_TEL, flatten_size=self.dataset_size)
 
@@ -582,32 +611,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             update_time = time.time() - start_time
             logger.info("Update time: %s seconds", update_time)
 
-            # TODO: we probably want a way of tracking how loss evolves within
-            # an epoch, and across epochs, not just the final metrics.
-            metric_logging_data = LoggingData(
-                trajectory=env_state_DL,
-                update_metrics=metrics_mean,
-            )
-
             with self.step_context("write_logs"):
                 training_state.raw_phase = "train"
-                for log_item in self.log_items:
-                    log_item(self.logger, metric_logging_data)
-
-                # logging metrics to info here...
-                for key, value in metrics_mean.items():
-                    assert isinstance(value, jnp.ndarray)
-                    self.logger.log_scalar(key, value, namespace="stats")
-
-                # logging has_nans to info here...
-                self.logger.log_scalar("has_nans", has_nans, namespace="stats")
-
-                self.logger.write(training_state)
                 training_state.num_steps += 1
                 training_state.num_samples += self.dataset_size
 
-            # Log the time taken for the model update.
-            with self.step_context("write_logs"):
+                self.log_trajectory_stats(env, env_state_TEL, eval=False)
+                self.log_update_metrics(metrics_mean)
+                self.logger.log_scalar("has_nans", has_nans, namespace="stats")
                 self.logger.log_scalar("rollout_time", rollout_time, namespace="⏰")
                 self.logger.log_scalar("update_time", update_time, namespace="⏰")
                 self.logger.write(training_state)
@@ -624,18 +635,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 render_dir = self.exp_dir / self.config.render_dir / render_name
                 logger.info("Rendering to %s", render_dir)
 
-                render_and_save_trajectory(
+                eval_env_state_T1L = render_and_save_trajectory(
                     env=env,
                     model=model,
                     variables=variables,
                     rng=rng,
                     output_dir=render_dir,
-                    num_steps=self.num_rollout_steps_per_env,
+                    num_steps=self.config.eval_rollout_length,
                     width=self.config.render_width,
                     height=self.config.render_height,
                 )
 
                 logger.info("Done rendering to %s", render_dir)
+
+                with self.step_context("write_logs"):
+                    self.log_trajectory_stats(env, eval_env_state_T1L, eval=True)
 
             variables = self.update_input_normalization_stats(
                 variables=variables,
