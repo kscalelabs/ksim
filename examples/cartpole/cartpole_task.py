@@ -4,42 +4,16 @@ import logging
 import time
 from dataclasses import dataclass
 
-import flax.linen as nn
 import jax
 import xax
-from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import PRNGKeyArray
 
 from examples.cartpole.cartpole_env import CartPoleEnv
-from ksim.model.formulations import ActorCriticAgent, CategoricalActionModel
-from ksim.model.mlp import MLP
+from ksim.model.base import ActorCriticAgent
+from ksim.model.factory import mlp_actor_critic_agent
 from ksim.task.ppo import PPOConfig, PPOTask
 
 logger = logging.getLogger(__name__)
-
-
-class CartPoleActionModel(CategoricalActionModel):
-    """Action model for CartPole."""
-
-    mlp: MLP
-
-    @nn.compact
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        observation = obs["observations"]
-        assert isinstance(observation, Array)
-        return self.mlp(observation)
-
-
-class CartPoleCriticModel(nn.Module):
-    """Critic model for CartPole."""
-
-    mlp: MLP
-
-    @nn.compact
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        observation = obs["observations"]
-        assert isinstance(observation, Array)
-        return self.mlp(observation)
 
 
 @dataclass
@@ -62,23 +36,12 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         """Get the model."""
-        return ActorCriticAgent(
-            actor_module=CartPoleActionModel(
-                mlp=MLP(
-                    num_hidden_layers=self.config.actor_num_layers,
-                    hidden_features=self.config.actor_hidden_dims,
-                    out_features=2,  # two discrete actions for CartPole
-                ),
-                num_outputs=2,
-                sampling_temperature=0.0,
-            ),
-            critic_module=CartPoleCriticModel(
-                mlp=MLP(
-                    num_hidden_layers=self.config.critic_num_layers,
-                    hidden_features=self.config.critic_hidden_dims,
-                    out_features=1,
-                ),
-            ),
+        return mlp_actor_critic_agent(
+            num_actions=2,
+            prediction_type="direct",
+            distribution_type="categorical",
+            actor_hidden_dims=(self.config.actor_hidden_dims,) * self.config.actor_num_layers,
+            critic_hidden_dims=(self.config.critic_hidden_dims,) * self.config.critic_num_layers,
         )
 
     def viz_environment(self) -> None:
@@ -113,16 +76,6 @@ class CartPoleTask(PPOTask[CartPoleConfig]):
                 episode_length = 0
 
                 while True:
-                    # Get observations and use policy
-                    rng, action_rng = jax.random.split(rng)
-                    _, log_prob = model.apply(
-                        variables,
-                        env_state,
-                        action_rng,
-                        method="actor_sample_and_log_prob",
-                    )
-                    assert isinstance(log_prob, Array)
-
                     # Take step
                     rng, step_rng = jax.random.split(rng)
                     env_state, _ = env.step(

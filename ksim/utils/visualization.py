@@ -15,7 +15,7 @@ from PIL import Image
 from scipy.interpolate import interp1d
 
 from ksim.env.base_env import BaseEnv
-from ksim.model.formulations import ActorCriticAgent
+from ksim.model.base import ActorCriticAgent
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ def save_trajectory_visualization(
 def render_and_save_trajectory(
     env: BaseEnv,
     model: ActorCriticAgent,
-    variables: PyTree,
+    variables: PyTree[Array],
     rng: PRNGKeyArray,
     output_dir: Path,
     *,
