@@ -32,6 +32,7 @@ from ksim.env.base_env import BaseEnv, BaseEnvConfig
 from ksim.env.types import EnvState
 from ksim.model.base import Agent
 from ksim.model.types import ModelInput
+from ksim.normalization import Normalizer
 from ksim.observation import Observation, ObservationBuilder
 from ksim.resets import Reset, ResetBuilder
 from ksim.rewards import Reward, RewardBuilder
@@ -388,6 +389,7 @@ class MjxEnv(BaseEnv[Config], ABC):
     def reset(
         self,
         agent: Agent,
+        normalizer: Normalizer,
         rng: jax.Array,
         physics_model_L: mjx.Model,
     ) -> tuple[EnvState, mjx.Data]:
@@ -421,6 +423,7 @@ class MjxEnv(BaseEnv[Config], ABC):
             recurrent_state=None,
         )
 
+        model_input = normalizer(model_input)
         prediction = agent.actor_model.forward(model_input)
         action_L_0 = agent.action_distribution.sample(rng, prediction)
 
@@ -456,6 +459,7 @@ class MjxEnv(BaseEnv[Config], ABC):
     def step(
         self,
         agent: Agent,
+        normalizer: Normalizer,
         env_state_L_t_minus_1: EnvState,
         rng: PRNGKeyArray,
         physics_data_L_t: mjx.Data,
@@ -501,6 +505,7 @@ class MjxEnv(BaseEnv[Config], ABC):
             action_history=None,
             recurrent_state=None,
         )
+        model_input = normalizer(model_input)
         prediction = agent.actor_model.forward(model_input)
         action_L_t = agent.action_distribution.sample(rng, prediction)
 
@@ -543,20 +548,23 @@ class MjxEnv(BaseEnv[Config], ABC):
         carry: tuple[EnvState, mjx.Data, PRNGKeyArray],
         _: None,
         *,
-        physics_model_L: mjx.Model,
         agent: Agent,
+        normalizer: Normalizer,
+        physics_model_L: mjx.Model,
         return_intermediate_data: bool = False,
     ) -> tuple[tuple[EnvState, mjx.Data, PRNGKeyArray], tuple[EnvState, mjx.Data | None, Array]]:
         """Steps the environment and resets if needed."""
         env_state_L_t_minus_1, mjx_data_L_t, rng = carry
         reset_env_state_L_t, reset_mjx_data_L_t_plus_1 = self.reset(
             agent=agent,
+            normalizer=normalizer,
             rng=rng,
             physics_model_L=physics_model_L,
         )
 
         step_env_state_L_t, step_mjx_data_L_t_plus_1 = self.step(
             agent=agent,
+            normalizer=normalizer,
             env_state_L_t_minus_1=env_state_L_t_minus_1,
             rng=rng,
             physics_data_L_t=mjx_data_L_t,
@@ -596,6 +604,7 @@ class MjxEnv(BaseEnv[Config], ABC):
     def unroll_trajectory(
         self,
         agent: Agent,
+        normalizer: Normalizer,
         rng: PRNGKeyArray,
         num_steps: int,
         env_state_L_t_minus_1: EnvState,
@@ -607,6 +616,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         step_fn = functools.partial(
             self.scannable_step_with_automatic_reset,
             agent=agent,
+            normalizer=Normalizer,
             physics_model_L=physics_model_L,
             return_intermediate_data=return_intermediate_data,
         )

@@ -30,6 +30,7 @@ from omegaconf import MISSING
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
 from ksim.model.base import Agent
+from ksim.normalization import Normalizer
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.visualization import render_and_save_trajectory
 
@@ -102,6 +103,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_rollout_time_loss_components(
         self,
         agent: Agent,
+        normalizer: Normalizer,
         trajectory_dataset: EnvState,
     ) -> RolloutTimeLossComponents: ...
 

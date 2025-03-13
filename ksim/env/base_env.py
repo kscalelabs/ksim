@@ -14,6 +14,7 @@ from omegaconf import MISSING
 from ksim.commands import Command
 from ksim.env.types import EnvState, PhysicsData, PhysicsModel
 from ksim.model.base import Agent
+from ksim.normalization import Normalizer
 from ksim.observation import Observation
 from ksim.resets import Reset
 from ksim.rewards import Reward
@@ -91,6 +92,7 @@ class BaseEnv(ABC, Generic[Config]):
     def unroll_trajectories(
         self,
         agent: Agent,
+        normalizer: Normalizer,
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,

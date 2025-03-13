@@ -16,6 +16,7 @@ from ksim.env.types import EnvState
 from ksim.model.base import ActorCriticAgent
 from ksim.model.distributions import GaussianDistribution
 from ksim.model.types import ModelInput
+from ksim.normalization import Normalizer
 from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
 
@@ -161,6 +162,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def get_rollout_time_loss_components(
         self,
         agent: ActorCriticAgent,
+        normalizer: Normalizer,
         trajectory_dataset: EnvState,
     ) -> RolloutTimeLossComponents:
         """Calculating advantages and returns for a rollout."""
@@ -171,6 +173,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             recurrent_state=None,
         )
 
+        model_input = normalizer(model_input)
         prediction = agent.actor_model.forward(model_input)
         initial_values = agent.critic_model.forward(model_input).squeeze(axis=-1)
 
@@ -258,6 +261,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def compute_ppo_loss(
         self,
         agent: ActorCriticAgent,
+        normalizer: Normalizer,
         env_state_batch: EnvState,
         rollout_time_loss_components: PPORolloutTimeLossComponents,
         rng: PRNGKeyArray,
@@ -271,6 +275,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             recurrent_state=None,
         )
 
+        model_input = normalizer(model_input)
         prediction = agent.actor_model.forward(model_input)
         log_probs = agent.action_distribution.log_prob(prediction, env_state_batch.action)
         values = agent.critic_model.forward(model_input).squeeze(axis=-1)
