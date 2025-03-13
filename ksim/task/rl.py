@@ -505,7 +505,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng = self.prng_key()
         burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 3)
 
-        # getting initial physics data
+        # Gets the initial physics data.
         physics_model_L = env.get_init_physics_model()
         reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
 
@@ -622,8 +622,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             if self.should_checkpoint(training_state):
                 self.save_checkpoint(
-                    model=variables, optimizer=optimizer, opt_state=opt_state, state=training_state
-                )  # Update XAX to be Flax supportive...
+                    model=variables,
+                    optimizer=optimizer,
+                    opt_state=opt_state,
+                    state=training_state,
+                )
 
                 render_name = self.get_render_name(training_state)
                 render_dir = self.exp_dir / self.config.render_dir / render_name
@@ -639,7 +642,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     width=self.config.render_width,
                     height=self.config.render_height,
                 )
-
                 logger.info("Done rendering to %s", render_dir)
 
                 with self.step_context("write_logs"):

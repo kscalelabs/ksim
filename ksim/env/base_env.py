@@ -47,19 +47,12 @@ class BaseEnv(ABC):
         self.config = config
 
     @abstractmethod
-    def get_init_physics_model(  # exists for compilation purposes
-        self,
-    ) -> PhysicsModel: ...
-
-    """Get the initial physics model for the environment (L)."""
+    def get_init_physics_model(self) -> PhysicsModel:
+        """Get the initial physics model for the environment (L)."""
 
     @abstractmethod
-    def get_dummy_env_states(
-        self,
-        num_envs: int,
-    ) -> EnvState: ...
-
-    """Get the dummy environment states for the environment (EL)."""
+    def get_dummy_env_states(self, num_envs: int) -> EnvState:
+        """Get the dummy environment states for the environment (EL)."""
 
     @abstractmethod
     def reset(
@@ -68,9 +61,8 @@ class BaseEnv(ABC):
         variables: PyTree[Array],
         rng: PRNGKeyArray,
         physics_model_L: PhysicsModel,
-    ) -> tuple[EnvState, PhysicsData | None]: ...
-
-    """Reset the environment (EL)."""
+    ) -> tuple[EnvState, PhysicsData | None]:
+        """Reset the environment (EL)."""
 
     @abstractmethod
     def step(
@@ -81,9 +73,8 @@ class BaseEnv(ABC):
         rng: PRNGKeyArray,
         physics_data_L_t: PhysicsData,
         physics_model_L: PhysicsModel,
-    ) -> tuple[EnvState, PhysicsData | None]: ...
-
-    """Step the environment (EL)."""
+    ) -> tuple[EnvState, PhysicsData | None]:
+        """Step the environment (EL)."""
 
     @abstractmethod
     def unroll_trajectories(
@@ -97,14 +88,13 @@ class BaseEnv(ABC):
         physics_data_EL_t: PhysicsData,
         physics_model_L: PhysicsModel,
         return_intermediate_data: bool = False,
-    ) -> tuple[EnvState, PhysicsData, Array]: ...
+    ) -> tuple[EnvState, PhysicsData, Array]:
+        """Returns env state trajectory (TEL) and physics data (EL or TEL).
 
-    """Returns env state trajectory (TEL) and physics data (EL or TEL).
-
-    If return_intermediate_data is True, the physics data is returned as a
-    trajectory (TEL). Otherwise, only the final physics data is returned (for
-    memory efficiency).
-    """
+        If return_intermediate_data is True, the physics data is returned as a
+        trajectory (TEL). Otherwise, only the final physics data is returned (for
+        memory efficiency).
+        """
 
     @abstractmethod
     def render_trajectory(
@@ -117,18 +107,15 @@ class BaseEnv(ABC):
         width: int = 640,
         height: int = 480,
         camera: int | None = None,
-    ) -> tuple[list[np.ndarray], EnvState]: ...
-
-    """Render trajectory and return list of images."""
-
-    @property
-    @abstractmethod
-    def observation_size(self) -> int: ...
-
-    """Get the size of the observation space."""
+    ) -> tuple[list[np.ndarray], EnvState]:
+        """Render trajectory and return list of images."""
 
     @property
     @abstractmethod
-    def action_size(self) -> int: ...
+    def observation_size(self) -> int:
+        """Get the size of the observation space."""
 
-    """Get the size of the action space."""
+    @property
+    @abstractmethod
+    def action_size(self) -> int:
+        """Get the size of the action space."""

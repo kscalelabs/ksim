@@ -153,9 +153,6 @@ class CartPoleEnv(BaseEnv):
     def action_size(self) -> int:
         return 1
 
-    ####################
-    # Helper functions #
-    ####################
     def reset_and_give_obs(
         self,
         model: ActorCriticAgent,
@@ -205,7 +202,9 @@ class CartPoleEnv(BaseEnv):
         a functional manner.
         """
         obs: FrozenDict[str, jax.Array] = FrozenDict(
-            {"observations": jnp.array(current_gym_obs)[None, :]}
+            {
+                "observations": jnp.array(current_gym_obs)[None, :],
+            }
         )
         command: FrozenDict[str, jax.Array] = FrozenDict({})
         action, _ = model.apply_actor_sample_and_log_prob(

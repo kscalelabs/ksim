@@ -19,7 +19,7 @@ from omegaconf import MISSING
 from ksim.env.types import EnvState
 from ksim.model.distributions import ActionDistribution
 from ksim.model.types import ModelInput
-from ksim.task.loss_helpers import compute_returns
+from ksim.task.ppo import compute_returns
 from ksim.utils.constants import EPSILON
 
 
@@ -315,7 +315,7 @@ def update_actor_critic_normalization(
 
     High alpha means more weight is given to the old data.
     """
-    # update the returns normalization parameters
+    # Update the returns normalization parameters.
     returns = compute_returns(trajectories_dataset.reward, trajectories_dataset.done, gamma)
     returns_std = jnp.std(returns)
     old_returns_std = variables["normalization"]["returns_std"]
@@ -325,7 +325,7 @@ def update_actor_critic_normalization(
         old_returns_std * returns_norm_alpha + returns_std * (1 - returns_norm_alpha)
     )
 
-    # update the observations normalization parameters
+    # Update the observations normalization parameters.
     for obs_name, obs_vec in trajectories_dataset.obs.items():
         assert isinstance(obs_vec, Array)
         obs_mean = jnp.mean(obs_vec, axis=tuple(range(obs_vec.ndim - 1)))

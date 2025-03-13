@@ -72,11 +72,14 @@ def test_default_humanoid_training() -> None:
         trajectories_dataset=env_state_TEL,
         initial_step=False,
     )
+
     rollout_loss_components_TEL = task.get_rollout_time_loss_components(
-        model, variables, env_state_TEL
+        model=model,
+        variables=variables,
+        trajectory_dataset=env_state_TEL,
     )
 
-    rollout_loss_components_DL = xax.ten_pytree(
+    rollout_loss_components_DL = xax.flatten_pytree(
         rollout_loss_components_TEL,
         flatten_size=task.dataset_size,
     )

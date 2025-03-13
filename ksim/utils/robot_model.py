@@ -85,7 +85,8 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> ModelMetada
 
             control_frequency_float = float(control_frequency)
             model_metadata = ModelMetadata(
-                actuators=actuators_metadata, control_frequency=control_frequency_float
+                actuators=actuators_metadata,
+                control_frequency=control_frequency_float,
             )
             metadata_path.parent.mkdir(parents=True, exist_ok=True)
             OmegaConf.save(model_metadata, metadata_path)

@@ -15,10 +15,97 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from ksim.env.types import EnvState
 from ksim.model.base import ActorCriticAgent, update_actor_critic_normalization
 from ksim.model.distributions import GaussianDistribution
-from ksim.task.loss_helpers import compute_returns
 from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
-from ksim.utils.constants import EPSILON
+
+
+def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
+    """Calculate returns from rewards and dones.
+
+    Dones are a mask of 0s and 1s, where 1s indicate the end of an episode.
+    Gamma is the discount factor.
+
+    Args:
+        rewards: The rewards from the environment.
+        dones: The dones from the environment.
+        gamma: The discount factor.
+
+    Returns:
+        The returns, with the same shape as the rewards.
+    """
+
+    # Calculating returns separately using gamma.
+    def scan_fn(returns_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+        """Scanning this computes the returns in reverse order."""
+        reward, mask = x
+        returns = reward + gamma * mask * returns_t_plus_1
+        return returns, returns
+
+    _, returns = jax.lax.scan(
+        scan_fn,
+        jnp.zeros_like(rewards[-1]),
+        (rewards, dones),
+        reverse=True,
+    )
+
+    return returns
+
+
+def compute_advantages_and_value_targets(
+    variables: PyTree[Array],
+    values: Array,
+    env_state_batch: EnvState,
+    scale_rewards: bool,
+    gamma: float,
+    lam: float,
+    eps: float = 1e-6,
+) -> tuple[Array, Array]:
+    """Computes the advantages using Generalized Advantage Estimation (GAE).
+
+    Note that some of this logic is NOT stock PPO, using Brax's PPO
+    implementation as a reference.
+
+    Args:
+        variables: The variables of the model.
+        values: The values of the model.
+        env_state_batch: The environment state batch.
+        scale_rewards: Whether to scale the rewards.
+        gamma: The discount factor.
+        lam: The lambda for GAE.
+        eps: A small epsilon value to avoid division by zero.
+
+    Returns:
+        The advantages and value targets.
+    """
+    done = env_state_batch.done
+    rewards = env_state_batch.reward
+
+    if scale_rewards:  # as per Engstrom, Ilyas, et al., (2020)
+        returns_std = variables["normalization"]["returns_std"]
+        rewards = rewards / (returns_std + eps)
+
+    def scan_fn(adv_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+        """Scanning this computes the advantages in reverse order."""
+        delta, mask = x
+        adv_t = delta + gamma * lam * mask * adv_t_plus_1
+        return adv_t, adv_t
+
+    # We use the last value as the bootstrap value (although it is not fully correct)
+    values_shifted = jnp.concatenate([values[1:], jnp.expand_dims(values[-1], 0)], axis=0)
+    mask = jnp.where(done, 0.0, 1.0)
+
+    # getting td residuals
+    deltas = rewards + gamma * values_shifted * mask - values
+
+    _, gae = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas, mask), reverse=True)
+    value_targets = jnp.add(gae, values)
+
+    # Following Brax and applying another TD step to get the value targets.
+    # TODO: experiment with original GAE & value targets
+    value_targets_shifted = jnp.concatenate([value_targets[1:], value_targets[-1:]], axis=0)
+    advantages = rewards + gamma * value_targets_shifted * mask - values
+
+    return advantages, value_targets
 
 
 @jax.tree_util.register_dataclass
@@ -37,6 +124,7 @@ class PPOConfig(RLConfig):
     # For the GAE computation
     gamma: float = xax.field(value=0.99, help="Discount factor for PPO")
     lam: float = xax.field(value=0.95, help="Lambda for GAE: high = more bias; low = more variance")
+    eps: float = xax.field(value=1e-6, help="Small epsilon value to avoid division by zero.")
 
     # General training parameters
     learning_rate: float = xax.field(value=1e-4, help="Learning rate for PPO.")
@@ -78,11 +166,6 @@ Config = TypeVar("Config", bound=PPOConfig)
 class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
 
-    ########################
-    # Implementing RL Task #
-    ########################
-
-    # TODO from ML eventually we should create
     def get_init_actor_carry(self) -> Array | None:
         """Get the actor carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
@@ -99,8 +182,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectory_dataset: EnvState,
     ) -> RolloutTimeLossComponents:
         """Calculating advantages and returns for a rollout."""
-        # we recompute here because we update the normalization stats before the
-        # minibatch training loop
         prediction = model.apply_actor(
             variables=variables,
             obs=trajectory_dataset.obs,
@@ -126,8 +207,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             recurrent_state=None,
         ).squeeze(axis=-1)
 
-        advantages, value_targets = self._compute_advantages_and_value_targets(
-            variables, initial_values, trajectory_dataset
+        advantages, value_targets = compute_advantages_and_value_targets(
+            variables=variables,
+            values=initial_values,
+            env_state_batch=trajectory_dataset,
+            scale_rewards=self.config.scale_rewards,
+            gamma=self.config.gamma,
+            lam=self.config.lam,
+            eps=self.config.eps,
         )
 
         # we decouple the computation of returns from the value targets
@@ -139,7 +226,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # normalizing at the trajectory dataset level
         if self.config.normalize_advantage and not self.config.normalize_advantage_in_minibatch:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + EPSILON)
+            advantages = (advantages - advantages.mean()) / (advantages.std() + self.config.eps)
 
         return PPORolloutTimeLossComponents(
             initial_action_log_probs=jax.lax.stop_gradient(initial_action_log_probs),
@@ -217,13 +304,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             gamma=self.config.gamma,
         )
 
-    # Pass-through abstract methods:
-    # `get_environment`
-
-    ######################
-    # Training Utilities #
-    ######################
-
     def compute_ppo_loss(
         self,
         model: ActorCriticAgent,
@@ -269,12 +349,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         advantages = rollout_time_loss_components.advantages
 
-        # worth noting that Andrychowicz (2021) found little advantage to
-        # minibatch normalization.
+        # Andrychowicz (2021) did not find any benefit in minibatch normalization.
         if self.config.normalize_advantage and self.config.normalize_advantage_in_minibatch:
             advantages = (advantages - advantages.mean()) / (advantages.std() + EPSILON)
 
-        # policy loss with clipping
+        # Policy loss, with clipping
         clipped_ratio = jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param)
         policy_objective = jnp.mean(
             jnp.minimum(
@@ -353,60 +432,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         return total_loss, metrics_to_log
 
     def compute_loss(self, model: PyTree, batch: xax.Batch, output: xax.Output) -> Array:
-        """Implementation to satisfy the TrainMixin interface.
-
-        In reinforcement learning context, this method is not expected to be called
-        directly by the XAX framework, but we provide an implementation to fulfill
-        the interface requirements.
-        """
-        # For RL tasks, this shouldn't be called by the XAX framework
-        # But we need to provide an implementation with the correct signature
         raise NotImplementedError(
             "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
             "PPO tasks use model_update and loss_metrics_grads instead."
         )
-
-    def _compute_advantages_and_value_targets(
-        self,
-        variables: PyTree[Array],
-        values: Array,
-        env_state_batch: EnvState,
-    ) -> tuple[Array, Array]:
-        """Computes the advantages using Generalized Advantage Estimation (GAE).
-
-        Note that some of this logic is NOT stock PPO, using Brax's
-        implementation of PPO as a reference.
-        """
-        done = env_state_batch.done
-        rewards = env_state_batch.reward
-
-        if self.config.scale_rewards:  # as per Engstrom, Ilyas, et al., (2020)
-            returns_std = variables["normalization"]["returns_std"]
-            rewards = rewards / (returns_std + EPSILON)
-
-        def scan_fn(adv_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
-            """Scanning this computes the advantages in reverse order."""
-            delta, mask = x
-            adv_t = delta + self.config.gamma * self.config.lam * mask * adv_t_plus_1
-            return adv_t, adv_t
-
-        # We use the last value as the bootstrap value (although it is not fully correct)
-        values_shifted = jnp.concatenate([values[1:], jnp.expand_dims(values[-1], 0)], axis=0)
-        mask = jnp.where(done, 0.0, 1.0)
-
-        # getting td residuals
-        deltas = rewards + self.config.gamma * values_shifted * mask - values
-
-        _, gae = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas, mask), reverse=True)
-        value_targets = jnp.add(gae, values)
-        # gae is the result from stock GAE...
-
-        # Following Brax and applying another TD step to get the value targets
-        # TODO: experiment with original GAE & value targets
-        value_targets_shifted = jnp.concatenate([value_targets[1:], value_targets[-1:]], axis=0)
-        advantages = rewards + self.config.gamma * value_targets_shifted * mask - values
-
-        return advantages, value_targets
 
     def loss_metrics_grads(
         self,

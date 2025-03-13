@@ -370,9 +370,7 @@ class MjxEnv(BaseEnv):
 
         return mjx_data_EL_0
 
-    def get_init_physics_model(
-        self,
-    ) -> mjx.Model:
+    def get_init_physics_model(self) -> mjx.Model:
         """Get the initial physics model for the environment (L)."""
         return self.default_mjx_model
 
