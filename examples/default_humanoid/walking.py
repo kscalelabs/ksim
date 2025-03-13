@@ -10,30 +10,20 @@ from jaxtyping import PRNGKeyArray
 from ksim.builders.commands import LinearVelocityCommand
 from ksim.builders.observation import (
     ActuatorForceObservation,
-    BaseAngularVelocityObservation,
-    BaseLinearVelocityObservation,
-    BaseOrientationObservation,
     CenterOfMassInertiaObservation,
     CenterOfMassVelocityObservation,
-    JointPositionObservation,
-    JointVelocityObservation,
     LegacyPositionObservation,
     LegacyVelocityObservation,
 )
 from ksim.builders.resets import (
     RandomizeJointPositions,
     RandomizeJointVelocities,
-    XYPositionResetBuilder,
 )
 from ksim.builders.rewards import (
     DHForwardReward,
     DHHealthyReward,
-    HeightReward,
-    TrackLinearVelocityXYReward,
 )
 from ksim.builders.terminations import (
-    PitchTooGreatTermination,
-    RollTooGreatTermination,
     UnhealthyTermination,
 )
 from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
