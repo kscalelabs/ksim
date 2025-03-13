@@ -8,7 +8,6 @@ import pytest
 import xax
 
 from examples.default_humanoid.walking import HumanoidWalkingConfig, HumanoidWalkingTask
-from ksim.utils.pytree import flatten_pytree
 
 
 @pytest.mark.slow
@@ -63,7 +62,10 @@ def test_default_humanoid_training() -> None:
         physics_model_L=physics_model_L,
         return_intermediate_data=False,
     )
-    env_state_DL = flatten_pytree(env_state_TEL, flatten_size=task.dataset_size)
+    env_state_DL = xax.flatten_pytree(
+        env_state_TEL,
+        flatten_size=task.dataset_size,
+    )
 
     variables = task.update_input_normalization_stats(
         variables=variables,
@@ -74,8 +76,9 @@ def test_default_humanoid_training() -> None:
         model, variables, env_state_TEL
     )
 
-    rollout_loss_components_DL = flatten_pytree(
-        rollout_loss_components_TEL, flatten_size=task.dataset_size
+    rollout_loss_components_DL = xax.ten_pytree(
+        rollout_loss_components_TEL,
+        flatten_size=task.dataset_size,
     )
 
     # Update the model

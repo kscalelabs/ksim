@@ -27,16 +27,10 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING
 
-from ksim.builders.loggers import (
-    AverageRewardLog,
-    EpisodeLengthLog,
-    ModelUpdateLog,
-)
+from ksim.builders.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.model.base import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
-from ksim.utils.profile import profile
-from ksim.utils.pytree import flatten_pytree, slice_pytree
 from ksim.utils.visualization import render_and_save_trajectory
 
 logger = logging.getLogger(__name__)
@@ -326,7 +320,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 namespace="update",
             )
 
-    @profile
+    @xax.profile
     def get_init_variables(self, key: PRNGKeyArray) -> PyTree:
         """Get the initial parameters as a PyTree: assumes flax-compatible model."""
         env = self.get_environment()
@@ -351,7 +345,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         initial_step: bool,
     ) -> PyTree: ...
 
-    @profile
+    @xax.profile
     def reshuffle_rollout(
         self,
         rollout_dataset_DL: EnvState,
@@ -378,7 +372,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return reshuffled_rollout_dataset_DL, reshuffled_rollout_time_loss_components_DL
 
-    @profile
+    @xax.profile
     def get_minibatch(
         self,
         rollout_DL: EnvState,
@@ -387,19 +381,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> tuple[EnvState, RolloutTimeLossComponents]:
         """Get a minibatch from the rollout (B)."""
         starting_idx = minibatch_idx * self.config.num_env_states_per_minibatch
-        rollout_BL = slice_pytree(
+        rollout_BL = xax.slice_pytree(
             rollout_DL,
             start=starting_idx,
             slice_length=self.config.num_env_states_per_minibatch,
         )
-        rollout_time_loss_components_BL = slice_pytree(
+        rollout_time_loss_components_BL = xax.slice_pytree(
             rollout_time_loss_components_DL,
             start=starting_idx,
             slice_length=self.config.num_env_states_per_minibatch,
         )
         return rollout_BL, rollout_time_loss_components_BL
 
-    @profile
+    @xax.profile
     def scannable_minibatch_step(
         self,
         training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
@@ -429,7 +423,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return (variables, opt_state, rng), metrics
 
-    @profile
+    @xax.profile
     def scannable_train_epoch(
         self,
         training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
@@ -468,7 +462,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # metrics is stacked over the minibatches
         return (variables, opt_state, rng), metrics
 
-    @profile
+    @xax.profile
     @xax.jit(static_argnames=["self", "model", "optimizer"])
     def rl_pass(
         self,
@@ -576,7 +570,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rollout_time = time.time() - start_time
             logger.info("Rollout time: %s seconds", rollout_time)
 
-            env_state_DL = flatten_pytree(env_state_TEL, flatten_size=self.dataset_size)
+            env_state_DL = xax.flatten_pytree(
+                env_state_TEL,
+                flatten_size=self.dataset_size,
+            )
 
             ###########################
             # Minibatch Training Loop #
@@ -589,8 +586,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rollout_loss_components_TEL = self.get_rollout_time_loss_components(
                 model, variables, env_state_TEL
             )
-            rollout_loss_components_DL = flatten_pytree(
-                rollout_loss_components_TEL, flatten_size=self.dataset_size
+            rollout_loss_components_DL = xax.flatten_pytree(
+                rollout_loss_components_TEL,
+                flatten_size=self.dataset_size,
             )
 
             # running training on minibatches
