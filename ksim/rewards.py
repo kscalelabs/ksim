@@ -646,10 +646,10 @@ class SinusoidalFeetHeightReward(Reward):
         right_foot_height = mjx_data_t_plus_1.geom_xpos[self.right_foot_geom_idx][2]
         # Calculate the sinusoidal pattern
         sin_pos = self.sinusoidal_feet_height(mjx_data_t_plus_1.time)
-        
+
         sin_pos_left_mask = jnp.maximum(sin_pos, 0.0)
         sin_pos_right_mask = jnp.maximum(-sin_pos, 0.0)
-        
+
         # Compute targets for left and right feet
         left_foot_target = jnp.sum(sin_pos_left_mask) + self.vertical_offset
         right_foot_target = jnp.sum(sin_pos_right_mask) + self.vertical_offset

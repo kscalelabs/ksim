@@ -13,7 +13,6 @@ import jax
 import jax.numpy as jnp
 import matplotlib
 from jaxtyping import Array, PyTree
-import numpy as np
 
 from ksim.env.mjx_env import MjxEnv
 from ksim.task.rl import RLTask

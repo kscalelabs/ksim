@@ -40,18 +40,18 @@ if __name__ == "__main__":
         case _:
             raise ValueError(f"Invalid task: {args.task}. Must be one of: standing, walking.")
 
-    config = MujocoInteractiveVisualizerConfig(physics_backend=args.physics_backend,
-                                               suspended_pos=jnp.array([0, 0, 0.7, 1, 0, 0, 0]),
+    config = MujocoInteractiveVisualizerConfig(
+        physics_backend=args.physics_backend,
+        suspended_pos=jnp.array([0, 0, 0.7, 1, 0, 0, 0]),
     )
     interactive_visualizer = MujocoInteractiveVisualizer(task, config=config)
 
     high_feet_phase_right = jnp.zeros(20)
-    high_feet_phase_right = high_feet_phase_right.at[10].set(-0.5) # hip pitch
-    high_feet_phase_right = high_feet_phase_right.at[13].set(-0.75) # knee roll
+    high_feet_phase_right = high_feet_phase_right.at[10].set(-0.5)  # hip pitch
+    high_feet_phase_right = high_feet_phase_right.at[13].set(-0.75)  # knee roll
     high_feet_phase_left = jnp.zeros(20)
-    high_feet_phase_left = high_feet_phase_left.at[15].set(0.5) # hip pitch
-    high_feet_phase_left = high_feet_phase_left.at[18].set(0.75) # knee 
-
+    high_feet_phase_left = high_feet_phase_left.at[15].set(0.5)  # hip pitch
+    high_feet_phase_left = high_feet_phase_left.at[18].set(0.75)  # knee
 
     interactive_visualizer.add_keyframe(
         Keyframe(

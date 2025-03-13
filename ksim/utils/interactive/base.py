@@ -30,14 +30,17 @@ class InteractiveVisualizerConfig:
     vel_step_size: float = 0.1  # Size of step when manually modifying velocity (meters/second)
     angle_step_size: float = 0.01  # Size of step when manually modifying angles (radians)
 
+
 @dataclass
 class Keyframe:
     """A keyframe for the interactive visualizer."""
+
     name: str
     position: np.ndarray | None = None
     velocity: np.ndarray | None = None
     joint_positions: np.ndarray | None = None
     joint_velocities: np.ndarray | None = None
+
 
 class InteractiveVisualizer(abc.ABC):
     """Base class for visualizing rewards in RL environments."""
