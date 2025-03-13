@@ -52,22 +52,9 @@ NUM_OUTPUTS = 20
 
 @dataclass
 class KBotV2WalkingConfig(PPOConfig, MjxEnvConfig):
-    # Robot model name to use.
-    robot_model_name: str = xax.field(value="kbot-v1-feet")
+    """Config for the KBotV2 walking task."""
 
-    # ML model parameters.
-    actor_hidden_dims: int = xax.field(value=512)
-    actor_num_layers: int = xax.field(value=2)
-    critic_hidden_dims: int = xax.field(value=512)
-    critic_num_layers: int = xax.field(value=4)
-    init_noise_std: float = xax.field(value=1.0)
-
-    # Termination conditions.
-    max_pitch: float = xax.field(value=0.1)
-    max_roll: float = xax.field(value=0.1)
-    action_clipping: float = xax.field(value=10.0)
-
-    actuator_type: str = xax.field(value="mit", help="The type of actuator to use.")
+    robot_model_name: str = xax.field(value="examples/kbot2/")
 
 
 class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
@@ -224,7 +211,6 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
         )
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:
-        # return jnp.zeros((self.config.actor_num_layers, self.config.actor_hidden_dims))
         return None
 
     def get_init_critic_carry(self) -> None:
