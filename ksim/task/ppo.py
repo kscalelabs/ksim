@@ -101,7 +101,7 @@ def compute_advantages_and_value_targets(
     value_targets = jnp.add(gae, values)
 
     # Following Brax and applying another TD step to get the value targets.
-    # TODO: experiment with original GAE & value targets
+    # TODO: Experiment with original GAE & value targets
     value_targets_shifted = jnp.concatenate([value_targets[1:], value_targets[-1:]], axis=0)
     advantages = rewards + gamma * value_targets_shifted * mask - values
 
@@ -217,7 +217,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             eps=self.config.eps,
         )
 
-        # we decouple the computation of returns from the value targets
+        # We decouple the computation of returns from the value targets.
         returns = compute_returns(
             rewards=trajectory_dataset.reward,
             dones=trajectory_dataset.done,
@@ -351,7 +351,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # Andrychowicz (2021) did not find any benefit in minibatch normalization.
         if self.config.normalize_advantage and self.config.normalize_advantage_in_minibatch:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + EPSILON)
+            advantages = (advantages - advantages.mean()) / (advantages.std() + self.config.eps)
 
         # Policy loss, with clipping
         clipped_ratio = jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param)
@@ -385,7 +385,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
         value_objective = self.config.value_loss_coef * value_mse
 
-        # entropy bonus term
+        # Entropy bonus term.
         entropies = model.distribution.entropy(prediction, rng)
         entropy_objective = self.config.entropy_coef * jnp.mean(entropies)
 

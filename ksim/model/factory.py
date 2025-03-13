@@ -69,7 +69,7 @@ def mlp_actor_critic_agent(
             sampling_temperature=distribution_kwargs["sampling_temperature"],
         )
 
-    # then create the actor module
+    # Then create the actor module.
     actor_module: KSimModel
     if prediction_type == "mean_std":
         actor_module = MLPMeanStdActor(
