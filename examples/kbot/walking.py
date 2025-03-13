@@ -233,7 +233,7 @@ if __name__ == "__main__":
             num_envs=2048,
             dt=0.001,
             ctrl_dt=0.005,
-            learning_rate=5e-5,
+            learning_rate=1e-5,
             save_every_n_steps=50,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
