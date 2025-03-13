@@ -53,6 +53,8 @@ class KBotV2StandingConfig(PPOConfig, MjxEnvConfig):
     """Config for the KBotV2 standing task."""
 
     robot_model_name: str = xax.field(value="examples/kbot2/")
+    min_action_latency: float = xax.field(value=0.0)
+    max_action_latency: float = xax.field(value=0.0)
 
 
 ########################

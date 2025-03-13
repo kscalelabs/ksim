@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import flax.linen as nn
 import jax.numpy as jnp
+import xax
 from jaxtyping import PRNGKeyArray
 
 from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
@@ -38,6 +39,8 @@ class ZBot2WalkingConfig(PPOConfig, MjxEnvConfig):
     """Combining configs for the ZBot2 walking task and fixing params."""
 
     robot_model_name: str = "examples/zbot2/"
+    min_action_latency: float = xax.field(value=0.0)
+    max_action_latency: float = xax.field(value=0.0)
 
 
 ####################

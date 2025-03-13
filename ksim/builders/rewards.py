@@ -239,7 +239,7 @@ class AngularVelocityXYPenalty(Reward):
 class TrackAngularVelocityZReward(Reward):
     """Reward for how well the robot is tracking the angular velocity command."""
 
-    cmd_name: str = attrs.field(default="angular_velocity_command")
+    cmd_name: str = attrs.field(default="angular_velocity_command_vector")
     norm: NormType = attrs.field(default="l2")
 
     def __call__(
@@ -259,7 +259,7 @@ class TrackAngularVelocityZReward(Reward):
 class TrackLinearVelocityXYReward(Reward):
     """Reward for how well the robot is tracking the linear velocity command."""
 
-    cmd_name: str = attrs.field(default="linear_velocity_command")
+    cmd_name: str = attrs.field(default="linear_velocity_command_vector")
     sensitivity: float = attrs.field(default=1.0)
 
     def __call__(
