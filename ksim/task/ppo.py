@@ -393,8 +393,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             adv_t = delta + self.config.gamma * self.config.lam * mask * adv_t_plus_1
             return adv_t, adv_t
 
-        values_shifted = jnp.concatenate([values[1:], values[-1:]], axis=0)
-        # just repeating the last value for the last time step (should zero it out mathematically)
+        # We use the last value as the bootstrap value (although it is not fully correct)
+        values_shifted = jnp.concatenate([values[1:], jnp.expand_dims(values[-1], 0)], axis=0)
         mask = jnp.where(done, 0.0, 1.0)
 
         # getting td residuals
