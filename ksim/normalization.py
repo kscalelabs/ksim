@@ -68,14 +68,11 @@ class PassThrough(Normalizer):
 
 
 class Standardize(Normalizer):
-    """Standardizes a pytree of arrays with online updates."""
+    """Standardizes a Pytree of arrays with online updates."""
 
     mean: PyTree[Array]
-    """The mean of the normalized arrays accross the batch dimension/s."""
     std: PyTree[Array]
-    """The std of the normalized arrays accross the batch dimension/s."""
     alpha: float
-    """The decay rate for the online updates: high = new is more important."""
 
     def __init__(self, pytree: PyTree[Array], *, alpha: float) -> None:
         """Initializes the normalization statistics."""
