@@ -17,6 +17,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Generic, Literal, TypeVar
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
@@ -449,7 +450,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return (agent, opt_state, rng), metrics
 
     @xax.profile
-    @xax.jit(static_argnames=["self", "optimizer"])
+    @eqx.filter_jit  # TODO: implement filter-like jit in xax
     def rl_pass(
         self,
         agent: Agent,
@@ -508,8 +509,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )(agent, reset_rngs, physics_model_L, obs_normalizer, cmd_normalizer)
 
         if self.config.compile_unroll:
-            static_args = ["num_steps", "num_envs", "return_intermediate_data"]
-            env_rollout_fn = xax.jit(static_argnames=static_args)(env.unroll_trajectories)
+            env_rollout_fn = eqx.filter_jit(env.unroll_trajectories)
 
         #################
         # Burn in Stage #

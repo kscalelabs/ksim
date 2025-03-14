@@ -5,6 +5,7 @@ from abc import ABC
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
@@ -158,7 +159,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Get the critic carry state."""
         raise NotImplementedError("Not implemented at the base PPO class.")
 
-    @xax.jit(static_argnames=["self"])
+    @eqx.filter_jit  # TODO: implement filter-like jit in xax
     def get_rollout_time_loss_components(
         self,
         agent: ActorCriticAgent,
