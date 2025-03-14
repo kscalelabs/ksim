@@ -34,7 +34,6 @@ from ksim.resets import (
 )
 from ksim.rewards import (
     DHForwardReward,
-    DHHealthyReward,
     HeightReward,
     SinusoidalFeetHeightRewardBuilder,
 )
