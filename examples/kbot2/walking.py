@@ -151,7 +151,7 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
                     scale=0.4,
                     vertical_offset=-0.09,
                 ),
-                TerminationPenalty(scale=-1.0),
+                TerminationPenalty(scale=-100.0),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian"),

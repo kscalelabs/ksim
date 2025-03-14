@@ -118,7 +118,7 @@ class TerminationPenalty(Reward):
         mjx_data_t_plus_1: mjx.Data,
         done_t: Array,
     ) -> Array:
-        return jnp.sum(done_t)
+        return jnp.sum(done_t.any())
 
 
 @attrs.define(frozen=True, kw_only=True)
