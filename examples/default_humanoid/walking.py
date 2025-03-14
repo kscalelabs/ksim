@@ -11,6 +11,7 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim.actuators import TorqueActuators
 from ksim.commands import LinearVelocityCommand
 from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
+from ksim.losses.ppo import PPOLoss
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.distributions import TanhGaussianDistribution
 from ksim.model.types import ModelInput
@@ -24,7 +25,7 @@ from ksim.observation import (
 )
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import DHForwardReward, DHHealthyReward
-from ksim.task.ppo import PPOConfig, PPOTask
+from ksim.task.rl import RLTask
 from ksim.terminations import UnhealthyTermination
 
 NUM_OUTPUTS = 21
@@ -98,14 +99,62 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
         return self.mlp(x)
 
 
+class BraxPPO(PPOLoss):
+    """Brax version of PPO loss."""
+
+    def compute_advantages_and_value_targets(
+        self,
+        values: Array,
+        rewards: Array,
+        dones: Array,
+    ) -> tuple[Array, Array]:
+        """Computes the advantages using Generalized Advantage Estimation (GAE).
+
+        Note that some of this logic is NOT stock PPO, using Brax's
+        implementation of PPO as a reference.
+        """
+
+        def scan_fn(adv_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+            """Scanning this computes the advantages in reverse order."""
+            delta, mask = x
+            adv_t = delta + self.gamma * self.lam * mask * adv_t_plus_1
+            return adv_t, adv_t
+
+        values_shifted = jnp.concatenate([values[1:], values[-1:]], axis=0)
+        # just repeating the last value for the last time step (should zero it out mathematically)
+        mask = jnp.where(dones, 0.0, 1.0)
+
+        # getting td residuals
+        deltas = rewards + self.gamma * values_shifted * mask - values
+
+        _, gae = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas, mask), reverse=True)
+        value_targets = jnp.add(gae, values)
+        # gae is the result from stock GAE...
+
+        # Following Brax and applying another TD step to get the value targets
+        # TODO: experiment with original GAE & value targets
+        value_targets_shifted = jnp.concatenate([value_targets[1:], value_targets[-1:]], axis=0)
+        advantages = rewards + self.gamma * value_targets_shifted * mask - values
+
+        return advantages, value_targets
+
+
 @dataclass
-class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
+class HumanoidWalkingConfig(MjxEnvConfig):
     """Combining configs for the humanoid walking task and fixing params."""
 
     robot_model_path: str = "examples/default_humanoid/scene.mjcf"
 
 
-class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
+class HumanoidWalkingTask(RLTask[HumanoidWalkingConfig]):
+    def get_loss(self) -> PPOLoss:
+        return BraxPPO(
+            config=self.config,
+            gamma=self.config.gamma,
+            lam=self.config.lam,
+            eps=self.config.eps,
+        )
+
     def get_environment(self) -> MjxEnv:
         return MjxEnv(
             self.config,
