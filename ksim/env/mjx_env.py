@@ -199,6 +199,11 @@ class MjxEnv(BaseEnv[Config], ABC):
         self.observations = _unique_list([(obs.observation_name, obs) for obs in observations_v])
         self.commands = _unique_list([(cmd.command_name, cmd) for cmd in commands_v])
 
+        if isinstance(actuators, ActuatorsBuilder):
+            self.actuators = actuators(data)
+        else:
+            self.actuators = actuators
+
         # For simplicity, assume integer (increase granularity if needed).
         assert self.config.ctrl_dt % self.config.dt == 0, "ctrl_dt must be a multiple of dt"
         self.physics_dt_per_ctrl_dt = int(self.config.ctrl_dt / self.config.dt)

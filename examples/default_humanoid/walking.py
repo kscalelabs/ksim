@@ -34,9 +34,9 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
-    min_std: float
-    max_std: float
-    var_scale: float
+    min_std: float = eqx.static_field()
+    max_std: float = eqx.static_field()
+    var_scale: float = eqx.static_field()
 
     def __init__(
         self,
@@ -52,6 +52,7 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
             width_size=64,
             depth=5,
             key=key,
+            activation=jax.nn.relu,
         )
         self.min_std = min_std
         self.max_std = max_std
@@ -89,6 +90,7 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
             width_size=64,
             depth=5,
             key=key,
+            activation=jax.nn.relu,
         )
 
     def forward(self, model_input: ModelInput) -> Array:

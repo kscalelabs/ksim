@@ -82,7 +82,6 @@ class KBot2Actor(eqx.Module, KSimModule):
         # concat because Gaussian-like distributions expect the parameters
         # to be mean concat std
         parametrization = jnp.concatenate([mean, std], axis=-1)
-        jax.debug.breakpoint()
 
         return parametrization
 

@@ -45,28 +45,6 @@ class PassThrough(Normalizer):
         return self
 
 
-# class Standardize(Normalizer):
-#     """Standardizes a pytree of arrays with mean and std along batch dims."""
-
-#     def __call__(self, pytree: PyTree[Array]) -> PyTree[Array]:
-#         """Standardizes a pytree of arrays with mean and std along batch dims."""
-
-#         def standardize_leaf(x: Array) -> Array:
-#             """Standardizes a leaf of the pytree."""
-#             batch_dims = x.shape[:-1]
-#             mean = jnp.mean(x, axis=tuple(range(len(batch_dims))))
-#             std = jnp.std(x, axis=tuple(range(len(batch_dims))))
-#             std = jnp.where(std > 0, std, jnp.ones_like(std))
-#             return (x - mean) / std
-
-#         normalized = jax.tree_map(standardize_leaf, pytree)
-#         return normalized
-
-#     def update(self, pytree: PyTree[Array]) -> "Standardize":
-#         """Updates the normalization statistics."""
-#         return self
-
-
 class Standardize(Normalizer):
     """Standardizes a pytree of arrays with online updates."""
 
@@ -109,5 +87,4 @@ class Standardize(Normalizer):
 
         new_mean, new_std = jax.tree_util.tree_map(update_leaf_stats, pytree, self.mean, self.std)
         res = eqx.tree_at(lambda t: (t.mean, t.std), self, (new_mean, new_std))
-        jax.debug.breakpoint()
         return res

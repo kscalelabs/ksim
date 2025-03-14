@@ -508,7 +508,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             env.reset,
             in_axes=(None, 0, None, None, None),
         )(agent, reset_rngs, physics_model_L, obs_normalizer, cmd_normalizer)
-        breakpoint()
 
         if self.config.compile_unroll:
             static_args = ["num_steps", "num_envs", "return_intermediate_data"]
