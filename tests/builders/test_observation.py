@@ -83,9 +83,7 @@ class BaseObservationTest(chex.TestCase):
         clean_data = jnp.zeros((1000,))
 
         # Generate many noisy samples
-        noisy_data = jax.vmap(lambda i: obs.add_noise(clean_data, jax.random.fold_in(rng, i)))(
-            jnp.arange(100)
-        )
+        noisy_data = jax.vmap(lambda i: obs.add_noise(clean_data, jax.random.fold_in(rng, i)))(jnp.arange(100))
 
         # Check statistical properties (mean close to 0, std dev close to noise value)
         mean = jnp.mean(noisy_data)
@@ -101,9 +99,7 @@ class BaseObservationTest(chex.TestCase):
         clean_data = jnp.zeros((1000,))
 
         # Generate many noisy samples
-        noisy_data = jax.vmap(lambda i: obs.add_noise(clean_data, jax.random.fold_in(rng, i)))(
-            jnp.arange(100)
-        )
+        noisy_data = jax.vmap(lambda i: obs.add_noise(clean_data, jax.random.fold_in(rng, i)))(jnp.arange(100))
 
         # Check that all values are within bounds
         self.assertTrue(jnp.all(noisy_data >= -3.0))

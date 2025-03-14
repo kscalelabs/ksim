@@ -1,6 +1,7 @@
 """Defines the base normalization class, along with some implementations."""
 
 from abc import ABC, abstractmethod
+from typing import Self
 
 import equinox as eqx
 import jax
@@ -13,15 +14,6 @@ class Normalizer(eqx.Module, ABC):
 
     For more fine-grained normalization, feel free to subclass this and pass
     in to the task definition.
-
-    E.g.
-    ```python
-    class CustomNormalizer(Normalizer):
-        def __call__(self, pytree: PyTree[Array]) -> PyTree[Array]:
-            # maybe do batch-wise norm on vector observations
-            # maybe do layer-wise norm on tensor observations
-            return ...
-    ```
     """
 
     @abstractmethod
@@ -29,7 +21,7 @@ class Normalizer(eqx.Module, ABC):
         """Normalizes a pytree of arrays."""
 
     @abstractmethod
-    def update(self, pytree: PyTree[Array]) -> "Normalizer":
+    def update(self, pytree: PyTree[Array]) -> Self:
         """Updates the normalization statistics."""
 
 
@@ -40,20 +32,17 @@ class PassThrough(Normalizer):
         """Passes through the pytree without normalization."""
         return pytree
 
-    def update(self, pytree: PyTree[Array]) -> "PassThrough":
+    def update(self, pytree: PyTree[Array]) -> Self:
         """Returns self."""
         return self
 
 
 class Standardize(Normalizer):
-    """Standardizes a pytree of arrays with online updates."""
+    """Standardizes a Pytree of arrays with online updates."""
 
     mean: PyTree[Array]
-    """The mean of the normalized arrays accross the batch dimension/s."""
     std: PyTree[Array]
-    """The std of the normalized arrays accross the batch dimension/s."""
     alpha: float
-    """The decay rate for the online updates: high = new is more important."""
 
     def __init__(self, pytree: PyTree[Array], *, alpha: float) -> None:
         """Initializes the normalization statistics."""
@@ -73,7 +62,7 @@ class Standardize(Normalizer):
         res = jax.tree_util.tree_map(normalize_leaf, pytree, self.mean, self.std)
         return res
 
-    def update(self, pytree: PyTree[Array]) -> "Standardize":
+    def update(self, pytree: PyTree[Array]) -> Self:
         """Updates the normalization statistics in a stateless manner."""
 
         def update_leaf_stats(x: Array, old_mean: Array, old_std: Array) -> tuple[Array, Array]:

@@ -230,6 +230,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         env_state_batch: EnvState,
         rollout_time_loss_components: RolloutTimeLossComponents,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
@@ -238,8 +240,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             agent=agent,
             env_state_batch=env_state_batch,
             rollout_time_loss_components=rollout_time_loss_components,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
+            obs_normalizer=obs_normalizer,  # noqa: F821 TODO fix
+            cmd_normalizer=cmd_normalizer,  # noqa: F821 TODO fix
             rng=rng,
         )
 
@@ -367,7 +369,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return total_loss, metrics_to_log
 
-    def compute_loss(self, model: PyTree, batch: Any, output: Any) -> Array:
+    def compute_loss(self, model: PyTree, batch: Any, output: Any) -> Array:  # noqa: ANN401
         raise NotImplementedError(
             "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
             "PPO tasks use model_update and loss_metrics_grads instead."

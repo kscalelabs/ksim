@@ -88,8 +88,9 @@ class TestLinearVelocityZPenalty:
         command: FrozenDict[str, Array] = FrozenDict({})
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
         action_t = jnp.array([0.1, 0.1, 0.1])
+        done_t = jnp.array([False])
 
-        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1) * scale
+        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1, done_t) * scale
 
         # Expected penalty is scale * z_velocity^2 for L2 norm
         expected = scale * (data_t_plus_1.qvel[2] ** 2)
@@ -110,8 +111,8 @@ class TestAngularVelocityXYPenalty:
         command: FrozenDict[str, Array] = FrozenDict({})
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
         action_t = jnp.array([0.1, 0.1, 0.1])
-
-        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1) * scale
+        done_t = jnp.array([False])
+        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1, done_t) * scale
 
         # Expected penalty is scale * sum(xy_angular_velocity^2) for L2 norm
         expected = scale * ((data_t_plus_1.qvel[3] ** 2) + (data_t_plus_1.qvel[4] ** 2))
@@ -129,18 +130,15 @@ class TestTrackAngularVelocityZReward:
         data_t = DummyMjxData()
         data_t_plus_1 = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
-        command: FrozenDict[str, Array] = FrozenDict(
-            {"angular_velocity_command_vector": jnp.array([0.5])}
-        )
+        command: FrozenDict[str, Array] = FrozenDict({"angular_velocity_command_vector": jnp.array([0.5])})
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
         action_t = jnp.array([0.1, 0.1, 0.1])
+        done_t = jnp.array([False])
 
-        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1) * scale
+        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1, done_t) * scale
 
         # Expected reward is scale * (z_angular_velocity * command)^2 for L2 norm
-        expected = (
-            scale * (data_t_plus_1.qvel[5] * command["angular_velocity_command_vector"][0]) ** 2
-        )
+        expected = scale * (data_t_plus_1.qvel[5] * command["angular_velocity_command_vector"][0]) ** 2
         assert jnp.allclose(result, expected)
 
 
@@ -156,18 +154,15 @@ class TestTrackLinearVelocityXYReward:
         data_t = DummyMjxData()
         data_t_plus_1 = DummyMjxData(qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
-        command: FrozenDict[str, Array] = FrozenDict(
-            {"linear_velocity_command_vector": jnp.array([0.5, 0.5])}
-        )
+        command: FrozenDict[str, Array] = FrozenDict({"linear_velocity_command_vector": jnp.array([0.5, 0.5])})
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
         action_t = jnp.array([0.1, 0.1, 0.1])
+        done_t = jnp.array([False])
 
-        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1) * scale
+        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1, done_t) * scale
 
         # Expected reward uses exponential decay based on L2 tracking error
-        tracking_error = jnp.linalg.norm(
-            command["linear_velocity_command_vector"] - data_t_plus_1.qvel[:2]
-        )
+        tracking_error = jnp.linalg.norm(command["linear_velocity_command_vector"] - data_t_plus_1.qvel[:2])
         expected = scale * jnp.exp(-sensitivity * tracking_error)
 
         assert jnp.allclose(result, expected)
@@ -187,15 +182,16 @@ class TestActionSmoothnessPenalty:
         command: FrozenDict[str, Array] = FrozenDict({})
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
         action_t = jnp.array([0.1, 0.1, 0.1])
+        done_t = jnp.array([False])
 
-        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1) * scale
+        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1, done_t) * scale
 
         # Expected penalty is scale * sum((action_t - action_t_minus_1)^2) for L2 norm
         expected = scale * jnp.sum((action_t - action_t_minus_1) ** 2)
         assert jnp.allclose(result, expected)
 
         # Test with None for action_t_minus_1
-        result = reward(None, data_t, command, action_t, data_t_plus_1)
+        result = reward(None, data_t, command, action_t, data_t_plus_1, done_t)
         assert jnp.allclose(result, 0.0)
 
 
@@ -219,8 +215,8 @@ class TestFootContactPenalty:
         command: FrozenDict[str, Array] = FrozenDict({})
         action_t_minus_1 = jnp.array([0.0, 0.0, 0.0])
         action_t = jnp.array([0.1, 0.1, 0.1])
-
-        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1) * scale
+        done_t = jnp.array([False])
+        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1, done_t) * scale
 
         # Expected penalty is scale * 1.0 (since there is contact with an illegal geom)
         expected = scale * 1.0
@@ -228,8 +224,8 @@ class TestFootContactPenalty:
 
         # Test with no illegal contacts
         data_t_plus_1 = DummyMjxData(contact=DummyContact(geom1=jnp.array([3, 4, 5])))
-
-        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1) * scale
+        done_t = jnp.array([False])
+        result = reward(action_t_minus_1, data_t, command, action_t, data_t_plus_1, done_t) * scale
 
         # Expected penalty is scale * 0.0 (since there is no contact with an illegal geom)
         expected = scale * 0.0

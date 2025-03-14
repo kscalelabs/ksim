@@ -32,7 +32,11 @@ from ksim.resets import (
     RandomizeJointVelocities,
     XYPositionResetBuilder,
 )
-from ksim.rewards import DHForwardReward, DHHealthyReward
+from ksim.rewards import (
+    DHForwardReward,
+    HeightReward,
+    SinusoidalFeetHeightRewardBuilder,
+)
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import PitchTooGreatTermination, RollTooGreatTermination
 
@@ -131,10 +135,17 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
                 RandomizeJointPositions(scale=0.01),
             ],
             rewards=[
-                DHHealthyReward(
-                    scale=0.5,
-                ),
+                HeightReward(scale=1.0, height_target=0.7),
                 DHForwardReward(scale=0.2),
+                SinusoidalFeetHeightRewardBuilder(
+                    left_foot_geom_name="KB_D_501L_L_LEG_FOOT_box_collision",
+                    right_foot_geom_name="KB_D_501R_R_LEG_FOOT_box_collision",
+                    amplitude=0.2,
+                    period=0.4,
+                    scale=0.4,
+                    vertical_offset=-0.09,
+                ),
+                TerminationPenalty(scale=-100.0),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian"),

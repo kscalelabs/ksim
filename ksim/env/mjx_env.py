@@ -237,6 +237,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         command_L_t: FrozenDict[str, Array],
         action_L_t: Array,
         mjx_data_L_t_plus_1: mjx.Data,
+        done_L_t: Array,
     ) -> FrozenDict[str, Array]:
         """Compute rewards from the state transition."""
         rewards = {}
@@ -248,6 +249,7 @@ class MjxEnv(BaseEnv[Config], ABC):
                     command_t=command_L_t,
                     action_t=action_L_t,
                     mjx_data_t_plus_1=mjx_data_L_t_plus_1,
+                    done_t=done_L_t,
                 )
                 * reward.scale
             )
@@ -443,11 +445,10 @@ class MjxEnv(BaseEnv[Config], ABC):
         )
 
         term_components_L_0 = self.get_terminations(mjx_data_L_1)
-        reward_components_L_0 = self.get_rewards(
-            action_L_0, mjx_data_L_0, command_L_0, action_L_0, mjx_data_L_1
-        )
-
         done_L_0 = jnp.stack([v for _, v in term_components_L_0.items()]).any()
+        reward_components_L_0 = self.get_rewards(
+            action_L_0, mjx_data_L_0, command_L_0, action_L_0, mjx_data_L_1, done_L_0
+        )
         reward_L_0 = jnp.stack([v for _, v in reward_components_L_0.items()]).sum()
 
         env_state_L_0 = EnvState(
@@ -532,6 +533,7 @@ class MjxEnv(BaseEnv[Config], ABC):
             command_L_t,
             action_L_t,
             mjx_data_L_t_plus_1,
+            done_L_t,
         )
         reward_L_t = jnp.stack([v for _, v in reward_components_L_t.items()]).sum()
 
@@ -611,6 +613,40 @@ class MjxEnv(BaseEnv[Config], ABC):
             return (env_state_L_t, mjx_data_L_t_plus_1, rng), (env_state_L_t, None, data_has_nans)
 
     @xax.profile
+    @xax.jit(static_argnames=["self"])
+    def apply_post_accumulate(self, env_state_TL: EnvState) -> EnvState:
+        """Apply post_accumulate to all reward components for a single trajectory."""
+        # Create a new reward_components dict with post-accumulated values
+        updated_reward_components = {}
+
+        for reward_name, reward_func in self.rewards:
+            # Extract the reward component for this reward function
+            reward_component = env_state_TL.reward_components[reward_name]
+
+            # Apply post_accumulate to the reward component
+            updated_reward = reward_func.post_accumulate(reward_component, env_state_TL.done)
+
+            # Store the updated reward
+            updated_reward_components[reward_name] = updated_reward
+
+        # Recalculate the total reward based on updated components
+        updated_total_reward = jnp.stack([v for _, v in updated_reward_components.items()]).sum(
+            axis=0
+        )
+
+        # Create a new EnvState with the updated reward components and total reward
+        return EnvState(
+            obs=env_state_TL.obs,
+            command=env_state_TL.command,
+            action=env_state_TL.action,
+            reward=updated_total_reward,
+            done=env_state_TL.done,
+            timestep=env_state_TL.timestep,
+            termination_components=env_state_TL.termination_components,
+            reward_components=FrozenDict(updated_reward_components),
+        )
+
+    @xax.profile
     def unroll_trajectory(
         self,
         agent: Agent,
@@ -640,6 +676,9 @@ class MjxEnv(BaseEnv[Config], ABC):
             xs=None,
             length=num_steps,
         )
+
+        # Apply post accumulation to the trajectory
+        env_state_TL = self.apply_post_accumulate(env_state_TL)
 
         if return_intermediate_data:
             assert isinstance(mjx_data_TL, mjx.Data)

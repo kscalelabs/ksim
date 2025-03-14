@@ -50,9 +50,7 @@ def split_and_pad_trajectories(
 
         # Extract and pad trajectory
         trajectory = flat_tensor[start_idx : start_idx + length]
-        padded = jnp.pad(
-            trajectory, [(0, max_trajectory_length - length)] + [(0, 0)] * (tensor_tne.ndim - 2)
-        )
+        padded = jnp.pad(trajectory, [(0, max_trajectory_length - length)] + [(0, 0)] * (tensor_tne.ndim - 2))
         mask = jnp.arange(max_trajectory_length) < length
 
         # Update arrays
@@ -68,9 +66,7 @@ def split_and_pad_trajectories(
         trajectory_masks,
     )
 
-    (_, _, padded_trajectories, trajectory_masks), _ = jax.lax.scan(
-        scan_fn, init_carry, trajectory_lengths
-    )
+    (_, _, padded_trajectories, trajectory_masks), _ = jax.lax.scan(scan_fn, init_carry, trajectory_lengths)
 
     return padded_trajectories, trajectory_masks
 

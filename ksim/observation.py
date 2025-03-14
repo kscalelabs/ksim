@@ -50,9 +50,7 @@ class Observation(ABC):
             case "gaussian":
                 return observation + jax.random.normal(rng, observation.shape) * self.noise
             case "uniform":
-                return observation + jax.random.uniform(
-                    rng, observation.shape, minval=-self.noise, maxval=self.noise
-                )
+                return observation + jax.random.uniform(rng, observation.shape, minval=-self.noise, maxval=self.noise)
             case _:
                 raise ValueError(f"Invalid noise type: {self.noise_type}")
 

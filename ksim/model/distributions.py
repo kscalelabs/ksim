@@ -86,9 +86,7 @@ class GaussianDistribution(ActionDistribution):
     def log_prob(self, parameters: Array, actions: Array) -> Array:
         """Compute the log probability of actions."""
         mean, std = self.get_mean_std(parameters)
-        log_probs = (
-            -0.5 * jnp.square((actions - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
-        )
+        log_probs = -0.5 * jnp.square((actions - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
         return jnp.sum(log_probs, axis=-1)
 
     def entropy(self, parameters: Array, rng: Array) -> Array:
@@ -142,9 +140,7 @@ class TanhGaussianDistribution(GaussianDistribution):
         # Compute the pre-tanh values from the actions (with clipping for stability)
         pre_tanh = jnp.arctanh(jnp.clip(actions, -1 + self.eps, 1 - self.eps))
         # Compute the base log probability from the Gaussian density
-        base_log_prob = (
-            -0.5 * jnp.square((pre_tanh - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
-        )
+        base_log_prob = -0.5 * jnp.square((pre_tanh - mean) / std) - jnp.log(std) - 0.5 * jnp.log(2 * jnp.pi)
         base_log_prob = jnp.sum(base_log_prob, axis=-1)
         # Compute the log-determinant of the Jacobian for the tanh transformation
         jacobian_correction = jnp.sum(jnp.log(1 - jnp.square(actions) + self.eps), axis=-1)

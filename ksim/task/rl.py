@@ -29,7 +29,6 @@ from omegaconf import MISSING
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
 from ksim.model.base import Agent
-from ksim.model.types import ModelInput
 from ksim.normalization import Normalizer
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.visualization import render_and_save_trajectory
@@ -163,8 +162,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_model(self, key: PRNGKeyArray) -> PyTree:
         """Get the model for the current task."""
         raise NotImplementedError(
-            "Reinforcement learning tasks must implement this method."
-            "Instead, we create an agent using dummy data."
+            "Reinforcement learning tasks must implement this method.Instead, we create an agent using dummy data."
         )
 
     def run(self) -> None:
