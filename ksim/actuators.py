@@ -87,9 +87,8 @@ class MITPositionActuatorsBuilder(ActuatorsBuilder[MITPositionActuators]):
 
     def __call__(self, data: BuilderData) -> MITPositionActuators:
         """Builds an MITPositionActuators instance."""
-        assert data.robot_metadata.joint_name_to_metadata is not None, (
-            "Missing joint_name_to_metadata within robot metadata"
-        )
+        if data.robot_metadata.joint_name_to_metadata is None:
+            raise ValueError("Missing joint_name_to_metadata within robot metadata")
         return MITPositionActuators(
             joint_to_kp_kds=data.robot_metadata.joint_name_to_metadata,
             mujoco_mappings=data.mujoco_mappings,
