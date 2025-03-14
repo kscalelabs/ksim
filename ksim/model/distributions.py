@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 
 import attrs
-import distrax
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array

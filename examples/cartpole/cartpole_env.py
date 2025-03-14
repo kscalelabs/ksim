@@ -57,7 +57,7 @@ class CartPoleEnv(BaseEnv):
 
     def reset(
         self,
-        model: ActorCriticAgent,
+        agent: ActorCriticAgent,
         variables: PyTree[Array],
         rng: PRNGKeyArray,
         physics_model_L: PhysicsModel,
@@ -68,7 +68,7 @@ class CartPoleEnv(BaseEnv):
 
     def step(
         self,
-        model: ActorCriticAgent,
+        agent: ActorCriticAgent,
         variables: PyTree[Array],
         env_state_L_t_minus_1: EnvState,
         rng: PRNGKeyArray,
@@ -81,7 +81,7 @@ class CartPoleEnv(BaseEnv):
 
     def unroll_trajectories(
         self,
-        model: ActorCriticAgent,
+        agent: ActorCriticAgent,
         variables: PyTree[Array],
         rng: PRNGKeyArray,
         num_steps: int,
@@ -155,7 +155,7 @@ class CartPoleEnv(BaseEnv):
 
     def reset_and_give_obs(
         self,
-        model: ActorCriticAgent,
+        agent: ActorCriticAgent,
         variables: PyTree[Array],
         rng: PRNGKeyArray,
     ) -> tuple[EnvState, np.ndarray]:
@@ -189,7 +189,7 @@ class CartPoleEnv(BaseEnv):
 
     def step_given_gym_obs(
         self,
-        model: ActorCriticAgent,
+        agent: ActorCriticAgent,
         variables: PyTree[Array],
         prev_env_state: EnvState,
         rng: PRNGKeyArray,
@@ -235,7 +235,7 @@ class CartPoleEnv(BaseEnv):
 
     def render_trajectory(
         self,
-        model: ActorCriticAgent,
+        agent: ActorCriticAgent,
         variables: PyTree[Array],
         rng: PRNGKeyArray,
         *,

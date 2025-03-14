@@ -2,15 +2,19 @@
 
 from dataclasses import dataclass
 
-import flax.linen as nn
+import equinox as eqx
+import jax
 import jax.numpy as jnp
-from jaxtyping import PRNGKeyArray
+from flax.core import FrozenDict
+from jaxtyping import Array, PRNGKeyArray
 
 from ksim.actuators import TorqueActuators
 from ksim.commands import LinearVelocityCommand
 from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.base import ActorCriticAgent
-from ksim.model.factory import mlp_actor_critic_agent
+from ksim.model.base import ActorCriticAgent, KSimModule
+from ksim.model.distributions import TanhGaussianDistribution
+from ksim.model.types import ModelInput
+from ksim.normalization import Normalizer, PassThrough, Standardize
 from ksim.observation import (
     ActuatorForceObservation,
     CenterOfMassInertiaObservation,
@@ -26,18 +30,87 @@ from ksim.terminations import UnhealthyTermination
 NUM_OUTPUTS = 21
 
 
+class DefaultHumanoidActor(eqx.Module, KSimModule):
+    """Actor for the walking task."""
+
+    mlp: eqx.nn.MLP
+    min_std: float
+    max_std: float
+    var_scale: float
+
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        min_std: float,
+        max_std: float,
+        var_scale: float,
+    ) -> None:
+        self.mlp = eqx.nn.MLP(
+            in_size=338,  # TODO: use similar pattern when dummy data gets passed in to populate
+            out_size=NUM_OUTPUTS * 2,
+            width_size=64,
+            depth=5,
+            key=key,
+        )
+        self.min_std = min_std
+        self.max_std = max_std
+        self.var_scale = var_scale
+
+    def forward(self, model_input: ModelInput) -> Array:
+        obs_vec = jnp.concatenate([v for v in model_input.obs.values()], axis=-1)
+        command_vec = jnp.concatenate([v for v in model_input.command.values()], axis=-1)
+        x = jnp.concatenate([obs_vec, command_vec], axis=-1)
+        prediction = self.mlp(x)
+
+        mean = prediction[..., :NUM_OUTPUTS]
+        std = prediction[..., NUM_OUTPUTS:]
+
+        # softplus and clipping for stability
+        std = (jax.nn.softplus(std) + self.min_std) * self.var_scale
+        std = jnp.clip(std, self.min_std, self.max_std)
+
+        # concat because Gaussian-like distributions expect the parameters
+        # to be mean concat std
+        parametrization = jnp.concatenate([mean, std], axis=-1)
+
+        return parametrization
+
+
+class DefaultHumanoidCritic(eqx.Module, KSimModule):
+    """Critic for the walking task."""
+
+    mlp: eqx.nn.MLP
+
+    def __init__(self, key: PRNGKeyArray) -> None:
+        self.mlp = eqx.nn.MLP(
+            in_size=338,  # TODO: is there a nice way of inferring this?
+            out_size=1,
+            width_size=64,
+            depth=5,
+            key=key,
+        )
+
+    def forward(self, model_input: ModelInput) -> Array:
+        obs_vec = jnp.concatenate([v for v in model_input.obs.values()], axis=-1)
+        command_vec = jnp.concatenate([v for v in model_input.command.values()], axis=-1)
+        x = jnp.concatenate([obs_vec, command_vec], axis=-1)
+        return self.mlp(x)
+
+
 @dataclass
 class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
     """Combining configs for the humanoid walking task and fixing params."""
 
-    robot_model_name: str = "examples/default_humanoid/"
+    robot_model_path: str = "examples/default_humanoid/scene.mjcf"
 
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
     def get_environment(self) -> MjxEnv:
         return MjxEnv(
             self.config,
-            robot_model_path=self.config.robot_model_name,
+            robot_model_path=self.config.robot_model_path,
+            robot_metadata_path=None,
             actuators=TorqueActuators(),
             terminations=[
                 UnhealthyTermination(
@@ -68,15 +141,17 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
         )
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
-        return mlp_actor_critic_agent(
-            num_actions=NUM_OUTPUTS,
-            prediction_type="mean_std",
-            distribution_type="tanh_gaussian",
-            actor_hidden_dims=(64,) * 5,
-            critic_hidden_dims=(64,) * 5,
-            kernel_initialization=nn.initializers.lecun_normal(),
-            post_process_kwargs={"min_std": 0.01, "max_std": 1.0, "var_scale": 1.0},
+        return ActorCriticAgent(
+            critic_model=DefaultHumanoidCritic(key),
+            actor_model=DefaultHumanoidActor(key, min_std=0.01, max_std=1.0, var_scale=1.0),
+            action_distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
+
+    def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer:
+        return Standardize(dummy_obs, alpha=1.0)
+
+    def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
+        return PassThrough()
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:
         return None

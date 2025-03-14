@@ -9,14 +9,14 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray
 from matplotlib import animation
 from PIL import Image
 from scipy.interpolate import interp1d
 
 from ksim.env.base_env import BaseEnv
 from ksim.env.types import EnvState
-from ksim.model.base import ActorCriticAgent
+from ksim.model.base import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +103,7 @@ def save_trajectory_visualization(
 
 def render_and_save_trajectory(
     env: BaseEnv,
-    model: ActorCriticAgent,
-    variables: PyTree[Array],
+    agent: Agent,
     rng: PRNGKeyArray,
     output_dir: Path,
     *,
@@ -119,8 +118,7 @@ def render_and_save_trajectory(
 
     Args:
         env: Environment to render
-        model: Model to use for actions
-        variables: Model variables
+        agent: Model to use for actions
         rng: Random number generator key
         output_dir: Directory to save the visualization to
         num_steps: Number of steps to render
@@ -131,8 +129,7 @@ def render_and_save_trajectory(
         save_video: Whether to save video file
     """
     frames, env_state_T1L = env.render_trajectory(
-        model=model,
-        variables=variables,
+        agent=agent,
         rng=rng,
         num_steps=num_steps,
         width=width,

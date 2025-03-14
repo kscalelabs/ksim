@@ -1,17 +1,17 @@
 """Defines the base actuators class, along with some implementations."""
 
 from abc import ABC, abstractmethod
-from typing import Mapping, TypedDict
+from typing import Generic, TypeVar
 
-import attrs
 import jax.numpy as jnp
 from jaxtyping import Array
+from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
+from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import MujocoMappings
 
 
-@attrs.define(frozen=True)
 class Actuators(ABC):
     """Collection of actuators."""
 
@@ -20,15 +20,19 @@ class Actuators(ABC):
         """Get the control signal from the action vector."""
 
 
+T = TypeVar("T", bound=Actuators)
+
+
+class ActuatorsBuilder(ABC, Generic[T]):
+    @abstractmethod
+    def __call__(self, data: BuilderData) -> T:
+        """Builds an observation from a MuJoCo model."""
+
+
 class TorqueActuators(Actuators):
     def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
         # Just use the action as the torque, the simplest actuator model.
         return action
-
-
-class PositionParams(TypedDict):
-    kp: float
-    kd: float
 
 
 class MITPositionActuators(Actuators):
@@ -36,7 +40,7 @@ class MITPositionActuators(Actuators):
 
     def __init__(
         self,
-        joint_to_kp_kds: Mapping[str, PositionParams],
+        joint_to_kp_kds: dict[str, JointMetadataOutput],
         mujoco_mappings: MujocoMappings,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
@@ -46,8 +50,17 @@ class MITPositionActuators(Actuators):
         for joint_name, params in joint_to_kp_kds.items():
             actuator_name = self.get_actuator_name(joint_name)
             actuator_idx = mujoco_mappings.ctrl_name_to_idx[actuator_name]
-            kps_list[actuator_idx] = params["kp"]
-            kds_list[actuator_idx] = params["kd"]
+
+            kp_str = params.kp
+            kd_str = params.kd
+            assert (
+                kp_str is not None and kd_str is not None
+            ), f"Missing kp or kd for joint {joint_name}"
+            kp = float(kp_str)
+            kd = float(kd_str)
+
+            kps_list[actuator_idx] = kp
+            kds_list[actuator_idx] = kd
 
         self.kps = jnp.array(kps_list)
         self.kds = jnp.array(kds_list)
@@ -71,26 +84,15 @@ class MITPositionActuators(Actuators):
         return ctrl
 
 
-class ScaledTorqueActuators(Actuators):
-    def __init__(
-        self,
-        joint_to_gear_ratios: Mapping[str, float],
-        joint_to_input_ranges: Mapping[str, tuple[float, float]],
-        mujoco_mappings: MujocoMappings,
-    ) -> None:
-        """Creates an instance of ScaledTorqueActuators."""
-        self.gear_ratios = jnp.array(
-            [joint_to_gear_ratios[m] for m in mujoco_mappings.ctrl_name_to_idx]
-        )
-        self.input_ranges = jnp.array(
-            [joint_to_input_ranges[m] for m in mujoco_mappings.ctrl_name_to_idx]
-        )
+class MITPositionActuatorsBuilder(ActuatorsBuilder[MITPositionActuators]):
+    """Builder for MITPositionActuators."""
 
-    def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
-        """Get the control signal from the (position) action vector."""
-        # Copy legacy and brax setup here
-        action_min = self.input_ranges[:, 0]
-        action_max = self.input_ranges[:, 1]
-        # Scale action from [-1,1] to actuator limits
-        ctrl = action * (action_max - action_min) * 0.5
-        return ctrl
+    def __call__(self, data: BuilderData) -> MITPositionActuators:
+        """Builds an MITPositionActuators instance."""
+        assert (
+            data.robot_metadata.joint_name_to_metadata is not None
+        ), "Missing joint_name_to_metadata within robot metadata"
+        return MITPositionActuators(
+            joint_to_kp_kds=data.robot_metadata.joint_name_to_metadata,
+            mujoco_mappings=data.mujoco_mappings,
+        )

@@ -8,6 +8,7 @@ import pytest
 import xax
 
 from examples.default_humanoid.walking import HumanoidWalkingConfig, HumanoidWalkingTask
+from ksim.model.types import ModelInput
 
 
 @pytest.mark.slow
@@ -28,32 +29,36 @@ def test_default_humanoid_training() -> None:
 
     # Get the environment and model
     env = task.get_environment()
-    model = task.get_model(key)
+    agent = task.get_model(key)
 
     # Initialize model parameters
     burn_in_rng, key, init_key = jax.random.split(key, 3)
-    dummy_states = env.get_dummy_env_states(config.num_envs)
-    variables = model.init(init_key, dummy_states.obs, dummy_states.command, None, None, None)
 
     # Get optimizer
     optimizer = task.get_optimizer()
-    opt_state = optimizer.init(variables["params"])
+    opt_state = optimizer.init(agent)  # type: ignore TODO: make it look like an optax.Params
 
     # Test a single training iteration
     physics_model_L = env.get_init_physics_model()
-
+    dummy_env_states = env.get_dummy_env_states(config.num_envs)
+    dummy_model_input = ModelInput(
+        obs=dummy_env_states.obs,
+        command=dummy_env_states.command,
+        action_history=None,
+        recurrent_state=None,
+    )
+    normalizer = task.get_normalizer(dummy_model_input)
     reset_rngs = jax.random.split(key, config.num_envs)
     env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, None))(
-        model, variables, reset_rngs, physics_model_L
+        agent, normalizer, reset_rngs, physics_model_L
     )
-    static_args = ["model", "num_steps", "num_envs", "return_intermediate_data"]
+    static_args = ["num_steps", "num_envs", "return_intermediate_data"]
     env_rollout_fn = xax.jit(static_argnames=static_args)(env.unroll_trajectories)
 
     # Get a trajectory dataset
-    key, rollout_key = jax.random.split(key)
+    key, _ = jax.random.split(key)
     env_state_TEL, _, _ = env_rollout_fn(
-        model=model,
-        variables=variables,
+        agent=agent,
         rng=burn_in_rng,
         num_steps=task.num_rollout_steps_per_env,
         num_envs=config.num_envs,
@@ -67,15 +72,8 @@ def test_default_humanoid_training() -> None:
         flatten_size=task.dataset_size,
     )
 
-    variables = task.update_input_normalization_stats(
-        variables=variables,
-        trajectories_dataset=env_state_TEL,
-        initial_step=False,
-    )
-
     rollout_loss_components_TEL = task.get_rollout_time_loss_components(
-        model=model,
-        variables=variables,
+        agent=agent,
         trajectory_dataset=env_state_TEL,
     )
 
@@ -87,10 +85,9 @@ def test_default_humanoid_training() -> None:
     # Update the model
     key, reshuffle_rng = jax.random.split(key)
     (_, _, _), metrics = task.rl_pass(
-        variables=variables,
+        agent=agent,
         opt_state=opt_state,
         reshuffle_rng=reshuffle_rng,
-        model=model,
         optimizer=optimizer,
         dataset_DL=env_state_DL,
         rollout_time_loss_components_DL=rollout_loss_components_DL,
@@ -127,12 +124,11 @@ def test_default_humanoid_run_method() -> None:
         # Get the environment and model to check for NaN values in initial setup
         env = task.get_environment()
         key = jax.random.PRNGKey(0)
-        model = task.get_model(key)
+        agent = task.get_model(key)
 
         # Initialize model parameters
         key, init_key = jax.random.split(key)
         dummy_states = env.get_dummy_env_states(config.num_envs)
-        variables = model.init(init_key, dummy_states.obs, dummy_states.command, None, None, None)
 
         # Check for NaN values in initial state
         # TODO: Switch these to asserts when we fix the NaN issue
@@ -146,7 +142,7 @@ def test_default_humanoid_run_method() -> None:
             xax.show_warning("NaN values found in initial action", important=True)
 
         # Check for NaN values in model parameters
-        for param_key, param_value in jax.tree_util.tree_leaves_with_path(variables["params"]):
+        for param_key, param_value in jax.tree_util.tree_leaves_with_path(agent):
             if jnp.isnan(param_value).any():
                 param_path = "/".join(str(p) for p in param_key)
                 xax.show_warning(
