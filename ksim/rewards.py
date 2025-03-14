@@ -18,18 +18,6 @@ from ksim.utils.mujoco import geoms_colliding
 
 logger = logging.getLogger(__name__)
 
-NormType = Literal["l1", "l2"]
-
-
-def get_norm(x: Array, norm: NormType) -> Array:
-    match norm:
-        case "l1":
-            return jnp.abs(x)
-        case "l2":
-            return jnp.square(x)
-        case _:
-            raise ValueError(f"Invalid norm: {norm}")
-
 
 @attrs.define(frozen=True, kw_only=True)
 class Reward(ABC):
@@ -48,7 +36,9 @@ class Reward(ABC):
             if self.scale > 0:
                 logger.warning("Penalty function %s has a positive scale: %f", name, self.scale)
         else:
-            logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale)
+            logger.warning(
+                "Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale
+            )
 
     # TODO: Use post_accumulate after unrolling
     def post_accumulate(self, reward: Array, done: Array) -> Array:
@@ -143,7 +133,7 @@ class HeightReward(Reward):
 class OrientationPenalty(Reward):
     """Penalty for how well the robot is oriented."""
 
-    norm: NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2")
     target_orientation: list = attrs.field(default=[0.073, 0.0, 1.0])
 
     def __call__(
@@ -156,7 +146,7 @@ class OrientationPenalty(Reward):
         done_t: Array,
     ) -> Array:
         return jnp.sum(
-            get_norm(
+            xax.get_norm(
                 xax.quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - jnp.array(self.target_orientation),
                 self.norm,
             )
@@ -167,7 +157,7 @@ class OrientationPenalty(Reward):
 class TorquePenalty(Reward):
     """Penalty for high torques."""
 
-    norm: NormType = attrs.field(default="l1")
+    norm: xax.NormType = attrs.field(default="l1")
 
     def __call__(
         self,
@@ -178,14 +168,14 @@ class TorquePenalty(Reward):
         mjx_data_t_plus_1: mjx.Data,
         done_t: Array,
     ) -> Array:
-        return jnp.sum(get_norm(mjx_data_t_plus_1.actuator_force, self.norm))
+        return jnp.sum(xax.get_norm(mjx_data_t_plus_1.actuator_force, self.norm))
 
 
 @attrs.define(frozen=True, kw_only=True)
 class EnergyPenalty(Reward):
     """Penalty for high energies."""
 
-    norm: NormType = attrs.field(default="l1")
+    norm: xax.NormType = attrs.field(default="l1")
 
     # NOTE: I think this is actually penalizing power (?). Rename if needed
     def __call__(
@@ -198,7 +188,8 @@ class EnergyPenalty(Reward):
         done_t: Array,
     ) -> Array:
         return jnp.sum(
-            get_norm(mjx_data_t_plus_1.qvel[6:], self.norm) * get_norm(mjx_data_t_plus_1.actuator_force, self.norm)
+            xax.get_norm(mjx_data_t_plus_1.qvel[6:], self.norm)
+            * xax.get_norm(mjx_data_t_plus_1.actuator_force, self.norm)
         )
 
 
@@ -206,7 +197,7 @@ class EnergyPenalty(Reward):
 class JointAccelerationPenalty(Reward):
     """Penalty for high joint accelerations."""
 
-    norm: NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(
         self,
@@ -217,14 +208,14 @@ class JointAccelerationPenalty(Reward):
         mjx_data_t_plus_1: mjx.Data,
         done_t: Array,
     ) -> Array:
-        return jnp.sum(get_norm(mjx_data_t_plus_1.qacc[6:], self.norm))
+        return jnp.sum(xax.get_norm(mjx_data_t_plus_1.qacc[6:], self.norm))
 
 
 @attrs.define(frozen=True, kw_only=True)
 class LinearVelocityZPenalty(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
-    norm: NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(
         self,
@@ -236,14 +227,14 @@ class LinearVelocityZPenalty(Reward):
         done_t: Array,
     ) -> Array:
         lin_vel_z = mjx_data_t_plus_1.qvel[2]
-        return get_norm(lin_vel_z, self.norm)
+        return xax.get_norm(lin_vel_z, self.norm)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class AngularVelocityXYPenalty(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
-    norm: NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(
         self,
@@ -255,7 +246,7 @@ class AngularVelocityXYPenalty(Reward):
         done_t: Array,
     ) -> Array:
         ang_vel_xy = mjx_data_t_plus_1.qvel[3:5]
-        return get_norm(ang_vel_xy, self.norm).sum(axis=-1)
+        return xax.get_norm(ang_vel_xy, self.norm).sum(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -263,7 +254,7 @@ class TrackAngularVelocityZReward(Reward):
     """Reward for how well the robot is tracking the angular velocity command."""
 
     cmd_name: str = attrs.field(default="angular_velocity_command_vector")
-    norm: NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(
         self,
@@ -276,7 +267,7 @@ class TrackAngularVelocityZReward(Reward):
     ) -> Array:
         ang_vel_cmd_1 = command_t[self.cmd_name][0]
         ang_vel_z = mjx_data_t_plus_1.qvel[5]
-        return get_norm(ang_vel_z * ang_vel_cmd_1, self.norm)
+        return xax.get_norm(ang_vel_z * ang_vel_cmd_1, self.norm)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -313,7 +304,7 @@ class TrackLinearVelocityXYReward(Reward):
 class ActionSmoothnessPenalty(Reward):
     """Penalty for how smooth the robot's action is."""
 
-    norm: NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(
         self,
@@ -328,8 +319,8 @@ class ActionSmoothnessPenalty(Reward):
         # we need to handle the case where action_t_minus_1 is None.
         # This only works if action_t_minus_1 is statically None or not None.
         if action_t_minus_1 is None:
-            return jnp.zeros_like(get_norm(action_t, self.norm).sum(axis=-1))
-        return get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1)
+            return jnp.zeros_like(xax.get_norm(action_t, self.norm).sum(axis=-1))
+        return xax.get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -349,7 +340,10 @@ class FootSlipPenalty(Reward):
         done_t: Array,
     ) -> Array:
         contacts = jnp.array(
-            [geoms_colliding(mjx_data_t_plus_1, geom_idx, self.floor_idx) for geom_idx in self.foot_geom_idxs]
+            [
+                geoms_colliding(mjx_data_t_plus_1, geom_idx, self.floor_idx)
+                for geom_idx in self.foot_geom_idxs
+            ]
         )
 
         # Get x and y velocities
@@ -387,7 +381,7 @@ class FeetClearancePenalty(Reward):
 
     foot_geom_idxs: Array
     max_foot_height: float
-    norm: NormType = attrs.field(default="l1")
+    norm: xax.NormType = attrs.field(default="l1")
 
     def __call__(
         self,
@@ -402,7 +396,7 @@ class FeetClearancePenalty(Reward):
 
         # TODO: Look into adding linear feet velocity norm to scale the foot delta
 
-        return jnp.sum(get_norm(feet_heights - self.max_foot_height, self.norm))
+        return jnp.sum(xax.get_norm(feet_heights - self.max_foot_height, self.norm))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -458,7 +452,9 @@ class FeetAirTimeReward(Reward):
             has_foot_contact = jnp.logical_or(has_contact_1, has_contact_2)
 
             # Check if any contact for this foot is close enough
-            distances_where_contact = jnp.where(has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4)
+            distances_where_contact = jnp.where(
+                has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4
+            )
             min_distance = jnp.min(distances_where_contact, initial=1e4)
             this_geom_in_contact = min_distance <= self.contact_eps
             left_foot_in_contact = jnp.logical_or(left_foot_in_contact, this_geom_in_contact)
@@ -469,7 +465,9 @@ class FeetAirTimeReward(Reward):
             has_contact_2 = mjx_data_t_plus_1.contact.geom2 == foot_idx
             has_foot_contact = jnp.logical_or(has_contact_1, has_contact_2)
 
-            distances_where_contact = jnp.where(has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4)
+            distances_where_contact = jnp.where(
+                has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4
+            )
             min_distance = jnp.min(distances_where_contact, initial=1e4)
             this_geom_in_contact = min_distance <= self.contact_eps
             right_foot_in_contact = jnp.logical_or(right_foot_in_contact, this_geom_in_contact)
@@ -509,7 +507,9 @@ class FeetAirTimeReward(Reward):
         correct_contacts = reward > 0
 
         # Calculate streak lengths at each timestep, reset on episode boundaries (done=True)
-        def count_streak(carry: Array, inputs: tuple[Array, Array]) -> tuple[Array, tuple[Array, Array]]:
+        def count_streak(
+            carry: Array, inputs: tuple[Array, Array]
+        ) -> tuple[Array, tuple[Array, Array]]:
             streak, x, is_done = carry, inputs[0], inputs[1]
             # Reset streak to 0 when done is True
             streak = jnp.where(is_done, 0, streak)
@@ -704,7 +704,7 @@ class DefaultPoseDeviationPenalty(Reward):
     joint_indices: Array
     default_positions: Array
     joint_deviation_weights: Array
-    norm: NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2")
     exclude_base_pose: bool = attrs.field(default=True)
 
     def __call__(
@@ -719,7 +719,7 @@ class DefaultPoseDeviationPenalty(Reward):
         current_positions = mjx_data_t_plus_1.qpos[self.joint_indices]
         deviations = current_positions - self.default_positions
         weighted_deviations = deviations * self.joint_deviation_weights
-        return jnp.sum(get_norm(weighted_deviations, self.norm))
+        return jnp.sum(xax.get_norm(weighted_deviations, self.norm))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -727,7 +727,7 @@ class DefaultPoseDeviationPenaltyBuilder(RewardBuilder[DefaultPoseDeviationPenal
     scale: float
     default_positions: dict[str, float]
     deviation_weights: dict[str, float]
-    norm: NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(self, data: BuilderData) -> DefaultPoseDeviationPenalty:
         # Convert joint names to indices
@@ -833,7 +833,7 @@ class SinusoidalFeetHeightReward(Reward):
     right_foot_geom_idx: int
     sinusoidal_feet_height: Callable[[Array], Array]
     vertical_offset: float
-    norm: NormType = attrs.field(default="l1")
+    norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=2.0)
     penalty_scale: float = attrs.field(default=0.2)
     error_clamp: float = attrs.field(default=0.5)
@@ -861,8 +861,8 @@ class SinusoidalFeetHeightReward(Reward):
         right_foot_target = jnp.sum(sin_pos_right_mask) + self.vertical_offset
 
         # Compute error
-        left_foot_error = get_norm(left_foot_height - left_foot_target, self.norm)
-        right_foot_error = get_norm(right_foot_height - right_foot_target, self.norm)
+        left_foot_error = xax.get_norm(left_foot_height - left_foot_target, self.norm)
+        right_foot_error = xax.get_norm(right_foot_height - right_foot_target, self.norm)
 
         # Total error
         total_error = left_foot_error + right_foot_error
