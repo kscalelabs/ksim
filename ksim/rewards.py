@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, Generic, Literal, TypeVar
 
 import attrs
+import jax
 import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
@@ -398,6 +399,172 @@ class FeetClearancePenaltyBuilder(RewardBuilder[FeetClearancePenalty]):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class FeetAirTimeReward(Reward):
+    """Reward for how much the robot's feet are in the air.
+
+    Rewards proper walking gait by encouraging exactly one foot
+    to be in contact with the ground at any time.
+    """
+
+    left_foot_geom_idxs: Array
+    right_foot_geom_idxs: Array
+    contact_eps: float = attrs.field(default=1e-2)
+    skip_if_zero_command: tuple[str, ...] = attrs.field(factory=tuple)
+    eps: float = attrs.field(default=1e-6)
+    single_contact_reward: float = attrs.field(default=1.0)
+    no_contact_penalty: float = attrs.field(default=0.5)
+    all_contact_penalty: float = attrs.field(default=0.8)
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+    ) -> Array:
+        # Check if any left foot geom is in contact
+        left_foot_in_contact = jnp.zeros((), dtype=jnp.bool_)
+        for foot_idx in self.left_foot_geom_idxs:
+            has_contact_1 = mjx_data_t_plus_1.contact.geom1 == foot_idx
+            has_contact_2 = mjx_data_t_plus_1.contact.geom2 == foot_idx
+            has_foot_contact = jnp.logical_or(has_contact_1, has_contact_2)
+
+            # Check if any contact for this foot is close enough
+            distances_where_contact = jnp.where(
+                has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4
+            )
+            min_distance = jnp.min(distances_where_contact, initial=1e4)
+            this_geom_in_contact = min_distance <= self.contact_eps
+            left_foot_in_contact = jnp.logical_or(left_foot_in_contact, this_geom_in_contact)
+
+        right_foot_in_contact = jnp.zeros((), dtype=jnp.bool_)
+        for foot_idx in self.right_foot_geom_idxs:
+            has_contact_1 = mjx_data_t_plus_1.contact.geom1 == foot_idx
+            has_contact_2 = mjx_data_t_plus_1.contact.geom2 == foot_idx
+            has_foot_contact = jnp.logical_or(has_contact_1, has_contact_2)
+
+            distances_where_contact = jnp.where(
+                has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4
+            )
+            min_distance = jnp.min(distances_where_contact, initial=1e4)
+            this_geom_in_contact = min_distance <= self.contact_eps
+            right_foot_in_contact = jnp.logical_or(right_foot_in_contact, this_geom_in_contact)
+
+        # Count how many feet are in contact
+        num_feet_in_contact = (left_foot_in_contact + right_foot_in_contact).astype(jnp.float32)
+
+        # Determine reward based on contact pattern:
+        # - Reward for exactly one foot in contact
+        # - Penalty for no feet in contact
+        # - Penalty for all feet in contact
+        reward = jnp.where(
+            num_feet_in_contact == 1,
+            self.single_contact_reward,  # One foot in contact
+            jnp.where(
+                num_feet_in_contact == 0,
+                -self.no_contact_penalty,  # No feet in contact - revisit as reward
+                -self.all_contact_penalty,  # Multiple feet in contact
+            ),
+        )
+
+        # Skip if commanded to stand still
+        if self.skip_if_zero_command:
+            commands_are_zero = jnp.stack(
+                [(command_t[cmd] < self.eps).all() for cmd in self.skip_if_zero_command],
+                axis=0,
+            )
+            reward = jnp.where(jnp.any(commands_are_zero), 0.0, reward)
+
+        return reward
+
+    def post_accumulate(self, reward: Array) -> Array:
+        # Identify consecutive positive rewards (correct foot contacts)
+        # We're looking at the full sequence of rewards from the episode
+
+        correct_contacts = reward > 0
+
+        # Calculate streak lengths at each timestep
+        def count_streak(carry: Array, x: Array) -> tuple[Array, Array]:
+            streak = carry
+            streak = jnp.where(x, streak + 1, 0)
+            return streak, streak
+
+        _, streaks = jax.lax.scan(count_streak, jnp.array(0), correct_contacts)
+
+        # Apply exponential scaling to the base reward based on streak length
+        # Start with a moderate multiplier that grows with streak length
+        streak_multiplier = jnp.minimum(1.0 + 0.1 * streaks, 2.0)  # Cap at 2x reward
+
+        # Apply the multiplier to positive rewards only
+        scaled_reward = jnp.where(reward > 0, reward * streak_multiplier, reward)
+
+        return scaled_reward
+
+    def __hash__(self) -> int:
+        return hash(
+            (
+                self.left_foot_geom_idxs,
+                self.right_foot_geom_idxs,
+                self.contact_eps,
+                self.skip_if_zero_command,
+                self.eps,
+                self.single_contact_reward,
+                self.no_contact_penalty,
+                self.all_contact_penalty,
+            )
+        )
+
+    def get_name(self) -> str:
+        return super().get_name()
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
+    scale: float
+    left_foot_geom_names: list[str]
+    right_foot_geom_names: list[str]
+    contact_eps: float = attrs.field(default=1e-2)
+    skip_if_zero_command: tuple[str, ...] | None = attrs.field(default=None)
+    single_contact_reward: float = attrs.field(default=1.0)
+    no_contact_penalty: float = attrs.field(default=0.5)
+    all_contact_penalty: float = attrs.field(default=0.8)
+
+    def __call__(self, data: BuilderData) -> FeetAirTimeReward:
+        left_foot_geom_idxs = []
+        for geom_name in self.left_foot_geom_names:
+            try:
+                left_foot_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            except KeyError:
+                raise ValueError(
+                    f"Geom '{geom_name}' not found in model. Available geoms: {data.mujoco_mappings.geom_name_to_idx.keys()}"
+                )
+
+        left_foot_geom_idxs = jnp.array(left_foot_geom_idxs)
+        right_foot_geom_idxs = []
+        for geom_name in self.right_foot_geom_names:
+            try:
+                right_foot_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            except KeyError:
+                raise ValueError(
+                    f"Geom '{geom_name}' not found in model. Available geoms: {data.mujoco_mappings.geom_name_to_idx.keys()}"
+                )
+
+        right_foot_geom_idxs = jnp.array(right_foot_geom_idxs)
+
+        return FeetAirTimeReward(
+            scale=self.scale,
+            left_foot_geom_idxs=left_foot_geom_idxs,
+            right_foot_geom_idxs=right_foot_geom_idxs,
+            contact_eps=self.contact_eps,
+            skip_if_zero_command=self.skip_if_zero_command if self.skip_if_zero_command else (),
+            single_contact_reward=self.single_contact_reward,
+            no_contact_penalty=self.no_contact_penalty,
+            all_contact_penalty=self.all_contact_penalty,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
 class FootContactPenalty(Reward):
     """Penalty for how much the robot's foot is in contact with the ground.
 
@@ -665,6 +832,7 @@ class SinusoidalFeetHeightReward(Reward):
         total_error = left_foot_error + right_foot_error
 
         # Calculate reward using both exponential reward and linear penalty components
+        # Mujoco playground uses just exponential reward, but isaac gym uses this setup
         exp_reward = jnp.exp(-self.sensitivity * total_error)
         linear_penalty = self.penalty_scale * jnp.minimum(total_error, self.error_clamp)
 
