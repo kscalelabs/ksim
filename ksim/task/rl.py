@@ -22,7 +22,6 @@ import jax.numpy as jnp
 import optax
 import xax
 from dpshdl.dataset import Dataset
-from flax import linen as nn
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING
@@ -103,10 +102,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_init_actor_carry(self) -> jnp.ndarray | None: ...
 
     @abstractmethod
-    def get_obs_normalizer(self, env_state: FrozenDict[str, Array]) -> Normalizer: ...
+    def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer: ...
 
     @abstractmethod
-    def get_cmd_normalizer(self, env_state: FrozenDict[str, Array]) -> Normalizer: ...
+    def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer: ...
 
     # The following should be implemented by the algorithmic subclass.
 
@@ -114,9 +113,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_rollout_time_loss_components(
         self,
         agent: Agent,
+        trajectory_dataset: EnvState,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
-        trajectory_dataset: EnvState,
     ) -> RolloutTimeLossComponents: ...
 
     @abstractmethod
@@ -127,6 +126,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         env_state_batch: EnvState,
         rollout_time_loss_components: RolloutTimeLossComponents,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[Agent, optax.OptState, Array, FrozenDict[str, Array]]: ...
 
@@ -158,6 +159,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Get the batch size for the current task."""
         # TODO: this is a hack for xax... need to implement mini batching properly later.
         return 1
+
+    def get_model(self, key: PRNGKeyArray) -> PyTree:
+        """Get the model for the current task."""
+        raise NotImplementedError(
+            "Reinforcement learning tasks must implement this method."
+            "Instead, we create an agent using dummy data."
+        )
 
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
@@ -379,6 +387,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         dataset_DL: EnvState,
         rollout_time_loss_components_DL: RolloutTimeLossComponents,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
     ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Perform a single minibatch update step."""
         agent, opt_state, rng = training_state
@@ -391,6 +401,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             opt_state=opt_state,
             env_state_batch=minibatch_BL,
             rollout_time_loss_components=rollout_time_minibatch_loss_components_BL,
+            obs_normalizer=obs_normalizer,
+            cmd_normalizer=cmd_normalizer,
             rng=rng,
         )
         rng, _ = jax.random.split(rng)
@@ -406,6 +418,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         dataset_DL: EnvState,
         rollout_time_loss_components_DL: RolloutTimeLossComponents,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
     ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Train a minibatch, returns the updated agent, optimizer state, loss, and metrics."""
         agent = training_state[0]
@@ -422,6 +436,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             optimizer=optimizer,
             dataset_DL=dataset_DL,
             rollout_time_loss_components_DL=rollout_time_loss_components_DL,
+            obs_normalizer=obs_normalizer,
+            cmd_normalizer=cmd_normalizer,
         )
 
         (agent, opt_state, _), metrics = jax.lax.scan(
@@ -444,6 +460,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         dataset_DL: EnvState,
         rollout_time_loss_components_DL: RolloutTimeLossComponents,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
     ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Perform multiple epochs of RL training on the current dataset."""
         partial_fn = functools.partial(
@@ -451,6 +469,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             optimizer=optimizer,
             dataset_DL=dataset_DL,
             rollout_time_loss_components_DL=rollout_time_loss_components_DL,
+            obs_normalizer=obs_normalizer,
+            cmd_normalizer=cmd_normalizer,
         )
 
         (agent, opt_state, reshuffle_rng), metrics = jax.lax.scan(
@@ -477,15 +497,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Gets the initial physics data.
         physics_model_L = env.get_init_physics_model()
         reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
+        dummy_env_states = env.get_dummy_env_states(self.config.num_envs)
+
+        obs_normalizer = self.get_obs_normalizer(dummy_env_states.obs)
+        cmd_normalizer = self.get_cmd_normalizer(dummy_env_states.command)
 
         # NOTE: env_state_EL_t and physics_data_EL_t_plus_1 are the carry data
         # structures used to efficiently unroll and resume trajectory rollouts
         env_state_EL_t, physics_data_EL_t_plus_1 = jax.vmap(
             env.reset,
-            in_axes=(None, 0, None),
-        )(agent, reset_rngs, physics_model_L)
-
-        normalizer = self.get_normalizer(env_state_EL_t)
+            in_axes=(None, 0, None, None, None),
+        )(agent, reset_rngs, physics_model_L, obs_normalizer, cmd_normalizer)
+        breakpoint()
 
         if self.config.compile_unroll:
             static_args = ["num_steps", "num_envs", "return_intermediate_data"]
@@ -497,17 +520,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         burn_in_env_state_TEL, _, _ = env_rollout_fn(
             agent=agent,
-            normalizer=normalizer,
             rng=burn_in_rng,
             num_steps=self.num_rollout_steps_per_env,
             num_envs=self.config.num_envs,
             env_state_EL_t_minus_1=env_state_EL_t,
             physics_data_EL_t=physics_data_EL_t_plus_1,
             physics_model_L=physics_model_L,
+            obs_normalizer=obs_normalizer,
+            cmd_normalizer=cmd_normalizer,
             return_intermediate_data=False,
         )
 
-        normalizer = normalizer.update(burn_in_env_state_TEL)
+        obs_normalizer = obs_normalizer.update(burn_in_env_state_TEL.obs)
+        cmd_normalizer = cmd_normalizer.update(burn_in_env_state_TEL.command)
 
         ##################
         # Training Stage #
@@ -525,13 +550,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             env_state_TEL, physics_data_EL_t_plus_1, has_nans = env_rollout_fn(
                 agent=agent,
-                normalizer=normalizer,
                 rng=rollout_rng,
                 num_steps=self.num_rollout_steps_per_env,
                 num_envs=self.config.num_envs,
                 env_state_EL_t_minus_1=env_state_EL_t,
                 physics_data_EL_t=physics_data_EL_t_plus_1,
                 physics_model_L=physics_model_L,
+                obs_normalizer=obs_normalizer,
+                cmd_normalizer=cmd_normalizer,
                 return_intermediate_data=False,
             )
             env_state_EL_t = jax.tree_util.tree_map(lambda x: x[-1], env_state_TEL)
@@ -554,8 +580,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # the name "rollout_time" loss components
             rollout_loss_components_TEL = self.get_rollout_time_loss_components(
                 agent=agent,
-                normalizer=normalizer,
                 trajectory_dataset=env_state_TEL,
+                obs_normalizer=obs_normalizer,
+                cmd_normalizer=cmd_normalizer,
             )
             rollout_loss_components_DL = xax.flatten_pytree(
                 rollout_loss_components_TEL,
@@ -570,10 +597,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 optimizer=optimizer,
                 dataset_DL=env_state_DL,
                 rollout_time_loss_components_DL=rollout_loss_components_DL,
+                obs_normalizer=obs_normalizer,
+                cmd_normalizer=cmd_normalizer,
             )
             metrics_mean = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
             update_time = time.time() - start_time
             logger.info("Update time: %s seconds", update_time)
+
+            # this will allow for online normalization, just know that we will
+            # be normalizing the already normalized observations and commands.
+            obs_normalizer = obs_normalizer.update(env_state_TEL.obs)
+            cmd_normalizer = cmd_normalizer.update(env_state_TEL.command)
 
             with self.step_context("write_logs"):
                 training_state.raw_phase = "train"

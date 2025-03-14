@@ -3,7 +3,7 @@
 import os
 from abc import ABC
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 import jax
 import jax.numpy as jnp
@@ -16,6 +16,7 @@ from ksim.env.types import EnvState
 from ksim.model.base import ActorCriticAgent
 from ksim.model.distributions import GaussianDistribution
 from ksim.model.types import ModelInput
+from ksim.normalization import Normalizer
 from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
 
@@ -162,11 +163,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         self,
         agent: ActorCriticAgent,
         trajectory_dataset: EnvState,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
     ) -> RolloutTimeLossComponents:
         """Calculating advantages and returns for a rollout."""
         model_input = ModelInput(
-            obs=trajectory_dataset.obs,
-            command=trajectory_dataset.command,
+            obs=obs_normalizer(trajectory_dataset.obs),
+            command=cmd_normalizer(trajectory_dataset.command),
             action_history=None,
             recurrent_state=None,
         )
@@ -232,12 +235,17 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
         assert isinstance(rollout_time_loss_components, PPORolloutTimeLossComponents)
         loss_val, metrics, grads = self.loss_metrics_grads(
-            agent, env_state_batch, rollout_time_loss_components, rng
+            agent=agent,
+            env_state_batch=env_state_batch,
+            rollout_time_loss_components=rollout_time_loss_components,
+            obs_normalizer=obs_normalizer,
+            cmd_normalizer=cmd_normalizer,
+            rng=rng,
         )
 
-        # this works because agent is fundamentally a PyTree, TODO: fix typechecking
-        updates, new_opt_state = optimizer.update(grads, opt_state, agent)  # type: ignore
-        new_agent = optax.apply_updates(agent, updates)  # type: ignore
+        # updates and opt_state have complex types that are hard to type properly. TODO: fix.
+        updates, new_opt_state = optimizer.update(grads, opt_state, agent)  # type: ignore[operator]
+        new_agent = optax.apply_updates(agent, updates)  # type: ignore[operator]
 
         # adding grad and loss to metrics
         grad_norm = optax.global_norm(grads)
@@ -260,13 +268,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         agent: ActorCriticAgent,
         env_state_batch: EnvState,
         rollout_time_loss_components: PPORolloutTimeLossComponents,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array]]:
         """Compute the PPO loss."""
         # get the log probs of the current model
         model_input = ModelInput(
-            obs=env_state_batch.obs,
-            command=env_state_batch.command,
+            obs=obs_normalizer(env_state_batch.obs),
+            command=cmd_normalizer(env_state_batch.command),
             action_history=None,
             recurrent_state=None,
         )
@@ -357,7 +367,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return total_loss, metrics_to_log
 
-    def compute_loss(self, model: PyTree, batch: xax.Batch, output: xax.Output) -> Array:
+    def compute_loss(self, model: PyTree, batch: Any, output: Any) -> Array:
         raise NotImplementedError(
             "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
             "PPO tasks use model_update and loss_metrics_grads instead."
@@ -368,13 +378,22 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         agent: ActorCriticAgent,
         env_state_batch: EnvState,
         rollout_time_loss_components: PPORolloutTimeLossComponents,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array], PyTree]:
         """Jitted version of value_and_grad computation."""
 
         def loss_fn(agent: ActorCriticAgent) -> tuple[Array, dict[str, Array]]:
             """Agent is a PyTree and can be optimized via optax."""
-            return self.compute_ppo_loss(agent, env_state_batch, rollout_time_loss_components, rng)
+            return self.compute_ppo_loss(
+                agent=agent,
+                env_state_batch=env_state_batch,
+                rollout_time_loss_components=rollout_time_loss_components,
+                obs_normalizer=obs_normalizer,
+                cmd_normalizer=cmd_normalizer,
+                rng=rng,
+            )
 
         (loss_val, metrics), grads = jax.value_and_grad(loss_fn, has_aux=True)(agent)
         return loss_val, metrics, grads

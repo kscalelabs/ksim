@@ -13,7 +13,7 @@ class BuilderData:
     """A trajectory of states."""
 
     robot_model: mjx.Model
-    robot_metadata: RobotURDFMetadataOutput
+    robot_metadata: RobotURDFMetadataOutput | None
     dt: float
     ctrl_dt: float
     mujoco_mappings: MujocoMappings

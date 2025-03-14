@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
-import attrs
 import jax.numpy as jnp
 from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
@@ -13,7 +12,6 @@ from ksim.utils.data import BuilderData
 from ksim.utils.mujoco import MujocoMappings
 
 
-@attrs.define(frozen=True)
 class Actuators(ABC):
     """Collection of actuators."""
 

@@ -129,7 +129,8 @@ class MjxEnv(BaseEnv[Config], ABC):
     def __init__(
         self,
         config: Config,
-        robot_dir_path: str | Path,
+        robot_model_path: str | Path,
+        robot_metadata_path: str | Path | None,
         actuators: Actuators | ActuatorsBuilder,
         terminations: Collection[Termination | TerminationBuilder],
         resets: Collection[Reset | ResetBuilder],
@@ -154,13 +155,14 @@ class MjxEnv(BaseEnv[Config], ABC):
         # ML: we will probably overhaul all of this in due time.
         # right now loading model and metadata from kscale-assets submodule directly.
         # when we have clarity on where the assets should come from, we should rewrite.
-        logger.info("Loading robot model %s", robot_dir_path)
-        mjcf_path = Path(robot_dir_path) / "robot.mjcf"
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+        logger.info("Loading robot model %s", robot_model_path)
+        mj_model = mujoco.MjModel.from_xml_path(str(robot_model_path))
         mj_model = self._override_model_settings(mj_model)
-        metadata_path = Path(robot_dir_path) / "metadata.json"
-        with open(metadata_path, "r") as f:
-            robot_metadata = RobotURDFMetadataOutput.model_validate_json(f.read())
+        if robot_metadata_path is not None:
+            with open(robot_metadata_path, "r") as f:
+                robot_metadata = RobotURDFMetadataOutput.model_validate_json(f.read())
+        else:
+            robot_metadata = None
 
         self.default_mj_model = mj_model
         self.default_mj_data = mujoco.MjData(mj_model)
@@ -414,18 +416,18 @@ class MjxEnv(BaseEnv[Config], ABC):
         timestep = jnp.array(0.0)
 
         mjx_data_L_0 = mjx_forward(mjx_model_L, mjx_data_L_0)
-        obs_L_0 = obs_normalizer(self.get_observation(mjx_data_L_0, obs_rng))
-        command_L_0 = cmd_normalizer(self.get_initial_commands(rng, timestep))
+        obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
+        command_L_0 = self.get_initial_commands(rng, timestep)
 
         model_input = ModelInput(
-            obs=obs_L_0,
-            command=command_L_0,
+            obs=obs_normalizer(obs_L_0),
+            command=cmd_normalizer(command_L_0),
             action_history=None,
             recurrent_state=None,
         )
 
         prediction = agent.actor_model.forward(model_input)
-        action_L_0 = agent.action_distribution.sample(rng, prediction)
+        action_L_0 = agent.action_distribution.sample(prediction, rng)
 
         mjx_data_L_1 = self.apply_physics_steps(
             mjx_model_L=mjx_model_L,
@@ -498,13 +500,11 @@ class MjxEnv(BaseEnv[Config], ABC):
             maxval=self.max_action_latency_step,
         )
 
-        obs_L_t = obs_normalizer(self.get_observation(mjx_data_L_t, obs_rng))
-        command_L_t = cmd_normalizer(
-            self.get_commands(env_state_L_t_minus_1.command, rng, timestep)
-        )
+        obs_L_t = self.get_observation(mjx_data_L_t, obs_rng)
+        command_L_t = self.get_commands(env_state_L_t_minus_1.command, rng, timestep)
         model_input = ModelInput(
-            obs=obs_L_t,
-            command=command_L_t,
+            obs=obs_normalizer(obs_L_t),
+            command=cmd_normalizer(command_L_t),
             action_history=None,
             recurrent_state=None,
         )

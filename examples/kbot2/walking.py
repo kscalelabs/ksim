@@ -2,15 +2,18 @@
 
 from dataclasses import dataclass
 
-import flax.linen as nn
+import equinox as eqx
+import jax
 import jax.numpy as jnp
 import xax
-from jaxtyping import PRNGKeyArray
+from flax.core import FrozenDict
+from jaxtyping import Array, PRNGKeyArray
 
 from ksim.actuators import MITPositionActuatorsBuilder
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.base import ActorCriticAgent
+from ksim.model.base import ActorCriticAgent, KSimModule
+from ksim.model.distributions import TanhGaussianDistribution
 from ksim.model.types import ModelInput
 from ksim.normalization import Normalizer, PassThrough, Standardize
 from ksim.observation import (
@@ -33,23 +36,84 @@ from ksim.rewards import DHForwardReward, DHHealthyReward
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import PitchTooGreatTermination, RollTooGreatTermination
 
-#####################
-# Model Definitions #
-#####################
-
-
-######################
-# Static Definitions #
-######################
-
 NUM_OUTPUTS = 20
+
+
+class KBot2Actor(eqx.Module, KSimModule):
+    """Actor for the walking task."""
+
+    mlp: eqx.nn.MLP
+    min_std: float
+    max_std: float
+    var_scale: float
+
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        min_std: float,
+        max_std: float,
+        var_scale: float,
+    ) -> None:
+        self.mlp = eqx.nn.MLP(
+            in_size=453,  # TODO: use similar pattern when dummy data gets passed in to populate
+            out_size=NUM_OUTPUTS * 2,
+            width_size=64,
+            depth=5,
+            key=key,
+        )
+        self.min_std = min_std
+        self.max_std = max_std
+        self.var_scale = var_scale
+
+    def forward(self, model_input: ModelInput) -> Array:
+        obs_vec = jnp.concatenate([v for v in model_input.obs.values()], axis=-1)
+        command_vec = jnp.concatenate([v for v in model_input.command.values()], axis=-1)
+        x = jnp.concatenate([obs_vec, command_vec], axis=-1)
+        prediction = self.mlp(x)
+
+        mean = prediction[..., :NUM_OUTPUTS]
+        std = prediction[..., NUM_OUTPUTS:]
+
+        # softplus and clipping for stability
+        std = (jax.nn.softplus(std) + self.min_std) * self.var_scale
+        std = jnp.clip(std, self.min_std, self.max_std)
+
+        # concat because Gaussian-like distributions expect the parameters
+        # to be mean concat std
+        parametrization = jnp.concatenate([mean, std], axis=-1)
+        jax.debug.breakpoint()
+
+        return parametrization
+
+
+class KBot2Critic(eqx.Module, KSimModule):
+    """Critic for the walking task."""
+
+    mlp: eqx.nn.MLP
+
+    def __init__(self, key: PRNGKeyArray) -> None:
+        self.mlp = eqx.nn.MLP(
+            in_size=453,  # TODO: is there a nice way of inferring this?
+            out_size=1,
+            width_size=64,
+            depth=5,
+            key=key,
+        )
+
+    def forward(self, model_input: ModelInput) -> Array:
+        obs_vec = jnp.concatenate([v for v in model_input.obs.values()], axis=-1)
+        command_vec = jnp.concatenate([v for v in model_input.command.values()], axis=-1)
+        x = jnp.concatenate([obs_vec, command_vec], axis=-1)
+        return self.mlp(x)
 
 
 @dataclass
 class KBotV2WalkingConfig(PPOConfig, MjxEnvConfig):
     """Config for the KBotV2 walking task."""
 
-    robot_model_name: str = xax.field(value="examples/kbot2/")
+    robot_model_path: str = xax.field(value="examples/kbot2/scene.mjcf")
+    robot_metadata_path: str = xax.field(value="examples/kbot2/metadata.json")
 
 
 class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
@@ -86,26 +150,22 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
                 SensorObservationBuilder(sensor_name="imu_gyro"),  # Sensor has noise already.
             ],
             commands=[
-                LinearVelocityCommand(x_scale=1.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
-                AngularVelocityCommand(scale=1.0, switch_prob=0.02, zero_prob=0.8),
+                LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
+                AngularVelocityCommand(scale=0.0, switch_prob=0.02, zero_prob=0.8),
             ],
         )
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
-        return mlp_actor_critic_agent(
-            num_actions=NUM_OUTPUTS,
-            prediction_type="mean_std",
-            distribution_type="tanh_gaussian",
-            actor_hidden_dims=(64,) * 5,
-            critic_hidden_dims=(64,) * 5,
-            kernel_initialization=nn.initializers.lecun_normal(),
-            post_process_kwargs={"min_std": 0.01, "max_std": 1.0, "var_scale": 1.0},
+        return ActorCriticAgent(
+            critic_model=KBot2Critic(key),
+            actor_model=KBot2Actor(key, min_std=0.01, max_std=1.0, var_scale=1.0),
+            action_distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
-    def get_obs_normalizer(self, model_input: ModelInput) -> Normalizer:
+    def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer:
         return Standardize()
 
-    def get_cmd_normalizer(self, model_input: ModelInput) -> Normalizer:
+    def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
         return PassThrough()
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:

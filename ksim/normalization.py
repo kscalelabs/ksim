@@ -40,60 +40,62 @@ class PassThrough(Normalizer):
         """Passes through the pytree without normalization."""
         return pytree
 
-
-class Standardize(Normalizer):
-    """Standardizes a pytree of arrays with mean and std along batch dims."""
-
-    def __call__(self, pytree: PyTree[Array]) -> PyTree[Array]:
-        """Standardizes a pytree of arrays with mean and std along batch dims."""
-
-        def standardize_leaf(x: Array) -> Array:
-            """Standardizes a leaf of the pytree."""
-            batch_dims = x.shape[:-1]
-            mean = jnp.mean(x, axis=tuple(range(len(batch_dims))))
-            std = jnp.std(x, axis=tuple(range(len(batch_dims))))
-            std = jax.lax.cond(
-                std > 0,
-                lambda: std,
-                lambda: jnp.ones_like(std),
-            )
-            return (x - mean) / std
-
-        return jax.tree_map(standardize_leaf, pytree)
-
-    def update(self, pytree: PyTree[Array]) -> "Standardize":
-        """Updates the normalization statistics."""
+    def update(self, pytree: PyTree[Array]) -> "PassThrough":
+        """Returns self."""
         return self
 
 
-class OnlineStandardizer(Normalizer):
+# class Standardize(Normalizer):
+#     """Standardizes a pytree of arrays with mean and std along batch dims."""
+
+#     def __call__(self, pytree: PyTree[Array]) -> PyTree[Array]:
+#         """Standardizes a pytree of arrays with mean and std along batch dims."""
+
+#         def standardize_leaf(x: Array) -> Array:
+#             """Standardizes a leaf of the pytree."""
+#             batch_dims = x.shape[:-1]
+#             mean = jnp.mean(x, axis=tuple(range(len(batch_dims))))
+#             std = jnp.std(x, axis=tuple(range(len(batch_dims))))
+#             std = jnp.where(std > 0, std, jnp.ones_like(std))
+#             return (x - mean) / std
+
+#         normalized = jax.tree_map(standardize_leaf, pytree)
+#         return normalized
+
+#     def update(self, pytree: PyTree[Array]) -> "Standardize":
+#         """Updates the normalization statistics."""
+#         return self
+
+
+class Standardize(Normalizer):
     """Standardizes a pytree of arrays with online updates."""
 
     mean: PyTree[Array]
+    """The mean of the normalized arrays accross the batch dimension/s."""
     std: PyTree[Array]
+    """The std of the normalized arrays accross the batch dimension/s."""
     alpha: float
+    """The decay rate for the online updates: high = new is more important."""
 
-    def __init__(self, pytree: PyTree[Array]) -> None:
+    def __init__(self, pytree: PyTree[Array], *, alpha: float) -> None:
         """Initializes the normalization statistics."""
-        leaf_shapes = jax.tree_map(lambda x: x.shape[-1:], pytree)
+        leaf_shapes = jax.tree_map(lambda x: x.shape[-1], pytree)
         self.mean = jax.tree_map(jnp.zeros, leaf_shapes)
         self.std = jax.tree_map(jnp.ones, leaf_shapes)
+        self.alpha = alpha
 
     def __call__(self, pytree: PyTree[Array]) -> PyTree[Array]:
         """Standardizes a pytree of arrays using the mean and std."""
 
         def normalize_leaf(x: Array, mean: Array, std: Array) -> Array:
             """Normalizes a leaf of the pytree."""
-            std = jax.lax.cond(
-                std > 0,
-                lambda: std,
-                lambda: jnp.ones_like(std),
-            )
+            std = jnp.where(std > 0, std, jnp.ones_like(std))
             return (x - mean) / std
 
-        return jax.tree_util.tree_map(normalize_leaf, pytree, self.mean, self.std)
+        res = jax.tree_util.tree_map(normalize_leaf, pytree, self.mean, self.std)
+        return res
 
-    def update(self, pytree: PyTree[Array]) -> "OnlineStandardizer":
+    def update(self, pytree: PyTree[Array]) -> "Standardize":
         """Updates the normalization statistics in a stateless manner."""
 
         def update_leaf_stats(x: Array, old_mean: Array, old_std: Array) -> tuple[Array, Array]:
@@ -106,4 +108,6 @@ class OnlineStandardizer(Normalizer):
             return new_mean, new_std
 
         new_mean, new_std = jax.tree_util.tree_map(update_leaf_stats, pytree, self.mean, self.std)
-        return eqx.tree_at(lambda t: (t.mean, t.std), self, (new_mean, new_std))
+        res = eqx.tree_at(lambda t: (t.mean, t.std), self, (new_mean, new_std))
+        jax.debug.breakpoint()
+        return res
