@@ -8,6 +8,7 @@ import pytest
 import xax
 
 from examples.default_humanoid.walking import HumanoidWalkingConfig, HumanoidWalkingTask
+from ksim.model.types import ModelInput
 
 
 @pytest.mark.slow
@@ -39,12 +40,19 @@ def test_default_humanoid_training() -> None:
 
     # Test a single training iteration
     physics_model_L = env.get_init_physics_model()
-
-    reset_rngs = jax.random.split(key, config.num_envs)
-    env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, 0, None))(
-        agent, reset_rngs, physics_model_L
+    dummy_env_states = env.get_dummy_env_states(config.num_envs)
+    dummy_model_input = ModelInput(
+        obs=dummy_env_states.obs,
+        command=dummy_env_states.command,
+        action_history=None,
+        recurrent_state=None,
     )
-    static_args = ["model", "num_steps", "num_envs", "return_intermediate_data"]
+    normalizer = task.get_normalizer(dummy_model_input)
+    reset_rngs = jax.random.split(key, config.num_envs)
+    env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, None))(
+        agent, normalizer, reset_rngs, physics_model_L
+    )
+    static_args = ["num_steps", "num_envs", "return_intermediate_data"]
     env_rollout_fn = xax.jit(static_argnames=static_args)(env.unroll_trajectories)
 
     # Get a trajectory dataset

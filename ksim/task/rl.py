@@ -30,6 +30,7 @@ from omegaconf import MISSING
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
 from ksim.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
 from ksim.model.base import Agent
+from ksim.model.types import ModelInput
 from ksim.normalization import Normalizer
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.visualization import render_and_save_trajectory
@@ -86,12 +87,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]
+        self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]  # TODO: fix
         super().__init__(config)
 
     ####################
     # Abstract methods #
     ####################
+
+    # These should be implemented by the user.
 
     @abstractmethod
     def get_environment(self) -> BaseEnv: ...
@@ -100,10 +103,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_init_actor_carry(self) -> jnp.ndarray | None: ...
 
     @abstractmethod
+    def get_obs_normalizer(self, env_state: FrozenDict[str, Array]) -> Normalizer: ...
+
+    @abstractmethod
+    def get_cmd_normalizer(self, env_state: FrozenDict[str, Array]) -> Normalizer: ...
+
+    # The following should be implemented by the algorithmic subclass.
+
+    @abstractmethod
     def get_rollout_time_loss_components(
         self,
         agent: Agent,
-        normalizer: Normalizer,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
         trajectory_dataset: EnvState,
     ) -> RolloutTimeLossComponents: ...
 
@@ -423,7 +435,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return (agent, opt_state, rng), metrics
 
     @xax.profile
-    @xax.jit(static_argnames=["self", "model", "optimizer"])
+    @xax.jit(static_argnames=["self", "optimizer"])
     def rl_pass(
         self,
         agent: Agent,
@@ -473,8 +485,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             in_axes=(None, 0, None),
         )(agent, reset_rngs, physics_model_L)
 
+        normalizer = self.get_normalizer(env_state_EL_t)
+
         if self.config.compile_unroll:
-            static_args = ["model", "num_steps", "num_envs", "return_intermediate_data"]
+            static_args = ["num_steps", "num_envs", "return_intermediate_data"]
             env_rollout_fn = xax.jit(static_argnames=static_args)(env.unroll_trajectories)
 
         #################
@@ -483,6 +497,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         burn_in_env_state_TEL, _, _ = env_rollout_fn(
             agent=agent,
+            normalizer=normalizer,
             rng=burn_in_rng,
             num_steps=self.num_rollout_steps_per_env,
             num_envs=self.config.num_envs,
@@ -491,11 +506,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             physics_model_L=physics_model_L,
             return_intermediate_data=False,
         )
-        # self.update_input_normalization_stats(
-        #     agent=agent,
-        #     trajectories_dataset=burn_in_env_state_TEL,
-        #     initial_step=False,
-        # )
+
+        normalizer = normalizer.update(burn_in_env_state_TEL)
 
         ##################
         # Training Stage #
@@ -513,6 +525,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             env_state_TEL, physics_data_EL_t_plus_1, has_nans = env_rollout_fn(
                 agent=agent,
+                normalizer=normalizer,
                 rng=rollout_rng,
                 num_steps=self.num_rollout_steps_per_env,
                 num_envs=self.config.num_envs,
@@ -540,7 +553,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # (e.g. advantages) and flattening them for efficiency, thus
             # the name "rollout_time" loss components
             rollout_loss_components_TEL = self.get_rollout_time_loss_components(
-                agent, env_state_TEL
+                agent=agent,
+                normalizer=normalizer,
+                trajectory_dataset=env_state_TEL,
             )
             rollout_loss_components_DL = xax.flatten_pytree(
                 rollout_loss_components_TEL,
@@ -600,13 +615,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 with self.step_context("write_logs"):
                     self.log_trajectory_stats(env, eval_env_state_T1L, eval=True)
-
-            # TODO: fix
-            # variables = self.update_input_normalization_stats(
-            #     agent=agent,
-            #     trajectories_dataset=env_state_TEL,
-            #     initial_step=False,
-            # )
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""

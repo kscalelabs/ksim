@@ -74,6 +74,8 @@ class BaseEnv(ABC, Generic[Config]):
         agent: Agent,
         rng: PRNGKeyArray,
         physics_model_L: PhysicsModel,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
     ) -> tuple[EnvState, PhysicsData | None]:
         """Reset the environment (EL)."""
 
@@ -85,6 +87,8 @@ class BaseEnv(ABC, Generic[Config]):
         rng: PRNGKeyArray,
         physics_data_L_t: PhysicsData,
         physics_model_L: PhysicsModel,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
     ) -> tuple[EnvState, PhysicsData | None]:
         """Step the environment (EL)."""
 
@@ -92,13 +96,14 @@ class BaseEnv(ABC, Generic[Config]):
     def unroll_trajectories(
         self,
         agent: Agent,
-        normalizer: Normalizer,
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
         env_state_EL_t_minus_1: EnvState,
         physics_data_EL_t: PhysicsData,
         physics_model_L: PhysicsModel,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
         return_intermediate_data: bool = False,
     ) -> tuple[EnvState, PhysicsData, Array]:
         """Returns env state trajectory (TEL) and physics data (EL or TEL).

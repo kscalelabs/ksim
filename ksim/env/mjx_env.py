@@ -389,9 +389,10 @@ class MjxEnv(BaseEnv[Config], ABC):
     def reset(
         self,
         agent: Agent,
-        normalizer: Normalizer,
         rng: jax.Array,
         physics_model_L: mjx.Model,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
     ) -> tuple[EnvState, mjx.Data]:
         """Using agent, returns initial state and data (EL, EL).
 
@@ -413,8 +414,8 @@ class MjxEnv(BaseEnv[Config], ABC):
         timestep = jnp.array(0.0)
 
         mjx_data_L_0 = mjx_forward(mjx_model_L, mjx_data_L_0)
-        obs_L_0 = self.get_observation(mjx_data_L_0, obs_rng)
-        command_L_0 = self.get_initial_commands(rng, timestep)
+        obs_L_0 = obs_normalizer(self.get_observation(mjx_data_L_0, obs_rng))
+        command_L_0 = cmd_normalizer(self.get_initial_commands(rng, timestep))
 
         model_input = ModelInput(
             obs=obs_L_0,
@@ -423,7 +424,6 @@ class MjxEnv(BaseEnv[Config], ABC):
             recurrent_state=None,
         )
 
-        model_input = normalizer(model_input)
         prediction = agent.actor_model.forward(model_input)
         action_L_0 = agent.action_distribution.sample(rng, prediction)
 
@@ -459,11 +459,12 @@ class MjxEnv(BaseEnv[Config], ABC):
     def step(
         self,
         agent: Agent,
-        normalizer: Normalizer,
         env_state_L_t_minus_1: EnvState,
         rng: PRNGKeyArray,
         physics_data_L_t: mjx.Data,
         physics_model_L: mjx.Model,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
     ) -> tuple[EnvState, mjx.Data]:
         """Stepping the environment in a consistent, JIT-able manner. Works on a single environment.
 
@@ -497,15 +498,16 @@ class MjxEnv(BaseEnv[Config], ABC):
             maxval=self.max_action_latency_step,
         )
 
-        obs_L_t = self.get_observation(mjx_data_L_t, obs_rng)
-        command_L_t = self.get_commands(env_state_L_t_minus_1.command, rng, timestep)
+        obs_L_t = obs_normalizer(self.get_observation(mjx_data_L_t, obs_rng))
+        command_L_t = cmd_normalizer(
+            self.get_commands(env_state_L_t_minus_1.command, rng, timestep)
+        )
         model_input = ModelInput(
             obs=obs_L_t,
             command=command_L_t,
             action_history=None,
             recurrent_state=None,
         )
-        model_input = normalizer(model_input)
         prediction = agent.actor_model.forward(model_input)
         action_L_t = agent.action_distribution.sample(rng, prediction)
 
@@ -542,33 +544,36 @@ class MjxEnv(BaseEnv[Config], ABC):
         return env_state_L_t, mjx_data_L_t_plus_1
 
     @xax.profile
-    @xax.jit(static_argnames=["self", "model", "return_intermediate_data"])
+    @xax.jit(static_argnames=["self", "return_intermediate_data"])
     def scannable_step_with_automatic_reset(
         self,
         carry: tuple[EnvState, mjx.Data, PRNGKeyArray],
         _: None,
         *,
         agent: Agent,
-        normalizer: Normalizer,
         physics_model_L: mjx.Model,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
         return_intermediate_data: bool = False,
     ) -> tuple[tuple[EnvState, mjx.Data, PRNGKeyArray], tuple[EnvState, mjx.Data | None, Array]]:
         """Steps the environment and resets if needed."""
         env_state_L_t_minus_1, mjx_data_L_t, rng = carry
         reset_env_state_L_t, reset_mjx_data_L_t_plus_1 = self.reset(
             agent=agent,
-            normalizer=normalizer,
             rng=rng,
             physics_model_L=physics_model_L,
+            obs_normalizer=obs_normalizer,
+            cmd_normalizer=cmd_normalizer,
         )
 
         step_env_state_L_t, step_mjx_data_L_t_plus_1 = self.step(
             agent=agent,
-            normalizer=normalizer,
             env_state_L_t_minus_1=env_state_L_t_minus_1,
             rng=rng,
             physics_data_L_t=mjx_data_L_t,
             physics_model_L=physics_model_L,
+            obs_normalizer=obs_normalizer,
+            cmd_normalizer=cmd_normalizer,
         )
 
         data_has_nans = jax.tree_util.tree_reduce(
@@ -604,21 +609,23 @@ class MjxEnv(BaseEnv[Config], ABC):
     def unroll_trajectory(
         self,
         agent: Agent,
-        normalizer: Normalizer,
         rng: PRNGKeyArray,
         num_steps: int,
         env_state_L_t_minus_1: EnvState,
         physics_data_L_t: mjx.Data,
         physics_model_L: mjx.Model,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
         return_intermediate_data: bool = False,
     ) -> tuple[EnvState, mjx.Data, Array]:
         """Returns EnvState rollout, final mjx.Data, and mjx.Data rollout."""
         step_fn = functools.partial(
             self.scannable_step_with_automatic_reset,
             agent=agent,
-            normalizer=Normalizer,
             physics_model_L=physics_model_L,
             return_intermediate_data=return_intermediate_data,
+            obs_normalizer=obs_normalizer,
+            cmd_normalizer=cmd_normalizer,
         )
 
         carry = (env_state_L_t_minus_1, physics_data_L_t, rng)
@@ -645,6 +652,8 @@ class MjxEnv(BaseEnv[Config], ABC):
         env_state_EL_t_minus_1: EnvState,
         physics_data_EL_t: mjx.Data,
         physics_model_L: mjx.Model,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
         return_intermediate_data: bool = False,
     ) -> tuple[EnvState, mjx.Data, Array]:
         """Returns EnvState rollout, final / stacked mjx.Data, and array of has_nans flags.
@@ -661,7 +670,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         rng_E = jax.random.split(rng, num_envs)
 
         env_state_ETL, physics_data_res, has_nans_ETL = jax.vmap(
-            self.unroll_trajectory, in_axes=(None, 0, 0, None, 0, 0, None, None)
+            self.unroll_trajectory, in_axes=(None, 0, None, 0, 0, None, None, None, None)
         )(
             agent,
             rng_E,
@@ -669,7 +678,9 @@ class MjxEnv(BaseEnv[Config], ABC):
             env_state_EL_t_minus_1,
             physics_data_EL_t,
             physics_model_L,
-            return_intermediate_data,
+            obs_normalizer=obs_normalizer,
+            cmd_normalizer=cmd_normalizer,
+            return_intermediate_data=return_intermediate_data,
         )
 
         # Transpose from (env, time, ...) to (time, env, ...)
@@ -692,6 +703,8 @@ class MjxEnv(BaseEnv[Config], ABC):
         self,
         agent: Agent,
         rng: PRNGKeyArray,
+        obs_normalizer: Normalizer,
+        cmd_normalizer: Normalizer,
         *,
         num_steps: int,
         width: int = 640,
@@ -702,9 +715,9 @@ class MjxEnv(BaseEnv[Config], ABC):
         physics_model_L = self.get_init_physics_model()
         reset_rngs = jax.random.split(rng, 1)
 
-        env_state_1L_0, physics_data_1L_1 = jax.vmap(self.reset, in_axes=(None, None, 0, None))(
-            agent, reset_rngs, physics_model_L
-        )
+        env_state_1L_0, physics_data_1L_1 = jax.vmap(
+            self.reset, in_axes=(None, 0, None, None, None)
+        )(agent, reset_rngs, physics_model_L, obs_normalizer, cmd_normalizer)
 
         env_state_TEL, traj_data, _ = self.unroll_trajectories(
             agent=agent,
@@ -714,6 +727,8 @@ class MjxEnv(BaseEnv[Config], ABC):
             env_state_EL_t_minus_1=env_state_1L_0,
             physics_data_EL_t=physics_data_1L_1,
             physics_model_L=physics_model_L,
+            obs_normalizer=obs_normalizer,
+            cmd_normalizer=cmd_normalizer,
             return_intermediate_data=True,
         )
 

@@ -11,7 +11,8 @@ from ksim.actuators import MITPositionActuatorsBuilder
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
 from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
 from ksim.model.base import ActorCriticAgent
-from ksim.model.factory import mlp_actor_critic_agent
+from ksim.model.types import ModelInput
+from ksim.normalization import Normalizer, PassThrough, Standardize
 from ksim.observation import (
     ActuatorForceObservation,
     BaseAngularVelocityObservation,
@@ -31,6 +32,11 @@ from ksim.resets import (
 from ksim.rewards import DHForwardReward, DHHealthyReward
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import PitchTooGreatTermination, RollTooGreatTermination
+
+#####################
+# Model Definitions #
+#####################
+
 
 ######################
 # Static Definitions #
@@ -95,6 +101,12 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
             kernel_initialization=nn.initializers.lecun_normal(),
             post_process_kwargs={"min_std": 0.01, "max_std": 1.0, "var_scale": 1.0},
         )
+
+    def get_obs_normalizer(self, model_input: ModelInput) -> Normalizer:
+        return Standardize()
+
+    def get_cmd_normalizer(self, model_input: ModelInput) -> Normalizer:
+        return PassThrough()
 
     def get_init_actor_carry(self) -> jnp.ndarray | None:
         return None
