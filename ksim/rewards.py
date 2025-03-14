@@ -48,9 +48,7 @@ class Reward(ABC):
             if self.scale > 0:
                 logger.warning("Penalty function %s has a positive scale: %f", name, self.scale)
         else:
-            logger.warning(
-                "Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale
-            )
+            logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale)
 
     # TODO: Use post_accumulate after unrolling
     def post_accumulate(self, reward: Array, done: Array) -> Array:
@@ -200,8 +198,7 @@ class EnergyPenalty(Reward):
         done_t: Array,
     ) -> Array:
         return jnp.sum(
-            get_norm(mjx_data_t_plus_1.qvel[6:], self.norm)
-            * get_norm(mjx_data_t_plus_1.actuator_force, self.norm)
+            get_norm(mjx_data_t_plus_1.qvel[6:], self.norm) * get_norm(mjx_data_t_plus_1.actuator_force, self.norm)
         )
 
 
@@ -352,10 +349,7 @@ class FootSlipPenalty(Reward):
         done_t: Array,
     ) -> Array:
         contacts = jnp.array(
-            [
-                geoms_colliding(mjx_data_t_plus_1, geom_idx, self.floor_idx)
-                for geom_idx in self.foot_geom_idxs
-            ]
+            [geoms_colliding(mjx_data_t_plus_1, geom_idx, self.floor_idx) for geom_idx in self.foot_geom_idxs]
         )
 
         # Get x and y velocities
@@ -464,9 +458,7 @@ class FeetAirTimeReward(Reward):
             has_foot_contact = jnp.logical_or(has_contact_1, has_contact_2)
 
             # Check if any contact for this foot is close enough
-            distances_where_contact = jnp.where(
-                has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4
-            )
+            distances_where_contact = jnp.where(has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4)
             min_distance = jnp.min(distances_where_contact, initial=1e4)
             this_geom_in_contact = min_distance <= self.contact_eps
             left_foot_in_contact = jnp.logical_or(left_foot_in_contact, this_geom_in_contact)
@@ -477,9 +469,7 @@ class FeetAirTimeReward(Reward):
             has_contact_2 = mjx_data_t_plus_1.contact.geom2 == foot_idx
             has_foot_contact = jnp.logical_or(has_contact_1, has_contact_2)
 
-            distances_where_contact = jnp.where(
-                has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4
-            )
+            distances_where_contact = jnp.where(has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4)
             min_distance = jnp.min(distances_where_contact, initial=1e4)
             this_geom_in_contact = min_distance <= self.contact_eps
             right_foot_in_contact = jnp.logical_or(right_foot_in_contact, this_geom_in_contact)
@@ -577,7 +567,8 @@ class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
                 left_foot_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
             except KeyError:
                 raise ValueError(
-                    f"Geom '{geom_name}' not found in model. Available geoms: {data.mujoco_mappings.geom_name_to_idx.keys()}"
+                    f"Geom '{geom_name}' not found in model. "
+                    f"Available geoms: {data.mujoco_mappings.geom_name_to_idx.keys()}"
                 )
 
         left_foot_geom_idxs = jnp.array(left_foot_geom_idxs)
@@ -587,7 +578,8 @@ class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
                 right_foot_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
             except KeyError:
                 raise ValueError(
-                    f"Geom '{geom_name}' not found in model. Available geoms: {data.mujoco_mappings.geom_name_to_idx.keys()}"
+                    f"Geom '{geom_name}' not found in model. "
+                    f"Available geoms: {data.mujoco_mappings.geom_name_to_idx.keys()}"
                 )
 
         right_foot_geom_idxs = jnp.array(right_foot_geom_idxs)

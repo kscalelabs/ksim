@@ -174,9 +174,7 @@ class XYPositionResetBuilder(ResetBuilder[Reset]):
             )
             hfield_data = data.model.hfield_data.reshape(nx, ny)
             logger.info("Using heightfield based floor with shape: %s", hfield_data.shape)
-            padded_bounds = compute_padded_bounds(
-                x_bound, y_bound, self.x_edge_padding, self.y_edge_padding
-            )
+            padded_bounds = compute_padded_bounds(x_bound, y_bound, self.x_edge_padding, self.y_edge_padding)
             return HFieldXYPositionReset(
                 bounds=(x_bound, y_bound, z_top, z_bottom),
                 padded_bounds=padded_bounds,
@@ -188,16 +186,12 @@ class XYPositionResetBuilder(ResetBuilder[Reset]):
         else:
             plane_indices = [i for i, t in enumerate(data.model.geom_type) if t == 0]
             if not plane_indices:
-                raise ValueError(
-                    "No heightfield or plane geom found in the model. MuJoCo scene missing floor!"
-                )
+                raise ValueError("No heightfield or plane geom found in the model. MuJoCo scene missing floor!")
             floor_idx = plane_indices[0]
             x_bound, y_bound = 5.0, 5.0
             z_pos = data.model.geom_pos[floor_idx][2]
             logger.info("Using plane based floor with bounds: %s, %s, %s", x_bound, y_bound, z_pos)
-            padded_bounds = compute_padded_bounds(
-                x_bound, y_bound, self.x_edge_padding, self.y_edge_padding
-            )
+            padded_bounds = compute_padded_bounds(x_bound, y_bound, self.x_edge_padding, self.y_edge_padding)
             return PlaneXYPositionReset(
                 bounds=(x_bound, y_bound, z_pos),
                 padded_bounds=padded_bounds,

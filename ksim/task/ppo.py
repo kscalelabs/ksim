@@ -216,9 +216,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         value_targets: Array,
     ) -> Array:
         """Compute the clipped value loss."""
-        value_clipped = target_values + (values - target_values).clip(
-            -self.config.clip_param, self.config.clip_param
-        )
+        value_clipped = target_values + (values - target_values).clip(-self.config.clip_param, self.config.clip_param)
         clipped_error = value_clipped - value_targets
         error = values - value_targets
         return jnp.maximum(error**2, clipped_error**2).mean()
@@ -238,8 +236,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             agent=agent,
             env_state_batch=env_state_batch,
             rollout_time_loss_components=rollout_time_loss_components,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
+            obs_normalizer=obs_normalizer,  # noqa: F821 TODO fix
+            cmd_normalizer=cmd_normalizer,  # noqa: F821 TODO fix
             rng=rng,
         )
 
@@ -367,7 +365,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return total_loss, metrics_to_log
 
-    def compute_loss(self, model: PyTree, batch: Any, output: Any) -> Array:
+    def compute_loss(self, model: PyTree, batch: Any, output: Any) -> Array:  # noqa: ANN401
         raise NotImplementedError(
             "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
             "PPO tasks use model_update and loss_metrics_grads instead."

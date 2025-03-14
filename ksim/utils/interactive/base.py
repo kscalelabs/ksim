@@ -108,9 +108,7 @@ class InteractiveVisualizer(ABC):
         self.termination_history: dict[str, collections.deque[float]] = collections.defaultdict(
             lambda: collections.deque(maxlen=self.viz_config.window_size)
         )
-        self.timestamps: collections.deque[float] = collections.deque(
-            maxlen=self.viz_config.window_size
-        )
+        self.timestamps: collections.deque[float] = collections.deque(maxlen=self.viz_config.window_size)
         self.start_time = time.time()
 
         # Flag to control thread execution
@@ -209,13 +207,9 @@ class InteractiveVisualizer(ABC):
                     min_len = min(len(values_list), len(timestamps_list))
                     if min_len > 0:
                         if data_type == "reward":
-                            self.ax_reward.plot(
-                                timestamps_list[-min_len:], values_list[-min_len:], label=name
-                            )
+                            self.ax_reward.plot(timestamps_list[-min_len:], values_list[-min_len:], label=name)
                         else:
-                            self.ax_term.plot(
-                                timestamps_list[-min_len:], values_list[-min_len:], label=name
-                            )
+                            self.ax_term.plot(timestamps_list[-min_len:], values_list[-min_len:], label=name)
 
         # Set labels and legends
         self.ax_reward.set_ylabel("Reward")
@@ -245,9 +239,7 @@ class InteractiveVisualizer(ABC):
                 logger.debug("  %s: latest value = %.6f", name, values[-1])
 
         logger.debug("-" * 80)
-        logger.debug(
-            "Plot updated with data from %d termination components", len(self.termination_history)
-        )
+        logger.debug("Plot updated with data from %d termination components", len(self.termination_history))
         for name, values in self.termination_history.items():
             if values:
                 logger.debug("  %s: latest value = %.6f", name, values[-1])

@@ -37,12 +37,8 @@ logger = logging.getLogger(__name__)
 class MujocoInteractiveVisualizerConfig(InteractiveVisualizerConfig):
     """Configuration for the Mujoco interactive visualizer."""
 
-    suspended_pos: Array = attrs.field(
-        factory=lambda: jnp.array([0, 0, 1, 1, 0, 0, 0], dtype=jnp.float32)
-    )
-    suspended_vel: Array = attrs.field(
-        factory=lambda: jnp.array([0, 0, 0, 0, 0, 0], dtype=jnp.float32)
-    )
+    suspended_pos: Array = attrs.field(factory=lambda: jnp.array([0, 0, 1, 1, 0, 0, 0], dtype=jnp.float32))
+    suspended_vel: Array = attrs.field(factory=lambda: jnp.array([0, 0, 0, 0, 0, 0], dtype=jnp.float32))
     physics_backend: str = attrs.field(default="mjx")
 
 
@@ -197,9 +193,7 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                 return "Resetting joints and orientation to initial state"
             case self.key_h:
                 if self.keyframes:
-                    self.current_keyframe_idx = (self.current_keyframe_idx + 1) % len(
-                        self.keyframes
-                    )
+                    self.current_keyframe_idx = (self.current_keyframe_idx + 1) % len(self.keyframes)
                     keyframe = self.keyframes[self.current_keyframe_idx]
                     position, velocity, joint_pos, joint_vel = (
                         keyframe.position,
@@ -210,28 +204,22 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                     if position is None:
                         position = self.data.qpos[:3]
                     elif position.shape != 3:
-                        raise ValueError(
-                            f"Position shape mismatch: {position.shape} != 3 (x, y, z)"
-                        )
+                        raise ValueError(f"Position shape mismatch: {position.shape} != 3 (x, y, z)")
                     if velocity is None:
                         velocity = self.data.qvel[:3]
                     elif velocity.shape != 3:
-                        raise ValueError(
-                            f"Velocity shape mismatch: {velocity.shape} != 3 (x, y, z)"
-                        )
+                        raise ValueError(f"Velocity shape mismatch: {velocity.shape} != 3 (x, y, z)")
                     if joint_pos is None:
                         joint_pos = self.data.qpos[7:]
                     elif joint_pos.shape != self.data.qpos[7:].shape:
                         raise ValueError(
-                            f"Joint positions shape mismatch: "
-                            f"{joint_pos.shape} != {self.data.qpos[7:].shape}"
+                            f"Joint positions shape mismatch: {joint_pos.shape} != {self.data.qpos[7:].shape}"
                         )
                     if joint_vel is None:
                         joint_vel = self.data.qvel[6:]
                     elif joint_vel.shape != self.data.qvel[6:].shape:
                         raise ValueError(
-                            f"Joint velocities shape mismatch: "
-                            f"{joint_vel.shape} != {self.data.qvel[6:].shape}"
+                            f"Joint velocities shape mismatch: {joint_vel.shape} != {self.data.qvel[6:].shape}"
                         )
 
                     self.data.qpos = jnp.concatenate([position, self.data.qpos[3:7], joint_pos])
@@ -274,9 +262,7 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
             step_fn = None
 
         # Create a viewer.
-        with mujoco_viewer.launch_passive(
-            model=self.model, data=self.data, key_callback=self.key_callback
-        ) as viewer:
+        with mujoco_viewer.launch_passive(model=self.model, data=self.data, key_callback=self.key_callback) as viewer:
             # Initialize the "previous state" appropriately.
             state_t_minus_1 = state
             target_time = time.time()

@@ -100,12 +100,8 @@ def lookup_in_dict(names: Collection[Tk], mapping: dict[Tk, Tv], names_type: str
     """Lookup a list of names in a dictionary and return the corresponding values."""
     missing_names = [name for name in names if name not in mapping]
     if missing_names:
-        available_names_str = "\n".join(
-            name for name in sorted(str(lookup) for lookup in mapping.keys())
-        )
-        raise ValueError(
-            f"{names_type} not found in model: {missing_names}\nAvailable:\n{available_names_str}"
-        )
+        available_names_str = "\n".join(name for name in sorted(str(lookup) for lookup in mapping.keys()))
+        raise ValueError(f"{names_type} not found in model: {missing_names}\nAvailable:\n{available_names_str}")
     return [mapping[name] for name in names]
 
 
@@ -217,9 +213,7 @@ def get_ctrl_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Dat
     return data.ctrl[mujoco_mappings.ctrl_name_to_idx[name]]
 
 
-def get_sensordata_from_name(
-    name: str, mujoco_mappings: MujocoMappings, data: mjx.Data
-) -> jnp.ndarray:
+def get_sensordata_from_name(name: str, mujoco_mappings: MujocoMappings, data: mjx.Data) -> jnp.ndarray:
     """Get the sensordata from a name."""
     return data.sensordata[mujoco_mappings.sensor_name_to_idx_range[name]]
 

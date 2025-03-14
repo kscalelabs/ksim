@@ -52,9 +52,7 @@ class PitchTooGreatTermination(Termination):
 
     def __call__(self, state: mjx.Data) -> Array:
         quat = state.qpos[3:7]
-        pitch = jnp.arctan2(
-            2 * quat[1] * quat[2] - 2 * quat[0] * quat[3], 1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2
-        )
+        pitch = jnp.arctan2(2 * quat[1] * quat[2] - 2 * quat[0] * quat[3], 1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2)
         return jnp.abs(pitch) > self.max_pitch
 
 
@@ -66,9 +64,7 @@ class RollTooGreatTermination(Termination):
 
     def __call__(self, state: mjx.Data) -> Array:
         quat = state.qpos[3:7]
-        roll = jnp.arctan2(
-            2 * quat[1] * quat[2] + 2 * quat[0] * quat[3], 1 - 2 * quat[2] ** 2 - 2 * quat[3] ** 2
-        )
+        roll = jnp.arctan2(2 * quat[1] * quat[2] + 2 * quat[0] * quat[3], 1 - 2 * quat[2] ** 2 - 2 * quat[3] ** 2)
         return jnp.abs(roll) > self.max_roll
 
 
@@ -121,9 +117,7 @@ class FallTerminationBuilder(TerminationBuilder[FallTermination]):
 
     def __call__(self, data: BuilderData) -> FallTermination:
         if not (self.quaternion_sensor or self.projected_gravity_sensor):
-            logger.info(
-                "No quaternion or projected gravity sensor specified, using base orientation."
-            )
+            logger.info("No quaternion or projected gravity sensor specified, using base orientation.")
             return FallTermination(
                 sensor_name="base",
                 sensor_type="base_orientation",
@@ -169,9 +163,7 @@ class IllegalContactTermination(Termination):
         illegal_geom1 = jnp.isin(state.contact.geom1, self.illegal_geom_idxs)
         illegal_geom2 = jnp.isin(state.contact.geom2, self.illegal_geom_idxs)
         illegal_contact = jnp.logical_or(illegal_geom1, illegal_geom2)
-        significant_contact = jnp.where(
-            illegal_contact, state.contact.dist < self.contact_eps, False
-        ).any()
+        significant_contact = jnp.where(illegal_contact, state.contact.dist < self.contact_eps, False).any()
 
         return jnp.array(significant_contact)
 

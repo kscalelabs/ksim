@@ -37,16 +37,14 @@ def save_video_with_rewards(
     interpolated_timesteps = np.arange(num_frames)
     reward_data = np.vstack(
         [
-            interp1d(
-                original_timesteps, reward_data_raw[:, i], kind="linear", fill_value="extrapolate"
-            )(interpolated_timesteps)
+            interp1d(original_timesteps, reward_data_raw[:, i], kind="linear", fill_value="extrapolate")(
+                interpolated_timesteps
+            )
             for i in range(reward_data_raw.shape[1])
         ]
     ).T
 
-    fig, (ax_reward, ax_video) = plt.subplots(
-        2, 1, gridspec_kw={"height_ratios": [1, 2]}, figsize=(8, 8)
-    )
+    fig, (ax_reward, ax_video) = plt.subplots(2, 1, gridspec_kw={"height_ratios": [1, 2]}, figsize=(8, 8))
 
     def _plot_rewards_with_frames(frame_idx: int) -> list[plt.Artist]:
         ax_reward.clear()
@@ -64,9 +62,7 @@ def save_video_with_rewards(
 
         return [ax_reward, ax_video]
 
-    ani = animation.FuncAnimation(
-        fig, _plot_rewards_with_frames, frames=num_frames, interval=1000 / fps
-    )
+    ani = animation.FuncAnimation(fig, _plot_rewards_with_frames, frames=num_frames, interval=1000 / fps)
     ani.save(output_path, writer="ffmpeg", fps=int(fps))
     plt.close(fig)
 

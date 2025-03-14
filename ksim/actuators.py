@@ -53,9 +53,7 @@ class MITPositionActuators(Actuators):
 
             kp_str = params.kp
             kd_str = params.kd
-            assert (
-                kp_str is not None and kd_str is not None
-            ), f"Missing kp or kd for joint {joint_name}"
+            assert kp_str is not None and kd_str is not None, f"Missing kp or kd for joint {joint_name}"
             kp = float(kp_str)
             kd = float(kd_str)
 
@@ -89,9 +87,9 @@ class MITPositionActuatorsBuilder(ActuatorsBuilder[MITPositionActuators]):
 
     def __call__(self, data: BuilderData) -> MITPositionActuators:
         """Builds an MITPositionActuators instance."""
-        assert (
-            data.robot_metadata.joint_name_to_metadata is not None
-        ), "Missing joint_name_to_metadata within robot metadata"
+        assert data.robot_metadata.joint_name_to_metadata is not None, (
+            "Missing joint_name_to_metadata within robot metadata"
+        )
         return MITPositionActuators(
             joint_to_kp_kds=data.robot_metadata.joint_name_to_metadata,
             mujoco_mappings=data.mujoco_mappings,
