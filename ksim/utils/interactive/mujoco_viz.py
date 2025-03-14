@@ -261,7 +261,7 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                         self.data_modifying_keycode = None
 
                     # When paused and if rewards are updated during pause.
-                    if self.paused and self.viz_config.reward_when_paused:
+                    if self.paused and self.viz_config.update_when_paused:
                         with viewer.lock():
                             rewards = self.env.get_rewards(
                                 self.dummy_action,
@@ -270,10 +270,13 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                                 self.dummy_action,
                                 state,
                             )
+                            terminations = self.env.get_terminations(state)
 
                         self.timestamps.append(time.time() - self.start_time)
                         for reward_name, value in rewards.items():
                             self.reward_history[reward_name].append(float(value))
+                        for termination_name, value in terminations.items():
+                            self.termination_history[termination_name].append(float(value))
                         state_t_minus_1 = state
 
                     if not self.paused:
@@ -290,12 +293,14 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                                 self.dummy_action,
                                 state,
                             )
+                            terminations = self.env.get_terminations(state)
 
                         current_time = time.time() - self.start_time
                         self.timestamps.append(current_time)
                         for reward_name, value in rewards.items():
                             self.reward_history[reward_name].append(float(value))
-
+                        for termination_name, value in terminations.items():
+                            self.termination_history[termination_name].append(float(value))
                         state_t_minus_1 = state
 
                     viewer.sync()
