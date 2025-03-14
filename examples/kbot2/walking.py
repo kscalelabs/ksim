@@ -39,7 +39,11 @@ from ksim.rewards import (
     SinusoidalFeetHeightRewardBuilder,
 )
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations import PitchTooGreatTermination, RollTooGreatTermination
+from ksim.terminations import (
+    PitchTooGreatTermination,
+    RollTooGreatTermination,
+    TerminationPenalty,
+)
 
 NUM_OUTPUTS = 20
 
@@ -147,6 +151,7 @@ class KBotV2WalkingTask(PPOTask[KBotV2WalkingConfig]):
                     scale=0.4,
                     vertical_offset=-0.09,
                 ),
+                TerminationPenalty(scale=-1.0),
             ],
             observations=[
                 BaseOrientationObservation(noise_type="gaussian"),

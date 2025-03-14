@@ -232,6 +232,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         command_L_t: FrozenDict[str, Array],
         action_L_t: Array,
         mjx_data_L_t_plus_1: mjx.Data,
+        done_L_t: Array,
     ) -> FrozenDict[str, Array]:
         """Compute rewards from the state transition."""
         rewards = {}
@@ -243,6 +244,7 @@ class MjxEnv(BaseEnv[Config], ABC):
                     command_t=command_L_t,
                     action_t=action_L_t,
                     mjx_data_t_plus_1=mjx_data_L_t_plus_1,
+                    done_t=done_L_t,
                 )
                 * reward.scale
             )
@@ -438,11 +440,10 @@ class MjxEnv(BaseEnv[Config], ABC):
         )
 
         term_components_L_0 = self.get_terminations(mjx_data_L_1)
-        reward_components_L_0 = self.get_rewards(
-            action_L_0, mjx_data_L_0, command_L_0, action_L_0, mjx_data_L_1
-        )
-
         done_L_0 = jnp.stack([v for _, v in term_components_L_0.items()]).any()
+        reward_components_L_0 = self.get_rewards(
+            action_L_0, mjx_data_L_0, command_L_0, action_L_0, mjx_data_L_1, done_L_0
+        )
         reward_L_0 = jnp.stack([v for _, v in reward_components_L_0.items()]).sum()
 
         env_state_L_0 = EnvState(
@@ -527,6 +528,7 @@ class MjxEnv(BaseEnv[Config], ABC):
             command_L_t,
             action_L_t,
             mjx_data_L_t_plus_1,
+            done_L_t,
         )
         reward_L_t = jnp.stack([v for _, v in reward_components_L_t.items()]).sum()
 

@@ -76,6 +76,7 @@ class Reward(ABC):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array: ...
 
     def get_name(self) -> str:
@@ -103,6 +104,24 @@ class RewardBuilder(ABC, Generic[T]):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class TerminationPenalty(Reward):
+    """Penalty for terminating the episode."""
+
+    scale: float = attrs.field(default=-1.0)
+
+    def __call__(
+        self,
+        action_t_minus_1: Array | None,
+        mjx_data_t: mjx.Data,
+        command_t: FrozenDict[str, Array],
+        action_t: Array,
+        mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
+    ) -> Array:
+        return jnp.sum(done_t)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class HeightReward(Reward):
     """Reward for how high the robot is."""
 
@@ -115,6 +134,7 @@ class HeightReward(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         height = mjx_data_t_plus_1.qpos[2]
         reward = jnp.exp(-jnp.abs(height - self.height_target) * 50)
@@ -135,6 +155,7 @@ class OrientationPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         return jnp.sum(
             get_norm(
@@ -157,6 +178,7 @@ class TorquePenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         return jnp.sum(get_norm(mjx_data_t_plus_1.actuator_force, self.norm))
 
@@ -175,6 +197,7 @@ class EnergyPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         return jnp.sum(
             get_norm(mjx_data_t_plus_1.qvel[6:], self.norm)
@@ -195,6 +218,7 @@ class JointAccelerationPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         return jnp.sum(get_norm(mjx_data_t_plus_1.qacc[6:], self.norm))
 
@@ -212,6 +236,7 @@ class LinearVelocityZPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         lin_vel_z = mjx_data_t_plus_1.qvel[2]
         return get_norm(lin_vel_z, self.norm)
@@ -230,6 +255,7 @@ class AngularVelocityXYPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         ang_vel_xy = mjx_data_t_plus_1.qvel[3:5]
         return get_norm(ang_vel_xy, self.norm).sum(axis=-1)
@@ -249,6 +275,7 @@ class TrackAngularVelocityZReward(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         ang_vel_cmd_1 = command_t[self.cmd_name][0]
         ang_vel_z = mjx_data_t_plus_1.qvel[5]
@@ -269,6 +296,7 @@ class TrackLinearVelocityXYReward(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         cmd_vel_xy = command_t[self.cmd_name]
         actual_vel_xy = mjx_data_t_plus_1.qvel[:2]
@@ -297,6 +325,7 @@ class ActionSmoothnessPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         # During tracing, both branches of jax.lax.cond are evaluated, so
         # we need to handle the case where action_t_minus_1 is None.
@@ -320,6 +349,7 @@ class FootSlipPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         contacts = jnp.array(
             [
@@ -372,6 +402,7 @@ class FeetClearancePenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         feet_heights = mjx_data_t_plus_1.geom_xpos[self.foot_geom_idxs][:, 2]
 
@@ -423,6 +454,7 @@ class FeetAirTimeReward(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         # Check if any left foot geom is in contact
         left_foot_in_contact = jnp.zeros((), dtype=jnp.bool_)
@@ -602,6 +634,7 @@ class FootContactPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         has_contact_1 = jnp.isin(mjx_data_t_plus_1.contact.geom1, self.illegal_geom_idxs)
         has_contact_2 = jnp.isin(mjx_data_t_plus_1.contact.geom2, self.illegal_geom_idxs)
@@ -689,6 +722,7 @@ class DefaultPoseDeviationPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         current_positions = mjx_data_t_plus_1.qpos[self.joint_indices]
         deviations = current_positions - self.default_positions
@@ -752,6 +786,7 @@ class JointPosLimitPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         # Get current joint positions
         joint_positions = mjx_data_t_plus_1.qpos[self.joint_indices]
@@ -818,6 +853,7 @@ class SinusoidalFeetHeightReward(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         # Get the height of the feet
         left_foot_height = mjx_data_t_plus_1.geom_xpos[self.left_foot_geom_idx][2]
@@ -898,6 +934,7 @@ class DHForwardReward(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         # Take just the x velocity component
         x_delta = -mjx_data_t_plus_1.qvel[1]
@@ -915,6 +952,7 @@ class XPosReward(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         x_pos = mjx_data_t_plus_1.qpos[0]
         return x_pos
@@ -934,6 +972,7 @@ class DHHealthyReward(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         return jnp.array(1.0)
 
@@ -952,6 +991,7 @@ class DHTerminationPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         height = mjx_data_t.qpos[2]
         is_unhealthy = jnp.where(height < self.healthy_z_lower, 1.0, 0.0)
@@ -970,5 +1010,6 @@ class DHControlPenalty(Reward):
         command_t: FrozenDict[str, Array],
         action_t: Array,
         mjx_data_t_plus_1: mjx.Data,
+        done_t: Array,
     ) -> Array:
         return jnp.sum(jnp.square(action_t))
