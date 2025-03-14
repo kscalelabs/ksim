@@ -77,7 +77,7 @@ class KBotV2StandingTask(PPOTask[KBotV2StandingConfig]):
                 LinearVelocityZPenalty(scale=-0.0),
                 AngularVelocityXYPenalty(scale=-0.15),
                 TrackLinearVelocityXYReward(scale=1.0),
-                HeightReward(scale=1.0, height_target=1.0),
+                HeightReward(scale=5.0, height_target=0.7),
                 TrackAngularVelocityZReward(scale=1.0),
                 ActionSmoothnessPenalty(scale=-0.0),
                 OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
