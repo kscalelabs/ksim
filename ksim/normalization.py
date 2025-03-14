@@ -1,6 +1,7 @@
 """Defines the base normalization class, along with some implementations."""
 
 from abc import ABC, abstractmethod
+from typing import Self
 
 import equinox as eqx
 import jax
@@ -13,15 +14,6 @@ class Normalizer(eqx.Module, ABC):
 
     For more fine-grained normalization, feel free to subclass this and pass
     in to the task definition.
-
-    E.g.
-    ```python
-    class CustomNormalizer(Normalizer):
-        def __call__(self, pytree: PyTree[Array]) -> PyTree[Array]:
-            # maybe do batch-wise norm on vector observations
-            # maybe do layer-wise norm on tensor observations
-            return ...
-    ```
     """
 
     @abstractmethod
@@ -29,7 +21,7 @@ class Normalizer(eqx.Module, ABC):
         """Normalizes a pytree of arrays."""
 
     @abstractmethod
-    def update(self, pytree: PyTree[Array]) -> "Normalizer":
+    def update(self, pytree: PyTree[Array]) -> Self:
         """Updates the normalization statistics."""
 
 
@@ -40,31 +32,9 @@ class PassThrough(Normalizer):
         """Passes through the pytree without normalization."""
         return pytree
 
-    def update(self, pytree: PyTree[Array]) -> "PassThrough":
+    def update(self, pytree: PyTree[Array]) -> Self:
         """Returns self."""
         return self
-
-
-# class Standardize(Normalizer):
-#     """Standardizes a pytree of arrays with mean and std along batch dims."""
-
-#     def __call__(self, pytree: PyTree[Array]) -> PyTree[Array]:
-#         """Standardizes a pytree of arrays with mean and std along batch dims."""
-
-#         def standardize_leaf(x: Array) -> Array:
-#             """Standardizes a leaf of the pytree."""
-#             batch_dims = x.shape[:-1]
-#             mean = jnp.mean(x, axis=tuple(range(len(batch_dims))))
-#             std = jnp.std(x, axis=tuple(range(len(batch_dims))))
-#             std = jnp.where(std > 0, std, jnp.ones_like(std))
-#             return (x - mean) / std
-
-#         normalized = jax.tree_map(standardize_leaf, pytree)
-#         return normalized
-
-#     def update(self, pytree: PyTree[Array]) -> "Standardize":
-#         """Updates the normalization statistics."""
-#         return self
 
 
 class Standardize(Normalizer):
@@ -92,7 +62,7 @@ class Standardize(Normalizer):
         res = jax.tree_util.tree_map(normalize_leaf, pytree, self.mean, self.std)
         return res
 
-    def update(self, pytree: PyTree[Array]) -> "Standardize":
+    def update(self, pytree: PyTree[Array]) -> Self:
         """Updates the normalization statistics in a stateless manner."""
 
         def update_leaf_stats(x: Array, old_mean: Array, old_std: Array) -> tuple[Array, Array]:
