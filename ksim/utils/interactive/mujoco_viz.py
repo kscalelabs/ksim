@@ -280,6 +280,8 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
             # Initialize the "previous state" appropriately.
             state_t_minus_1 = state
             target_time = time.time()
+
+            log_start_time = self.data.time
             try:
                 while viewer.is_running():
                     # Process key inputs.
@@ -325,7 +327,7 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
                             terminations = self.env.get_terminations(state)
 
                         current_time = time.time() - self.start_time
-                        self.timestamps.append(current_time)
+                        self.timestamps.append(self.data.time - log_start_time)
                         for reward_name, value in rewards.items():
                             self.reward_history[reward_name].append(float(value))
                         for termination_name, value in terminations.items():

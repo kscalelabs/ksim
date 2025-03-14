@@ -53,7 +53,7 @@ class Reward(ABC):
             )
 
     # TODO: Use post_accumulate after unrolling
-    def post_accumulate(self, reward: Array) -> Array:
+    def post_accumulate(self, reward: Array, done: Array) -> Array:
         """Runs a post-epoch accumulation step.
 
         This function is called after the reward has been accumulated over the
@@ -64,6 +64,7 @@ class Reward(ABC):
 
         Args:
             reward: The accumulated reward over the epoch.
+            done: Array of episode termination flags.
         """
         return reward
 
@@ -478,20 +479,27 @@ class FeetAirTimeReward(Reward):
 
         return reward
 
-    def post_accumulate(self, reward: Array) -> Array:
+    def post_accumulate(self, reward: Array, done: Array) -> Array:
         # Identify consecutive positive rewards (correct foot contacts)
         # We're looking at the full sequence of rewards from the episode
 
+        # Create a mask for correct contacts (where reward > 0)
         correct_contacts = reward > 0
 
-        # Calculate streak lengths at each timestep
-        def count_streak(carry: Array, x: Array) -> tuple[Array, Array]:
-            streak = carry
+        # Calculate streak lengths at each timestep, reset on episode boundaries (done=True)
+        def count_streak(carry: Array, inputs: tuple[Array, Array]) -> tuple[Array, tuple[Array, Array]]:
+            streak, x, is_done = carry, inputs[0], inputs[1]
+            # Reset streak to 0 when done is True
+            streak = jnp.where(is_done, 0, streak)
+            # Increment streak only for correct contacts
             streak = jnp.where(x, streak + 1, 0)
-            return streak, streak
+            return streak, (streak, is_done)
 
-        _, streaks = jax.lax.scan(count_streak, jnp.array(0), correct_contacts)
+        # Create inputs for scan: (correct_contacts, done)
+        scan_inputs = (correct_contacts, done)
 
+        # Initialize streak counter at 0
+        _, (streaks, _) = jax.lax.scan(count_streak, jnp.array(0), scan_inputs)
         # Apply exponential scaling to the base reward based on streak length
         # Start with a moderate multiplier that grows with streak length
         streak_multiplier = jnp.minimum(1.0 + 0.1 * streaks, 2.0)  # Cap at 2x reward
@@ -613,7 +621,7 @@ class FootContactPenalty(Reward):
 
         return penalty
 
-    def post_accumulate(self, reward: Array) -> Array:
+    def post_accumulate(self, reward: Array, done: Array) -> Array:
         # We only want to apply the penalty if the total contact time is more
         # than ``self.allowed_contact_prct`` percent of the time. Since the
         # reward tensor will be an array of zeros and ones, we can adjust by
