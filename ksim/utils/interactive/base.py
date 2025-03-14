@@ -98,7 +98,7 @@ class InteractiveVisualizer(abc.ABC):
         self.fig_save_path = self.viz_config.fig_save_dir / "plot.png"
 
         # Setup figure but don't display it yet
-        self.fig, self.ax = plt.subplots(figsize=(10, 6))
+        self.fig, (self.ax_reward, self.ax_term) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
         self.fig.savefig(self.fig_save_path)  # Save an initial empty plots
 
         # Start a thread to periodically save plot images
@@ -151,10 +151,11 @@ class InteractiveVisualizer(abc.ABC):
     def update_plot(self) -> None:
         """Update plot and save to disk."""
         # Clear the axis
-        self.ax.clear()
+        self.ax_reward.clear()
+        self.ax_term.clear()
 
-        # Plot each reward component
-        for _, history in [
+        # Plot both reward and termination components
+        for data_type, history in [
             ("reward", self.reward_history),
             ("term", self.termination_history),
         ]:
@@ -165,16 +166,31 @@ class InteractiveVisualizer(abc.ABC):
                     # Make sure we have matching lengths
                     min_len = min(len(values_list), len(timestamps_list))
                     if min_len > 0:
-                        self.ax.plot(timestamps_list[-min_len:], values_list[-min_len:], label=name)
+                        if data_type == "reward":
+                            self.ax_reward.plot(
+                                timestamps_list[-min_len:], values_list[-min_len:], label=name
+                            )
+                        else:
+                            self.ax_term.plot(
+                                timestamps_list[-min_len:], values_list[-min_len:], label=name
+                            )
 
-        # Set labels and legend
-        self.ax.set_xlabel("Time (s)")
-        self.ax.set_ylabel("Reward")
-        self.ax.set_title("Rewards Visualization")
-        self.ax.legend(loc="upper left")
+        # Set labels and legends
+        self.ax_reward.set_ylabel("Reward")
+        self.ax_reward.set_title("Rewards Visualization")
+        self.ax_reward.legend(loc="upper left")
+
+        self.ax_term.set_xlabel("Time (s)")
+        self.ax_term.set_ylabel("Termination")
+        self.ax_term.set_title("Termination Signals")
+        self.ax_term.legend(loc="upper left")
 
         if self.timestamps:
-            self.ax.set_xlim(self.timestamps[0], self.timestamps[-1])
+            self.ax_reward.set_xlim(self.timestamps[0], self.timestamps[-1])
+            self.ax_term.set_xlim(self.timestamps[0], self.timestamps[-1])
+
+        # Add some spacing between subplots
+        self.fig.tight_layout()
 
         # Save to disk
         self.fig.savefig(self.fig_save_path)
