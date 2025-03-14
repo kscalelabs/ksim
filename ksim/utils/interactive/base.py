@@ -1,10 +1,10 @@
 """Base class for interactive visualizers."""
 
-import abc
 import collections
 import logging
 import threading
 import time
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,7 +42,7 @@ class Keyframe:
     joint_velocities: np.ndarray | None = None
 
 
-class InteractiveVisualizer(abc.ABC):
+class InteractiveVisualizer(ABC):
     """Base class for visualizing rewards in RL environments."""
 
     # Mapping of key names to keycodes for commands that modify the environment state
@@ -128,7 +128,7 @@ class InteractiveVisualizer(abc.ABC):
         self.plot_thread.daemon = True
         self.plot_thread.start()
 
-    @abc.abstractmethod
+    @abstractmethod
     def setup_environment(self) -> BaseEnv:
         """Set up the environment for visualization.
 
@@ -165,7 +165,7 @@ class InteractiveVisualizer(abc.ABC):
         if keycode in [v[0] for v in self.ENV_STATE_KEYCODES.values()]:
             self.data_modifying_keycode = keycode
 
-    @abc.abstractmethod
+    @abstractmethod
     def run(self) -> None:
         """Run the visualization loop."""
         pass
