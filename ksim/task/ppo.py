@@ -1,6 +1,5 @@
 """Defines a standard task interface for training a policy."""
 
-import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
@@ -349,10 +348,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             metrics_to_log["prediction_sigma_mean"] = jnp.mean(sigma)
             metrics_to_log["prediction_sigma_min"] = jnp.min(sigma)
             metrics_to_log["prediction_sigma_max"] = jnp.max(sigma)
-
-        use_debug = os.environ.get("DEBUG", "0") == "1"
-        if use_debug and jnp.isnan(total_loss):  # should skip compilation
-            breakpoint()
 
         return total_loss, metrics_to_log
 

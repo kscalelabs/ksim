@@ -1,18 +1,18 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
-from dataclasses import dataclass
 from typing import Collection
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mujoco
+import optax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-from ksim.actuators import MITPositionActuators
+from ksim.actuators import TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.env.mjx_engine import MjxEngine
@@ -135,12 +135,33 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
         return prediction
 
 
-class HumanoidWalkingTask(PPOTask):
+class HumanoidWalkingTask(PPOTask[PPOConfig]):
+    def get_optimizer(self) -> optax.GradientTransformation:
+        """Get the optimizer: handled by XAX."""
+        return optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.adam(self.config.learning_rate),
+        )
+
+    def critic_predict_minibatch(
+        self,
+        agent: ActorCriticAgent,
+        obs_ET: Array,
+        cmd_ET: Array,
+    ) -> Array:
+        pass  # Not used anywhere rn
 
     def get_model_and_metadata(self) -> tuple[PhysicsModel, dict[str, JointMetadataOutput]]:
+        metadata = None  # get_joint_metadata(mj_model)  # TODO: implement this function properly
         mj_model = mujoco.MjModel.from_xml_path("examples/default_humanoid/scene.mjcf")
-        metadata = None # get_joint_metadata(mj_model)  # TODO: implement this function properly
-        mjx_model = mjx.Model(mj_model)
+
+        mj_model.opt.timestep = jnp.array(self.config.dt)
+        mj_model.opt.iterations = 6
+        mj_model.opt.ls_iterations = 6
+        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
+        mj_model.opt.solver = mjx.SolverType.CG
+        mjx_model = mjx.put_model(mj_model)
+
         return mjx_model, metadata
 
     def get_engine(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> MjxEngine:
@@ -150,14 +171,11 @@ class HumanoidWalkingTask(PPOTask):
                 RandomizeJointPositions(scale=0.01),
                 RandomizeJointVelocities(scale=0.01),
             ],
-            actuators=MITPositionActuators(physics_model, metadata),
+            # actuators=MITPositionActuators(physics_model, metadata), # TODO:bring it back
+            actuators=TorqueActuators(),
             # TODO: add randomizers
             dt=self.config.dt,
             ctrl_dt=self.config.ctrl_dt,
-            solver=mjx.SolverType.CG,  # TODO: experiment with euler
-            iterations=6,
-            ls_iterations=6,
-            disableflags=mjx.DisableBit.EULERDAMP,
             min_action_latency_step=0,
             max_action_latency_step=0,
         )
@@ -204,6 +222,7 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking
     HumanoidWalkingTask.launch(
         PPOConfig(
+            compile_unroll=True,
             num_learning_epochs=8,
             num_env_states_per_minibatch=8192,
             num_minibatches=32,

@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Collection, Generic, Literal, TypeVar
+from typing import Collection, Generic, Literal, TypeVar
 
 import equinox as eqx
 import jax
@@ -133,10 +133,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]  # TODO: fix
         super().__init__(config)
 
-    ####################
-    # Abstract methods #
-    ####################
-
     @abstractmethod
     def get_model_and_metadata(self) -> tuple[Agent, dict[str, JointMetadataOutput]]: ...
 
@@ -193,10 +189,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[Agent, optax.OptState, Array, FrozenDict[str, Array]]: ...
-
-    ##############
-    # Properties #
-    ##############
 
     @property
     def dataset_size(self) -> int:
@@ -547,7 +539,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         training_state: xax.State,
     ) -> None:
         """Runs the main RL training loop."""
-        breakpoint()
         physics_model, metadata = self.get_model_and_metadata()
         engine = self.get_engine(physics_model, metadata)
         obs_generators = self.get_obs_generators(physics_model)  # these should be given necessary data for building
@@ -574,10 +565,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if self.config.compile_unroll:
             unroll_trajectories_fn = eqx.filter_jit(unroll_trajectories_fn)
 
-        #################
-        # Burn in Stage #
-        #################
-
+        # Burn in stage
         burn_transitions_ET, _, _, _ = unroll_trajectories_fn(
             state_E,
             rng,
@@ -596,16 +584,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         obs_normalizer = obs_normalizer.update(burn_transitions_ET.obs)
         cmd_normalizer = cmd_normalizer.update(burn_transitions_ET.command)
 
-        ##################
-        # Training Stage #
-        ##################
         while not self.is_training_over(training_state):
             with self.step_context("on_step_start"):
                 training_state = self.on_step_start(training_state)
-
-            #############################
-            # Rollout and Normalization #
-            #############################
 
             start_time = time.time()
             reshuffle_rng, rollout_rng, train_rng = jax.random.split(train_rng, 3)
@@ -628,9 +609,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rollout_time = time.time() - start_time
             logger.info("Rollout time: %s seconds", rollout_time)
 
-            ###########################
-            # Minibatch Training Loop #
-            ###########################
             start_time = time.time()
 
             # getting loss components that are constant across minibatches

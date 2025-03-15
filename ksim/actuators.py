@@ -33,8 +33,10 @@ class ActuatorsBuilder(ABC, Generic[T]):
 
 
 class TorqueActuators(Actuators):
+    """Direct torque control."""
+
     def get_ctrl(self, action: Array, physics_data: PhysicsData) -> Array:
-        # Just use the action as the torque, the simplest actuator model.
+        """Just use the action as the torque, the simplest actuator model."""
         return action
 
 
