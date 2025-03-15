@@ -37,10 +37,10 @@ class StaticFrictionRandomization(Randomization):
 
     def __call__(self, model: PhysicsModel, rng: JaxArray) -> PhysicsModel:
         rng, key = jax.random.split(rng)
-        frictionloss = model.dof_frictionloss[6:] * jax.random.uniform(
+        frictionloss = model.dof_frictionloss * jax.random.uniform(
             key, shape=(model.nq,), minval=self.scale_lower, maxval=self.scale_upper
         )
-        dof_frictionloss = model.dof_frictionloss.at[6:].set(frictionloss)
+        dof_frictionloss = model.dof_frictionloss.at[:].set(frictionloss)
 
         return dof_frictionloss
 
@@ -70,10 +70,10 @@ class ArmatureRandomization(Randomization):
     scale_upper: float = attrs.field(default=1.05)
 
     def __call__(self, model: PhysicsModel, rng: JaxArray) -> PhysicsModel:
-        armature = model.dof_armature[6:] * jax.random.uniform(
-            rng, shape=(model.nq - 6,), minval=self.scale_lower, maxval=self.scale_upper
+        armature = model.dof_armature * jax.random.uniform(
+            rng, shape=(model.nq,), minval=self.scale_lower, maxval=self.scale_upper
         )
-        dof_armature = model.dof_armature.at[6:].set(armature)
+        dof_armature = model.dof_armature.at[:].set(armature)
         return dof_armature
 
 
@@ -118,8 +118,8 @@ class JointDampingRandomization(Randomization):
 
     def __call__(self, model: PhysicsModel, rng: JaxArray) -> PhysicsModel:
         rng, key = jax.random.split(rng)
-        kd = model.dof_damping[6:] * jax.random.uniform(
-            key, (model.nq,), minval=self.scale_lower, maxval=self.scale_upper
+        kd = model.dof_damping * jax.random.uniform(
+            key, shape=(model.nq,), minval=self.scale_lower, maxval=self.scale_upper
         )
-        dof_damping = model.dof_damping.at[6:].set(kd)
+        dof_damping = model.dof_damping.at[:].set(kd)
         return dof_damping

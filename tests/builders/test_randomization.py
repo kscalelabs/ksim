@@ -19,11 +19,11 @@ class DummyPhysicsModel:
     """Mock mjx.Model for testing."""
 
     def __init__(self) -> None:
-        self.dof_frictionloss = jnp.ones((18,))
+        self.dof_frictionloss = jnp.ones((12,))
         self.dof_armature = jnp.ones((12,))
         self.body_mass = jnp.ones((10,))
         self.geom_friction = jnp.ones((10, 1))
-        self.dof_damping = jnp.ones((18,))
+        self.dof_damping = jnp.ones((12,))
         self.nq = 12
         self.nbody = 10
 
