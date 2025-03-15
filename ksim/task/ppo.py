@@ -1,7 +1,7 @@
 """Defines a standard task interface for training a policy."""
 
 import os
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
@@ -13,29 +13,17 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.data import EnvState
+from ksim.env.data import Transition
 from ksim.model.base import ActorCriticAgent
 from ksim.model.distributions import GaussianDistribution
-from ksim.model.types import ModelInput
+from ksim.model.types import ModelCarry, ModelInput
 from ksim.normalization import Normalizer
 from ksim.task.rl import RLConfig, RLTask
-from ksim.task.types import PPORolloutTimeLossComponents, RolloutTimeLossComponents
+from ksim.task.types import PPORolloutTimeStats, RolloutTimeStats
 
 
 def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
-    """Calculate returns from rewards and dones.
-
-    Dones are a mask of 0s and 1s, where 1s indicate the end of an episode.
-    Gamma is the discount factor.
-
-    Args:
-        rewards: The rewards from the environment.
-        dones: The dones from the environment.
-        gamma: The discount factor.
-
-    Returns:
-        The returns, with the same shape as the rewards.
-    """
+    """Calculate returns from rewards and dones."""
 
     # Calculating returns separately using gamma.
     def scan_fn(returns_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
@@ -52,6 +40,18 @@ def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
     )
 
     return returns
+
+
+def get_deltas(
+    rewards: Array,
+    values: Array,
+    values_shifted: Array,
+    termination_mask: Array,
+    decay_gamma: float,
+) -> Array:
+    """Computes the TD residuals for a rollout."""
+    deltas = rewards + decay_gamma * values_shifted * termination_mask - values
+    return deltas
 
 
 def compute_advantages_and_value_targets(
@@ -79,8 +79,7 @@ def compute_advantages_and_value_targets(
     values_shifted = jnp.concatenate([values[1:], jnp.expand_dims(values[-1], 0)], axis=0)
     mask = jnp.where(dones, 0.0, 1.0)
 
-    # getting td residuals
-    deltas = rewards + decay_gamma * values_shifted * mask - values
+    deltas = get_deltas(rewards, values, values_shifted, mask, decay_gamma)
 
     _, gae = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas, mask), reverse=True)
     value_targets = jnp.add(gae, values)
@@ -151,22 +150,26 @@ Config = TypeVar("Config", bound=PPOConfig)
 class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
 
-    def get_init_actor_carry(self) -> Array | None:
-        """Get the actor carry state."""
-        raise NotImplementedError("Not implemented at the base PPO class.")
+    ###########################
+    # Potentially Overridable #
+    ###########################
 
-    def get_init_critic_carry(self) -> Array | None:
-        """Get the critic carry state."""
-        raise NotImplementedError("Not implemented at the base PPO class.")
-
-    @eqx.filter_jit  # TODO: implement filter-like jit in xax
-    def get_rollout_time_loss_components(
+    @abstractmethod
+    def critic_predict_minibatch(
         self,
         agent: ActorCriticAgent,
-        trajectory_dataset: EnvState,
+        obs_ET: Array,
+        cmd_ET: Array,
+    ) -> Array: ...
+
+    @eqx.filter_jit  # TODO: implement filter-like jit in xax
+    def get_rollout_time_stats(
+        self,
+        agent: ActorCriticAgent,
+        trajectory_dataset: Transition,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
-    ) -> RolloutTimeLossComponents:
+    ) -> RolloutTimeStats:
         """Calculating advantages and returns for a rollout."""
         model_input = ModelInput(
             obs=obs_normalizer(trajectory_dataset.obs),
@@ -202,7 +205,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         if self.config.normalize_advantage and not self.config.normalize_advantage_in_minibatch:
             advantages = (advantages - advantages.mean()) / (advantages.std() + self.config.eps)
 
-        return PPORolloutTimeLossComponents(
+        return PPORolloutTimeStats(
             initial_action_log_probs=jax.lax.stop_gradient(initial_action_log_probs),
             initial_values=jax.lax.stop_gradient(initial_values),
             advantages=jax.lax.stop_gradient(advantages),
@@ -227,18 +230,18 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         agent: ActorCriticAgent,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        env_state_batch: EnvState,
-        rollout_time_loss_components: RolloutTimeLossComponents,
+        minibatch: Transition,
+        rollout_time_stats: RolloutTimeStats,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        assert isinstance(rollout_time_loss_components, PPORolloutTimeLossComponents)
+        assert isinstance(rollout_time_stats, PPORolloutTimeStats)
         loss_val, metrics, grads = self.loss_metrics_grads(
             agent=agent,
-            env_state_batch=env_state_batch,
-            rollout_time_loss_components=rollout_time_loss_components,
+            minibatch=minibatch,
+            rollout_time_stats=rollout_time_stats,
             obs_normalizer=obs_normalizer,  # noqa: F821 TODO fix
             cmd_normalizer=cmd_normalizer,  # noqa: F821 TODO fix
             rng=rng,
@@ -257,41 +260,31 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return new_agent, new_opt_state, loss_val, frozen_metrics
 
-    def get_optimizer(self) -> optax.GradientTransformation:
-        """Get the optimizer: handled by XAX."""
-        return optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            optax.adam(self.config.learning_rate),
-        )
-
     def compute_ppo_loss(
         self,
         agent: ActorCriticAgent,
-        env_state_batch: EnvState,
-        rollout_time_loss_components: PPORolloutTimeLossComponents,
+        minibatch: Transition,
+        rollout_time_stats: PPORolloutTimeStats,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array]]:
-        """Compute the PPO loss."""
+        """Compute the PPO loss.
+
+        Note: minibatches will be shape: (time, env, ...). Depending on the
+        sampling function, these may be contiguous along the time dim.
+        """
         # get the log probs of the current model
-        model_input = ModelInput(
-            obs=obs_normalizer(env_state_batch.obs),
-            command=cmd_normalizer(env_state_batch.command),
-            action_history=None,
-            recurrent_state=None,
-        )
+        prediction = self.actor_predict_minibatch(minibatch, obs_normalizer, cmd_normalizer)
+        log_probs = agent.action_distribution.log_prob(prediction, minibatch.action)
+        values = agent.critic_model.forward(minibatch, carry=self.get_init_critic_carry()).squeeze(axis=-1)
 
-        prediction = agent.actor_model.forward(model_input)
-        log_probs = agent.action_distribution.log_prob(prediction, env_state_batch.action)
-        values = agent.critic_model.forward(model_input).squeeze(axis=-1)
-
-        log_prob_diff = log_probs - rollout_time_loss_components.initial_action_log_probs
+        log_prob_diff = log_probs - rollout_time_stats.initial_action_log_probs
         ratio = jnp.exp(log_prob_diff)
 
         # get the state-value estimates
 
-        advantages = rollout_time_loss_components.advantages
+        advantages = rollout_time_stats.advantages
 
         # Andrychowicz (2021) did not find any benefit in minibatch normalization.
         if self.config.normalize_advantage and self.config.normalize_advantage_in_minibatch:
@@ -305,7 +298,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 clipped_ratio * advantages,
             )
         )
-        value_targets = rollout_time_loss_components.value_targets
+        value_targets = rollout_time_stats.value_targets
 
         # value loss term
         value_pred = agent.critic_model.forward(model_input).squeeze(axis=-1)
@@ -314,7 +307,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             self.config.use_clipped_value_loss,
             lambda: 0.5
             * self._clipped_value_loss(
-                target_values=rollout_time_loss_components.initial_values,
+                target_values=rollout_time_stats.initial_values,
                 values=value_pred,
                 value_targets=value_targets,
             ),
@@ -339,11 +332,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "ratio_max": jnp.max(ratio),
             "ratio_min": jnp.min(ratio),
             "log_prob_diff_mean": jnp.mean(log_prob_diff),
-            "advantage_norm_mean": jnp.mean(rollout_time_loss_components.advantages),
-            "action_mean": jnp.mean(env_state_batch.action),
-            "action_std": jnp.std(env_state_batch.action),
-            "action_max": jnp.max(env_state_batch.action),
-            "action_min": jnp.min(env_state_batch.action),
+            "advantage_norm_mean": jnp.mean(rollout_time_stats.advantages),
+            "action_mean": jnp.mean(minibatch.action),
+            "action_std": jnp.std(minibatch.action),
+            "action_max": jnp.max(minibatch.action),
+            "action_min": jnp.min(minibatch.action),
             "prediction_mean": jnp.mean(prediction),
             "prediction_std": jnp.std(prediction),
             "log_prob_mean": jnp.mean(log_probs),
@@ -351,8 +344,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "log_prob_min": jnp.min(log_probs),
             "values_std": jnp.std(values),
             "values_mean": jnp.mean(values),
-            "obs_nans_ratio": xax.compute_nan_ratio(env_state_batch.obs),
-            "action_nans_ratio": xax.compute_nan_ratio(env_state_batch.action),
+            "obs_nans_ratio": xax.compute_nan_ratio(minibatch.obs),
+            "action_nans_ratio": xax.compute_nan_ratio(minibatch.action),
         }
 
         if isinstance(agent.action_distribution, GaussianDistribution):
@@ -377,8 +370,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def loss_metrics_grads(
         self,
         agent: ActorCriticAgent,
-        env_state_batch: EnvState,
-        rollout_time_loss_components: PPORolloutTimeLossComponents,
+        minibatch: Transition,
+        rollout_time_stats: PPORolloutTimeStats,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
@@ -389,8 +382,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             """Agent is a PyTree and can be optimized via optax."""
             return self.compute_ppo_loss(
                 agent=agent,
-                env_state_batch=env_state_batch,
-                rollout_time_loss_components=rollout_time_loss_components,
+                minibatch=minibatch,
+                rollout_time_stats=rollout_time_stats,
                 obs_normalizer=obs_normalizer,
                 cmd_normalizer=cmd_normalizer,
                 rng=rng,

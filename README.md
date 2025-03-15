@@ -87,9 +87,9 @@ Key Commands:
 
 ## Terminology
 The following terminology is relevant to understanding RL tasks.
-- `EnvState`: includes obs, command, action, reward, and done. The latter two are
+- `Transition`: includes obs, command, action, reward, and done. The latter two are
   conditioned on the transition produced by the action.
-- Dataset: a set of `EnvState`s used for training an RL update. Fully defined by
+- Dataset: a set of `Transition`s used for training an RL update. Fully defined by
   `num_env_states_per_minibatch * num_minibatches`.
 - Minibatch: a subset of the dataset used for training an RL update. Updates are
   performed per minibatch.
@@ -123,7 +123,7 @@ Timestamp suffixes:
 These should absolutely be annotated:
 - `mjx.Data`
 - `mjx.Model`
-- Everything relevant to `EnvState` (e.g. `obs`, `command`, `action`, etc.)
+- Everything relevant to `Transition` (e.g. `obs`, `command`, `action`, etc.)
 
 ### Sharp Bits
 - Add all sharp bits or unorthodox (yet correct) design decisions here.

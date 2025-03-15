@@ -5,11 +5,13 @@ from dataclasses import dataclass
 import jax
 from jaxtyping import Array
 
+from ksim.env.data import Transition
+
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class RolloutTimeLossComponents:
-    """Components of the loss function for a rollout."""
+class RolloutTimeStats:
+    """Only computed once at the end of a rollout, used accross training."""
 
     initial_action_log_probs: Array
     initial_values: Array
@@ -18,8 +20,17 @@ class RolloutTimeLossComponents:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class PPORolloutTimeLossComponents(RolloutTimeLossComponents):
+class PPORolloutTimeStats(RolloutTimeStats):
     """Components of the loss function for a PPO rollout."""
 
     advantages: Array
     returns: Array
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class RLDataset:
+    """Everything you need to run an RL pass."""
+
+    transitions: Transition
+    rollout_time_stats: RolloutTimeStats

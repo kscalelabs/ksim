@@ -14,8 +14,8 @@ from matplotlib import animation
 from PIL import Image
 from scipy.interpolate import interp1d
 
-from ksim.env.base_engine import BaseEnv
-from ksim.env.data import EnvState
+from ksim.env.base_engine import BaseEnv, PhysicsEngine
+from ksim.env.data import Transition
 from ksim.model.base import Agent
 
 logger = logging.getLogger(__name__)
@@ -98,18 +98,18 @@ def save_trajectory_visualization(
 
 
 def render_and_save_trajectory(
-    env: BaseEnv,
     agent: Agent,
+    engine: PhysicsEngine,
     rng: PRNGKeyArray,
-    output_dir: Path,
     *,
+    output_dir: Path,
     num_steps: int,
     width: int = 640,
     height: int = 480,
     camera: int | None = None,
     save_frames: bool = True,
     save_video: bool = True,
-) -> EnvState:
+) -> Transition:
     """Render a trajectory and save it as frames and/or video.
 
     Args:
@@ -124,22 +124,24 @@ def render_and_save_trajectory(
         save_frames: Whether to save individual frames
         save_video: Whether to save video file
     """
-    frames, env_state_T1L = env.render_trajectory(
-        agent=agent,
-        rng=rng,
-        num_steps=num_steps,
-        width=width,
-        height=height,
-        camera=camera,
-    )
+    # frames, env_state_T1L = env.render_trajectory(
+    #     agent=agent,
+    #     rng=rng,
+    #     num_steps=num_steps,
+    #     width=width,
+    #     height=height,
+    #     camera=camera,
+    # )
 
-    save_trajectory_visualization(
-        frames=frames,
-        output_dir=output_dir,
-        fps=1 / env.config.ctrl_dt,
-        save_frames=save_frames,
-        save_video=save_video,
-        rewards=env_state_T1L.reward_components,
-    )
+    # save_trajectory_visualization(
+    #     frames=frames,
+    #     output_dir=output_dir,
+    #     fps=1 / env.config.ctrl_dt,
+    #     save_frames=save_frames,
+    #     save_video=save_video,
+    #     rewards=env_state_T1L.reward_components,
+    # )
 
-    return env_state_T1L
+    # return env_state_T1L
+    # sorry, please rewrite this to use the new unroll_trajectory function
+    raise NotImplementedError("Please rewrite this to use the new unroll_trajectory function")

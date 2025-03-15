@@ -1,6 +1,5 @@
 """Minimal API that interfaces with env to unroll trajectories."""
 
-from abc import ABC, abstractmethod
 from dataclasses import replace
 from typing import Collection, NamedTuple
 
@@ -12,10 +11,10 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.commands import Command
-from ksim.env.base_engine import BaseEngine
+from ksim.env.base_engine import PhysicsEngine
 from ksim.env.data import PhysicsData, PhysicsState, Transition
 from ksim.model.base import Agent
-from ksim.model.types import ModelInput, ModelRecurrence
+from ksim.model.types import ModelCarry
 from ksim.normalization import Normalizer
 from ksim.observation import Observation
 from ksim.rewards import Reward
@@ -32,19 +31,19 @@ class UnrollNaNDetector(NamedTuple):
     reward_has_nans: Array
 
 
-UnrollCarry = tuple[FrozenDict[str, Array], ModelRecurrence, PhysicsState]
+UnrollCarry = tuple[FrozenDict[str, Array], ModelCarry, PhysicsState]
 UnrollYs = tuple[Transition, UnrollNaNDetector, PhysicsData | None]
 # personal preference... don't like tuple-mania
 
 
 def unroll_trajectory(
-    agent: Agent,
     physics_state: PhysicsState,
+    *,
+    agent: Agent,
     obs_normalizer: Normalizer,
     cmd_normalizer: Normalizer,
     rng: PRNGKeyArray,
-    *,  # everything below this must be static at runtime (helpful for jit)
-    engine: BaseEngine,
+    engine: PhysicsEngine,
     obs_generators: Collection[Observation],
     command_generators: Collection[Command],
     reward_generators: Collection[Reward],
@@ -57,7 +56,7 @@ def unroll_trajectory(
     Key insight: unrolling really doesn't need the previous Transition since we
     can safely reset command, and since prev action is in PhysicsState.
     """
-    initial_recurrence = agent.actor_model.initial_recurrence()
+    initial_carry = agent.actor_model.initial_carry()
     initial_command = get_initial_commands(rng, command_generators=command_generators)
 
     def state_transition(
@@ -66,13 +65,13 @@ def unroll_trajectory(
     ) -> tuple[UnrollCarry, UnrollYs]:
         """Constructs transition, resets if needed."""
         obs_rng, cmd_rng, act_rng, reset_rng = jax.random.split(rng, 4)
-        prev_command, recurrence, physics_state = carry
+        prev_command, carry, physics_state = carry
         prev_action = physics_state.most_recent_action
         obs = get_observation(physics_state, obs_rng, obs_generators=obs_generators)
         command = get_commands(prev_command, physics_state, cmd_rng, command_generators=command_generators)
 
-        model_input = ModelInput(obs_normalizer(obs), cmd_normalizer(command), None, None)
-        prediction, next_recurrence = agent.actor_model.forward(model_input, recurrence)
+        # we still return unnormalized obs and command to calculate normalization statistics
+        prediction, next_carry = agent.actor_model.forward(obs_normalizer(obs), cmd_normalizer(command), carry)
         action = agent.action_distribution.sample(prediction, act_rng)
         next_physics_state = engine.step(action, physics_state)
 
@@ -94,7 +93,7 @@ def unroll_trajectory(
         do_reset = jnp.logical_or(action_causes_termination, next_data_has_nans)
         reset_state = engine.reset(reset_rng)
         next_physics_state = xax.update_pytree(do_reset, next_physics_state, reset_state)
-        next_recurrence = xax.update_pytree(do_reset, next_recurrence, initial_recurrence)
+        next_carry = xax.update_pytree(do_reset, next_carry, initial_carry)
         command = xax.update_pytree(do_reset, command, initial_command)
 
         transition = Transition(
@@ -122,13 +121,13 @@ def unroll_trajectory(
 
         # if is fine since condition will be static at runtime
         if return_intermediate_physics_data:
-            return (command, next_recurrence, next_physics_state), (transition, nan_mask, next_physics_state)
+            return (command, next_carry, next_physics_state), (transition, nan_mask, next_physics_state)
         else:
-            return (command, next_recurrence, next_physics_state), (transition, nan_mask, None)
+            return (command, next_carry, next_physics_state), (transition, nan_mask, None)
 
     (_, _, final_physics_state), (transition, nan_mask, intermediate_physics_data) = jax.lax.scan(
         state_transition,
-        (initial_command, initial_recurrence, physics_state),
+        (initial_command, initial_carry, physics_state),
         jax.random.split(rng, num_steps),
     )
 

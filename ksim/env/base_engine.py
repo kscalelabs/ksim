@@ -11,7 +11,7 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim.env.data import PhysicsState
 
 
-class BaseEngine(ABC):
+class PhysicsEngine(ABC):
     """The role of an engine is simple: reset and step. Decoupled from data."""
 
     @abstractmethod

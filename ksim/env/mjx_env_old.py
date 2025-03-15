@@ -29,7 +29,7 @@ from mujoco import mjx
 from ksim.actuators import Actuators, ActuatorsBuilder
 from ksim.commands import Command, CommandBuilder
 from ksim.env.base_engine import BaseEnv, BaseEnvConfig
-from ksim.env.data import EnvState
+from ksim.env.data import Transition
 from ksim.model.base import Agent
 from ksim.model.types import ModelInput
 from ksim.normalization import Normalizer
@@ -347,11 +347,11 @@ class MjxEnv(BaseEnv[Config], ABC):
             return data
 
         rngs = jax.random.split(jax.random.PRNGKey(0), num_envs)
-        default_data_EL = jax.vmap(get_init_data)(rngs)
+        default_dataE = jax.vmap(get_init_data)(rngs)
 
-        mjx_data_EL_0 = jax.vmap(mjx_forward, in_axes=(None, 0))(self.default_mjx_model, default_data_EL)
+        mjx_dataE_0 = jax.vmap(mjx_forward, in_axes=(None, 0))(self.default_mjx_model, default_dataE)
 
-        return mjx_data_EL_0
+        return mjx_dataE_0
 
     def get_init_physics_model(self) -> mjx.Model:
         """Get the initial physics model for the environment (L)."""
@@ -361,23 +361,23 @@ class MjxEnv(BaseEnv[Config], ABC):
     def get_dummy_env_states(
         self,
         num_envs: int,
-    ) -> EnvState:
+    ) -> Transition:
         """Get initial environment states (EL)."""
         rng = jax.random.PRNGKey(0)
         cmd_rng, obs_rng = jax.random.split(rng, 2)
-        mjx_data_EL_0 = self.get_init_physics_data(num_envs)
-        timestep_E = mjx_data_EL_0.time
+        mjx_dataE_0 = self.get_init_physics_data(num_envs)
+        timestep_E = mjx_dataE_0.time
         obs_rng_E = jax.random.split(obs_rng, num_envs)
         command_rng_E = jax.random.split(cmd_rng, num_envs)
-        obs_dummy_EL = jax.vmap(self.get_observation)(mjx_data_EL_0, obs_rng_E)
-        command_dummy_EL = jax.vmap(self.get_initial_commands)(command_rng_E, timestep_E)
+        obs_dummyE = jax.vmap(self.get_observation)(mjx_dataE_0, obs_rng_E)
+        command_dummyE = jax.vmap(self.get_initial_commands)(command_rng_E, timestep_E)
 
         termination_components = {name: jnp.zeros((num_envs,)) for name, _ in self.terminations}
         reward_components = {name: jnp.zeros((num_envs,)) for name, _ in self.rewards}
 
-        return EnvState(
-            obs=obs_dummy_EL,
-            command=command_dummy_EL,
+        return Transition(
+            obs=obs_dummyE,
+            command=command_dummyE,
             action=jnp.ones((num_envs, self.default_mjx_model.nu)),
             reward=jnp.ones((num_envs,)),
             done=jnp.zeros((num_envs,), dtype=jnp.bool_),
@@ -394,11 +394,11 @@ class MjxEnv(BaseEnv[Config], ABC):
         physics_model_L: mjx.Model,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
-    ) -> tuple[EnvState, mjx.Data]:
+    ) -> tuple[Transition, mjx.Data]:
         """Using agent, returns initial state and data (EL, EL).
 
         We couple the step and actor because we couple the actions with the rest
-        of env state. This ultimately allows for extremely constrained `EnvState`s,
+        of env state. This ultimately allows for extremely constrained `Transition`s,
         which promote correct RL code.
 
         Additionally, using a carry state for mjx model and data allows for
@@ -443,7 +443,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         )
         reward_L_0 = jnp.stack([v for _, v in reward_components_L_0.items()]).sum()
 
-        env_state_L_0 = EnvState(
+        env_state_L_0 = Transition(
             obs=obs_L_0,
             command=command_L_0,
             action=action_L_0,
@@ -459,17 +459,17 @@ class MjxEnv(BaseEnv[Config], ABC):
     def step(
         self,
         agent: Agent,
-        env_state_L_t_minus_1: EnvState,
+        env_state_L_t_minus_1: Transition,
         rng: PRNGKeyArray,
         physics_data_L_t: mjx.Data,
         physics_model_L: mjx.Model,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
-    ) -> tuple[EnvState, mjx.Data]:
+    ) -> tuple[Transition, mjx.Data]:
         """Stepping the environment in a consistent, JIT-able manner. Works on a single environment.
 
         We couple the step and actor because we couple the actions with the rest of env state. This
-        ultimately allows for extremely constrained `EnvState`s, which promote correct RL code.
+        ultimately allows for extremely constrained `Transition`s, which promote correct RL code.
 
         At t=t_0:
             - Action is sampled.
@@ -529,7 +529,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         )
         reward_L_t = jnp.stack([v for _, v in reward_components_L_t.items()]).sum()
 
-        env_state_L_t = EnvState(
+        env_state_L_t = Transition(
             obs=obs_L_t,
             command=command_L_t,
             action=action_L_t,
@@ -546,7 +546,7 @@ class MjxEnv(BaseEnv[Config], ABC):
     @xax.jit(static_argnames=["self", "return_intermediate_data"])
     def scannable_step_with_automatic_reset(
         self,
-        carry: tuple[EnvState, mjx.Data, PRNGKeyArray],
+        carry: tuple[Transition, mjx.Data, PRNGKeyArray],
         _: None,
         *,
         agent: Agent,
@@ -554,7 +554,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         return_intermediate_data: bool = False,
-    ) -> tuple[tuple[EnvState, mjx.Data, PRNGKeyArray], tuple[EnvState, mjx.Data | None, Array]]:
+    ) -> tuple[tuple[Transition, mjx.Data, PRNGKeyArray], tuple[Transition, mjx.Data | None, Array]]:
         """Steps the environment and resets if needed."""
         env_state_L_t_minus_1, mjx_data_L_t, rng = carry
         reset_env_state_L_t, reset_mjx_data_L_t_plus_1 = self.reset(
@@ -606,17 +606,17 @@ class MjxEnv(BaseEnv[Config], ABC):
 
     @xax.profile
     @xax.jit(static_argnames=["self"])
-    def apply_post_accumulate(self, env_state_TL: EnvState) -> EnvState:
+    def apply_post_accumulate(self, env_state_T: Transition) -> Transition:
         """Apply post_accumulate to all reward components for a single trajectory."""
         # Create a new reward_components dict with post-accumulated values
         updated_reward_components = {}
 
         for reward_name, reward_func in self.rewards:
             # Extract the reward component for this reward function
-            reward_component = env_state_TL.reward_components[reward_name]
+            reward_component = env_state_T.reward_components[reward_name]
 
             # Apply post_accumulate to the reward component
-            updated_reward = reward_func.post_accumulate(reward_component, env_state_TL.done)
+            updated_reward = reward_func.post_accumulate(reward_component, env_state_T.done)
 
             # Store the updated reward
             updated_reward_components[reward_name] = updated_reward
@@ -624,15 +624,15 @@ class MjxEnv(BaseEnv[Config], ABC):
         # Recalculate the total reward based on updated components
         updated_total_reward = jnp.stack([v for _, v in updated_reward_components.items()]).sum(axis=0)
 
-        # Create a new EnvState with the updated reward components and total reward
-        return EnvState(
-            obs=env_state_TL.obs,
-            command=env_state_TL.command,
-            action=env_state_TL.action,
+        # Create a new Transition with the updated reward components and total reward
+        return Transition(
+            obs=env_state_T.obs,
+            command=env_state_T.command,
+            action=env_state_T.action,
             reward=updated_total_reward,
-            done=env_state_TL.done,
-            timestep=env_state_TL.timestep,
-            termination_components=env_state_TL.termination_components,
+            done=env_state_T.done,
+            timestep=env_state_T.timestep,
+            termination_components=env_state_T.termination_components,
             reward_components=FrozenDict(updated_reward_components),
         )
 
@@ -642,14 +642,14 @@ class MjxEnv(BaseEnv[Config], ABC):
         agent: Agent,
         rng: PRNGKeyArray,
         num_steps: int,
-        env_state_L_t_minus_1: EnvState,
+        env_state_L_t_minus_1: Transition,
         physics_data_L_t: mjx.Data,
         physics_model_L: mjx.Model,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         return_intermediate_data: bool = False,
-    ) -> tuple[EnvState, mjx.Data, Array]:
-        """Returns EnvState rollout, final mjx.Data, and mjx.Data rollout."""
+    ) -> tuple[Transition, mjx.Data, Array]:
+        """Returns Transition rollout, final mjx.Data, and mjx.Data rollout."""
         step_fn = functools.partial(
             self.scannable_step_with_automatic_reset,
             agent=agent,
@@ -660,7 +660,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         )
 
         carry = (env_state_L_t_minus_1, physics_data_L_t, rng)
-        (_, final_mjx_data_L_f_plus_1, _), (env_state_TL, mjx_data_TL, has_nans_TL) = jax.lax.scan(
+        (_, final_mjx_data_L_f_plus_1, _), (env_state_T, mjx_data_T, has_nans_T) = jax.lax.scan(
             f=step_fn,
             init=carry,
             xs=None,
@@ -668,13 +668,13 @@ class MjxEnv(BaseEnv[Config], ABC):
         )
 
         # Apply post accumulation to the trajectory
-        env_state_TL = self.apply_post_accumulate(env_state_TL)
+        env_state_T = self.apply_post_accumulate(env_state_T)
 
         if return_intermediate_data:
-            assert isinstance(mjx_data_TL, mjx.Data)
-            return env_state_TL, mjx_data_TL, has_nans_TL
+            assert isinstance(mjx_data_T, mjx.Data)
+            return env_state_T, mjx_data_T, has_nans_T
         else:
-            return env_state_TL, final_mjx_data_L_f_plus_1, has_nans_TL
+            return env_state_T, final_mjx_data_L_f_plus_1, has_nans_T
 
     @xax.profile
     def unroll_trajectories(
@@ -683,14 +683,14 @@ class MjxEnv(BaseEnv[Config], ABC):
         rng: PRNGKeyArray,
         num_steps: int,
         num_envs: int,
-        env_state_EL_t_minus_1: EnvState,
-        physics_data_EL_t: mjx.Data,
+        env_stateE_t_minus_1: Transition,
+        physics_dataE_t: mjx.Data,
         physics_model_L: mjx.Model,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         return_intermediate_data: bool = False,
-    ) -> tuple[EnvState, mjx.Data, Array]:
-        """Returns EnvState rollout, final / stacked mjx.Data, and array of has_nans flags.
+    ) -> tuple[Transition, mjx.Data, Array]:
+        """Returns Transition rollout, final / stacked mjx.Data, and array of has_nans flags.
 
         1. The batched reset (using vmap) initializes a state for each environment.
         2. A vectorized (vmap-ed) env_step function is defined that calls step.
@@ -703,14 +703,14 @@ class MjxEnv(BaseEnv[Config], ABC):
         """
         rng_E = jax.random.split(rng, num_envs)
 
-        env_state_ETL, physics_data_res, has_nans_ETL = jax.vmap(
+        env_state_ET, physics_data_res, has_nans_ET = jax.vmap(
             self.unroll_trajectory, in_axes=(None, 0, None, 0, 0, None, None, None, None)
         )(
             agent,
             rng_E,
             num_steps,
-            env_state_EL_t_minus_1,
-            physics_data_EL_t,
+            env_stateE_t_minus_1,
+            physics_dataE_t,
             physics_model_L,
             obs_normalizer,
             cmd_normalizer,
@@ -722,15 +722,15 @@ class MjxEnv(BaseEnv[Config], ABC):
         def transpose_time_and_env_dims(x: Array) -> Array:
             return jnp.transpose(x, (1, 0) + tuple(range(2, x.ndim)))
 
-        env_state_TEL = jax.tree_util.tree_map(transpose_time_and_env_dims, env_state_ETL)
+        env_state_TE = jax.tree_util.tree_map(transpose_time_and_env_dims, env_state_ET)
 
         if return_intermediate_data:
             # Only transpose physics data if it contains trajectory information
             physics_data_res = jax.tree_util.tree_map(transpose_time_and_env_dims, physics_data_res)
 
-        has_nans = jnp.any(has_nans_ETL)
+        has_nans = jnp.any(has_nans_ET)
 
-        return env_state_TEL, physics_data_res, has_nans
+        return env_state_TE, physics_data_res, has_nans
 
     @xax.profile
     def render_trajectory(
@@ -744,7 +744,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         width: int = 640,
         height: int = 480,
         camera: int | None = None,
-    ) -> tuple[list[np.ndarray], EnvState]:
+    ) -> tuple[list[np.ndarray], Transition]:
         """Render a trajectory of the environment."""
         physics_model_L = self.get_init_physics_model()
         reset_rngs = jax.random.split(rng, 1)
@@ -753,13 +753,13 @@ class MjxEnv(BaseEnv[Config], ABC):
             agent, reset_rngs, physics_model_L, obs_normalizer, cmd_normalizer
         )
 
-        env_state_TEL, traj_data, _ = self.unroll_trajectories(
+        env_state_TE, traj_data, _ = self.unroll_trajectories(
             agent=agent,
             rng=rng,
             num_steps=num_steps,
             num_envs=1,
-            env_state_EL_t_minus_1=env_state_1L_0,
-            physics_data_EL_t=physics_data_1L_1,
+            env_stateE_t_minus_1=env_state_1L_0,
+            physics_dataE_t=physics_data_1L_1,
             physics_model_L=physics_model_L,
             obs_normalizer=obs_normalizer,
             cmd_normalizer=cmd_normalizer,
@@ -798,4 +798,4 @@ class MjxEnv(BaseEnv[Config], ABC):
             frames.append(frame)
         renderer.close()
 
-        return frames, env_state_TEL
+        return frames, env_state_TE
