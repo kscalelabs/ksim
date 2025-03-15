@@ -12,17 +12,13 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-from ksim.actuators import (
-    MITPositionActuators,
-    MITPositionActuatorsBuilder,
-    TorqueActuators,
-)
+from ksim.actuators import MITPositionActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
-from ksim.env.mjx_engine import MjxEngine, MjxEnv, MjxEnvConfig
+from ksim.env.mjx_engine import MjxEngine
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.distributions import TanhGaussianDistribution
-from ksim.model.types import ModelCarry, ModelInput
+from ksim.model.types import ModelCarry
 from ksim.normalization import Normalizer, PassThrough, Standardize
 from ksim.observation import (
     ActuatorForceObservation,

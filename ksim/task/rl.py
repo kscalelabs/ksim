@@ -313,7 +313,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         with self:
             start_time = time.time()
             rng = self.prng_key()
-            engine = self.get_engine()
+            physics_model, metadata = self.get_model_and_metadata()
+            engine = self.get_engine(physics_model, metadata)
             render_name = self.get_render_name(state)
             render_dir = self.exp_dir / self.config.render_dir / render_name
 
@@ -547,7 +548,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> None:
         """Runs the main RL training loop."""
         physics_model, metadata = self.get_model_and_metadata()
-        engine = self.get_engine()
+        engine = self.get_engine(physics_model, metadata)
         obs_generators = self.get_obs_generators(physics_model)  # these should be given necessary data for building
         command_generators = self.get_command_generators()
         reward_generators = self.get_reward_generators(physics_model)
