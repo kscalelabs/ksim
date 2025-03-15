@@ -33,6 +33,7 @@ from ksim.builders.loggers import (
     ModelUpdateLog,
 )
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
+from ksim.env.mjx.mjx_env import MjxEnv
 from ksim.model.base import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
@@ -41,6 +42,9 @@ from ksim.utils.pytree import flatten_pytree, slice_pytree
 from ksim.utils.visualization import render_and_save_trajectory
 
 logger = logging.getLogger(__name__)
+
+import mujoco
+from mujoco import mjx
 
 
 @jax.tree_util.register_dataclass
@@ -515,147 +519,154 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         rng = self.prng_key()
         burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 3)
-
+        
+                
         # getting initial physics data
         physics_model_L = env.get_init_physics_model()
-        reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
+        mj_data = mujoco.MjData(env.default_mj_model)
+        
+        with mujoco.viewer.launch_passive(model=env.default_mj_model, data=mj_data) as viewer:
 
-        # NOTE: env_state_EL_t and physics_data_EL_t_plus_1 are the carry data
-        # structures used to efficiently unroll and resume trajectory rollouts
-        env_state_EL_t, physics_data_EL_t_plus_1 = jax.vmap(
-            env.reset, in_axes=(None, None, 0, None)
-        )(model, variables, reset_rngs, physics_model_L)
+            # getting initial physics data
+            physics_model_L = env.get_init_physics_model()
+            reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
 
-        if self.config.compile_unroll:
-            static_args = ["model", "num_steps", "num_envs", "return_intermediate_data"]
-            env_rollout_fn = legit_jit(static_argnames=static_args)(env.unroll_trajectories)
+            # NOTE: env_state_EL_t and physics_data_EL_t_plus_1 are the carry data
+            # structures used to efficiently unroll and resume trajectory rollouts
+            env_state_EL_t, physics_data_EL_t_plus_1 = jax.vmap(
+                env.reset, in_axes=(None, None, 0, None)
+            )(model, variables, reset_rngs, physics_model_L)
 
-        #################
-        # Burn in Stage #
-        #################
-        burn_in_env_state_TEL, _, _ = env_rollout_fn(
-            model=model,
-            variables=variables,
-            rng=burn_in_rng,
-            num_steps=self.num_rollout_steps_per_env,
-            num_envs=self.config.num_envs,
-            env_state_EL_t_minus_1=env_state_EL_t,
-            physics_data_EL_t=physics_data_EL_t_plus_1,
-            physics_model_L=physics_model_L,
-            return_intermediate_data=False,
-        )
-        variables = self.update_input_normalization_stats(
-            variables=variables,
-            trajectories_dataset=burn_in_env_state_TEL,
-            initial_step=False,
-        )
+            env_rollout_fn = env.unroll_trajectories_with_viewer
 
-        ##################
-        # Training Stage #
-        ##################
-        while not self.is_training_over(training_state):
-            with self.step_context("on_step_start"):
-                training_state = self.on_step_start(training_state)
-
-            #############################
-            # Rollout and Normalization #
-            #############################
-
-            start_time = time.time()
-            reshuffle_rng, rollout_rng, train_rng = jax.random.split(train_rng, 3)
-
-            env_state_TEL, physics_data_EL_t_plus_1, has_nans = env_rollout_fn(
+            #################
+            # Burn in Stage #
+            #################
+            burn_in_env_state_TEL, _, _ = env_rollout_fn(
                 model=model,
                 variables=variables,
-                rng=rollout_rng,
+                rng=burn_in_rng,
                 num_steps=self.num_rollout_steps_per_env,
                 num_envs=self.config.num_envs,
                 env_state_EL_t_minus_1=env_state_EL_t,
                 physics_data_EL_t=physics_data_EL_t_plus_1,
                 physics_model_L=physics_model_L,
                 return_intermediate_data=False,
+                viewer=viewer,
             )
-            env_state_EL_t = jax.tree_util.tree_map(lambda x: x[-1], env_state_TEL)
-
-            rollout_time = time.time() - start_time
-            logger.info("Rollout time: %s seconds", rollout_time)
-
-            env_state_DL = flatten_pytree(env_state_TEL, flatten_size=self.dataset_size)
-
-            ###########################
-            # Minibatch Training Loop #
-            ###########################
-            start_time = time.time()
-
-            # getting loss components that are constant across minibatches
-            # (e.g. advantages) and flattening them for efficiency, thus
-            # the name "rollout_time" loss components
-            rollout_loss_components_TEL = self.get_rollout_time_loss_components(
-                model, variables, env_state_TEL
-            )
-            rollout_loss_components_DL = flatten_pytree(
-                rollout_loss_components_TEL, flatten_size=self.dataset_size
-            )
-
-            # running training on minibatches
-            (variables, opt_state, reshuffle_rng), metrics = self.rl_pass(
-                variables=variables,
-                opt_state=opt_state,
-                reshuffle_rng=reshuffle_rng,
-                model=model,
-                optimizer=optimizer,
-                dataset_DL=env_state_DL,
-                rollout_time_loss_components_DL=rollout_loss_components_DL,
-            )
-            metrics_mean = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
-            update_time = time.time() - start_time
-            logger.info("Update time: %s seconds", update_time)
-
-            with self.step_context("write_logs"):
-                training_state.raw_phase = "train"
-                training_state.num_steps += 1
-                training_state.num_samples += self.dataset_size
-
-                self.log_trajectory_stats(env, env_state_TEL, eval=False)
-                self.log_update_metrics(metrics_mean)
-                self.logger.log_scalar("has_nans", has_nans, namespace="stats")
-                self.logger.log_scalar("rollout_time", rollout_time, namespace="⏰")
-                self.logger.log_scalar("update_time", update_time, namespace="⏰")
-                self.logger.write(training_state)
-
-            with self.step_context("on_step_end"):
-                training_state = self.on_step_end(training_state)
-
-            if self.should_checkpoint(training_state):
-                self.save_checkpoint(
-                    model=variables, optimizer=optimizer, opt_state=opt_state, state=training_state
-                )  # Update XAX to be Flax supportive...
-
-                render_name = self.get_render_name(training_state)
-                render_dir = self.exp_dir / self.config.render_dir / render_name
-                logger.info("Rendering to %s", render_dir)
-
-                eval_env_state_T1L = render_and_save_trajectory(
-                    env=env,
-                    model=model,
-                    variables=variables,
-                    rng=rng,
-                    output_dir=render_dir,
-                    num_steps=self.config.eval_rollout_length,
-                    width=self.config.render_width,
-                    height=self.config.render_height,
-                )
-
-                logger.info("Done rendering to %s", render_dir)
-
-                with self.step_context("write_logs"):
-                    self.log_trajectory_stats(env, eval_env_state_T1L, eval=True)
-
             variables = self.update_input_normalization_stats(
                 variables=variables,
-                trajectories_dataset=env_state_TEL,
+                trajectories_dataset=burn_in_env_state_TEL,
                 initial_step=False,
             )
+
+            ##################
+            # Training Stage #
+            ##################
+            while not self.is_training_over(training_state):
+                with self.step_context("on_step_start"):
+                    training_state = self.on_step_start(training_state)
+
+                #############################
+                # Rollout and Normalization #
+                #############################
+
+                start_time = time.time()
+                reshuffle_rng, rollout_rng, train_rng = jax.random.split(train_rng, 3)
+
+                env_state_TEL, physics_data_EL_t_plus_1, has_nans = env_rollout_fn(
+                    model=model,
+                    variables=variables,
+                    rng=rollout_rng,
+                    num_steps=self.num_rollout_steps_per_env,
+                    num_envs=self.config.num_envs,
+                    env_state_EL_t_minus_1=env_state_EL_t,
+                    physics_data_EL_t=physics_data_EL_t_plus_1,
+                    physics_model_L=physics_model_L,
+                    return_intermediate_data=False,
+                    viewer=viewer,
+                )
+                env_state_EL_t = jax.tree_util.tree_map(lambda x: x[-1], env_state_TEL)
+
+                rollout_time = time.time() - start_time
+                logger.info("Rollout time: %s seconds", rollout_time)
+
+                env_state_DL = flatten_pytree(env_state_TEL, flatten_size=self.dataset_size)
+
+                ###########################
+                # Minibatch Training Loop #
+                ###########################
+                start_time = time.time()
+
+                # getting loss components that are constant across minibatches
+                # (e.g. advantages) and flattening them for efficiency, thus
+                # the name "rollout_time" loss components
+                rollout_loss_components_TEL = self.get_rollout_time_loss_components(
+                    model, variables, env_state_TEL
+                )
+                rollout_loss_components_DL = flatten_pytree(
+                    rollout_loss_components_TEL, flatten_size=self.dataset_size
+                )
+
+                # running training on minibatches
+                (variables, opt_state, reshuffle_rng), metrics = self.rl_pass(
+                    variables=variables,
+                    opt_state=opt_state,
+                    reshuffle_rng=reshuffle_rng,
+                    model=model,
+                    optimizer=optimizer,
+                    dataset_DL=env_state_DL,
+                    rollout_time_loss_components_DL=rollout_loss_components_DL,
+                )
+                metrics_mean = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
+                update_time = time.time() - start_time
+                logger.info("Update time: %s seconds", update_time)
+
+                with self.step_context("write_logs"):
+                    training_state.raw_phase = "train"
+                    training_state.num_steps += 1
+                    training_state.num_samples += self.dataset_size
+
+                    self.log_trajectory_stats(env, env_state_TEL, eval=False)
+                    self.log_update_metrics(metrics_mean)
+                    self.logger.log_scalar("has_nans", has_nans, namespace="stats")
+                    self.logger.log_scalar("rollout_time", rollout_time, namespace="⏰")
+                    self.logger.log_scalar("update_time", update_time, namespace="⏰")
+                    self.logger.write(training_state)
+
+                with self.step_context("on_step_end"):
+                    training_state = self.on_step_end(training_state)
+
+                if self.should_checkpoint(training_state):
+                    self.save_checkpoint(
+                        model=variables, optimizer=optimizer, opt_state=opt_state, state=training_state
+                    )  # Update XAX to be Flax supportive...
+
+                    render_name = self.get_render_name(training_state)
+                    render_dir = self.exp_dir / self.config.render_dir / render_name
+                    logger.info("Rendering to %s", render_dir)
+
+                    eval_env_state_T1L = render_and_save_trajectory(
+                        env=env,
+                        model=model,
+                        variables=variables,
+                        rng=rng,
+                        output_dir=render_dir,
+                        num_steps=self.config.eval_rollout_length,
+                        width=self.config.render_width,
+                        height=self.config.render_height,
+                    )
+
+                    logger.info("Done rendering to %s", render_dir)
+
+                    with self.step_context("write_logs"):
+                        self.log_trajectory_stats(env, eval_env_state_T1L, eval=True)
+
+                variables = self.update_input_normalization_stats(
+                    variables=variables,
+                    trajectories_dataset=env_state_TEL,
+                    initial_step=False,
+                )
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""

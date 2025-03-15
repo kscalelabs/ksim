@@ -177,7 +177,7 @@ if __name__ == "__main__":
             dt=0.001,
             ctrl_dt=0.005,
             learning_rate=1e-5,
-            save_every_n_steps=25,
+            save_every_n_steps=5,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,
@@ -195,6 +195,6 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            eval_rollout_length=1000,
+            eval_rollout_length=2,
         ),
     )

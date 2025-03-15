@@ -64,9 +64,10 @@ def legit_jit(
 
             if do_profile:
                 class_name = (args[0].__class__.__name__) + "." if fn.__name__ == "__call__" else ""
+                label = f"{class_name}{fn.__name__}"
                 logger.info(
                     "Currently running %s (count: %s)",
-                    f"{class_name}{fn.__name__}",
+                    label,
                     JitState.compilation_count,
                 )
 
@@ -84,8 +85,7 @@ def legit_jit(
                         arg_dict[param_names[i]] = get_hash(arg)
                 for k, v in kwargs.items():
                     arg_dict[k] = get_hash(v)
-
-                logger.info("- took %s seconds", runtime)
+                logger.info(" - %s took %s seconds", label, runtime)
                 JitState.compilation_count += 1
 
                 if JitState.last_arg_dict is not None:
@@ -95,7 +95,7 @@ def legit_jit(
                         curr = arg_dict.get(k, "N/A")
 
                         if prev != curr:
-                            logger.info("- Arg '%s' hash changed: %s -> %s", k, prev, curr)
+                            logger.info(" - %s Arg '%s' hash changed: %s -> %s", label, k, prev, curr)
 
                 JitState.last_arg_dict = arg_dict
 
