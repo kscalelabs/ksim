@@ -44,6 +44,7 @@ class MjxEngine(PhysicsEngine):
             iterations=iterations,
             ls_iterations=ls_iterations,
             disableflags=disableflags,
+            solver=solver,
         )
 
         self.actuators = actuators
@@ -61,11 +62,13 @@ class MjxEngine(PhysicsEngine):
         iterations: int,
         ls_iterations: int,
         disableflags: mjx.DisableBit,
+        solver: mjx.SolverType,
     ) -> mjx.Model:
         mjx_model.opt.timestep = jnp.array(dt)
         mjx_model.opt.iterations = iterations
         mjx_model.opt.ls_iterations = ls_iterations
         mjx_model.opt.disableflags = disableflags
+        mjx_model.opt.solver = solver
         return mjx_model
 
     def reset(self, rng: PRNGKeyArray) -> PhysicsState:
