@@ -84,18 +84,3 @@ class MITPositionActuators(Actuators):
 
         ctrl = self.kps * pos_delta + self.kds * vel_delta
         return ctrl
-
-
-class MITPositionActuatorsBuilder(ActuatorsBuilder[MITPositionActuators]):
-    """Builder for MITPositionActuators."""
-
-    def __call__(
-        self,
-        physics_model: PhysicsModel,
-        joint_name_to_metadata: dict[str, JointMetadataOutput],
-    ) -> MITPositionActuators:
-        """Builds an MITPositionActuators instance."""
-        return MITPositionActuators(
-            physics_model=physics_model,
-            joint_name_to_metadata=joint_name_to_metadata,
-        )

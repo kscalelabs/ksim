@@ -23,5 +23,6 @@ class PhysicsEngine(ABC):
         self,
         action: Array,
         physics_state: PhysicsState,
+        rng: PRNGKeyArray,
     ) -> PhysicsState:
         """Step the engine and return the physics model and data."""

@@ -29,7 +29,7 @@ from ksim.observation import (
     Observation,
 )
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
-from ksim.rewards import DHForwardReward, DHHealthyReward, HeightReward, Reward
+from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
 
@@ -151,9 +151,13 @@ class HumanoidWalkingTask(PPOTask):
             ],
             actuators=MITPositionActuators(physics_model, metadata),
             dt=self.config.dt,
+            ctrl_dt=self.config.ctrl_dt,
+            solver=mjx.SolverType.CG,  # TODO: experiment with euler
             iterations=6,
             ls_iterations=6,
-            disableflags=mujoco.mjtDisableBit.mjDSBL_EULERDAMP.value,
+            disableflags=mjx.DisableBit.EULERDAMP,
+            min_action_latency_step=0,
+            max_action_latency_step=0,
         )
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
