@@ -19,6 +19,7 @@ from typing import Generic, Literal, TypeVar
 
 import jax
 import jax.numpy as jnp
+import mujoco
 import optax
 import xax
 from dpshdl.dataset import Dataset
@@ -33,7 +34,6 @@ from ksim.builders.loggers import (
     ModelUpdateLog,
 )
 from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
-from ksim.env.mjx.mjx_env import MjxEnv
 from ksim.model.base import ActorCriticAgent
 from ksim.task.types import RolloutTimeLossComponents
 from ksim.utils.jit import legit_jit
@@ -43,8 +43,6 @@ from ksim.utils.visualization import render_and_save_trajectory
 
 logger = logging.getLogger(__name__)
 
-import mujoco
-from mujoco import mjx
 
 
 @jax.tree_util.register_dataclass
@@ -519,14 +517,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         rng = self.prng_key()
         burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 3)
-        
-                
+
         # getting initial physics data
         physics_model_L = env.get_init_physics_model()
         viewer_mj_data = mujoco.MjData(env.default_mj_model)
-        
-        with mujoco.viewer.launch_passive(model=env.default_mj_model, data=viewer_mj_data) as viewer:
 
+        with mujoco.viewer.launch_passive(
+            model=env.default_mj_model, data=viewer_mj_data
+        ) as viewer:
             # getting initial physics data
             physics_model_L = env.get_init_physics_model()
             reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
@@ -641,7 +639,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 if self.should_checkpoint(training_state):
                     self.save_checkpoint(
-                        model=variables, optimizer=optimizer, opt_state=opt_state, state=training_state
+                        model=variables,
+                        optimizer=optimizer,
+                        opt_state=opt_state,
+                        state=training_state,
                     )  # Update XAX to be Flax supportive...
 
                     render_name = self.get_render_name(training_state)

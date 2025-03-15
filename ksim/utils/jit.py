@@ -95,7 +95,9 @@ def legit_jit(
                         curr = arg_dict.get(k, "N/A")
 
                         if prev != curr:
-                            logger.info(" - %s Arg '%s' hash changed: %s -> %s", label, k, prev, curr)
+                            logger.info(
+                                " - %s Arg '%s' hash changed: %s -> %s", label, k, prev, curr
+                            )
 
                 JitState.last_arg_dict = arg_dict
 
