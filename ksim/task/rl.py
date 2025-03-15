@@ -523,9 +523,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 
         # getting initial physics data
         physics_model_L = env.get_init_physics_model()
-        mj_data = mujoco.MjData(env.default_mj_model)
+        viewer_mj_data = mujoco.MjData(env.default_mj_model)
         
-        with mujoco.viewer.launch_passive(model=env.default_mj_model, data=mj_data) as viewer:
+        with mujoco.viewer.launch_passive(model=env.default_mj_model, data=viewer_mj_data) as viewer:
 
             # getting initial physics data
             physics_model_L = env.get_init_physics_model()
@@ -553,6 +553,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 physics_model_L=physics_model_L,
                 return_intermediate_data=False,
                 viewer=viewer,
+                viewer_mj_data=viewer_mj_data,
             )
             variables = self.update_input_normalization_stats(
                 variables=variables,
@@ -585,6 +586,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     physics_model_L=physics_model_L,
                     return_intermediate_data=False,
                     viewer=viewer,
+                    viewer_mj_data=viewer_mj_data,
                 )
                 env_state_EL_t = jax.tree_util.tree_map(lambda x: x[-1], env_state_TEL)
 

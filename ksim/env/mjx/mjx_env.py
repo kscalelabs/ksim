@@ -725,6 +725,7 @@ class MjxEnv(BaseEnv):
         physics_model_L: mjx.Model,
         return_intermediate_data: bool = False,
         viewer: Handle | None = None,
+        viewer_mj_data: mujoco.MjData | None = None,
     ) -> tuple[EnvState, mjx.Data, Array]:
         """Returns EnvState rollout, final physics data, and has_nans flag.
         
@@ -956,8 +957,8 @@ class MjxEnv(BaseEnv):
                     jax.debug.print("self.default_mj_data type: {}", type(self.default_mj_data))
                     jax.debug.print("self.default_mj_model type: {}", type(self.default_mj_model))
                     jax.debug.print("first_env_data type: {}", type(first_env_data))
-                    
-                    mjx.get_data_into(self.default_mj_data, self.default_mj_model, first_env_data)
+                    jax.debug.print("viewer_mj_data type: {}", type(viewer_mj_data))
+                    mjx.get_data_into(viewer_mj_data, self.default_mj_model, first_env_data)
                     jax.debug.print("mjx.get_data_into() completed successfully")
                     
                     jax.debug.print("About to call viewer.sync()")
