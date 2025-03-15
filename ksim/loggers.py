@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
 
-from ksim.env.types import EnvState
+from ksim.env.data import EnvState
 
 
 @jax.tree_util.register_dataclass

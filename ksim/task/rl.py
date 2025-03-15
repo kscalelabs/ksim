@@ -27,7 +27,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import MISSING
 
-from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
+from ksim.env.base_engine import BaseEnv, BaseEnvConfig, EnvState
 from ksim.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
 from ksim.model.base import Agent
 from ksim.normalization import Normalizer
@@ -177,9 +177,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.run_environment(agent)
 
             case _:
-                raise ValueError(
-                    f"Invalid action: {self.config.action}. Should be one of `train` or `env`."
-                )
+                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
 
     #########################
     # Logging and Rendering #
@@ -195,12 +193,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             raise ValueError(f"Checkpoint not found at {pretrained_path}")
 
         if self.config.checkpoint_num is not None:
-            checkpoint_path = (
-                pretrained_path / "checkpoints" / f"ckpt.{self.config.checkpoint_num}.bin"
-            )
-            error_msg = (
-                f"Checkpoint number {self.config.checkpoint_num} not found at {checkpoint_path}"
-            )
+            checkpoint_path = pretrained_path / "checkpoints" / f"ckpt.{self.config.checkpoint_num}.bin"
+            error_msg = f"Checkpoint number {self.config.checkpoint_num} not found at {checkpoint_path}"
             assert checkpoint_path.exists(), error_msg
             return self.config.checkpoint_num, checkpoint_path
 
@@ -291,9 +285,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return termination_stats
 
-    def log_trajectory_stats(
-        self, env: BaseEnv, env_state_TEL: EnvState, eval: bool = False
-    ) -> None:
+    def log_trajectory_stats(self, env: BaseEnv, env_state_TEL: EnvState, eval: bool = False) -> None:
         """Logs the reward and termination stats for the trajectory."""
         for key, value in self.get_reward_stats(env_state_TEL, env).items():
             self.logger.log_scalar(
@@ -692,9 +684,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info("Interrupted training", important=True)
 
             except BaseException:
-                exception_tb = textwrap.indent(
-                    xax.highlight_exception_message(traceback.format_exc()), "  "
-                )
+                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
                 self.save_checkpoint(agent, optimizer, opt_state, training_state)

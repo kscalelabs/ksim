@@ -8,7 +8,7 @@ import xax
 from jaxtyping import PRNGKeyArray
 
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
+from ksim.env.mjx_engine import MjxEnv, MjxEnvConfig
 from ksim.model.base import ActorCriticAgent
 from ksim.model.factory import mlp_actor_critic_agent
 from ksim.observation import (

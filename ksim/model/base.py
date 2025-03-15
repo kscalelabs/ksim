@@ -11,15 +11,19 @@ import jax
 from jaxtyping import Array
 
 from ksim.model.distributions import ActionDistribution
-from ksim.model.types import ModelInput
+from ksim.model.types import ModelInput, ModelRecurrence
 
 
 class KSimModule(ABC):
     """Base class for all actor-critic agents."""
 
     @abstractmethod
-    def forward(self, input: ModelInput) -> Array:
-        """Apply the actor-critic to the given input."""
+    def forward(self, input: ModelInput, recurrence: ModelRecurrence | None) -> tuple[Array, ModelRecurrence | None]:
+        """Apply the actor-critic to the given input. Can be recurrent."""
+
+    @abstractmethod
+    def initial_recurrence(self) -> ModelRecurrence:
+        """Initial recurrence state for the model."""
 
 
 @jax.tree_util.register_dataclass

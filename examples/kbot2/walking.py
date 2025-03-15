@@ -11,7 +11,7 @@ from jaxtyping import Array, PRNGKeyArray
 
 from ksim.actuators import MITPositionActuatorsBuilder
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
+from ksim.env.mjx_engine import MjxEnv, MjxEnvConfig
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.distributions import TanhGaussianDistribution
 from ksim.model.types import ModelInput

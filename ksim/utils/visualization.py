@@ -14,8 +14,8 @@ from matplotlib import animation
 from PIL import Image
 from scipy.interpolate import interp1d
 
-from ksim.env.base_env import BaseEnv
-from ksim.env.types import EnvState
+from ksim.env.base_engine import BaseEnv
+from ksim.env.data import EnvState
 from ksim.model.base import Agent
 
 logger = logging.getLogger(__name__)

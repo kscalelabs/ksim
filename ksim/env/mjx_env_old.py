@@ -28,8 +28,8 @@ from mujoco import mjx
 
 from ksim.actuators import Actuators, ActuatorsBuilder
 from ksim.commands import Command, CommandBuilder
-from ksim.env.base_env import BaseEnv, BaseEnvConfig
-from ksim.env.types import EnvState
+from ksim.env.base_engine import BaseEnv, BaseEnvConfig
+from ksim.env.data import EnvState
 from ksim.model.base import Agent
 from ksim.model.types import ModelInput
 from ksim.normalization import Normalizer
@@ -38,7 +38,7 @@ from ksim.resets import Reset, ResetBuilder
 from ksim.rewards import Reward, RewardBuilder
 from ksim.terminations import Termination, TerminationBuilder
 from ksim.utils.data import BuilderData
-from ksim.utils.mujoco import make_mujoco_mappings
+from ksim.utils.named_access import make_mujoco_mappings
 
 logger = logging.getLogger(__name__)
 
@@ -144,10 +144,8 @@ class MjxEnv(BaseEnv[Config], ABC):
                 f"Maximum action latency ({self.config.max_action_latency}) must be greater than "
                 f"minimum action latency ({self.config.min_action_latency})"
             )
-        if self.config.min_action_latency < 0:
-            raise ValueError(
-                f"Action latency ({self.config.min_action_latency}) must be non-negative"
-            )
+        if self.config.min_action_latncy < 0:
+            raise ValueError(f"Action latency ({self.config.min_action_latency}) must be non-negative")
 
         self.min_action_latency_step = round(self.config.min_action_latency / self.config.dt)
         self.max_action_latency_step = round(self.config.max_action_latency / self.config.dt)
@@ -268,17 +266,13 @@ class MjxEnv(BaseEnv[Config], ABC):
         terminations = {}
         for termination_name, termination in self.terminations:
             term_val = termination(mjx_data_L_t_plus_1)
-            chex.assert_shape(
-                term_val, (), custom_message=f"Termination {termination_name} must be a scalar"
-            )
+            chex.assert_shape(term_val, (), custom_message=f"Termination {termination_name} must be a scalar")
             terminations[termination_name] = term_val
         return FrozenDict(terminations)
 
     @xax.profile
     @xax.jit(static_argnames=["self"])
-    def get_initial_commands(
-        self, rng: PRNGKeyArray, initial_time: Array | None
-    ) -> FrozenDict[str, Array]:
+    def get_initial_commands(self, rng: PRNGKeyArray, initial_time: Array | None) -> FrozenDict[str, Array]:
         """Compute initial commands from the pipeline state."""
         commands = {}
         if initial_time is None:
@@ -355,9 +349,7 @@ class MjxEnv(BaseEnv[Config], ABC):
         rngs = jax.random.split(jax.random.PRNGKey(0), num_envs)
         default_data_EL = jax.vmap(get_init_data)(rngs)
 
-        mjx_data_EL_0 = jax.vmap(mjx_forward, in_axes=(None, 0))(
-            self.default_mjx_model, default_data_EL
-        )
+        mjx_data_EL_0 = jax.vmap(mjx_forward, in_axes=(None, 0))(self.default_mjx_model, default_data_EL)
 
         return mjx_data_EL_0
 
@@ -630,9 +622,7 @@ class MjxEnv(BaseEnv[Config], ABC):
             updated_reward_components[reward_name] = updated_reward
 
         # Recalculate the total reward based on updated components
-        updated_total_reward = jnp.stack([v for _, v in updated_reward_components.items()]).sum(
-            axis=0
-        )
+        updated_total_reward = jnp.stack([v for _, v in updated_reward_components.items()]).sum(axis=0)
 
         # Create a new EnvState with the updated reward components and total reward
         return EnvState(
@@ -722,9 +712,9 @@ class MjxEnv(BaseEnv[Config], ABC):
             env_state_EL_t_minus_1,
             physics_data_EL_t,
             physics_model_L,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
-            return_intermediate_data=return_intermediate_data,
+            obs_normalizer,
+            cmd_normalizer,
+            return_intermediate_data,
         )
 
         # Transpose from (env, time, ...) to (time, env, ...)
@@ -759,9 +749,9 @@ class MjxEnv(BaseEnv[Config], ABC):
         physics_model_L = self.get_init_physics_model()
         reset_rngs = jax.random.split(rng, 1)
 
-        env_state_1L_0, physics_data_1L_1 = jax.vmap(
-            self.reset, in_axes=(None, 0, None, None, None)
-        )(agent, reset_rngs, physics_model_L, obs_normalizer, cmd_normalizer)
+        env_state_1L_0, physics_data_1L_1 = jax.vmap(self.reset, in_axes=(None, 0, None, None, None))(
+            agent, reset_rngs, physics_model_L, obs_normalizer, cmd_normalizer
+        )
 
         env_state_TEL, traj_data, _ = self.unroll_trajectories(
             agent=agent,
@@ -778,9 +768,7 @@ class MjxEnv(BaseEnv[Config], ABC):
 
         mjx_data_traj = jax.tree_util.tree_map(lambda x: jnp.squeeze(x, axis=1), traj_data)
 
-        mjx_data_list = [
-            jax.tree_util.tree_map(lambda x: x[i], mjx_data_traj) for i in range(num_steps)
-        ]
+        mjx_data_list = [jax.tree_util.tree_map(lambda x: x[i], mjx_data_traj) for i in range(num_steps)]
 
         render_mj_data = mujoco.MjData(self.default_mj_model)
 

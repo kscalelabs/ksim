@@ -10,9 +10,12 @@ import jax
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array
-from mujoco import mjx
 
-from ksim.utils.data import BuilderData
+from ksim.env.data import PhysicsData, PhysicsModel
+from ksim.utils.named_access import (
+    get_geom_data_idx_by_name,
+    get_sensor_data_idxs_by_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +27,7 @@ class Termination(ABC):
     """Base class for terminations."""
 
     @abstractmethod
-    def __call__(self, state: mjx.Data) -> Array:
+    def __call__(self, state: PhysicsData) -> Array:
         """Checks if the environment has terminated. Shape of output should be (num_envs)."""
 
     def get_name(self) -> str:
@@ -40,7 +43,7 @@ T = TypeVar("T", bound=Termination)
 
 class TerminationBuilder(ABC, Generic[T]):
     @abstractmethod
-    def __call__(self, data: BuilderData) -> T:
+    def __call__(self, physics_model: PhysicsModel) -> T:
         """Builds a termination from a MuJoCo model."""
 
 
@@ -50,7 +53,7 @@ class PitchTooGreatTermination(Termination):
 
     max_pitch: float
 
-    def __call__(self, state: mjx.Data) -> Array:
+    def __call__(self, state: PhysicsData) -> Array:
         quat = state.qpos[3:7]
         pitch = jnp.arctan2(2 * quat[1] * quat[2] - 2 * quat[0] * quat[3], 1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2)
         return jnp.abs(pitch) > self.max_pitch
@@ -62,7 +65,7 @@ class RollTooGreatTermination(Termination):
 
     max_roll: float
 
-    def __call__(self, state: mjx.Data) -> Array:
+    def __call__(self, state: PhysicsData) -> Array:
         quat = state.qpos[3:7]
         roll = jnp.arctan2(2 * quat[1] * quat[2] + 2 * quat[0] * quat[3], 1 - 2 * quat[2] ** 2 - 2 * quat[3] ** 2)
         return jnp.abs(roll) > self.max_roll
@@ -74,10 +77,12 @@ class MinimumHeightTermination(Termination):
 
     min_height: float
 
-    def __call__(self, state: mjx.Data) -> Array:
+    def __call__(self, state: PhysicsData) -> Array:
         return state.qpos[2] < self.min_height
 
 
+# ML: we should rewrite this to be fully understandable from the class name.
+# Don't love that we combine logic and bury stuff like gravity[2] < 0.0.
 @attrs.define(frozen=True, kw_only=True)
 class FallTermination(Termination):
     """Terminates the episode if the robot falls."""
@@ -89,7 +94,7 @@ class FallTermination(Termination):
     # TODO: Check that this logic is correct.
     # Also need to account for sensor transformations...
     @xax.jit(static_argnames=["self"])
-    def __call__(self, state: mjx.Data) -> Array:
+    def __call__(self, state: PhysicsData) -> Array:
         match self.sensor_type:
             case "quaternion_orientation":
                 quat = state.qpos[3:7]
@@ -99,7 +104,7 @@ class FallTermination(Termination):
                 )
                 return jnp.abs(pitch) > self.max_pitch
             case "gravity_vector":
-                gravity = state.sensor[self.sensor_name]
+                gravity = state.sensor[self.sensor_name]  # ML: does this exist?
                 return gravity[2] < 0.0
             case "base_orientation":
                 quat = state.qpos[3:7]
@@ -115,7 +120,7 @@ class FallTerminationBuilder(TerminationBuilder[FallTermination]):
     quaternion_sensor: str | None = attrs.field(default=None)
     projected_gravity_sensor: str | None = attrs.field(default=None)
 
-    def __call__(self, data: BuilderData) -> FallTermination:
+    def __call__(self, physics_model: PhysicsModel) -> FallTermination:
         if not (self.quaternion_sensor or self.projected_gravity_sensor):
             logger.info("No quaternion or projected gravity sensor specified, using base orientation.")
             return FallTermination(
@@ -131,14 +136,14 @@ class FallTerminationBuilder(TerminationBuilder[FallTermination]):
 
         if self.quaternion_sensor:
             try:
-                _ = data.mujoco_mappings.sensor_name_to_idx_range[self.quaternion_sensor]
+                _ = get_sensor_data_idxs_by_name(physics_model)[self.quaternion_sensor]
                 sensor_name = self.quaternion_sensor
                 sensor_type = "quaternion_orientation"
             except KeyError:
                 raise ValueError(f"Quaternion sensor {self.quaternion_sensor} not found.")
         elif self.projected_gravity_sensor:
             try:
-                _ = data.mujoco_mappings.sensor_name_to_idx_range[self.projected_gravity_sensor]
+                _ = get_sensor_data_idxs_by_name(physics_model)[self.projected_gravity_sensor]
                 sensor_name = self.projected_gravity_sensor
                 sensor_type = "gravity_vector"
             except KeyError:
@@ -156,7 +161,7 @@ class IllegalContactTermination(Termination):
     illegal_geom_idxs: jax.Array
     contact_eps: float = -0.001
 
-    def __call__(self, state: mjx.Data) -> Array:
+    def __call__(self, state: PhysicsData) -> Array:
         if state.ncon == 0:
             return jnp.array(False)
 
@@ -177,9 +182,9 @@ class IllegalContactTerminationBuilder(TerminationBuilder[IllegalContactTerminat
     geom_names: Collection[str] = attrs.field()
     contact_eps: float = attrs.field(default=-1e-3)
 
-    def __call__(self, data: BuilderData) -> IllegalContactTermination:
+    def __call__(self, physics_model: PhysicsModel) -> IllegalContactTermination:
         illegal_geom_idxs = []
-        for geom_name, geom_idx in data.mujoco_mappings.geom_name_to_idx.items():
+        for geom_name, geom_idx in get_geom_data_idx_by_name(physics_model).items():
             if geom_name in self.geom_names:
                 illegal_geom_idxs.append(geom_idx)
 
@@ -198,7 +203,7 @@ class UnhealthyTermination(Termination):
     unhealthy_z_lower: float = attrs.field(default=1.0)
     unhealthy_z_upper: float = attrs.field(default=2.0)
 
-    def __call__(self, state: mjx.Data) -> Array:
+    def __call__(self, state: PhysicsData) -> Array:
         height = state.qpos[2]
         is_healthy = jnp.where(height < self.unhealthy_z_lower, 0.0, 1.0)
         is_healthy = jnp.where(height > self.unhealthy_z_upper, 0.0, is_healthy)

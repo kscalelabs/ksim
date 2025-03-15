@@ -12,7 +12,7 @@ import xax
 from jaxtyping import PRNGKeyArray
 from mujoco import mjx
 
-from ksim.utils.data import BuilderData
+from ksim.env.data import PhysicsData, PhysicsModel
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ T = TypeVar("T", bound=Reset)
 
 class ResetBuilder(ABC, Generic[T]):
     @abstractmethod
-    def __call__(self, data: BuilderData) -> T:
+    def __call__(self, physics_model: PhysicsModel) -> T:
         """Builds a reset from a MuJoCo model."""
 
 
@@ -139,7 +139,7 @@ class XYPositionResetBuilder(ResetBuilder[Reset]):
     x_edge_padding: float = attrs.field(default=5.0)
     y_edge_padding: float = attrs.field(default=5.0)
 
-    def __call__(self, data: BuilderData) -> Reset:
+    def __call__(self, physics_model: PhysicsModel) -> Reset:
         def compute_padded_bounds(
             x_bound: float, y_bound: float, x_edge_padding: float, y_edge_padding: float
         ) -> tuple[float, float, float, float]:
@@ -152,31 +152,29 @@ class XYPositionResetBuilder(ResetBuilder[Reset]):
 
         # Get robot base height.
         try:
-            names = data.robot_model.names.decode().split("\x00")
+            names = physics_model.names.decode().split("\x00")
             base_idx = names.index("floating_base_link") - 1  # Adjust for body index.
-            robot_base_height = data.robot_model.body_pos[base_idx][2]
+            robot_base_height = physics_model.body_pos[base_idx][2]
             logger.info("Robot base height: %s", robot_base_height)
         except ValueError:
             raise ValueError("Could not find floating_base_link in the model.")
 
         # Return HFieldXYPositionReset if there is a heightfield.
-        if hasattr(data.robot_model, "hfield_size") and data.robot_model.hfield_size.size > 0:
-            x_bound, y_bound, z_top, z_bottom = data.robot_model.hfield_size.flatten().tolist()
+        if hasattr(physics_model, "hfield_size") and physics_model.hfield_size.size > 0:
+            x_bound, y_bound, z_top, z_bottom = physics_model.hfield_size.flatten().tolist()
             nx = (
-                int(data.robot_model.hfield_nrow.item())
-                if hasattr(data.robot_model.hfield_nrow, "item")
-                else int(data.robot_model.hfield_nrow)
+                int(physics_model.hfield_nrow.item())
+                if hasattr(physics_model.hfield_nrow, "item")
+                else int(physics_model.hfield_nrow)
             )
             ny = (
-                int(data.robot_model.hfield_ncol.item())
-                if hasattr(data.robot_model.hfield_ncol, "item")
-                else int(data.robot_model.hfield_ncol)
+                int(physics_model.hfield_ncol.item())
+                if hasattr(physics_model.hfield_ncol, "item")
+                else int(physics_model.hfield_ncol)
             )
-            hfield_data = data.robot_model.hfield_data.reshape(nx, ny)
+            hfield_data = physics_model.hfield_data.reshape(nx, ny)
             logger.info("Using heightfield based floor with shape: %s", hfield_data.shape)
-            padded_bounds = compute_padded_bounds(
-                x_bound, y_bound, self.x_edge_padding, self.y_edge_padding
-            )
+            padded_bounds = compute_padded_bounds(x_bound, y_bound, self.x_edge_padding, self.y_edge_padding)
             return HFieldXYPositionReset(
                 bounds=(x_bound, y_bound, z_top, z_bottom),
                 padded_bounds=padded_bounds,
@@ -186,18 +184,14 @@ class XYPositionResetBuilder(ResetBuilder[Reset]):
             )
 
         else:
-            plane_indices = [i for i, t in enumerate(data.robot_model.geom_type) if t == 0]
+            plane_indices = [i for i, t in enumerate(physics_model.geom_type) if t == 0]
             if not plane_indices:
-                raise ValueError(
-                    "No heightfield or plane geom found in the model. MuJoCo scene missing floor!"
-                )
+                raise ValueError("No heightfield or plane geom found in the model. MuJoCo scene missing floor!")
             floor_idx = plane_indices[0]
             x_bound, y_bound = 5.0, 5.0
-            z_pos = data.robot_model.geom_pos[floor_idx][2]
+            z_pos = physics_model.geom_pos[floor_idx][2]
             logger.info("Using plane based floor with bounds: %s, %s, %s", x_bound, y_bound, z_pos)
-            padded_bounds = compute_padded_bounds(
-                x_bound, y_bound, self.x_edge_padding, self.y_edge_padding
-            )
+            padded_bounds = compute_padded_bounds(x_bound, y_bound, self.x_edge_padding, self.y_edge_padding)
             return PlaneXYPositionReset(
                 bounds=(x_bound, y_bound, z_pos),
                 padded_bounds=padded_bounds,
@@ -213,7 +207,7 @@ class RandomizeJointPositions(Reset):
 
     scale: float = attrs.field(default=0.01)
 
-    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+    def __call__(self, data: PhysicsData, rng: PRNGKeyArray) -> PhysicsData:
         qpos = data.qpos
         qpos = qpos + jax.random.uniform(rng, qpos.shape, minval=-self.scale, maxval=self.scale)
         data = data.replace(qpos=qpos)
@@ -226,7 +220,7 @@ class RandomizeJointVelocities(Reset):
 
     scale: float = attrs.field(default=0.01)
 
-    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+    def __call__(self, data: PhysicsData, rng: PRNGKeyArray) -> PhysicsData:
         qvel = data.qvel
         qvel = qvel + jax.random.uniform(rng, qvel.shape, minval=-self.scale, maxval=self.scale)
         data = data.replace(qvel=qvel)

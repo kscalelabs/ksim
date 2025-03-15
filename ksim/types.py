@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from ksim.env.types import EnvState
+from ksim.env.data import EnvState
 from ksim.model.types import ModelInput
 from ksim.task.types import RolloutTimeLossComponents
 

@@ -6,7 +6,9 @@ from dataclasses import dataclass
 
 import jax.tree_util
 from flax.core import FrozenDict
-from jaxtyping import Array
+from jaxtyping import Array, PyTree
+
+ModelRecurrence = PyTree
 
 
 @jax.tree_util.register_dataclass

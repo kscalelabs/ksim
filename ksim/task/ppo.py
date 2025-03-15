@@ -13,7 +13,7 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.types import EnvState
+from ksim.env.data import EnvState
 from ksim.model.base import ActorCriticAgent
 from ksim.model.distributions import GaussianDistribution
 from ksim.model.types import ModelInput
@@ -217,9 +217,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         value_targets: Array,
     ) -> Array:
         """Compute the clipped value loss."""
-        value_clipped = target_values + (values - target_values).clip(
-            -self.config.clip_param, self.config.clip_param
-        )
+        value_clipped = target_values + (values - target_values).clip(-self.config.clip_param, self.config.clip_param)
         clipped_error = value_clipped - value_targets
         error = values - value_targets
         return jnp.maximum(error**2, clipped_error**2).mean()
