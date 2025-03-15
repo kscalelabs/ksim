@@ -5,7 +5,7 @@ import unittest
 import chex
 import jax.numpy as jnp
 
-from ksim.losses.ppo import PPOLoss
+from ksim.task.ppo import PPOLoss
 
 _TOL = 1e-4
 
@@ -27,10 +27,14 @@ class TestPppoBasic(chex.TestCase):
     def test_single_episode_zero_advantages_one_env(self) -> None:
         rewards = jnp.array([[0.5], [0.5], [0.5], [0.5]])
         dones = jnp.array([[False], [False], [False], [True]])
-        # Manually computed discounted returns:
-        # R3 = 0.5, R2 = 0.5 + 0.99*0.5 = 0.995, R1 = 0.5 + 0.99*0.995 ≈ 1.48505,
-        # R0 = 0.5 + 0.99*1.48505 ≈ 1.9702.
-        expected_value_targets = jnp.array([[1.9702], [1.48505], [0.995], [0.5]])
+        expected_value_targets = jnp.array(
+            [
+                [1.9702],  # 0.5 + 0.99*1.48505 ≈ 1.9702
+                [1.48505],  # 0.5 + 0.99*0.995 = 1.48505
+                [0.995],  # 0.5 + 0.99*0.5 = 0.995
+                [0.5],  # 0.5
+            ]
+        )
         # Use expected returns as dummy value estimates so that advantages should be zero.
         values = expected_value_targets
         advantages, value_targets = self.variant(self.loss.compute_advantages_and_value_targets)(values, rewards, dones)
@@ -42,19 +46,16 @@ class TestPppoBasic(chex.TestCase):
     def test_two_episodes_zero_advantages_one_env(self) -> None:
         rewards = jnp.array([[0.5], [0.5], [0.5], [0.5], [0.5], [0.5], [0.5], [0.5]])
         dones = jnp.array([[False], [False], [False], [True], [False], [False], [False], [True]])
-        # For each episode of 4 steps, the discounted returns are:
-        # R3 = 0.5, R2 = 0.5 + 0.99*0.5 = 0.995, R1 = 0.5 + 0.99*0.995 ≈ 1.48505,
-        # R0 = 0.5 + 0.99*1.48505 ≈ 1.9702.
         expected_value_targets = jnp.array(
             [
-                [1.9702],
-                [1.48505],
-                [0.995],
-                [0.5],
-                [1.9702],
-                [1.48505],
-                [0.995],
-                [0.5],
+                [1.9702],  # 0.5 + 0.99*1.48505 ≈ 1.9702
+                [1.48505],  # 0.5 + 0.99*0.995 = 1.48505
+                [0.995],  # 0.5 + 0.99*0.5 = 0.995
+                [0.5],  # 0.5
+                [1.9702],  # 0.5 + 0.99*1.48505 ≈ 1.9702
+                [1.48505],  # 0.5 + 0.99*0.995 = 1.48505
+                [0.995],  # 0.5 + 0.99*0.5 = 0.995
+                [0.5],  # 0.5
             ]
         )
         values = expected_value_targets  # Setting dummy estimates equal to expected returns.

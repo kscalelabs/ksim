@@ -8,13 +8,12 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.losses.loss import Loss
 from ksim.model.base import ActorCriticAgent
 from ksim.model.types import ModelInput
 from ksim.normalization import Normalizer
 
 
-class PPOLoss(Loss):
+class PPOLoss:
     """Computes the PPO loss."""
 
     def __init__(
@@ -39,7 +38,7 @@ class PPOLoss(Loss):
         self.clip_value_loss = clip_value_loss
         self.eps = eps
 
-    def compute_loss(
+    def compute_ppo_loss(
         self,
         agent: ActorCriticAgent,
         command: Array,
@@ -101,6 +100,7 @@ class PPOLoss(Loss):
         total_objective = policy_objective - value_objective + entropy_objective
         total_loss = -total_objective
 
+        # TODO: move this to a separate place
         metrics_to_log: dict[str, Array] = {
             "policy_objective": policy_objective,
             "value_objective": value_objective,

@@ -11,7 +11,6 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim.actuators import TorqueActuators
 from ksim.commands import LinearVelocityCommand
 from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.losses.ppo import PPOLoss
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.distributions import TanhGaussianDistribution
 from ksim.model.types import ModelInput
@@ -25,6 +24,7 @@ from ksim.observation import (
 )
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import DHForwardReward, DHHealthyReward
+from ksim.task.ppo import PPOLoss
 from ksim.task.rl import RLTask
 from ksim.terminations import UnhealthyTermination
 
