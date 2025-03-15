@@ -750,7 +750,7 @@ class MjxEnv(BaseEnv):
         logger.info("Starting unroll_trajectories_with_viewer")
 
         if viewer is None:
-            raise ValueError("Mujoco viewer must be provided for unroll_trajectories_with_viewer.")
+            logger.warning("No viewer provided, skipping viewer sync.")
 
         if num_steps <= 0:
             raise ValueError(f"Cannot unroll trajectory with {num_steps} steps.")
@@ -843,17 +843,18 @@ class MjxEnv(BaseEnv):
             current_physics_data = next_physics_data
             has_nans = has_nans or jnp.any(step_has_nans)
 
-            try:
-                for i in range(num_envs):
-                    curr_env_data = jax.tree_util.tree_map(
-                        lambda x: x[i] if x.ndim > 0 else x, current_physics_data
-                    )
-                    mjx.get_data_into(viewer_mj_data, self.default_mj_model, curr_env_data)
-                    viewer.sync()
-                    break  # only sync the first environment for now
+            if viewer is not None:
+                try:
+                    for i in range(num_envs):
+                        curr_env_data = jax.tree_util.tree_map(
+                            lambda x: x[i] if x.ndim > 0 else x, current_physics_data
+                        )
+                        mjx.get_data_into(viewer_mj_data, self.default_mj_model, curr_env_data)
+                        viewer.sync()
+                        break  # only sync the first environment for now
 
-            except Exception as ex:
-                logger.error("Error during viewer sync: %s", str(ex))
+                except Exception as ex:
+                    logger.error("Error during viewer sync: %s", str(ex))
                 logger.error("Traceback: %s", traceback.format_exc())
 
         # Stack environment states along time dimension (T, E, ...)
