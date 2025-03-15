@@ -15,7 +15,7 @@ class RolloutTimeStats:
 
     initial_action_log_probs: Array
     initial_values: Array
-    value_targets: Array
+    returns: Array
 
 
 @jax.tree_util.register_dataclass
@@ -24,7 +24,7 @@ class PPORolloutTimeStats(RolloutTimeStats):
     """Components of the loss function for a PPO rollout."""
 
     advantages: Array
-    returns: Array
+    value_targets: Array
 
 
 @jax.tree_util.register_dataclass

@@ -483,8 +483,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state = training_state[1]
         rng = training_state[2]
 
-        if self.config.reshuffle_rollout:
-            dataset_ET = xax.reshuffle_pytree(
+        if self.config.reshuffle_rollout:  # if doing recurrence, can't shuffle accross T
+            dataset_ET = xax.reshuffle_pytree(  # TODO: confirm this actually reshuffles accross T and E (for IID)
                 dataset_ET,
                 (self.config.num_envs, self.num_rollout_steps_per_env),
                 rng,
@@ -569,7 +569,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         obs_normalizer = self.get_obs_normalizer(dummy_obs)
         cmd_normalizer = self.get_cmd_normalizer(dummy_cmd)
 
-        unroll_trajectories_fn = jax.vmap(unroll_trajectory, in_axes=(0))  # only 1 pos param
+        unroll_trajectories_fn = jax.vmap(unroll_trajectory, in_axes=(0, 0))  # only 1 pos param
         if self.config.compile_unroll:
             unroll_trajectories_fn = eqx.filter_jit(unroll_trajectories_fn)
 
@@ -577,12 +577,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Burn in Stage #
         #################
 
-        burn_transitions_TE, _, _, _ = unroll_trajectories_fn(
+        burn_transitions_ET, _, _, _ = unroll_trajectories_fn(
             state_E,
+            rng,
             agent=agent,
             obs_normalizer=obs_normalizer,
             cmd_normalizer=cmd_normalizer,
-            rng=burn_in_rng,
             engine=engine,
             obs_generators=obs_generators,
             command_generators=command_generators,
@@ -592,8 +592,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return_intermediate_physics_data=False,
         )
 
-        obs_normalizer = self.get_obs_normalizer(burn_transitions_TE.obs)
-        cmd_normalizer = self.get_cmd_normalizer(burn_transitions_TE.command)
+        obs_normalizer = obs_normalizer.update(burn_transitions_ET.obs)
+        cmd_normalizer = cmd_normalizer.update(burn_transitions_ET.command)
 
         ##################
         # Training Stage #
@@ -609,7 +609,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             start_time = time.time()
             reshuffle_rng, rollout_rng, train_rng = jax.random.split(train_rng, 3)
 
-            transitions_TE, state_E, has_nans, _ = unroll_trajectories_fn(
+            transitions_ET, state_E, has_nans, _ = unroll_trajectories_fn(
                 state_E,
                 agent=agent,
                 obs_normalizer=obs_normalizer,
@@ -635,19 +635,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # getting loss components that are constant across minibatches
             # (e.g. advantages) and flattening them for efficiency, thus
             # the name "rollout_time" loss components
-            rollout_stats_TE = jax.vmap(
+            rollout_stats_ET = jax.vmap(
                 self.get_rollout_time_stats,
                 in_axes=(0),
             )(
-                transitions_TE,
+                transitions_ET,
                 agent=agent,
                 obs_normalizer=obs_normalizer,
                 cmd_normalizer=cmd_normalizer,
             )
 
-            dataset_TE = RLDataset(
-                transitions=transitions_TE,
-                rollout_time_stats=rollout_stats_TE,
+            dataset_ET = RLDataset(
+                transitions=transitions_ET,
+                rollout_time_stats=rollout_stats_ET,
             )
 
             # running training on minibatches
@@ -656,7 +656,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 opt_state=opt_state,
                 reshuffle_rng=reshuffle_rng,
                 optimizer=optimizer,
-                dataset_ET=dataset_TE,
+                dataset_ET=dataset_ET,
                 obs_normalizer=obs_normalizer,
                 cmd_normalizer=cmd_normalizer,
             )
@@ -666,15 +666,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # this will allow for online normalization, must be updated after
             # the update step.
-            obs_normalizer = obs_normalizer.update(transitions_TE.obs)
-            cmd_normalizer = cmd_normalizer.update(transitions_TE.command)
+            obs_normalizer = obs_normalizer.update(transitions_ET.obs)
+            cmd_normalizer = cmd_normalizer.update(transitions_ET.command)
 
             with self.step_context("write_logs"):
                 training_state.raw_phase = "train"
                 training_state.num_steps += 1
                 training_state.num_samples += self.dataset_size
 
-                self.log_trajectory_stats(transitions_TE, reward_generators, termination_generators, eval=False)
+                self.log_trajectory_stats(transitions_ET, reward_generators, termination_generators, eval=False)
                 self.log_update_metrics(metrics_mean)
                 self.log_has_nans(has_nans)
                 self.logger.log_scalar("rollout_time", rollout_time, namespace="⏰")
@@ -708,7 +708,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 logger.info("Done rendering to %s", render_dir)
 
                 with self.step_context("write_logs"):
-                    self.log_trajectory_stats(transitions_TE, reward_generators, termination_generators, eval=True)
+                    self.log_trajectory_stats(transitions_ET, reward_generators, termination_generators, eval=True)
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""

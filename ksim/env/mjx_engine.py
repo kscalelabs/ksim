@@ -54,7 +54,7 @@ class MjxEngine(PhysicsEngine):
         self.min_action_latency_step = min_action_latency_step
         self.max_action_latency_step = max_action_latency_step
 
-    def _override_model_settings(
+    def _override_model_settings(  # TODO: this should live in get_mjx_model_and_metadata...
         self,
         mjx_model: mjx.Model,
         *,
@@ -106,6 +106,7 @@ class MjxEngine(PhysicsEngine):
 
         # TODO: probably incldue the model + data domain randomizer here...
 
+        # NOTE: latency is untested...
         latency_steps = jax.random.randint(
             key=rng,
             shape=(),
@@ -113,7 +114,7 @@ class MjxEngine(PhysicsEngine):
             maxval=self.max_action_latency_step,
         )
 
-        def f(carry: tuple[mjx.Data, Array], _: None) -> tuple[tuple[mjx.Data, Array], None]:
+        def move_physics(carry: tuple[mjx.Data, Array], _: None) -> tuple[tuple[mjx.Data, Array], None]:
             data, step_num = carry
             ctrl = jax.lax.select(
                 step_num >= latency_steps,
@@ -126,6 +127,6 @@ class MjxEngine(PhysicsEngine):
             new_data = mjx.step(mjx_model, data_with_ctrl)
             return (new_data, step_num + 1.0), None
 
-        mjx_data = jax.lax.scan(f, (mjx_data, jnp.array(0.0)), None, length=phys_steps_per_ctrl_steps)[0][0]
+        mjx_data = jax.lax.scan(move_physics, (mjx_data, jnp.array(0.0)), None, length=phys_steps_per_ctrl_steps)[0][0]
 
         return PhysicsState(model=mjx_model, data=mjx_data, most_recent_action=action)

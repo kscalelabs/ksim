@@ -150,6 +150,7 @@ class HumanoidWalkingTask(PPOTask):
                 RandomizeJointVelocities(scale=0.01),
             ],
             actuators=MITPositionActuators(physics_model, metadata),
+            # TODO: add randomizers
             dt=self.config.dt,
             ctrl_dt=self.config.ctrl_dt,
             solver=mjx.SolverType.CG,  # TODO: experiment with euler

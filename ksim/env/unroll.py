@@ -38,11 +38,11 @@ UnrollYs = tuple[Transition, UnrollNaNDetector, PhysicsData | None]
 
 def unroll_trajectory(
     physics_state: PhysicsState,
+    rng: PRNGKeyArray,
     *,
     agent: Agent,
     obs_normalizer: Normalizer,
     cmd_normalizer: Normalizer,
-    rng: PRNGKeyArray,
     engine: PhysicsEngine,
     obs_generators: Collection[Observation],
     command_generators: Collection[Command],
@@ -64,7 +64,7 @@ def unroll_trajectory(
         rng: PRNGKeyArray,
     ) -> tuple[UnrollCarry, UnrollYs]:
         """Constructs transition, resets if needed."""
-        obs_rng, cmd_rng, act_rng, reset_rng = jax.random.split(rng, 4)
+        obs_rng, cmd_rng, act_rng, reset_rng, physics_rng = jax.random.split(rng, 5)
         prev_command, carry, physics_state = carry
         prev_action = physics_state.most_recent_action
         obs = get_observation(physics_state, obs_rng, obs_generators=obs_generators)
@@ -73,7 +73,7 @@ def unroll_trajectory(
         # we still return unnormalized obs and command to calculate normalization statistics
         prediction, next_carry = agent.actor_model.forward(obs_normalizer(obs), cmd_normalizer(command), carry)
         action = agent.action_distribution.sample(prediction, act_rng)
-        next_physics_state = engine.step(action, physics_state)
+        next_physics_state = engine.step(action, physics_state, physics_rng)
 
         termination_components = get_terminations(next_physics_state, termination_generators=termination_generators)
         action_causes_termination = jax.tree_util.tree_reduce(jnp.logical_or, termination_components.values())
@@ -92,9 +92,9 @@ def unroll_trajectory(
         next_data_has_nans = xax.pytree_has_nans(next_physics_state.data)
         do_reset = jnp.logical_or(action_causes_termination, next_data_has_nans)
         reset_state = engine.reset(reset_rng)
-        next_physics_state = xax.update_pytree(do_reset, next_physics_state, reset_state)
-        next_carry = xax.update_pytree(do_reset, next_carry, initial_carry)
-        command = xax.update_pytree(do_reset, command, initial_command)
+        next_physics_state = xax.update_pytree(do_reset, reset_state, next_physics_state)
+        next_carry = xax.update_pytree(do_reset, initial_carry, next_carry)
+        command = xax.update_pytree(do_reset, initial_command, command)
 
         transition = Transition(
             obs=obs,
