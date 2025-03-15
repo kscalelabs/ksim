@@ -14,7 +14,7 @@ import jax.numpy as jnp
 import matplotlib
 from jaxtyping import Array, PyTree
 
-from ksim.env.mjx_engine import MjxEnv
+from ksim.env.mjx_engine import MjxEngine
 from ksim.task.rl import RLTask
 from ksim.utils.interactive.base import (
     InteractiveVisualizer,
@@ -68,7 +68,8 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
             jax.config.update("jax_disable_jit", True)
         logger.info("Using physics backend: %s", config.physics_backend)
 
-        self.env = self.setup_environment()
+        # TODO: setup engine
+        self.env = self.setup_engine()
 
         # Initialize Mujoco-specific variables
         self.model = self.env.default_mj_model
@@ -76,10 +77,10 @@ class MujocoInteractiveVisualizer(InteractiveVisualizer):
         self.command = self.env.get_initial_commands(jax.random.PRNGKey(0), None)
         self.dummy_action = jnp.zeros(self.env.action_size)
 
-    def setup_environment(self) -> MjxEnv:
+    def setup_engine(self) -> MjxEngine:
         """Set up the MjxEnv environment for visualization."""
-        env = self.task.get_environment()
-        assert isinstance(env, MjxEnv), "MujocoRewardVisualizer only works with MjxEnv"
+        env = self.task.get_engine()
+        assert isinstance(env, MjxEngine), "MujocoRewardVisualizer only works with MjxEngine"
         return env
 
     def _step(

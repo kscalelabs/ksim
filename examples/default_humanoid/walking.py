@@ -139,7 +139,7 @@ class HumanoidWalkingTask(PPOTask):
 
     def get_model_and_metadata(self) -> tuple[PhysicsModel, dict[str, JointMetadataOutput]]:
         mj_model = mujoco.MjModel.from_xml_path("examples/default_humanoid/scene.mjcf")
-        metadata = get_joint_metadata(mj_model)  # TODO: implement this function properly
+        metadata = None # get_joint_metadata(mj_model)  # TODO: implement this function properly
         mjx_model = mjx.Model(mj_model)
         return mjx_model, metadata
 
@@ -215,7 +215,6 @@ if __name__ == "__main__":
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,
-            # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
             scale_rewards=False,
             gamma=0.97,
             lam=0.95,

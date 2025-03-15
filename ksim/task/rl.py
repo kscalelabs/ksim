@@ -547,6 +547,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         training_state: xax.State,
     ) -> None:
         """Runs the main RL training loop."""
+        breakpoint()
         physics_model, metadata = self.get_model_and_metadata()
         engine = self.get_engine(physics_model, metadata)
         obs_generators = self.get_obs_generators(physics_model)  # these should be given necessary data for building
