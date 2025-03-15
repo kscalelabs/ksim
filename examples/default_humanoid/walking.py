@@ -83,6 +83,7 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
 
         return parametrization
 
+    # TODO: we should move all this to RL and away from the model definition
     def initial_carry(self) -> ModelCarry:
         """No carry for now, but we could use this to initialize recurrence or action history."""
         return None
