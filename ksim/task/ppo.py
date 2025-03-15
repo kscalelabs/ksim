@@ -166,20 +166,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def get_rollout_time_stats(
         self,
         agent: ActorCriticAgent,
-        trajectory_dataset: Transition,
+        trajectory_dataset: Transition,  # TODO: pick a consistent naming convention... dataset_ET?
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
     ) -> RolloutTimeStats:
         """Calculating advantages and returns for a rollout."""
-        model_input = ModelInput(
-            obs=obs_normalizer(trajectory_dataset.obs),
-            command=cmd_normalizer(trajectory_dataset.command),
-            action_history=None,
-            recurrent_state=None,
-        )
-
-        prediction = agent.actor_model.forward(model_input)
-        initial_values = agent.critic_model.forward(model_input).squeeze(axis=-1)
+        normalized_obs = obs_normalizer(trajectory_dataset.obs)
+        normalized_cmd = cmd_normalizer(trajectory_dataset.command)
+        prediction = agent.actor_model.forward_accross_episode(normalized_obs, normalized_cmd)  # TODO: vmap this...
+        initial_values = agent.critic_model.forward_accross_episode(normalized_obs, normalized_cmd).squeeze(axis=-1)
 
         initial_action_log_probs = agent.action_distribution.log_prob(
             parameters=prediction,
@@ -275,16 +270,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         sampling function, these may be contiguous along the time dim.
         """
         # get the log probs of the current model
-        prediction = self.actor_predict_minibatch(minibatch, obs_normalizer, cmd_normalizer)
+        normalized_obs = obs_normalizer(minibatch.obs)
+        normalized_cmd = cmd_normalizer(minibatch.command)
+        prediction = agent.actor_model.forward_accross_episode(
+            normalized_obs, normalized_cmd
+        )  # TODO: maybe assume it'll be BT, vmap this... this will break otherwise...
+        values = agent.critic_model.forward_accross_episode(normalized_obs, normalized_cmd).squeeze(axis=-1)
         log_probs = agent.action_distribution.log_prob(prediction, minibatch.action)
-        values = agent.critic_model.forward(minibatch, carry=self.get_init_critic_carry()).squeeze(axis=-1)
 
         log_prob_diff = log_probs - rollout_time_stats.initial_action_log_probs
         ratio = jnp.exp(log_prob_diff)
 
         # get the state-value estimates
-
         advantages = rollout_time_stats.advantages
+        value_targets = rollout_time_stats.value_targets
 
         # Andrychowicz (2021) did not find any benefit in minibatch normalization.
         if self.config.normalize_advantage and self.config.normalize_advantage_in_minibatch:
@@ -298,20 +297,17 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 clipped_ratio * advantages,
             )
         )
-        value_targets = rollout_time_stats.value_targets
 
         # value loss term
-        value_pred = agent.critic_model.forward(model_input).squeeze(axis=-1)
-        value_pred = value_pred.squeeze(axis=-1)  # (time, env)
         value_mse = jax.lax.cond(
             self.config.use_clipped_value_loss,
             lambda: 0.5
             * self._clipped_value_loss(
                 target_values=rollout_time_stats.initial_values,
-                values=value_pred,
+                values=values,
                 value_targets=value_targets,
             ),
-            lambda: 0.5 * jnp.mean((value_targets - value_pred) ** 2),
+            lambda: 0.5 * jnp.mean((value_targets - values) ** 2),
         )
         value_objective = self.config.value_loss_coef * value_mse
 
