@@ -712,7 +712,6 @@ class MjxEnv(BaseEnv):
 
         return env_state_TEL, physics_data_res, has_nans
 
-
     @profile
     def unroll_trajectories_with_viewer(
         self,
@@ -748,66 +747,22 @@ class MjxEnv(BaseEnv):
         Returns:
             Tuple of (trajectory of environment states, final physics data, has_nans flag)
         """
-        logger.info("unroll_trajectories_with_viewer called")
+        logger.info("Starting unroll_trajectories_with_viewer")
 
-        # Short circuit if we have 0 steps to unroll
+        if viewer is None:
+            raise ValueError("Mujoco viewer must be provided for unroll_trajectories_with_viewer.")
+
         if num_steps <= 0:
-            # Create an empty trajectory with the right structure
-            empty_obs_dict = {}
-            for obs_name, obs_value in env_state_EL_t_minus_1.obs.items():
-                # Create an empty array with time dimension 0 but preserving other dimensions
-                empty_shape = (0,) + obs_value.shape
-                empty_obs_dict[obs_name] = jnp.zeros(empty_shape, dtype=obs_value.dtype)
+            raise ValueError(f"Cannot unroll trajectory with {num_steps} steps.")
 
-            empty_env_state = EnvState(
-                obs=FrozenDict(empty_obs_dict),
-                command=FrozenDict(
-                    {
-                        k: jnp.zeros((0,) + v.shape, dtype=v.dtype)
-                        for k, v in env_state_EL_t_minus_1.command.items()
-                    }
-                ),
-                action=jnp.zeros(
-                    (0,) + env_state_EL_t_minus_1.action.shape,
-                    dtype=env_state_EL_t_minus_1.action.dtype,
-                ),
-                reward=jnp.zeros(
-                    (0,) + env_state_EL_t_minus_1.reward.shape,
-                    dtype=env_state_EL_t_minus_1.reward.dtype,
-                ),
-                done=jnp.zeros(
-                    (0,) + env_state_EL_t_minus_1.done.shape,
-                    dtype=env_state_EL_t_minus_1.done.dtype,
-                ),
-                timestep=jnp.zeros(
-                    (0,) + env_state_EL_t_minus_1.timestep.shape,
-                    dtype=env_state_EL_t_minus_1.timestep.dtype,
-                ),
-                termination_components=FrozenDict(
-                    {
-                        k: jnp.zeros((0,) + v.shape, dtype=v.dtype)
-                        for k, v in env_state_EL_t_minus_1.termination_components.items()
-                    }
-                ),
-                reward_components=FrozenDict(
-                    {
-                        k: jnp.zeros((0,) + v.shape, dtype=v.dtype)
-                        for k, v in env_state_EL_t_minus_1.reward_components.items()
-                    }
-                ),
-            )
-
-            return empty_env_state, physics_data_EL_t, jnp.array(False)
-
-        # Initialize states, physics data, and RNG for each environment
         current_env_states = env_state_EL_t_minus_1
         current_physics_data = physics_data_EL_t
         current_rng = rng
 
-        # Store all states for each step
         all_env_states = []
+        all_physics_data = [] if return_intermediate_data else None
+        has_nans = False
 
-        # Define the step function (only the physics step is jitted)
         step_fn = functools.partial(
             self.scannable_step_with_automatic_reset,
             physics_model_L=physics_model_L,
@@ -816,38 +771,32 @@ class MjxEnv(BaseEnv):
             return_intermediate_data=return_intermediate_data,
         )
 
-        # Global flag for whether we encountered NaNs
-        has_nans = False
-
         # Create a version of step_fn that handles a single environment
         def step_single_env(env_state, phys_data, step_rng):
             result = step_fn((env_state, phys_data, step_rng), None)
             return result
 
-        # JIT the single environment step function for better performance
+        # Only the inner physics step is jitted
         logger.info("JIT-compiling the physics step function...")
         start_compile = time.time()
         jitted_step_single_env = jax.jit(step_single_env)
         compile_time = time.time() - start_compile
         logger.info("Compilation took %.4fs", compile_time)
 
-        # Use a regular Python loop for time steps
         logger.info("Starting time step loop for %d steps", num_steps)
         for t in range(num_steps):
             logger.info("Time step %d/%d", t + 1, num_steps)
 
-            # Generate new RNG keys for each environment
             current_rng, step_rng = jax.random.split(current_rng)
             env_rngs = jax.random.split(step_rng, num_envs)
 
-            # Process each environment sequentially
             next_states = []
             next_physics = []
             step_states = []
             step_has_nans_list = []
 
             for e in range(num_envs):
-                # Extract this environment's state
+                # Fetch stuff for current env
                 env_state_e = jax.tree_util.tree_map(
                     lambda x: x[e] if x.ndim > 0 else x, current_env_states
                 )
@@ -855,114 +804,85 @@ class MjxEnv(BaseEnv):
                     lambda x: x[e] if hasattr(x, "ndim") and x.ndim > 0 else x, current_physics_data
                 )
 
-                # Step this environment
+                # Try env step
                 try:
-                    # Call jitted function and get raw result
                     raw_result = jitted_step_single_env(env_state_e, physics_data_e, env_rngs[e])
-
-                    # Break down unpacking step by step
                     carry_result, output = raw_result
-
                     next_state, next_phys, rng_out = carry_result
-
                     step_state, intermediate_data, step_has_nan = output
-
                 except Exception as ex:
                     logger.error("Error stepping environment %d: %s", e + 1, str(ex))
                     logger.error("Traceback: %s", traceback.format_exc())
                     raise
 
-                # Store results
-                try:
-                    next_states.append(next_state)
-                    next_physics.append(next_phys)
-                    step_states.append(step_state)
-                    step_has_nans_list.append(step_has_nan)
-                except Exception as ex:
-                    logger.error("Exception storing results for environment %d: %s", e + 1, str(ex))
-                    logger.error("Traceback: %s", traceback.format_exc())
-                    raise
+                next_states.append(next_state)
+                next_physics.append(next_phys)
+                step_states.append(step_state)
+                step_has_nans_list.append(step_has_nan)
 
             # Re-stack the environment states and physics data
             try:
-                next_env_states = jax.tree_util.tree_map(
-                    lambda *xs: (
-                        jnp.stack(xs, axis=0) if xs and isinstance(xs[0], jnp.ndarray) else None
-                    ),
-                    *next_states,
+                stack_fn = lambda *xs: (
+                    jnp.stack(xs, axis=0) if xs and isinstance(xs[0], jnp.ndarray) else None
                 )
-
-                next_physics_data = jax.tree_util.tree_map(
-                    lambda *xs: (
-                        jnp.stack(xs, axis=0) if xs and isinstance(xs[0], jnp.ndarray) else None
-                    ),
-                    *next_physics,
-                )
-
-                step_env_states = jax.tree_util.tree_map(
-                    lambda *xs: (
-                        jnp.stack(xs, axis=0) if xs and isinstance(xs[0], jnp.ndarray) else None
-                    ),
-                    *step_states,
-                )
-
+                next_env_states = jax.tree_util.tree_map(stack_fn, *next_states)
+                next_physics_data = jax.tree_util.tree_map(stack_fn, *next_physics)
+                step_env_states = jax.tree_util.tree_map(stack_fn, *step_states)
                 step_has_nans = jnp.stack(step_has_nans_list)
             except Exception as ex:
                 logger.error("Error re-stacking states: %s", str(ex))
                 logger.error("Traceback: %s", traceback.format_exc())
                 raise
 
-            # Store the states
             all_env_states.append(step_env_states)
 
-            # Update for next iteration
+            if return_intermediate_data:
+                all_physics_data.append(next_physics_data)
+
             current_env_states = next_env_states
             current_physics_data = next_physics_data
             has_nans = has_nans or jnp.any(step_has_nans)
 
-            # Sync the viewer if provided
-            if viewer is not None:
-                try:
-                    for i in range(num_envs):
-                        curr_env_data = jax.tree_util.tree_map(
-                            lambda x: x[i] if hasattr(x, "ndim") and x.ndim > 0 else x,
-                            current_physics_data,
-                        )
+            try:
+                for i in range(num_envs):
+                    curr_env_data = jax.tree_util.tree_map(
+                        lambda x: x[i] if x.ndim > 0 else x, current_physics_data
+                    )
+                    mjx.get_data_into(viewer_mj_data, self.default_mj_model, curr_env_data)
+                    viewer.sync()
+                    break  # only sync the first environment for now
 
-                        mjx.get_data_into(viewer_mj_data, self.default_mj_model, curr_env_data)
-
-                        viewer.sync()
-
-                        break  # only sync the first environment for now
-
-                except Exception as ex:
-                    logger.error("Error during viewer sync: %s", str(ex))
-                    logger.error("Traceback: %s", traceback.format_exc())
+            except Exception as ex:
+                logger.error("Error during viewer sync: %s", str(ex))
+                logger.error("Traceback: %s", traceback.format_exc())
 
         # Stack environment states along time dimension (T, E, ...)
         try:
-            env_state_TEL = jax.tree_util.tree_map(
-                lambda *xs: (
-                    jnp.stack(xs, axis=0) if xs and isinstance(xs[0], jnp.ndarray) else None
-                ),
-                *all_env_states,
+            stack_fn = lambda *xs: (
+                jnp.stack(xs, axis=0) if xs and isinstance(xs[0], jnp.ndarray) else None
+            )
+            env_state_TEL = jax.tree_util.tree_map(stack_fn, *all_env_states)
+
+            # Fill in any missing states with zeros
+            fill_fn = lambda x, ref: (
+                x if x is not None else jnp.zeros((num_steps,) + ref.shape, dtype=ref.dtype)
+            )
+            env_state_TEL = jax.tree_util.tree_map(fill_fn, env_state_TEL, env_state_EL_t_minus_1)
+
+            # Stack physics data if needed
+            return_physics_data = (
+                jax.tree_util.tree_map(stack_fn, *all_physics_data)
+                if return_intermediate_data and all_physics_data
+                else current_physics_data
             )
 
-            # Fix any None values that might have resulted from stacking
-            env_state_TEL = jax.tree_util.tree_map(
-                lambda x, ref: (
-                    x if x is not None else jnp.zeros((num_steps,) + ref.shape, dtype=ref.dtype)
-                ),
-                env_state_TEL,
-                env_state_EL_t_minus_1,
-            )
         except Exception as ex:
             logger.error("Error during final stacking: %s", str(ex))
             logger.error("Traceback: %s", traceback.format_exc())
             raise
 
         logger.info("unroll_trajectories_with_viewer completed successfully")
-        return env_state_TEL, current_physics_data, jnp.array(has_nans)
+        return env_state_TEL, return_physics_data, jnp.array(has_nans)
 
     @profile
     def render_trajectory(
