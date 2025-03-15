@@ -54,7 +54,7 @@ class PPOLoss(Loss):
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array]]:
         """Compute the PPO loss."""
-        # get the log probs of the current model
+        # Get the log probs of the current model
         model_input = ModelInput(
             obs=obs_normalizer(observation),
             command=cmd_normalizer(command),
@@ -71,7 +71,7 @@ class PPOLoss(Loss):
         if self.normalize_advantage:
             advantages = (advantages - advantages.mean()) / (advantages.std() + self.eps)
 
-        # Policy loss, with clipping
+        # Policy loss term with clipping
         clipped_ratio = jnp.clip(ratio, 1 - self.clip_param, 1 + self.clip_param)
         policy_objective = jnp.mean(
             jnp.minimum(
@@ -81,9 +81,7 @@ class PPOLoss(Loss):
         )
 
         # Value loss term
-        values = agent.critic_model.forward(model_input).squeeze(axis=-1)
-        # give axes
-        values = values.squeeze(axis=-1)  # (time, env)
+        values = agent.critic_model.forward(model_input)
         value_mse = jax.lax.cond(
             self.clip_value_loss,
             lambda: 0.5
@@ -94,7 +92,7 @@ class PPOLoss(Loss):
             ),
             lambda: 0.5 * jnp.mean((value_targets - values) ** 2),
         )
-        value_objective = self.config.value_loss_coef * value_mse
+        value_objective = self.value_loss_coef * value_mse
 
         # Entropy bonus term.
         entropies = agent.action_distribution.entropy(prediction, rng)
