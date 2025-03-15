@@ -11,10 +11,14 @@ import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array
-from mujoco import mjx
 
-from ksim.utils.data import BuilderData
-from ksim.utils.mujoco import geoms_colliding
+from ksim.env.data import PhysicsData, PhysicsModel
+from ksim.utils.named_access import (
+    geoms_colliding,
+    get_floor_idx,
+    get_geom_data_idx_by_name,
+    get_qpos_data_idxs_by_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +61,12 @@ class Reward(ABC):
     @abstractmethod
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array: ...
 
     def get_name(self) -> str:
@@ -78,7 +82,7 @@ T = TypeVar("T", bound=Reward)
 
 class RewardBuilder(ABC, Generic[T]):
     @abstractmethod
-    def __call__(self, data: BuilderData) -> T:
+    def __call__(self, physics_model: PhysicsModel) -> T:
         """Builds a reward from a MuJoCo model.
 
         Args:
@@ -97,14 +101,14 @@ class TerminationPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        return jnp.sum(done_t.any())
+        return jnp.sum(next_state_terminates.any())
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -115,14 +119,14 @@ class HeightReward(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        height = mjx_data_t_plus_1.qpos[2]
+        height = next_physics_state.qpos[2]
         reward = jnp.exp(-jnp.abs(height - self.height_target) * 50)
         return reward
 
@@ -136,16 +140,16 @@ class OrientationPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
         return jnp.sum(
             xax.get_norm(
-                xax.quat_to_euler(mjx_data_t_plus_1.qpos[3:7]) - jnp.array(self.target_orientation),
+                xax.quat_to_euler(next_physics_state.qpos[3:7]) - jnp.array(self.target_orientation),
                 self.norm,
             )
         )
@@ -159,14 +163,14 @@ class TorquePenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        return jnp.sum(xax.get_norm(mjx_data_t_plus_1.actuator_force, self.norm))
+        return jnp.sum(xax.get_norm(next_physics_state.actuator_force, self.norm))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -178,16 +182,16 @@ class EnergyPenalty(Reward):
     # NOTE: I think this is actually penalizing power (?). Rename if needed
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
         return jnp.sum(
-            xax.get_norm(mjx_data_t_plus_1.qvel[6:], self.norm)
-            * xax.get_norm(mjx_data_t_plus_1.actuator_force, self.norm)
+            xax.get_norm(next_physics_state.qvel[6:], self.norm)
+            * xax.get_norm(next_physics_state.actuator_force, self.norm)
         )
 
 
@@ -199,14 +203,14 @@ class JointAccelerationPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        return jnp.sum(xax.get_norm(mjx_data_t_plus_1.qacc[6:], self.norm))
+        return jnp.sum(xax.get_norm(next_physics_state.qacc[6:], self.norm))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -217,14 +221,14 @@ class LinearVelocityZPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        lin_vel_z = mjx_data_t_plus_1.qvel[2]
+        lin_vel_z = next_physics_state.qvel[2]
         return xax.get_norm(lin_vel_z, self.norm)
 
 
@@ -236,14 +240,14 @@ class AngularVelocityXYPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        ang_vel_xy = mjx_data_t_plus_1.qvel[3:5]
+        ang_vel_xy = next_physics_state.qvel[3:5]
         return xax.get_norm(ang_vel_xy, self.norm).sum(axis=-1)
 
 
@@ -256,15 +260,15 @@ class TrackAngularVelocityZReward(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        ang_vel_cmd_1 = command_t[self.cmd_name][0]
-        ang_vel_z = mjx_data_t_plus_1.qvel[5]
+        ang_vel_cmd_1 = command[self.cmd_name][0]
+        ang_vel_z = next_physics_state.qvel[5]
         return xax.get_norm(ang_vel_z * ang_vel_cmd_1, self.norm)
 
 
@@ -277,15 +281,15 @@ class TrackLinearVelocityXYReward(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        cmd_vel_xy = command_t[self.cmd_name]
-        actual_vel_xy = mjx_data_t_plus_1.qvel[:2]
+        cmd_vel_xy = command[self.cmd_name]
+        actual_vel_xy = next_physics_state.qvel[:2]
 
         # Compute tracking error as L2 distance between commanded and actual velocity
         tracking_error = jnp.linalg.norm(cmd_vel_xy - actual_vel_xy)
@@ -306,19 +310,19 @@ class ActionSmoothnessPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
         # During tracing, both branches of jax.lax.cond are evaluated, so
-        # we need to handle the case where action_t_minus_1 is None.
-        # This only works if action_t_minus_1 is statically None or not None.
-        if action_t_minus_1 is None:
-            return jnp.zeros_like(xax.get_norm(action_t, self.norm).sum(axis=-1))
-        return xax.get_norm(action_t - action_t_minus_1, self.norm).sum(axis=-1)
+        # we need to handle the case where prev_action is None.
+        # This only works if prev_action is statically None or not None.
+        if prev_action is None:
+            return jnp.zeros_like(xax.get_norm(action, self.norm).sum(axis=-1))
+        return xax.get_norm(action - prev_action, self.norm).sum(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -330,19 +334,19 @@ class FootSlipPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
         contacts = jnp.array(
-            [geoms_colliding(mjx_data_t_plus_1, geom_idx, self.floor_idx) for geom_idx in self.foot_geom_idxs]
+            [geoms_colliding(next_physics_state, geom_idx, self.floor_idx) for geom_idx in self.foot_geom_idxs]
         )
 
         # Get x and y velocities
-        body_vel = mjx_data_t_plus_1.qvel[:2]
+        body_vel = next_physics_state.qvel[:2]
 
         return jnp.sum(jnp.linalg.norm(body_vel, axis=-1) * contacts)
 
@@ -352,13 +356,14 @@ class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
     scale: float
     foot_geom_names: list[str]
 
-    def __call__(self, data: BuilderData) -> FootSlipPenalty:
+    def __call__(self, physics_model: PhysicsModel) -> FootSlipPenalty:
+        geom_name_to_idx = get_geom_data_idx_by_name(physics_model)
+        floor_idx = get_floor_idx(physics_model)
         illegal_geom_idxs = []
         for geom_name in self.foot_geom_names:
-            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            illegal_geom_idxs.append(geom_name_to_idx[geom_name])
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
-        floor_idx = data.mujoco_mappings.floor_geom_idx
         if floor_idx is None:
             raise ValueError("No floor geom found in model")
 
@@ -380,14 +385,14 @@ class FeetClearancePenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        feet_heights = mjx_data_t_plus_1.geom_xpos[self.foot_geom_idxs][:, 2]
+        feet_heights = next_physics_state.geom_xpos[self.foot_geom_idxs][:, 2]
 
         # TODO: Look into adding linear feet velocity norm to scale the foot delta
 
@@ -400,10 +405,11 @@ class FeetClearancePenaltyBuilder(RewardBuilder[FeetClearancePenalty]):
     foot_geom_names: list[str]
     max_foot_height: float
 
-    def __call__(self, data: BuilderData) -> FeetClearancePenalty:
+    def __call__(self, physics_model: PhysicsModel) -> FeetClearancePenalty:
+        geom_name_to_idx = get_geom_data_idx_by_name(physics_model)
         illegal_geom_idxs = []
         for geom_name in self.foot_geom_names:
-            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            illegal_geom_idxs.append(geom_name_to_idx[geom_name])
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
         return FeetClearancePenalty(
@@ -432,33 +438,33 @@ class FeetAirTimeReward(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
         # Check if any left foot geom is in contact
         left_foot_in_contact = jnp.zeros((), dtype=jnp.bool_)
         for foot_idx in self.left_foot_geom_idxs:
-            has_contact_1 = mjx_data_t_plus_1.contact.geom1 == foot_idx
-            has_contact_2 = mjx_data_t_plus_1.contact.geom2 == foot_idx
+            has_contact_1 = next_physics_state.contact.geom1 == foot_idx
+            has_contact_2 = next_physics_state.contact.geom2 == foot_idx
             has_foot_contact = jnp.logical_or(has_contact_1, has_contact_2)
 
             # Check if any contact for this foot is close enough
-            distances_where_contact = jnp.where(has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4)
+            distances_where_contact = jnp.where(has_foot_contact, next_physics_state.contact.dist, 1e4)
             min_distance = jnp.min(distances_where_contact, initial=1e4)
             this_geom_in_contact = min_distance <= self.contact_eps
             left_foot_in_contact = jnp.logical_or(left_foot_in_contact, this_geom_in_contact)
 
         right_foot_in_contact = jnp.zeros((), dtype=jnp.bool_)
         for foot_idx in self.right_foot_geom_idxs:
-            has_contact_1 = mjx_data_t_plus_1.contact.geom1 == foot_idx
-            has_contact_2 = mjx_data_t_plus_1.contact.geom2 == foot_idx
+            has_contact_1 = next_physics_state.contact.geom1 == foot_idx
+            has_contact_2 = next_physics_state.contact.geom2 == foot_idx
             has_foot_contact = jnp.logical_or(has_contact_1, has_contact_2)
 
-            distances_where_contact = jnp.where(has_foot_contact, mjx_data_t_plus_1.contact.dist, 1e4)
+            distances_where_contact = jnp.where(has_foot_contact, next_physics_state.contact.dist, 1e4)
             min_distance = jnp.min(distances_where_contact, initial=1e4)
             this_geom_in_contact = min_distance <= self.contact_eps
             right_foot_in_contact = jnp.logical_or(right_foot_in_contact, this_geom_in_contact)
@@ -483,7 +489,7 @@ class FeetAirTimeReward(Reward):
         # Skip if commanded to stand still
         if self.skip_if_zero_command:
             commands_are_zero = jnp.stack(
-                [(command_t[cmd] < self.eps).all() for cmd in self.skip_if_zero_command],
+                [(command[cmd] < self.eps).all() for cmd in self.skip_if_zero_command],
                 axis=0,
             )
             reward = jnp.where(jnp.any(commands_are_zero), 0.0, reward)
@@ -549,26 +555,25 @@ class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
     no_contact_penalty: float = attrs.field(default=0.5)
     all_contact_penalty: float = attrs.field(default=0.8)
 
-    def __call__(self, data: BuilderData) -> FeetAirTimeReward:
+    def __call__(self, physics_model: PhysicsModel) -> FeetAirTimeReward:
+        geom_name_to_idx = get_geom_data_idx_by_name(physics_model)
         left_foot_geom_idxs = []
         for geom_name in self.left_foot_geom_names:
             try:
-                left_foot_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+                left_foot_geom_idxs.append(geom_name_to_idx[geom_name])
             except KeyError:
                 raise ValueError(
-                    f"Geom '{geom_name}' not found in model. "
-                    f"Available geoms: {data.mujoco_mappings.geom_name_to_idx.keys()}"
+                    f"Geom '{geom_name}' not found in model. " f"Available geoms: {geom_name_to_idx.keys()}"
                 )
 
         left_foot_geom_idxs = jnp.array(left_foot_geom_idxs)
         right_foot_geom_idxs = []
         for geom_name in self.right_foot_geom_names:
             try:
-                right_foot_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+                right_foot_geom_idxs.append(geom_name_to_idx[geom_name])
             except KeyError:
                 raise ValueError(
-                    f"Geom '{geom_name}' not found in model. "
-                    f"Available geoms: {data.mujoco_mappings.geom_name_to_idx.keys()}"
+                    f"Geom '{geom_name}' not found in model. " f"Available geoms: {geom_name_to_idx.keys()}"
                 )
 
         right_foot_geom_idxs = jnp.array(right_foot_geom_idxs)
@@ -610,25 +615,25 @@ class FootContactPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        has_contact_1 = jnp.isin(mjx_data_t_plus_1.contact.geom1, self.illegal_geom_idxs)
-        has_contact_2 = jnp.isin(mjx_data_t_plus_1.contact.geom2, self.illegal_geom_idxs)
+        has_contact_1 = jnp.isin(next_physics_state.contact.geom1, self.illegal_geom_idxs)
+        has_contact_2 = jnp.isin(next_physics_state.contact.geom2, self.illegal_geom_idxs)
         has_contact = jnp.logical_or(has_contact_1, has_contact_2)
 
         # Handle case where there might be no contacts or no matches
-        distances_where_contact = jnp.where(has_contact, mjx_data_t_plus_1.contact.dist, 1e4)
+        distances_where_contact = jnp.where(has_contact, next_physics_state.contact.dist, 1e4)
         min_distance = jnp.min(distances_where_contact, initial=1e4)
         penalty = (min_distance <= self.contact_eps).astype(jnp.float32)
 
         if self.skip_if_zero_command:
             commands_are_zero = jnp.stack(
-                [(command_t[cmd] < self.eps).all() for cmd in self.skip_if_zero_command],
+                [(command[cmd] < self.eps).all() for cmd in self.skip_if_zero_command],
                 axis=0,
             )
             penalty = jnp.where(commands_are_zero, 0.0, penalty).sum()
@@ -666,10 +671,11 @@ class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
     contact_eps: float = attrs.field(default=1e-2)
     skip_if_zero_command: tuple[str, ...] | None = attrs.field(default=None)
 
-    def __call__(self, data: BuilderData) -> FootContactPenalty:
+    def __call__(self, physics_model: PhysicsModel) -> FootContactPenalty:
+        geom_name_to_idx = get_geom_data_idx_by_name(physics_model)
         illegal_geom_idxs = []
         for geom_name in self.foot_geom_names:
-            illegal_geom_idxs.append(data.mujoco_mappings.geom_name_to_idx[geom_name])
+            illegal_geom_idxs.append(geom_name_to_idx[geom_name])
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
@@ -698,14 +704,14 @@ class DefaultPoseDeviationPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        current_positions = mjx_data_t_plus_1.qpos[self.joint_indices]
+        current_positions = next_physics_state.qpos[self.joint_indices]
         deviations = current_positions - self.default_positions
         weighted_deviations = deviations * self.joint_deviation_weights
         return jnp.sum(xax.get_norm(weighted_deviations, self.norm))
@@ -718,7 +724,7 @@ class DefaultPoseDeviationPenaltyBuilder(RewardBuilder[DefaultPoseDeviationPenal
     deviation_weights: dict[str, float]
     norm: xax.NormType = attrs.field(default="l2")
 
-    def __call__(self, data: BuilderData) -> DefaultPoseDeviationPenalty:
+    def __call__(self, physics_model: PhysicsModel) -> DefaultPoseDeviationPenalty:
         # Convert joint names to indices
         joint_indices = []
         default_positions_list = []
@@ -726,7 +732,7 @@ class DefaultPoseDeviationPenaltyBuilder(RewardBuilder[DefaultPoseDeviationPenal
 
         for joint_name, position in self.default_positions.items():
             try:
-                idx_range = data.mujoco_mappings.qpos_name_to_idx_range[joint_name]
+                idx_range = get_qpos_data_idxs_by_name(physics_model)[joint_name]
                 start_idx = idx_range[0]
                 joint_indices.append(start_idx)
                 default_positions_list.append(position)
@@ -762,15 +768,15 @@ class JointPosLimitPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
         # Get current joint positions
-        joint_positions = mjx_data_t_plus_1.qpos[self.joint_indices]
+        joint_positions = next_physics_state.qpos[self.joint_indices]
 
         # Calculate violations of soft limits
         lower_violations = -jnp.clip(joint_positions - self.soft_lower_limits, None, 0.0)
@@ -787,15 +793,16 @@ class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
     scale: float
     joint_limits: dict[str, tuple[float, float]]
 
-    def __call__(self, data: BuilderData) -> JointPosLimitPenalty:
+    def __call__(self, physics_model: PhysicsModel) -> JointPosLimitPenalty:
         # Convert joint names to indices
         joint_indices = []
         soft_lowers = []
         soft_uppers = []
+        qpos_name_to_idx = get_qpos_data_idxs_by_name(physics_model)
 
         for joint_name, (lower, upper) in self.joint_limits.items():
-            if joint_name in data.mujoco_mappings.qpos_name_to_idx_range:
-                idx_range = data.mujoco_mappings.qpos_name_to_idx_range[joint_name]
+            if joint_name in qpos_name_to_idx:
+                idx_range = qpos_name_to_idx[joint_name]
                 start_idx = idx_range[0]
                 joint_indices.append(start_idx)
                 soft_lowers.append(lower)
@@ -829,18 +836,18 @@ class SinusoidalFeetHeightReward(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
         # Get the height of the feet
-        left_foot_height = mjx_data_t_plus_1.geom_xpos[self.left_foot_geom_idx][2]
-        right_foot_height = mjx_data_t_plus_1.geom_xpos[self.right_foot_geom_idx][2]
+        left_foot_height = next_physics_state.geom_xpos[self.left_foot_geom_idx][2]
+        right_foot_height = next_physics_state.geom_xpos[self.right_foot_geom_idx][2]
         # Calculate the sinusoidal pattern
-        sin_pos = self.sinusoidal_feet_height(mjx_data_t_plus_1.time)
+        sin_pos = self.sinusoidal_feet_height(next_physics_state.time)
 
         sin_pos_left_mask = jnp.maximum(sin_pos, 0.0)
         sin_pos_right_mask = jnp.maximum(-sin_pos, 0.0)
@@ -878,15 +885,16 @@ class SinusoidalFeetHeightRewardBuilder(RewardBuilder[SinusoidalFeetHeightReward
     penalty_scale: float = attrs.field(default=0.2)
     error_clamp: float = attrs.field(default=0.5)
 
-    def __call__(self, data: BuilderData) -> SinusoidalFeetHeightReward:
+    def __call__(self, physics_model: PhysicsModel) -> SinusoidalFeetHeightReward:
+        geom_name_to_idx = get_geom_data_idx_by_name(physics_model)
         try:
-            left_foot_geom_idx = data.mujoco_mappings.geom_name_to_idx[self.left_foot_geom_name]
-            right_foot_geom_idx = data.mujoco_mappings.geom_name_to_idx[self.right_foot_geom_name]
+            left_foot_geom_idx = geom_name_to_idx[self.left_foot_geom_name]
+            right_foot_geom_idx = geom_name_to_idx[self.right_foot_geom_name]
         except KeyError:
             raise ValueError(
                 f"Foot geom '{self.left_foot_geom_name}' or "
                 f"'{self.right_foot_geom_name}' not found in model. "
-                f"Available geoms: {data.mujoco_mappings.geom_name_to_idx.keys()}"
+                f"Available geoms: {geom_name_to_idx.keys()}"
             )
 
         def sinusoidal_feet_height(time: Array) -> Array:
@@ -910,15 +918,15 @@ class DHForwardReward(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
         # Take just the x velocity component
-        x_delta = -mjx_data_t_plus_1.qvel[1]
+        x_delta = -next_physics_state.qvel[1]
         return x_delta
 
 
@@ -928,14 +936,14 @@ class XPosReward(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        x_pos = mjx_data_t_plus_1.qpos[0]
+        x_pos = next_physics_state.qpos[0]
         return x_pos
 
 
@@ -948,12 +956,12 @@ class DHHealthyReward(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
         return jnp.array(1.0)
 
@@ -967,14 +975,14 @@ class DHTerminationPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        height = mjx_data_t.qpos[2]
+        height = physics_state.qpos[2]
         is_unhealthy = jnp.where(height < self.healthy_z_lower, 1.0, 0.0)
         is_unhealthy = jnp.where(height > self.healthy_z_upper, 1.0, is_unhealthy)
         return is_unhealthy
@@ -986,11 +994,11 @@ class DHControlPenalty(Reward):
 
     def __call__(
         self,
-        action_t_minus_1: Array | None,
-        mjx_data_t: mjx.Data,
-        command_t: FrozenDict[str, Array],
-        action_t: Array,
-        mjx_data_t_plus_1: mjx.Data,
-        done_t: Array,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
     ) -> Array:
-        return jnp.sum(jnp.square(action_t))
+        return jnp.sum(jnp.square(action))

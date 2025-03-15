@@ -11,7 +11,7 @@ from jaxtyping import Array, PRNGKeyArray
 
 from ksim.actuators import MITPositionActuatorsBuilder
 from ksim.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
+from ksim.env.mjx_engine import MjxEnv, MjxEnvConfig
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.distributions import TanhGaussianDistribution
 from ksim.model.types import ModelInput
@@ -38,11 +38,7 @@ from ksim.rewards import (
     SinusoidalFeetHeightRewardBuilder,
 )
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations import (
-    PitchTooGreatTermination,
-    RollTooGreatTermination,
-    TerminationPenalty,
-)
+from ksim.terminations import PitchTooGreatTermination, RollTooGreatTermination
 
 NUM_OUTPUTS = 20
 
@@ -90,7 +86,6 @@ class KBot2Actor(eqx.Module, KSimModule):
         # concat because Gaussian-like distributions expect the parameters
         # to be mean concat std
         parametrization = jnp.concatenate([mean, std], axis=-1)
-        jax.debug.breakpoint()
 
         return parametrization
 

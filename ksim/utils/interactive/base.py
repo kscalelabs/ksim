@@ -11,7 +11,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 
-from ksim.env.base_env import BaseEnv
+from ksim.env.base_engine import BaseEnv
 from ksim.task.rl import RLTask
 
 matplotlib.use("Agg")  # Use non-interactive backend

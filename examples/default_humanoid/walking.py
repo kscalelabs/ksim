@@ -1,19 +1,24 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
 from dataclasses import dataclass
+from typing import Collection
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import mujoco
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
+from kscale.web.gen.api import JointMetadataOutput
+from mujoco import mjx
 
-from ksim.actuators import TorqueActuators
-from ksim.commands import LinearVelocityCommand
-from ksim.env.mjx_env import MjxEnv, MjxEnvConfig
+from ksim.actuators import MITPositionActuators
+from ksim.commands import Command, LinearVelocityCommand
+from ksim.env.data import PhysicsModel
+from ksim.env.mjx_engine import MjxEngine
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.distributions import TanhGaussianDistribution
-from ksim.model.types import ModelInput
+from ksim.model.types import ModelCarry
 from ksim.normalization import Normalizer, PassThrough, Standardize
 from ksim.observation import (
     ActuatorForceObservation,
@@ -21,11 +26,12 @@ from ksim.observation import (
     CenterOfMassVelocityObservation,
     LegacyPositionObservation,
     LegacyVelocityObservation,
+    Observation,
 )
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
-from ksim.rewards import DHForwardReward, DHHealthyReward
+from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations import UnhealthyTermination
+from ksim.terminations import Termination, UnhealthyTermination
 
 NUM_OUTPUTS = 21
 
@@ -34,9 +40,9 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
-    min_std: float
-    max_std: float
-    var_scale: float
+    min_std: float = eqx.static_field()
+    max_std: float = eqx.static_field()
+    var_scale: float = eqx.static_field()
 
     def __init__(
         self,
@@ -52,14 +58,15 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
             width_size=64,
             depth=5,
             key=key,
+            activation=jax.nn.relu,
         )
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
 
-    def forward(self, model_input: ModelInput) -> Array:
-        obs_vec = jnp.concatenate([v for v in model_input.obs.values()], axis=-1)
-        command_vec = jnp.concatenate([v for v in model_input.command.values()], axis=-1)
+    def forward(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None) -> Array:
+        obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
+        command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
         x = jnp.concatenate([obs_vec, command_vec], axis=-1)
         prediction = self.mlp(x)
 
@@ -76,6 +83,20 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
 
         return parametrization
 
+    def initial_carry(self) -> ModelCarry:
+        """No carry for now, but we could use this to initialize recurrence or action history."""
+        return None
+
+    def forward_accross_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+        """Forward pass across the episode (time, ...). No env dimension.
+
+        By default, we vmap the forward pass for efficiency. If you implement
+        recurrence, you should override this with an appropriate scan.
+        """
+        vmapped_forward = jax.vmap(self.forward, in_axes=(0, 0, None))
+        prediction, _ = vmapped_forward(obs, command, None)
+        return prediction
+
 
 class DefaultHumanoidCritic(eqx.Module, KSimModule):
     """Critic for the walking task."""
@@ -89,55 +110,54 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
             width_size=64,
             depth=5,
             key=key,
+            activation=jax.nn.relu,
         )
 
-    def forward(self, model_input: ModelInput) -> Array:
-        obs_vec = jnp.concatenate([v for v in model_input.obs.values()], axis=-1)
-        command_vec = jnp.concatenate([v for v in model_input.command.values()], axis=-1)
+    def forward(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None) -> Array:
+        obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
+        command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
         x = jnp.concatenate([obs_vec, command_vec], axis=-1)
         return self.mlp(x)
 
+    def initial_carry(self) -> ModelCarry:
+        """No carry for now, but we could use this to initialize recurrence."""
+        return None
 
-@dataclass
-class HumanoidWalkingConfig(PPOConfig, MjxEnvConfig):
-    """Combining configs for the humanoid walking task and fixing params."""
+    def forward_accross_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+        """Forward pass across the episode (time, ...). No env dimension.
 
-    robot_model_path: str = "examples/default_humanoid/scene.mjcf"
+        By default, we vmap the forward pass for efficiency. If you implement
+        recurrence, you should override this with an appropriate scan.
+        """
+        vmapped_forward = jax.vmap(self.forward, in_axes=(0, 0, None))
+        prediction, _ = vmapped_forward(obs, command, None)
+        return prediction
 
 
-class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
-    def get_environment(self) -> MjxEnv:
-        return MjxEnv(
-            self.config,
-            robot_model_path=self.config.robot_model_path,
-            robot_metadata_path=None,
-            actuators=TorqueActuators(),
-            terminations=[
-                UnhealthyTermination(
-                    unhealthy_z_lower=0.8,
-                    unhealthy_z_upper=2.0,
-                ),
-            ],
-            resets=[
+class HumanoidWalkingTask(PPOTask):
+
+    def get_model_and_metadata(self) -> tuple[PhysicsModel, dict[str, JointMetadataOutput]]:
+        mj_model = mujoco.MjModel.from_xml_path("examples/default_humanoid/scene.mjcf")
+        metadata = get_joint_metadata(mj_model)  # TODO: implement this function properly
+        mjx_model = mjx.Model(mj_model)
+        return mjx_model, metadata
+
+    def get_engine(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> MjxEngine:
+        return MjxEngine(
+            default_physics_model=physics_model,
+            resetters=[
                 RandomizeJointPositions(scale=0.01),
                 RandomizeJointVelocities(scale=0.01),
             ],
-            rewards=[
-                DHHealthyReward(
-                    scale=0.5,
-                ),
-                DHForwardReward(scale=0.125),
-            ],
-            observations=[
-                LegacyPositionObservation(exclude_xy=True),
-                LegacyVelocityObservation(),
-                CenterOfMassInertiaObservation(),
-                CenterOfMassVelocityObservation(),
-                ActuatorForceObservation(),
-            ],
-            commands=[
-                LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
-            ],
+            actuators=MITPositionActuators(physics_model, metadata),
+            dt=self.config.dt,
+            ctrl_dt=self.config.ctrl_dt,
+            solver=mjx.SolverType.CG,  # TODO: experiment with euler
+            iterations=6,
+            ls_iterations=6,
+            disableflags=mjx.DisableBit.EULERDAMP,
+            min_action_latency_step=0,
+            max_action_latency_step=0,
         )
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
@@ -153,17 +173,35 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingConfig]):
     def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
         return PassThrough()
 
-    def get_init_actor_carry(self) -> jnp.ndarray | None:
-        return None
+    # from ML: I haven't made up my mind on this API, but I generally think we should move away
+    # from the hidden builder pattern. Giving the data directly will help with this.
+    # In fact, we might even want to make this return a pure function.
+    def get_obs_generators(self, physics_model: PhysicsModel) -> Collection[Observation]:
+        return [
+            LegacyPositionObservation(exclude_xy=True),
+            LegacyVelocityObservation(),
+            CenterOfMassInertiaObservation(),
+            CenterOfMassVelocityObservation(),
+            ActuatorForceObservation(),
+        ]
 
-    def get_init_critic_carry(self) -> None:
-        return None
+    def get_command_generators(self) -> Collection[Command]:
+        return [LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3)]
+
+    def get_reward_generators(self, physics_model: PhysicsModel) -> Collection[Reward]:
+        return [
+            HeightReward(scale=1.0, height_target=0.7),
+            DHForwardReward(scale=0.2),
+        ]
+
+    def get_termination_generators(self, physics_model: PhysicsModel) -> Collection[Termination]:
+        return [UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0)]
 
 
 if __name__ == "__main__":
     # python -m examples.default_humanoid.walking
     HumanoidWalkingTask.launch(
-        HumanoidWalkingConfig(
+        PPOConfig(
             num_learning_epochs=8,
             num_env_states_per_minibatch=8192,
             num_minibatches=32,
@@ -176,8 +214,6 @@ if __name__ == "__main__":
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,
             # ksim-legacy original setup was dt=0.003 and ctrl_dt=0.012 ~ 83.33 hz
-            solver_iterations=6,
-            solver_ls_iterations=6,
             scale_rewards=False,
             gamma=0.97,
             lam=0.95,

@@ -76,5 +76,4 @@ class Standardize(Normalizer):
 
         new_mean, new_std = jax.tree_util.tree_map(update_leaf_stats, pytree, self.mean, self.std)
         res = eqx.tree_at(lambda t: (t.mean, t.std), self, (new_mean, new_std))
-        jax.debug.breakpoint()
         return res
