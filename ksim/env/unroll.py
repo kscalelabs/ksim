@@ -12,7 +12,7 @@ from jaxtyping import Array, PRNGKeyArray
 
 from ksim.commands import Command
 from ksim.env.base_engine import BaseEngine
-from ksim.env.data import PhysicsState, Transition
+from ksim.env.data import PhysicsData, PhysicsState, Transition
 from ksim.model.base import Agent
 from ksim.model.types import ModelInput, ModelRecurrence
 from ksim.normalization import Normalizer
@@ -32,6 +32,7 @@ class UnrollNaNDetector(NamedTuple):
 
 
 UnrollCarry = tuple[FrozenDict[str, Array], ModelRecurrence, PhysicsState]
+UnrollYs = tuple[Transition, UnrollNaNDetector, PhysicsData | None]
 # personal preference... don't like tuple-mania
 
 
@@ -49,15 +50,19 @@ def unroll_trajectory(
     termination_generators: Collection[Termination],
     num_steps: int,
     return_intermediate_physics_data: bool = False,
-) -> tuple[Transition, PhysicsState, UnrollNaNDetector]:
-    """Returns (stacked) transitions and final physics state."""
+) -> tuple[Transition, PhysicsState, UnrollNaNDetector, PhysicsData | None]:
+    """Returns (stacked) transitions and final physics state.
+
+    Key insight: unrolling really doesn't need the previous Transition since we
+    can safely reset command, and since prev action is in PhysicsState.
+    """
     initial_recurrence = agent.actor_model.initial_recurrence()
     initial_command = get_initial_commands(rng, command_generators=command_generators)
 
     def step_auto_reset_fn(
         carry: UnrollCarry,
         rng: PRNGKeyArray,
-    ) -> tuple[UnrollCarry, tuple[Transition, UnrollNaNDetector]]:
+    ) -> tuple[UnrollCarry, UnrollYs]:
         """Gets obs, gets action, steps, gets reward, gets done, repeat."""
         obs_rng, cmd_rng, act_rng, reset_rng = jax.random.split(rng, 4)
         prev_command, recurrence, physics_state = carry
@@ -103,7 +108,7 @@ def unroll_trajectory(
         )
 
         # there are a lot of places nans can occur... unlikely to occur outside
-        # next_physics_state, but better to check all of them until theyre gone.
+        # next_physics_state, but better to check all of them until they're gone
         nan_mask = UnrollNaNDetector(
             obs_has_nans=xax.pytree_has_nans(obs),
             command_has_nans=xax.pytree_has_nans(command),
@@ -114,16 +119,19 @@ def unroll_trajectory(
             reward_has_nans=xax.pytree_has_nans(rewards),
         )
 
-        # we usually don't want to return physics data
-        return (command, next_recurrence, next_physics_state), (transition, nan_mask)
+        # if is fine since condition will be static at runtime
+        if return_intermediate_physics_data:
+            return (command, next_recurrence, next_physics_state), (transition, nan_mask, next_physics_state)
+        else:
+            return (command, next_recurrence, next_physics_state), (transition, nan_mask, None)
 
-    (_, _, next_physics_state), (transition, nan_mask) = jax.lax.scan(
+    (_, _, final_physics_state), (transition, nan_mask, intermediate_physics_data) = jax.lax.scan(
         step_auto_reset_fn,
         (initial_command, initial_recurrence, physics_state),
         jax.random.split(rng, num_steps),
     )
 
-    return transition, next_physics_state, nan_mask
+    return transition, final_physics_state, nan_mask, intermediate_physics_data
 
 
 def get_observation(
