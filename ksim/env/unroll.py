@@ -1,6 +1,7 @@
 """Minimal API that interfaces with env to unroll trajectories."""
 
 from abc import ABC, abstractmethod
+from dataclasses import replace
 from typing import Collection, NamedTuple
 
 import chex
@@ -59,11 +60,11 @@ def unroll_trajectory(
     initial_recurrence = agent.actor_model.initial_recurrence()
     initial_command = get_initial_commands(rng, command_generators=command_generators)
 
-    def step_auto_reset_fn(
+    def state_transition(
         carry: UnrollCarry,
         rng: PRNGKeyArray,
     ) -> tuple[UnrollCarry, UnrollYs]:
-        """Gets obs, gets action, steps, gets reward, gets done, repeat."""
+        """Constructs transition, resets if needed."""
         obs_rng, cmd_rng, act_rng, reset_rng = jax.random.split(rng, 4)
         prev_command, recurrence, physics_state = carry
         prev_action = physics_state.most_recent_action
@@ -126,9 +127,22 @@ def unroll_trajectory(
             return (command, next_recurrence, next_physics_state), (transition, nan_mask, None)
 
     (_, _, final_physics_state), (transition, nan_mask, intermediate_physics_data) = jax.lax.scan(
-        step_auto_reset_fn,
+        state_transition,
         (initial_command, initial_recurrence, physics_state),
         jax.random.split(rng, num_steps),
+    )
+
+    # post accumulating rewards (the only thing that makes sense to accumulate)
+    post_accumulated_reward_components = post_accumulate_rewards(
+        transition.reward_components,
+        transition.done,
+        reward_generators=reward_generators,
+    )
+    post_accumulated_rewards = jax.tree_util.tree_reduce(jnp.add, post_accumulated_reward_components.values())
+    transition = replace(
+        transition,
+        reward_components=post_accumulated_reward_components,
+        reward=post_accumulated_rewards,
     )
 
     return transition, final_physics_state, nan_mask, intermediate_physics_data
@@ -181,6 +195,22 @@ def get_rewards(
         )
         rewards[name] = reward_val
     return FrozenDict(rewards)
+
+
+def post_accumulate_rewards(
+    reward_components: FrozenDict[str, Array],
+    done: Array,
+    *,
+    reward_generators: Collection[Reward],
+) -> FrozenDict[str, Array]:
+    """Post-accumulate rewards."""
+    for reward_generator in reward_generators:
+        original_reward = reward_components[reward_generator.reward_name]
+        assert isinstance(original_reward, Array)
+        reward_val = reward_generator.post_accumulate(original_reward, done)
+        reward_components[reward_generator.reward_name] = reward_val
+
+    return reward_components
 
 
 def get_terminations(

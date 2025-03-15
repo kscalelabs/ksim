@@ -1,14 +1,17 @@
 """Base Types for Environments."""
 
-from typing import NamedTuple
+from dataclasses import dataclass
 
+import jax
 import mujoco
 from flax.core import FrozenDict
 from jaxtyping import Array
 from mujoco import mjx
 
 
-class Transition(NamedTuple):
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Transition:
     """Base environment state class."""
 
     obs: FrozenDict[str, Array]  # <- state
@@ -26,7 +29,9 @@ PhysicsData = mjx.Data | mujoco.MjData
 PhysicsModel = mjx.Model | mujoco.MjModel
 
 
-class PhysicsState(NamedTuple):
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class PhysicsState:
     """Everything you need for the engine to take an action and step physics."""
 
     most_recent_action: Array  # since ctrl_dt > dt, we need this to simulate actuator logic
