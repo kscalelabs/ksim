@@ -855,7 +855,7 @@ class MjxEnv(BaseEnv):
 
                 except Exception as ex:
                     logger.error("Error during viewer sync: %s", str(ex))
-                logger.error("Traceback: %s", traceback.format_exc())
+                    logger.error("Traceback: %s", traceback.format_exc())
 
         # Stack environment states along time dimension (T, E, ...)
         try:
