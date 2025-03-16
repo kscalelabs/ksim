@@ -11,13 +11,13 @@ import optax
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from xax.nn.distributions import GaussianDistribution
 
 from ksim.env.data import Transition
 from ksim.model.base import ActorCriticAgent
-from ksim.model.distributions import GaussianDistribution
 from ksim.normalization import Normalizer
 from ksim.task.rl import RLConfig, RLTask
-from ksim.task.types import PPORolloutTimeStats, RolloutTimeStats
+from ksim.task.types import PPORolloutTimeStats, RLDataset, RolloutTimeStats
 
 
 def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
@@ -90,6 +90,128 @@ def compute_advantages_and_value_targets(
     return advantages, value_targets
 
 
+def clipped_value_loss(
+    target_values: Array,
+    values: Array,
+    value_targets: Array,
+    clip_param: float,
+) -> Array:
+    """Compute the clipped value loss."""
+    value_clipped = target_values + (values - target_values).clip(-clip_param, clip_param)
+    clipped_error = value_clipped - value_targets
+    error = values - value_targets
+    return jnp.maximum(error**2, clipped_error**2).mean()
+
+
+def compute_ppo_loss(
+    agent: ActorCriticAgent,
+    transitions: Transition,
+    rollout_time_stats: PPORolloutTimeStats,
+    obs_normalizer: Normalizer,
+    cmd_normalizer: Normalizer,
+    rng: PRNGKeyArray,
+    *,
+    normalize_advantage: bool = True,
+    normalize_advantage_in_minibatch: bool = False,
+    eps: float = 1e-6,
+    clip_param: float = 0.2,
+    value_loss_coef: float = 0.5,
+    entropy_coef: float = 0.008,
+    use_clipped_value_loss: bool = True,
+) -> tuple[Array, dict[str, Array]]:
+    """Compute the PPO loss.
+
+    Note: minibatches will be shape: (time, env, ...). Depending on the
+    sampling function, these may be contiguous along the time dim.
+    """
+    # get the log probs of the current model
+    normalized_obs = obs_normalizer(transitions.obs)
+    normalized_cmd = cmd_normalizer(transitions.command)
+    prediction = jax.vmap(agent.actor_model.batched_forward_across_time, in_axes=(0, 0))(
+        normalized_obs, normalized_cmd
+    )  # TODO: maybe assume it'll be BT, vmap this... this will break otherwise...
+    values = jax.vmap(agent.critic_model.batched_forward_across_time, in_axes=(0, 0))(normalized_obs, normalized_cmd)
+    values = values.squeeze(axis=-1)
+    log_probs_per_action = agent.action_distribution.log_prob(prediction, transitions.action)
+    log_probs = jnp.sum(log_probs_per_action, axis=-1)
+
+    log_prob_diff = log_probs - rollout_time_stats.initial_action_log_probs
+    ratio = jnp.exp(log_prob_diff)
+
+    # get the state-value estimates
+    advantages = rollout_time_stats.advantages
+    value_targets = rollout_time_stats.value_targets
+
+    # Andrychowicz (2021) did not find any benefit in minibatch normalization.
+    if normalize_advantage and normalize_advantage_in_minibatch:
+        advantages = (advantages - advantages.mean()) / (advantages.std() + eps)
+
+    # Policy loss, with clipping
+    clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
+    policy_objective = jnp.mean(
+        jnp.minimum(
+            ratio * advantages,
+            clipped_ratio * advantages,
+        )
+    )
+
+    # value loss term
+    value_mse = jax.lax.cond(
+        use_clipped_value_loss,
+        lambda: 0.5
+        * clipped_value_loss(
+            target_values=rollout_time_stats.initial_values,
+            values=values,
+            value_targets=value_targets,
+            clip_param=clip_param,
+        ),
+        lambda: 0.5 * jnp.mean((value_targets - values) ** 2),
+    )
+    value_objective = value_loss_coef * value_mse
+
+    # Entropy bonus term.
+    entropies = agent.action_distribution.entropy(prediction, rng)
+    entropy_objective = entropy_coef * jnp.mean(entropies)
+
+    total_objective = policy_objective - value_objective + entropy_objective
+    total_loss = -total_objective
+
+    metrics_to_log: dict[str, Array] = {
+        "policy_objective": policy_objective,
+        "value_objective": value_objective,
+        "entropy_objective": entropy_objective,
+        "total_objective": total_objective,
+        "ratio_mean": jnp.mean(ratio),
+        "ratio_std": jnp.std(ratio),
+        "ratio_max": jnp.max(ratio),
+        "ratio_min": jnp.min(ratio),
+        "log_prob_diff_mean": jnp.mean(log_prob_diff),
+        "advantage_norm_mean": jnp.mean(rollout_time_stats.advantages),
+        "action_mean": jnp.mean(transitions.action),
+        "action_std": jnp.std(transitions.action),
+        "action_max": jnp.max(transitions.action),
+        "action_min": jnp.min(transitions.action),
+        "prediction_mean": jnp.mean(prediction),
+        "prediction_std": jnp.std(prediction),
+        "log_prob_mean": jnp.mean(log_probs),
+        "log_prob_max": jnp.max(log_probs),
+        "log_prob_min": jnp.min(log_probs),
+        "values_std": jnp.std(values),
+        "values_mean": jnp.mean(values),
+        "obs_nans_ratio": xax.compute_nan_ratio(transitions.obs),
+        "action_nans_ratio": xax.compute_nan_ratio(transitions.action),
+    }
+
+    if isinstance(agent.action_distribution, GaussianDistribution):
+        mu, sigma = agent.action_distribution.get_mean_std(prediction)
+        metrics_to_log["prediction_mu_mean"] = jnp.mean(mu)
+        metrics_to_log["prediction_sigma_mean"] = jnp.mean(sigma)
+        metrics_to_log["prediction_sigma_min"] = jnp.min(sigma)
+        metrics_to_log["prediction_sigma_max"] = jnp.max(sigma)
+
+    return total_loss, metrics_to_log
+
+
 @jax.tree_util.register_dataclass
 @dataclass
 class PPOConfig(RLConfig):
@@ -148,6 +270,12 @@ Config = TypeVar("Config", bound=PPOConfig)
 class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
 
+    def compute_loss(self, model: PyTree, batch: Any, output: Any) -> Array:  # noqa: ANN401
+        raise NotImplementedError(
+            "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
+            "PPO tasks use model_update and loss_metrics_grads instead."
+        )
+
     ###########################
     # Potentially Overridable #
     ###########################
@@ -171,13 +299,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Calculating advantages and returns for a rollout."""
         normalized_obs = obs_normalizer(transitions.obs)
         normalized_cmd = cmd_normalizer(transitions.command)
-        prediction = agent.actor_model.forward_across_episode(normalized_obs, normalized_cmd)  # TODO: vmap this...
-        initial_values = agent.critic_model.forward_across_episode(normalized_obs, normalized_cmd).squeeze(axis=-1)
 
-        initial_action_log_probs = agent.action_distribution.log_prob(
+        prediction = jax.vmap(agent.actor_model.batched_forward_across_time, in_axes=(0, 0))(
+            normalized_obs, normalized_cmd
+        )
+        initial_values = jax.vmap(agent.critic_model.batched_forward_across_time, in_axes=(0, 0))(
+            normalized_obs, normalized_cmd
+        )
+        initial_values = initial_values.squeeze(axis=-1)
+
+        initial_action_log_probs_per_action = agent.action_distribution.log_prob(
             parameters=prediction,
             actions=transitions.action,
         )
+        initial_action_log_probs = jnp.sum(initial_action_log_probs_per_action, axis=-1)
 
         advantages, value_targets = compute_advantages_and_value_targets(
             values=initial_values,
@@ -206,35 +341,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             returns=jax.lax.stop_gradient(returns),
         )
 
-    def _clipped_value_loss(
-        self,
-        target_values: Array,
-        values: Array,
-        value_targets: Array,
-    ) -> Array:
-        """Compute the clipped value loss."""
-        value_clipped = target_values + (values - target_values).clip(-self.config.clip_param, self.config.clip_param)
-        clipped_error = value_clipped - value_targets
-        error = values - value_targets
-        return jnp.maximum(error**2, clipped_error**2).mean()
-
     def model_update(
         self,
         agent: ActorCriticAgent,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        minibatch: Transition,
-        rollout_time_stats: RolloutTimeStats,
+        minibatch: RLDataset,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        assert isinstance(rollout_time_stats, PPORolloutTimeStats)
         loss_val, metrics, grads = self.loss_metrics_grads(
             agent=agent,
             minibatch=minibatch,
-            rollout_time_stats=rollout_time_stats,
             obs_normalizer=obs_normalizer,  # noqa: F821 TODO fix
             cmd_normalizer=cmd_normalizer,  # noqa: F821 TODO fix
             rng=rng,
@@ -242,7 +362,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # updates and opt_state have complex types that are hard to type properly. TODO: fix.
         updates, new_opt_state = optimizer.update(grads, opt_state, agent)  # type: ignore[operator]
-        new_agent = optax.apply_updates(agent, updates)  # type: ignore[operator]
+        new_agent = eqx.apply_updates(agent, updates)  # TODO: let's build our own debuggable apply_updates
 
         # adding grad and loss to metrics
         grad_norm = optax.global_norm(grads)
@@ -253,131 +373,36 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return new_agent, new_opt_state, loss_val, frozen_metrics
 
-    def compute_ppo_loss(
-        self,
-        agent: ActorCriticAgent,
-        minibatch: Transition,
-        rollout_time_stats: PPORolloutTimeStats,
-        obs_normalizer: Normalizer,
-        cmd_normalizer: Normalizer,
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, dict[str, Array]]:
-        """Compute the PPO loss.
-
-        Note: minibatches will be shape: (time, env, ...). Depending on the
-        sampling function, these may be contiguous along the time dim.
-        """
-        # get the log probs of the current model
-        normalized_obs = obs_normalizer(minibatch.obs)
-        normalized_cmd = cmd_normalizer(minibatch.command)
-        prediction = agent.actor_model.forward_across_episode(
-            normalized_obs, normalized_cmd
-        )  # TODO: maybe assume it'll be BT, vmap this... this will break otherwise...
-        values = agent.critic_model.forward_across_episode(normalized_obs, normalized_cmd).squeeze(axis=-1)
-        log_probs = agent.action_distribution.log_prob(prediction, minibatch.action)
-
-        log_prob_diff = log_probs - rollout_time_stats.initial_action_log_probs
-        ratio = jnp.exp(log_prob_diff)
-
-        # get the state-value estimates
-        advantages = rollout_time_stats.advantages
-        value_targets = rollout_time_stats.value_targets
-
-        # Andrychowicz (2021) did not find any benefit in minibatch normalization.
-        if self.config.normalize_advantage and self.config.normalize_advantage_in_minibatch:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + self.config.eps)
-
-        # Policy loss, with clipping
-        clipped_ratio = jnp.clip(ratio, 1 - self.config.clip_param, 1 + self.config.clip_param)
-        policy_objective = jnp.mean(
-            jnp.minimum(
-                ratio * advantages,
-                clipped_ratio * advantages,
-            )
-        )
-
-        # value loss term
-        value_mse = jax.lax.cond(
-            self.config.use_clipped_value_loss,
-            lambda: 0.5
-            * self._clipped_value_loss(
-                target_values=rollout_time_stats.initial_values,
-                values=values,
-                value_targets=value_targets,
-            ),
-            lambda: 0.5 * jnp.mean((value_targets - values) ** 2),
-        )
-        value_objective = self.config.value_loss_coef * value_mse
-
-        # Entropy bonus term.
-        entropies = agent.action_distribution.entropy(prediction, rng)
-        entropy_objective = self.config.entropy_coef * jnp.mean(entropies)
-
-        total_objective = policy_objective - value_objective + entropy_objective
-        total_loss = -total_objective
-
-        metrics_to_log: dict[str, Array] = {
-            "policy_objective": policy_objective,
-            "value_objective": value_objective,
-            "entropy_objective": entropy_objective,
-            "total_objective": total_objective,
-            "ratio_mean": jnp.mean(ratio),
-            "ratio_std": jnp.std(ratio),
-            "ratio_max": jnp.max(ratio),
-            "ratio_min": jnp.min(ratio),
-            "log_prob_diff_mean": jnp.mean(log_prob_diff),
-            "advantage_norm_mean": jnp.mean(rollout_time_stats.advantages),
-            "action_mean": jnp.mean(minibatch.action),
-            "action_std": jnp.std(minibatch.action),
-            "action_max": jnp.max(minibatch.action),
-            "action_min": jnp.min(minibatch.action),
-            "prediction_mean": jnp.mean(prediction),
-            "prediction_std": jnp.std(prediction),
-            "log_prob_mean": jnp.mean(log_probs),
-            "log_prob_max": jnp.max(log_probs),
-            "log_prob_min": jnp.min(log_probs),
-            "values_std": jnp.std(values),
-            "values_mean": jnp.mean(values),
-            "obs_nans_ratio": xax.compute_nan_ratio(minibatch.obs),
-            "action_nans_ratio": xax.compute_nan_ratio(minibatch.action),
-        }
-
-        if isinstance(agent.action_distribution, GaussianDistribution):
-            mu, sigma = agent.action_distribution.get_mean_std(prediction)
-            metrics_to_log["prediction_mu_mean"] = jnp.mean(mu)
-            metrics_to_log["prediction_sigma_mean"] = jnp.mean(sigma)
-            metrics_to_log["prediction_sigma_min"] = jnp.min(sigma)
-            metrics_to_log["prediction_sigma_max"] = jnp.max(sigma)
-
-        return total_loss, metrics_to_log
-
-    def compute_loss(self, model: PyTree, batch: Any, output: Any) -> Array:  # noqa: ANN401
-        raise NotImplementedError(
-            "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
-            "PPO tasks use model_update and loss_metrics_grads instead."
-        )
-
     def loss_metrics_grads(
         self,
         agent: ActorCriticAgent,
-        minibatch: Transition,
-        rollout_time_stats: PPORolloutTimeStats,
+        minibatch: RLDataset,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array], PyTree]:
-        """Jitted version of value_and_grad computation."""
+        """Value_and_grad computation. with metrics"""
 
         def loss_fn(agent: ActorCriticAgent) -> tuple[Array, dict[str, Array]]:
             """Agent is a PyTree and can be optimized via optax."""
-            return self.compute_ppo_loss(
+            rollout_time_stats = minibatch.rollout_time_stats
+            assert isinstance(rollout_time_stats, PPORolloutTimeStats)
+            return compute_ppo_loss(
                 agent=agent,
-                minibatch=minibatch,
+                transitions=minibatch.transitions,
                 rollout_time_stats=rollout_time_stats,
                 obs_normalizer=obs_normalizer,
                 cmd_normalizer=cmd_normalizer,
                 rng=rng,
+                normalize_advantage=self.config.normalize_advantage,
+                normalize_advantage_in_minibatch=self.config.normalize_advantage_in_minibatch,
+                eps=self.config.eps,
+                clip_param=self.config.clip_param,
+                value_loss_coef=self.config.value_loss_coef,
+                entropy_coef=self.config.entropy_coef,
+                use_clipped_value_loss=self.config.use_clipped_value_loss,
             )
 
-        (loss_val, metrics), grads = jax.value_and_grad(loss_fn, has_aux=True)(agent)
+        # TODO: let's own our own debuggable filter value and grad
+        (loss_val, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(agent)
         return loss_val, metrics, grads

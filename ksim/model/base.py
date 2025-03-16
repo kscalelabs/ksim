@@ -7,11 +7,12 @@ expects a `ModelInput` and returns an `Array`.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+import equinox as eqx
 import jax
 from flax.core import FrozenDict
 from jaxtyping import Array
+from xax.nn.distributions import ActionDistribution
 
-from ksim.model.distributions import ActionDistribution
 from ksim.model.types import ModelCarry
 
 
@@ -38,7 +39,7 @@ class KSimModule(ABC):
         """
         return None
 
-    def forward_across_episode(self, obs: Array, command: Array) -> Array:
+    def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement
@@ -65,4 +66,4 @@ class ActorCriticAgent(Agent):
 
     critic_model: KSimModule
     actor_model: KSimModule
-    action_distribution: ActionDistribution
+    action_distribution: ActionDistribution = eqx.static_field()

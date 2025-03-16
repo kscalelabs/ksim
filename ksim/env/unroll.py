@@ -142,8 +142,9 @@ def unroll_trajectory(
         reward_components=post_accumulated_reward_components,
         reward=post_accumulated_rewards,
     )
+    has_nans_any = jax.tree_util.tree_map(jnp.any, nan_mask)
 
-    return transition, final_physics_state, nan_mask, intermediate_physics_data
+    return transition, final_physics_state, has_nans_any, intermediate_physics_data
 
 
 def get_observation(

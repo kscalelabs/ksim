@@ -527,12 +527,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             cmd_normalizer=cmd_normalizer,
         )
 
-        (agent, opt_state, reshuffle_rng), metrics = jax.lax.scan(
-            partial_fn,
-            (agent, opt_state, reshuffle_rng),
-            None,
-            length=self.config.num_learning_epochs,
+        # for now just do a single update
+        new_agent, new_opt_state, loss_val, metrics = self.model_update(
+            agent=agent,
+            optimizer=optimizer,
+            opt_state=opt_state,
+            minibatch=dataset_ET,
+            obs_normalizer=obs_normalizer,
+            cmd_normalizer=cmd_normalizer,
+            rng=reshuffle_rng,
         )
+
+        # (agent, opt_state, reshuffle_rng), metrics = jax.lax.scan(
+        #     partial_fn,
+        #     (agent, opt_state, reshuffle_rng),
+        #     None,
+        #     length=self.config.num_learning_epochs,
+        # )
         # metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
         return (agent, opt_state, reshuffle_rng), metrics
 
@@ -602,7 +613,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             start_time = time.time()
             rollout_rng, reshuffle_rng, train_rng = jax.random.split(train_rng, 3)
             rollout_rng_E = jax.random.split(rollout_rng, self.config.num_envs)
-            transitions_ET, state_E, has_nans, _ = unroll_trajectories_fn(
+            transitions_ET, state_E, has_nans_E, _ = unroll_trajectories_fn(
                 state_E,
                 rollout_rng_E,
                 agent,
@@ -616,22 +627,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.num_rollout_steps_per_env,
                 False,
             )
+            has_nans = jax.tree_util.tree_map(jnp.any, has_nans_E)
 
             rollout_time = time.time() - start_time
             logger.info("Rollout time: %s seconds", rollout_time)
 
             start_time = time.time()
-            # getting loss components that are constant across minibatches
-            # (e.g. advantages) and flattening them for efficiency, thus
-            # the name "rollout_time" loss components
-            rollout_stats_ET = jax.vmap(
-                self.get_rollout_time_stats,
-                in_axes=(0, None, None, None),
-            )(
-                transitions_ET,
-                agent,
-                obs_normalizer,
-                cmd_normalizer,
+            rollout_stats_ET = self.get_rollout_time_stats(
+                transitions=transitions_ET,
+                agent=agent,
+                obs_normalizer=obs_normalizer,
+                cmd_normalizer=cmd_normalizer,
             )
 
             dataset_ET = RLDataset(

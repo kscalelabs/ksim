@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import optax
+import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
@@ -17,7 +18,6 @@ from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.env.mjx_engine import MjxEngine
 from ksim.model.base import ActorCriticAgent, KSimModule
-from ksim.model.distributions import TanhGaussianDistribution
 from ksim.model.types import ModelCarry
 from ksim.normalization import Normalizer, PassThrough
 from ksim.observation import (
@@ -61,7 +61,9 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
         self.max_std = max_std
         self.var_scale = var_scale
 
-    def forward(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None) -> Array:
+    def forward(
+        self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None
+    ) -> tuple[Array, ModelCarry | None]:
         obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
         command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
         assert obs_vec.ndim == command_vec.ndim
@@ -80,14 +82,14 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
         # to be mean concat std
         parametrization = jnp.concatenate([mean, std], axis=-1)
 
-        return parametrization, carry
+        return parametrization, None
 
     # TODO: we should move all this to RL and away from the model definition
     def initial_carry(self) -> ModelCarry:
         """No carry for now, but we could use this to initialize recurrence or action history."""
         return None
 
-    def forward_across_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+    def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement
@@ -113,17 +115,19 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
             activation=jax.nn.relu,
         )
 
-    def forward(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None) -> Array:
+    def forward(
+        self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None
+    ) -> tuple[Array, ModelCarry | None]:
         obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
         command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
         x = jnp.concatenate([obs_vec, command_vec], axis=-1)
-        return self.mlp(x)
+        return self.mlp(x), None
 
     def initial_carry(self) -> ModelCarry:
         """No carry for now, but we could use this to initialize recurrence."""
         return None
 
-    def forward_across_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+    def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement
@@ -183,9 +187,12 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
         return ActorCriticAgent(
             critic_model=DefaultHumanoidCritic(key),
             actor_model=DefaultHumanoidActor(key, min_std=0.01, max_std=1.0, var_scale=1.0),
-            action_distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
+            action_distribution=xax.nn.distributions.TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
+    # from ML: I haven't made up my mind on this API, but I generally think we should move away
+    # from the hidden builder pattern. Giving the data directly will help with this.
+    # In fact, we might even want to make this return a pure function.
     def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer:
         # TODO: bring back standard normalization
         return PassThrough()
@@ -193,9 +200,6 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
     def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
         return PassThrough()
 
-    # from ML: I haven't made up my mind on this API, but I generally think we should move away
-    # from the hidden builder pattern. Giving the data directly will help with this.
-    # In fact, we might even want to make this return a pure function.
     def get_obs_generators(self, physics_model: PhysicsModel) -> Collection[Observation]:
         return [
             # LegacyPositionObservation(exclude_xy=True),

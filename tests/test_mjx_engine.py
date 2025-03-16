@@ -1,11 +1,9 @@
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mujoco
 import pytest
 from jax import random
 from mujoco import mjx
-from xax.utils.pytree import pytree_has_nans
 
 from ksim.actuators import TorqueActuators
 from ksim.env.data import PhysicsState

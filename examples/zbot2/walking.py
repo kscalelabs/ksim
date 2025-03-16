@@ -12,16 +12,13 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 from mujoco_scenes.mjcf import load_mjmodel
+from xax.nn.distributions import TanhGaussianDistribution
 
 from ksim.actuators import TorqueActuators
-from ksim.commands import (
-    Command,
-    LinearVelocityCommand,
-)
+from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.env.mjx_engine import MjxEngine
 from ksim.model.base import ActorCriticAgent, KSimModule
-from ksim.model.distributions import TanhGaussianDistribution
 from ksim.model.types import ModelCarry
 from ksim.normalization import Normalizer, PassThrough, Standardize
 from ksim.observation import (
@@ -29,20 +26,10 @@ from ksim.observation import (
     LegacyVelocityObservation,
     Observation,
 )
-from ksim.resets import (
-    RandomizeJointPositions,
-    RandomizeJointVelocities,
-)
-from ksim.rewards import (
-    DHForwardReward,
-    HeightReward,
-    Reward,
-)
+from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
+from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations import (
-    Termination,
-    UnhealthyTermination,
-)
+from ksim.terminations import Termination, UnhealthyTermination
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +90,7 @@ class ZBot2Actor(eqx.Module, KSimModule):
         """No carry for now, but we could use this to initialize recurrence or action history."""
         return None
 
-    def forward_across_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+    def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement
@@ -139,7 +126,7 @@ class ZBot2Critic(eqx.Module, KSimModule):
         """No carry for now, but we could use this to initialize recurrence."""
         return None
 
-    def forward_across_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+    def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement
