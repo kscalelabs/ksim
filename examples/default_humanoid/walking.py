@@ -116,6 +116,8 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
     def forward(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None) -> Array:
         obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
         command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
+        assert obs_vec.ndim == command_vec.ndim
+
         x = jnp.concatenate([obs_vec, command_vec], axis=-1)
         return self.mlp(x)
 
@@ -130,8 +132,7 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
         recurrence, you should override this with an appropriate scan.
         """
         vmapped_forward = jax.vmap(self.forward, in_axes=(0, 0, None))
-        prediction, _ = vmapped_forward(obs, command, None)
-        return prediction
+        return vmapped_forward(obs, command, None)
 
 
 class HumanoidWalkingTask(PPOTask[PPOConfig]):
@@ -224,9 +225,9 @@ if __name__ == "__main__":
         PPOConfig(
             compile_unroll=False,
             num_learning_epochs=8,
-            num_env_states_per_minibatch=2,
+            num_env_states_per_minibatch=6,
             num_minibatches=1,
-            num_envs=1,
+            num_envs=2,
             dt=0.005,
             ctrl_dt=0.02,
             learning_rate=1e-5,

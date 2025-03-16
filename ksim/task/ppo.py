@@ -17,7 +17,7 @@ from ksim.model.base import ActorCriticAgent
 from ksim.model.distributions import GaussianDistribution
 from ksim.normalization import Normalizer
 from ksim.task.rl import RLConfig, RLTask
-from ksim.task.types import PPORolloutTimeStats, RolloutTimeStats
+from ksim.task.types import PPORolloutTimeStats, RLDataset, RolloutTimeStats
 
 
 def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
@@ -160,7 +160,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         cmd_ET: Array,
     ) -> Array: ...
 
-    @eqx.filter_jit  # TODO: implement filter-like jit in xax
+    # @eqx.filter_jit  # TODO: implement filter-like jit in xax
     def get_rollout_time_stats(
         self,
         transitions: Transition,
@@ -171,8 +171,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Calculating advantages and returns for a rollout."""
         normalized_obs = obs_normalizer(transitions.obs)
         normalized_cmd = cmd_normalizer(transitions.command)
-        prediction = agent.actor_model.forward_across_episode(normalized_obs, normalized_cmd)  # TODO: vmap this...
-        initial_values = agent.critic_model.forward_across_episode(normalized_obs, normalized_cmd).squeeze(axis=-1)
+
+        prediction = agent.actor_model.forward_across_episode(normalized_obs, normalized_cmd)
+        initial_values = agent.critic_model.forward_across_episode(normalized_obs, normalized_cmd)
 
         initial_action_log_probs = agent.action_distribution.log_prob(
             parameters=prediction,
@@ -224,17 +225,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         minibatch: Transition,
-        rollout_time_stats: RolloutTimeStats,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        assert isinstance(rollout_time_stats, PPORolloutTimeStats)
+        assert isinstance(minibatch.rollout_time_stats, PPORolloutTimeStats)
         loss_val, metrics, grads = self.loss_metrics_grads(
             agent=agent,
             minibatch=minibatch,
-            rollout_time_stats=rollout_time_stats,
             obs_normalizer=obs_normalizer,  # noqa: F821 TODO fix
             cmd_normalizer=cmd_normalizer,  # noqa: F821 TODO fix
             rng=rng,
@@ -255,9 +254,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
     def compute_ppo_loss(
         self,
-        agent: ActorCriticAgent,
-        minibatch: Transition,
-        rollout_time_stats: PPORolloutTimeStats,
+        params: ActorCriticAgent,
+        static: ActorCriticAgent,
+        minibatch: RLDataset,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
@@ -267,15 +266,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Note: minibatches will be shape: (time, env, ...). Depending on the
         sampling function, these may be contiguous along the time dim.
         """
+        agent = eqx.combine(params, static)
+        rollout_time_stats = minibatch.rollout_time_stats
+        transitions = minibatch.transitions
         # get the log probs of the current model
-        normalized_obs = obs_normalizer(minibatch.obs)
-        normalized_cmd = cmd_normalizer(minibatch.command)
-        prediction = agent.actor_model.forward_across_episode(
-            normalized_obs, normalized_cmd
-        )  # TODO: maybe assume it'll be BT, vmap this... this will break otherwise...
-        values = agent.critic_model.forward_across_episode(normalized_obs, normalized_cmd).squeeze(axis=-1)
-        log_probs = agent.action_distribution.log_prob(prediction, minibatch.action)
-
+        normalized_obs = obs_normalizer(transitions.obs)
+        normalized_cmd = cmd_normalizer(transitions.command)
+        prediction = agent.actor_model.forward_across_episode(normalized_obs, normalized_cmd)
+        values = agent.critic_model.forward_across_episode(normalized_obs, normalized_cmd)
+        log_probs = agent.action_distribution.log_prob(prediction, transitions.action)
         log_prob_diff = log_probs - rollout_time_stats.initial_action_log_probs
         ratio = jnp.exp(log_prob_diff)
 
@@ -361,23 +360,24 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         self,
         agent: ActorCriticAgent,
         minibatch: Transition,
-        rollout_time_stats: PPORolloutTimeStats,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array], PyTree]:
         """Jitted version of value_and_grad computation."""
 
-        def loss_fn(agent: ActorCriticAgent) -> tuple[Array, dict[str, Array]]:
+        def loss_fn(params: ActorCriticAgent, static: ActorCriticAgent) -> tuple[Array, dict[str, Array]]:
             """Agent is a PyTree and can be optimized via optax."""
             return self.compute_ppo_loss(
-                agent=agent,
+                params=params,
+                static=static,
                 minibatch=minibatch,
-                rollout_time_stats=rollout_time_stats,
                 obs_normalizer=obs_normalizer,
                 cmd_normalizer=cmd_normalizer,
                 rng=rng,
             )
 
-        (loss_val, metrics), grads = jax.value_and_grad(loss_fn, has_aux=True)(agent)
+        # pfb30: required by eqx setup
+        agent_params, agent_static = eqx.partition(agent, eqx.is_array)
+        (loss_val, metrics), grads = jax.value_and_grad(loss_fn, has_aux=True)(agent_params, agent_static)
         return loss_val, metrics, grads

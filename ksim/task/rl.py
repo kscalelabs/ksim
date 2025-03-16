@@ -445,6 +445,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Perform a single minibatch update step."""
         agent, opt_state, rng = training_state
+
         minibatch_BT = self.get_minibatch(dataset_ET, minibatch_idx)
         agent, opt_state, _, metrics = self.model_update(
             agent=agent,
