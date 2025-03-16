@@ -39,7 +39,6 @@ UnrollYs = tuple[Transition, UnrollNaNDetector, PhysicsData | None]
 def unroll_trajectory(
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
-    *,
     agent: Agent,
     obs_normalizer: Normalizer,
     cmd_normalizer: Normalizer,
@@ -71,10 +70,7 @@ def unroll_trajectory(
         command = get_commands(prev_command, physics_state, cmd_rng, command_generators=command_generators)
 
         # we still return unnormalized obs and command to calculate normalization statistics
-        # TODO: move vmap to the model class
-        # forward_fn = jax.vmap(agent.actor_model.forward, in_axes=(0, 0, None))
-        forward_fn = agent.actor_model.forward
-        prediction, next_carry = forward_fn(obs_normalizer(obs), cmd_normalizer(command), carry)
+        prediction, next_carry = agent.actor_model.forward(obs_normalizer(obs), cmd_normalizer(command), carry)
         action = agent.action_distribution.sample(prediction, act_rng)
         next_physics_state = engine.step(action, physics_state, physics_rng)
 
@@ -139,7 +135,8 @@ def unroll_trajectory(
         transition.done,
         reward_generators=reward_generators,
     )
-    post_accumulated_rewards = jax.tree_util.tree_reduce(jnp.add, post_accumulated_reward_components.values())
+
+    post_accumulated_rewards = jax.tree_util.tree_reduce(jnp.add, list(post_accumulated_reward_components.values()))
     transition = replace(
         transition,
         reward_components=post_accumulated_reward_components,

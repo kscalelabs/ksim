@@ -164,7 +164,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def get_rollout_time_stats(
         self,
         transitions: Transition,
-        *,
         agent: ActorCriticAgent,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
