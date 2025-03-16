@@ -527,24 +527,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             cmd_normalizer=cmd_normalizer,
         )
 
-        # for now just do a single update
-        new_agent, new_opt_state, loss_val, metrics = self.model_update(
-            agent=agent,
-            optimizer=optimizer,
-            opt_state=opt_state,
-            minibatch=dataset_ET,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
-            rng=reshuffle_rng,
+        (agent, opt_state, reshuffle_rng), metrics = jax.lax.scan(
+            partial_fn,
+            (agent, opt_state, reshuffle_rng),
+            None,
+            length=self.config.num_learning_epochs,
         )
-
-        # (agent, opt_state, reshuffle_rng), metrics = jax.lax.scan(
-        #     partial_fn,
-        #     (agent, opt_state, reshuffle_rng),
-        #     None,
-        #     length=self.config.num_learning_epochs,
-        # )
-        # metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
+        # TODO: We should probably implement this to get scanning going
+        # https://github.com/patrick-kidger/optimistix/blob/4d7856150233f58e531dbef0e88af889ed61fc64/optimistix/_iterate.py#L223-L236
+        # See: https://github.com/patrick-kidger/equinox/issues/709
+        metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
         return (agent, opt_state, reshuffle_rng), metrics
 
     def rl_train_loop(

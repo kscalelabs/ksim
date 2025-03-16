@@ -228,9 +228,9 @@ if __name__ == "__main__":
         PPOConfig(
             compile_unroll=False,
             num_learning_epochs=8,
-            num_env_states_per_minibatch=2,
-            num_minibatches=1,
-            num_envs=1,
+            num_env_states_per_minibatch=20,
+            num_minibatches=5,
+            num_envs=10,
             dt=0.005,
             ctrl_dt=0.02,
             learning_rate=1e-5,
