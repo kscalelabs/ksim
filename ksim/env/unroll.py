@@ -79,7 +79,7 @@ def unroll_trajectory(
         next_physics_state = engine.step(action, physics_state, physics_rng)
 
         termination_components = get_terminations(next_physics_state, termination_generators=termination_generators)
-        action_causes_termination = jax.tree_util.tree_reduce(jnp.logical_or, termination_components.values())
+        action_causes_termination = jax.tree_util.tree_reduce(jnp.logical_or, list(termination_components.values()))
         reward_components = get_rewards(
             prev_action=prev_action,
             physics_state=physics_state,
