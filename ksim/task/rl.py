@@ -133,6 +133,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]  # TODO: fix
         super().__init__(config)
 
+        assert self.get_obs_generators(None), "obs_generators must not be empty"
+        assert self.get_command_generators(), "command_generators must not be empty"
+        assert self.get_reward_generators(None), "reward_generators must not be empty"
+        assert self.get_termination_generators(None), "termination_generators must not be empty"
+
     @abstractmethod
     def get_model_and_metadata(self) -> tuple[Agent, dict[str, JointMetadataOutput]]: ...
 
