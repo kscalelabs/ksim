@@ -11,7 +11,7 @@ from ksim.env.data import Transition
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class RolloutTimeStats:
-    """Only computed once at the end of a rollout, used accross training."""
+    """Only computed once at the end of a rollout, used across training."""
 
     initial_action_log_probs: Array
     initial_values: Array

@@ -107,7 +107,7 @@ class KBot2Actor(eqx.Module, KSimModule):
         """No carry for now, but we could use this to initialize recurrence or action history."""
         return None
 
-    def forward_accross_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+    def forward_across_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement
@@ -143,7 +143,7 @@ class KBot2Critic(eqx.Module, KSimModule):
         """No carry for now, but we could use this to initialize recurrence."""
         return None
 
-    def forward_accross_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+    def forward_across_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement

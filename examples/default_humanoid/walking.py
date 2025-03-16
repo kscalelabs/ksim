@@ -19,7 +19,7 @@ from ksim.env.mjx_engine import MjxEngine
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.distributions import TanhGaussianDistribution
 from ksim.model.types import ModelCarry
-from ksim.normalization import Normalizer, PassThrough, Standardize
+from ksim.normalization import Normalizer, PassThrough
 from ksim.observation import (
     ActuatorForceObservation,
     LegacyVelocityObservation,
@@ -87,7 +87,7 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
         """No carry for now, but we could use this to initialize recurrence or action history."""
         return None
 
-    def forward_accross_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+    def forward_across_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement
@@ -105,7 +105,7 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=338,  # TODO: is there a nice way of inferring this?
+            in_size=56,  # TODO: is there a nice way of inferring this?
             out_size=1,
             width_size=64,
             depth=5,
@@ -123,7 +123,7 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
         """No carry for now, but we could use this to initialize recurrence."""
         return None
 
-    def forward_accross_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+    def forward_across_episode(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement
@@ -187,7 +187,8 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
         )
 
     def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer:
-        return Standardize(dummy_obs, alpha=1.0)
+        # TODO: bring back standard normalization
+        return PassThrough()
 
     def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
         return PassThrough()
@@ -224,7 +225,7 @@ if __name__ == "__main__":
             compile_unroll=False,
             num_learning_epochs=8,
             num_env_states_per_minibatch=2,
-            num_minibatches=3,
+            num_minibatches=1,
             num_envs=1,
             dt=0.005,
             ctrl_dt=0.02,

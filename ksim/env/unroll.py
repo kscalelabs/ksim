@@ -205,13 +205,14 @@ def post_accumulate_rewards(
     reward_generators: Collection[Reward],
 ) -> FrozenDict[str, Array]:
     """Post-accumulate rewards."""
+    post_accumulated_reward_components = dict(reward_components)
     for reward_generator in reward_generators:
         original_reward = reward_components[reward_generator.reward_name]
         assert isinstance(original_reward, Array)
         reward_val = reward_generator.post_accumulate(original_reward, done)
-        reward_components[reward_generator.reward_name] = reward_val
+        post_accumulated_reward_components[reward_generator.reward_name] = reward_val
 
-    return reward_components
+    return FrozenDict(post_accumulated_reward_components)
 
 
 def get_terminations(

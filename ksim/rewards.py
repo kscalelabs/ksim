@@ -83,14 +83,7 @@ T = TypeVar("T", bound=Reward)
 class RewardBuilder(ABC, Generic[T]):
     @abstractmethod
     def __call__(self, physics_model: PhysicsModel) -> T:
-        """Builds a reward from a MuJoCo model.
-
-        Args:
-            data: The data to build the reward from.
-
-        Returns:
-            A reward that can be applied to a state.
-        """
+        """Builds a reward from a MuJoCo model."""
 
 
 @attrs.define(frozen=True, kw_only=True)

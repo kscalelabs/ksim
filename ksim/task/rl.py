@@ -424,7 +424,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         dataset: RLDataset,
         minibatch_idx: Array,
     ) -> RLDataset:
-        """Selecting accross E dim to go from (E, T) to (B, T)."""
+        """Selecting across E dim to go from (E, T) to (B, T)."""
         starting_idx = minibatch_idx * self.num_envs_per_minibatch
         minibatch = xax.slice_pytree(
             dataset,
@@ -476,8 +476,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state = training_state[1]
         rng = training_state[2]
 
-        if self.config.reshuffle_rollout:  # if doing recurrence, can't shuffle accross T
-            dataset_ET = xax.reshuffle_pytree(  # TODO: confirm this actually reshuffles accross T and E (for IID)
+        if self.config.reshuffle_rollout:  # if doing recurrence, can't shuffle across T
+            dataset_ET = xax.reshuffle_pytree(  # TODO: confirm this actually reshuffles across T and E (for IID)
                 dataset_ET,
                 (self.config.num_envs, self.num_rollout_steps_per_env),
                 rng,
@@ -595,14 +595,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 training_state = self.on_step_start(training_state)
 
             start_time = time.time()
-            reshuffle_rng, rollout_rng, train_rng = jax.random.split(train_rng, 3)
+            rollout_rng_E, reshuffle_rng, train_rng = jax.random.split(train_rng, 3)
 
             transitions_ET, state_E, has_nans, _ = unroll_trajectories_fn(
                 state_E,
+                rollout_rng_E,
                 agent=agent,
                 obs_normalizer=obs_normalizer,
                 cmd_normalizer=cmd_normalizer,
-                rng=rollout_rng,
                 engine=engine,
                 obs_generators=obs_generators,
                 command_generators=command_generators,
@@ -620,6 +620,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # getting loss components that are constant across minibatches
             # (e.g. advantages) and flattening them for efficiency, thus
             # the name "rollout_time" loss components
+
             rollout_stats_ET = jax.vmap(
                 self.get_rollout_time_stats,
                 in_axes=(0),
@@ -629,7 +630,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 obs_normalizer=obs_normalizer,
                 cmd_normalizer=cmd_normalizer,
             )
-
             dataset_ET = RLDataset(
                 transitions=transitions_ET,
                 rollout_time_stats=rollout_stats_ET,

@@ -38,7 +38,7 @@ class KSimModule(ABC):
         """
         return None
 
-    def forward_accross_episode(self, obs: Array, command: Array) -> Array:
+    def forward_across_episode(self, obs: Array, command: Array) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement

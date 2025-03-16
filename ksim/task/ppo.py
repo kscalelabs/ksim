@@ -163,34 +163,35 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     @eqx.filter_jit  # TODO: implement filter-like jit in xax
     def get_rollout_time_stats(
         self,
+        transitions: Transition,
+        *,
         agent: ActorCriticAgent,
-        trajectory_dataset: Transition,  # TODO: pick a consistent naming convention... dataset_ET?
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
     ) -> RolloutTimeStats:
         """Calculating advantages and returns for a rollout."""
-        normalized_obs = obs_normalizer(trajectory_dataset.obs)
-        normalized_cmd = cmd_normalizer(trajectory_dataset.command)
-        prediction = agent.actor_model.forward_accross_episode(normalized_obs, normalized_cmd)  # TODO: vmap this...
-        initial_values = agent.critic_model.forward_accross_episode(normalized_obs, normalized_cmd).squeeze(axis=-1)
+        normalized_obs = obs_normalizer(transitions.obs)
+        normalized_cmd = cmd_normalizer(transitions.command)
+        prediction = agent.actor_model.forward_across_episode(normalized_obs, normalized_cmd)  # TODO: vmap this...
+        initial_values = agent.critic_model.forward_across_episode(normalized_obs, normalized_cmd).squeeze(axis=-1)
 
         initial_action_log_probs = agent.action_distribution.log_prob(
             parameters=prediction,
-            actions=trajectory_dataset.action,
+            actions=transitions.action,
         )
 
         advantages, value_targets = compute_advantages_and_value_targets(
             values=initial_values,
-            rewards=trajectory_dataset.reward,
-            dones=trajectory_dataset.done,
+            rewards=transitions.reward,
+            dones=transitions.done,
             decay_gamma=self.config.gamma,
             gae_lambda=self.config.lam,
         )
 
         # we decouple the computation of returns from the value targets.
         returns = compute_returns(
-            rewards=trajectory_dataset.reward,
-            dones=trajectory_dataset.done,
+            rewards=transitions.reward,
+            dones=transitions.done,
             gamma=self.config.gamma,
         )
 
@@ -270,10 +271,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # get the log probs of the current model
         normalized_obs = obs_normalizer(minibatch.obs)
         normalized_cmd = cmd_normalizer(minibatch.command)
-        prediction = agent.actor_model.forward_accross_episode(
+        prediction = agent.actor_model.forward_across_episode(
             normalized_obs, normalized_cmd
         )  # TODO: maybe assume it'll be BT, vmap this... this will break otherwise...
-        values = agent.critic_model.forward_accross_episode(normalized_obs, normalized_cmd).squeeze(axis=-1)
+        values = agent.critic_model.forward_across_episode(normalized_obs, normalized_cmd).squeeze(axis=-1)
         log_probs = agent.action_distribution.log_prob(prediction, minibatch.action)
 
         log_prob_diff = log_probs - rollout_time_stats.initial_action_log_probs
