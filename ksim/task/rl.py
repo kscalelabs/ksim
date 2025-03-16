@@ -204,7 +204,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Number of steps to unroll per environment during dataset creation.
 
         E.g. if you have 32 minibatches, with num_envs_per_minibatch=8192, with
-        2048 envs in total, then you will rollout 128 steps each env.
+        2048 envs in total, then you will rollout 128 steps each env:
+        8192 * 32 / 2048 = 128
         """
         msg = "Dataset size must be divisible by number of envs"
         assert self.dataset_size % self.config.num_envs == 0, msg
@@ -547,7 +548,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         termination_generators = self.get_termination_generators(physics_model)
 
         rng = self.prng_key()
-        burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 3)
+        rng, burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 4)
 
         reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
         state_E = jax.vmap(
@@ -561,14 +562,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         obs_normalizer = self.get_obs_normalizer(dummy_obs)
         cmd_normalizer = self.get_cmd_normalizer(dummy_cmd)
 
-        unroll_trajectories_fn = jax.vmap(unroll_trajectory, in_axes=(0, 0))  # only 1 pos param
+        #unroll_trajectories_fn = jax.vmap(unroll_trajectory, in_axes=(None, 0)) # only 2 positional args
+        unroll_trajectories_fn = unroll_trajectory 
         if self.config.compile_unroll:
             unroll_trajectories_fn = eqx.filter_jit(unroll_trajectories_fn)
-
+        
         # Burn in stage
+        burn_in_rng_E = jax.random.split(rng, self.config.num_envs)
+        burn_in_rng_E = burn_in_rng
+
         burn_transitions_ET, _, _, _ = unroll_trajectories_fn(
             state_E,
-            rng,
+            burn_in_rng_E,
             agent=agent,
             obs_normalizer=obs_normalizer,
             cmd_normalizer=cmd_normalizer,

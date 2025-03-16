@@ -53,7 +53,7 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
         var_scale: float,
     ) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=338,  # TODO: use similar pattern when dummy data gets passed in to populate
+            in_size=56,  # TODO: use similar pattern when dummy data gets passed in to populate
             out_size=NUM_OUTPUTS * 2,
             width_size=64,
             depth=5,
@@ -67,7 +67,9 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
     def forward(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None) -> Array:
         obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
         command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
+        assert obs_vec.ndim == command_vec.ndim
         x = jnp.concatenate([obs_vec, command_vec], axis=-1)
+
         prediction = self.mlp(x)
 
         mean = prediction[..., :NUM_OUTPUTS]
@@ -81,7 +83,7 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
         # to be mean concat std
         parametrization = jnp.concatenate([mean, std], axis=-1)
 
-        return parametrization
+        return parametrization, carry
 
     # TODO: we should move all this to RL and away from the model definition
     def initial_carry(self) -> ModelCarry:
@@ -198,10 +200,10 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
     # In fact, we might even want to make this return a pure function.
     def get_obs_generators(self, physics_model: PhysicsModel) -> Collection[Observation]:
         return [
-            LegacyPositionObservation(exclude_xy=True),
+            # LegacyPositionObservation(exclude_xy=True),
             LegacyVelocityObservation(),
-            CenterOfMassInertiaObservation(),
-            CenterOfMassVelocityObservation(),
+            # CenterOfMassInertiaObservation(), # TODO: debug and bring it back
+            # CenterOfMassVelocityObservation(),
             ActuatorForceObservation(),
         ]
 
@@ -222,11 +224,11 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking
     HumanoidWalkingTask.launch(
         PPOConfig(
-            compile_unroll=True,
+            compile_unroll=False,
             num_learning_epochs=8,
-            num_env_states_per_minibatch=8192,
-            num_minibatches=32,
-            num_envs=2048,
+            num_env_states_per_minibatch=5,
+            num_minibatches=3,
+            num_envs=1,
             dt=0.005,
             ctrl_dt=0.02,
             learning_rate=1e-5,

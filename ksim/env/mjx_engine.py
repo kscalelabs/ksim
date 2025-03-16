@@ -92,6 +92,7 @@ class MjxEngine(PhysicsEngine):
                 action,
                 prev_action,
             )
+
             torques = self.actuators.get_ctrl(ctrl, data)
             data_with_ctrl = data.replace(ctrl=torques)
             data_with_ctrl = mjx.forward(mjx_model, data_with_ctrl)  # TODO: investigate if we can remove this

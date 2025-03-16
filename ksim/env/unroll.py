@@ -71,8 +71,11 @@ def unroll_trajectory(
         command = get_commands(prev_command, physics_state, cmd_rng, command_generators=command_generators)
 
         # we still return unnormalized obs and command to calculate normalization statistics
-        prediction, next_carry = agent.actor_model.forward(obs_normalizer(obs), cmd_normalizer(command), carry)
+        # move vmap to the model class
+        forward_fn = jax.vmap(agent.actor_model.forward, in_axes=(0, 0, None))
+        prediction, next_carry = forward_fn(obs_normalizer(obs), cmd_normalizer(command), carry)
         action = agent.action_distribution.sample(prediction, act_rng)
+        breakpoint()
         next_physics_state = engine.step(action, physics_state, physics_rng)
 
         termination_components = get_terminations(next_physics_state, termination_generators=termination_generators)
