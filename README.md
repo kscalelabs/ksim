@@ -8,6 +8,13 @@ Clone the repo
 
 ```bash
 git clone git@github.com:kscalelabs/ksim.git
+cd ksim
+git submodule update --init --recursive
+```
+Also, you will need git lfs for the kscale-assets submodule, so run 
+```bash
+sudo apt-get install git-lfs # Optional
+git submodule update --init --recursive
 ```
 
 Create a new python environment. We reccomend using [conda](https://www.anaconda.com/docs/getting-started/miniconda/main) for this.
