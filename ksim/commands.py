@@ -69,8 +69,8 @@ class LinearVelocityCommand(Command):
         x = jax.random.uniform(rng_x, (), minval=-self.x_scale, maxval=self.x_scale)
         y = jax.random.uniform(rng_y, (), minval=-self.y_scale, maxval=self.y_scale)
         zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
-        # TODO - bring back one dimension or change e
-        cmd = jnp.array([x, y]).reshape(1, 2)
+        # TODO this is not consistent with other commands shape
+        cmd = jnp.array([x, y])
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
     def __call__(self, prev_command: Array | None, time: Array, rng: PRNGKeyArray) -> Array:

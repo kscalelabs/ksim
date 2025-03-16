@@ -71,11 +71,11 @@ def unroll_trajectory(
         command = get_commands(prev_command, physics_state, cmd_rng, command_generators=command_generators)
 
         # we still return unnormalized obs and command to calculate normalization statistics
-        # move vmap to the model class
-        forward_fn = jax.vmap(agent.actor_model.forward, in_axes=(0, 0, None))
+        # TODO: move vmap to the model class
+        # forward_fn = jax.vmap(agent.actor_model.forward, in_axes=(0, 0, None))
+        forward_fn = agent.actor_model.forward
         prediction, next_carry = forward_fn(obs_normalizer(obs), cmd_normalizer(command), carry)
         action = agent.action_distribution.sample(prediction, act_rng)
-        breakpoint()
         next_physics_state = engine.step(action, physics_state, physics_rng)
 
         termination_components = get_terminations(next_physics_state, termination_generators=termination_generators)
@@ -92,6 +92,7 @@ def unroll_trajectory(
         rewards = jax.tree_util.tree_reduce(jnp.add, reward_components.values())
 
         # resetting if nans or termination, resetting everything...
+        # TODO - to be fixed in xax
         next_data_has_nans = xax.pytree_has_nans(next_physics_state.data)
         do_reset = jnp.logical_or(action_causes_termination, next_data_has_nans)
         reset_state = engine.reset(reset_rng)
@@ -112,6 +113,7 @@ def unroll_trajectory(
 
         # there are a lot of places nans can occur... unlikely to occur outside
         # next_physics_state, but better to check all of them until they're gone
+        # TODO - to be fixed in xax
         nan_mask = UnrollNaNDetector(
             obs_has_nans=xax.pytree_has_nans(obs),
             command_has_nans=xax.pytree_has_nans(command),
@@ -121,6 +123,7 @@ def unroll_trajectory(
             termination_has_nans=xax.pytree_has_nans(termination_components),
             reward_has_nans=xax.pytree_has_nans(rewards),
         )
+        nan_mask = jnp.bool(False)
 
         # if is fine since condition will be static at runtime
         if return_intermediate_physics_data:
@@ -170,7 +173,7 @@ def get_rewards(
     physics_state: PhysicsState,
     command: FrozenDict[str, Array],
     action: Array,
-    next_physics_state: PhysicsState,
+    next_physics_state: PhysicsState, # TODO - rewards only process data
     next_state_terminates: Array,
     *,
     reward_generators: Collection[Reward],
@@ -181,10 +184,10 @@ def get_rewards(
         reward_val = (
             reward_generator(
                 prev_action=prev_action,
-                physics_state=physics_state,
+                physics_state=physics_state.data,
                 command=command,
                 action=action,
-                next_physics_state=next_physics_state,
+                next_physics_state=next_physics_state.data,
                 next_state_terminates=next_state_terminates,
             )
             * reward_generator.scale

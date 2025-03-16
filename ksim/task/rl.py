@@ -550,11 +550,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng = self.prng_key()
         rng, burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 4)
 
-        reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
-        state_E = jax.vmap(
-            engine.reset,
-            in_axes=(0),
-        )(reset_rngs)
+        # reset_rngs, _ = jax.random.split(reset_rng, self.config.num_envs)
+        # state_E = jax.vmap(
+        #     engine.reset,
+        #     in_axes=(0)
+        # )(reset_rngs)
+        reset_rngs, _ = jax.random.split(reset_rng)
+        state_E = engine.reset(reset_rngs)
 
         # the normalizers need dummy data to infer shapes
         dummy_obs = get_observation(state_E, burn_in_rng, obs_generators=obs_generators)
@@ -562,15 +564,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         obs_normalizer = self.get_obs_normalizer(dummy_obs)
         cmd_normalizer = self.get_cmd_normalizer(dummy_cmd)
 
-        #unroll_trajectories_fn = jax.vmap(unroll_trajectory, in_axes=(None, 0)) # only 2 positional args
+        # unroll_trajectories_fn = jax.vmap(unroll_trajectory, in_axes=(0, 0)) # only 2 positional args
         unroll_trajectories_fn = unroll_trajectory 
         if self.config.compile_unroll:
             unroll_trajectories_fn = eqx.filter_jit(unroll_trajectories_fn)
         
         # Burn in stage
-        burn_in_rng_E = jax.random.split(rng, self.config.num_envs)
+        # burn_in_rng_E = jax.random.split(rng, self.config.num_envs)
         burn_in_rng_E = burn_in_rng
-
         burn_transitions_ET, _, _, _ = unroll_trajectories_fn(
             state_E,
             burn_in_rng_E,

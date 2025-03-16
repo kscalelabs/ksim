@@ -37,8 +37,9 @@ class MjxEngine(PhysicsEngine):
         self.default_mjx_model = default_physics_model
         self.actuators = actuators
         self.resetters = resetters
+        assert ctrl_dt % dt == 0, "ctrl_dt must be a multiple of dt"
         self.ctrl_dt = ctrl_dt
-        self.phys_steps_per_ctrl_steps = int(dt / ctrl_dt)
+        self.phys_steps_per_ctrl_steps = int(ctrl_dt / dt)
         self.min_action_latency_step = min_action_latency_step
         self.max_action_latency_step = max_action_latency_step
 
