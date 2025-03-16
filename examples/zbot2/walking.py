@@ -66,7 +66,7 @@ class ZBot2Actor(eqx.Module, KSimModule):
         var_scale: float,
     ) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=54,  # TODO: use similar pattern when dummy data gets passed in to populate
+            in_size=50,  # TODO: use similar pattern when dummy data gets passed in to populate
             out_size=NUM_OUTPUTS * 2,
             width_size=64,
             depth=5,
