@@ -22,9 +22,6 @@ from ksim.model.types import ModelCarry
 from ksim.normalization import Normalizer, PassThrough, Standardize
 from ksim.observation import (
     ActuatorForceObservation,
-    CenterOfMassInertiaObservation,
-    CenterOfMassVelocityObservation,
-    LegacyPositionObservation,
     LegacyVelocityObservation,
     Observation,
 )

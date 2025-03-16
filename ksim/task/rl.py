@@ -565,10 +565,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         cmd_normalizer = self.get_cmd_normalizer(dummy_cmd)
 
         # unroll_trajectories_fn = jax.vmap(unroll_trajectory, in_axes=(0, 0)) # only 2 positional args
-        unroll_trajectories_fn = unroll_trajectory 
+        unroll_trajectories_fn = unroll_trajectory
         if self.config.compile_unroll:
             unroll_trajectories_fn = eqx.filter_jit(unroll_trajectories_fn)
-        
+
         # Burn in stage
         # burn_in_rng_E = jax.random.split(rng, self.config.num_envs)
         burn_in_rng_E = burn_in_rng

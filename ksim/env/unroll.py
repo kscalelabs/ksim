@@ -89,10 +89,9 @@ def unroll_trajectory(
             next_state_terminates=action_causes_termination,
             reward_generators=reward_generators,
         )
-        rewards = jax.tree_util.tree_reduce(jnp.add, reward_components.values())
+        rewards = jax.tree_util.tree_reduce(jnp.add, reward_components)
 
         # resetting if nans or termination, resetting everything...
-        # TODO - to be fixed in xax
         next_data_has_nans = xax.pytree_has_nans(next_physics_state.data)
         do_reset = jnp.logical_or(action_causes_termination, next_data_has_nans)
         reset_state = engine.reset(reset_rng)
@@ -113,7 +112,6 @@ def unroll_trajectory(
 
         # there are a lot of places nans can occur... unlikely to occur outside
         # next_physics_state, but better to check all of them until they're gone
-        # TODO - to be fixed in xax
         nan_mask = UnrollNaNDetector(
             obs_has_nans=xax.pytree_has_nans(obs),
             command_has_nans=xax.pytree_has_nans(command),
@@ -123,8 +121,6 @@ def unroll_trajectory(
             termination_has_nans=xax.pytree_has_nans(termination_components),
             reward_has_nans=xax.pytree_has_nans(rewards),
         )
-        nan_mask = jnp.bool(False)
-
         # if is fine since condition will be static at runtime
         if return_intermediate_physics_data:
             return (command, next_carry, next_physics_state), (transition, nan_mask, next_physics_state)
@@ -173,7 +169,7 @@ def get_rewards(
     physics_state: PhysicsState,
     command: FrozenDict[str, Array],
     action: Array,
-    next_physics_state: PhysicsState, # TODO - rewards only process data
+    next_physics_state: PhysicsState,  # TODO - rewards only process data
     next_state_terminates: Array,
     *,
     reward_generators: Collection[Reward],
