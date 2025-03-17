@@ -2,12 +2,11 @@
 
 from typing import Literal
 
-from ksim.env.types import EnvState
-from ksim.model.types import ModelInput
-from ksim.task.types import RolloutTimeLossComponents
+from ksim.env.data import Transition
+from ksim.task.types import RolloutTimeStats
 
 NoiseType = Literal["gaussian", "uniform"]
 ObsType = Literal["proprio", "image"]
 CmdType = Literal["vector", "text"]
 
-__all__ = ["EnvState", "ModelInput", "NoiseType", "ObsType", "CmdType", "RolloutTimeLossComponents"]
+__all__ = ["Transition", "NoiseType", "ObsType", "CmdType", "RolloutTimeStats"]

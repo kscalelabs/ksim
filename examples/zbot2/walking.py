@@ -33,15 +33,11 @@ from ksim.terminations import Termination, UnhealthyTermination
 
 logger = logging.getLogger(__name__)
 
-######################
-# Static Definitions #
-######################
-
-NUM_OUTPUTS = 20
+NUM_OUTPUTS = 18
 
 
-class KBot2Actor(eqx.Module, KSimModule):
-    """Actor for the standing task."""
+class ZBot2Actor(eqx.Module, KSimModule):
+    """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
     min_std: float = eqx.static_field()
@@ -57,7 +53,7 @@ class KBot2Actor(eqx.Module, KSimModule):
         var_scale: float,
     ) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=54,  # TODO: use similar pattern when dummy data gets passed in to populate
+            in_size=50,  # TODO: use similar pattern when dummy data gets passed in to populate
             out_size=NUM_OUTPUTS * 2,
             width_size=64,
             depth=5,
@@ -105,7 +101,7 @@ class KBot2Actor(eqx.Module, KSimModule):
         return prediction
 
 
-class KBot2Critic(eqx.Module, KSimModule):
+class ZBot2Critic(eqx.Module, KSimModule):
     """Critic for the standing task."""
 
     mlp: eqx.nn.MLP
@@ -141,7 +137,7 @@ class KBot2Critic(eqx.Module, KSimModule):
         return prediction
 
 
-class KBot2StandingTask(PPOTask[PPOConfig]):
+class ZBot2WalkingTask(PPOTask[PPOConfig]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Get the optimizer: handled by XAX."""
         return optax.chain(
@@ -160,7 +156,7 @@ class KBot2StandingTask(PPOTask[PPOConfig]):
     def get_model_and_metadata(self) -> tuple[PhysicsModel, dict[str, JointMetadataOutput]]:
         metadata = None  # get_joint_metadata(mj_model)  # TODO: implement this function properly
 
-        robot_path = "examples/kscale-assets/kbot-v2-feet/robot.mjcf"
+        robot_path = "examples/kscale-assets/zbot-feet/robot.mjcf"
         scene_type = "smooth"
         logger.info("Loading mjcf from: %s", robot_path)
         logger.info("Scene type: %s", scene_type)
@@ -193,8 +189,8 @@ class KBot2StandingTask(PPOTask[PPOConfig]):
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
         return ActorCriticAgent(
-            critic_model=KBot2Critic(key),
-            actor_model=KBot2Actor(key, min_std=0.01, max_std=1.0, var_scale=1.0),
+            critic_model=ZBot2Critic(key),
+            actor_model=ZBot2Actor(key, min_std=0.01, max_std=1.0, var_scale=1.0),
             action_distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
@@ -217,7 +213,7 @@ class KBot2StandingTask(PPOTask[PPOConfig]):
         ]
 
     def get_command_generators(self) -> Collection[Command]:
-        return [LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3)]
+        return [LinearVelocityCommand(x_scale=1.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3)]
 
     def get_reward_generators(self, physics_model: PhysicsModel) -> Collection[Reward]:
         return [
@@ -230,8 +226,8 @@ class KBot2StandingTask(PPOTask[PPOConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot2.standing
-    KBot2StandingTask.launch(
+    # python -m examples.zbot2.walking
+    ZBot2WalkingTask.launch(
         PPOConfig(
             compile_unroll=False,
             num_learning_epochs=8,

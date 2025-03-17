@@ -8,11 +8,10 @@ import attrs
 import jax
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from mujoco import mjx
 
-from ksim.env.types import PhysicsData
+from ksim.env.data import PhysicsData, PhysicsModel
 from ksim.types import NoiseType, ObsType
-from ksim.utils.data import BuilderData
+from ksim.utils.named_access import get_sensor_data_idxs_by_name
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -70,13 +69,9 @@ T = TypeVar("T", bound=Observation)
 
 class ObservationBuilder(ABC, Generic[T]):
     @abstractmethod
-    def __call__(self, data: BuilderData) -> T:
+    def __call__(self, physics_model: PhysicsModel) -> T:
         """Builds an observation from a MuJoCo model."""
 
-
-####################
-# MJX Observations #
-####################
 
 # NOTE: we make assumption that the freejoint is ALWAYS the first 7 joints
 
@@ -85,7 +80,7 @@ class MjxObservation(Observation, ABC):
     obs_type: ObsType = "proprio"
 
     @abstractmethod
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         """Gets the observation from the state."""
 
 
@@ -93,7 +88,7 @@ class MjxObservation(Observation, ABC):
 class BasePositionObservation(MjxObservation):
     obs_type: ObsType = "proprio"
 
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[0:3]  # (3,)
         return qpos
 
@@ -102,7 +97,7 @@ class BasePositionObservation(MjxObservation):
 class BaseOrientationObservation(MjxObservation):
     obs_type: ObsType = "proprio"
 
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[3:7]  # (4,)
         return qpos
 
@@ -111,7 +106,7 @@ class BaseOrientationObservation(MjxObservation):
 class BaseLinearVelocityObservation(MjxObservation):
     obs_type: ObsType = "proprio"
 
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[0:3]  # (3,)
         return qvel
 
@@ -120,7 +115,7 @@ class BaseLinearVelocityObservation(MjxObservation):
 class BaseAngularVelocityObservation(MjxObservation):
     obs_type: ObsType = "proprio"
 
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[3:6]  # (3,)
         return qvel
 
@@ -129,7 +124,7 @@ class BaseAngularVelocityObservation(MjxObservation):
 class JointPositionObservation(MjxObservation):
     obs_type: ObsType = "proprio"
 
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[7:]  # (N,)
         return qpos
 
@@ -138,7 +133,7 @@ class JointPositionObservation(MjxObservation):
 class JointVelocityObservation(MjxObservation):
     obs_type: ObsType = "proprio"
 
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[6:]  # (N,)
         return qvel
 
@@ -155,7 +150,7 @@ class LegacyPositionObservation(MjxObservation):
 
     exclude_xy: bool = attrs.field(default=True)
 
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         position = state.qpos
         if self.exclude_xy:
             position = position[2:]  # Skip x,y but include z and all joint positions
@@ -169,13 +164,13 @@ class LegacyVelocityObservation(Observation):
     In the legacy code, all velocities (base + joint) are included without any exclusions.
     """
 
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         return state.qvel
 
 
 @attrs.define(frozen=True)
 class CenterOfMassInertiaObservation(Observation):
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         # Skip the first entry (world body) and flatten
         cinert = state.cinert[1:].ravel()  # Shape will be (nbody-1, 10)
         return cinert
@@ -183,7 +178,7 @@ class CenterOfMassInertiaObservation(Observation):
 
 @attrs.define(frozen=True)
 class CenterOfMassVelocityObservation(Observation):
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         # Skip the first entry (world body) and flatten
         cvel = state.cvel[1:].ravel()  # Shape will be (nbody-1, 6)
         return cvel
@@ -191,7 +186,7 @@ class CenterOfMassVelocityObservation(Observation):
 
 @attrs.define(frozen=True)
 class ActuatorForceObservation(Observation):
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         # Get actuator forces
         qfrc_actuator = state.qfrc_actuator  # Shape will be (nu,)
         return qfrc_actuator
@@ -202,7 +197,7 @@ class SensorObservation(Observation):
     sensor_name: str = attrs.field()
     sensor_idx_range: tuple[int, int | None] | None = attrs.field(default=None)
 
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         assert self.sensor_idx_range is not None
         sensor_data = state.sensordata[self.sensor_idx_range[0] : self.sensor_idx_range[1]].ravel()
         return sensor_data
@@ -226,12 +221,13 @@ class SensorObservationBuilder(ObservationBuilder[SensorObservation]):
         self.noise = noise
         self.noise_type = noise_type
 
-    def __call__(self, data: BuilderData) -> SensorObservation:
-        if self.sensor_name not in data.mujoco_mappings.sensor_name_to_idx_range:
-            options = "\n".join(sorted(data.mujoco_mappings.sensor_name_to_idx_range.keys()))
+    def __call__(self, physics_model: PhysicsModel) -> SensorObservation:
+        sensor_name_to_idx_range = get_sensor_data_idxs_by_name(physics_model)
+        if self.sensor_name not in sensor_name_to_idx_range:
+            options = "\n".join(sorted(sensor_name_to_idx_range.keys()))
             raise ValueError(f"{self.sensor_name} not found in model. Available:\n{options}")
 
-        sensor_idx_range = data.mujoco_mappings.sensor_name_to_idx_range[self.sensor_name]
+        sensor_idx_range = sensor_name_to_idx_range[self.sensor_name]
 
         return SensorObservation(
             noise=self.noise,
