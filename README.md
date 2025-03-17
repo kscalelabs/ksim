@@ -8,12 +8,11 @@ Clone the repo
 
 ```bash
 git clone git@github.com:kscalelabs/ksim.git
-cd ksim
-git submodule update --init --recursive
 ```
 Also, you will need git lfs for the kscale-assets submodule, so run 
 ```bash
 sudo apt-get install git-lfs # Optional
+cd ksim
 git submodule update --init --recursive
 ```
 
