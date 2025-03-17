@@ -381,7 +381,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array], PyTree]:
-        """Value_and_grad computation. with metrics"""
+        """Value_and_grad computation with metrics."""
 
         def loss_fn(agent: ActorCriticAgent) -> tuple[Array, dict[str, Array]]:
             """Agent is a PyTree and can be optimized via optax."""
