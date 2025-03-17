@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Callable, Collection, Generic, Literal, TypeVar
+from typing import Collection, Generic, Literal, TypeVar
 
 import equinox as eqx
 import jax

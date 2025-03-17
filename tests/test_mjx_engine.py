@@ -1,3 +1,5 @@
+"""Tests for the MjxEngine class."""
+
 import jax
 import jax.numpy as jnp
 import mujoco
@@ -30,7 +32,7 @@ def engine() -> MjxEngine:
     return engine
 
 
-def test_engine_jittable(engine: MjxEngine):
+def test_engine_jittable(engine: MjxEngine) -> None:
     """Test that engine can be jitted."""
     action = jnp.zeros(21)
     rng = random.PRNGKey(0)
@@ -41,7 +43,7 @@ def test_engine_jittable(engine: MjxEngine):
     assert isinstance(next_state, PhysicsState)
 
 
-def test_engine_vmappable(engine: MjxEngine):
+def test_engine_vmappable(engine: MjxEngine) -> None:
     """Test that engine reset can be vmapped across multiple environments."""
     num_envs = 3
     rng = random.PRNGKey(0)

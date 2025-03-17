@@ -16,7 +16,7 @@ from ksim.actuators import TorqueActuators
 from ksim.commands import Command
 from ksim.env.data import PhysicsData, PhysicsState
 from ksim.env.mjx_engine import MjxEngine
-from ksim.env.unroll import unroll_trajectory
+from ksim.env.unroll import UnrollNaNDetector, unroll_trajectory
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.types import ModelCarry
 from ksim.normalization import Normalizer, PassThrough
@@ -27,6 +27,7 @@ from ksim.terminations import Termination
 
 _ACTION_DIM = 21
 _NUM_STEPS = 4
+_NUM_ENVS = 2
 
 
 class DummyTermination(Termination):
@@ -127,6 +128,11 @@ def agent() -> ActorCriticAgent:
     )
 
 
+def _assert_nan_detector_is_none(nan_detector: UnrollNaNDetector) -> None:
+    for field, value in nan_detector._asdict().items():
+        assert not value.any(), f"{field} contains NaNs"
+
+
 dummy_obs = DummyObservation()
 dummy_cmd = DummyCommand()
 dummy_term = DummyTermination()
@@ -137,7 +143,7 @@ cmd_normalizer = PassThrough()
 
 
 @pytest.mark.slow
-def test_unroll_shapes(engine: MjxEngine, agent: ActorCriticAgent):
+def test_unroll_shapes(engine: MjxEngine, agent: ActorCriticAgent) -> None:
     """Test that unroll_trajectory returns the correct shapes."""
     rng = jax.random.PRNGKey(0)
     initial_physics_state = engine.reset(rng)
@@ -160,13 +166,12 @@ def test_unroll_shapes(engine: MjxEngine, agent: ActorCriticAgent):
     assert transitions.obs["dummy_observation_proprio_gaussian"].shape == (4, 1)
     assert transitions.command["dummy_command_vector"].shape == (4, 1)
     assert final_state.data.qpos.shape == (28,)
-    for field, value in unroll_nan_detector._asdict().items():
-        assert not value, f"{field} contains NaNs"
     assert intermediate_data is None
+    _assert_nan_detector_is_none(unroll_nan_detector)
 
 
 @pytest.mark.slow
-def test_unroll_jittable(engine: MjxEngine, agent: ActorCriticAgent):
+def test_unroll_jittable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
     """Test that engine can be jitted."""
     rng = jax.random.PRNGKey(0)
     initial_physics_state = engine.reset(rng)
@@ -186,5 +191,41 @@ def test_unroll_jittable(engine: MjxEngine, agent: ActorCriticAgent):
         num_steps=_NUM_STEPS,
         return_intermediate_physics_data=False,
     )
-    for field, value in unroll_nan_detector._asdict().items():
-        assert not value, f"{field} contains NaNs"
+
+    _assert_nan_detector_is_none(unroll_nan_detector)
+
+
+@pytest.mark.slow
+def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
+    """Test that unroll_trajectory can be vmapped."""
+    rng = jax.random.PRNGKey(0)
+    rngs = jax.random.split(rng, _NUM_ENVS)
+    initial_physics_states = jax.vmap(engine.reset, in_axes=(0))(rngs)
+    vmapped_engine_step = jax.vmap(engine.step, in_axes=(0, 0, 0))
+    vmapped_engine_step(jnp.zeros((_NUM_ENVS, _ACTION_DIM)), initial_physics_states, rngs)
+    physics_state_in_axes = jax.tree_map(lambda x: 0 if x.ndim > 0 else None, initial_physics_states)
+
+    jitted_unroll = eqx.filter_jit(unroll_trajectory)
+    vmapped_unroll_trajectory = jax.vmap(
+        jitted_unroll, in_axes=(physics_state_in_axes, 0, None, None, None, None, None, None, None, None, None, None)
+    )
+
+    transitions, final_state, unroll_nan_detector, _ = vmapped_unroll_trajectory(
+        initial_physics_states,
+        rngs,
+        agent,
+        obs_normalizer,
+        cmd_normalizer,
+        engine,
+        [dummy_obs],
+        [dummy_cmd],
+        [dummy_rew],
+        [dummy_term],
+        num_steps=_NUM_STEPS,
+        return_intermediate_physics_data=False,
+    )
+
+    assert transitions.obs["dummy_observation_proprio_gaussian"].shape == (_NUM_STEPS, _NUM_ENVS, 1)
+    assert transitions.command["dummy_command_vector"].shape == (_NUM_STEPS, _NUM_ENVS, 1)
+    assert final_state.data.qpos.shape == (_NUM_ENVS, 28)
+    _assert_nan_detector_is_none(unroll_nan_detector)
