@@ -34,13 +34,10 @@ from ksim.env.base_engine import PhysicsEngine
 from ksim.env.data import PhysicsModel, Transition
 from ksim.env.unroll import (
     UnrollNaNDetector,
-    get_initial_commands,
-    get_observation,
     unroll_trajectory,
 )
 from ksim.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
 from ksim.model.base import Agent
-from ksim.normalization import Normalizer
 from ksim.observation import Observation
 from ksim.rewards import Reward
 from ksim.task.types import RLDataset, RolloutTimeStats
@@ -158,12 +155,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_termination_generators(self, physics_model: PhysicsModel) -> Collection[Termination]: ...
 
     @abstractmethod
-    def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer: ...
-
-    @abstractmethod
-    def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer: ...
-
-    @abstractmethod
     def get_optimizer(self) -> optax.GradientTransformation: ...
 
     # The following should be implemented by the algorithmic subclass.
@@ -173,8 +164,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         transitions: Transition,
         agent: Agent,
-        obs_normalizer: Normalizer,
-        cmd_normalizer: Normalizer,
     ) -> RolloutTimeStats:
         """E.g. calculating advantages and returns for a rollout.
 
@@ -190,8 +179,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         agent: Agent,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        obs_normalizer: Normalizer,
-        cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[Agent, optax.OptState, Array, FrozenDict[str, Array]]: ...
 
@@ -446,8 +433,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         *,
         optimizer: optax.GradientTransformation,
         dataset_ET: RLDataset,
-        obs_normalizer: Normalizer,
-        cmd_normalizer: Normalizer,
     ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Perform a single minibatch update step."""
         agent, opt_state, rng = training_state
@@ -457,8 +442,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             optimizer=optimizer,
             opt_state=opt_state,
             minibatch=minibatch_BT,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
             rng=rng,
         )
         rng, _ = jax.random.split(rng)
@@ -473,8 +456,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         *,
         optimizer: optax.GradientTransformation,
         dataset_ET: RLDataset,
-        obs_normalizer: Normalizer,
-        cmd_normalizer: Normalizer,
     ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Train a minibatch, returns the updated agent, optimizer state, loss, and metrics."""
         agent = training_state[0]
@@ -493,8 +474,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.scannable_minibatch_step,
             optimizer=optimizer,
             dataset_ET=dataset_ET,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
         )
 
         (agent, opt_state, _), metrics = scan_model(
@@ -517,16 +496,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         reshuffle_rng: PRNGKeyArray,
         optimizer: optax.GradientTransformation,
         dataset_ET: RLDataset,
-        obs_normalizer: Normalizer,
-        cmd_normalizer: Normalizer,
     ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Perform multiple epochs of RL training on the current dataset."""
         partial_fn = functools.partial(
             self.scannable_train_epoch,
             optimizer=optimizer,
             dataset_ET=dataset_ET,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
         )
 
         (agent, opt_state, reshuffle_rng), metrics = scan_model(
@@ -560,14 +535,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
         state_E = jax.vmap(engine.reset, in_axes=(0))(reset_rngs)
 
-        # the normalizers need dummy data to infer shapes
-        dummy_obs = get_observation(state_E, burn_in_rng, obs_generators=obs_generators)
-        dummy_cmd = get_initial_commands(burn_in_rng, command_generators=command_generators)
-        obs_normalizer = self.get_obs_normalizer(dummy_obs)
-        cmd_normalizer = self.get_cmd_normalizer(dummy_cmd)
-
         unroll_trajectories_fn = jax.vmap(
-            unroll_trajectory, in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None)
+            unroll_trajectory,
+            in_axes=(0, 0, None, None, None, None, None, None, None, None),
         )
 
         if self.config.compile_unroll:
@@ -581,8 +551,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             state_E,
             burn_in_rng_E,
             agent,
-            obs_normalizer,
-            cmd_normalizer,
             engine,
             obs_generators,
             command_generators,
@@ -591,9 +559,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.num_rollout_steps_per_env,
             False,
         )
-
-        obs_normalizer = obs_normalizer.update(burn_transitions_ET.obs)
-        cmd_normalizer = cmd_normalizer.update(burn_transitions_ET.command)
 
         while not self.is_training_over(training_state):
             with self.step_context("on_step_start"):
@@ -606,8 +571,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state_E,
                 rollout_rng_E,
                 agent,
-                obs_normalizer,
-                cmd_normalizer,
                 engine,
                 obs_generators,
                 command_generators,
@@ -625,8 +588,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rollout_stats_ET = self.get_rollout_time_stats(
                 transitions=transitions_ET,
                 agent=agent,
-                obs_normalizer=obs_normalizer,
-                cmd_normalizer=cmd_normalizer,
             )
 
             dataset_ET = RLDataset(
@@ -641,17 +602,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 reshuffle_rng=reshuffle_rng,
                 optimizer=optimizer,
                 dataset_ET=dataset_ET,
-                obs_normalizer=obs_normalizer,
-                cmd_normalizer=cmd_normalizer,
             )
             metrics_mean = jax.tree.map(lambda x: jnp.mean(x), metrics)
             update_time = time.time() - start_time
             logger.info("Update time: %s seconds", update_time)
-
-            # this will allow for online normalization, must be updated after
-            # the update step.
-            obs_normalizer = obs_normalizer.update(transitions_ET.obs)
-            cmd_normalizer = cmd_normalizer.update(transitions_ET.command)
 
             with self.step_context("write_logs"):
                 training_state.raw_phase = "train"

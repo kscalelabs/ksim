@@ -19,7 +19,6 @@ from ksim.env.mjx_engine import MjxEngine
 from ksim.env.unroll import UnrollNaNDetector, unroll_trajectory
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.types import ModelCarry
-from ksim.normalization import Normalizer, PassThrough
 from ksim.observation import Observation
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import Reward
@@ -62,21 +61,20 @@ class DummyCommand(Command):
 
 
 def get_observation(
-    physics_state: PhysicsState, rng: PRNGKeyArray, *, obs_generators: Collection[Observation]
+    physics_state: PhysicsState,
+    rng: PRNGKeyArray,
+    *,
+    obs_generators: Collection[Observation],
 ) -> FrozenDict[str, Array]:
     return FrozenDict({"some_observation": jnp.zeros(1)})
 
 
-def get_initial_commands(rng: PRNGKeyArray, *, command_generators: Collection[Command]) -> FrozenDict[str, Array]:
+def get_initial_commands(
+    rng: PRNGKeyArray,
+    *,
+    command_generators: Collection[Command],
+) -> FrozenDict[str, Array]:
     return FrozenDict({"some_command": jnp.zeros(1)})
-
-
-def get_obs_normalizer(dummy_obs: FrozenDict[str, Array]) -> Normalizer:
-    return PassThrough()
-
-
-def get_cmd_normalizer(dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
-    return PassThrough()
 
 
 class DummyActor(eqx.Module, KSimModule):
@@ -138,9 +136,6 @@ dummy_cmd = DummyCommand()
 dummy_term = DummyTermination()
 dummy_rew = DummyReward(scale=1.0)
 
-obs_normalizer = PassThrough()
-cmd_normalizer = PassThrough()
-
 
 @pytest.mark.slow
 def test_unroll_shapes(engine: MjxEngine, agent: ActorCriticAgent) -> None:
@@ -152,8 +147,6 @@ def test_unroll_shapes(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         physics_state=initial_physics_state,
         rng=rng,
         agent=agent,
-        obs_normalizer=obs_normalizer,
-        cmd_normalizer=cmd_normalizer,
         engine=engine,
         obs_generators=[dummy_obs],
         command_generators=[dummy_cmd],
@@ -181,8 +174,6 @@ def test_unroll_jittable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         physics_state=initial_physics_state,
         rng=rng,
         agent=agent,
-        obs_normalizer=obs_normalizer,
-        cmd_normalizer=cmd_normalizer,
         engine=engine,
         obs_generators=[dummy_obs],
         command_generators=[dummy_cmd],
@@ -213,8 +204,6 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         initial_physics_states,
         rngs,
         agent,
-        obs_normalizer,
-        cmd_normalizer,
         engine,
         [dummy_obs],
         [dummy_cmd],

@@ -15,7 +15,6 @@ from ksim.env.base_engine import PhysicsEngine
 from ksim.env.data import PhysicsData, PhysicsState, Transition
 from ksim.model.base import Agent
 from ksim.model.types import ModelCarry
-from ksim.normalization import Normalizer
 from ksim.observation import Observation
 from ksim.rewards import Reward
 from ksim.terminations import Termination
@@ -40,8 +39,6 @@ def unroll_trajectory(
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
     agent: Agent,
-    obs_normalizer: Normalizer,
-    cmd_normalizer: Normalizer,
     engine: PhysicsEngine,
     obs_generators: Collection[Observation],
     command_generators: Collection[Command],
@@ -70,7 +67,7 @@ def unroll_trajectory(
         command = get_commands(prev_command, physics_state, cmd_rng, command_generators=command_generators)
 
         # we still return unnormalized obs and command to calculate normalization statistics
-        prediction, next_carry = agent.actor_model.forward(obs_normalizer(obs), cmd_normalizer(command), carry)
+        prediction, next_carry = agent.actor_model.forward(obs, command, carry)
         action = agent.action_distribution.sample(prediction, act_rng)
         next_physics_state = engine.step(action, physics_state, physics_rng)
 

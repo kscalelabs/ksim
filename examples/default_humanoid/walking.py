@@ -19,7 +19,6 @@ from ksim.env.data import PhysicsModel
 from ksim.env.mjx_engine import MjxEngine
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.types import ModelCarry
-from ksim.normalization import Normalizer, PassThrough
 from ksim.observation import (
     ActuatorForceObservation,
     LegacyVelocityObservation,
@@ -189,16 +188,6 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
             actor_model=DefaultHumanoidActor(key, min_std=0.01, max_std=1.0, var_scale=1.0),
             action_distribution=xax.nn.distributions.TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
-
-    # from ML: I haven't made up my mind on this API, but I generally think we should move away
-    # from the hidden builder pattern. Giving the data directly will help with this.
-    # In fact, we might even want to make this return a pure function.
-    def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer:
-        # TODO: bring back standard normalization
-        return PassThrough()
-
-    def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
-        return PassThrough()
 
     def get_obs_generators(self, physics_model: PhysicsModel) -> Collection[Observation]:
         return [

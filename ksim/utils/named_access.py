@@ -11,7 +11,6 @@ from ksim.env.data import PhysicsData, PhysicsModel
 
 logger = logging.getLogger(__name__)
 
-
 Tk = TypeVar("Tk", bound=Hashable)
 Tv = TypeVar("Tv")
 
