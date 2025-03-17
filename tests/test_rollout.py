@@ -221,11 +221,11 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         [dummy_cmd],
         [dummy_rew],
         [dummy_term],
-        num_steps=_NUM_STEPS,
-        return_intermediate_physics_data=False,
+        _NUM_STEPS,
+        False,
     )
 
-    assert transitions.obs["dummy_observation_proprio_gaussian"].shape == (_NUM_STEPS, _NUM_ENVS, 1)
-    assert transitions.command["dummy_command_vector"].shape == (_NUM_STEPS, _NUM_ENVS, 1)
+    assert transitions.obs["dummy_observation_proprio_gaussian"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
+    assert transitions.command["dummy_command_vector"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
     assert final_state.data.qpos.shape == (_NUM_ENVS, 28)
     _assert_nan_detector_is_none(unroll_nan_detector)
