@@ -14,7 +14,7 @@ from matplotlib import animation
 from PIL import Image
 from scipy.interpolate import interp1d
 
-from ksim.env.base_engine import BaseEnv, PhysicsEngine
+from ksim.env.base_engine import PhysicsEngine
 from ksim.env.data import Transition
 from ksim.model.base import Agent
 

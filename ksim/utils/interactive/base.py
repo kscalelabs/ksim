@@ -11,7 +11,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 
-from ksim.env.base_engine import BaseEnv
+from ksim.env.base_engine import PhysicsEngine
 from ksim.task.rl import RLTask
 
 matplotlib.use("Agg")  # Use non-interactive backend
@@ -65,12 +65,7 @@ class InteractiveVisualizer(ABC):
     }
 
     def __init__(self, task: RLTask, config: InteractiveVisualizerConfig | None = None) -> None:
-        """Initialize the reward and termination visualizer.
-
-        Args:
-            task: The RL task to visualize
-            config: Configuration for the visualizer
-        """
+        """Initialize the reward and termination visualizer."""
         if config is None:
             config = InteractiveVisualizerConfig()
 
@@ -127,20 +122,12 @@ class InteractiveVisualizer(ABC):
         self.plot_thread.start()
 
     @abstractmethod
-    def setup_environment(self) -> BaseEnv:
-        """Set up the environment for visualization.
-
-        Returns:
-            The environment instance
-        """
+    def setup_environment(self) -> PhysicsEngine:
+        """Set up the physics engine for visualization."""
         pass
 
     def key_callback(self, keycode: int) -> None:
-        """Handle key press events.
-
-        Args:
-            keycode: The keycode of the pressed key
-        """
+        """Handle key press events."""
         logger.info("Key pressed: %s", chr(keycode))
         logger.info("Keycode: %d", keycode)
 

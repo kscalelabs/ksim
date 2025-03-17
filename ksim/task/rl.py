@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Collection, Generic, Literal, TypeVar
+from typing import Callable, Collection, Generic, Literal, TypeVar
 
 import equinox as eqx
 import jax
@@ -27,6 +27,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from omegaconf import MISSING
+from xax.utils.transformations import scan_model
 
 from ksim.commands import Command
 from ksim.env.base_engine import PhysicsEngine
@@ -133,9 +134,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]  # TODO: fix
         super().__init__(config)
 
-    ####################
-    # Abstract methods #
-    ####################
+        assert self.get_obs_generators(None), "obs_generators must not be empty"
+        assert self.get_command_generators(), "command_generators must not be empty"
+        assert self.get_reward_generators(None), "reward_generators must not be empty"
+        assert self.get_termination_generators(None), "termination_generators must not be empty"
 
     @abstractmethod
     def get_model_and_metadata(self) -> tuple[Agent, dict[str, JointMetadataOutput]]: ...
@@ -170,7 +172,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_rollout_time_stats(
         self,
         transitions: Transition,
-        *,
         agent: Agent,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
@@ -194,10 +195,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
     ) -> tuple[Agent, optax.OptState, Array, FrozenDict[str, Array]]: ...
 
-    ##############
-    # Properties #
-    ##############
-
     @property
     def dataset_size(self) -> int:
         """The total number of environment states in the current PPO dataset.
@@ -212,7 +209,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Number of steps to unroll per environment during dataset creation.
 
         E.g. if you have 32 minibatches, with num_envs_per_minibatch=8192, with
-        2048 envs in total, then you will rollout 128 steps each env.
+        2048 envs in total, then you will rollout 128 steps each env:
+        8192 * 32 / 2048 = 128
         """
         msg = "Dataset size must be divisible by number of envs"
         assert self.dataset_size % self.config.num_envs == 0, msg
@@ -431,7 +429,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         dataset: RLDataset,
         minibatch_idx: Array,
     ) -> RLDataset:
-        """Selecting accross E dim to go from (E, T) to (B, T)."""
+        """Selecting across E dim to go from (E, T) to (B, T)."""
         starting_idx = minibatch_idx * self.num_envs_per_minibatch
         minibatch = xax.slice_pytree(
             dataset,
@@ -483,8 +481,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state = training_state[1]
         rng = training_state[2]
 
-        if self.config.reshuffle_rollout:  # if doing recurrence, can't shuffle accross T
-            dataset_ET = xax.reshuffle_pytree(  # TODO: confirm this actually reshuffles accross T and E (for IID)
+        if self.config.reshuffle_rollout:  # if doing recurrence, can't shuffle across T
+            dataset_ET = xax.reshuffle_pytree(  # TODO: confirm this actually reshuffles across T and E (for IID)
                 dataset_ET,
                 (self.config.num_envs, self.num_rollout_steps_per_env),
                 rng,
@@ -499,7 +497,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             cmd_normalizer=cmd_normalizer,
         )
 
-        (agent, opt_state, _), metrics = jax.lax.scan(
+        (agent, opt_state, _), metrics = scan_model(
             partial_fn,
             (agent, opt_state, minibatch_rng),
             jnp.arange(self.config.num_minibatches),
@@ -530,13 +528,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             cmd_normalizer=cmd_normalizer,
         )
 
-        (agent, opt_state, reshuffle_rng), metrics = jax.lax.scan(
+        (agent, opt_state, reshuffle_rng), metrics = scan_model(
             partial_fn,
             (agent, opt_state, reshuffle_rng),
             None,
             length=self.config.num_learning_epochs,
         )
-        # metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
+        metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
         return (agent, opt_state, reshuffle_rng), metrics
 
     def rl_train_loop(
@@ -555,13 +553,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         termination_generators = self.get_termination_generators(physics_model)
 
         rng = self.prng_key()
-        burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 3)
+        rng, burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 4)
 
         reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
-        state_E = jax.vmap(
-            engine.reset,
-            in_axes=(0),
-        )(reset_rngs)
+        state_E = jax.vmap(engine.reset, in_axes=(0))(reset_rngs)
 
         # the normalizers need dummy data to infer shapes
         dummy_obs = get_observation(state_E, burn_in_rng, obs_generators=obs_generators)
@@ -569,77 +564,67 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         obs_normalizer = self.get_obs_normalizer(dummy_obs)
         cmd_normalizer = self.get_cmd_normalizer(dummy_cmd)
 
-        unroll_trajectories_fn = jax.vmap(unroll_trajectory, in_axes=(0, 0))  # only 1 pos param
+        # This needs to be adapted to freeze mjx.model properly
+        _in_axes = jax.tree_map(lambda x: 0 if x.ndim > 0 else None, state_E)
+
+        # pfb30: somewhat positional arguments did not work for me here
+        unroll_trajectories_fn = jax.vmap(
+            unroll_trajectory, in_axes=(_in_axes, 0, None, None, None, None, None, None, None, None, None, None)
+        )
+
         if self.config.compile_unroll:
             unroll_trajectories_fn = eqx.filter_jit(unroll_trajectories_fn)
 
-        #################
-        # Burn in Stage #
-        #################
+        # Burn in stage
+        burn_in_rng_E = jax.random.split(rng, self.config.num_envs)
 
         burn_transitions_ET, _, _, _ = unroll_trajectories_fn(
             state_E,
-            rng,
-            agent=agent,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
-            engine=engine,
-            obs_generators=obs_generators,
-            command_generators=command_generators,
-            reward_generators=reward_generators,
-            termination_generators=termination_generators,
-            num_steps=self.num_rollout_steps_per_env,
-            return_intermediate_physics_data=False,
+            burn_in_rng_E,
+            agent,
+            obs_normalizer,
+            cmd_normalizer,
+            engine,
+            obs_generators,
+            command_generators,
+            reward_generators,
+            termination_generators,
+            self.num_rollout_steps_per_env,
+            False,
         )
 
         obs_normalizer = obs_normalizer.update(burn_transitions_ET.obs)
         cmd_normalizer = cmd_normalizer.update(burn_transitions_ET.command)
 
-        ##################
-        # Training Stage #
-        ##################
         while not self.is_training_over(training_state):
             with self.step_context("on_step_start"):
                 training_state = self.on_step_start(training_state)
 
-            #############################
-            # Rollout and Normalization #
-            #############################
-
             start_time = time.time()
-            reshuffle_rng, rollout_rng, train_rng = jax.random.split(train_rng, 3)
-
-            transitions_ET, state_E, has_nans, _ = unroll_trajectories_fn(
+            rollout_rng, reshuffle_rng, train_rng = jax.random.split(train_rng, 3)
+            rollout_rng_E = jax.random.split(rollout_rng, self.config.num_envs)
+            transitions_ET, state_E, has_nans_E, _ = unroll_trajectories_fn(
                 state_E,
-                agent=agent,
-                obs_normalizer=obs_normalizer,
-                cmd_normalizer=cmd_normalizer,
-                rng=rollout_rng,
-                engine=engine,
-                obs_generators=obs_generators,
-                command_generators=command_generators,
-                reward_generators=reward_generators,
-                termination_generators=termination_generators,
-                num_steps=self.num_rollout_steps_per_env,
-                return_intermediate_physics_data=False,
+                rollout_rng_E,
+                agent,
+                obs_normalizer,
+                cmd_normalizer,
+                engine,
+                obs_generators,
+                command_generators,
+                reward_generators,
+                termination_generators,
+                self.num_rollout_steps_per_env,
+                False,
             )
+            has_nans = jax.tree_util.tree_map(jnp.any, has_nans_E)
 
             rollout_time = time.time() - start_time
             logger.info("Rollout time: %s seconds", rollout_time)
 
-            ###########################
-            # Minibatch Training Loop #
-            ###########################
             start_time = time.time()
-
-            # getting loss components that are constant across minibatches
-            # (e.g. advantages) and flattening them for efficiency, thus
-            # the name "rollout_time" loss components
-            rollout_stats_ET = jax.vmap(
-                self.get_rollout_time_stats,
-                in_axes=(0),
-            )(
-                transitions_ET,
+            rollout_stats_ET = self.get_rollout_time_stats(
+                transitions=transitions_ET,
                 agent=agent,
                 obs_normalizer=obs_normalizer,
                 cmd_normalizer=cmd_normalizer,

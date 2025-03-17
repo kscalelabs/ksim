@@ -83,14 +83,7 @@ T = TypeVar("T", bound=Reward)
 class RewardBuilder(ABC, Generic[T]):
     @abstractmethod
     def __call__(self, physics_model: PhysicsModel) -> T:
-        """Builds a reward from a MuJoCo model.
-
-        Args:
-            data: The data to build the reward from.
-
-        Returns:
-            A reward that can be applied to a state.
-        """
+        """Builds a reward from a MuJoCo model."""
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -562,9 +555,7 @@ class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
             try:
                 left_foot_geom_idxs.append(geom_name_to_idx[geom_name])
             except KeyError:
-                raise ValueError(
-                    f"Geom '{geom_name}' not found in model. " f"Available geoms: {geom_name_to_idx.keys()}"
-                )
+                raise ValueError(f"Geom '{geom_name}' not found in model. Available geoms: {geom_name_to_idx.keys()}")
 
         left_foot_geom_idxs = jnp.array(left_foot_geom_idxs)
         right_foot_geom_idxs = []
@@ -572,9 +563,7 @@ class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
             try:
                 right_foot_geom_idxs.append(geom_name_to_idx[geom_name])
             except KeyError:
-                raise ValueError(
-                    f"Geom '{geom_name}' not found in model. " f"Available geoms: {geom_name_to_idx.keys()}"
-                )
+                raise ValueError(f"Geom '{geom_name}' not found in model. Available geoms: {geom_name_to_idx.keys()}")
 
         right_foot_geom_idxs = jnp.array(right_foot_geom_idxs)
 

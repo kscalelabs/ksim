@@ -1,241 +1,257 @@
-"""defines simple task for training a walking policy for zbot2."""
+"""Defines simple task for training a walking policy for K-Bot."""
 
-from dataclasses import dataclass
+import logging
+from typing import Collection
 
-import flax.linen as nn
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+import optax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
+from kscale.web.gen.api import JointMetadataOutput
+from mujoco import mjx
+from mujoco_scenes.mjcf import load_mjmodel
+from xax.nn.distributions import TanhGaussianDistribution
 
-from ksim.builders.commands import AngularVelocityCommand, LinearVelocityCommand
-from ksim.builders.observation import (
+from ksim.actuators import TorqueActuators
+from ksim.commands import Command, LinearVelocityCommand
+from ksim.env.data import PhysicsModel
+from ksim.env.mjx_engine import MjxEngine
+from ksim.model.base import ActorCriticAgent, KSimModule
+from ksim.model.types import ModelCarry
+from ksim.normalization import Normalizer, PassThrough, Standardize
+from ksim.observation import (
     ActuatorForceObservation,
-    BaseAngularVelocityObservation,
-    BaseLinearVelocityObservation,
-    BaseOrientationObservation,
-    CenterOfMassInertiaObservation,
-    CenterOfMassVelocityObservation,
-    JointPositionObservation,
-    JointVelocityObservation,
-    SensorObservationBuilder,
+    LegacyVelocityObservation,
+    Observation,
 )
-from ksim.builders.resets import XYPositionResetBuilder
-from ksim.builders.rewards import DHForwardReward, DHHealthyReward
-from ksim.builders.terminations import PitchTooGreatTermination, RollTooGreatTermination
-from ksim.env.mjx.mjx_env import MjxEnv, MjxEnvConfig
-from ksim.model.distributions import TanhGaussianDistribution
-from ksim.model.formulations import ActorCriticAgent, ActorModel
-from ksim.model.mlp import MLP
+from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
+from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
+from ksim.terminations import Termination, UnhealthyTermination
 
-######################
-# Static Definitions #
-######################
+logger = logging.getLogger(__name__)
 
 NUM_OUTPUTS = 18
 
 
-@dataclass
-class ZBot2WalkingConfig(PPOConfig, MjxEnvConfig):
-    """Combining configs for the ZBot2 walking task and fixing params."""
+class ZBot2Actor(eqx.Module, KSimModule):
+    """Actor for the walking task."""
 
-    robot_model_name: str = "examples/zbot2/"
+    mlp: eqx.nn.MLP
+    min_std: float = eqx.static_field()
+    max_std: float = eqx.static_field()
+    var_scale: float = eqx.static_field()
 
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        min_std: float,
+        max_std: float,
+        var_scale: float,
+    ) -> None:
+        self.mlp = eqx.nn.MLP(
+            in_size=50,  # TODO: use similar pattern when dummy data gets passed in to populate
+            out_size=NUM_OUTPUTS * 2,
+            width_size=64,
+            depth=5,
+            key=key,
+            activation=jax.nn.relu,
+        )
+        self.min_std = min_std
+        self.max_std = max_std
+        self.var_scale = var_scale
 
-#####################
-# Model Definitions #
-#####################
+    def forward(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None) -> Array:
+        obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
+        command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
+        assert obs_vec.ndim == command_vec.ndim
+        x = jnp.concatenate([obs_vec, command_vec], axis=-1)
 
+        prediction = self.mlp(x)
 
-class ZBot2LearnedStdActorModel(ActorModel):
-    network: MLP
-    min_std: float = 0.01
-    max_std: float = 1.0
-    var_scale: float = 1.0
+        mean = prediction[..., :NUM_OUTPUTS]
+        std = prediction[..., NUM_OUTPUTS:]
 
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> Array:
-        """Forward pass of the actor model."""
-        x = jnp.concatenate(list(obs.values()), axis=-1)
-        predictions = self.network(x)
-
-        mean = predictions[..., :NUM_OUTPUTS]
-        std = predictions[..., NUM_OUTPUTS:]
-
-        # need to do this for stability
+        # softplus and clipping for stability
         std = (jax.nn.softplus(std) + self.min_std) * self.var_scale
         std = jnp.clip(std, self.min_std, self.max_std)
 
         # concat because Gaussian-like distributions expect the parameters
         # to be mean concat std
-        actions_n = jnp.concatenate([mean, std], axis=-1)
+        parametrization = jnp.concatenate([mean, std], axis=-1)
 
-        return actions_n
+        return parametrization, carry
 
+    # TODO: we should move all this to RL and away from the model definition
+    def initial_carry(self) -> ModelCarry:
+        """No carry for now, but we could use this to initialize recurrence or action history."""
+        return None
 
-class ZBot2CriticModel(nn.Module):
-    network: MLP
+    def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+        """Forward pass across the episode (time, ...). No env dimension.
 
-    @nn.compact
-    def __call__(self, obs: FrozenDict[str, Array], cmd: FrozenDict[str, Array]) -> jax.Array:
-        """Forward pass of the critic model."""
-        x = jnp.concatenate(list(obs.values()), axis=-1)
-        value_estimate = self.network(x)
-
-        return value_estimate
-
-
-####################
-# Task Definitions #
-####################
+        By default, we vmap the forward pass for efficiency. If you implement
+        recurrence, you should override this with an appropriate scan.
+        """
+        vmapped_forward = jax.vmap(self.forward, in_axes=(0, 0, None))
+        prediction, _ = vmapped_forward(obs, command, None)
+        return prediction
 
 
-class ZBot2WalkingTask(PPOTask[ZBot2WalkingConfig]):
-    def get_environment(self) -> MjxEnv:
-        """Get the environment."""
-        return MjxEnv(
-            self.config,
-            terminations=[
-                RollTooGreatTermination(max_roll=1.04),
-                PitchTooGreatTermination(max_pitch=1.04),
+class ZBot2Critic(eqx.Module, KSimModule):
+    """Critic for the standing task."""
+
+    mlp: eqx.nn.MLP
+
+    def __init__(self, key: PRNGKeyArray) -> None:
+        self.mlp = eqx.nn.MLP(
+            in_size=338,  # TODO: is there a nice way of inferring this?
+            out_size=1,
+            width_size=64,
+            depth=5,
+            key=key,
+            activation=jax.nn.relu,
+        )
+
+    def forward(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None) -> Array:
+        obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
+        command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
+        x = jnp.concatenate([obs_vec, command_vec], axis=-1)
+        return self.mlp(x)
+
+    def initial_carry(self) -> ModelCarry:
+        """No carry for now, but we could use this to initialize recurrence."""
+        return None
+
+    def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+        """Forward pass across the episode (time, ...). No env dimension.
+
+        By default, we vmap the forward pass for efficiency. If you implement
+        recurrence, you should override this with an appropriate scan.
+        """
+        vmapped_forward = jax.vmap(self.forward, in_axes=(0, 0, None))
+        prediction, _ = vmapped_forward(obs, command, None)
+        return prediction
+
+
+class ZBot2WalkingTask(PPOTask[PPOConfig]):
+    def get_optimizer(self) -> optax.GradientTransformation:
+        """Get the optimizer: handled by XAX."""
+        return optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.adam(self.config.learning_rate),
+        )
+
+    def critic_predict_minibatch(
+        self,
+        agent: ActorCriticAgent,
+        obs_ET: Array,
+        cmd_ET: Array,
+    ) -> Array:
+        pass  # Not used anywhere rn
+
+    def get_model_and_metadata(self) -> tuple[PhysicsModel, dict[str, JointMetadataOutput]]:
+        metadata = None  # get_joint_metadata(mj_model)  # TODO: implement this function properly
+
+        robot_path = "examples/kscale-assets/zbot-feet/robot.mjcf"
+        scene_type = "smooth"
+        logger.info("Loading mjcf from: %s", robot_path)
+        logger.info("Scene type: %s", scene_type)
+        mj_model = load_mjmodel(robot_path, scene_type)
+
+        mj_model.opt.timestep = jnp.array(self.config.dt)
+        mj_model.opt.iterations = 6
+        mj_model.opt.ls_iterations = 6
+        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
+        mj_model.opt.solver = mjx.SolverType.CG
+        mjx_model = mjx.put_model(mj_model)
+
+        return mjx_model, metadata
+
+    def get_engine(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> MjxEngine:
+        return MjxEngine(
+            default_physics_model=physics_model,
+            resetters=[
+                RandomizeJointPositions(scale=0.01),
+                RandomizeJointVelocities(scale=0.01),
             ],
-            resets=[
-                XYPositionResetBuilder(),
-            ],
-            rewards=[
-                # AngularVelocityXYPenalty(scale=-0.15),
-                # TrackLinearVelocityXYReward(scale=1.0),
-                # HeightReward(scale=1.0, height_target=0.42),
-                # TrackAngularVelocityZReward(scale=1.0),
-                # OrientationPenalty(scale=-0.5, target_orientation=[0.0, 0.0, 0.0]),
-                # DefaultPoseDeviationPenaltyBuilder(
-                #     scale=-0.1,
-                #     default_positions={
-                #         "left_shoulder_pitch": 0.0,
-                #         "left_shoulder_yaw": 0.0,
-                #         "left_elbow": 0.0,
-                #         "right_shoulder_pitch": 0.0,
-                #         "right_shoulder_yaw": 0.0,
-                #         "right_elbow": 0.0,
-                #         "left_hip_pitch": 0.0,
-                #         "left_hip_roll": 0.0,
-                #         "left_hip_yaw": 0.0,
-                #         "left_knee": 0.0,
-                #         "left_ankle": 0.0,
-                #         "right_hip_pitch": 0.0,
-                #         "right_hip_roll": 0.0,
-                #         "right_hip_yaw": 0.0,
-                #         "right_knee": 0.0,
-                #         "right_ankle": 0.0,
-                #     },
-                #     deviation_weights={
-                #         "left_shoulder_pitch": 1.0,
-                #         "left_shoulder_yaw": 1.0,
-                #         "left_elbow": 1.0,
-                #         "right_shoulder_pitch": 1.0,
-                #         "right_shoulder_yaw": 1.0,
-                #         "right_elbow": 1.0,
-                #         "left_hip_pitch": 2.0,
-                #         "left_hip_roll": 2.0,
-                #         "left_hip_yaw": 2.0,
-                #         "left_knee": 1.0,
-                #         "left_ankle": 1.0,
-                #         "right_hip_pitch": 2.0,
-                #         "right_hip_roll": 2.0,
-                #         "right_hip_yaw": 2.0,
-                #         "right_knee": 1.0,
-                #         "right_ankle": 1.0,
-                #     },
-                # ),
-                DHHealthyReward(
-                    scale=0.5,
-                ),
-                DHForwardReward(scale=0.2),
-            ],
-            observations=[
-                BaseOrientationObservation(noise_type="gaussian"),
-                BaseLinearVelocityObservation(noise_type="gaussian"),
-                BaseAngularVelocityObservation(noise_type="gaussian"),
-                JointPositionObservation(noise_type="gaussian"),
-                JointVelocityObservation(noise_type="gaussian"),
-                CenterOfMassInertiaObservation(noise_type="gaussian"),
-                CenterOfMassVelocityObservation(noise_type="gaussian"),
-                ActuatorForceObservation(noise_type="gaussian"),
-                SensorObservationBuilder(sensor_name="IMU_acc"),  # Sensor has noise already.
-                SensorObservationBuilder(sensor_name="IMU_gyro"),  # Sensor has noise already.
-            ],
-            commands=[
-                LinearVelocityCommand(
-                    x_scale=0.0,
-                    y_scale=0.0,
-                    switch_prob=0.02,
-                    zero_prob=0.3,
-                ),
-                AngularVelocityCommand(
-                    scale=0.0,
-                    switch_prob=0.02,
-                    zero_prob=0.8,
-                ),
-            ],
+            # actuators=MITPositionActuators(physics_model, metadata), # TODO:bring it back
+            actuators=TorqueActuators(),
+            # TODO: add randomizers
+            dt=self.config.dt,
+            ctrl_dt=self.config.ctrl_dt,
+            min_action_latency_step=0,
+            max_action_latency_step=0,
         )
 
     def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
-        """Get the model."""
         return ActorCriticAgent(
-            actor_module=ZBot2LearnedStdActorModel(
-                MLP(
-                    out_dim=NUM_OUTPUTS * 2,  # 2x for std prediction
-                    hidden_dims=(64,) * 5,
-                    activation=nn.relu,
-                    bias_init=nn.initializers.zeros,
-                ),
-            ),
-            critic_module=ZBot2CriticModel(
-                MLP(
-                    out_dim=1,
-                    hidden_dims=(64,) * 5,
-                    activation=nn.relu,
-                    bias_init=nn.initializers.zeros,
-                ),
-            ),
-            distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
+            critic_model=ZBot2Critic(key),
+            actor_model=ZBot2Actor(key, min_std=0.01, max_std=1.0, var_scale=1.0),
+            action_distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
-    def get_init_actor_carry(self) -> jnp.ndarray | None:
-        """Get the initial actor carry."""
-        return None
+    def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer:
+        return Standardize(dummy_obs, alpha=1.0)
 
-    def get_init_critic_carry(self) -> None:
-        """Get the initial critic carry."""
-        return None
+    def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
+        return PassThrough()
+
+    # from ML: I haven't made up my mind on this API, but I generally think we should move away
+    # from the hidden builder pattern. Giving the data directly will help with this.
+    # In fact, we might even want to make this return a pure function.
+    def get_obs_generators(self, physics_model: PhysicsModel) -> Collection[Observation]:
+        return [
+            # LegacyPositionObservation(exclude_xy=True),
+            LegacyVelocityObservation(),
+            # CenterOfMassInertiaObservation(), # TODO: debug and bring it back
+            # CenterOfMassVelocityObservation(),
+            ActuatorForceObservation(),
+        ]
+
+    def get_command_generators(self) -> Collection[Command]:
+        return [LinearVelocityCommand(x_scale=1.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3)]
+
+    def get_reward_generators(self, physics_model: PhysicsModel) -> Collection[Reward]:
+        return [
+            HeightReward(scale=1.0, height_target=0.7),
+            DHForwardReward(scale=0.2),
+        ]
+
+    def get_termination_generators(self, physics_model: PhysicsModel) -> Collection[Termination]:
+        return [UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0)]
 
 
 if __name__ == "__main__":
     # python -m examples.zbot2.walking
     ZBot2WalkingTask.launch(
-        ZBot2WalkingConfig(
+        PPOConfig(
+            compile_unroll=False,
             num_learning_epochs=8,
-            num_env_states_per_minibatch=8192,
-            num_minibatches=32,
-            num_envs=2048,
-            dt=0.001,
-            ctrl_dt=0.005,
-            learning_rate=0.00005,
-            save_every_n_steps=50,
+            num_env_states_per_minibatch=6,
+            num_minibatches=3,
+            num_envs=2,
+            dt=0.005,
+            ctrl_dt=0.02,
+            learning_rate=1e-5,
+            save_every_n_steps=25,
             only_save_most_recent=False,
             reward_scaling_alpha=0.0,
             obs_norm_alpha=0.0,
-            solver_iterations=6,
-            solver_ls_iterations=6,
-            actuator_type="mit",
             scale_rewards=False,
             gamma=0.97,
             lam=0.95,
             normalize_advantage=True,
             normalize_advantage_in_minibatch=True,
             entropy_coef=0.001,
-            clip_param=0.2,
+            clip_param=0.3,
             use_clipped_value_loss=False,
             max_grad_norm=1.0,
+            max_action_latency=0.0,
+            min_action_latency=0.0,
+            eval_rollout_length=1000,
         ),
     )

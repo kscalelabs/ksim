@@ -39,7 +39,6 @@ UnrollYs = tuple[Transition, UnrollNaNDetector, PhysicsData | None]
 def unroll_trajectory(
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
-    *,
     agent: Agent,
     obs_normalizer: Normalizer,
     cmd_normalizer: Normalizer,
@@ -76,7 +75,7 @@ def unroll_trajectory(
         next_physics_state = engine.step(action, physics_state, physics_rng)
 
         termination_components = get_terminations(next_physics_state, termination_generators=termination_generators)
-        action_causes_termination = jax.tree_util.tree_reduce(jnp.logical_or, termination_components.values())
+        action_causes_termination = jax.tree_util.tree_reduce(jnp.logical_or, list(termination_components.values()))
         reward_components = get_rewards(
             prev_action=prev_action,
             physics_state=physics_state,
@@ -86,7 +85,7 @@ def unroll_trajectory(
             next_state_terminates=action_causes_termination,
             reward_generators=reward_generators,
         )
-        rewards = jax.tree_util.tree_reduce(jnp.add, reward_components.values())
+        rewards = jax.tree_util.tree_reduce(jnp.add, reward_components)
 
         # resetting if nans or termination, resetting everything...
         next_data_has_nans = xax.pytree_has_nans(next_physics_state.data)
@@ -118,7 +117,6 @@ def unroll_trajectory(
             termination_has_nans=xax.pytree_has_nans(termination_components),
             reward_has_nans=xax.pytree_has_nans(rewards),
         )
-
         # if is fine since condition will be static at runtime
         if return_intermediate_physics_data:
             return (command, next_carry, next_physics_state), (transition, nan_mask, next_physics_state)
@@ -137,14 +135,16 @@ def unroll_trajectory(
         transition.done,
         reward_generators=reward_generators,
     )
-    post_accumulated_rewards = jax.tree_util.tree_reduce(jnp.add, post_accumulated_reward_components.values())
+
+    post_accumulated_rewards = jax.tree_util.tree_reduce(jnp.add, list(post_accumulated_reward_components.values()))
     transition = replace(
         transition,
         reward_components=post_accumulated_reward_components,
         reward=post_accumulated_rewards,
     )
+    has_nans_any = jax.tree_util.tree_map(jnp.any, nan_mask)
 
-    return transition, final_physics_state, nan_mask, intermediate_physics_data
+    return transition, final_physics_state, has_nans_any, intermediate_physics_data
 
 
 def get_observation(
@@ -167,7 +167,7 @@ def get_rewards(
     physics_state: PhysicsState,
     command: FrozenDict[str, Array],
     action: Array,
-    next_physics_state: PhysicsState,
+    next_physics_state: PhysicsState,  # TODO - rewards only process data
     next_state_terminates: Array,
     *,
     reward_generators: Collection[Reward],
@@ -178,10 +178,10 @@ def get_rewards(
         reward_val = (
             reward_generator(
                 prev_action=prev_action,
-                physics_state=physics_state,
+                physics_state=physics_state.data,
                 command=command,
                 action=action,
-                next_physics_state=next_physics_state,
+                next_physics_state=next_physics_state.data,
                 next_state_terminates=next_state_terminates,
             )
             * reward_generator.scale
@@ -203,13 +203,14 @@ def post_accumulate_rewards(
     reward_generators: Collection[Reward],
 ) -> FrozenDict[str, Array]:
     """Post-accumulate rewards."""
+    post_accumulated_reward_components = dict(reward_components)
     for reward_generator in reward_generators:
         original_reward = reward_components[reward_generator.reward_name]
         assert isinstance(original_reward, Array)
         reward_val = reward_generator.post_accumulate(original_reward, done)
-        reward_components[reward_generator.reward_name] = reward_val
+        post_accumulated_reward_components[reward_generator.reward_name] = reward_val
 
-    return reward_components
+    return FrozenDict(post_accumulated_reward_components)
 
 
 def get_terminations(

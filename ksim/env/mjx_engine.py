@@ -29,47 +29,19 @@ class MjxEngine(PhysicsEngine):
         *,
         dt: float,
         ctrl_dt: float,
-        solver: mjx.SolverType,
-        iterations: int,
-        ls_iterations: int,
-        disableflags: mjx.DisableBit,
         min_action_latency_step: int,
         max_action_latency_step: int,
     ) -> None:
         """Initialize the MJX engine with resetting and actuators."""
         assert isinstance(default_physics_model, mjx.Model)
-        self.default_mjx_model = self._override_model_settings(
-            default_physics_model,
-            dt=dt,
-            iterations=iterations,
-            ls_iterations=ls_iterations,
-            disableflags=disableflags,
-            solver=solver,
-        )
-
+        self.default_mjx_model = default_physics_model
         self.actuators = actuators
         self.resetters = resetters
+        assert ctrl_dt % dt == 0, "ctrl_dt must be a multiple of dt"
         self.ctrl_dt = ctrl_dt
-        self.phys_steps_per_ctrl_steps = int(dt / ctrl_dt)
+        self.phys_steps_per_ctrl_steps = int(ctrl_dt / dt)
         self.min_action_latency_step = min_action_latency_step
         self.max_action_latency_step = max_action_latency_step
-
-    def _override_model_settings(  # TODO: this should live in get_mjx_model_and_metadata...
-        self,
-        mjx_model: mjx.Model,
-        *,
-        dt: float,
-        iterations: int,
-        ls_iterations: int,
-        disableflags: mjx.DisableBit,
-        solver: mjx.SolverType,
-    ) -> mjx.Model:
-        mjx_model.opt.timestep = jnp.array(dt)
-        mjx_model.opt.iterations = iterations
-        mjx_model.opt.ls_iterations = ls_iterations
-        mjx_model.opt.disableflags = disableflags
-        mjx_model.opt.solver = solver
-        return mjx_model
 
     def reset(self, rng: PRNGKeyArray) -> PhysicsState:
         """Reset the engine and return the physics model and data."""
@@ -121,6 +93,7 @@ class MjxEngine(PhysicsEngine):
                 action,
                 prev_action,
             )
+
             torques = self.actuators.get_ctrl(ctrl, data)
             data_with_ctrl = data.replace(ctrl=torques)
             data_with_ctrl = mjx.forward(mjx_model, data_with_ctrl)  # TODO: investigate if we can remove this

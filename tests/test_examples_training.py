@@ -7,8 +7,7 @@ import jax.numpy as jnp
 import pytest
 import xax
 
-from examples.default_humanoid.walking import HumanoidWalkingConfig, HumanoidWalkingTask
-from ksim.model.types import ModelInput
+from examples.default_humanoid.walking import HumanoidWalkingTask
 
 
 @pytest.mark.slow
@@ -24,7 +23,7 @@ def test_default_humanoid_training() -> None:
     )
 
     # Create the task
-    task = HumanoidWalkingTask(config)
+    task = HumanoidWalkingTask(PPOTask)
     key = jax.random.PRNGKey(0)
 
     # Get the environment and model
@@ -41,6 +40,7 @@ def test_default_humanoid_training() -> None:
     # Test a single training iteration
     physics_model_L = env.get_init_physics_model()
     dummy_env_states = env.get_dummy_env_states(config.num_envs)
+    # TODO
     dummy_model_input = ModelInput(
         obs=dummy_env_states.obs,
         command=dummy_env_states.command,
@@ -149,3 +149,8 @@ def test_default_humanoid_run_method() -> None:
                     f"NaN values found in model parameter '{param_path}'",
                     important=True,
                 )
+
+
+if __name__ == "__main__":
+    test_default_humanoid_training()
+    # test_default_humanoid_run_method()
