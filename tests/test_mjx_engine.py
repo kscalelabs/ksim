@@ -52,7 +52,7 @@ def test_engine_vmappable(engine: MjxEngine) -> None:
     vmapped_reset = jax.vmap(jax.jit(engine.reset), in_axes=(0,))
     states = vmapped_reset(keys)
 
-    assert len(jax.tree_util.tree_leaves(states)[0]) == num_envs
+    assert len(jax.tree.leaves(states)[0]) == num_envs
 
     action = jnp.zeros((num_envs, 21))
     vmapped_step = jax.vmap(jax.jit(engine.step), in_axes=(0, 0, 0))

@@ -191,7 +191,6 @@ def test_unroll_jittable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         num_steps=_NUM_STEPS,
         return_intermediate_physics_data=False,
     )
-
     _assert_nan_detector_is_none(unroll_nan_detector)
 
 
@@ -202,15 +201,15 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
     rngs = jax.random.split(rng, _NUM_ENVS)
     initial_physics_states = jax.vmap(engine.reset, in_axes=(0))(rngs)
     vmapped_engine_step = jax.vmap(engine.step, in_axes=(0, 0, 0))
-    vmapped_engine_step(jnp.zeros((_NUM_ENVS, _ACTION_DIM)), initial_physics_states, rngs)
-    physics_state_in_axes = jax.tree_map(lambda x: 0 if x.ndim > 0 else None, initial_physics_states)
+    actions = jnp.zeros((_NUM_ENVS, _ACTION_DIM))
+    vmapped_engine_step(actions, initial_physics_states, rngs)
 
-    jitted_unroll = eqx.filter_jit(unroll_trajectory)
     vmapped_unroll_trajectory = jax.vmap(
-        jitted_unroll, in_axes=(physics_state_in_axes, 0, None, None, None, None, None, None, None, None, None, None)
+        unroll_trajectory, in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None)
     )
+    jit_unroll = eqx.filter_jit(vmapped_unroll_trajectory)
 
-    transitions, final_state, unroll_nan_detector, _ = vmapped_unroll_trajectory(
+    transitions, final_state, unroll_nan_detector, _ = jit_unroll(
         initial_physics_states,
         rngs,
         agent,
@@ -228,4 +227,5 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
     assert transitions.obs["dummy_observation_proprio_gaussian"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
     assert transitions.command["dummy_command_vector"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
     assert final_state.data.qpos.shape == (_NUM_ENVS, 28)
+    assert jnp.unique(final_state.data.qpos[:, 0]).shape[0] == _NUM_ENVS
     _assert_nan_detector_is_none(unroll_nan_detector)

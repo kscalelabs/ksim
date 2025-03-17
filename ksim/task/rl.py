@@ -536,7 +536,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             None,
             length=self.config.num_learning_epochs,
         )
-        metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
+        metrics = jax.tree.map(lambda x: jnp.mean(x), metrics)
         return (agent, opt_state, reshuffle_rng), metrics
 
     def rl_train_loop(
@@ -566,12 +566,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         obs_normalizer = self.get_obs_normalizer(dummy_obs)
         cmd_normalizer = self.get_cmd_normalizer(dummy_cmd)
 
-        # This needs to be adapted to freeze mjx.model properly
-        _in_axes = jax.tree_map(lambda x: 0 if x.ndim > 0 else None, state_E)
-
-        # pfb30: somewhat positional arguments did not work for me here
         unroll_trajectories_fn = jax.vmap(
-            unroll_trajectory, in_axes=(_in_axes, 0, None, None, None, None, None, None, None, None, None, None)
+            unroll_trajectory, in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None)
         )
 
         if self.config.compile_unroll:
@@ -580,6 +576,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Burn in stage
         burn_in_rng_E = jax.random.split(rng, self.config.num_envs)
 
+        # No positional arguments with vmap (https://github.com/jax-ml/jax/issues/7465)
         burn_transitions_ET, _, _, _ = unroll_trajectories_fn(
             state_E,
             burn_in_rng_E,
@@ -619,7 +616,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.num_rollout_steps_per_env,
                 False,
             )
-            has_nans = jax.tree_util.tree_map(jnp.any, has_nans_E)
+            has_nans = jax.tree.map(jnp.any, has_nans_E)
 
             rollout_time = time.time() - start_time
             logger.info("Rollout time: %s seconds", rollout_time)
@@ -647,7 +644,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 obs_normalizer=obs_normalizer,
                 cmd_normalizer=cmd_normalizer,
             )
-            metrics_mean = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
+            metrics_mean = jax.tree.map(lambda x: jnp.mean(x), metrics)
             update_time = time.time() - start_time
             logger.info("Update time: %s seconds", update_time)
 
