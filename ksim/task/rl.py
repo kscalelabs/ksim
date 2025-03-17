@@ -536,6 +536,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # TODO: We should probably implement this to get scanning going
         # https://github.com/patrick-kidger/optimistix/blob/4d7856150233f58e531dbef0e88af889ed61fc64/optimistix/_iterate.py#L223-L236
         # See: https://github.com/patrick-kidger/equinox/issues/709
+        # or use NNX scan?
         metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
         return (agent, opt_state, reshuffle_rng), metrics
 
