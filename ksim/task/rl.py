@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Collection, Generic, Literal, TypeVar
+from typing import Callable, Collection, Generic, Literal, TypeVar
 
 import equinox as eqx
 import jax
@@ -27,6 +27,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from omegaconf import MISSING
+from xax.utils.transformations import scan_model
 
 from ksim.commands import Command
 from ksim.env.base_engine import PhysicsEngine
@@ -496,7 +497,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             cmd_normalizer=cmd_normalizer,
         )
 
-        (agent, opt_state, _), metrics = jax.lax.scan(
+        (agent, opt_state, _), metrics = scan_model(
             partial_fn,
             (agent, opt_state, minibatch_rng),
             jnp.arange(self.config.num_minibatches),
@@ -527,16 +528,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             cmd_normalizer=cmd_normalizer,
         )
 
-        (agent, opt_state, reshuffle_rng), metrics = jax.lax.scan(
+        (agent, opt_state, reshuffle_rng), metrics = scan_model(
             partial_fn,
             (agent, opt_state, reshuffle_rng),
             None,
             length=self.config.num_learning_epochs,
         )
-        # TODO: We should probably implement this to get scanning going
-        # https://github.com/patrick-kidger/optimistix/blob/4d7856150233f58e531dbef0e88af889ed61fc64/optimistix/_iterate.py#L223-L236
-        # See: https://github.com/patrick-kidger/equinox/issues/709
-        # or use NNX scan?
         metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
         return (agent, opt_state, reshuffle_rng), metrics
 
