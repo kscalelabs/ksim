@@ -109,7 +109,6 @@ class DummyCritic(eqx.Module, KSimModule):
 def engine() -> MjxEngine:
     mj_model = mujoco.MjModel.from_xml_path("tests/fixed_assets/default_humanoid_test.mjcf")
     mjx_model = mjx.put_model(mj_model)
-
     engine = MjxEngine(
         default_physics_model=mjx_model,
         resetters=[
@@ -238,10 +237,3 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
     assert final_state.data.qpos.shape == (_NUM_ENVS, 28)
     assert jnp.unique(final_state.data.qpos[:, 0]).shape[0] == _NUM_ENVS
     _assert_nan_detector_is_none(unroll_nan_detector)
-    breakpoint()
-
-
-# if __name__ == "__main__":
-#     engine = engine()
-#     agent = agent()
-#     test_unroll_vmappable(engine, agent)
