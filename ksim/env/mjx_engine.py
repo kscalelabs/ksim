@@ -10,6 +10,7 @@ from mujoco import mjx
 from ksim.actuators import Actuators
 from ksim.env.base_engine import PhysicsEngine
 from ksim.env.data import PhysicsModel, PhysicsState
+from ksim.randomization import Randomizer
 from ksim.resets import Reset
 
 
@@ -25,6 +26,7 @@ class MjxEngine(PhysicsEngine):
         self,
         default_physics_model: PhysicsModel,
         resetters: Collection[Reset],
+        randomizers: Collection[Randomizer],
         actuators: Actuators,
         *,
         dt: float,
@@ -37,6 +39,7 @@ class MjxEngine(PhysicsEngine):
         self.default_mjx_model = default_physics_model
         self.actuators = actuators
         self.resetters = resetters
+        self.randomizers = randomizers
         assert ctrl_dt % dt == 0, "ctrl_dt must be a multiple of dt"
         self.ctrl_dt = ctrl_dt
         self.phys_steps_per_ctrl_steps = int(ctrl_dt / dt)
@@ -45,13 +48,18 @@ class MjxEngine(PhysicsEngine):
 
     def reset(self, rng: PRNGKeyArray) -> PhysicsState:
         """Reset the engine and return the physics model and data."""
+        rng_resetters, rng_randomizers = jax.random.split(rng, 2)
         mjx_model = self.default_mjx_model
         mjx_data = mjx.make_data(mjx_model)
 
         # probably don't need to scan, fixed and small
         for resetter in self.resetters:
-            rng = jax.random.split(rng, 1)[0]
-            mjx_data = resetter(mjx_data, rng)
+            rng_resetters = jax.random.split(rng_resetters, 1)[0]
+            mjx_data = resetter(mjx_data, rng_resetters)
+
+        for randomizer in self.randomizers:
+            rng_randomizers = jax.random.split(rng_randomizers, 1)[0]
+            mjx_model, mjx_data = randomizer(mjx_model, mjx_data, rng_randomizers)
 
         mjx_data = mjx.forward(mjx_model, mjx_data)
         assert isinstance(mjx_data, mjx.Data)

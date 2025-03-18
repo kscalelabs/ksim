@@ -67,7 +67,7 @@
       </default>
 
       <!-- joints -->
-      <joint type="hinge" damping=".2" stiffness="1" armature=".01" limited="true" solimplimit="0 .99 .01"/>
+      <joint type="hinge" damping=".2" frictionloss="0.1" stiffness="1" armature=".01" limited="true" solimplimit="0 .99 .01"/>
       <default class="joint_big">
         <joint damping="5" stiffness="10"/>
         <default class="hip_x">

@@ -567,7 +567,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         cmd_normalizer = self.get_cmd_normalizer(dummy_cmd)
 
         unroll_trajectories_fn = jax.vmap(
-            unroll_trajectory, in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None)
+            unroll_trajectory,
+            in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None),
         )
 
         if self.config.compile_unroll:

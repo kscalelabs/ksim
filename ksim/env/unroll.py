@@ -119,7 +119,11 @@ def unroll_trajectory(
         )
         # if is fine since condition will be static at runtime
         if return_intermediate_physics_data:
-            return (command, next_carry, next_physics_state), (transition, nan_mask, next_physics_state)
+            return (command, next_carry, next_physics_state), (
+                transition,
+                nan_mask,
+                next_physics_state,
+            )
         else:
             return (command, next_carry, next_physics_state), (transition, nan_mask, None)
 

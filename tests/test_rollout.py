@@ -14,13 +14,14 @@ from xax.nn.distributions import TanhGaussianDistribution
 
 from ksim.actuators import TorqueActuators
 from ksim.commands import Command
-from ksim.env.data import PhysicsData, PhysicsState
+from ksim.env.data import PhysicsData, PhysicsModel, PhysicsState
 from ksim.env.mjx_engine import MjxEngine
 from ksim.env.unroll import UnrollNaNDetector, unroll_trajectory
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.types import ModelCarry
 from ksim.normalization import Normalizer, PassThrough
 from ksim.observation import Observation
+from ksim.randomization import Randomizer
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import Reward
 from ksim.terminations import Termination
@@ -59,6 +60,11 @@ class DummyCommand(Command):
 
     def __call__(self, prev_command: Array | None, time: Array, rng: PRNGKeyArray) -> Array:
         return jnp.zeros(1)
+
+
+class DummyRandomizer(Randomizer):
+    def __call__(self, model: PhysicsModel, data: PhysicsData, rng: Array) -> tuple[PhysicsModel, PhysicsData]:
+        return model, data
 
 
 def get_observation(
@@ -103,12 +109,14 @@ class DummyCritic(eqx.Module, KSimModule):
 def engine() -> MjxEngine:
     mj_model = mujoco.MjModel.from_xml_path("tests/fixed_assets/default_humanoid_test.mjcf")
     mjx_model = mjx.put_model(mj_model)
+
     engine = MjxEngine(
         default_physics_model=mjx_model,
         resetters=[
             RandomizeJointPositions(scale=0.01),
             RandomizeJointVelocities(scale=0.01),
         ],
+        randomizers=[DummyRandomizer()],
         actuators=TorqueActuators(),
         dt=0.005,
         ctrl_dt=0.02,
@@ -205,7 +213,8 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
     vmapped_engine_step(actions, initial_physics_states, rngs)
 
     vmapped_unroll_trajectory = jax.vmap(
-        unroll_trajectory, in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None)
+        unroll_trajectory,
+        in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None),
     )
     jit_unroll = eqx.filter_jit(vmapped_unroll_trajectory)
 
@@ -229,3 +238,10 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
     assert final_state.data.qpos.shape == (_NUM_ENVS, 28)
     assert jnp.unique(final_state.data.qpos[:, 0]).shape[0] == _NUM_ENVS
     _assert_nan_detector_is_none(unroll_nan_detector)
+    breakpoint()
+
+
+# if __name__ == "__main__":
+#     engine = engine()
+#     agent = agent()
+#     test_unroll_vmappable(engine, agent)
