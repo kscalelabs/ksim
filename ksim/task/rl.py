@@ -274,7 +274,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             case "env":
                 agent, _, _, _ = self.load_initial_state(self.prng_key())
-                breakpoint()
                 self.run_environment(agent, self.config.eval_rollout_length)
 
             case _:

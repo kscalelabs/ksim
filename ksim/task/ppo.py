@@ -314,7 +314,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # normalizing at the trajectory dataset level
         if self.config.normalize_advantage and not self.config.normalize_advantage_in_minibatch:
             advantages_ET = (advantages_ET - advantages_ET.mean()) / (advantages_ET.std() + self.config.eps)
-        # jax.debug.breakpoint()
+
         return PPORolloutTimeStats(
             initial_action_log_probs=jax.lax.stop_gradient(initial_action_log_probs_ET),
             initial_values=jax.lax.stop_gradient(initial_values_ET),
