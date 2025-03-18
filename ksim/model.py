@@ -16,7 +16,6 @@ from xax.nn.distributions import ActionDistribution
 
 ModelCarry = PyTree
 
-
 class KSimModule(ABC):
     """Base class for all actor-critic agents."""
 
@@ -25,14 +24,6 @@ class KSimModule(ABC):
         self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None
     ) -> tuple[Array, ModelCarry | None]:
         """Apply the actor-critic to the given input. Can be recurrent."""
-
-    @abstractmethod
-    def make_export_model(self) -> tuple[Callable, int]:
-        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
-
-        Returns:
-            A tuple containing the inference function and the size of the input vector.
-        """
 
     ######################
     # Easily Overridable #
@@ -58,13 +49,19 @@ class KSimModule(ABC):
         prediction, _ = vmapped_forward(obs, command, None)
         return prediction
 
+class DeployableModel(KSimModule):
+    """A model that can be deployed."""
+
+    @abstractmethod
+    def make_export_model(self) -> tuple[Callable, int]:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action."""
 
 @jax.tree_util.register_dataclass
 @dataclass
 class Agent(ABC):
     """Base class for all agents."""
 
-    actor_model: KSimModule
+    actor_model: DeployableModel
     action_distribution: ActionDistribution
 
 
@@ -74,5 +71,5 @@ class ActorCriticAgent(Agent):
     """An agent that has both an actor and a critic."""
 
     critic_model: KSimModule
-    actor_model: KSimModule
+    actor_model: DeployableModel
     action_distribution: ActionDistribution = eqx.static_field()

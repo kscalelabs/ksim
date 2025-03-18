@@ -1,5 +1,6 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
+from pathlib import Path
 from typing import Callable, Collection, TypeAlias, TypeVar
 
 import equinox as eqx
@@ -17,7 +18,7 @@ from ksim.actuators import TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.env.mjx_engine import MjxEngine
-from ksim.model import ActorCriticAgent, KSimModule, ModelCarry
+from ksim.model import ActorCriticAgent, DeployableModel, KSimModule, ModelCarry
 from ksim.observation import ActuatorForceObservation, Observation
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import DHForwardReward, HeightReward, Reward
@@ -31,7 +32,7 @@ Observation: TypeAlias = FrozenDict[str, Array]
 Command: TypeAlias = FrozenDict[str, Array]
 
 
-class DefaultHumanoidActor(eqx.Module, KSimModule):
+class DefaultHumanoidActor(eqx.Module, DeployableModel):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
