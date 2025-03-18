@@ -68,6 +68,9 @@ class DefaultHumanoidActor(eqx.Module, DeployableModel):
         """
         input_size = self.mlp.in_size
 
+        if input_size == "scalar":
+            input_size = 1
+
         distribution = xax.nn.distributions.TanhGaussianDistribution(action_dim=NUM_OUTPUTS)
 
         def model_fn(input: Array) -> Array:
@@ -77,7 +80,8 @@ class DefaultHumanoidActor(eqx.Module, DeployableModel):
             std = prediction[..., NUM_OUTPUTS:]
 
             # Leaving room to make this stochastic
-            deterministic_action = distribution.mode(mean, std)
+            parameterization = jnp.concatenate([mean, std], axis=-1)
+            deterministic_action = distribution.mode(parameterization)
 
             return deterministic_action
 
