@@ -27,10 +27,6 @@ from ksim.terminations import Termination, UnhealthyTermination
 
 logger = logging.getLogger(__name__)
 
-######################
-# Static Definitions #
-######################
-
 NUM_OUTPUTS = 20
 
 

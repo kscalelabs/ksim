@@ -274,6 +274,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             case "env":
                 agent, _, _, _ = self.load_initial_state(self.prng_key())
+                breakpoint()
                 self.run_environment(agent, self.config.eval_rollout_length)
 
             case _:
@@ -325,11 +326,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         state: xax.State | None = None,
     ) -> None:
         raise NotImplementedError("Environment tasks must implement this method.")
-
-    def log_state(self) -> None:
-        super().log_state()
-
-        # self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
 
     def get_reward_stats(
         self,

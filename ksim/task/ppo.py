@@ -273,10 +273,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "PPO tasks use model_update and loss_metrics_grads instead."
         )
 
-    ###########################
-    # Potentially Overridable #
-    ###########################
-
     @abstractmethod
     def critic_predict_minibatch(
         self,

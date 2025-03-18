@@ -25,10 +25,6 @@ class KSimModule(ABC):
     ) -> tuple[Array, ModelCarry | None]:
         """Apply the actor-critic to the given input. Can be recurrent."""
 
-    ######################
-    # Easily Overridable #
-    ######################
-
     # TODO: move this to RLTask and make it overrideable there...
     def initial_carry(self) -> ModelCarry | None:
         """Initial carry state for the model.

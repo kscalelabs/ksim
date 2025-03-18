@@ -156,7 +156,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     ) -> Array:
         pass  # Not used anywhere rn
 
-    async def get_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
+    def get_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
         metadata = get_joint_metadata(mj_model)
@@ -215,7 +215,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 if __name__ == "__main__":
     # python -m examples.default_humanoid.walking
     HumanoidWalkingTask.launch(
-        PPOConfig(
+        HumanoidWalkingTaskConfig(
             compile_unroll=False,
             num_learning_epochs=8,
             num_env_states_per_minibatch=20,
