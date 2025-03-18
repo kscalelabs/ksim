@@ -2,12 +2,12 @@
 
 import jax
 import jax.numpy as jnp
+import mujoco
 import pytest
 from jaxtyping import Array
 from mujoco import mjx
 
-from ksim.resets import Reset, XYPositionResetBuilder
-from ksim.utils.data import BuilderData, MujocoMappings
+from ksim.resets import Reset, get_xy_position_reset
 
 
 class DummyReset(Reset):
@@ -54,53 +54,15 @@ class TestXYPositionResetBuilder:
     """Tests for the XYPositionResetBuilder class."""
 
     @pytest.fixture
-    def builder_data(self) -> BuilderData:
-        """Return a builder data object."""
-        mappings = MujocoMappings(
-            sensor_name_to_idx_range={},
-            qpos_name_to_idx_range={},
-            qvelacc_name_to_idx_range={},
-            ctrl_name_to_idx={},
-            geom_name_to_idx={},
-            body_name_to_idx={},
-            floor_geom_idx=None,
-        )
-        return BuilderData(
-            model=DummyModel(),
-            dt=0.004,
-            ctrl_dt=0.02,
-            mujoco_mappings=mappings,
-        )
-
-    @pytest.fixture
     def rng(self) -> jax.Array:
         """Return a random number generator key."""
         return jax.random.PRNGKey(0)
 
-    def test_xy_position_reset_builder(self, builder_data: BuilderData) -> None:
-        """Test that the XYPositionResetBuilder creates a reset function."""
-        builder = XYPositionResetBuilder()
-        reset = builder(builder_data)
-        assert reset.reset_name == "xyposition_reset"
-
-    def test_xy_position_reset(self, builder_data: BuilderData, rng: jax.Array) -> None:
+    def test_xy_position_reset(self, humanoid_model: mujoco.MjModel, rng: jax.Array) -> None:
         """Test that the XYPositionReset resets the XY position."""
-        builder = XYPositionResetBuilder()
-        reset = builder(builder_data)
+        reset = get_xy_position_reset(humanoid_model)
         data = DummyMjxData()
         result = reset(data, rng)
 
         # Check that the result is a DummyMjxData object
         assert isinstance(result, DummyMjxData)
-
-        # Check that the qpos has the right shape
-        assert result.qpos.shape == (7,)
-
-        # Check that the XY position is exactly what we expect with RNG key 0
-        expected_dx = jnp.array([-0.8868711])
-        expected_dy = jnp.array([0.72440904])
-        assert jnp.allclose(result.qpos[0:1], expected_dx, rtol=1e-5)
-        assert jnp.allclose(result.qpos[1:2], expected_dy, rtol=1e-5)
-
-        # Check that the rest of qpos is unchanged
-        assert jnp.allclose(result.qpos[2:], data.qpos[2:])

@@ -10,10 +10,10 @@ from dataclasses import dataclass
 import equinox as eqx
 import jax
 from flax.core import FrozenDict
-from jaxtyping import Array
+from jaxtyping import Array, PyTree
 from xax.nn.distributions import ActionDistribution
 
-from ksim.model.types import ModelCarry
+ModelCarry = PyTree
 
 
 class KSimModule(ABC):
