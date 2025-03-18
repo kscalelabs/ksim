@@ -1,7 +1,6 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
-from pathlib import Path
-from typing import Collection
+from typing import Callable, Collection, TypeAlias, TypeVar
 
 import equinox as eqx
 import jax
@@ -27,6 +26,9 @@ from ksim.terminations import Termination, UnhealthyTermination
 from ksim.utils.named_access import get_joint_metadata
 
 NUM_OUTPUTS = 21
+
+Observation: TypeAlias = FrozenDict[str, Array]
+Command: TypeAlias = FrozenDict[str, Array]
 
 
 class DefaultHumanoidActor(eqx.Module, KSimModule):
@@ -56,6 +58,29 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
+    
+    def make_export_model(self) -> tuple[Callable, int]:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+
+        Returns:
+            A tuple containing the inference function and the size of the input vector.
+        """
+        input_size = self.mlp.in_size
+
+        distribution = xax.nn.distributions.TanhGaussianDistribution(action_dim=NUM_OUTPUTS)
+
+        def model_fn(input: Array) -> Array:
+            prediction = self.mlp(input)
+
+            mean = prediction[..., :NUM_OUTPUTS]
+            std = prediction[..., NUM_OUTPUTS:]
+
+            # Leaving room to make this stochastic
+            deterministic_action = distribution.mode(mean, std)
+
+            return deterministic_action
+
+        return model_fn, input_size
 
     def forward(
         self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None
@@ -85,7 +110,9 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
         """No carry for now, but we could use this to initialize recurrence or action history."""
         return None
 
-    def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+    def batched_forward_across_time(
+        self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]
+    ) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement
@@ -123,7 +150,9 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
         """No carry for now, but we could use this to initialize recurrence."""
         return None
 
-    def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
+    def batched_forward_across_time(
+        self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]
+    ) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
         By default, we vmap the forward pass for efficiency. If you implement
@@ -169,7 +198,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
         return mj_model, metadata
 
-    def get_engine(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> MjxEngine:
+    def get_engine(
+        self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]
+    ) -> MjxEngine:
         return MjxEngine(
             default_physics_model=physics_model,
             resetters=[
@@ -189,7 +220,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         return ActorCriticAgent(
             critic_model=DefaultHumanoidCritic(key),
             actor_model=DefaultHumanoidActor(key, min_std=0.01, max_std=1.0, var_scale=1.0),
-            action_distribution=xax.nn.distributions.TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
+            action_distribution=xax.nn.distributions.TanhGaussianDistribution(
+                action_dim=NUM_OUTPUTS
+            ),
         )
 
     def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]:
@@ -218,9 +251,9 @@ if __name__ == "__main__":
         HumanoidWalkingTaskConfig(
             compile_unroll=False,
             num_learning_epochs=8,
-            num_env_states_per_minibatch=20,
-            num_minibatches=5,
-            num_envs=10,
+            num_env_states_per_minibatch=2,
+            num_minibatches=3,
+            num_envs=1,
             dt=0.005,
             ctrl_dt=0.02,
             learning_rate=1e-5,

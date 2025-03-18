@@ -630,6 +630,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     state=training_state,
                 )
 
+                # Figure out if we want shift this logic to xax
+                model_fn, input_size = agent.actor_model.make_export_model()
+                xax.export(model_fn, input_size, self.get_ckpt_path(training_state).parent)
+
                 render_name = self.get_render_name(training_state)
                 render_dir = self.exp_dir / self.config.render_dir / render_name
                 logger.info("Rendering to %s", render_dir)
@@ -676,6 +680,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         f"steps and {training_state.num_samples} samples"
                     )
                     xax.show_info(msg, important=True)
+                    if self.config.save_tf_model:
+                        export_fn, input_size = agent.actor_model.make_export_model()
+                        xax.export(export_fn, input_size, self.get_ckpt_path(training_state).parent)
+
                 self.save_checkpoint(agent, optimizer, opt_state, training_state)
 
             except (KeyboardInterrupt, bdb.BdbQuit):

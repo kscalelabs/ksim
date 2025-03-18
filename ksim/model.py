@@ -6,6 +6,7 @@ expects a `ModelInput` and returns an `Array`.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Callable
 
 import equinox as eqx
 import jax
@@ -24,6 +25,18 @@ class KSimModule(ABC):
         self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None
     ) -> tuple[Array, ModelCarry | None]:
         """Apply the actor-critic to the given input. Can be recurrent."""
+
+    @abstractmethod
+    def make_export_model(self) -> tuple[Callable, int]:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+
+        Returns:
+            A tuple containing the inference function and the size of the input vector.
+        """
+
+    ######################
+    # Easily Overridable #
+    ######################
 
     # TODO: move this to RLTask and make it overrideable there...
     def initial_carry(self) -> ModelCarry | None:
