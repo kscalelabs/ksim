@@ -33,6 +33,7 @@ class MjxEngine(PhysicsEngine):
         max_action_latency_step: int,
     ) -> None:
         """Initialize the MJX engine with resetting and actuators."""
+        jax.debug.print("[400] MjxEngine.__init__: starting")
         assert isinstance(default_physics_model, mjx.Model)
         self.default_mjx_model = default_physics_model
         self.actuators = actuators
@@ -42,26 +43,35 @@ class MjxEngine(PhysicsEngine):
         self.phys_steps_per_ctrl_steps = int(ctrl_dt / dt)
         self.min_action_latency_step = min_action_latency_step
         self.max_action_latency_step = max_action_latency_step
+        jax.debug.print("[401] MjxEngine.__init__: completed")
 
     def reset(self, rng: PRNGKeyArray) -> PhysicsState:
         """Reset the engine and return the physics model and data."""
-        mjx_model = self.default_mjx_model
-        mjx_data = mjx.make_data(mjx_model)
+        jax.debug.print("[500] MjxEngine.reset: starting")
+        try:
+            mjx_model = self.default_mjx_model
+            mjx_data = mjx.make_data(mjx_model)
+            jax.debug.print("[501] MjxEngine.reset: mjx_data created")
 
-        # probably don't need to scan, fixed and small
-        for resetter in self.resetters:
-            rng = jax.random.split(rng, 1)[0]
-            mjx_data = resetter(mjx_data, rng)
+            # probably don't need to scan, fixed and small
+            for resetter in self.resetters:
+                rng = jax.random.split(rng, 1)[0]
+                mjx_data = resetter(mjx_data, rng)
+            jax.debug.print("[502] MjxEngine.reset: resetters applied")
 
-        mjx_data = mjx.forward(mjx_model, mjx_data)
-        assert isinstance(mjx_data, mjx.Data)
-        default_action = mjx_data.ctrl
+            mjx_data = mjx.forward(mjx_model, mjx_data)
+            jax.debug.print("[503] MjxEngine.reset: mjx.forward completed")
+            assert isinstance(mjx_data, mjx.Data)
+            default_action = mjx_data.ctrl
 
-        return PhysicsState(
-            model=mjx_model,
-            data=mjx_data,
-            most_recent_action=default_action,
-        )
+            return PhysicsState(
+                model=mjx_model,
+                data=mjx_data,
+                most_recent_action=default_action,
+            )
+        except Exception as e:
+            jax.debug.print("[ERR500] MjxEngine.reset: exception: {error}", error=str(e))
+            raise
 
     def step(
         self,
@@ -70,36 +80,77 @@ class MjxEngine(PhysicsEngine):
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         """Step the engine and return the physics model and data."""
-        mjx_model = state.model
-        mjx_data = state.data
-        mjx_data = mjx.forward(mjx_model, mjx_data)
-        phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
-        prev_action = state.most_recent_action
+        jax.debug.print("[600] MjxEngine.step: starting")
+        try:
+            mjx_model = state.model
+            mjx_data = state.data
+            
+            jax.debug.print("[601] MjxEngine.step: calling mjx.forward")
+            mjx_data = mjx.forward(mjx_model, mjx_data)
+            jax.debug.print("[602] MjxEngine.step: mjx.forward completed")
+            
+            phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
+            prev_action = state.most_recent_action
 
-        # TODO: probably incldue the model + data domain randomizer here...
+            # TODO: probably incldue the model + data domain randomizer here...
 
-        # NOTE: latency is untested...
-        latency_steps = jax.random.randint(
-            key=rng,
-            shape=(),
-            minval=self.min_action_latency_step,
-            maxval=self.max_action_latency_step,
-        )
-
-        def move_physics(carry: tuple[mjx.Data, Array], _: None) -> tuple[tuple[mjx.Data, Array], None]:
-            data, step_num = carry
-            ctrl = jax.lax.select(
-                step_num >= latency_steps,
-                action,
-                prev_action,
+            # NOTE: latency is untested...
+            latency_steps = jax.random.randint(
+                key=rng,
+                shape=(),
+                minval=self.min_action_latency_step,
+                maxval=self.max_action_latency_step,
             )
+            jax.debug.print("[603] MjxEngine.step: generated latency_steps={steps}", steps=latency_steps)
 
-            torques = self.actuators.get_ctrl(ctrl, data)
-            data_with_ctrl = data.replace(ctrl=torques)
-            data_with_ctrl = mjx.forward(mjx_model, data_with_ctrl)  # TODO: investigate if we can remove this
-            new_data = mjx.step(mjx_model, data_with_ctrl)
-            return (new_data, step_num + 1.0), None
+            def move_physics(carry: tuple[mjx.Data, Array], _: None) -> tuple[tuple[mjx.Data, Array], None]:
+                data, step_num = carry
+                jax.debug.print("[610] move_physics: step_num={step_num}", step_num=step_num)
+                
+                ctrl = jax.lax.select(
+                    step_num >= latency_steps,
+                    action,
+                    prev_action,
+                )
+                jax.debug.print("[611] move_physics: ctrl shape={shape}, min={min}, max={max}", 
+                             shape=ctrl.shape, min=jnp.min(ctrl), max=jnp.max(ctrl))
 
-        mjx_data = jax.lax.scan(move_physics, (mjx_data, jnp.array(0.0)), None, length=phys_steps_per_ctrl_steps)[0][0]
+                try:
+                    torques = self.actuators.get_ctrl(ctrl, data)
+                    jax.debug.print("[612] move_physics: torques shape={shape}, min={min}, max={max}", 
+                                 shape=torques.shape, min=jnp.min(torques), max=jnp.max(torques))
+                except Exception as e:
+                    jax.debug.print("[ERR610] move_physics: exception in get_ctrl: {error}", error=str(e))
+                    raise
+                
+                try:
+                    data_with_ctrl = data.replace(ctrl=torques)
+                    jax.debug.print("[613] move_physics: data_with_ctrl created")
+                except Exception as e:
+                    jax.debug.print("[ERR611] move_physics: exception in data.replace: {error}", error=str(e))
+                    raise
+                
+                try:
+                    data_with_ctrl = mjx.forward(mjx_model, data_with_ctrl)
+                    jax.debug.print("[614] move_physics: mjx.forward completed")
+                except Exception as e:
+                    jax.debug.print("[ERR612] move_physics: exception in mjx.forward: {error}", error=str(e))
+                    raise
+                
+                try:
+                    new_data = mjx.step(mjx_model, data_with_ctrl)
+                    jax.debug.print("[615] move_physics: mjx.step completed")
+                except Exception as e:
+                    jax.debug.print("[ERR613] move_physics: exception in mjx.step: {error}", error=str(e))
+                    raise
+                
+                return (new_data, step_num + 1.0), None
 
-        return PhysicsState(model=mjx_model, data=mjx_data, most_recent_action=action)
+            jax.debug.print("[604] MjxEngine.step: about to execute scan over move_physics")
+            mjx_data = jax.lax.scan(move_physics, (mjx_data, jnp.array(0.0)), None, length=phys_steps_per_ctrl_steps)[0][0]
+            jax.debug.print("[605] MjxEngine.step: scan completed successfully")
+
+            return PhysicsState(model=mjx_model, data=mjx_data, most_recent_action=action)
+        except Exception as e:
+            jax.debug.print("[ERR600] MjxEngine.step: exception: {error}", error=str(e))
+            raise

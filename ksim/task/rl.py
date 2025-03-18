@@ -571,29 +571,62 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         if self.config.compile_unroll:
-            unroll_trajectories_fn = eqx.filter_jit(unroll_trajectories_fn)
+            jax.debug.print("[100] About to JIT-compile unroll function")
+            try:
+                # First, let's examine what the agent's architecture looks like
+                jax.debug.print("[101] Agent architecture: actor_model={actor}, critic_model={critic}, distribution={dist}", 
+                              actor=type(agent.actor_model).__name__,
+                              critic=type(agent.critic_model).__name__,
+                              dist=type(agent.action_distribution).__name__)
+                
+                # Let's check the state shapes and types
+                jax.debug.print("[102] State structure: model={model}, data={data}", 
+                              model=type(state_E.model).__name__,
+                              data=type(state_E.data).__name__)
+                
+                # Extract and print the JAX function description before compilation
+                jax.debug.print("[103] Lowering function to JAX IR")
+                
+                # Perform JIT compilation in stages
+                jax.debug.print("[104] Creating JIT function with eqx.filter_jit")
+                unroll_trajectories_fn = eqx.filter_jit(unroll_trajectories_fn)
+                jax.debug.print("[105] JIT compilation created successfully")
+            except Exception as e:
+                jax.debug.print("[ERR100] Error during JIT compilation: {error}", error=str(e))
+                raise
 
         # Burn in stage
+        jax.debug.print("[200] Starting burn-in stage")
         burn_in_rng_E = jax.random.split(rng, self.config.num_envs)
 
         # No positional arguments with vmap (https://github.com/jax-ml/jax/issues/7465)
-        burn_transitions_ET, _, _, _ = unroll_trajectories_fn(
-            state_E,
-            burn_in_rng_E,
-            agent,
-            obs_normalizer,
-            cmd_normalizer,
-            engine,
-            obs_generators,
-            command_generators,
-            reward_generators,
-            termination_generators,
-            self.num_rollout_steps_per_env,
-            False,
-        )
+        jax.debug.print("[201] About to execute burn-in unroll, state_E shapes: {shapes}", 
+                     shapes=jax.tree_map(lambda x: getattr(x, 'shape', None) if hasattr(x, 'shape') else None, state_E))
+        try:
+            jax.debug.print("[202] Right before calling unroll_trajectories_fn")
+            burn_transitions_ET, _, _, _ = unroll_trajectories_fn(
+                state_E,
+                burn_in_rng_E,
+                agent,
+                obs_normalizer,
+                cmd_normalizer,
+                engine,
+                obs_generators,
+                command_generators,
+                reward_generators,
+                termination_generators,
+                self.num_rollout_steps_per_env,
+                False,
+            )
+            jax.debug.print("[203] Burn-in unroll executed successfully")
+        except Exception as e:
+            jax.debug.print("[ERR200] Error during burn-in unroll: {error}", error=str(e))
+            raise
 
+        jax.debug.print("[204] Updating normalizers after burn-in")
         obs_normalizer = obs_normalizer.update(burn_transitions_ET.obs)
         cmd_normalizer = cmd_normalizer.update(burn_transitions_ET.command)
+        jax.debug.print("[205] Normalizers updated, entering main training loop")
 
         while not self.is_training_over(training_state):
             with self.step_context("on_step_start"):

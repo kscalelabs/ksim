@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
@@ -37,6 +38,8 @@ class TorqueActuators(Actuators):
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData) -> Array:
         """Just use the action as the torque, the simplest actuator model."""
+        jax.debug.print("TorqueActuators.get_ctrl: action shape={shape}, min={min}, max={max}", 
+                     shape=action.shape, min=jnp.min(action), max=jnp.max(action))
         return action
 
 
