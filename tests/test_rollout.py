@@ -205,7 +205,8 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
     vmapped_engine_step(actions, initial_physics_states, rngs)
 
     vmapped_unroll_trajectory = jax.vmap(
-        unroll_trajectory, in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None)
+        unroll_trajectory,
+        in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None),
     )
     jit_unroll = eqx.filter_jit(vmapped_unroll_trajectory)
 

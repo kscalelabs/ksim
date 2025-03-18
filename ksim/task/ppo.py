@@ -33,12 +33,12 @@ def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
 
     _, returns = jax.lax.scan(
         scan_fn,
-        jnp.zeros_like(rewards[-1]),
-        (rewards, mask),
+        jnp.zeros((rewards.shape[0],)),  # Ensures shape (num_envs,)
+        (rewards.T, mask.T),
         reverse=True,
     )
 
-    return returns
+    return returns.T
 
 
 def get_deltas(
@@ -60,35 +60,28 @@ def compute_advantages_and_value_targets(
     decay_gamma: float,
     gae_lambda: float,
 ) -> tuple[Array, Array]:
-    """Computes the advantages using Generalized Advantage Estimation (GAE).
+    # Inputs are (env, time); transpose to (time, env)
+    values_T = values.T
+    rewards_T = rewards.T
+    dones_T = dones.T
 
-    Note that some of this logic is NOT stock PPO, using Brax's PPO
-    implementation as a reference.
+    values_shifted = jnp.concatenate([values_T[1:], jnp.expand_dims(values_T[-1], 0)], axis=0)
+    mask = 1.0 - dones_T.astype(jnp.float32)
+    deltas = get_deltas(rewards_T, values_T, values_shifted, mask, decay_gamma)
 
-    Values, rewards, dones must have shape of (time, *batch_dims, ...).
-    """
-
-    def scan_fn(adv_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+    def scan_fn(adv_next: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
         """Scanning this computes the advantages in reverse order."""
         delta, mask = x
-        adv_t = delta + decay_gamma * gae_lambda * mask * adv_t_plus_1
-        return adv_t, adv_t
-
-    # We use the last value as the bootstrap value (although it is not fully correct)
-    values_shifted = jnp.concatenate([values[1:], jnp.expand_dims(values[-1], 0)], axis=0)
-    mask = jnp.array(1.0 - dones.astype(jnp.float32))
-
-    deltas = get_deltas(rewards, values, values_shifted, mask, decay_gamma)
+        adv = delta + decay_gamma * gae_lambda * mask * adv_next
+        return adv, adv
 
     _, gae = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas, mask), reverse=True)
-    value_targets = jnp.add(gae, values)
 
-    # Following Brax and applying another TD step to get the value targets.
-    # TODO: Experiment with original GAE & value targets
+    value_targets = gae + values_T
     value_targets_shifted = jnp.concatenate([value_targets[1:], value_targets[-1:]], axis=0)
-    advantages = rewards + decay_gamma * value_targets_shifted * mask - values
+    advantages = rewards_T + decay_gamma * value_targets_shifted * mask - values_T
 
-    return advantages, value_targets
+    return advantages.T, value_targets.T
 
 
 def clipped_value_loss(
@@ -297,6 +290,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
     ) -> RolloutTimeStats:
+        # TODO: this should be a standalone function, config unified
+        assert transitions.reward.shape == (self.config.num_envs, self.num_rollout_steps_per_env)
+        assert transitions.done.shape == (self.config.num_envs, self.num_rollout_steps_per_env)
+        assert transitions.action.shape[:2] == (
+            self.config.num_envs,
+            self.num_rollout_steps_per_env,
+        )
+
         """Calculating advantages and returns for a rollout."""
         normalized_obs = obs_normalizer(transitions.obs)
         normalized_cmd = cmd_normalizer(transitions.command)
@@ -307,16 +308,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         initial_values = jax.vmap(agent.critic_model.batched_forward_across_time, in_axes=(0, 0))(
             normalized_obs, normalized_cmd
         )
-        initial_values = initial_values.squeeze(axis=-1)
-
+        initial_values_ET = initial_values.squeeze(axis=-1)
         initial_action_log_probs_per_action = agent.action_distribution.log_prob(
             parameters=prediction,
             actions=transitions.action,
         )
-        initial_action_log_probs = jnp.sum(initial_action_log_probs_per_action, axis=-1)
-
-        advantages, value_targets = compute_advantages_and_value_targets(
-            values=initial_values,
+        initial_action_log_probs_ET = jnp.sum(initial_action_log_probs_per_action, axis=-1)
+        advantages_ET, value_targets_ET = compute_advantages_and_value_targets(
+            values=initial_values_ET,
             rewards=transitions.reward,
             dones=transitions.done,
             decay_gamma=self.config.gamma,
@@ -324,22 +323,21 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         # we decouple the computation of returns from the value targets.
-        returns = compute_returns(
+        returns_ET = compute_returns(
             rewards=transitions.reward,
             dones=transitions.done,
             gamma=self.config.gamma,
         )
-
         # normalizing at the trajectory dataset level
         if self.config.normalize_advantage and not self.config.normalize_advantage_in_minibatch:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + self.config.eps)
-
+            advantages_ET = (advantages_ET - advantages_ET.mean()) / (advantages_ET.std() + self.config.eps)
+        # jax.debug.breakpoint()
         return PPORolloutTimeStats(
-            initial_action_log_probs=jax.lax.stop_gradient(initial_action_log_probs),
-            initial_values=jax.lax.stop_gradient(initial_values),
-            advantages=jax.lax.stop_gradient(advantages),
-            value_targets=jax.lax.stop_gradient(value_targets),
-            returns=jax.lax.stop_gradient(returns),
+            initial_action_log_probs=jax.lax.stop_gradient(initial_action_log_probs_ET),
+            initial_values=jax.lax.stop_gradient(initial_values_ET),
+            advantages=jax.lax.stop_gradient(advantages_ET),
+            value_targets=jax.lax.stop_gradient(value_targets_ET),
+            returns=jax.lax.stop_gradient(returns_ET),
         )
 
     def model_update(

@@ -339,8 +339,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def log_state(self) -> None:
         super().log_state()
 
-        # self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
-
     def get_reward_stats(
         self,
         trajectory: Transition,
@@ -567,7 +565,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         cmd_normalizer = self.get_cmd_normalizer(dummy_cmd)
 
         unroll_trajectories_fn = jax.vmap(
-            unroll_trajectory, in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None)
+            unroll_trajectory,
+            in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None),
         )
 
         if self.config.compile_unroll:
@@ -616,6 +615,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.num_rollout_steps_per_env,
                 False,
             )
+
             has_nans = jax.tree.map(jnp.any, has_nans_E)
 
             rollout_time = time.time() - start_time
