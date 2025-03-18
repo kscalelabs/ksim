@@ -14,7 +14,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from xax.nn.distributions import GaussianDistribution
 
 from ksim.env.data import Transition
-from ksim.model.base import ActorCriticAgent
+from ksim.model import ActorCriticAgent
 from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeStats, RLDataset, RolloutTimeStats
 

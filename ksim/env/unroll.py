@@ -15,8 +15,7 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim.commands import Command
 from ksim.env.base_engine import PhysicsEngine
 from ksim.env.data import PhysicsData, PhysicsState, Transition
-from ksim.model.base import Agent
-from ksim.model.types import ModelCarry
+from ksim.model import Agent, ModelCarry
 from ksim.observation import Observation
 from ksim.rewards import Reward
 from ksim.terminations import Termination

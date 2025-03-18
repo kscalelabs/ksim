@@ -39,7 +39,7 @@ from ksim.env.unroll import (
     unroll_trajectory,
 )
 from ksim.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
-from ksim.model.base import Agent
+from ksim.model import Agent
 from ksim.observation import Observation
 from ksim.rewards import Reward
 from ksim.task.types import RLDataset, RolloutTimeStats

@@ -17,8 +17,7 @@ from ksim.commands import Command
 from ksim.env.data import PhysicsData, PhysicsState
 from ksim.env.mjx_engine import MjxEngine
 from ksim.env.unroll import UnrollNaNDetector, unroll_trajectory
-from ksim.model.base import ActorCriticAgent, KSimModule
-from ksim.model.types import ModelCarry
+from ksim.model import ActorCriticAgent, KSimModule, ModelCarry
 from ksim.observation import Observation
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import Reward

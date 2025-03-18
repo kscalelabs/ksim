@@ -18,8 +18,7 @@ from ksim.actuators import TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.env.mjx_engine import MjxEngine
-from ksim.model.base import ActorCriticAgent, KSimModule
-from ksim.model.types import ModelCarry
+from ksim.model import ActorCriticAgent, KSimModule, ModelCarry
 from ksim.observation import ActuatorForceObservation, Observation
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import DHForwardReward, HeightReward, Reward
