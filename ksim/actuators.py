@@ -6,17 +6,16 @@ from typing import Generic, TypeVar
 import jax.numpy as jnp
 from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
-from mujoco import mjx
 
-from ksim.utils.data import BuilderData
-from ksim.utils.mujoco import MujocoMappings
+from ksim.env.data import PhysicsData, PhysicsModel
+from ksim.utils.named_access import get_ctrl_data_idx_by_name
 
 
 class Actuators(ABC):
     """Collection of actuators."""
 
     @abstractmethod
-    def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
+    def get_ctrl(self, action: Array, physics_data: PhysicsData) -> Array:
         """Get the control signal from the action vector."""
 
 
@@ -25,13 +24,19 @@ T = TypeVar("T", bound=Actuators)
 
 class ActuatorsBuilder(ABC, Generic[T]):
     @abstractmethod
-    def __call__(self, data: BuilderData) -> T:
+    def __call__(
+        self,
+        physics_model: PhysicsModel,
+        joint_name_to_metadata: dict[str, JointMetadataOutput],
+    ) -> T:
         """Builds an observation from a MuJoCo model."""
 
 
 class TorqueActuators(Actuators):
-    def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
-        # Just use the action as the torque, the simplest actuator model.
+    """Direct torque control."""
+
+    def get_ctrl(self, action: Array, physics_data: PhysicsData) -> Array:
+        """Just use the action as the torque, the simplest actuator model."""
         return action
 
 
@@ -40,16 +45,17 @@ class MITPositionActuators(Actuators):
 
     def __init__(
         self,
-        joint_to_kp_kds: dict[str, JointMetadataOutput],
-        mujoco_mappings: MujocoMappings,
+        physics_model: PhysicsModel,
+        joint_name_to_metadata: dict[str, JointMetadataOutput],
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
-        kps_list = [0.0] * len(mujoco_mappings.ctrl_name_to_idx)
-        kds_list = [0.0] * len(mujoco_mappings.ctrl_name_to_idx)
+        ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
+        kps_list = [0.0] * len(ctrl_name_to_idx)
+        kds_list = [0.0] * len(ctrl_name_to_idx)
 
-        for joint_name, params in joint_to_kp_kds.items():
+        for joint_name, params in joint_name_to_metadata.items():
             actuator_name = self.get_actuator_name(joint_name)
-            actuator_idx = mujoco_mappings.ctrl_name_to_idx[actuator_name]
+            actuator_idx = ctrl_name_to_idx[actuator_name]
 
             kp_str = params.kp
             kd_str = params.kd
@@ -69,10 +75,10 @@ class MITPositionActuators(Actuators):
         # This can be overridden if necessary.
         return f"{joint_name}_ctrl"
 
-    def get_ctrl(self, mjx_data: mjx.Data, action: Array) -> Array:
+    def get_ctrl(self, action: Array, physics_data: PhysicsData) -> Array:
         """Get the control signal from the (position) action vector."""
-        current_pos = mjx_data.qpos[7:]  # First 7 are always root pos.
-        current_vel = mjx_data.qvel[6:]  # First 6 are always root vel.
+        current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
+        current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
         target_velocities = jnp.zeros_like(action)
 
         pos_delta = action - current_pos
@@ -80,16 +86,3 @@ class MITPositionActuators(Actuators):
 
         ctrl = self.kps * pos_delta + self.kds * vel_delta
         return ctrl
-
-
-class MITPositionActuatorsBuilder(ActuatorsBuilder[MITPositionActuators]):
-    """Builder for MITPositionActuators."""
-
-    def __call__(self, data: BuilderData) -> MITPositionActuators:
-        """Builds an MITPositionActuators instance."""
-        if data.robot_metadata.joint_name_to_metadata is None:
-            raise ValueError("Missing joint_name_to_metadata within robot metadata")
-        return MITPositionActuators(
-            joint_to_kp_kds=data.robot_metadata.joint_name_to_metadata,
-            mujoco_mappings=data.mujoco_mappings,
-        )

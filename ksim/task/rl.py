@@ -15,8 +15,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Generic, Literal, TypeVar
+from typing import Collection, Generic, Literal, TypeVar
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
@@ -24,13 +25,26 @@ import xax
 from dpshdl.dataset import Dataset
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from kscale.web.gen.api import JointMetadataOutput
 from omegaconf import MISSING
+from xax.utils.transformation import scan_model
 
-from ksim.env.base_env import BaseEnv, BaseEnvConfig, EnvState
+from ksim.commands import Command
+from ksim.env.base_engine import PhysicsEngine
+from ksim.env.data import PhysicsModel, Transition
+from ksim.env.unroll import (
+    UnrollNaNDetector,
+    get_initial_commands,
+    get_observation,
+    unroll_trajectory,
+)
 from ksim.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
 from ksim.model.base import Agent
 from ksim.normalization import Normalizer
-from ksim.task.types import RolloutTimeLossComponents
+from ksim.observation import Observation
+from ksim.rewards import Reward
+from ksim.task.types import RLDataset, RolloutTimeStats
+from ksim.terminations import Termination
 from ksim.utils.visualization import render_and_save_trajectory
 
 logger = logging.getLogger(__name__)
@@ -38,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 @jax.tree_util.register_dataclass
 @dataclass
-class RLConfig(BaseEnvConfig, xax.Config):
+class RLConfig(xax.Config):
     action: str = xax.field(
         value="train",
         help="The action to take; should be either `train` or `env`.",
@@ -71,9 +85,41 @@ class RLConfig(BaseEnvConfig, xax.Config):
         value=None,
         help="The checkpoint number to load. Otherwise the latest checkpoint is loaded.",
     )
+    reshuffle_rollout: bool = xax.field(
+        value=True,
+        help="Whether to reshuffle the rollout dataset.",
+    )
     compile_unroll: bool = xax.field(
         value=True,
         help="Whether to compile the entire unroll fn.",
+    )
+    render_height: int = xax.field(
+        value=640,
+        help="The height of the rendered images.",
+    )
+    render_width: int = xax.field(
+        value=480,
+        help="The width of the rendered images.",
+    )
+    render_dir: str = xax.field(
+        value="render",
+        help="The directory to save the rendered images.",
+    )
+    ctrl_dt: float = xax.field(
+        value=0.02,
+        help="The time step of the control loop.",
+    )
+    dt: float = xax.field(
+        value=0.005,
+        help="The time step of the physics loop.",
+    )
+    min_action_latency: float = xax.field(
+        value=0.0,
+        help="The minimum latency of the action.",
+    )
+    max_action_latency: float = xax.field(
+        value=0.0,
+        help="The maximum latency of the action.",
     )
 
 
@@ -88,17 +134,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]  # TODO: fix
         super().__init__(config)
 
-    ####################
-    # Abstract methods #
-    ####################
-
-    # These should be implemented by the user.
-
-    @abstractmethod
-    def get_environment(self) -> BaseEnv: ...
+        assert self.get_obs_generators(None), "obs_generators must not be empty"
+        assert self.get_command_generators(), "command_generators must not be empty"
+        assert self.get_reward_generators(None), "reward_generators must not be empty"
+        assert self.get_termination_generators(None), "termination_generators must not be empty"
 
     @abstractmethod
-    def get_init_actor_carry(self) -> jnp.ndarray | None: ...
+    def get_model_and_metadata(self) -> tuple[Agent, dict[str, JointMetadataOutput]]: ...
+
+    @abstractmethod
+    def get_engine(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> PhysicsEngine: ...
+
+    @abstractmethod
+    def get_obs_generators(self, physics_model: PhysicsModel) -> Collection[Observation]: ...
+
+    @abstractmethod
+    def get_command_generators(self) -> Collection[Command]: ...
+
+    @abstractmethod
+    def get_reward_generators(self, physics_model: PhysicsModel) -> Collection[Reward]: ...
+
+    @abstractmethod
+    def get_termination_generators(self, physics_model: PhysicsModel) -> Collection[Termination]: ...
 
     @abstractmethod
     def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer: ...
@@ -106,45 +163,69 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @abstractmethod
     def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer: ...
 
+    @abstractmethod
+    def get_optimizer(self) -> optax.GradientTransformation: ...
+
     # The following should be implemented by the algorithmic subclass.
 
     @abstractmethod
-    def get_rollout_time_loss_components(
+    def get_rollout_time_stats(
         self,
+        transitions: Transition,
         agent: Agent,
-        trajectory_dataset: EnvState,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
-    ) -> RolloutTimeLossComponents: ...
+    ) -> RolloutTimeStats:
+        """E.g. calculating advantages and returns for a rollout.
+
+        NOTE: transitions should be (T, ...) shape. No batch dimension.
+        """
+        ...
 
     @abstractmethod
     def model_update(
         self,
+        minibatch: RLDataset,
+        *,
         agent: Agent,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        env_state_batch: EnvState,
-        rollout_time_loss_components: RolloutTimeLossComponents,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
     ) -> tuple[Agent, optax.OptState, Array, FrozenDict[str, Array]]: ...
 
-    ##############
-    # Properties #
-    ##############
-
     @property
     def dataset_size(self) -> int:
-        """The total number of environment states in the current PPO dataset."""
+        """The total number of environment states in the current PPO dataset.
+
+        E.g. if you have 32 minibatches, with num_envs_per_minibatch=8192, then
+        you will have dataset size 32 * 8192 = 262144.
+        """
         return self.config.num_env_states_per_minibatch * self.config.num_minibatches
 
     @property
     def num_rollout_steps_per_env(self) -> int:
-        """Number of steps to unroll per environment during dataset creation."""
+        """Number of steps to unroll per environment during dataset creation.
+
+        E.g. if you have 32 minibatches, with num_envs_per_minibatch=8192, with
+        2048 envs in total, then you will rollout 128 steps each env:
+        8192 * 32 / 2048 = 128
+        """
         msg = "Dataset size must be divisible by number of envs"
         assert self.dataset_size % self.config.num_envs == 0, msg
         return self.dataset_size // self.config.num_envs
+
+    @property
+    def num_envs_per_minibatch(self) -> int:
+        """Number of environments per minibatch.
+
+        E.g. if you roll out 128 steps with 2048 envs in parallel with 32
+        minibatches, then you will have 64 parallel env lines per minibatch.
+
+        This helps us go from (2048, 128) to (64, 128) 32 times.
+        """
+        return self.config.num_envs // self.config.num_minibatches
 
     ########################
     # XAX-specific methods #
@@ -230,7 +311,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         with self:
             start_time = time.time()
             rng = self.prng_key()
-            env = self.get_environment()
+            physics_model, metadata = self.get_model_and_metadata()
+            engine = self.get_engine(physics_model, metadata)
             render_name = self.get_render_name(state)
             render_dir = self.exp_dir / self.config.render_dir / render_name
 
@@ -245,7 +327,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             logger.info("Unrolling trajectories")
 
             render_and_save_trajectory(
-                env=env,
+                engine=engine,
                 agent=agent,
                 rng=rng,
                 output_dir=render_dir,
@@ -259,40 +341,52 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # self.logger.log_file("env_state.yaml", OmegaConf.to_yaml(env.get_state()))
 
-    def get_reward_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
+    def get_reward_stats(
+        self,
+        trajectory: Transition,
+        reward_generators: Collection[Reward],
+    ) -> dict[str, jnp.ndarray]:
         """Get reward statistics from the trajectoryl (D)."""
         reward_stats: dict[str, jnp.ndarray] = {}
 
         num_episodes = jnp.sum(trajectory.done).clip(min=1)  # rough approx
         terms = trajectory.reward_components
-        for key, _ in env.rewards:
-            statistic = terms[key]
+        for generator in reward_generators:
+            statistic = terms[generator.reward_name]
             assert isinstance(statistic, Array)
-            reward_stats[key] = jnp.sum(statistic) / num_episodes
+            reward_stats[generator.reward_name] = jnp.sum(statistic) / num_episodes
 
         return reward_stats
 
-    def get_termination_stats(self, trajectory: EnvState, env: BaseEnv) -> dict[str, jnp.ndarray]:
+    def get_termination_stats(
+        self, trajectory: Transition, termination_generators: Collection[Termination]
+    ) -> dict[str, jnp.ndarray]:
         """Get termination statistics from the trajectory (D)."""
         termination_stats: dict[str, jnp.ndarray] = {}
 
         terms = trajectory.termination_components
-        for key, _ in env.terminations:
-            statistic = terms[key]
+        for generator in termination_generators:
+            statistic = terms[generator.termination_name]
             assert isinstance(statistic, Array)
-            termination_stats[key] = jnp.mean(statistic)
+            termination_stats[generator.termination_name] = jnp.mean(statistic)
 
         return termination_stats
 
-    def log_trajectory_stats(self, env: BaseEnv, env_state_TEL: EnvState, eval: bool = False) -> None:
+    def log_trajectory_stats(
+        self,
+        transitions: Transition,
+        reward_generators: Collection[Reward],
+        termination_generators: Collection[Termination],
+        eval: bool = False,
+    ) -> None:
         """Logs the reward and termination stats for the trajectory."""
-        for key, value in self.get_reward_stats(env_state_TEL, env).items():
+        for key, value in self.get_reward_stats(transitions, reward_generators).items():
             self.logger.log_scalar(
                 key=key,
                 value=value,
                 namespace="reward" if not eval else "eval/reward",
             )
-        for key, value in self.get_termination_stats(env_state_TEL, env).items():
+        for key, value in self.get_termination_stats(transitions, termination_generators).items():
             self.logger.log_scalar(
                 key=key,
                 value=value,
@@ -300,9 +394,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
         # Logs the mean episode length.
-        episode_num_per_env = jnp.sum(env_state_TEL.done, axis=0) + (1 - env_state_TEL.done[-1])
+        episode_num_per_env = jnp.sum(transitions.done, axis=0) + (1 - transitions.done[-1])
         episode_count = jnp.sum(episode_num_per_env)
-        num_env_states = jnp.prod(jnp.array(env_state_TEL.done.shape))
+        num_env_states = jnp.prod(jnp.array(transitions.done.shape))
         mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
         self.logger.log_scalar(
             key="mean_episode_seconds",
@@ -320,53 +414,29 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 namespace="update",
             )
 
-    @xax.profile
-    def reshuffle_rollout(
-        self,
-        rollout_dataset_DL: EnvState,
-        rollout_time_loss_components_DL: RolloutTimeLossComponents,
-        rng: PRNGKeyArray,
-    ) -> tuple[EnvState, RolloutTimeLossComponents]:
-        """Reshuffle a rollout array (DL)."""
-        # Generate permutation indices
-        batch_size = self.dataset_size
-        permutation = jax.random.choice(rng, jnp.arange(batch_size), (batch_size,))
-
-        # Apply permutation to rollout dataset
-        def permute_array(x: Array) -> Array:
-            # Handle arrays with proper shape checking
-            if x.shape[0] == batch_size:
-                return x[permutation]
-            return x
-
-        # Apply permutation to both structures
-        reshuffled_rollout_dataset_DL = jax.tree_util.tree_map(permute_array, rollout_dataset_DL)
-        reshuffled_rollout_time_loss_components_DL = jax.tree_util.tree_map(
-            permute_array, rollout_time_loss_components_DL
-        )
-
-        return reshuffled_rollout_dataset_DL, reshuffled_rollout_time_loss_components_DL
+    def log_has_nans(self, has_nans: UnrollNaNDetector) -> None:
+        """Logs the number of nans in the current update."""
+        for key, value in has_nans._asdict().items():
+            self.logger.log_scalar(
+                key=key,
+                value=value,
+                namespace="has_nans",
+            )
 
     @xax.profile
     def get_minibatch(
         self,
-        rollout_DL: EnvState,
-        rollout_time_loss_components_DL: RolloutTimeLossComponents,
+        dataset: RLDataset,
         minibatch_idx: Array,
-    ) -> tuple[EnvState, RolloutTimeLossComponents]:
-        """Get a minibatch from the rollout (B)."""
-        starting_idx = minibatch_idx * self.config.num_env_states_per_minibatch
-        rollout_BL = xax.slice_pytree(
-            rollout_DL,
+    ) -> RLDataset:
+        """Selecting across E dim to go from (E, T) to (B, T)."""
+        starting_idx = minibatch_idx * self.num_envs_per_minibatch
+        minibatch = xax.slice_pytree(
+            dataset,
             start=starting_idx,
-            slice_length=self.config.num_env_states_per_minibatch,
+            slice_length=self.num_envs_per_minibatch,
         )
-        rollout_time_loss_components_BL = xax.slice_pytree(
-            rollout_time_loss_components_DL,
-            start=starting_idx,
-            slice_length=self.config.num_env_states_per_minibatch,
-        )
-        return rollout_BL, rollout_time_loss_components_BL
+        return minibatch
 
     @xax.profile
     def scannable_minibatch_step(
@@ -375,22 +445,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         minibatch_idx: Array,
         *,
         optimizer: optax.GradientTransformation,
-        dataset_DL: EnvState,
-        rollout_time_loss_components_DL: RolloutTimeLossComponents,
+        dataset_ET: RLDataset,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
     ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Perform a single minibatch update step."""
         agent, opt_state, rng = training_state
-        minibatch_BL, rollout_time_minibatch_loss_components_BL = self.get_minibatch(
-            dataset_DL, rollout_time_loss_components_DL, minibatch_idx
-        )
+        minibatch_BT = self.get_minibatch(dataset_ET, minibatch_idx)
         agent, opt_state, _, metrics = self.model_update(
             agent=agent,
             optimizer=optimizer,
             opt_state=opt_state,
-            env_state_batch=minibatch_BL,
-            rollout_time_loss_components=rollout_time_minibatch_loss_components_BL,
+            minibatch=minibatch_BT,
             obs_normalizer=obs_normalizer,
             cmd_normalizer=cmd_normalizer,
             rng=rng,
@@ -406,8 +472,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         _: None,
         *,
         optimizer: optax.GradientTransformation,
-        dataset_DL: EnvState,
-        rollout_time_loss_components_DL: RolloutTimeLossComponents,
+        dataset_ET: RLDataset,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
     ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
@@ -416,23 +481,26 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state = training_state[1]
         rng = training_state[2]
 
-        dataset_DL, rollout_time_loss_components_DL = self.reshuffle_rollout(
-            dataset_DL, rollout_time_loss_components_DL, rng
-        )
+        if self.config.reshuffle_rollout:  # if doing recurrence, can't shuffle across T
+            dataset_ET = xax.reshuffle_pytree(  # TODO: confirm this actually reshuffles across T and E (for IID)
+                dataset_ET,
+                (self.config.num_envs, self.num_rollout_steps_per_env),
+                rng,
+            )
         rng, minibatch_rng = jax.random.split(rng)
 
         partial_fn = functools.partial(
             self.scannable_minibatch_step,
             optimizer=optimizer,
-            dataset_DL=dataset_DL,
-            rollout_time_loss_components_DL=rollout_time_loss_components_DL,
+            dataset_ET=dataset_ET,
             obs_normalizer=obs_normalizer,
             cmd_normalizer=cmd_normalizer,
         )
 
-        (agent, opt_state, _), metrics = jax.lax.scan(
+        (agent, opt_state, _), metrics = scan_model(
             partial_fn,
-            (agent, opt_state, minibatch_rng),
+            agent,
+            (opt_state, minibatch_rng),
             jnp.arange(self.config.num_minibatches),
         )
 
@@ -441,15 +509,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return (agent, opt_state, rng), metrics
 
     @xax.profile
-    @xax.jit(static_argnames=["self", "optimizer"])
+    @eqx.filter_jit  # TODO: implement filter-like jit in xax
     def rl_pass(
         self,
         agent: Agent,
         opt_state: optax.OptState,
         reshuffle_rng: PRNGKeyArray,
         optimizer: optax.GradientTransformation,
-        dataset_DL: EnvState,
-        rollout_time_loss_components_DL: RolloutTimeLossComponents,
+        dataset_ET: RLDataset,
         obs_normalizer: Normalizer,
         cmd_normalizer: Normalizer,
     ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
@@ -457,126 +524,114 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         partial_fn = functools.partial(
             self.scannable_train_epoch,
             optimizer=optimizer,
-            dataset_DL=dataset_DL,
-            rollout_time_loss_components_DL=rollout_time_loss_components_DL,
+            dataset_ET=dataset_ET,
             obs_normalizer=obs_normalizer,
             cmd_normalizer=cmd_normalizer,
         )
 
-        (agent, opt_state, reshuffle_rng), metrics = jax.lax.scan(
+        (agent, opt_state, reshuffle_rng), metrics = scan_model(
             partial_fn,
-            (agent, opt_state, reshuffle_rng),
+            agent,
+            (opt_state, reshuffle_rng),
             None,
             length=self.config.num_learning_epochs,
         )
-        # metrics = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
+        metrics = jax.tree.map(lambda x: jnp.mean(x), metrics)
         return (agent, opt_state, reshuffle_rng), metrics
 
     def rl_train_loop(
         self,
         agent: Agent,
-        env: BaseEnv,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         training_state: xax.State,
     ) -> None:
         """Runs the main RL training loop."""
+        physics_model, metadata = self.get_model_and_metadata()
+        engine = self.get_engine(physics_model, metadata)
+        obs_generators = self.get_obs_generators(physics_model)  # these should be given necessary data for building
+        command_generators = self.get_command_generators()
+        reward_generators = self.get_reward_generators(physics_model)
+        termination_generators = self.get_termination_generators(physics_model)
+
         rng = self.prng_key()
-        burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 3)
+        rng, burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 4)
 
-        # Gets the initial physics data.
-        physics_model_L = env.get_init_physics_model()
         reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
-        dummy_env_states = env.get_dummy_env_states(self.config.num_envs)
+        state_E = jax.vmap(engine.reset, in_axes=(0))(reset_rngs)
 
-        obs_normalizer = self.get_obs_normalizer(dummy_env_states.obs)
-        cmd_normalizer = self.get_cmd_normalizer(dummy_env_states.command)
+        # the normalizers need dummy data to infer shapes
+        dummy_obs = get_observation(state_E, burn_in_rng, obs_generators=obs_generators)
+        dummy_cmd = get_initial_commands(burn_in_rng, command_generators=command_generators)
+        obs_normalizer = self.get_obs_normalizer(dummy_obs)
+        cmd_normalizer = self.get_cmd_normalizer(dummy_cmd)
 
-        # NOTE: env_state_EL_t and physics_data_EL_t_plus_1 are the carry data
-        # structures used to efficiently unroll and resume trajectory rollouts
-        env_state_EL_t, physics_data_EL_t_plus_1 = jax.vmap(
-            env.reset,
-            in_axes=(None, 0, None, None, None),
-        )(agent, reset_rngs, physics_model_L, obs_normalizer, cmd_normalizer)
-        breakpoint()
-
-        if self.config.compile_unroll:
-            static_args = ["num_steps", "num_envs", "return_intermediate_data"]
-            env_rollout_fn = xax.jit(static_argnames=static_args)(env.unroll_trajectories)
-
-        #################
-        # Burn in Stage #
-        #################
-
-        burn_in_env_state_TEL, _, _ = env_rollout_fn(
-            agent=agent,
-            rng=burn_in_rng,
-            num_steps=self.num_rollout_steps_per_env,
-            num_envs=self.config.num_envs,
-            env_state_EL_t_minus_1=env_state_EL_t,
-            physics_data_EL_t=physics_data_EL_t_plus_1,
-            physics_model_L=physics_model_L,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
-            return_intermediate_data=False,
+        unroll_trajectories_fn = jax.vmap(
+            unroll_trajectory, in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None)
         )
 
-        obs_normalizer = obs_normalizer.update(burn_in_env_state_TEL.obs)
-        cmd_normalizer = cmd_normalizer.update(burn_in_env_state_TEL.command)
+        if self.config.compile_unroll:
+            unroll_trajectories_fn = eqx.filter_jit(unroll_trajectories_fn)
 
-        ##################
-        # Training Stage #
-        ##################
+        # Burn in stage
+        burn_in_rng_E = jax.random.split(rng, self.config.num_envs)
+
+        # No positional arguments with vmap (https://github.com/jax-ml/jax/issues/7465)
+        burn_transitions_ET, _, _, _ = unroll_trajectories_fn(
+            state_E,
+            burn_in_rng_E,
+            agent,
+            obs_normalizer,
+            cmd_normalizer,
+            engine,
+            obs_generators,
+            command_generators,
+            reward_generators,
+            termination_generators,
+            self.num_rollout_steps_per_env,
+            False,
+        )
+
+        obs_normalizer = obs_normalizer.update(burn_transitions_ET.obs)
+        cmd_normalizer = cmd_normalizer.update(burn_transitions_ET.command)
+
         while not self.is_training_over(training_state):
             with self.step_context("on_step_start"):
                 training_state = self.on_step_start(training_state)
 
-            #############################
-            # Rollout and Normalization #
-            #############################
-
             start_time = time.time()
-            reshuffle_rng, rollout_rng, train_rng = jax.random.split(train_rng, 3)
-
-            env_state_TEL, physics_data_EL_t_plus_1, has_nans = env_rollout_fn(
-                agent=agent,
-                rng=rollout_rng,
-                num_steps=self.num_rollout_steps_per_env,
-                num_envs=self.config.num_envs,
-                env_state_EL_t_minus_1=env_state_EL_t,
-                physics_data_EL_t=physics_data_EL_t_plus_1,
-                physics_model_L=physics_model_L,
-                obs_normalizer=obs_normalizer,
-                cmd_normalizer=cmd_normalizer,
-                return_intermediate_data=False,
+            rollout_rng, reshuffle_rng, train_rng = jax.random.split(train_rng, 3)
+            rollout_rng_E = jax.random.split(rollout_rng, self.config.num_envs)
+            transitions_ET, state_E, has_nans_E, _ = unroll_trajectories_fn(
+                state_E,
+                rollout_rng_E,
+                agent,
+                obs_normalizer,
+                cmd_normalizer,
+                engine,
+                obs_generators,
+                command_generators,
+                reward_generators,
+                termination_generators,
+                self.num_rollout_steps_per_env,
+                False,
             )
-            env_state_EL_t = jax.tree_util.tree_map(lambda x: x[-1], env_state_TEL)
+            has_nans = jax.tree.map(jnp.any, has_nans_E)
 
             rollout_time = time.time() - start_time
             logger.info("Rollout time: %s seconds", rollout_time)
 
-            env_state_DL = xax.flatten_pytree(
-                env_state_TEL,
-                flatten_size=self.dataset_size,
-            )
-
-            ###########################
-            # Minibatch Training Loop #
-            ###########################
             start_time = time.time()
-
-            # getting loss components that are constant across minibatches
-            # (e.g. advantages) and flattening them for efficiency, thus
-            # the name "rollout_time" loss components
-            rollout_loss_components_TEL = self.get_rollout_time_loss_components(
+            rollout_stats_ET = self.get_rollout_time_stats(
+                transitions=transitions_ET,
                 agent=agent,
-                trajectory_dataset=env_state_TEL,
                 obs_normalizer=obs_normalizer,
                 cmd_normalizer=cmd_normalizer,
             )
-            rollout_loss_components_DL = xax.flatten_pytree(
-                rollout_loss_components_TEL,
-                flatten_size=self.dataset_size,
+
+            dataset_ET = RLDataset(
+                transitions=transitions_ET,
+                rollout_time_stats=rollout_stats_ET,
             )
 
             # running training on minibatches
@@ -585,28 +640,27 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 opt_state=opt_state,
                 reshuffle_rng=reshuffle_rng,
                 optimizer=optimizer,
-                dataset_DL=env_state_DL,
-                rollout_time_loss_components_DL=rollout_loss_components_DL,
+                dataset_ET=dataset_ET,
                 obs_normalizer=obs_normalizer,
                 cmd_normalizer=cmd_normalizer,
             )
-            metrics_mean = jax.tree_util.tree_map(lambda x: jnp.mean(x), metrics)
+            metrics_mean = jax.tree.map(lambda x: jnp.mean(x), metrics)
             update_time = time.time() - start_time
             logger.info("Update time: %s seconds", update_time)
 
-            # this will allow for online normalization, just know that we will
-            # be normalizing the already normalized observations and commands.
-            obs_normalizer = obs_normalizer.update(env_state_TEL.obs)
-            cmd_normalizer = cmd_normalizer.update(env_state_TEL.command)
+            # this will allow for online normalization, must be updated after
+            # the update step.
+            obs_normalizer = obs_normalizer.update(transitions_ET.obs)
+            cmd_normalizer = cmd_normalizer.update(transitions_ET.command)
 
             with self.step_context("write_logs"):
                 training_state.raw_phase = "train"
                 training_state.num_steps += 1
                 training_state.num_samples += self.dataset_size
 
-                self.log_trajectory_stats(env, env_state_TEL, eval=False)
+                self.log_trajectory_stats(transitions_ET, reward_generators, termination_generators, eval=False)
                 self.log_update_metrics(metrics_mean)
-                self.logger.log_scalar("has_nans", has_nans, namespace="stats")
+                self.log_has_nans(has_nans)
                 self.logger.log_scalar("rollout_time", rollout_time, namespace="⏰")
                 self.logger.log_scalar("update_time", update_time, namespace="⏰")
                 self.logger.write(training_state)
@@ -626,9 +680,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 render_dir = self.exp_dir / self.config.render_dir / render_name
                 logger.info("Rendering to %s", render_dir)
 
-                eval_env_state_T1L = render_and_save_trajectory(
-                    env=env,
+                render_and_save_trajectory(
                     agent=agent,
+                    engine=engine,
                     rng=rng,
                     output_dir=render_dir,
                     num_steps=self.config.eval_rollout_length,
@@ -638,14 +692,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 logger.info("Done rendering to %s", render_dir)
 
                 with self.step_context("write_logs"):
-                    self.log_trajectory_stats(env, eval_env_state_T1L, eval=True)
+                    self.log_trajectory_stats(transitions_ET, reward_generators, termination_generators, eval=True)
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
         with self:
             key = self.prng_key()
             self.set_loggers()
-            env = self.get_environment()
 
             if xax.is_master():
                 Thread(target=self.log_state, daemon=True).start()
@@ -665,7 +718,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             try:
                 self.rl_train_loop(
                     agent=agent,
-                    env=env,
                     optimizer=optimizer,
                     opt_state=opt_state,
                     training_state=training_state,

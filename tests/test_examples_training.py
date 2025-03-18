@@ -7,8 +7,7 @@ import jax.numpy as jnp
 import pytest
 import xax
 
-from examples.default_humanoid.walking import HumanoidWalkingConfig, HumanoidWalkingTask
-from ksim.model.types import ModelInput
+from examples.default_humanoid.walking import HumanoidWalkingTask
 
 
 @pytest.mark.slow
@@ -24,7 +23,7 @@ def test_default_humanoid_training() -> None:
     )
 
     # Create the task
-    task = HumanoidWalkingTask(config)
+    task = HumanoidWalkingTask(PPOTask)
     key = jax.random.PRNGKey(0)
 
     # Get the environment and model
@@ -41,6 +40,7 @@ def test_default_humanoid_training() -> None:
     # Test a single training iteration
     physics_model_L = env.get_init_physics_model()
     dummy_env_states = env.get_dummy_env_states(config.num_envs)
+    # TODO
     dummy_model_input = ModelInput(
         obs=dummy_env_states.obs,
         command=dummy_env_states.command,
@@ -49,7 +49,7 @@ def test_default_humanoid_training() -> None:
     )
     normalizer = task.get_normalizer(dummy_model_input)
     reset_rngs = jax.random.split(key, config.num_envs)
-    env_state_EL_0, physics_data_EL_1 = jax.vmap(env.reset, in_axes=(None, None, 0, None))(
+    env_stateE_0, physics_dataE_1 = jax.vmap(env.reset, in_axes=(None, None, 0, None))(
         agent, normalizer, reset_rngs, physics_model_L
     )
     static_args = ["num_steps", "num_envs", "return_intermediate_data"]
@@ -57,28 +57,28 @@ def test_default_humanoid_training() -> None:
 
     # Get a trajectory dataset
     key, _ = jax.random.split(key)
-    env_state_TEL, _, _ = env_rollout_fn(
+    env_state_TE, _, _ = env_rollout_fn(
         agent=agent,
         rng=burn_in_rng,
         num_steps=task.num_rollout_steps_per_env,
         num_envs=config.num_envs,
-        env_state_EL_t_minus_1=env_state_EL_0,
-        physics_data_EL_t=physics_data_EL_1,
+        env_stateE_t_minus_1=env_stateE_0,
+        physics_dataE_t=physics_dataE_1,
         physics_model_L=physics_model_L,
         return_intermediate_data=False,
     )
-    env_state_DL = xax.flatten_pytree(
-        env_state_TEL,
+    env_stateD = xax.flatten_pytree(
+        env_state_TE,
         flatten_size=task.dataset_size,
     )
 
-    rollout_loss_components_TEL = task.get_rollout_time_loss_components(
+    rollout_stats_TE = task.get_rollout_time_stats(
         agent=agent,
-        trajectory_dataset=env_state_TEL,
+        trajectory_dataset=env_state_TE,
     )
 
-    rollout_loss_components_DL = xax.flatten_pytree(
-        rollout_loss_components_TEL,
+    rollout_statsD = xax.flatten_pytree(
+        rollout_stats_TE,
         flatten_size=task.dataset_size,
     )
 
@@ -89,8 +89,8 @@ def test_default_humanoid_training() -> None:
         opt_state=opt_state,
         reshuffle_rng=reshuffle_rng,
         optimizer=optimizer,
-        dataset_DL=env_state_DL,
-        rollout_time_loss_components_DL=rollout_loss_components_DL,
+        datasetD=env_stateD,
+        rollout_time_statsD=rollout_statsD,
     )
 
     # Verify metrics
@@ -149,3 +149,8 @@ def test_default_humanoid_run_method() -> None:
                     f"NaN values found in model parameter '{param_path}'",
                     important=True,
                 )
+
+
+if __name__ == "__main__":
+    test_default_humanoid_training()
+    # test_default_humanoid_run_method()
