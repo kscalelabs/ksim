@@ -1,22 +1,23 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mujoco
+import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-from ksim.actuators import TorqueActuators
+from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
-from ksim.env.mjx_engine import MjxEngine
 from ksim.observation import ActuatorForceObservation, Observation
-from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
+from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities, Reset
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
@@ -134,17 +135,36 @@ class DefaultHumanoidModel(eqx.Module):
         self.critic = DefaultHumanoidCritic(key)
 
 
+@dataclass
 class HumanoidWalkingTaskConfig(PPOConfig):
     """Config for the humanoid walking task."""
 
-    pass
+    use_mit_actuators: bool = xax.field(
+        value=False,
+        help="Whether to use the MIT actuator model, where the actions are position commands",
+    )
+    kp: float = xax.field(
+        value=1.0,
+        help="The Kp for the actuators",
+    )
+    kd: float = xax.field(
+        value=0.1,
+        help="The Kd for the actuators",
+    )
+    armature: float = xax.field(
+        value=1e-2,
+        help="A value representing the effective inertia of the actuator armature",
+    )
+    friction: float = xax.field(
+        value=1e-6,
+        help="The dynamic friction loss for the actuator",
+    )
 
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
-    def get_mujoco_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
+    def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
-        metadata = get_joint_metadata(mj_model)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
@@ -152,23 +172,28 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
         mj_model.opt.solver = mjx.SolverType.CG
 
-        return mj_model, metadata
+        return mj_model
 
-    def get_engine(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> MjxEngine:
-        return MjxEngine(
-            default_physics_model=physics_model,
-            resetters=[
-                RandomizeJointPositions(scale=0.01),
-                RandomizeJointVelocities(scale=0.01),
-            ],
-            # actuators=MITPositionActuators(physics_model, metadata), # TODO:bring it back
-            actuators=TorqueActuators(),
-            # TODO: add randomizers
-            dt=self.config.dt,
-            ctrl_dt=self.config.ctrl_dt,
-            min_action_latency_step=0,
-            max_action_latency_step=0,
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
+        return get_joint_metadata(
+            mj_model,
+            kp=self.config.kp,
+            kd=self.config.kd,
+            armature=self.config.armature,
+            friction=self.config.friction,
         )
+
+    def get_actuators(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> Actuators:
+        if self.config.use_mit_actuators:
+            return MITPositionActuators(physics_model, metadata)
+        else:
+            return TorqueActuators()
+
+    def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
+        return [
+            RandomizeJointPositions(scale=0.01),
+            RandomizeJointVelocities(scale=0.01),
+        ]
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)

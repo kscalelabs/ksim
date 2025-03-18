@@ -18,7 +18,7 @@ class PhysicsState:
     """Everything you need for the engine to take an action and step physics."""
 
     most_recent_action: Array  # since ctrl_dt > dt, we need this to simulate actuator logic
-    model: PhysicsModel  # really important to think of this as a pointer of pointers... can be shared
+    model: PhysicsModel
     data: PhysicsData
 
 

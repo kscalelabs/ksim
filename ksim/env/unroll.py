@@ -13,8 +13,8 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.commands import Command
-from ksim.env.base_engine import PhysicsEngine
 from ksim.env.data import PhysicsData, PhysicsState, Transition
+from ksim.env.engine import PhysicsEngine
 from ksim.observation import Observation
 from ksim.rewards import Reward
 from ksim.terminations import Termination

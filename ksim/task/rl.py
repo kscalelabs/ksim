@@ -31,17 +31,20 @@ from mujoco import mjx
 from omegaconf import MISSING
 from xax.utils.transformation import scan_model
 
+from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.env.base_engine import PhysicsEngine
 from ksim.env.data import PhysicsModel, Transition
+from ksim.env.engine import PhysicsEngine, get_physics_engine
 from ksim.env.unroll import (
     UnrollNaNDetector,
     unroll_trajectory,
 )
 from ksim.observation import Observation
+from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.task.types import RLDataset, RolloutTimeStats
 from ksim.terminations import Termination
+from ksim.utils.named_access import get_joint_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +52,7 @@ logger = logging.getLogger(__name__)
 @jax.tree_util.register_dataclass
 @dataclass
 class RLConfig(xax.Config):
-    debug_environment: bool = xax.field(
+    run_environment: bool = xax.field(
         value=False,
         help="Instead of dropping into the training loop, run the environment loop.",
     )
@@ -130,7 +133,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     """Base class for reinforcement learning tasks."""
 
     @abstractmethod
-    def get_mujoco_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]: ...
+    def get_mujoco_model(self) -> mujoco.MjModel: ...
+
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
+        return get_joint_metadata(mj_model)
 
     def get_mjx_model(self, mj_model: mujoco.MjModel) -> mjx.Model:
         """Convert a mujoco model to an mjx model.
@@ -145,8 +151,30 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # that it is performant in MJX.
         return mjx.put_model(mj_model)
 
+    def get_engine(
+        self,
+        physics_model: PhysicsModel,
+        metadata: dict[str, JointMetadataOutput] | None = None,
+    ) -> PhysicsEngine:
+        return get_physics_engine(
+            physics_model=physics_model,
+            resets=self.get_resets(physics_model),
+            actuators=self.get_actuators(physics_model, metadata),
+            dt=self.config.dt,
+            ctrl_dt=self.config.ctrl_dt,
+            min_action_latency=self.config.min_action_latency,
+            max_action_latency=self.config.max_action_latency,
+        )
+
     @abstractmethod
-    def get_engine(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> PhysicsEngine: ...
+    def get_resets(self, physics_model: PhysicsModel) -> Collection[Reset]: ...
+
+    @abstractmethod
+    def get_actuators(
+        self,
+        physics_model: PhysicsModel,
+        metadata: dict[str, JointMetadataOutput] | None = None,
+    ) -> Actuators: ...
 
     @abstractmethod
     def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]: ...
@@ -256,7 +284,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
-        if self.config.debug_environment:
+        if self.config.run_environment:
             self.run_environment()
         else:
             self.run_training()
@@ -496,7 +524,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         training_state: xax.State,
     ) -> None:
         """Runs the main RL training loop."""
-        mj_model, metadata = self.get_mujoco_model_and_metadata()
+        mj_model = self.get_mujoco_model()
+        metadata = self.get_mujoco_model_metadata(mj_model)
         mjx_model = self.get_mjx_model(mj_model)
         engine = self.get_engine(mjx_model, metadata)
         observations = self.get_observations(mjx_model)
@@ -628,7 +657,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, model_rng = jax.random.split(rng)
             agent, state = self.load_initial_state(model_rng, load_optimizer=False)
 
-            mj_model, metadata = self.get_mujoco_model_and_metadata()
+            mj_model = self.get_mujoco_model()
+            metadata = self.get_mujoco_model_metadata(mj_model)
             engine = self.get_engine(mj_model, metadata)
             observations = self.get_observations(mj_model)
             commands = self.get_commands(mj_model)
