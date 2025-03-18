@@ -5,6 +5,7 @@ To be merged with the reset classes which mutates the data in place.
 
 import functools
 from abc import ABC, abstractmethod
+from typing import Generic, TypeVar
 
 import attrs
 import jax
@@ -12,6 +13,7 @@ from jaxtyping import Array
 from omegaconf import MISSING
 
 from ksim.env.data import PhysicsData, PhysicsModel
+from ksim.utils.named_access import get_body_data_idx_by_name
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -25,6 +27,15 @@ class Randomizer(ABC):
     @functools.cached_property
     def name(self) -> str:
         return self.name
+
+
+T = TypeVar("T", bound=Randomizer)
+
+
+class RandomizerBuilder(ABC, Generic[T]):
+    @abstractmethod
+    def __call__(self, physics_model: PhysicsModel, data: PhysicsData, rng: Array) -> T:
+        """Builds a randomizer from a MuJoCo model."""
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -95,6 +106,22 @@ class LinkMassRandomizer(Randomizer):
         body_mass = model.body_mass.at[:].set(model.body_mass * dmass)
         model = model.tree_replace({self.name: body_mass})
         return model, data
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TorsoMassRandomizerBuilder(Randomizer):
+    scale_lower: float = attrs.field(default=-1.0)
+    scale_upper: float = attrs.field(default=1.0)
+    torso_body_name: str = attrs.field(default=MISSING)
+
+    def __call__(self, model: PhysicsModel, data: PhysicsData) -> tuple[PhysicsModel, PhysicsData]:
+        torso_body_id = get_body_data_idx_by_name(model)[self.torso_body_name]
+        return TorsoMassRandomizer(
+            name=self.name,
+            scale_lower=self.scale_lower,
+            scale_upper=self.scale_upper,
+            torso_body_id=torso_body_id,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
