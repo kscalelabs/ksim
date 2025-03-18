@@ -14,7 +14,6 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from xax.nn.distributions import GaussianDistribution
 
 from ksim.env.data import Transition
-from ksim.model import ActorCriticAgent
 from ksim.task.rl import RLConfig, RLTask
 from ksim.task.types import PPORolloutTimeStats, RLDataset, RolloutTimeStats
 
@@ -103,7 +102,7 @@ def clipped_value_loss(
 
 
 def compute_ppo_loss(
-    agent: ActorCriticAgent,
+    agent: PyTree,
     transitions: Transition,
     rollout_time_stats: PPORolloutTimeStats,
     rng: PRNGKeyArray,
@@ -212,45 +211,62 @@ def compute_ppo_loss(
 @jax.tree_util.register_dataclass
 @dataclass
 class PPOConfig(RLConfig):
-    # For the CLIP term (see Schulman et al. 2017)
-    clip_param: float = xax.field(value=0.2, help="Clipping parameter for PPO.")
-
-    # For the Value Function (VF) term
-    value_loss_coef: float = xax.field(value=0.5, help="Value loss coefficient for PPO.")
-    use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss.")
-
-    # For the entropy bonus term
-    entropy_coef: float = xax.field(value=0.008, help="Entropy coefficient for PPO.")
-
-    # For the GAE computation
-    gamma: float = xax.field(value=0.99, help="Discount factor for PPO")
-    lam: float = xax.field(value=0.95, help="Lambda for GAE: high = more bias; low = more variance")
-    eps: float = xax.field(value=1e-6, help="Small epsilon value to avoid division by zero.")
-
-    # General training parameters
-    learning_rate: float = xax.field(value=1e-4, help="Learning rate for PPO.")
-    max_grad_norm: float = xax.field(value=0.5, help="Maximum gradient norm for clipping.")
-
-    # Normalization parameters
+    clip_param: float = xax.field(
+        value=0.2,
+        help="Clipping parameter for PPO, see Schulman et al. (2017)",
+    )
+    value_loss_coef: float = xax.field(
+        value=0.5,
+        help="Value loss coefficient for PPO.",
+    )
+    use_clipped_value_loss: bool = xax.field(
+        value=True,
+        help="Whether to use clipped value loss.",
+    )
+    entropy_coef: float = xax.field(
+        value=0.008,
+        help="Entropy coefficient for PPO.",
+    )
+    gamma: float = xax.field(
+        value=0.99,
+        help="Discount factor for PPO",
+    )
+    lam: float = xax.field(
+        value=0.95,
+        help="Lambda for GAE: high = more bias; low = more variance",
+    )
+    eps: float = xax.field(
+        value=1e-6,
+        help="Small epsilon value to avoid division by zero.",
+    )
+    learning_rate: float = xax.field(
+        value=1e-4,
+        help="Learning rate for PPO.",
+    )
+    max_grad_norm: float = xax.field(
+        value=0.5,
+        help="Maximum gradient norm for clipping.",
+    )
     scale_rewards: bool = xax.field(
         value=False,
-        help="Whether to scale rewards, see Engstrom, Ilyas, et al., (2020).",
+        help="Whether to scale rewards, see Engstrom, Ilyas, et al. (2020).",
     )
-    normalize_advantage: bool = xax.field(value=True, help="Whether to normalize advantages.")
+    normalize_advantage: bool = xax.field(
+        value=True,
+        help="Whether to normalize advantages.",
+    )
     normalize_advantage_in_minibatch: bool = xax.field(
         value=False,
         help="Whether to normalize advantages at the minibatch level as per OpenAI baselines.",
     )
-    # NOTE: if scale_rewards is True, advantages will still get its own normalization
     reward_scaling_alpha: float = xax.field(
         value=0.0003,
-        help="Rate at which to update reward scaling online as per Hessel, Soyer, et al., (2018).",
+        help="Rate at which to update reward scaling online as per Hessel, Soyer, et al. (2018).",
     )
     obs_norm_alpha: float = xax.field(
         value=0.0003,
         help="Rate at which to update observation norm stats, Andrychowicz (2021) and Duan (2016).",
     )
-    # NOTE: as per recommendations, going to enforce observation normalization.
     pretrained: str | None = xax.field(
         value=None,
         help="The path to a pretrained model to load.",
@@ -273,16 +289,27 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "PPO tasks use model_update and loss_metrics_grads instead."
         )
 
+    def get_optimizer(self) -> optax.GradientTransformation:
+        """Builds the optimizer.
+
+        This provides a reasonable default optimizer for training PPO models,
+        but can be overridden by subclasses who want to do something different.
+        """
+        return optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.adam(self.config.learning_rate),
+        )
+
     @abstractmethod
     def critic_predict_minibatch(
         self,
-        agent: ActorCriticAgent,
+        agent: PyTree,
         obs_ET: Array,
         cmd_ET: Array,
     ) -> Array: ...
 
-    @eqx.filter_jit  # TODO: implement filter-like jit in xax
-    def get_rollout_time_stats(self, transitions: Transition, agent: ActorCriticAgent) -> RolloutTimeStats:
+    @eqx.filter_jit
+    def get_rollout_time_stats(self, transitions: Transition, agent: PyTree) -> RolloutTimeStats:
         """Calculating advantages and returns for a rollout."""
         prediction = jax.vmap(agent.actor_model.batched_forward_across_time, in_axes=(0, 0))(
             transitions.obs, transitions.command
@@ -327,7 +354,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
     def model_update(
         self,
-        agent: ActorCriticAgent,
+        agent: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         minibatch: RLDataset,
@@ -355,13 +382,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
     def loss_metrics_grads(
         self,
-        agent: ActorCriticAgent,
+        agent: PyTree,
         minibatch: RLDataset,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array], PyTree]:
         """Value_and_grad computation with metrics."""
 
-        def loss_fn(agent: ActorCriticAgent) -> tuple[Array, dict[str, Array]]:
+        def loss_fn(agent: PyTree) -> tuple[Array, dict[str, Array]]:
             """Agent is a PyTree and can be optimized via optax."""
             rollout_time_stats = minibatch.rollout_time_stats
             assert isinstance(rollout_time_stats, PPORolloutTimeStats)

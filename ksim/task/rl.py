@@ -33,13 +33,11 @@ from xax.utils.transformation import scan_model
 
 from ksim.commands import Command
 from ksim.env.base_engine import PhysicsEngine
-from ksim.env.data import Transition
+from ksim.env.data import PhysicsModel, Transition
 from ksim.env.unroll import (
     UnrollNaNDetector,
     unroll_trajectory,
 )
-from ksim.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
-from ksim.model import Agent
 from ksim.observation import Observation
 from ksim.rewards import Reward
 from ksim.task.types import RLDataset, RolloutTimeStats
@@ -51,10 +49,6 @@ logger = logging.getLogger(__name__)
 @jax.tree_util.register_dataclass
 @dataclass
 class RLConfig(xax.Config):
-    action: str = xax.field(
-        value="train",
-        help="The action to take; should be either `train` or `env`.",
-    )
     num_learning_epochs: int = xax.field(
         value=MISSING,
         help="Number of learning epochs per dataset.",
@@ -131,16 +125,6 @@ Config = TypeVar("Config", bound=RLConfig)
 class RLTask(xax.Task[Config], Generic[Config], ABC):
     """Base class for reinforcement learning tasks."""
 
-    def __init__(self, config: Config) -> None:
-        self.config = config
-        self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]  # TODO: fix
-        super().__init__(config)
-
-        assert self.get_observations(None), "obs_generators must not be empty"
-        assert self.get_commands(), "command_generators must not be empty"
-        assert self.get_rewards(None), "reward_generators must not be empty"
-        assert self.get_terminations(None), "termination_generators must not be empty"
-
     @abstractmethod
     def get_mujoco_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]: ...
 
@@ -154,23 +138,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             The mjx model.
         """
         # TODO: We should perform some checks on the Mujoco model to ensure
-        # that it is performant.
+        # that it is performant in MJX.
         return mjx.put_model(mj_model)
 
     @abstractmethod
-    def get_engine(self, physics_model: mjx.Model, metadata: dict[str, JointMetadataOutput]) -> PhysicsEngine: ...
+    def get_engine(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> PhysicsEngine: ...
 
     @abstractmethod
-    def get_observations(self, physics_model: mjx.Model) -> Collection[Observation]: ...
+    def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]: ...
 
     @abstractmethod
-    def get_commands(self) -> Collection[Command]: ...
+    def get_commands(self, physics_model: PhysicsModel) -> Collection[Command]: ...
 
     @abstractmethod
-    def get_rewards(self, physics_model: mjx.Model) -> Collection[Reward]: ...
+    def get_rewards(self, physics_model: PhysicsModel) -> Collection[Reward]: ...
 
     @abstractmethod
-    def get_terminations(self, physics_model: mjx.Model) -> Collection[Termination]: ...
+    def get_terminations(self, physics_model: PhysicsModel) -> Collection[Termination]: ...
 
     @abstractmethod
     def get_optimizer(self) -> optax.GradientTransformation: ...
@@ -179,7 +163,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_rollout_time_stats(
         self,
         transitions: Transition,
-        agent: Agent,
+        agent: PyTree,
     ) -> RolloutTimeStats:
         """E.g. calculating advantages and returns for a rollout.
 
@@ -200,11 +184,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         minibatch: RLDataset,
         *,
-        agent: Agent,
+        agent: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         rng: PRNGKeyArray,
-    ) -> tuple[Agent, optax.OptState, Array, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Perform a single minibatch update step.
 
         Args:
@@ -268,17 +252,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
-        match self.config.action:
-            case "train":
-                self.run_training()
-
-            case "env":
-                agent, _, _, _ = self.load_initial_state(self.prng_key())
-                breakpoint()
-                self.run_environment(agent, self.config.eval_rollout_length)
-
-            case _:
-                raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
+        self.run_training()
 
     def get_checkpoint_number_and_path(self) -> tuple[int, Path]:
         """Get the checkpoint number and path from config or latest checkpoint."""
@@ -318,14 +292,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return f"{prefix}_pretrained_{ckpt_num}_{time_string}"
 
         return f"{prefix}_no_state_{time_string}"
-
-    def run_environment(
-        self,
-        agent: Agent,
-        num_steps: int,
-        state: xax.State | None = None,
-    ) -> None:
-        raise NotImplementedError("Environment tasks must implement this method.")
 
     def get_reward_stats(
         self,
@@ -429,12 +395,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @xax.profile
     def scannable_minibatch_step(
         self,
-        training_state: tuple[Agent, optax.OptState, PRNGKeyArray],
+        training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
         minibatch_idx: Array,
         *,
         optimizer: optax.GradientTransformation,
         dataset_ET: RLDataset,
-    ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+    ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Perform a single minibatch update step."""
         agent, opt_state, rng = training_state
         minibatch_BT = self.get_minibatch(dataset_ET, minibatch_idx)
@@ -452,12 +418,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @xax.profile
     def scannable_train_epoch(
         self,
-        training_state: tuple[Agent, optax.OptState, PRNGKeyArray],
+        training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
         _: None,
         *,
         optimizer: optax.GradientTransformation,
         dataset_ET: RLDataset,
-    ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+    ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Train a minibatch, returns the updated agent, optimizer state, loss, and metrics."""
         agent = training_state[0]
         opt_state = training_state[1]
@@ -492,7 +458,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @eqx.filter_jit  # TODO: implement filter-like jit in xax
     def rl_pass(
         self,
-        agent: Agent,
+        agent: PyTree,
         opt_state: optax.OptState,
         reshuffle_rng: PRNGKeyArray,
         optimizer: optax.GradientTransformation,
@@ -517,7 +483,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def rl_train_loop(
         self,
-        agent: Agent,
+        agent: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         training_state: xax.State,
@@ -641,6 +607,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 with self.step_context("write_logs"):
                     self.log_trajectory_stats(transitions_ET, rewards, terminations, eval=True)
+
+    def run_environment(self) -> None:
+        """Wraps the environment loop.
+
+        This provides an easy interface for developers to test out their
+        models and environments before launching training jobs.
+        """
+        with self:
+            rng = self.prng_key()
+            self.set_loggers()
+
+            rng, model_rng = jax.random.split(rng)
+            agent, optimizer, opt_state, training_state = self.load_initial_state(model_rng)
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""

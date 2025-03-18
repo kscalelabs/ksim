@@ -7,8 +7,6 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mujoco
-import optax
-import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
@@ -18,7 +16,6 @@ from ksim.actuators import TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.env.mjx_engine import MjxEngine
-from ksim.model import ModelCarry
 from ksim.observation import ActuatorForceObservation, Observation
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import DHForwardReward, HeightReward, Reward
@@ -149,13 +146,6 @@ class HumanoidWalkingTaskConfig(PPOConfig):
 
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
-    def get_optimizer(self) -> optax.GradientTransformation:
-        """Get the optimizer: handled by XAX."""
-        return optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            optax.adam(self.config.learning_rate),
-        )
-
     def get_mujoco_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
@@ -185,19 +175,15 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             max_action_latency_step=0,
         )
 
-    def get_model(self, key: PRNGKeyArray) -> ActorCriticAgent:
-        return ActorCriticAgent(
-            critic_model=DefaultHumanoidCritic(key),
-            actor_model=DefaultHumanoidActor(key, min_std=0.01, max_std=1.0, var_scale=1.0),
-            action_distribution=xax.nn.distributions.TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
-        )
+    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
+        return DefaultHumanoidModel(key)
 
     def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]:
         return [
             ActuatorForceObservation(),
         ]
 
-    def get_commands(self) -> Collection[Command]:
+    def get_commands(self, physics_model: PhysicsModel) -> Collection[Command]:
         return [LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3)]
 
     def get_rewards(self, physics_model: PhysicsModel) -> Collection[Reward]:
