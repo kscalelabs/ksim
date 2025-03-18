@@ -1,7 +1,7 @@
 """Minimal API that interfaces with env to unroll trajectories."""
 
 from dataclasses import replace
-from typing import Collection, NamedTuple
+from typing import Collection, Generic, Mapping, NamedTuple, Protocol, TypeVar
 
 import chex
 import jax
@@ -10,12 +10,11 @@ import mujoco
 import numpy as np
 import xax
 from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.commands import Command
 from ksim.env.base_engine import PhysicsEngine
 from ksim.env.data import PhysicsData, PhysicsState, Transition
-from ksim.model import Agent, ModelCarry
 from ksim.observation import Observation
 from ksim.rewards import Reward
 from ksim.terminations import Termination
@@ -31,6 +30,20 @@ class UnrollNaNDetector(NamedTuple):
     reward_has_nans: Array
 
 
+ModelCarry = PyTree
+ModelCarryT = TypeVar("ModelCarryT", bound=ModelCarry)
+
+
+class SampleActionFn(Protocol, Generic[ModelCarryT]):
+    def __call__(
+        self,
+        obs: Mapping[str, Array],
+        cmd: Mapping[str, Array],
+        rng: PRNGKeyArray,
+        carry: ModelCarryT,
+    ) -> tuple[Array, ModelCarryT]: ...
+
+
 UnrollCarry = tuple[FrozenDict[str, Array], ModelCarry, PhysicsState]
 UnrollYs = tuple[Transition, UnrollNaNDetector, PhysicsData | None]
 
@@ -38,7 +51,8 @@ UnrollYs = tuple[Transition, UnrollNaNDetector, PhysicsData | None]
 def unroll_trajectory(
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
-    agent: Agent,
+    initial_carry: ModelCarry,
+    sample_action_fn: SampleActionFn,
     engine: PhysicsEngine,
     obs_generators: Collection[Observation],
     command_generators: Collection[Command],
@@ -52,25 +66,31 @@ def unroll_trajectory(
     Key insight: unrolling really doesn't need the previous Transition since we
     can safely reset command, and since prev action is in PhysicsState.
     """
-    initial_carry = agent.actor_model.initial_carry()
     initial_command = get_initial_commands(rng, command_generators=command_generators)
 
-    def state_transition(
-        carry: UnrollCarry,
-        rng: PRNGKeyArray,
-    ) -> tuple[UnrollCarry, UnrollYs]:
-        """Constructs transition, resets if needed."""
+    def state_transition(carry: UnrollCarry, rng: PRNGKeyArray) -> tuple[UnrollCarry, UnrollYs]:
+        """Runs a single step of the environment transition function.
+
+        Args:
+            carry: A tuple containing the previous command, the model carry
+                state, and the previous physics state.
+            rng: A PRNGKeyArray.
+
+        Returns:
+            A tuple containing the next carry, the transition, and the next
+            physics state.
+        """
         obs_rng, cmd_rng, act_rng, reset_rng, physics_rng = jax.random.split(rng, 5)
         prev_command, carry, physics_state = carry
         prev_action = physics_state.most_recent_action
         obs = get_observation(physics_state, obs_rng, obs_generators=obs_generators)
         command = get_commands(prev_command, physics_state, cmd_rng, command_generators=command_generators)
 
-        # we still return unnormalized obs and command to calculate normalization statistics
-        prediction, next_carry = agent.actor_model.forward(obs, command, carry)
-        action = agent.action_distribution.sample(prediction, act_rng)
+        # Runs the actor and applies the sampled actions to the physics engine.
+        action, next_carry = sample_action_fn(obs, command, act_rng, carry)
         next_physics_state = engine.step(action, physics_state, physics_rng)
 
+        # Checks for termination and computes rewards.
         termination_components = get_terminations(next_physics_state, termination_generators=termination_generators)
         action_causes_termination = jax.tree_util.tree_reduce(jnp.logical_or, list(termination_components.values()))
         reward_components = get_rewards(
@@ -92,6 +112,7 @@ def unroll_trajectory(
         next_carry = xax.update_pytree(do_reset, initial_carry, next_carry)
         command = xax.update_pytree(do_reset, initial_command, command)
 
+        # Constructs the transition object.
         transition = Transition(
             obs=obs,
             command=command,
@@ -103,8 +124,9 @@ def unroll_trajectory(
             reward_components=reward_components,
         )
 
-        # there are a lot of places nans can occur... unlikely to occur outside
-        # next_physics_state, but better to check all of them until they're gone
+        # There are a lot of places nans can occur. They are unlikely to occur
+        # outside next_physics_state, but better to check all of them until
+        # they're gone.
         nan_mask = UnrollNaNDetector(
             obs_has_nans=xax.pytree_has_nans(obs),
             command_has_nans=xax.pytree_has_nans(command),
@@ -114,7 +136,8 @@ def unroll_trajectory(
             termination_has_nans=xax.pytree_has_nans(termination_components),
             reward_has_nans=xax.pytree_has_nans(rewards),
         )
-        # if is fine since condition will be static at runtime
+
+        # If is fine since condition will be static at runtime
         if return_intermediate_physics_data:
             return (command, next_carry, next_physics_state), (transition, nan_mask, next_physics_state)
         else:

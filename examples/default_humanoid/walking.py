@@ -1,7 +1,6 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
 from pathlib import Path
-from typing import Collection
 
 import equinox as eqx
 import jax
@@ -110,10 +109,6 @@ class DefaultHumanoidCritic(eqx.Module):
         x = jnp.concatenate([obs_vec, command_vec], axis=-1)
         return self.mlp(x), None
 
-    def initial_carry(self) -> ModelCarry:
-        """No carry for now, but we could use this to initialize recurrence."""
-        return None
-
     def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
         """Forward pass across the episode (time, ...). No env dimension.
 
@@ -178,21 +173,23 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
-    def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]:
+    def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
         return [
             ActuatorForceObservation(),
         ]
 
-    def get_commands(self, physics_model: PhysicsModel) -> Collection[Command]:
-        return [LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3)]
+    def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
+        return [
+            LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
+        ]
 
-    def get_rewards(self, physics_model: PhysicsModel) -> Collection[Reward]:
+    def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
         return [
             HeightReward(scale=1.0, height_target=0.7),
             DHForwardReward(scale=0.2),
         ]
 
-    def get_terminations(self, physics_model: PhysicsModel) -> Collection[Termination]:
+    def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
             UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0),
         ]

@@ -139,14 +139,6 @@ class ZBot2WalkingTask(PPOTask[PPOConfig]):
             optax.adam(self.config.learning_rate),
         )
 
-    def critic_predict_minibatch(
-        self,
-        agent: ActorCriticAgent,
-        obs_ET: Array,
-        cmd_ET: Array,
-    ) -> Array:
-        pass  # Not used anywhere rn
-
     def get_mujoco_model_and_metadata(self) -> tuple[PhysicsModel, dict[str, JointMetadataOutput]]:
         metadata = None  # get_joint_metadata(mj_model)  # TODO: implement this function properly
 
@@ -188,9 +180,6 @@ class ZBot2WalkingTask(PPOTask[PPOConfig]):
             action_distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
-    # from ML: I haven't made up my mind on this API, but I generally think we should move away
-    # from the hidden builder pattern. Giving the data directly will help with this.
-    # In fact, we might even want to make this return a pure function.
     def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]:
         return [
             ActuatorForceObservation(),

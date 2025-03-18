@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 @jax.tree_util.register_dataclass
 @dataclass
 class RLConfig(xax.Config):
+    debug_environment: bool = xax.field(
+        value=False,
+        help="Instead of dropping into the training loop, run the environment loop.",
+    )
     num_learning_epochs: int = xax.field(
         value=MISSING,
         help="Number of learning epochs per dataset.",
@@ -252,7 +256,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
-        self.run_training()
+        if self.config.debug_environment:
+            self.run_environment()
+        else:
+            self.run_training()
 
     def get_checkpoint_number_and_path(self) -> tuple[int, Path]:
         """Get the checkpoint number and path from config or latest checkpoint."""
@@ -493,7 +500,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         mjx_model = self.get_mjx_model(mj_model)
         engine = self.get_engine(mjx_model, metadata)
         observations = self.get_observations(mjx_model)
-        commands = self.get_commands()
+        commands = self.get_commands(mjx_model)
         rewards = self.get_rewards(mjx_model)
         terminations = self.get_terminations(mjx_model)
 
@@ -619,7 +626,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.set_loggers()
 
             rng, model_rng = jax.random.split(rng)
-            agent, optimizer, opt_state, training_state = self.load_initial_state(model_rng)
+            agent, state = self.load_initial_state(model_rng, load_optimizer=False)
+
+            mj_model, metadata = self.get_mujoco_model_and_metadata()
+            engine = self.get_engine(mj_model, metadata)
+            observations = self.get_observations(mj_model)
+            commands = self.get_commands(mj_model)
+            rewards = self.get_rewards(mj_model)
+            terminations = self.get_terminations(mj_model)
+
+            breakpoint()
+
+            asdf
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
@@ -631,7 +649,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 Thread(target=self.log_state, daemon=True).start()
 
             rng, model_rng = jax.random.split(rng)
-            agent, optimizer, opt_state, training_state = self.load_initial_state(model_rng)
+            agent, optimizer, opt_state, training_state = self.load_initial_state(model_rng, load_optimizer=True)
 
             training_state = self.on_training_start(training_state)
             training_state.num_samples = 1  # prevents from checkpointing at start

@@ -1,6 +1,6 @@
 """Defines a standard task interface for training a policy."""
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
@@ -299,14 +299,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             optax.clip_by_global_norm(self.config.max_grad_norm),
             optax.adam(self.config.learning_rate),
         )
-
-    @abstractmethod
-    def critic_predict_minibatch(
-        self,
-        agent: PyTree,
-        obs_ET: Array,
-        cmd_ET: Array,
-    ) -> Array: ...
 
     @eqx.filter_jit
     def get_rollout_time_stats(self, transitions: Transition, agent: PyTree) -> RolloutTimeStats:

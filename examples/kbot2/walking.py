@@ -139,14 +139,6 @@ class KBot2WalkingTask(PPOTask[PPOConfig]):
             optax.adam(self.config.learning_rate),
         )
 
-    def critic_predict_minibatch(
-        self,
-        agent: ActorCriticAgent,
-        obs_ET: Array,
-        cmd_ET: Array,
-    ) -> Array:
-        pass  # Not used anywhere rn
-
     def get_mujoco_model_and_metadata(self) -> tuple[PhysicsModel, dict[str, JointMetadataOutput]]:
         metadata = None  # get_joint_metadata(mj_model)  # TODO: implement this function properly
 
