@@ -98,9 +98,8 @@ class DummyCritic(eqx.Module, KSimModule):
 
 
 @pytest.fixture
-def engine() -> MjxEngine:
-    mj_model = mujoco.MjModel.from_xml_path("tests/fixed_assets/default_humanoid_test.mjcf")
-    mjx_model = mjx.put_model(mj_model)
+def engine(humanoid_model: mujoco.MjModel) -> MjxEngine:
+    mjx_model = mjx.put_model(humanoid_model)
     engine = MjxEngine(
         default_physics_model=mjx_model,
         resetters=[

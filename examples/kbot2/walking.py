@@ -20,11 +20,7 @@ from ksim.env.data import PhysicsModel
 from ksim.env.mjx_engine import MjxEngine
 from ksim.model.base import ActorCriticAgent, KSimModule
 from ksim.model.types import ModelCarry
-from ksim.observation import (
-    ActuatorForceObservation,
-    LegacyVelocityObservation,
-    Observation,
-)
+from ksim.observation import ActuatorForceObservation, Observation
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -198,10 +194,6 @@ class KBot2WalkingTask(PPOTask[PPOConfig]):
     # In fact, we might even want to make this return a pure function.
     def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]:
         return [
-            # LegacyPositionObservation(exclude_xy=True),
-            LegacyVelocityObservation(),
-            # CenterOfMassInertiaObservation(), # TODO: debug and bring it back
-            # CenterOfMassVelocityObservation(),
             ActuatorForceObservation(),
         ]
 

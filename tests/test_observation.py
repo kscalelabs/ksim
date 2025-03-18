@@ -2,7 +2,6 @@
 
 import unittest
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
 import chex
@@ -10,7 +9,6 @@ import jax
 import jax.numpy as jnp
 import mujoco
 from jaxtyping import Array, PRNGKeyArray
-from mujoco import mjx
 
 from ksim.observation import (
     BaseAngularVelocityObservation,
@@ -26,15 +24,12 @@ from ksim.observation import (
 _TOL = 1e-4
 
 
-def get_humanoid_model() -> mujoco.MjModel:
-    mjcf_path = (Path(__file__).parent / "fixed_assets" / "default_humanoid_test.mjcf").resolve().as_posix()
-    mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
-    return mj_model
-
-
 class DummyObservation(Observation):
-    def observe(self, state: mjx.Data, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros((3,))
+    def initial_command(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(2)
+
+    def command(self, prev_command: Array, time: float, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(2)
 
 
 @jax.tree_util.register_dataclass
@@ -283,8 +278,8 @@ class SensorObservationTest(chex.TestCase):
 
 
 class SensorObservationBuilderTest(chex.TestCase):
-    def setUp(self) -> None:
-        self.physics_model = get_humanoid_model()
+    def setUp(self, humanoid_model: mujoco.MjModel) -> None:
+        self.physics_model = humanoid_model
 
     def test_builder_creates_correct_observation(self) -> None:
         obs = SensorObservation.create(

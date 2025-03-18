@@ -3,7 +3,7 @@
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Generic, Literal, TypeVar
+from typing import Collection, Literal, Self
 
 import attrs
 import jax
@@ -36,15 +36,6 @@ class Termination(ABC):
     @functools.cached_property
     def termination_name(self) -> str:
         return self.get_name()
-
-
-T = TypeVar("T", bound=Termination)
-
-
-class TerminationBuilder(ABC, Generic[T]):
-    @abstractmethod
-    def __call__(self, physics_model: PhysicsModel) -> T:
-        """Builds a termination from a MuJoCo model."""
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -91,8 +82,6 @@ class FallTermination(Termination):
     sensor_type: SensorType
     max_pitch: float = attrs.field(default=0.78)
 
-    # TODO: Check that this logic is correct.
-    # Also need to account for sensor transformations...
     @xax.jit(static_argnames=["self"])
     def __call__(self, state: PhysicsData) -> Array:
         match self.sensor_type:
@@ -103,9 +92,11 @@ class FallTermination(Termination):
                     1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2,
                 )
                 return jnp.abs(pitch) > self.max_pitch
+
             case "gravity_vector":
                 gravity = state.sensor[self.sensor_name]  # ML: does this exist?
                 return gravity[2] < 0.0
+
             case "base_orientation":
                 quat = state.qpos[3:7]
                 pitch = jnp.arctan2(
@@ -114,43 +105,47 @@ class FallTermination(Termination):
                 )
                 return jnp.abs(pitch) > self.max_pitch
 
-
-@attrs.define(frozen=True, kw_only=True)
-class FallTerminationBuilder(TerminationBuilder[FallTermination]):
-    quaternion_sensor: str | None = attrs.field(default=None)
-    projected_gravity_sensor: str | None = attrs.field(default=None)
-
-    def __call__(self, physics_model: PhysicsModel) -> FallTermination:
-        if not (self.quaternion_sensor or self.projected_gravity_sensor):
-            logger.info("No quaternion or projected gravity sensor specified, using base orientation.")
+    @classmethod
+    def create_from_quaternion_sensor(cls, physics_model: PhysicsModel, quaternion_sensor: str) -> Self:
+        try:
+            _ = get_sensor_data_idxs_by_name(physics_model)[quaternion_sensor]
             return FallTermination(
-                sensor_name="base",
-                sensor_type="base_orientation",
+                sensor_name=quaternion_sensor,
+                sensor_type="quaternion_orientation",
             )
+        except KeyError:
+            raise ValueError(f"Quaternion sensor {quaternion_sensor} not found.")
 
-        if self.quaternion_sensor and self.projected_gravity_sensor:
+    @classmethod
+    def create_from_projected_gravity_sensor(cls, physics_model: PhysicsModel, projected_gravity_sensor: str) -> Self:
+        try:
+            _ = get_sensor_data_idxs_by_name(physics_model)[projected_gravity_sensor]
+            return FallTermination(
+                sensor_name=projected_gravity_sensor,
+                sensor_type="gravity_vector",
+            )
+        except KeyError:
+            raise ValueError(f"Projected gravity sensor {projected_gravity_sensor} not found.")
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        quaternion_sensor: str | None = None,
+        projected_gravity_sensor: str | None = None,
+    ) -> Self:
+        if quaternion_sensor and projected_gravity_sensor:
             raise ValueError("Only one of quaternion or projected gravity sensor can be specified.")
 
-        sensor_name: str
-        sensor_type: SensorType
+        if quaternion_sensor:
+            return cls.create_from_quaternion_sensor(physics_model, quaternion_sensor)
 
-        if self.quaternion_sensor:
-            try:
-                _ = get_sensor_data_idxs_by_name(physics_model)[self.quaternion_sensor]
-                sensor_name = self.quaternion_sensor
-                sensor_type = "quaternion_orientation"
-            except KeyError:
-                raise ValueError(f"Quaternion sensor {self.quaternion_sensor} not found.")
-        elif self.projected_gravity_sensor:
-            try:
-                _ = get_sensor_data_idxs_by_name(physics_model)[self.projected_gravity_sensor]
-                sensor_name = self.projected_gravity_sensor
-                sensor_type = "gravity_vector"
-            except KeyError:
-                raise ValueError(f"Gravity sensor {self.projected_gravity_sensor} not found.")
+        if projected_gravity_sensor:
+            return cls.create_from_projected_gravity_sensor(physics_model, projected_gravity_sensor)
+
         return FallTermination(
-            sensor_name=sensor_name,
-            sensor_type=sensor_type,
+            sensor_name="base",
+            sensor_type="base_orientation",
         )
 
 
@@ -176,22 +171,28 @@ class IllegalContactTermination(Termination):
         """Convert JAX arrays to tuples for hashing."""
         return hash((tuple(self.illegal_geom_idxs), self.contact_eps))
 
-
-@attrs.define(frozen=True, kw_only=True)
-class IllegalContactTerminationBuilder(TerminationBuilder[IllegalContactTermination]):
-    geom_names: Collection[str] = attrs.field()
-    contact_eps: float = attrs.field(default=-1e-3)
-
-    def __call__(self, physics_model: PhysicsModel) -> IllegalContactTermination:
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        geom_names: Collection[str],
+        contact_eps: float = -1e-3,
+    ) -> Self:
         illegal_geom_idxs = []
+        geom_name_set = set(geom_names)
         for geom_name, geom_idx in get_geom_data_idx_by_name(physics_model).items():
-            if geom_name in self.geom_names:
+            if geom_name in geom_name_set:
                 illegal_geom_idxs.append(geom_idx)
+                geom_name_set.remove(geom_name)
+
+        if geom_name_set:
+            choices = sorted(list(get_geom_data_idx_by_name(physics_model).keys()))
+            raise ValueError(f"Geoms {geom_name_set} not found in model. Choices are: {choices}")
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
-        return IllegalContactTermination(
-            contact_eps=self.contact_eps,
+        return cls(
+            contact_eps=contact_eps,
             illegal_geom_idxs=illegal_geom_idxs,
         )
 
