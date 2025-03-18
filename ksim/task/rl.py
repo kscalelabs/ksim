@@ -142,7 +142,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         assert self.get_terminations(None), "termination_generators must not be empty"
 
     @abstractmethod
-    def get_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]: ...
+    def get_mujoco_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]: ...
 
     def get_mjx_model(self, mj_model: mujoco.MjModel) -> mjx.Model:
         """Convert a mujoco model to an mjx model.
@@ -335,7 +335,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Get reward statistics from the trajectoryl (D)."""
         reward_stats: dict[str, jnp.ndarray] = {}
 
-        num_episodes = jnp.sum(trajectory.done).clip(min=1)  # rough approx
+        num_episodes = jnp.sum(trajectory.done).clip(min=1)
         terms = trajectory.reward_components
         for generator in reward_generators:
             statistic = terms[generator.reward_name]
@@ -345,7 +345,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return reward_stats
 
     def get_termination_stats(
-        self, trajectory: Transition, termination_generators: Collection[Termination]
+        self,
+        trajectory: Transition,
+        termination_generators: Collection[Termination],
     ) -> dict[str, jnp.ndarray]:
         """Get termination statistics from the trajectory (D)."""
         termination_stats: dict[str, jnp.ndarray] = {}
@@ -521,7 +523,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         training_state: xax.State,
     ) -> None:
         """Runs the main RL training loop."""
-        mj_model, metadata = self.get_model_and_metadata()
+        mj_model, metadata = self.get_mujoco_model_and_metadata()
         mjx_model = self.get_mjx_model(mj_model)
         engine = self.get_engine(mjx_model, metadata)
         observations = self.get_observations(mjx_model)

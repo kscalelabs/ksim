@@ -18,7 +18,7 @@ from ksim.actuators import TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.env.mjx_engine import MjxEngine
-from ksim.model import ActorCriticAgent, KSimModule, ModelCarry
+from ksim.model import ModelCarry
 from ksim.observation import ActuatorForceObservation, Observation
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import DHForwardReward, HeightReward, Reward
@@ -26,10 +26,11 @@ from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
 from ksim.utils.named_access import get_joint_metadata
 
+NUM_INPUTS = 56
 NUM_OUTPUTS = 21
 
 
-class DefaultHumanoidActor(eqx.Module, KSimModule):
+class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
@@ -46,7 +47,7 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
         var_scale: float,
     ) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=56,  # TODO: use similar pattern when dummy data gets passed in to populate
+            in_size=NUM_INPUTS,
             out_size=NUM_OUTPUTS * 2,
             width_size=64,
             depth=5,
@@ -58,53 +59,43 @@ class DefaultHumanoidActor(eqx.Module, KSimModule):
         self.var_scale = var_scale
 
     def forward(
-        self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None
-    ) -> tuple[Array, ModelCarry | None]:
+        self,
+        obs: FrozenDict[str, Array],
+        command: FrozenDict[str, Array],
+        carry: None,
+    ) -> tuple[Array, None]:
         obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
         command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
         assert obs_vec.ndim == command_vec.ndim
         x = jnp.concatenate([obs_vec, command_vec], axis=-1)
 
+        # Split the output into mean and standard deviation.
         prediction = self.mlp(x)
-
         mean = prediction[..., :NUM_OUTPUTS]
         std = prediction[..., NUM_OUTPUTS:]
 
-        # softplus and clipping for stability
+        # Softplus and clip to ensure positive standard deviations.
         std = (jax.nn.softplus(std) + self.min_std) * self.var_scale
         std = jnp.clip(std, self.min_std, self.max_std)
 
-        # concat because Gaussian-like distributions expect the parameters
-        # to be mean concat std
+        # Concatenate the Gaussian parameters into a single array.
         parametrization = jnp.concatenate([mean, std], axis=-1)
 
         return parametrization, None
 
-    # TODO: we should move all this to RL and away from the model definition
-    def initial_carry(self) -> ModelCarry:
-        """No carry for now, but we could use this to initialize recurrence or action history."""
+    def initial_carry(self) -> None:
         return None
 
-    def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
-        """Forward pass across the episode (time, ...). No env dimension.
 
-        By default, we vmap the forward pass for efficiency. If you implement
-        recurrence, you should override this with an appropriate scan.
-        """
-        vmapped_forward = jax.vmap(self.forward, in_axes=(0, 0, None))
-        prediction, _ = vmapped_forward(obs, command, None)
-        return prediction
-
-
-class DefaultHumanoidCritic(eqx.Module, KSimModule):
+class DefaultHumanoidCritic(eqx.Module):
     """Critic for the walking task."""
 
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=56,  # TODO: is there a nice way of inferring this?
-            out_size=1,
+            in_size=NUM_INPUTS,
+            out_size=1,  # Always output a single critic value.
             width_size=64,
             depth=5,
             key=key,
@@ -112,8 +103,11 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
         )
 
     def forward(
-        self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None
-    ) -> tuple[Array, ModelCarry | None]:
+        self,
+        obs: FrozenDict[str, Array],
+        command: FrozenDict[str, Array],
+        carry: None,
+    ) -> tuple[Array, None]:
         obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
         command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
         x = jnp.concatenate([obs_vec, command_vec], axis=-1)
@@ -134,6 +128,20 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
         return prediction
 
 
+class DefaultHumanoidModel(eqx.Module):
+    actor: DefaultHumanoidActor
+    critic: DefaultHumanoidCritic
+
+    def __init__(self, key: PRNGKeyArray) -> None:
+        self.actor = DefaultHumanoidActor(
+            key,
+            min_std=0.01,
+            max_std=1.0,
+            var_scale=1.0,
+        )
+        self.critic = DefaultHumanoidCritic(key)
+
+
 class HumanoidWalkingTaskConfig(PPOConfig):
     """Config for the humanoid walking task."""
 
@@ -148,15 +156,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             optax.adam(self.config.learning_rate),
         )
 
-    def critic_predict_minibatch(
-        self,
-        agent: ActorCriticAgent,
-        obs_ET: Array,
-        cmd_ET: Array,
-    ) -> Array:
-        pass  # Not used anywhere rn
-
-    def get_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
+    def get_mujoco_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
         metadata = get_joint_metadata(mj_model)

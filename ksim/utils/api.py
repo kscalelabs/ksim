@@ -12,7 +12,7 @@ from kscale.web.utils import get_robots_dir, should_refresh_file
 logger = logging.getLogger(__name__)
 
 
-async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
+async def get_mujoco_model_path(model_name: str, cache: bool = True) -> str | Path:
     """Downloads and caches the model URDF if it doesn't exists in a local directory."""
     try:
         urdf_dir = Path(model_name)
@@ -30,7 +30,7 @@ async def get_model_path(model_name: str, cache: bool = True) -> str | Path:
     return mjcf_path
 
 
-async def get_model_metadata(model_name: str, cache: bool = True) -> RobotURDFMetadataOutput:
+async def get_mujoco_model_metadata(model_name: str, cache: bool = True) -> RobotURDFMetadataOutput:
     """Downloads and caches the model metadata."""
     try:
         directory = Path(model_name)
@@ -58,17 +58,17 @@ async def get_model_metadata(model_name: str, cache: bool = True) -> RobotURDFMe
     return metadata
 
 
-async def get_model_and_metadata(
+async def get_mujoco_model_and_metadata(
     model_name: str,
     cache: bool = True,
 ) -> tuple[str, RobotURDFMetadataOutput]:
     """Downloads and caches the model URDF and metadata."""
     urdf_path, metadata = await asyncio.gather(
-        get_model_path(
+        get_mujoco_model_path(
             model_name=model_name,
             cache=cache,
         ),
-        get_model_metadata(
+        get_mujoco_model_metadata(
             model_name=model_name,
             cache=cache,
         ),

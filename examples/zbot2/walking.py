@@ -147,7 +147,7 @@ class ZBot2WalkingTask(PPOTask[PPOConfig]):
     ) -> Array:
         pass  # Not used anywhere rn
 
-    def get_model_and_metadata(self) -> tuple[PhysicsModel, dict[str, JointMetadataOutput]]:
+    def get_mujoco_model_and_metadata(self) -> tuple[PhysicsModel, dict[str, JointMetadataOutput]]:
         metadata = None  # get_joint_metadata(mj_model)  # TODO: implement this function properly
 
         robot_path = "examples/kscale-assets/zbot-feet/robot.mjcf"
