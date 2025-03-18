@@ -109,22 +109,6 @@ class LinkMassRandomizer(Randomizer):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class TorsoMassRandomizerBuilder(Randomizer):
-    scale_lower: float = attrs.field(default=-1.0)
-    scale_upper: float = attrs.field(default=1.0)
-    torso_body_name: str = attrs.field(default=MISSING)
-
-    def __call__(self, model: PhysicsModel, data: PhysicsData) -> tuple[PhysicsModel, PhysicsData]:
-        torso_body_id = get_body_data_idx_by_name(model)[self.torso_body_name]
-        return TorsoMassRandomizer(
-            name=self.name,
-            scale_lower=self.scale_lower,
-            scale_upper=self.scale_upper,
-            torso_body_id=torso_body_id,
-        )
-
-
-@attrs.define(frozen=True, kw_only=True)
 class TorsoMassRandomizer(Randomizer):
     """Randomizes the torso mass."""
 
@@ -139,6 +123,21 @@ class TorsoMassRandomizer(Randomizer):
         body_mass = model.body_mass.at[self.torso_body_id].set(model.body_mass[self.torso_body_id] + dmass)
         model = model.tree_replace({self.name: body_mass})
         return model, data
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TorsoMassRandomizerBuilder(RandomizerBuilder[TorsoMassRandomizer]):
+    scale_lower: float = attrs.field(default=-1.0)
+    scale_upper: float = attrs.field(default=1.0)
+    torso_body_name: str = attrs.field(default=MISSING)
+
+    def __call__(self, model: PhysicsModel) -> TorsoMassRandomizer:
+        torso_body_id = get_body_data_idx_by_name(model)[self.torso_body_name]
+        return TorsoMassRandomizer(
+            scale_lower=self.scale_lower,
+            scale_upper=self.scale_upper,
+            torso_body_id=torso_body_id,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)

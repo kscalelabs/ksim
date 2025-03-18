@@ -158,6 +158,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_termination_generators(self, physics_model: PhysicsModel) -> Collection[Termination]: ...
 
     @abstractmethod
+    def get_randomizer_generators(self, physics_model: PhysicsModel, data: PhysicsData) -> Collection[Randomizer]: ...
+
+    @abstractmethod
     def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer: ...
 
     @abstractmethod
@@ -553,7 +556,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         command_generators = self.get_command_generators()
         reward_generators = self.get_reward_generators(physics_model)
         termination_generators = self.get_termination_generators(physics_model)
-
         rng = self.prng_key()
         rng, burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 4)
 

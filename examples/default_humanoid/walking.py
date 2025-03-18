@@ -25,6 +25,7 @@ from ksim.observation import (
     LegacyVelocityObservation,
     Observation,
 )
+from ksim.randomization import Randomizer, TorsoMassRandomizerBuilder
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -174,9 +175,9 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
                 RandomizeJointPositions(scale=0.01),
                 RandomizeJointVelocities(scale=0.01),
             ],
+            randomizers=self.get_randomizer_generators(physics_model),
             # actuators=MITPositionActuators(physics_model, metadata), # TODO:bring it back
             actuators=TorqueActuators(),
-            # TODO: add randomizers
             dt=self.config.dt,
             ctrl_dt=self.config.ctrl_dt,
             min_action_latency_step=0,
@@ -220,6 +221,9 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
 
     def get_termination_generators(self, physics_model: PhysicsModel) -> Collection[Termination]:
         return [UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0)]
+
+    def get_randomizer_generators(self, physics_model: PhysicsModel) -> Collection[Randomizer]:
+        return [TorsoMassRandomizerBuilder(torso_body_name="torso")(physics_model)]
 
 
 if __name__ == "__main__":
