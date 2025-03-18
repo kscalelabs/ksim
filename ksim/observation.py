@@ -2,7 +2,7 @@
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar, get_args
+from typing import TypeVar, get_args
 
 import attrs
 import jax
@@ -49,7 +49,19 @@ class Observation(ABC):
             case "gaussian":
                 return observation + jax.random.normal(rng, observation.shape) * self.noise
             case "uniform":
-                return observation + jax.random.uniform(rng, observation.shape, minval=-self.noise, maxval=self.noise)
+                return observation + jax.random.uniform(
+                    rng,
+                    observation.shape,
+                    minval=-self.noise,
+                    maxval=self.noise,
+                )
+            case "uniform_multiply":
+                return observation * jax.random.uniform(
+                    rng,
+                    observation.shape,
+                    minval=1.0 - self.noise,
+                    maxval=1.0 + self.noise,
+                )
             case _:
                 raise ValueError(f"Invalid noise type: {self.noise_type}")
 
@@ -65,15 +77,6 @@ class Observation(ABC):
 
 
 T = TypeVar("T", bound=Observation)
-
-
-class ObservationBuilder(ABC, Generic[T]):
-    @abstractmethod
-    def __call__(self, physics_model: PhysicsModel) -> T:
-        """Builds an observation from a MuJoCo model."""
-
-
-# NOTE: we make assumption that the freejoint is ALWAYS the first 7 joints
 
 
 class MjxObservation(Observation, ABC):
@@ -195,43 +198,40 @@ class ActuatorForceObservation(Observation):
 @attrs.define(frozen=True, kw_only=True)
 class SensorObservation(Observation):
     sensor_name: str = attrs.field()
-    sensor_idx_range: tuple[int, int | None] | None = attrs.field(default=None)
+    sensor_idx_range: tuple[int, int | None] = attrs.field()
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        sensor_name: str,
+        noise: float = 0.0,
+        noise_type: NoiseType = "gaussian",
+    ) -> "SensorObservation":
+        """Create a sensor observation from a physics model.
+
+        Args:
+            physics_model: MuJoCo physics model
+            sensor_name: Name of sensor to observe
+            noise: Amount of noise to add
+            noise_type: Type of noise to add
+        """
+        sensor_name_to_idx_range = get_sensor_data_idxs_by_name(physics_model)
+        if sensor_name not in sensor_name_to_idx_range:
+            options = "\n".join(sorted(sensor_name_to_idx_range.keys()))
+            raise ValueError(f"{sensor_name} not found in model. Available:\n{options}")
+
+        return cls(
+            noise=noise,
+            noise_type=noise_type,
+            sensor_name=sensor_name,
+            sensor_idx_range=sensor_name_to_idx_range[sensor_name],
+        )
 
     def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
-        assert self.sensor_idx_range is not None
         sensor_data = state.sensordata[self.sensor_idx_range[0] : self.sensor_idx_range[1]].ravel()
         return sensor_data
 
     def get_name(self) -> str:
         base_name = super().get_name()
-        return base_name if self.sensor_name is None else f"{self.sensor_name}_{base_name}"
-
-
-class SensorObservationBuilder(ObservationBuilder[SensorObservation]):
-    def __init__(
-        self,
-        *,
-        sensor_name: str,
-        noise: float = 0.0,
-        noise_type: NoiseType = "gaussian",
-    ) -> None:
-        super().__init__()
-
-        self.sensor_name = sensor_name
-        self.noise = noise
-        self.noise_type = noise_type
-
-    def __call__(self, physics_model: PhysicsModel) -> SensorObservation:
-        sensor_name_to_idx_range = get_sensor_data_idxs_by_name(physics_model)
-        if self.sensor_name not in sensor_name_to_idx_range:
-            options = "\n".join(sorted(sensor_name_to_idx_range.keys()))
-            raise ValueError(f"{self.sensor_name} not found in model. Available:\n{options}")
-
-        sensor_idx_range = sensor_name_to_idx_range[self.sensor_name]
-
-        return SensorObservation(
-            noise=self.noise,
-            noise_type=self.noise_type,
-            sensor_name=self.sensor_name,
-            sensor_idx_range=sensor_idx_range,
-        )
+        return f"{self.sensor_name}_{base_name}"

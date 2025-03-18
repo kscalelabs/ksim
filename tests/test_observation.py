@@ -2,11 +2,13 @@
 
 import unittest
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 import chex
 import jax
 import jax.numpy as jnp
+import mujoco
 from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
@@ -19,11 +21,15 @@ from ksim.observation import (
     JointVelocityObservation,
     Observation,
     SensorObservation,
-    SensorObservationBuilder,
 )
-from ksim.utils.data import BuilderData, MujocoMappings
 
 _TOL = 1e-4
+
+
+def get_humanoid_model() -> mujoco.MjModel:
+    mjcf_path = (Path(__file__).parent / "fixed_assets" / "default_humanoid_test.mjcf").resolve().as_posix()
+    mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+    return mj_model
 
 
 class DummyObservation(Observation):
@@ -278,58 +284,42 @@ class SensorObservationTest(chex.TestCase):
 
 class SensorObservationBuilderTest(chex.TestCase):
     def setUp(self) -> None:
-        # Create a BuilderData with sensor mappings
-        self.mappings = MujocoMappings(
-            sensor_name_to_idx_range={
-                "imu_sensor": (0, 3),
-                "force_sensor": (3, 6),
-                "touch_sensor": (6, 10),
-            },
-            qpos_name_to_idx_range={},
-            qvelacc_name_to_idx_range={},
-            ctrl_name_to_idx={},
-            geom_name_to_idx={},
-            body_name_to_idx={},
-            floor_geom_idx=None,
-        )
-        self.builder_data = BuilderData(
-            model=None,
-            dt=0.004,
-            ctrl_dt=0.02,
-            mujoco_mappings=self.mappings,
-        )
+        self.physics_model = get_humanoid_model()
 
     def test_builder_creates_correct_observation(self) -> None:
-        builder = SensorObservationBuilder(
-            sensor_name="imu_sensor",
+        obs = SensorObservation.create(
+            self.physics_model,
+            sensor_name="imu_acc",
             noise=0.1,
             noise_type="uniform",
         )
-        obs = builder(self.builder_data)
 
         self.assertIsInstance(obs, SensorObservation)
-        self.assertEqual(obs.sensor_name, "imu_sensor")
+        self.assertEqual(obs.sensor_name, "imu_acc")
         self.assertEqual(obs.sensor_idx_range, (0, 3))
         self.assertEqual(obs.noise, 0.1)
         self.assertEqual(obs.noise_type, "uniform")
 
     def test_builder_raises_error_for_invalid_sensor(self) -> None:
-        builder = SensorObservationBuilder(sensor_name="nonexistent_sensor")
-
         with self.assertRaises(ValueError):
-            builder(self.builder_data)
+            SensorObservation.create(
+                self.physics_model,
+                sensor_name="nonexistent_sensor",
+                noise=0.1,
+                noise_type="uniform",
+            )
 
     def test_builder_noise_parameters(self) -> None:
         # Test that noise parameters are correctly passed through the builder
         noise_value = 2.5
         noise_type: Literal["gaussian", "uniform"] = "uniform"
 
-        builder = SensorObservationBuilder(
-            sensor_name="imu_sensor",
+        obs = SensorObservation.create(
+            self.physics_model,
+            sensor_name="imu_acc",
             noise=noise_value,
             noise_type=noise_type,
         )
-        obs = builder(self.builder_data)
 
         # Check that the observation has the correct noise parameters
         self.assertEqual(obs.noise, noise_value)

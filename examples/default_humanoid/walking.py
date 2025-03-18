@@ -1,5 +1,6 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
+from pathlib import Path
 from typing import Collection
 
 import equinox as eqx
@@ -28,6 +29,7 @@ from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
+from ksim.utils.named_access import get_joint_metadata
 
 NUM_OUTPUTS = 21
 
@@ -153,18 +155,18 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
     ) -> Array:
         pass  # Not used anywhere rn
 
-    def get_model_and_metadata(self) -> tuple[PhysicsModel, dict[str, JointMetadataOutput]]:
-        metadata = None  # get_joint_metadata(mj_model)  # TODO: implement this function properly
-        mj_model = mujoco.MjModel.from_xml_path("examples/default_humanoid/scene.mjcf")
+    async def get_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
+        mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
+        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+        metadata = get_joint_metadata(mj_model)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
         mj_model.opt.ls_iterations = 6
         mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
         mj_model.opt.solver = mjx.SolverType.CG
-        mjx_model = mjx.put_model(mj_model)
 
-        return mjx_model, metadata
+        return mj_model, metadata
 
     def get_engine(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> MjxEngine:
         return MjxEngine(
@@ -189,7 +191,7 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
             action_distribution=xax.nn.distributions.TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
-    def get_obs_generators(self, physics_model: PhysicsModel) -> Collection[Observation]:
+    def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]:
         return [
             # LegacyPositionObservation(exclude_xy=True),
             LegacyVelocityObservation(),
@@ -198,17 +200,19 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
             ActuatorForceObservation(),
         ]
 
-    def get_command_generators(self) -> Collection[Command]:
+    def get_commands(self) -> Collection[Command]:
         return [LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3)]
 
-    def get_reward_generators(self, physics_model: PhysicsModel) -> Collection[Reward]:
+    def get_rewards(self, physics_model: PhysicsModel) -> Collection[Reward]:
         return [
             HeightReward(scale=1.0, height_target=0.7),
             DHForwardReward(scale=0.2),
         ]
 
-    def get_termination_generators(self, physics_model: PhysicsModel) -> Collection[Termination]:
-        return [UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0)]
+    def get_terminations(self, physics_model: PhysicsModel) -> Collection[Termination]:
+        return [
+            UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0),
+        ]
 
 
 if __name__ == "__main__":

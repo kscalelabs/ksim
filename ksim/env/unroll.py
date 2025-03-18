@@ -6,6 +6,8 @@ from typing import Collection, NamedTuple
 import chex
 import jax
 import jax.numpy as jnp
+import mujoco
+import numpy as np
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
@@ -32,7 +34,6 @@ class UnrollNaNDetector(NamedTuple):
 
 UnrollCarry = tuple[FrozenDict[str, Array], ModelCarry, PhysicsState]
 UnrollYs = tuple[Transition, UnrollNaNDetector, PhysicsData | None]
-# personal preference... don't like tuple-mania
 
 
 def unroll_trajectory(
@@ -126,14 +127,14 @@ def unroll_trajectory(
         jax.random.split(rng, num_steps),
     )
 
-    # post accumulating rewards (the only thing that makes sense to accumulate)
+    # Compute post-accumulated rewards (the only thing that makes sense to accumulate).
     post_accumulated_reward_components = post_accumulate_rewards(
         transition.reward_components,
         transition.done,
         reward_generators=reward_generators,
     )
-
     post_accumulated_rewards = jax.tree_util.tree_reduce(jnp.add, list(post_accumulated_reward_components.values()))
+
     transition = replace(
         transition,
         reward_components=post_accumulated_reward_components,
@@ -254,3 +255,30 @@ def get_initial_commands(
         command_val = command_generator.initial_command(rng)
         commands[command_name] = command_val
     return FrozenDict(commands)
+
+
+def render_data_to_frames(
+    data: PhysicsData,
+    default_mj_model: mujoco.MjModel,
+    camera: int | str | mujoco.MjvCamera = -1,
+    height: int = 240,
+    width: int = 320,
+) -> list[np.ndarray]:
+    """Render the data to a sequence of Numpy arrays."""
+    for leaf in jax.tree.leaves(data):
+        if isinstance(leaf, Array):
+            num_steps = leaf.shape[0]
+            break
+    else:
+        raise ValueError("No array found in data")
+
+    mjx_data_list = [jax.tree.map(lambda x: x[i], data) for i in range(num_steps)]
+    scene_option = mujoco.MjvOption()
+
+    renderer = mujoco.Renderer(default_mj_model, height=height, width=width)
+    frames = []
+    for mjx_data in mjx_data_list:
+        renderer.update_scene(mjx_data, camera=camera, scene_option=scene_option)
+        frames.append(renderer.render())
+
+    return frames

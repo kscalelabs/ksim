@@ -200,7 +200,7 @@ class KBot2StandingTask(PPOTask[PPOConfig]):
     # from ML: I haven't made up my mind on this API, but I generally think we should move away
     # from the hidden builder pattern. Giving the data directly will help with this.
     # In fact, we might even want to make this return a pure function.
-    def get_obs_generators(self, physics_model: PhysicsModel) -> Collection[Observation]:
+    def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]:
         return [
             # LegacyPositionObservation(exclude_xy=True),
             LegacyVelocityObservation(),
@@ -209,16 +209,16 @@ class KBot2StandingTask(PPOTask[PPOConfig]):
             ActuatorForceObservation(),
         ]
 
-    def get_command_generators(self) -> Collection[Command]:
+    def get_commands(self) -> Collection[Command]:
         return [LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3)]
 
-    def get_reward_generators(self, physics_model: PhysicsModel) -> Collection[Reward]:
+    def get_rewards(self, physics_model: PhysicsModel) -> Collection[Reward]:
         return [
             HeightReward(scale=1.0, height_target=0.7),
             DHForwardReward(scale=0.2),
         ]
 
-    def get_termination_generators(self, physics_model: PhysicsModel) -> Collection[Termination]:
+    def get_terminations(self, physics_model: PhysicsModel) -> Collection[Termination]:
         return [UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0)]
 
 
