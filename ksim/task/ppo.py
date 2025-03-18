@@ -22,6 +22,7 @@ from ksim.task.types import PPORolloutTimeStats, RLDataset, RolloutTimeStats
 
 def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
     """Calculate returns from rewards and dones."""
+    mask = jnp.array(1.0 - dones.astype(jnp.float32))
 
     # Calculating returns separately using gamma.
     def scan_fn(returns_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
@@ -33,7 +34,7 @@ def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
     _, returns = jax.lax.scan(
         scan_fn,
         jnp.zeros_like(rewards[-1]),
-        (rewards, dones),
+        (rewards, mask),
         reverse=True,
     )
 
@@ -75,7 +76,7 @@ def compute_advantages_and_value_targets(
 
     # We use the last value as the bootstrap value (although it is not fully correct)
     values_shifted = jnp.concatenate([values[1:], jnp.expand_dims(values[-1], 0)], axis=0)
-    mask = jnp.where(dones, 0.0, 1.0)
+    mask = jnp.array(1.0 - dones.astype(jnp.float32))
 
     deltas = get_deltas(rewards, values, values_shifted, mask, decay_gamma)
 
