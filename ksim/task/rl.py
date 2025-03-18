@@ -215,7 +215,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng: The random number generator.
 
         Returns:
-            tuple[Agent, optax.OptState, Array, FrozenDict[str, Array]]: The updated agent, optimizer state, loss, and metrics.
+            The updated agent, optimizer state, loss, and metrics.
         """
         ...
 
