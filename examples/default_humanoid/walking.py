@@ -135,7 +135,13 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
         return prediction
 
 
-class HumanoidWalkingTask(PPOTask[PPOConfig]):
+class HumanoidWalkingTaskConfig(PPOConfig):
+    """Config for the humanoid walking task."""
+
+    pass
+
+
+class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Get the optimizer: handled by XAX."""
         return optax.chain(

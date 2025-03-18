@@ -155,8 +155,8 @@ def test_unroll_shapes(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         return_intermediate_physics_data=False,
     )
 
-    assert transitions.obs["dummy_observation_proprio_gaussian"].shape == (4, 1)
-    assert transitions.command["dummy_command_vector"].shape == (4, 1)
+    assert transitions.obs["dummy_observation"].shape == (4, 1)
+    assert transitions.command["dummy_command"].shape == (4, 1)
     assert final_state.data.qpos.shape == (28,)
     assert intermediate_data is None
     _assert_nan_detector_is_none(unroll_nan_detector)
@@ -212,8 +212,8 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         False,
     )
 
-    assert transitions.obs["dummy_observation_proprio_gaussian"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
-    assert transitions.command["dummy_command_vector"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
+    assert transitions.obs["dummy_observation"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
+    assert transitions.command["dummy_command"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
     assert final_state.data.qpos.shape == (_NUM_ENVS, 28)
     assert jnp.unique(final_state.data.qpos[:, 0]).shape[0] == _NUM_ENVS
     _assert_nan_detector_is_none(unroll_nan_detector)

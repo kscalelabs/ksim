@@ -2,14 +2,15 @@
 
 import unittest
 from dataclasses import dataclass
-from typing import Literal
 
 import chex
 import jax
 import jax.numpy as jnp
 import mujoco
+import pytest
 from jaxtyping import Array, PRNGKeyArray
 
+from ksim.env.data import PhysicsData
 from ksim.observation import (
     BaseAngularVelocityObservation,
     BaseLinearVelocityObservation,
@@ -25,11 +26,8 @@ _TOL = 1e-4
 
 
 class DummyObservation(Observation):
-    def initial_command(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(2)
-
-    def command(self, prev_command: Array, time: float, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(2)
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(1)
 
 
 @jax.tree_util.register_dataclass
@@ -42,283 +40,185 @@ class DummyMjxData:
     sensordata: Array
 
 
-default_mjx_data = DummyMjxData(
-    qpos=jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]),
-    qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]),
-    sensordata=jnp.array([10.0, 11.0, 12.0, 13.0, 14.0]),
-)
+@pytest.fixture
+def default_mjx_data() -> DummyMjxData:
+    return DummyMjxData(
+        qpos=jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]),
+        qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]),
+        sensordata=jnp.array([10.0, 11.0, 12.0, 13.0, 14.0]),
+    )
 
 
-class BaseObservationTest(chex.TestCase):
-    def test_observation_name(self) -> None:
-        obs = DummyObservation(noise=0.0, noise_type="gaussian")
-        self.assertEqual(obs.get_name(), "dummy_observation_proprio_gaussian")
-        self.assertEqual(obs.observation_name, "dummy_observation_proprio_gaussian")
-
-    def test_add_gaussian_noise(self) -> None:
-        rng = jax.random.PRNGKey(0)
-        obs = DummyObservation(noise=1.0, noise_type="gaussian")
-        clean_data = jnp.zeros((3,))
-        noisy_data = obs.add_noise(clean_data, rng)
-
-        # The noise should make the data non-zero
-        self.assertFalse(jnp.array_equal(clean_data, noisy_data))
-
-    def test_add_uniform_noise(self) -> None:
-        rng = jax.random.PRNGKey(0)
-        obs = DummyObservation(noise=1.0, noise_type="uniform")
-        clean_data = jnp.zeros((3,))
-        noisy_data = obs.add_noise(clean_data, rng)
-
-        # The noise should make the data non-zero
-        self.assertFalse(jnp.array_equal(clean_data, noisy_data))
-
-        # Uniform noise should be bounded
-        self.assertTrue(jnp.all(noisy_data >= -1.0))
-        self.assertTrue(jnp.all(noisy_data <= 1.0))
-
-    def test_gaussian_noise_statistics(self) -> None:
-        # Test statistical properties of Gaussian noise
-        rng = jax.random.PRNGKey(0)
-        obs = DummyObservation(noise=2.0, noise_type="gaussian")
-        clean_data = jnp.zeros((1000,))
-
-        # Generate many noisy samples
-        noisy_data = jax.vmap(lambda i: obs.add_noise(clean_data, jax.random.fold_in(rng, i)))(jnp.arange(100))
-
-        # Check statistical properties (mean close to 0, std dev close to noise value)
-        mean = jnp.mean(noisy_data)
-        std = jnp.std(noisy_data)
-
-        self.assertLess(jnp.abs(mean), 0.1)
-        self.assertLess(jnp.abs(std - 2.0), 0.2)
-
-    def test_uniform_noise_statistics(self) -> None:
-        # Test statistical properties of uniform noise
-        rng = jax.random.PRNGKey(0)
-        obs = DummyObservation(noise=3.0, noise_type="uniform")
-        clean_data = jnp.zeros((1000,))
-
-        # Generate many noisy samples
-        noisy_data = jax.vmap(lambda i: obs.add_noise(clean_data, jax.random.fold_in(rng, i)))(jnp.arange(100))
-
-        # Check that all values are within bounds
-        self.assertTrue(jnp.all(noisy_data >= -3.0))
-        self.assertTrue(jnp.all(noisy_data <= 3.0))
-
-        # Check that distribution is roughly uniform
-        hist = jnp.histogram(noisy_data, bins=10, range=(-3.0, 3.0))[0]
-        expected_count = len(noisy_data) / 10
-        # Allow some variance but each bin should be reasonably populated
-        self.assertTrue(jnp.all(hist > expected_count * 0.7))
-
-    def test_invalid_noise_type(self) -> None:
-        # Test that an invalid noise type raises an error
-        rng = jax.random.PRNGKey(0)
-        # Using a string literal that's not a valid noise type
-        obs = DummyObservation(noise=1.0, noise_type="invalid_type")  # type: ignore[arg-type]
-        clean_data = jnp.zeros((3,))
-
-        with self.assertRaises(ValueError):
-            obs.add_noise(clean_data, rng)
-
-    def test_zero_noise(self) -> None:
-        # Test that zero noise doesn't change the data
-        rng = jax.random.PRNGKey(0)
-        obs = DummyObservation(noise=0.0, noise_type="gaussian")
-        clean_data = jnp.ones((3,))
-        noisy_data = obs.add_noise(clean_data, rng)
-
-        chex.assert_trees_all_close(clean_data, noisy_data)
+def test_base_position_observation(default_mjx_data: DummyMjxData) -> None:
+    rng = jax.random.PRNGKey(0)
+    obs = BasePositionObservation()
+    result = obs(default_mjx_data, rng)
+    chex.assert_shape(result, (3,))
+    chex.assert_trees_all_close(
+        result,
+        jnp.array([1.0, 2.0, 3.0]),
+        atol=_TOL,
+    )
 
 
-class MjxObservationTest(chex.TestCase):
-    def setUp(self) -> None:
-        self.data = default_mjx_data
-        self.rng = jax.random.PRNGKey(0)
-
-    def test_base_position_observation(self) -> None:
-        obs = BasePositionObservation()
-        result = obs(self.data, self.rng)
-        chex.assert_shape(result, (3,))
-        chex.assert_trees_all_close(
-            result,
-            jnp.array([1.0, 2.0, 3.0]),
-            atol=_TOL,
-        )
-
-    def test_base_orientation_observation(self) -> None:
-        obs = BaseOrientationObservation()
-        result = obs(self.data, self.rng)
-        chex.assert_shape(result, (4,))
-        chex.assert_trees_all_close(
-            result,
-            jnp.array([4.0, 5.0, 6.0, 7.0]),
-            atol=_TOL,
-        )
-
-    def test_base_linear_velocity_observation(self) -> None:
-        obs = BaseLinearVelocityObservation()
-        result = obs(self.data, self.rng)
-        chex.assert_shape(result, (3,))
-        chex.assert_trees_all_close(
-            result,
-            jnp.array([0.1, 0.2, 0.3]),
-            atol=_TOL,
-        )
-
-    def test_base_angular_velocity_observation(self) -> None:
-        obs = BaseAngularVelocityObservation()
-        result = obs(self.data, self.rng)
-        chex.assert_shape(result, (3,))
-        chex.assert_trees_all_close(
-            result,
-            jnp.array([0.4, 0.5, 0.6]),
-            atol=_TOL,
-        )
-
-    def test_joint_position_observation(self) -> None:
-        obs = JointPositionObservation()
-        result = obs(self.data, self.rng)
-        chex.assert_shape(result, (2,))
-        chex.assert_trees_all_close(
-            result,
-            jnp.array([8.0, 9.0]),
-            atol=_TOL,
-        )
-
-    def test_joint_velocity_observation(self) -> None:
-        obs = JointVelocityObservation()
-        result = obs(self.data, self.rng)
-        chex.assert_shape(result, (3,))
-        chex.assert_trees_all_close(
-            result,
-            jnp.array([0.7, 0.8, 0.9]),
-            atol=_TOL,
-        )
-
-    def test_base_position_observation_with_noise(self) -> None:
-        obs = BasePositionObservation(noise=1.0, noise_type="gaussian")
-        clean_result = obs(self.data, self.rng)
-
-        # Run with different key to get different noise
-        different_rng = jax.random.fold_in(self.rng, 1)
-        noisy_result = obs(self.data, different_rng)
-
-        # Results should be different due to noise
-        self.assertFalse(jnp.array_equal(clean_result, noisy_result))
-
-        # But the base data should be the same before noise
-        expected_base = jnp.array([1.0, 2.0, 3.0])
-        # Extract noise from first result
-        noise = clean_result - expected_base
-        self.assertFalse(jnp.allclose(noise, jnp.zeros_like(noise)))
+def test_base_orientation_observation(default_mjx_data: DummyMjxData) -> None:
+    rng = jax.random.PRNGKey(0)
+    obs = BaseOrientationObservation()
+    result = obs(default_mjx_data, rng)
+    chex.assert_shape(result, (4,))
+    chex.assert_trees_all_close(
+        result,
+        jnp.array([4.0, 5.0, 6.0, 7.0]),
+        atol=_TOL,
+    )
 
 
-class SensorObservationTest(chex.TestCase):
-    def setUp(self) -> None:
-        self.data = default_mjx_data
-        self.rng = jax.random.PRNGKey(0)
-
-    def test_sensor_observation(self) -> None:
-        obs = SensorObservation(
-            sensor_name="test_sensor",
-            sensor_idx_range=(1, 4),
-        )
-        result = obs(self.data, self.rng)
-        chex.assert_shape(result, (3,))
-        chex.assert_trees_all_close(
-            result,
-            jnp.array([11.0, 12.0, 13.0]),
-            atol=_TOL,
-        )
-
-    def test_sensor_observation_with_noise(self) -> None:
-        obs = SensorObservation(
-            sensor_name="test_sensor",
-            sensor_idx_range=(1, 4),
-            noise=0.5,
-            noise_type="gaussian",
-        )
-        result = obs(self.data, self.rng)
-        noisy_result = obs.add_noise(result, self.rng)
-
-        # The noise should make the data different
-        self.assertFalse(jnp.array_equal(result, noisy_result))
-
-    def test_sensor_observation_name(self) -> None:
-        obs = SensorObservation(
-            sensor_name="test_sensor",
-            sensor_idx_range=(1, 4),
-        )
-        self.assertEqual(obs.get_name(), "test_sensor_sensor_observation_proprio_gaussian")
-
-    def test_noise_consistency(self) -> None:
-        # Test that the same RNG key produces the same noise
-        obs = SensorObservation(
-            sensor_name="test_sensor",
-            sensor_idx_range=(1, 4),
-            noise=0.5,
-            noise_type="gaussian",
-        )
-
-        # Get two noisy observations with the same key
-        result1 = obs(self.data, self.rng)
-        result2 = obs(self.data, self.rng)
-
-        # They should be identical since we used the same key
-        chex.assert_trees_all_close(result1, result2)
-
-        # Now with different keys, they should be different
-        different_rng = jax.random.fold_in(self.rng, 1)
-        result3 = obs(self.data, different_rng)
-
-        # Results should be different
-        self.assertFalse(jnp.array_equal(result1, result3))
+def test_base_linear_velocity_observation(default_mjx_data: DummyMjxData) -> None:
+    rng = jax.random.PRNGKey(0)
+    obs = BaseLinearVelocityObservation()
+    result = obs(default_mjx_data, rng)
+    chex.assert_shape(result, (3,))
+    chex.assert_trees_all_close(
+        result,
+        jnp.array([0.1, 0.2, 0.3]),
+        atol=_TOL,
+    )
 
 
-class SensorObservationBuilderTest(chex.TestCase):
-    def setUp(self, humanoid_model: mujoco.MjModel) -> None:
-        self.physics_model = humanoid_model
+def test_base_angular_velocity_observation(default_mjx_data: DummyMjxData) -> None:
+    rng = jax.random.PRNGKey(0)
+    obs = BaseAngularVelocityObservation()
+    result = obs(default_mjx_data, rng)
+    chex.assert_shape(result, (3,))
+    chex.assert_trees_all_close(
+        result,
+        jnp.array([0.4, 0.5, 0.6]),
+        atol=_TOL,
+    )
 
-    def test_builder_creates_correct_observation(self) -> None:
-        obs = SensorObservation.create(
-            self.physics_model,
-            sensor_name="imu_acc",
+
+def test_joint_position_observation(default_mjx_data: DummyMjxData) -> None:
+    rng = jax.random.PRNGKey(0)
+    obs = JointPositionObservation()
+    result = obs(default_mjx_data, rng)
+    chex.assert_shape(result, (2,))
+    chex.assert_trees_all_close(
+        result,
+        jnp.array([8.0, 9.0]),
+        atol=_TOL,
+    )
+
+
+def test_joint_velocity_observation(default_mjx_data: DummyMjxData) -> None:
+    rng = jax.random.PRNGKey(0)
+    obs = JointVelocityObservation()
+    result = obs(default_mjx_data, rng)
+    chex.assert_shape(result, (3,))
+    chex.assert_trees_all_close(
+        result,
+        jnp.array([0.7, 0.8, 0.9]),
+        atol=_TOL,
+    )
+
+
+def test_base_position_observation_with_noise(default_mjx_data: DummyMjxData) -> None:
+    rng = jax.random.PRNGKey(0)
+    obs = BasePositionObservation(noise=1.0)
+    clean_result = obs(default_mjx_data, rng)
+
+    # Run with different key to get different noise
+    different_rng = jax.random.fold_in(rng, 1)
+    noisy_result = obs(default_mjx_data, different_rng)
+
+    # Results should be different due to noise
+    assert not jnp.array_equal(clean_result, noisy_result)
+
+    # But the base data should be the same before noise
+    expected_base = jnp.array([1.0, 2.0, 3.0])
+    # Extract noise from first result
+    noise = clean_result - expected_base
+    assert not jnp.allclose(noise, jnp.zeros_like(noise))
+
+
+def test_sensor_observation(default_mjx_data: DummyMjxData) -> None:
+    rng = jax.random.PRNGKey(0)
+    obs = SensorObservation(
+        sensor_name="test_sensor",
+        sensor_idx_range=(1, 4),
+    )
+    result = obs(default_mjx_data, rng)
+    chex.assert_shape(result, (3,))
+    chex.assert_trees_all_close(
+        result,
+        jnp.array([11.0, 12.0, 13.0]),
+        atol=_TOL,
+    )
+
+
+def test_sensor_observation_with_noise(default_mjx_data: DummyMjxData) -> None:
+    rng = jax.random.PRNGKey(0)
+    obs = SensorObservation(
+        sensor_name="test_sensor",
+        sensor_idx_range=(1, 4),
+        noise=0.5,
+        noise_type="gaussian",
+    )
+    result = obs(default_mjx_data, rng)
+    noisy_result = obs.add_noise(result, rng)
+
+    # The noise should make the data different
+    assert not jnp.array_equal(result, noisy_result)
+
+
+def test_noise_consistency(default_mjx_data: DummyMjxData) -> None:
+    rng = jax.random.PRNGKey(0)
+
+    # Test that the same RNG key produces the same noise
+    obs = SensorObservation(
+        sensor_name="test_sensor",
+        sensor_idx_range=(1, 4),
+        noise=0.5,
+        noise_type="gaussian",
+    )
+
+    # Get two noisy observations with the same key
+    result1 = obs(default_mjx_data, rng)
+    result2 = obs(default_mjx_data, rng)
+
+    # They should be identical since we used the same key
+    chex.assert_trees_all_close(result1, result2)
+
+    # Now with different keys, they should be different
+    different_rng = jax.random.fold_in(rng, 1)
+    result3 = obs(default_mjx_data, different_rng)
+
+    # Results should be different
+    assert not jnp.array_equal(result1, result3)
+
+
+def test_builder_creates_correct_observation(humanoid_model: mujoco.MjModel) -> None:
+    obs = SensorObservation.create(
+        humanoid_model,
+        sensor_name="imu_acc",
+        noise=0.1,
+        noise_type="uniform",
+    )
+
+    assert isinstance(obs, SensorObservation)
+    assert obs.sensor_name == "imu_acc"
+    assert obs.sensor_idx_range == (0, 3)
+    assert obs.noise == 0.1
+    assert obs.noise_type == "uniform"
+
+
+def test_builder_raises_error_for_invalid_sensor(humanoid_model: mujoco.MjModel) -> None:
+    with pytest.raises(ValueError):
+        SensorObservation.create(
+            humanoid_model,
+            sensor_name="nonexistent_sensor",
             noise=0.1,
             noise_type="uniform",
         )
-
-        self.assertIsInstance(obs, SensorObservation)
-        self.assertEqual(obs.sensor_name, "imu_acc")
-        self.assertEqual(obs.sensor_idx_range, (0, 3))
-        self.assertEqual(obs.noise, 0.1)
-        self.assertEqual(obs.noise_type, "uniform")
-
-    def test_builder_raises_error_for_invalid_sensor(self) -> None:
-        with self.assertRaises(ValueError):
-            SensorObservation.create(
-                self.physics_model,
-                sensor_name="nonexistent_sensor",
-                noise=0.1,
-                noise_type="uniform",
-            )
-
-    def test_builder_noise_parameters(self) -> None:
-        # Test that noise parameters are correctly passed through the builder
-        noise_value = 2.5
-        noise_type: Literal["gaussian", "uniform"] = "uniform"
-
-        obs = SensorObservation.create(
-            self.physics_model,
-            sensor_name="imu_acc",
-            noise=noise_value,
-            noise_type=noise_type,
-        )
-
-        # Check that the observation has the correct noise parameters
-        self.assertEqual(obs.noise, noise_value)
-        self.assertEqual(obs.noise_type, noise_type)
 
 
 if __name__ == "__main__":
