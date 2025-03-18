@@ -20,32 +20,30 @@ from typing import Collection, Generic, Literal, TypeVar
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import mujoco
 import optax
 import xax
 from dpshdl.dataset import Dataset
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
+from mujoco import mjx
 from omegaconf import MISSING
 from xax.utils.transformation import scan_model
 
 from ksim.commands import Command
 from ksim.env.base_engine import PhysicsEngine
-from ksim.env.data import PhysicsModel, Transition
+from ksim.env.data import Transition
 from ksim.env.unroll import (
     UnrollNaNDetector,
-    get_initial_commands,
-    get_observation,
     unroll_trajectory,
 )
 from ksim.loggers import AverageRewardLog, EpisodeLengthLog, ModelUpdateLog
-from ksim.model.base import Agent
-from ksim.normalization import Normalizer
+from ksim.model import Agent
 from ksim.observation import Observation
 from ksim.rewards import Reward
 from ksim.task.types import RLDataset, RolloutTimeStats
 from ksim.terminations import Termination
-from ksim.utils.visualization import render_and_save_trajectory
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +91,10 @@ class RLConfig(xax.Config):
         value=True,
         help="Whether to compile the entire unroll fn.",
     )
+    render_camera: int | str = xax.field(
+        value=-1,
+        help="The camera to render from.",
+    )
     render_height: int = xax.field(
         value=640,
         help="The height of the rendered images.",
@@ -134,51 +136,62 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self.log_items = [EpisodeLengthLog(), AverageRewardLog(), ModelUpdateLog()]  # TODO: fix
         super().__init__(config)
 
-        assert self.get_obs_generators(None), "obs_generators must not be empty"
-        assert self.get_command_generators(), "command_generators must not be empty"
-        assert self.get_reward_generators(None), "reward_generators must not be empty"
-        assert self.get_termination_generators(None), "termination_generators must not be empty"
+        assert self.get_observations(None), "obs_generators must not be empty"
+        assert self.get_commands(), "command_generators must not be empty"
+        assert self.get_rewards(None), "reward_generators must not be empty"
+        assert self.get_terminations(None), "termination_generators must not be empty"
 
     @abstractmethod
-    def get_model_and_metadata(self) -> tuple[Agent, dict[str, JointMetadataOutput]]: ...
+    def get_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]: ...
+
+    def get_mjx_model(self, mj_model: mujoco.MjModel) -> mjx.Model:
+        """Convert a mujoco model to an mjx model.
+
+        Args:
+            mj_model: The mujoco model to convert.
+
+        Returns:
+            The mjx model.
+        """
+        # TODO: We should perform some checks on the Mujoco model to ensure
+        # that it is performant.
+        return mjx.put_model(mj_model)
 
     @abstractmethod
-    def get_engine(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> PhysicsEngine: ...
+    def get_engine(self, physics_model: mjx.Model, metadata: dict[str, JointMetadataOutput]) -> PhysicsEngine: ...
 
     @abstractmethod
-    def get_obs_generators(self, physics_model: PhysicsModel) -> Collection[Observation]: ...
+    def get_observations(self, physics_model: mjx.Model) -> Collection[Observation]: ...
 
     @abstractmethod
-    def get_command_generators(self) -> Collection[Command]: ...
+    def get_commands(self) -> Collection[Command]: ...
 
     @abstractmethod
-    def get_reward_generators(self, physics_model: PhysicsModel) -> Collection[Reward]: ...
+    def get_rewards(self, physics_model: mjx.Model) -> Collection[Reward]: ...
 
     @abstractmethod
-    def get_termination_generators(self, physics_model: PhysicsModel) -> Collection[Termination]: ...
-
-    @abstractmethod
-    def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer: ...
-
-    @abstractmethod
-    def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer: ...
+    def get_terminations(self, physics_model: mjx.Model) -> Collection[Termination]: ...
 
     @abstractmethod
     def get_optimizer(self) -> optax.GradientTransformation: ...
-
-    # The following should be implemented by the algorithmic subclass.
 
     @abstractmethod
     def get_rollout_time_stats(
         self,
         transitions: Transition,
         agent: Agent,
-        obs_normalizer: Normalizer,
-        cmd_normalizer: Normalizer,
     ) -> RolloutTimeStats:
         """E.g. calculating advantages and returns for a rollout.
 
-        NOTE: transitions should be (T, ...) shape. No batch dimension.
+        `transitions` should be (T, ...) shape, with no batch dimension, since
+        this is calculated per-trajectory.
+
+        Args:
+            transitions: (T, ...) shape, with no batch dimension.
+            agent: The agent that generated the transitions.
+
+        Returns:
+            RolloutTimeStats: The rollout time stats.
         """
         ...
 
@@ -190,10 +203,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         agent: Agent,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        obs_normalizer: Normalizer,
-        cmd_normalizer: Normalizer,
         rng: PRNGKeyArray,
-    ) -> tuple[Agent, optax.OptState, Array, FrozenDict[str, Array]]: ...
+    ) -> tuple[Agent, optax.OptState, Array, FrozenDict[str, Array]]:
+        """Perform a single minibatch update step.
+
+        Args:
+            minibatch: The minibatch to update.
+            agent: The agent to update.
+            optimizer: The optimizer to use.
+            opt_state: The optimizer state.
+            rng: The random number generator.
+
+        Returns:
+            The updated agent, optimizer state, loss, and metrics.
+        """
+        ...
 
     @property
     def dataset_size(self) -> int:
@@ -227,10 +251,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
         return self.config.num_envs // self.config.num_minibatches
 
-    ########################
-    # XAX-specific methods #
-    ########################
-
     def get_dataset(self, phase: Literal["train", "valid"]) -> Dataset:
         """Get the dataset for the current task."""
         raise NotImplementedError("Reinforcement learning tasks do not require datasets.")
@@ -243,7 +263,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_model(self, key: PRNGKeyArray) -> PyTree:
         """Get the model for the current task."""
         raise NotImplementedError(
-            "Reinforcement learning tasks must implement this method.Instead, we create an agent using dummy data."
+            "Reinforcement learning tasks must implement this method. Instead, we create an agent using dummy data."
         )
 
     def run(self) -> None:
@@ -254,14 +274,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             case "env":
                 agent, _, _, _ = self.load_initial_state(self.prng_key())
-                self.run_environment(agent)
+                breakpoint()
+                self.run_environment(agent, self.config.eval_rollout_length)
 
             case _:
                 raise ValueError(f"Invalid action: {self.config.action}. Should be one of `train` or `env`.")
-
-    #########################
-    # Logging and Rendering #
-    #########################
 
     def get_checkpoint_number_and_path(self) -> tuple[int, Path]:
         """Get the checkpoint number and path from config or latest checkpoint."""
@@ -305,39 +322,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run_environment(
         self,
         agent: Agent,
+        num_steps: int,
         state: xax.State | None = None,
     ) -> None:
-        """Run the environment with rendering and logging."""
-        with self:
-            start_time = time.time()
-            rng = self.prng_key()
-            physics_model, metadata = self.get_model_and_metadata()
-            engine = self.get_engine(physics_model, metadata)
-            render_name = self.get_render_name(state)
-            render_dir = self.exp_dir / self.config.render_dir / render_name
-
-            end_time = time.time()
-            logger.info("Time taken for environment setup: %s seconds", end_time - start_time)
-
-            logger.log(logging.INFO, "Rendering to %s", render_dir)
-
-            self.set_loggers()
-
-            # Unroll trajectories and collect the frames for rendering
-            logger.info("Unrolling trajectories")
-
-            render_and_save_trajectory(
-                engine=engine,
-                agent=agent,
-                rng=rng,
-                output_dir=render_dir,
-                num_steps=self.num_rollout_steps_per_env,
-                width=self.config.render_width,
-                height=self.config.render_height,
-            )
-
-    def log_state(self) -> None:
-        super().log_state()
+        raise NotImplementedError("Environment tasks must implement this method.")
 
     def get_reward_stats(
         self,
@@ -444,8 +432,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         *,
         optimizer: optax.GradientTransformation,
         dataset_ET: RLDataset,
-        obs_normalizer: Normalizer,
-        cmd_normalizer: Normalizer,
     ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Perform a single minibatch update step."""
         agent, opt_state, rng = training_state
@@ -455,8 +441,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             optimizer=optimizer,
             opt_state=opt_state,
             minibatch=minibatch_BT,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
             rng=rng,
         )
         rng, _ = jax.random.split(rng)
@@ -471,8 +455,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         *,
         optimizer: optax.GradientTransformation,
         dataset_ET: RLDataset,
-        obs_normalizer: Normalizer,
-        cmd_normalizer: Normalizer,
     ) -> tuple[tuple[Agent, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Train a minibatch, returns the updated agent, optimizer state, loss, and metrics."""
         agent = training_state[0]
@@ -491,8 +473,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.scannable_minibatch_step,
             optimizer=optimizer,
             dataset_ET=dataset_ET,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
         )
 
         (agent, opt_state, _), metrics = scan_model(
@@ -515,16 +495,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         reshuffle_rng: PRNGKeyArray,
         optimizer: optax.GradientTransformation,
         dataset_ET: RLDataset,
-        obs_normalizer: Normalizer,
-        cmd_normalizer: Normalizer,
     ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
         """Perform multiple epochs of RL training on the current dataset."""
         partial_fn = functools.partial(
             self.scannable_train_epoch,
             optimizer=optimizer,
             dataset_ET=dataset_ET,
-            obs_normalizer=obs_normalizer,
-            cmd_normalizer=cmd_normalizer,
         )
 
         (agent, opt_state, reshuffle_rng), metrics = scan_model(
@@ -545,12 +521,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         training_state: xax.State,
     ) -> None:
         """Runs the main RL training loop."""
-        physics_model, metadata = self.get_model_and_metadata()
-        engine = self.get_engine(physics_model, metadata)
-        obs_generators = self.get_obs_generators(physics_model)  # these should be given necessary data for building
-        command_generators = self.get_command_generators()
-        reward_generators = self.get_reward_generators(physics_model)
-        termination_generators = self.get_termination_generators(physics_model)
+        mj_model, metadata = self.get_model_and_metadata()
+        mjx_model = self.get_mjx_model(mj_model)
+        engine = self.get_engine(mjx_model, metadata)
+        observations = self.get_observations(mjx_model)
+        commands = self.get_commands()
+        rewards = self.get_rewards(mjx_model)
+        terminations = self.get_terminations(mjx_model)
 
         rng = self.prng_key()
         rng, burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 4)
@@ -558,41 +535,30 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
         state_E = jax.vmap(engine.reset, in_axes=(0))(reset_rngs)
 
-        # the normalizers need dummy data to infer shapes
-        dummy_obs = get_observation(state_E, burn_in_rng, obs_generators=obs_generators)
-        dummy_cmd = get_initial_commands(burn_in_rng, command_generators=command_generators)
-        obs_normalizer = self.get_obs_normalizer(dummy_obs)
-        cmd_normalizer = self.get_cmd_normalizer(dummy_cmd)
-
         unroll_trajectories_fn = jax.vmap(
             unroll_trajectory,
-            in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None),
+            in_axes=(0, 0, None, None, None, None, None, None, None, None),
         )
 
         if self.config.compile_unroll:
             unroll_trajectories_fn = eqx.filter_jit(unroll_trajectories_fn)
 
         # Burn in stage
-        burn_in_rng_E = jax.random.split(rng, self.config.num_envs)
+        burn_in_rng_E = jax.random.split(burn_in_rng, self.config.num_envs)
 
         # No positional arguments with vmap (https://github.com/jax-ml/jax/issues/7465)
-        burn_transitions_ET, _, _, _ = unroll_trajectories_fn(
+        unroll_trajectories_fn(
             state_E,
             burn_in_rng_E,
             agent,
-            obs_normalizer,
-            cmd_normalizer,
             engine,
-            obs_generators,
-            command_generators,
-            reward_generators,
-            termination_generators,
+            observations,
+            commands,
+            rewards,
+            terminations,
             self.num_rollout_steps_per_env,
             False,
         )
-
-        obs_normalizer = obs_normalizer.update(burn_transitions_ET.obs)
-        cmd_normalizer = cmd_normalizer.update(burn_transitions_ET.command)
 
         while not self.is_training_over(training_state):
             with self.step_context("on_step_start"):
@@ -605,13 +571,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state_E,
                 rollout_rng_E,
                 agent,
-                obs_normalizer,
-                cmd_normalizer,
                 engine,
-                obs_generators,
-                command_generators,
-                reward_generators,
-                termination_generators,
+                observations,
+                commands,
+                rewards,
+                terminations,
                 self.num_rollout_steps_per_env,
                 False,
             )
@@ -625,8 +589,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rollout_stats_ET = self.get_rollout_time_stats(
                 transitions=transitions_ET,
                 agent=agent,
-                obs_normalizer=obs_normalizer,
-                cmd_normalizer=cmd_normalizer,
             )
 
             dataset_ET = RLDataset(
@@ -641,24 +603,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 reshuffle_rng=reshuffle_rng,
                 optimizer=optimizer,
                 dataset_ET=dataset_ET,
-                obs_normalizer=obs_normalizer,
-                cmd_normalizer=cmd_normalizer,
             )
             metrics_mean = jax.tree.map(lambda x: jnp.mean(x), metrics)
             update_time = time.time() - start_time
             logger.info("Update time: %s seconds", update_time)
-
-            # this will allow for online normalization, must be updated after
-            # the update step.
-            obs_normalizer = obs_normalizer.update(transitions_ET.obs)
-            cmd_normalizer = cmd_normalizer.update(transitions_ET.command)
 
             with self.step_context("write_logs"):
                 training_state.raw_phase = "train"
                 training_state.num_steps += 1
                 training_state.num_samples += self.dataset_size
 
-                self.log_trajectory_stats(transitions_ET, reward_generators, termination_generators, eval=False)
+                self.log_trajectory_stats(transitions_ET, rewards, terminations, eval=False)
                 self.log_update_metrics(metrics_mean)
                 self.log_has_nans(has_nans)
                 self.logger.log_scalar("rollout_time", rollout_time, namespace="⏰")
@@ -680,31 +635,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 render_dir = self.exp_dir / self.config.render_dir / render_name
                 logger.info("Rendering to %s", render_dir)
 
-                render_and_save_trajectory(
-                    agent=agent,
-                    engine=engine,
-                    rng=rng,
-                    output_dir=render_dir,
-                    num_steps=self.config.eval_rollout_length,
-                    width=self.config.render_width,
-                    height=self.config.render_height,
-                )
+                raise NotImplementedError("Please rewrite this to use the new unroll_trajectory function")
                 logger.info("Done rendering to %s", render_dir)
 
                 with self.step_context("write_logs"):
-                    self.log_trajectory_stats(transitions_ET, reward_generators, termination_generators, eval=True)
+                    self.log_trajectory_stats(transitions_ET, rewards, terminations, eval=True)
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
         with self:
-            key = self.prng_key()
+            rng = self.prng_key()
             self.set_loggers()
 
             if xax.is_master():
                 Thread(target=self.log_state, daemon=True).start()
 
-            key, model_key = jax.random.split(key)
-            agent, optimizer, opt_state, training_state = self.load_initial_state(model_key)
+            rng, model_rng = jax.random.split(rng)
+            agent, optimizer, opt_state, training_state = self.load_initial_state(model_rng)
 
             training_state = self.on_training_start(training_state)
             training_state.num_samples = 1  # prevents from checkpointing at start

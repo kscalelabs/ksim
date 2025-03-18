@@ -18,14 +18,8 @@ from ksim.actuators import TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.env.mjx_engine import MjxEngine
-from ksim.model.base import ActorCriticAgent, KSimModule
-from ksim.model.types import ModelCarry
-from ksim.normalization import Normalizer, PassThrough, Standardize
-from ksim.observation import (
-    ActuatorForceObservation,
-    LegacyVelocityObservation,
-    Observation,
-)
+from ksim.model import ActorCriticAgent, KSimModule, ModelCarry
+from ksim.observation import ActuatorForceObservation, Observation
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -194,34 +188,24 @@ class KBot2WalkingTask(PPOTask[PPOConfig]):
             action_distribution=TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
-    def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer:
-        return Standardize(dummy_obs, alpha=1.0)
-
-    def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
-        return PassThrough()
-
     # from ML: I haven't made up my mind on this API, but I generally think we should move away
     # from the hidden builder pattern. Giving the data directly will help with this.
     # In fact, we might even want to make this return a pure function.
-    def get_obs_generators(self, physics_model: PhysicsModel) -> Collection[Observation]:
+    def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]:
         return [
-            # LegacyPositionObservation(exclude_xy=True),
-            LegacyVelocityObservation(),
-            # CenterOfMassInertiaObservation(), # TODO: debug and bring it back
-            # CenterOfMassVelocityObservation(),
             ActuatorForceObservation(),
         ]
 
-    def get_command_generators(self) -> Collection[Command]:
+    def get_commands(self) -> Collection[Command]:
         return [LinearVelocityCommand(x_scale=1.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3)]
 
-    def get_reward_generators(self, physics_model: PhysicsModel) -> Collection[Reward]:
+    def get_rewards(self, physics_model: PhysicsModel) -> Collection[Reward]:
         return [
             HeightReward(scale=1.0, height_target=0.7),
             DHForwardReward(scale=0.2),
         ]
 
-    def get_termination_generators(self, physics_model: PhysicsModel) -> Collection[Termination]:
+    def get_terminations(self, physics_model: PhysicsModel) -> Collection[Termination]:
         return [UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0)]
 
 

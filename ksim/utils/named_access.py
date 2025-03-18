@@ -6,11 +6,11 @@ from typing import Hashable, TypeVar
 import jax
 import jax.numpy as jnp
 from jaxtyping import PyTree
+from kscale.web.gen.api import JointMetadataOutput
 
 from ksim.env.data import PhysicsData, PhysicsModel
 
 logger = logging.getLogger(__name__)
-
 
 Tk = TypeVar("Tk", bound=Hashable)
 Tv = TypeVar("Tv")
@@ -121,3 +121,24 @@ def geoms_colliding(state: PhysicsData, geom1: int, geom2: int) -> jax.Array:
         lambda _: get_collision_info(state.contact, geom1, geom2)[0] < 0,
         operand=None,
     )
+
+
+def get_joint_metadata(
+    model: PhysicsModel,
+    kp: float | None = None,
+    kd: float | None = None,
+    armature: float | None = None,
+    friction: float | None = None,
+) -> dict[str, JointMetadataOutput]:
+    """Get the joint metadata from the model."""
+    metadata = {}
+    for i in range(model.njnt):
+        name_start = model.name_jntadr[i]
+        name = bytes(model.names[name_start:]).decode("utf-8").split("\x00")[0]
+        metadata[name] = JointMetadataOutput(
+            kp=kp,
+            kd=kd,
+            armature=armature,
+            friction=friction,
+        )
+    return metadata

@@ -1,5 +1,6 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
+from pathlib import Path
 from typing import Collection
 
 import equinox as eqx
@@ -17,18 +18,13 @@ from ksim.actuators import TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.env.mjx_engine import MjxEngine
-from ksim.model.base import ActorCriticAgent, KSimModule
-from ksim.model.types import ModelCarry
-from ksim.normalization import Normalizer, PassThrough
-from ksim.observation import (
-    ActuatorForceObservation,
-    LegacyVelocityObservation,
-    Observation,
-)
+from ksim.model import ActorCriticAgent, KSimModule, ModelCarry
+from ksim.observation import ActuatorForceObservation, Observation
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
+from ksim.utils.named_access import get_joint_metadata
 
 NUM_OUTPUTS = 21
 
@@ -138,7 +134,13 @@ class DefaultHumanoidCritic(eqx.Module, KSimModule):
         return prediction
 
 
-class HumanoidWalkingTask(PPOTask[PPOConfig]):
+class HumanoidWalkingTaskConfig(PPOConfig):
+    """Config for the humanoid walking task."""
+
+    pass
+
+
+class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Get the optimizer: handled by XAX."""
         return optax.chain(
@@ -154,18 +156,18 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
     ) -> Array:
         pass  # Not used anywhere rn
 
-    def get_model_and_metadata(self) -> tuple[PhysicsModel, dict[str, JointMetadataOutput]]:
-        metadata = None  # get_joint_metadata(mj_model)  # TODO: implement this function properly
-        mj_model = mujoco.MjModel.from_xml_path("examples/default_humanoid/scene.mjcf")
+    def get_model_and_metadata(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
+        mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
+        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+        metadata = get_joint_metadata(mj_model)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
         mj_model.opt.ls_iterations = 6
         mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
         mj_model.opt.solver = mjx.SolverType.CG
-        mjx_model = mjx.put_model(mj_model)
 
-        return mjx_model, metadata
+        return mj_model, metadata
 
     def get_engine(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> MjxEngine:
         return MjxEngine(
@@ -190,42 +192,30 @@ class HumanoidWalkingTask(PPOTask[PPOConfig]):
             action_distribution=xax.nn.distributions.TanhGaussianDistribution(action_dim=NUM_OUTPUTS),
         )
 
-    # from ML: I haven't made up my mind on this API, but I generally think we should move away
-    # from the hidden builder pattern. Giving the data directly will help with this.
-    # In fact, we might even want to make this return a pure function.
-    def get_obs_normalizer(self, dummy_obs: FrozenDict[str, Array]) -> Normalizer:
-        # TODO: bring back standard normalization
-        return PassThrough()
-
-    def get_cmd_normalizer(self, dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
-        return PassThrough()
-
-    def get_obs_generators(self, physics_model: PhysicsModel) -> Collection[Observation]:
+    def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]:
         return [
-            # LegacyPositionObservation(exclude_xy=True),
-            LegacyVelocityObservation(),
-            # CenterOfMassInertiaObservation(), # TODO: debug and bring it back
-            # CenterOfMassVelocityObservation(),
             ActuatorForceObservation(),
         ]
 
-    def get_command_generators(self) -> Collection[Command]:
+    def get_commands(self) -> Collection[Command]:
         return [LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3)]
 
-    def get_reward_generators(self, physics_model: PhysicsModel) -> Collection[Reward]:
+    def get_rewards(self, physics_model: PhysicsModel) -> Collection[Reward]:
         return [
             HeightReward(scale=1.0, height_target=0.7),
             DHForwardReward(scale=0.2),
         ]
 
-    def get_termination_generators(self, physics_model: PhysicsModel) -> Collection[Termination]:
-        return [UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0)]
+    def get_terminations(self, physics_model: PhysicsModel) -> Collection[Termination]:
+        return [
+            UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0),
+        ]
 
 
 if __name__ == "__main__":
     # python -m examples.default_humanoid.walking
     HumanoidWalkingTask.launch(
-        PPOConfig(
+        HumanoidWalkingTaskConfig(
             compile_unroll=False,
             num_learning_epochs=8,
             num_env_states_per_minibatch=20,

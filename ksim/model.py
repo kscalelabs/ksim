@@ -10,10 +10,10 @@ from dataclasses import dataclass
 import equinox as eqx
 import jax
 from flax.core import FrozenDict
-from jaxtyping import Array
+from jaxtyping import Array, PyTree
 from xax.nn.distributions import ActionDistribution
 
-from ksim.model.types import ModelCarry
+ModelCarry = PyTree
 
 
 class KSimModule(ABC):
@@ -24,10 +24,6 @@ class KSimModule(ABC):
         self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array], carry: ModelCarry | None
     ) -> tuple[Array, ModelCarry | None]:
         """Apply the actor-critic to the given input. Can be recurrent."""
-
-    ######################
-    # Easily Overridable #
-    ######################
 
     # TODO: move this to RLTask and make it overrideable there...
     def initial_carry(self) -> ModelCarry | None:

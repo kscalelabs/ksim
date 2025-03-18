@@ -17,9 +17,7 @@ from ksim.commands import Command
 from ksim.env.data import PhysicsData, PhysicsState
 from ksim.env.mjx_engine import MjxEngine
 from ksim.env.unroll import UnrollNaNDetector, unroll_trajectory
-from ksim.model.base import ActorCriticAgent, KSimModule
-from ksim.model.types import ModelCarry
-from ksim.normalization import Normalizer, PassThrough
+from ksim.model import ActorCriticAgent, KSimModule, ModelCarry
 from ksim.observation import Observation
 from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
 from ksim.rewards import Reward
@@ -62,21 +60,20 @@ class DummyCommand(Command):
 
 
 def get_observation(
-    physics_state: PhysicsState, rng: PRNGKeyArray, *, obs_generators: Collection[Observation]
+    physics_state: PhysicsState,
+    rng: PRNGKeyArray,
+    *,
+    obs_generators: Collection[Observation],
 ) -> FrozenDict[str, Array]:
     return FrozenDict({"some_observation": jnp.zeros(1)})
 
 
-def get_initial_commands(rng: PRNGKeyArray, *, command_generators: Collection[Command]) -> FrozenDict[str, Array]:
+def get_initial_commands(
+    rng: PRNGKeyArray,
+    *,
+    command_generators: Collection[Command],
+) -> FrozenDict[str, Array]:
     return FrozenDict({"some_command": jnp.zeros(1)})
-
-
-def get_obs_normalizer(dummy_obs: FrozenDict[str, Array]) -> Normalizer:
-    return PassThrough()
-
-
-def get_cmd_normalizer(dummy_cmd: FrozenDict[str, Array]) -> Normalizer:
-    return PassThrough()
 
 
 class DummyActor(eqx.Module, KSimModule):
@@ -100,9 +97,8 @@ class DummyCritic(eqx.Module, KSimModule):
 
 
 @pytest.fixture
-def engine() -> MjxEngine:
-    mj_model = mujoco.MjModel.from_xml_path("tests/fixed_assets/default_humanoid_test.mjcf")
-    mjx_model = mjx.put_model(mj_model)
+def engine(humanoid_model: mujoco.MjModel) -> MjxEngine:
+    mjx_model = mjx.put_model(humanoid_model)
     engine = MjxEngine(
         default_physics_model=mjx_model,
         resetters=[
@@ -138,9 +134,6 @@ dummy_cmd = DummyCommand()
 dummy_term = DummyTermination()
 dummy_rew = DummyReward(scale=1.0)
 
-obs_normalizer = PassThrough()
-cmd_normalizer = PassThrough()
-
 
 @pytest.mark.slow
 def test_unroll_shapes(engine: MjxEngine, agent: ActorCriticAgent) -> None:
@@ -152,8 +145,6 @@ def test_unroll_shapes(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         physics_state=initial_physics_state,
         rng=rng,
         agent=agent,
-        obs_normalizer=obs_normalizer,
-        cmd_normalizer=cmd_normalizer,
         engine=engine,
         obs_generators=[dummy_obs],
         command_generators=[dummy_cmd],
@@ -163,8 +154,8 @@ def test_unroll_shapes(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         return_intermediate_physics_data=False,
     )
 
-    assert transitions.obs["dummy_observation_proprio_gaussian"].shape == (4, 1)
-    assert transitions.command["dummy_command_vector"].shape == (4, 1)
+    assert transitions.obs["dummy_observation"].shape == (4, 1)
+    assert transitions.command["dummy_command"].shape == (4, 1)
     assert final_state.data.qpos.shape == (28,)
     assert intermediate_data is None
     _assert_nan_detector_is_none(unroll_nan_detector)
@@ -181,8 +172,6 @@ def test_unroll_jittable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         physics_state=initial_physics_state,
         rng=rng,
         agent=agent,
-        obs_normalizer=obs_normalizer,
-        cmd_normalizer=cmd_normalizer,
         engine=engine,
         obs_generators=[dummy_obs],
         command_generators=[dummy_cmd],
@@ -206,7 +195,7 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
 
     vmapped_unroll_trajectory = jax.vmap(
         unroll_trajectory,
-        in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None),
+        in_axes=(0, 0, None, None, None, None, None, None, None, None),
     )
     jit_unroll = eqx.filter_jit(vmapped_unroll_trajectory)
 
@@ -214,8 +203,6 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         initial_physics_states,
         rngs,
         agent,
-        obs_normalizer,
-        cmd_normalizer,
         engine,
         [dummy_obs],
         [dummy_cmd],
@@ -225,8 +212,8 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         False,
     )
 
-    assert transitions.obs["dummy_observation_proprio_gaussian"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
-    assert transitions.command["dummy_command_vector"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
+    assert transitions.obs["dummy_observation"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
+    assert transitions.command["dummy_command"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
     assert final_state.data.qpos.shape == (_NUM_ENVS, 28)
     assert jnp.unique(final_state.data.qpos[:, 0]).shape[0] == _NUM_ENVS
     _assert_nan_detector_is_none(unroll_nan_detector)

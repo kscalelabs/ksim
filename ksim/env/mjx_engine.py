@@ -9,7 +9,7 @@ from mujoco import mjx
 
 from ksim.actuators import Actuators
 from ksim.env.base_engine import PhysicsEngine
-from ksim.env.data import PhysicsModel, PhysicsState
+from ksim.env.data import PhysicsState
 from ksim.resets import Reset
 
 
@@ -23,7 +23,7 @@ class MjxEngine(PhysicsEngine):
 
     def __init__(
         self,
-        default_physics_model: PhysicsModel,
+        default_physics_model: mjx.Model,
         resetters: Collection[Reset],
         actuators: Actuators,
         *,
@@ -33,7 +33,6 @@ class MjxEngine(PhysicsEngine):
         max_action_latency_step: int,
     ) -> None:
         """Initialize the MJX engine with resetting and actuators."""
-        assert isinstance(default_physics_model, mjx.Model)
         self.default_mjx_model = default_physics_model
         self.actuators = actuators
         self.resetters = resetters

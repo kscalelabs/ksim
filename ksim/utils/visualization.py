@@ -9,14 +9,10 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array
 from matplotlib import animation
 from PIL import Image
 from scipy.interpolate import interp1d
-
-from ksim.env.base_engine import PhysicsEngine
-from ksim.env.data import Transition
-from ksim.model.base import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -95,53 +91,3 @@ def save_trajectory_visualization(
         save_video_with_rewards(frames, rewards, fps, output_dir / "trajectory.mp4")
         end_time = time.time()
         logger.info("Time taken for video creation: %.2f seconds", end_time - start_time)
-
-
-def render_and_save_trajectory(
-    agent: Agent,
-    engine: PhysicsEngine,
-    rng: PRNGKeyArray,
-    *,
-    output_dir: Path,
-    num_steps: int,
-    width: int = 640,
-    height: int = 480,
-    camera: int | None = None,
-    save_frames: bool = True,
-    save_video: bool = True,
-) -> Transition:
-    """Render a trajectory and save it as frames and/or video.
-
-    Args:
-        env: Environment to render
-        agent: Model to use for actions
-        rng: Random number generator key
-        output_dir: Directory to save the visualization to
-        num_steps: Number of steps to render
-        width: Width of rendered frames
-        height: Height of rendered frames
-        camera: Camera ID to use for rendering
-        save_frames: Whether to save individual frames
-        save_video: Whether to save video file
-    """
-    # frames, env_state_T1L = env.render_trajectory(
-    #     agent=agent,
-    #     rng=rng,
-    #     num_steps=num_steps,
-    #     width=width,
-    #     height=height,
-    #     camera=camera,
-    # )
-
-    # save_trajectory_visualization(
-    #     frames=frames,
-    #     output_dir=output_dir,
-    #     fps=1 / env.config.ctrl_dt,
-    #     save_frames=save_frames,
-    #     save_video=save_video,
-    #     rewards=env_state_T1L.reward_components,
-    # )
-
-    # return env_state_T1L
-    # sorry, please rewrite this to use the new unroll_trajectory function
-    raise NotImplementedError("Please rewrite this to use the new unroll_trajectory function")
