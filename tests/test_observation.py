@@ -1,7 +1,7 @@
-"""Tests for observation builders in the ksim package."""
+"""Tests for observations in the ksim package."""
 
-import unittest
 from dataclasses import dataclass
+from pathlib import Path
 
 import chex
 import jax
@@ -26,13 +26,20 @@ _TOL = 1e-4
 
 
 class DummyObservation(Observation):
+    """A dummy observation for testing."""
+
     def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        """Get a dummy observation from the state."""
         return jnp.zeros(1)
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        """Add noise to the observation."""
+        return observation
 
 
 @jax.tree_util.register_dataclass
 @dataclass
-class DummyMjxData:
+class DummyMjxData(PhysicsData):
     """Mock mjx.Data for testing."""
 
     qpos: Array
@@ -42,6 +49,7 @@ class DummyMjxData:
 
 @pytest.fixture
 def default_mjx_data() -> DummyMjxData:
+    """Create a default mjx data fixture for testing."""
     return DummyMjxData(
         qpos=jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]),
         qvel=jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]),
@@ -49,8 +57,21 @@ def default_mjx_data() -> DummyMjxData:
     )
 
 
-def test_base_position_observation(default_mjx_data: DummyMjxData) -> None:
-    rng = jax.random.PRNGKey(0)
+@pytest.fixture
+def rng() -> PRNGKeyArray:
+    """Create a default RNG key fixture for testing."""
+    return jax.random.PRNGKey(0)
+
+
+@pytest.fixture
+def humanoid_model() -> mujoco.MjModel:
+    """Create a humanoid model fixture for testing."""
+    mjcf_path = (Path(__file__).parent / "fixed_assets" / "default_humanoid_test.mjcf").resolve().as_posix()
+    return mujoco.MjModel.from_xml_path(mjcf_path)
+
+
+def test_base_position_observation(default_mjx_data: DummyMjxData, rng: PRNGKeyArray) -> None:
+    """Test base position observation."""
     obs = BasePositionObservation()
     result = obs(default_mjx_data, rng)
     chex.assert_shape(result, (3,))
@@ -61,8 +82,8 @@ def test_base_position_observation(default_mjx_data: DummyMjxData) -> None:
     )
 
 
-def test_base_orientation_observation(default_mjx_data: DummyMjxData) -> None:
-    rng = jax.random.PRNGKey(0)
+def test_base_orientation_observation(default_mjx_data: DummyMjxData, rng: PRNGKeyArray) -> None:
+    """Test base orientation observation."""
     obs = BaseOrientationObservation()
     result = obs(default_mjx_data, rng)
     chex.assert_shape(result, (4,))
@@ -73,8 +94,8 @@ def test_base_orientation_observation(default_mjx_data: DummyMjxData) -> None:
     )
 
 
-def test_base_linear_velocity_observation(default_mjx_data: DummyMjxData) -> None:
-    rng = jax.random.PRNGKey(0)
+def test_base_linear_velocity_observation(default_mjx_data: DummyMjxData, rng: PRNGKeyArray) -> None:
+    """Test base linear velocity observation."""
     obs = BaseLinearVelocityObservation()
     result = obs(default_mjx_data, rng)
     chex.assert_shape(result, (3,))
@@ -85,8 +106,8 @@ def test_base_linear_velocity_observation(default_mjx_data: DummyMjxData) -> Non
     )
 
 
-def test_base_angular_velocity_observation(default_mjx_data: DummyMjxData) -> None:
-    rng = jax.random.PRNGKey(0)
+def test_base_angular_velocity_observation(default_mjx_data: DummyMjxData, rng: PRNGKeyArray) -> None:
+    """Test base angular velocity observation."""
     obs = BaseAngularVelocityObservation()
     result = obs(default_mjx_data, rng)
     chex.assert_shape(result, (3,))
@@ -97,8 +118,8 @@ def test_base_angular_velocity_observation(default_mjx_data: DummyMjxData) -> No
     )
 
 
-def test_joint_position_observation(default_mjx_data: DummyMjxData) -> None:
-    rng = jax.random.PRNGKey(0)
+def test_joint_position_observation(default_mjx_data: DummyMjxData, rng: PRNGKeyArray) -> None:
+    """Test joint position observation."""
     obs = JointPositionObservation()
     result = obs(default_mjx_data, rng)
     chex.assert_shape(result, (2,))
@@ -109,8 +130,8 @@ def test_joint_position_observation(default_mjx_data: DummyMjxData) -> None:
     )
 
 
-def test_joint_velocity_observation(default_mjx_data: DummyMjxData) -> None:
-    rng = jax.random.PRNGKey(0)
+def test_joint_velocity_observation(default_mjx_data: DummyMjxData, rng: PRNGKeyArray) -> None:
+    """Test joint velocity observation."""
     obs = JointVelocityObservation()
     result = obs(default_mjx_data, rng)
     chex.assert_shape(result, (3,))
@@ -121,8 +142,8 @@ def test_joint_velocity_observation(default_mjx_data: DummyMjxData) -> None:
     )
 
 
-def test_base_position_observation_with_noise(default_mjx_data: DummyMjxData) -> None:
-    rng = jax.random.PRNGKey(0)
+def test_base_position_observation_with_noise(default_mjx_data: DummyMjxData, rng: PRNGKeyArray) -> None:
+    """Test base position observation with noise."""
     obs = BasePositionObservation(noise=1.0)
     clean_result = obs(default_mjx_data, rng)
 
@@ -140,8 +161,8 @@ def test_base_position_observation_with_noise(default_mjx_data: DummyMjxData) ->
     assert not jnp.allclose(noise, jnp.zeros_like(noise))
 
 
-def test_sensor_observation(default_mjx_data: DummyMjxData) -> None:
-    rng = jax.random.PRNGKey(0)
+def test_sensor_observation(default_mjx_data: DummyMjxData, rng: PRNGKeyArray) -> None:
+    """Test sensor observation."""
     obs = SensorObservation(
         sensor_name="test_sensor",
         sensor_idx_range=(1, 4),
@@ -155,8 +176,8 @@ def test_sensor_observation(default_mjx_data: DummyMjxData) -> None:
     )
 
 
-def test_sensor_observation_with_noise(default_mjx_data: DummyMjxData) -> None:
-    rng = jax.random.PRNGKey(0)
+def test_sensor_observation_with_noise(default_mjx_data: DummyMjxData, rng: PRNGKeyArray) -> None:
+    """Test sensor observation with noise."""
     obs = SensorObservation(
         sensor_name="test_sensor",
         sensor_idx_range=(1, 4),
@@ -170,9 +191,8 @@ def test_sensor_observation_with_noise(default_mjx_data: DummyMjxData) -> None:
     assert not jnp.array_equal(result, noisy_result)
 
 
-def test_noise_consistency(default_mjx_data: DummyMjxData) -> None:
-    rng = jax.random.PRNGKey(0)
-
+def test_noise_consistency(default_mjx_data: DummyMjxData, rng: PRNGKeyArray) -> None:
+    """Test noise consistency across different RNG keys."""
     # Test that the same RNG key produces the same noise
     obs = SensorObservation(
         sensor_name="test_sensor",
@@ -197,6 +217,7 @@ def test_noise_consistency(default_mjx_data: DummyMjxData) -> None:
 
 
 def test_builder_creates_correct_observation(humanoid_model: mujoco.MjModel) -> None:
+    """Test that the builder creates a correct observation."""
     obs = SensorObservation.create(
         humanoid_model,
         sensor_name="imu_acc",
@@ -212,6 +233,7 @@ def test_builder_creates_correct_observation(humanoid_model: mujoco.MjModel) -> 
 
 
 def test_builder_raises_error_for_invalid_sensor(humanoid_model: mujoco.MjModel) -> None:
+    """Test that the builder raises an error for invalid sensor names."""
     with pytest.raises(ValueError):
         SensorObservation.create(
             humanoid_model,
@@ -219,7 +241,3 @@ def test_builder_raises_error_for_invalid_sensor(humanoid_model: mujoco.MjModel)
             noise=0.1,
             noise_type="uniform",
         )
-
-
-if __name__ == "__main__":
-    unittest.main()
