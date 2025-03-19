@@ -50,7 +50,7 @@ class HFieldXYPositionReset(Reset):
         # Unpack padded bounds.
         lower_x, upper_x, lower_y, upper_y = self.padded_bounds
 
-        rng_split, keyx, keyy = jax.random.split(rng, 3)
+        keyx, keyy = jax.random.split(rng)
         offset_x = jax.random.uniform(keyx, (1,), minval=-self.x_range, maxval=self.x_range)
         offset_y = jax.random.uniform(keyy, (1,), minval=-self.y_range, maxval=self.y_range)
 
@@ -73,6 +73,7 @@ class HFieldXYPositionReset(Reset):
             0,
             ny - 1,
         )
+
         # Get the height from the heightfield and add the z offset.
         z = self.hfield_data[x_idx, y_idx]
         qpos_j = qpos_j.at[2:3].set(z + z_top + self.robot_base_height)
@@ -124,7 +125,7 @@ class PlaneXYPositionReset(Reset):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class RandomizeJointPositions(Reset):
+class RandomJointPositionReset(Reset):
     """Resets the joint positions of the robot to random values."""
 
     scale: float = attrs.field(default=0.01)
@@ -137,7 +138,7 @@ class RandomizeJointPositions(Reset):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class RandomizeJointVelocities(Reset):
+class RandomJointVelocityReset(Reset):
     """Resets the joint velocities of the robot to random values."""
 
     scale: float = attrs.field(default=0.01)

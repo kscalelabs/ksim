@@ -18,7 +18,8 @@ from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.observation import ActuatorForceObservation, Observation
-from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities, Reset
+from ksim.randomization import Randomization, WeightRandomization
+from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
@@ -172,10 +173,15 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         else:
             return TorqueActuators()
 
+    def get_randomization(self, physics_model: PhysicsModel) -> list[Randomization]:
+        return [
+            WeightRandomization(scale=0.01),
+        ]
+
     def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
         return [
-            RandomizeJointPositions(scale=0.01),
-            RandomizeJointVelocities(scale=0.01),
+            RandomJointPositionReset(scale=0.01),
+            RandomJointVelocityReset(scale=0.01),
         ]
 
     def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:

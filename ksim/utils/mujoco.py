@@ -5,6 +5,19 @@ from jaxtyping import Array
 from mujoco import mjx
 
 
+def update_model_field(model: mujoco.MjModel | mjx.Model, name: str, new_value: Array) -> mujoco.MjModel | mjx.Model:
+    """Handles the update of a model field in a mujoco.MjModel or mjx.Model object.
+
+    This is necessary because Mujoco handles model elements as pointers, while
+    MJX model elements are stateful.
+    """
+    if isinstance(model, mujoco.MjModel):
+        getattr(model, name)[:] = new_value
+    else:
+        model = model.replace(**{name: new_value})
+    return model
+
+
 def update_data_field(data: mujoco.MjData | mjx.Data, name: str, new_value: Array) -> mujoco.MjData | mjx.Data:
     """Handles the update of a data field in a mujoco.MjData or mjx.Data object.
 

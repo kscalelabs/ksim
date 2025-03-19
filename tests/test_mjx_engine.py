@@ -10,7 +10,7 @@ from mujoco import mjx
 from ksim.actuators import TorqueActuators
 from ksim.env.data import PhysicsState
 from ksim.env.mjx_engine import MjxEngine
-from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
+from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset
 
 
 @pytest.fixture
@@ -19,8 +19,8 @@ def engine(humanoid_model: mujoco.MjModel) -> MjxEngine:
     engine = MjxEngine(
         default_physics_model=mjx_model,
         resetters=[
-            RandomizeJointPositions(scale=0.01),
-            RandomizeJointVelocities(scale=0.01),
+            RandomJointPositionReset(scale=0.01),
+            RandomJointVelocityReset(scale=0.01),
         ],
         actuators=TorqueActuators(),
         dt=0.005,

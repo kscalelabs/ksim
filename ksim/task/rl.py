@@ -42,6 +42,7 @@ from ksim.env.engine import (
     get_physics_engine,
 )
 from ksim.observation import Observation
+from ksim.randomization import Randomization
 from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
@@ -144,6 +145,17 @@ def get_initial_commands(
     return FrozenDict(commands)
 
 
+def apply_randomizations(
+    physics_model: PhysicsModel,
+    randomizations: Collection[Randomization],
+    rng: PRNGKeyArray,
+) -> PhysicsModel:
+    for randomization in randomizations:
+        rng, randomization_rng = jax.random.split(rng)
+        physics_model = randomization(physics_model, randomization_rng)
+    return physics_model
+
+
 @jax.tree_util.register_dataclass
 @dataclass
 class RLConfig(xax.Config):
@@ -177,11 +189,11 @@ class RLConfig(xax.Config):
         help="The size of the figure for each plot.",
     )
     render_height: int = xax.field(
-        value=480,
+        value=240,
         help="The height of the rendered images.",
     )
     render_width: int = xax.field(
-        value=640,
+        value=320,
         help="The width of the rendered images.",
     )
     render_track_body_id: int | None = xax.field(
@@ -256,6 +268,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> PhysicsEngine:
         return get_physics_engine(
             engine_type=engine_type_from_physics_model(physics_model),
+            randomizations=self.get_randomization(physics_model),
             resets=self.get_resets(physics_model),
             actuators=self.get_actuators(physics_model, metadata),
             dt=self.config.dt,
@@ -265,7 +278,26 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
     @abstractmethod
-    def get_resets(self, physics_model: PhysicsModel) -> Collection[Reset]: ...
+    def get_randomization(self, physics_model: PhysicsModel) -> Collection[Randomization]:
+        """Returns randomizers, for randomizing each environment.
+
+        Args:
+            physics_model: The physics model to get the randomization for.
+
+        Returns:
+            A collection of randomization generators.
+        """
+
+    @abstractmethod
+    def get_resets(self, physics_model: PhysicsModel) -> Collection[Reset]:
+        """Returns the reset generators for the current task.
+
+        Args:
+            physics_model: The physics model to get the resets for.
+
+        Returns:
+            A collection of reset generators.
+        """
 
     @abstractmethod
     def get_actuators(
@@ -361,6 +393,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def step_engine(
         self,
+        physics_model: PhysicsModel,
         model: PyTree,
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
@@ -369,6 +402,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Runs a single step of the physics engine.
 
         Args:
+            physics_model: The physics model.
             model: The model, with parameters to be updated.
             engine: The physics engine.
             engine_constants: The constants for the engine.
@@ -398,7 +432,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         action, next_carry = self.sample_action(
             model=model,
             carry=engine_variables.carry,
-            physics_model=engine_constants.physics_model,
+            physics_model=physics_model,
             observations=observations,
             commands=commands,
             rng=act_rng,
@@ -407,7 +441,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Steps the physics engine.
         next_physics_state: PhysicsState = engine.step(
             action=action,
-            physics_model=engine_constants.physics_model,
+            physics_model=physics_model,
             physics_state=engine_variables.physics_state,
             rng=physics_rng,
         )
@@ -433,7 +467,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Conditionally reset on termination.
         next_physics_state = jax.lax.cond(
             terminated,
-            lambda: engine.reset(engine_constants.physics_model, reset_rng),
+            lambda: engine.reset(physics_model, reset_rng),
             lambda: next_physics_state,
         )
         next_carry = jax.lax.cond(
@@ -665,6 +699,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def _single_unroll(
         self,
         rng: PRNGKeyArray,
+        physics_model: PhysicsModel,
         model: PyTree,
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
@@ -674,9 +709,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng, cmd_rng = jax.random.split(rng)
         initial_commands = get_initial_commands(cmd_rng, command_generators=engine_constants.command_generators)
 
+        # Apply randomizations to the environment.
+        rng, randomization_rng = jax.random.split(rng)
+        physics_model = apply_randomizations(
+            physics_model,
+            engine_constants.randomization_generators,
+            randomization_rng,
+        )
+
         # Reset the physics state.
         rng, reset_rng = jax.random.split(rng)
-        physics_state = engine.reset(engine_constants.physics_model, reset_rng)
+        physics_state = engine.reset(physics_model, reset_rng)
 
         engine_variables = EngineVariables(
             carry=initial_carry,
@@ -687,6 +730,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         def scan_fn(carry: EngineVariables, _: None) -> tuple[EngineVariables, Transition]:
             transition, next_engine_variables = self.step_engine(
+                physics_model=physics_model,
                 model=model,
                 engine=engine,
                 engine_constants=engine_constants,
@@ -722,6 +766,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def _vmapped_unroll(
         self,
         rng: PRNGKeyArray,
+        physics_model: PhysicsModel,
         model: PyTree,
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
@@ -729,8 +774,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         num_envs: int,
     ) -> Transition:
         rngs = jax.random.split(rng, num_envs)
-        vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None))
-        return vmapped_unroll(rngs, model, engine, engine_constants, num_steps)
+        vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None, None))
+        return vmapped_unroll(rngs, physics_model, model, engine, engine_constants, num_steps)
 
     @abstractmethod
     def update_model(
@@ -774,14 +819,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         commands = self.get_commands(mjx_model)
         rewards = self.get_rewards(mjx_model)
         terminations = self.get_terminations(mjx_model)
+        randomizations = self.get_randomization(mjx_model)
 
         # These remain constant across the entire episode.
         engine_constants = EngineConstants(
-            physics_model=mjx_model,
             obs_generators=observations,
             command_generators=commands,
             reward_generators=rewards,
             termination_generators=terminations,
+            randomization_generators=randomizations,
         )
 
         while not self.is_training_over(state):
@@ -794,6 +840,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng, rollout_rng = jax.random.split(rng)
                 transitions = self._single_unroll(
                     rng=rollout_rng,
+                    physics_model=mjx_model,
                     model=model,
                     engine=engine,
                     engine_constants=engine_constants,
@@ -815,6 +862,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, rollout_rng = jax.random.split(rng)
             transitions = self._vmapped_unroll(
                 rng=rollout_rng,
+                physics_model=mjx_model,
                 model=model,
                 engine=engine,
                 engine_constants=engine_constants,
@@ -887,6 +935,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             commands = self.get_commands(mj_model)
             rewards = self.get_rewards(mj_model)
             terminations = self.get_terminations(mj_model)
+            randomizations = self.get_randomization(mj_model)
 
             # Gets initial variables.
             initial_carry = self.get_initial_carry()
@@ -919,11 +968,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # These components remain constant across the entire episode.
             engine_constants = EngineConstants(
-                physics_model=mj_model,
                 obs_generators=observations,
                 command_generators=commands,
                 reward_generators=rewards,
                 termination_generators=terminations,
+                randomization_generators=randomizations,
             )
 
             # These components are updated each step.
@@ -939,11 +988,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             step_id = 0
             try:
                 for step_id in iterator:
-                    _, engine_variables = self.step_engine(
+                    transition, engine_variables = self.step_engine(
+                        physics_model=mj_model,
                         model=model,
                         engine=engine,
                         engine_constants=engine_constants,
                         engine_variables=engine_variables,
+                    )
+
+                    # We manually trigger randomizations on termination,
+                    # whereas during training the randomization is only applied
+                    # once per rollout for efficiency.
+                    rng, randomization_rng = jax.random.split(rng)
+                    mj_model = jax.lax.cond(
+                        transition.done,
+                        lambda: apply_randomizations(mj_model, randomizations, randomization_rng),
+                        lambda: mj_model,
                     )
 
                     if viewer is not None:
