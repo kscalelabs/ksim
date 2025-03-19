@@ -11,7 +11,6 @@ import optax
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from xax.nn.distributions import GaussianDistribution
 
 from ksim.env.data import Transition
 from ksim.task.rl import RLConfig, RLTask
@@ -197,13 +196,6 @@ def compute_ppo_loss(
         "obs_nans_ratio": xax.compute_nan_ratio(transitions.obs),
         "action_nans_ratio": xax.compute_nan_ratio(transitions.action),
     }
-
-    if isinstance(agent.action_distribution, GaussianDistribution):
-        mu, sigma = agent.action_distribution.get_mean_std(prediction)
-        metrics_to_log["prediction_mu_mean"] = jnp.mean(mu)
-        metrics_to_log["prediction_sigma_mean"] = jnp.mean(sigma)
-        metrics_to_log["prediction_sigma_min"] = jnp.min(sigma)
-        metrics_to_log["prediction_sigma_max"] = jnp.max(sigma)
 
     return total_loss, metrics_to_log
 

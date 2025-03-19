@@ -12,9 +12,12 @@ brax
 distrax
 jax
 mediapy
-mujoco
-mujoco-mjx
-mujoco-scenes
 optax
 scipy
 xax
+
+# Mujoco
+mujoco
+mujoco-mjx
+mujoco-scenes
+mujoco-python-viewer

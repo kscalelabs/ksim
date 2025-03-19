@@ -5,6 +5,7 @@ TODO: need to add SPMD and sharding support for super fast training :)
 
 import bdb
 import functools
+import itertools
 import logging
 import signal
 import sys
@@ -16,11 +17,15 @@ from dataclasses import dataclass
 from threading import Thread
 from typing import Collection, Generic, TypeVar
 
+import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mujoco
+import mujoco_viewer
+import numpy as np
 import optax
+import tqdm
 import xax
 from dpshdl.dataset import Dataset
 from flax.core import FrozenDict
@@ -32,15 +37,13 @@ from xax.utils.transformation import scan_model
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.env.data import PhysicsModel, PhysicsState, Transition
-from ksim.env.engine import PhysicsEngine, get_physics_engine
-from ksim.env.unroll import (
-    UnrollNaNDetector,
-    get_commands,
-    get_observation,
-    get_rewards,
-    get_terminations,
-    unroll_trajectory,
+from ksim.env.data import PhysicsData, PhysicsModel, PhysicsState, Transition
+from ksim.env.engine import (
+    EngineConstants,
+    EngineVariables,
+    PhysicsEngine,
+    engine_type_from_physics_model,
+    get_physics_engine,
 )
 from ksim.observation import Observation
 from ksim.resets import Reset
@@ -50,6 +53,143 @@ from ksim.terminations import Termination
 from ksim.utils.named_access import get_joint_metadata
 
 logger = logging.getLogger(__name__)
+
+
+def get_observation(
+    physics_state: PhysicsState,
+    rng: PRNGKeyArray,
+    *,
+    obs_generators: Collection[Observation],
+) -> FrozenDict[str, Array]:
+    """Get the observation from the physics state."""
+    observations = {}
+    for observation in obs_generators:
+        rng, obs_rng = jax.random.split(rng)
+        observation_value = observation(physics_state.data, obs_rng)
+        observations[observation.observation_name] = observation_value
+    return FrozenDict(observations)
+
+
+def get_rewards(
+    physics_state: PhysicsState,
+    command: FrozenDict[str, Array],
+    action: Array,
+    next_physics_state: PhysicsState,  # TODO - rewards only process data
+    next_state_terminates: Array,
+    *,
+    reward_generators: Collection[Reward],
+) -> FrozenDict[str, Array]:
+    """Get the rewards from the physics state."""
+    rewards = {}
+    for reward_generator in reward_generators:
+        reward_val = (
+            reward_generator(
+                prev_action=physics_state.most_recent_action,
+                physics_state=physics_state.data,
+                command=command,
+                action=action,
+                next_physics_state=next_physics_state.data,
+                next_state_terminates=next_state_terminates,
+            )
+            * reward_generator.scale
+        )
+        name = reward_generator.reward_name
+        chex.assert_shape(reward_val, (), custom_message=f"Reward {name} must be a scalar")
+        rewards[name] = reward_val
+    return FrozenDict(rewards)
+
+
+def post_accumulate_rewards(
+    reward_components: FrozenDict[str, Array],
+    done: Array,
+    *,
+    reward_generators: Collection[Reward],
+) -> FrozenDict[str, Array]:
+    """Post-accumulate rewards."""
+    post_accumulated_reward_components = dict(reward_components)
+    for reward_generator in reward_generators:
+        original_reward = reward_components[reward_generator.reward_name]
+        assert isinstance(original_reward, Array)
+        reward_val = reward_generator.post_accumulate(original_reward, done)
+        post_accumulated_reward_components[reward_generator.reward_name] = reward_val
+
+    return FrozenDict(post_accumulated_reward_components)
+
+
+def get_terminations(
+    physics_state: PhysicsState,
+    *,
+    termination_generators: Collection[Termination],
+) -> FrozenDict[str, Array]:
+    """Get the terminations from the physics state."""
+    terminations = {}
+    for termination in termination_generators:
+        termination_val = termination(physics_state.data)
+        chex.assert_type(termination_val, bool)
+        name = termination.termination_name
+        terminations[name] = termination_val
+    return FrozenDict(terminations)
+
+
+def get_commands(
+    prev_commands: FrozenDict[str, Array],
+    physics_state: PhysicsState,
+    rng: PRNGKeyArray,
+    *,
+    command_generators: Collection[Command],
+) -> FrozenDict[str, Array]:
+    """Get the commands from the physics state."""
+    commands = {}
+    for command_generator in command_generators:
+        rng, cmd_rng = jax.random.split(rng)
+        command_name = command_generator.command_name
+        prev_command = prev_commands[command_name]
+        assert isinstance(prev_command, Array)
+        command_val = command_generator(prev_command, physics_state.data.time, cmd_rng)
+        commands[command_name] = command_val
+    return FrozenDict(commands)
+
+
+def get_initial_commands(
+    rng: PRNGKeyArray,
+    *,
+    command_generators: Collection[Command],
+) -> FrozenDict[str, Array]:
+    """Get the initial commands from the physics state."""
+    commands = {}
+    for command_generator in command_generators:
+        rng, cmd_rng = jax.random.split(rng)
+        command_name = command_generator.command_name
+        command_val = command_generator.initial_command(cmd_rng)
+        commands[command_name] = command_val
+    return FrozenDict(commands)
+
+
+def render_data_to_frames(
+    data: PhysicsData,
+    default_mj_model: mujoco.MjModel,
+    camera: int | str | mujoco.MjvCamera = -1,
+    height: int = 240,
+    width: int = 320,
+) -> list[np.ndarray]:
+    """Render the data to a sequence of Numpy arrays."""
+    for leaf in jax.tree.leaves(data):
+        if isinstance(leaf, Array):
+            num_steps = leaf.shape[0]
+            break
+    else:
+        raise ValueError("No array found in data")
+
+    mjx_data_list = [jax.tree.map(lambda x: x[i], data) for i in range(num_steps)]
+    scene_option = mujoco.MjvOption()
+
+    renderer = mujoco.Renderer(default_mj_model, height=height, width=width)
+    frames = []
+    for mjx_data in mjx_data_list:
+        renderer.update_scene(mjx_data, camera=camera, scene_option=scene_option)
+        frames.append(renderer.render())
+
+    return frames
 
 
 @jax.tree_util.register_dataclass
@@ -164,7 +304,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> PhysicsEngine:
         return get_physics_engine(
-            physics_model=physics_model,
+            engine_type=engine_type_from_physics_model(physics_model),
             resets=self.get_resets(physics_model),
             actuators=self.get_actuators(physics_model, metadata),
             dt=self.config.dt,
@@ -227,27 +367,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             A collection of termination generators.
         """
 
-    def step_engine(
-        self,
-        model: PyTree,
-        physics_model: PhysicsModel,
-        engine: PhysicsEngine,
-        prev_command: FrozenDict[str, Array],
-        physics_state: PhysicsState,
-        observations: Collection[Observation],
-        commands: Collection[Command],
-        rewards: Collection[Reward],
-        terminations: Collection[Termination],
-        rng: PRNGKeyArray,
-    ) -> None:
-        obs_rng, cmd_rng, act_rng, reset_rng, physics_rng = jax.random.split(rng, 5)
-        obs = get_observation(physics_state, obs_rng, obs_generators=observations)
-        cmd = get_commands(prev_command, physics_state, cmd_rng, command_generators=commands)
-        action, next_carry = self.sample_action(model, physics_model, act_rng)
-        physics_state = engine.step(action, physics_state, physics_rng)
-        rew = get_rewards(physics_state, act_rng, reward_generators=rewards)
-        term = get_terminations(physics_state, act_rng, termination_generators=terminations)
-
     @abstractmethod
     def get_initial_carry(self) -> PyTree:
         """Returns the initial carry for the model.
@@ -261,8 +380,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def sample_action(
         self,
         model: PyTree,
-        physics_model: PhysicsModel,
         carry: PyTree,
+        physics_model: PhysicsModel,
+        observations: FrozenDict[str, Array],
+        commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, PyTree]:
         """Takes in the current model, the physics model, and a random key, and returns an action.
@@ -270,12 +391,126 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             model: The current model.
             physics_model: The physics model.
+            observations: The current observations.
+            commands: The current commands.
             carry: The model carry from the previous step.
             rng: The random key.
 
         Returns:
             The action to take.
         """
+
+    def step_engine(
+        self,
+        model: PyTree,
+        engine: PhysicsEngine,
+        engine_constants: EngineConstants,
+        engine_variables: EngineVariables,
+        rng: PRNGKeyArray,
+    ) -> tuple[Transition, EngineVariables]:
+        """Runs a single step of the physics engine.
+
+        Args:
+            model: The model, with parameters to be updated.
+            carry: The carry from the previous step.
+            engine: The physics engine.
+            engine_constants: The constants for the engine.
+            engine_variables: The variables for the engine.
+            rng: The random key.
+
+        Returns:
+            A tuple containing the transition and the next engine variables.
+        """
+        obs_rng, cmd_rng, act_rng, reset_rng, physics_rng = jax.random.split(rng, 5)
+
+        # Gets the observations from the physics state.
+        observations = get_observation(
+            physics_state=engine_variables.physics_state,
+            rng=obs_rng,
+            obs_generators=engine_constants.obs_generators,
+        )
+
+        # Gets the commmands from the previous commands and the physics state.
+        commands = get_commands(
+            prev_commands=engine_variables.commands,
+            physics_state=engine_variables.physics_state,
+            rng=cmd_rng,
+            command_generators=engine_constants.command_generators,
+        )
+
+        # Samples an action from the model.
+        action, next_carry = self.sample_action(
+            model=model,
+            carry=engine_variables.carry,
+            physics_model=engine_constants.physics_model,
+            observations=observations,
+            commands=commands,
+            rng=act_rng,
+        )
+
+        # Steps the physics engine.
+        next_physics_state: PhysicsState = engine.step(
+            action=action,
+            physics_model=engine_constants.physics_model,
+            physics_state=engine_variables.physics_state,
+            rng=physics_rng,
+        )
+
+        # Gets termination components and a single termination boolean.
+        terminations = get_terminations(
+            physics_state=engine_variables.physics_state,
+            termination_generators=engine_constants.termination_generators,
+        )
+        terminated = jax.tree.reduce(jnp.logical_or, list(terminations.values()))
+
+        # Gets reward components and a single reward.
+        rewards = get_rewards(
+            physics_state=engine_variables.physics_state,
+            command=commands,
+            action=action,
+            next_physics_state=next_physics_state,
+            next_state_terminates=terminated,
+            reward_generators=engine_constants.reward_generators,
+        )
+        reward = jax.tree.reduce(jnp.add, list(rewards.values()))
+
+        # Conditionally reset on termination.
+        next_physics_state = jax.lax.cond(
+            terminated,
+            lambda: engine.reset(engine_constants.physics_model, reset_rng),
+            lambda: next_physics_state,
+        )
+        next_carry = jax.lax.cond(
+            terminated,
+            lambda: engine_constants.initial_carry,
+            lambda: next_carry,
+        )
+        commands = jax.lax.cond(
+            terminated,
+            lambda: engine_constants.initial_command,
+            lambda: commands,
+        )
+
+        # Combines all the relevant data into a single object.
+        transition = Transition(
+            obs=observations,
+            command=commands,
+            action=action,
+            reward=reward,
+            done=terminated,
+            timestep=next_physics_state.data.time,
+            termination_components=terminations,
+            reward_components=rewards,
+        )
+
+        # Gets the variables for the next step.
+        next_variables = EngineVariables(
+            carry=next_carry,
+            commands=commands,
+            physics_state=next_physics_state,
+        )
+
+        return transition, next_variables
 
     def get_dataset(self, phase: xax.Phase) -> Dataset:
         raise NotImplementedError("RL tasks do not require datasets, since trajectory histories are stored in-memory.")
@@ -371,15 +606,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 key=key,
                 value=value,
                 namespace="update",
-            )
-
-    def log_has_nans(self, has_nans: UnrollNaNDetector) -> None:
-        """Logs the number of nans in the current update."""
-        for key, value in has_nans._asdict().items():
-            self.logger.log_scalar(
-                key=key,
-                value=value,
-                namespace="has_nans",
             )
 
     @xax.profile
@@ -493,147 +719,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         training_state: xax.State,
     ) -> None:
-        """Runs the main RL training loop."""
-        mj_model = self.get_mujoco_model()
-        metadata = self.get_mujoco_model_metadata(mj_model)
-        mjx_model = self.get_mjx_model(mj_model)
-        engine = self.get_engine(mjx_model, metadata)
-        observations = self.get_observations(mjx_model)
-        commands = self.get_commands(mjx_model)
-        rewards = self.get_rewards(mjx_model)
-        terminations = self.get_terminations(mjx_model)
+        raise NotImplementedError("RL training loop not implemented")
 
-        rng = self.prng_key()
-        rng, burn_in_rng, reset_rng, train_rng = jax.random.split(rng, 4)
+    def run_environment(self, num_steps: int | None = None) -> None:
+        """Provides an easy-to-use interface for debugging environments.
 
-        reset_rngs = jax.random.split(reset_rng, self.config.num_envs)
-        state_E = jax.vmap(engine.reset, in_axes=(0))(reset_rngs)
-
-        unroll_trajectories_fn = jax.vmap(
-            unroll_trajectory,
-            in_axes=(0, 0, None, None, None, None, None, None, None, None),
-        )
-
-        if self.config.compile_unroll:
-            unroll_trajectories_fn = eqx.filter_jit(unroll_trajectories_fn)
-
-        # Burn in stage
-        burn_in_rng_E = jax.random.split(burn_in_rng, self.config.num_envs)
-
-        # No positional arguments with vmap (https://github.com/jax-ml/jax/issues/7465)
-        unroll_trajectories_fn(
-            state_E,
-            burn_in_rng_E,
-            agent,
-            engine,
-            observations,
-            commands,
-            rewards,
-            terminations,
-            self.num_rollout_steps_per_env,
-            False,
-        )
-
-        while not self.is_training_over(training_state):
-            with self.step_context("on_step_start"):
-                training_state = self.on_step_start(training_state)
-
-            start_time = time.time()
-            rollout_rng, reshuffle_rng, train_rng = jax.random.split(train_rng, 3)
-            rollout_rng_E = jax.random.split(rollout_rng, self.config.num_envs)
-            transitions_ET, state_E, has_nans_E, _ = unroll_trajectories_fn(
-                state_E,
-                rollout_rng_E,
-                agent,
-                engine,
-                observations,
-                commands,
-                rewards,
-                terminations,
-                self.num_rollout_steps_per_env,
-                False,
-            )
-            has_nans = jax.tree.map(jnp.any, has_nans_E)
-
-            rollout_time = time.time() - start_time
-            logger.info("Rollout time: %s seconds", rollout_time)
-
-            start_time = time.time()
-            rollout_stats_ET = self.get_rollout_time_stats(
-                transitions=transitions_ET,
-                agent=agent,
-            )
-
-            dataset_ET = RLDataset(
-                transitions=transitions_ET,
-                rollout_time_stats=rollout_stats_ET,
-            )
-
-            # running training on minibatches
-            (agent, opt_state, reshuffle_rng), metrics = self.rl_pass(
-                agent=agent,
-                opt_state=opt_state,
-                reshuffle_rng=reshuffle_rng,
-                optimizer=optimizer,
-                dataset_ET=dataset_ET,
-            )
-            metrics_mean = jax.tree.map(lambda x: jnp.mean(x), metrics)
-            update_time = time.time() - start_time
-            logger.info("Update time: %s seconds", update_time)
-
-            with self.step_context("write_logs"):
-                training_state.raw_phase = "train"
-                training_state.num_steps += 1
-                training_state.num_samples += self.dataset_size
-
-                self.log_trajectory_stats(transitions_ET, rewards, terminations, eval=False)
-                self.log_update_metrics(metrics_mean)
-                self.log_has_nans(has_nans)
-                self.logger.log_scalar("rollout_time", rollout_time, namespace="⏰")
-                self.logger.log_scalar("update_time", update_time, namespace="⏰")
-                self.logger.write(training_state)
-
-            with self.step_context("on_step_end"):
-                training_state = self.on_step_end(training_state)
-
-            if self.should_checkpoint(training_state):
-                self.save_checkpoint(
-                    model=agent,
-                    optimizer=optimizer,
-                    opt_state=opt_state,
-                    state=training_state,
-                )
-
-                render_name = self.get_render_name(training_state)
-                render_dir = self.exp_dir / self.config.render_dir / render_name
-                logger.info("Rendering to %s", render_dir)
-
-                raise NotImplementedError("Please rewrite this to use the new unroll_trajectory function")
-                logger.info("Done rendering to %s", render_dir)
-
-                with self.step_context("write_logs"):
-                    self.log_trajectory_stats(transitions_ET, rewards, terminations, eval=True)
-
-    def run_environment(self, use_mjx: bool = False, num_steps: int = 1000) -> None:
-        """Wraps the environment loop.
-
-        This provides an easy interface for developers to test out their
-        models and environments before launching training jobs.
+        This function runs the environment for `num_steps`, rendering using
+        MujocoViewer while simultaneously plotting the reward and termination
+        information.
 
         Args:
-            use_mjx: If set, use the MJX engine instead of the Mujoco engine.
-            num_steps: The number of steps to run the environment for.
+            num_steps: The number of steps to run the environment for. If not
+                provided, run until the user manually terminates the
+                environment visualizer.
         """
-        with self:
+        with self, jax.disable_jit():
             rng = self.prng_key()
             self.set_loggers()
 
             rng, model_rng = jax.random.split(rng)
-            agent, state = self.load_initial_state(model_rng, load_optimizer=False)
+            model, _ = self.load_initial_state(model_rng, load_optimizer=False)
 
             mj_model: PhysicsModel = self.get_mujoco_model()
-            if use_mjx:
-                mj_model = self.get_mjx_model(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
             engine = self.get_engine(mj_model, metadata)
             observations = self.get_observations(mj_model)
@@ -641,14 +748,67 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rewards = self.get_rewards(mj_model)
             terminations = self.get_terminations(mj_model)
 
+            # Gets initial variables.
+            initial_carry = self.get_initial_carry()
+            initial_commands = get_initial_commands(rng, command_generators=commands)
+
             # Resets the physics state.
             rng, reset_rng = jax.random.split(rng)
-            physics_state = engine.reset(reset_rng)
+            physics_state = engine.reset(mj_model, reset_rng)
 
-            for _ in range(num_steps):
-                rng, action_rng, step_rng = jax.random.split(rng, 3)
-                action = self.sample_action(agent, mj_model, action_rng)
-                physics_state = engine.step(action, physics_state, step_rng)
+            viewer = mujoco_viewer.MujocoViewer(mj_model, physics_state.data, mode="window")
+
+            # These components remain constant across the entire episode.
+            engine_constants = EngineConstants(
+                physics_model=mj_model,
+                initial_carry=initial_carry,
+                initial_command=initial_commands,
+                obs_generators=observations,
+                command_generators=commands,
+                reward_generators=rewards,
+                termination_generators=terminations,
+            )
+
+            # These components are updated each step.
+            engine_variables = EngineVariables(
+                carry=initial_carry,
+                commands=initial_commands,
+                physics_state=physics_state,
+            )
+
+            iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
+            all_transitions_list = []
+
+            step_id = 0
+            try:
+                for step_id in iterator:
+                    rng, step_rng = jax.random.split(rng)
+                    transition, engine_variables = self.step_engine(
+                        model=model,
+                        engine=engine,
+                        engine_constants=engine_constants,
+                        engine_variables=engine_variables,
+                        rng=step_rng,
+                    )
+
+                    # We need to manually update the viewer data field, because
+                    # resetting the environment creates a new data object rather
+                    # than happening in-place.
+                    viewer.data = engine_variables.physics_state.data
+
+                    all_transitions_list.append(transition)
+                    viewer.render()
+
+            except (KeyboardInterrupt, bdb.BdbQuit, Exception):
+                # Raise on the first step for debugging purposes.
+                if step_id == 0:
+                    raise
+
+                logger.info("Keyboard interrupt, exiting environment loop")
+                viewer.close()
+
+            all_transitions = jax.tree.map(lambda *x: jnp.stack(x), *all_transitions_list)
+            return all_transitions
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""

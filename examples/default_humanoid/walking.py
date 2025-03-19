@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -23,7 +24,7 @@ from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
 from ksim.utils.named_access import get_joint_metadata
 
-NUM_INPUTS = 56
+NUM_INPUTS = 29
 NUM_OUTPUTS = 21
 
 
@@ -55,33 +56,24 @@ class DefaultHumanoidActor(eqx.Module):
         self.max_std = max_std
         self.var_scale = var_scale
 
-    def forward(
+    def __call__(
         self,
-        obs: FrozenDict[str, Array],
-        command: FrozenDict[str, Array],
-        carry: None,
-    ) -> tuple[Array, None]:
-        obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
-        command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
-        assert obs_vec.ndim == command_vec.ndim
-        x = jnp.concatenate([obs_vec, command_vec], axis=-1)
+        act_frc_obs_n: Array,
+        lin_vel_cmd_n: Array,
+    ) -> distrax.Distribution:
+        x_n = jnp.concatenate([act_frc_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
 
         # Split the output into mean and standard deviation.
-        prediction = self.mlp(x)
-        mean = prediction[..., :NUM_OUTPUTS]
-        std = prediction[..., NUM_OUTPUTS:]
+        prediction_n = self.mlp(x_n)
+        mean_n = prediction_n[..., :NUM_OUTPUTS]
+        std_n = prediction_n[..., NUM_OUTPUTS:]
 
         # Softplus and clip to ensure positive standard deviations.
-        std = (jax.nn.softplus(std) + self.min_std) * self.var_scale
-        std = jnp.clip(std, self.min_std, self.max_std)
+        std_n = (jax.nn.softplus(std_n) + self.min_std) * self.var_scale
+        std_n = jnp.clip(std_n, self.min_std, self.max_std)
 
-        # Concatenate the Gaussian parameters into a single array.
-        parametrization = jnp.concatenate([mean, std], axis=-1)
-
-        return parametrization, None
-
-    def initial_carry(self) -> None:
-        return None
+        # return distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
+        return distrax.Normal(mean_n, std_n)
 
 
 class DefaultHumanoidCritic(eqx.Module):
@@ -99,26 +91,13 @@ class DefaultHumanoidCritic(eqx.Module):
             activation=jax.nn.relu,
         )
 
-    def forward(
+    def __call__(
         self,
-        obs: FrozenDict[str, Array],
-        command: FrozenDict[str, Array],
-        carry: None,
-    ) -> tuple[Array, None]:
-        obs_vec = jnp.concatenate([v for v in obs.values()], axis=-1)
-        command_vec = jnp.concatenate([v for v in command.values()], axis=-1)
-        x = jnp.concatenate([obs_vec, command_vec], axis=-1)
-        return self.mlp(x), None
-
-    def batched_forward_across_time(self, obs: FrozenDict[str, Array], command: FrozenDict[str, Array]) -> Array:
-        """Forward pass across the episode (time, ...). No env dimension.
-
-        By default, we vmap the forward pass for efficiency. If you implement
-        recurrence, you should override this with an appropriate scan.
-        """
-        vmapped_forward = jax.vmap(self.forward, in_axes=(0, 0, None))
-        prediction, _ = vmapped_forward(obs, command, None)
-        return prediction
+        act_frc_obs_n: Array,
+        lin_vel_cmd_n: Array,
+    ) -> Array:
+        x_n = jnp.concatenate([act_frc_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
+        return self.mlp(x_n)
 
 
 class DefaultHumanoidModel(eqx.Module):
@@ -219,14 +198,23 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
+    def get_initial_carry(self) -> None:
+        return None
+
     def sample_action(
         self,
         model: DefaultHumanoidModel,
-        physics_model: PhysicsModel,
         carry: None,
+        physics_model: PhysicsModel,
+        observations: FrozenDict[str, Array],
+        commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, None]:
-        raise NotImplementedError("Not implemented")
+        act_frc_obs_n = observations["actuator_force_observation"]
+        lin_vel_cmd_n = commands["linear_velocity_command"]
+        action_dist_n = model.actor(act_frc_obs_n, lin_vel_cmd_n)
+        action_n = action_dist_n.sample(seed=rng)
+        return action_n, None
 
 
 if __name__ == "__main__":

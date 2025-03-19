@@ -12,6 +12,7 @@ from jaxtyping import PRNGKeyArray
 from mujoco import mjx
 
 from ksim.env.data import PhysicsData, PhysicsModel
+from ksim.utils.mujoco import update_data_field
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +76,8 @@ class HFieldXYPositionReset(Reset):
         # Get the height from the heightfield and add the z offset.
         z = self.hfield_data[x_idx, y_idx]
         qpos_j = qpos_j.at[2:3].set(z + z_top + self.robot_base_height)
-
-        return data.replace(qpos=qpos_j)
+        data = update_data_field(data, "qpos", qpos_j)
+        return data
 
     def __hash__(self) -> int:
         array_bytes = self.hfield_data.tobytes()
@@ -118,7 +119,8 @@ class PlaneXYPositionReset(Reset):
         qpos_j = qpos_j.at[0:1].set(new_x)
         qpos_j = qpos_j.at[1:2].set(new_y)
         qpos_j = qpos_j.at[2:3].set(z_pos + self.robot_base_height)
-        return data.replace(qpos=qpos_j)
+        data = update_data_field(data, "qpos", qpos_j)
+        return data
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -130,7 +132,7 @@ class RandomizeJointPositions(Reset):
     def __call__(self, data: PhysicsData, rng: PRNGKeyArray) -> PhysicsData:
         qpos = data.qpos
         qpos = qpos + jax.random.uniform(rng, qpos.shape, minval=-self.scale, maxval=self.scale)
-        data = data.replace(qpos=qpos)
+        data = update_data_field(data, "qpos", qpos)
         return data
 
 
@@ -143,7 +145,7 @@ class RandomizeJointVelocities(Reset):
     def __call__(self, data: PhysicsData, rng: PRNGKeyArray) -> PhysicsData:
         qvel = data.qvel
         qvel = qvel + jax.random.uniform(rng, qvel.shape, minval=-self.scale, maxval=self.scale)
-        data = data.replace(qvel=qvel)
+        data = update_data_field(data, "qvel", qvel)
         return data
 
 

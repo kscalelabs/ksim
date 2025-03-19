@@ -6,22 +6,48 @@ model and data.
 
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Collection, Literal
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mujoco
-from jaxtyping import Array, PRNGKeyArray
+from flax.core import FrozenDict
+from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 
 from ksim.actuators import Actuators
+from ksim.commands import Command
 from ksim.env.data import PhysicsModel, PhysicsState
+from ksim.observation import Observation
 from ksim.resets import Reset
+from ksim.rewards import Reward
+from ksim.terminations import Termination
 
 logger = logging.getLogger(__name__)
 
 EngineType = Literal["mjx", "mujoco"]
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class EngineConstants:
+    physics_model: PhysicsModel
+    initial_carry: PyTree
+    initial_command: FrozenDict[str, Array]
+    obs_generators: Collection[Observation]
+    command_generators: Collection[Command]
+    reward_generators: Collection[Reward]
+    termination_generators: Collection[Termination]
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class EngineVariables:
+    carry: PyTree
+    commands: FrozenDict[str, Array]
+    physics_state: PhysicsState
 
 
 class PhysicsEngine(eqx.Module, ABC):
@@ -148,8 +174,7 @@ class MujocoEngine(PhysicsEngine):
             rng, reset_rng = jax.random.split(rng)
             mujoco_data = reset(mujoco_data, reset_rng)
 
-        mujoco_data = mujoco.mj_forward(physics_model, mujoco_data)
-        assert isinstance(mujoco_data, mujoco.MjData)
+        mujoco.mj_forward(physics_model, mujoco_data)
         default_action = mujoco_data.ctrl
 
         return PhysicsState(data=mujoco_data, most_recent_action=default_action)
@@ -162,7 +187,7 @@ class MujocoEngine(PhysicsEngine):
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         mujoco_data = physics_state.data
-        mujoco_data = mujoco.mj_forward(physics_model, mujoco_data)
+        mujoco.mj_forward(physics_model, mujoco_data)
         phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
 
@@ -183,8 +208,8 @@ class MujocoEngine(PhysicsEngine):
 
             torques = self.actuators.get_ctrl(ctrl, mujoco_data)
             mujoco_data.ctrl[:] = torques
-            mujoco_data = mujoco.mj_forward(physics_model, mujoco_data)
-            mujoco_data = mujoco.mj_step(physics_model, mujoco_data)
+            mujoco.mj_forward(physics_model, mujoco_data)
+            mujoco.mj_step(physics_model, mujoco_data)
 
         return PhysicsState(data=mujoco_data, most_recent_action=action)
 
@@ -232,3 +257,11 @@ def get_physics_engine(
 
         case _:
             raise ValueError(f"Unsupported physics model type: {engine_type}")
+
+
+def engine_type_from_physics_model(physics_model: PhysicsModel) -> EngineType:
+    if isinstance(physics_model, mujoco.MjModel):
+        return "mujoco"
+    if isinstance(physics_model, mjx.Model):
+        return "mjx"
+    raise ValueError(f"Unsupported physics model type: {type(physics_model)}")

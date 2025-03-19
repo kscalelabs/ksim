@@ -58,6 +58,9 @@ class MITPositionActuators(Actuators):
 
         for joint_name, params in joint_name_to_metadata.items():
             actuator_name = self.get_actuator_name(joint_name)
+            if actuator_name not in ctrl_name_to_idx:
+                logger.warning("Joint %s has no actuator name. Skipping.", joint_name)
+                continue
             actuator_idx = ctrl_name_to_idx[actuator_name]
 
             kp_str = params.kp

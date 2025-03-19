@@ -206,7 +206,4 @@ class UnhealthyTermination(Termination):
 
     def __call__(self, state: PhysicsData) -> Array:
         height = state.qpos[2]
-        is_healthy = jnp.where(height < self.unhealthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.unhealthy_z_upper, 0.0, is_healthy)
-        not_healthy = jnp.where(is_healthy == 0.0, 1.0, 0.0)
-        return not_healthy
+        return (height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper)
