@@ -177,11 +177,11 @@ class RLConfig(xax.Config):
         help="The size of the figure for each plot.",
     )
     render_height: int = xax.field(
-        value=240,
+        value=480,
         help="The height of the rendered images.",
     )
     render_width: int = xax.field(
-        value=320,
+        value=640,
         help="The width of the rendered images.",
     )
     render_track_body_id: int | None = xax.field(
@@ -901,7 +901,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     mode="window",
                     height=self.config.render_height,
                     width=self.config.render_width,
-                    hide_menus=True,
                 )
 
                 # Sets the viewer camera.
