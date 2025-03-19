@@ -109,14 +109,16 @@ def concatenate_transitions(transitions: list[Transition]) -> Transition:
             pad_width[1] = (0, target_length - x.shape[1])
         return jnp.pad(x, pad_width, mode="constant")
 
-    # Zero-pads each array to a consistent length. We flip the done flags
-    # so that zero-padding results in any invalid states being masked out.
-    for transition in transitions:
-        transition.done = ~transition.done
-    padded_transitions: list[Transition] = jax.tree_map(lambda x: pad_array(x, length), transitions)
-    for transition in padded_transitions:
-        transition.done = ~transition.done
+    def update_done_flag(transition: Transition) -> Transition:
+        new_done = jnp.cumsum(transition.done, dtype=transition.done.dtype)
 
+        # Need to do it this way because we transitions are frozen.
+        kwargs = transition.__dict__
+        kwargs["done"] = new_done
+        return Transition(**kwargs)
+
+    padded_transitions: list[Transition] = jax.tree_map(lambda x: pad_array(x, length), transitions)
+    padded_transitions = [update_done_flag(transition) for transition in padded_transitions]
     return jax.tree_map(lambda *x: jnp.concatenate(x, axis=0), *padded_transitions)
 
 
