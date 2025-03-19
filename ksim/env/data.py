@@ -6,7 +6,6 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 import mujoco
-import numpy as np
 from flax.core import FrozenDict
 from jaxtyping import Array
 from mujoco import mjx
@@ -52,8 +51,9 @@ def chunk_transitions(transitions: Transition) -> list[Transition]:
         transitions: A non-implicit transitions PyTree.
 
     Returns:
-        A list of transitions, where each transition represents a complete episode
-        or a segment ending with the trajectory's end.
+        A list of transitions, where each transition represents a complete
+        episode or a segment ending with the trajectory's end. Note that the
+        batch dimension is preserved in each transition.
     """
     # Get the done flags from transitions
     done_flags = transitions.done
@@ -65,11 +65,11 @@ def chunk_transitions(transitions: Transition) -> list[Transition]:
     # Process each batch
     for batch_idx in range(num_batches):
         # Find indices where episodes end (done=True)
-        episode_ends = np.where(done_flags[batch_idx])[0]
+        episode_ends = jnp.where(done_flags[batch_idx])[0]
 
         # Add the last step index if it's not already included
         if len(episode_ends) == 0 or episode_ends[-1] != num_steps - 1:
-            episode_ends = np.append(episode_ends, num_steps - 1)
+            episode_ends = jnp.append(episode_ends, num_steps - 1)
 
         # Initialize the start index for slicing
         start_idx = 0
@@ -110,7 +110,7 @@ def concatenate_transitions(transitions: list[Transition]) -> Transition:
         return jnp.pad(x, pad_width, mode="constant")
 
     def update_done_flag(transition: Transition) -> Transition:
-        new_done = jnp.cumsum(transition.done, dtype=transition.done.dtype)
+        new_done = jnp.cumsum(transition.done, axis=-1, dtype=transition.done.dtype)
 
         # Need to do it this way because we transitions are frozen.
         kwargs = transition.__dict__
