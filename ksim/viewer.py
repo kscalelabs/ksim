@@ -1,40 +1,21 @@
-"""MuJoCo viewer implementation with interactive visualization capabilities.
-
-This module provides a viewer for MuJoCo environments with support for:
-- Interactive camera control
-- Real-time visualization of physics simulation
-- Overlay information display
-- Plotting capabilities
-- Screenshot capture
-- Custom marker visualization
-"""
-
-from __future__ import annotations
+"""MuJoCo viewer implementation with interactive visualization capabilities."""
 
 import time
 from dataclasses import dataclass
 from threading import Lock
-from typing import Any
+from typing import Any, Literal, get_args
 
 import glfw
 import mujoco
 import numpy as np
 
+RenderMode = Literal["window", "offscreen"]
+
 
 @dataclass
 class ViewerConfig:
-    """Configuration for the MuJoCo viewer.
-
-    Attributes:
-        hide_menus: Whether to hide the overlay menus by default
-        render_mode: Either "window" or "offscreen" rendering mode
-        title: Window title for window mode
-        width: Window width (optional)
-        height: Window height (optional)
-    """
-
     hide_menus: bool = False
-    render_mode: str = "window"
+    render_mode: RenderMode = "window"
     title: str = "ksim"
     width: int | None = None
     height: int | None = None
@@ -515,7 +496,7 @@ class MujocoViewer(Callbacks):
         self,
         model: mujoco.MjModel,
         data: mujoco.MjData,
-        mode: str = "window",
+        mode: RenderMode = "window",
         title: str = "mujoco-python-viewer",
         width: int | None = None,
         height: int | None = None,
@@ -537,7 +518,7 @@ class MujocoViewer(Callbacks):
         self.model = model
         self.data = data
         self.render_mode = mode
-        if self.render_mode not in ["offscreen", "window"]:
+        if self.render_mode not in get_args(RenderMode):
             raise NotImplementedError("Invalid mode. Only 'offscreen' and 'window' are supported.")
 
         self.is_alive = True
