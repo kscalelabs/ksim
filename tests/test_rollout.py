@@ -14,11 +14,12 @@ from xax.nn.distributions import TanhGaussianDistribution
 
 from ksim.actuators import TorqueActuators
 from ksim.commands import Command
-from ksim.env.data import PhysicsData, PhysicsState
+from ksim.env.data import PhysicsData, PhysicsModel, PhysicsState
 from ksim.env.mjx_engine import MjxEngine
 from ksim.env.unroll import UnrollNaNDetector, unroll_trajectory
 from ksim.model import ActorCriticAgent, KSimModule, ModelCarry
 from ksim.observation import Observation
+from ksim.randomization import Randomization
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
@@ -57,6 +58,11 @@ class DummyCommand(Command):
 
     def __call__(self, prev_command: Array | None, time: Array, rng: PRNGKeyArray) -> Array:
         return jnp.zeros(1)
+
+
+class DummyRandomization(Randomization):
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
+        return model
 
 
 def get_observation(
@@ -105,6 +111,7 @@ def engine(humanoid_model: mujoco.MjModel) -> MjxEngine:
             RandomJointPositionReset(scale=0.01),
             RandomJointVelocityReset(scale=0.01),
         ],
+        randomizers=[DummyRandomization()],
         actuators=TorqueActuators(),
         dt=0.005,
         ctrl_dt=0.02,
@@ -194,7 +201,8 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
     vmapped_engine_step(actions, initial_physics_states, rngs)
 
     vmapped_unroll_trajectory = jax.vmap(
-        unroll_trajectory, in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None)
+        unroll_trajectory,
+        in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None),
     )
     jit_unroll = eqx.filter_jit(vmapped_unroll_trajectory)
 

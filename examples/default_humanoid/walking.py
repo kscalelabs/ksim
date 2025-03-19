@@ -19,12 +19,15 @@ from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.observation import ActuatorForceObservation, Observation
-from ksim.randomization import Randomization, WeightRandomization
+from ksim.randomization import (
+    Randomization,
+    WeightRandomization,
+)
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
-from ksim.utils.named_access import get_joint_metadata
+from ksim.utils.mujoco import get_joint_metadata
 
 NUM_INPUTS = 29
 NUM_OUTPUTS = 21
@@ -254,18 +257,14 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         return action_n, None
 
 if __name__ == "__main__":
-    # python -m examples.default_humanoid.walking
+    # python -m examples.default_humanoid.walking run_environment=True
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             num_envs=8,
+            batch_size=32,
             dt=0.005,
             ctrl_dt=0.02,
             learning_rate=1e-5,
-            save_every_n_steps=25,
-            only_save_most_recent=False,
-            reward_scaling_alpha=0.0,
-            obs_norm_alpha=0.0,
-            scale_rewards=False,
             gamma=0.97,
             lam=0.95,
             normalize_advantage=True,

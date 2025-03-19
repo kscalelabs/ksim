@@ -12,7 +12,7 @@ import xax
 from jaxtyping import Array
 
 from ksim.env.data import PhysicsData, PhysicsModel
-from ksim.utils.named_access import (
+from ksim.utils.mujoco import (
     get_geom_data_idx_by_name,
     get_sensor_data_idxs_by_name,
 )

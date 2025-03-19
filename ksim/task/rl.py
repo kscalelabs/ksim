@@ -10,17 +10,20 @@ import textwrap
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Thread
 from typing import Any, Collection, Generic, TypeVar
 
 import chex
 import equinox as eqx
+import imageio.v2 as imageio
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import mujoco
 import numpy as np
 import optax
+import PIL.Image
 import tqdm
 import xax
 from dpshdl.dataset import Dataset
@@ -46,7 +49,7 @@ from ksim.randomization import Randomization
 from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
-from ksim.utils.named_access import get_joint_metadata
+from ksim.utils.mujoco import get_joint_metadata
 from ksim.viewer import MujocoViewer
 
 logger = logging.getLogger(__name__)
@@ -150,6 +153,7 @@ def apply_randomizations(
     randomizations: Collection[Randomization],
     rng: PRNGKeyArray,
 ) -> PhysicsModel:
+    """Apply randomizations to the physics model."""
     for randomization in randomizations:
         rng, randomization_rng = jax.random.split(rng)
         physics_model = randomization(physics_model, randomization_rng)
@@ -163,6 +167,14 @@ class RLConfig(xax.Config):
     run_environment: bool = xax.field(
         value=False,
         help="Instead of dropping into the training loop, run the environment loop.",
+    )
+    run_environment_num_seconds: float | None = xax.field(
+        value=None,
+        help="If provided, run the environment loop for the given number of seconds.",
+    )
+    run_environment_save_path: str | None = xax.field(
+        value=None,
+        help="If provided, save the rendered video to the given path.",
     )
 
     # Training parameters.
@@ -268,7 +280,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> PhysicsEngine:
         return get_physics_engine(
             engine_type=engine_type_from_physics_model(physics_model),
-            randomizations=self.get_randomization(physics_model),
             resets=self.get_resets(physics_model),
             actuators=self.get_actuators(physics_model, metadata),
             dt=self.config.dt,
@@ -517,7 +528,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
         if self.config.run_environment:
-            self.run_environment()
+            self.run_environment(
+                num_steps=(
+                    None
+                    if self.config.run_environment_num_seconds is None
+                    else round(self.config.run_environment_num_seconds / self.config.ctrl_dt)
+                ),
+                save_path=self.config.run_environment_save_path,
+            )
         else:
             self.run_training()
 
@@ -908,7 +926,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run_environment(
         self,
         num_steps: int | None = None,
-        render_visualization: bool = True,
+        save_path: str | Path | None = None,
     ) -> None:
         """Provides an easy-to-use interface for debugging environments.
 
@@ -920,8 +938,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             num_steps: The number of steps to run the environment for. If not
                 provided, run until the user manually terminates the
                 environment visualizer.
-            render_visualization: If set, render the Mujoco visualizer.
+            save_path: If provided, save the rendered video to the given path.
         """
+        if save_path is not None:
+            save_path = Path(save_path)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+
         with self, jax.disable_jit():
             rng = self.prng_key()
             self.set_loggers()
@@ -947,25 +969,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, reset_rng = jax.random.split(rng)
             physics_state = engine.reset(mj_model, reset_rng)
 
-            viewer: MujocoViewer | None = None
+            viewer = MujocoViewer(
+                mj_model,
+                physics_state.data,
+                mode="window" if save_path is None else "offscreen",
+                height=self.config.render_height,
+                width=self.config.render_width,
+            )
 
-            if render_visualization:
-                viewer = MujocoViewer(
-                    mj_model,
-                    physics_state.data,
-                    mode="window",
-                    height=self.config.render_height,
-                    width=self.config.render_width,
-                )
-
-                # Sets the viewer camera.
-                viewer.cam.distance = self.config.render_distance
-                viewer.cam.azimuth = self.config.render_azimuth
-                viewer.cam.elevation = self.config.render_elevation
-                viewer.cam.lookat[:] = self.config.render_lookat
-                if self.config.render_track_body_id is not None:
-                    viewer.cam.trackbodyid = self.config.render_track_body_id
-                    viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+            # Sets the viewer camera.
+            viewer.cam.distance = self.config.render_distance
+            viewer.cam.azimuth = self.config.render_azimuth
+            viewer.cam.elevation = self.config.render_elevation
+            viewer.cam.lookat[:] = self.config.render_lookat
+            if self.config.render_track_body_id is not None:
+                viewer.cam.trackbodyid = self.config.render_track_body_id
+                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
             # These components remain constant across the entire episode.
             engine_constants = EngineConstants(
@@ -987,6 +1006,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
 
             step_id = 0
+            frames: list[np.ndarray] = []
             try:
                 for step_id in iterator:
                     transition, engine_variables = self.step_engine(
@@ -1007,24 +1027,27 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         lambda: mj_model,
                     )
 
-                    if viewer is not None:
-                        # We need to manually update the viewer data field, because
-                        # resetting the environment creates a new data object rather
-                        # than happening in-place, as Mujoco expects.
-                        viewer.data = engine_variables.physics_state.data
+                    # We need to manually update the viewer data field, because
+                    # resetting the environment creates a new data object rather
+                    # than happening in-place, as Mujoco expects.
+                    viewer.data = engine_variables.physics_state.data
 
-                        # Adds command elements to the scene.
-                        for command in commands:
-                            command.update_scene(viewer.scn, engine_variables.commands[command.command_name])
+                    # Adds command elements to the scene.
+                    for command in commands:
+                        command.update_scene(viewer.scn, engine_variables.commands[command.command_name])
 
+                    # Logs the frames to render.
+                    if save_path is None:
                         viewer.render()
+                    else:
+                        frames.append(viewer.read_pixels(depth=False))
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
             except Exception:
                 # Raise on the first step for debugging purposes.
-                if step_id == 0:
+                if step_id <= 1:
                     raise
 
                 logger.info("Keyboard interrupt, exiting environment loop")
@@ -1032,6 +1055,40 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             finally:
                 if viewer is not None:
                     viewer.close()
+
+                if save_path is not None:
+                    if len(frames) == 0:
+                        raise ValueError("No frames to save")
+
+                    fps = round(1 / self.config.ctrl_dt)
+
+                    match save_path.suffix.lower():
+                        case ".mp4":
+                            try:
+                                with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
+                                    for frame in frames:
+                                        writer.append_data(frame)
+
+                            except Exception as e:
+                                raise RuntimeError(
+                                    "Failed to save video - note that saving .mp4 videos with imageio usually "
+                                    "requires the FFMPEG backend, which can be installed using `pip install "
+                                    "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
+                                    "your system."
+                                ) from e
+
+                        case ".gif":
+                            images = [PIL.Image.fromarray(frame) for frame in frames]
+                            images[0].save(
+                                save_path,
+                                save_all=True,
+                                append_images=images[1:],
+                                duration=int(1000 / fps),
+                                loop=0,
+                            )
+
+                        case _:
+                            raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""

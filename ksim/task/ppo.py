@@ -12,7 +12,7 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.data import Transition
+from ksim.env.data import Transition, generate_transition_batches
 from ksim.task.rl import RLConfig, RLTask
 
 
@@ -212,6 +212,25 @@ def compute_ppo_loss(
 @jax.tree_util.register_dataclass
 @dataclass
 class PPOConfig(RLConfig):
+    # Batching parameters.
+    group_batches_by_length: bool = xax.field(
+        value=True,
+        help="Whether to group transitions by length, otherwise, transitions are grouped randomly.",
+    )
+    num_passes: int = xax.field(
+        value=1,
+        help="The number of update passes over the set of trajectories",
+    )
+    include_last_batch: bool = xax.field(
+        value=True,
+        help="Whether to include the last batch if it's not full.",
+    )
+    min_batch_size: int = xax.field(
+        default=2,
+        help="The minimum number of transitions to include in a batch.",
+    )
+
+    # PPO parameters.
     clip_param: float = xax.field(
         value=0.2,
         help="Clipping parameter for PPO, see Schulman et al. (2017)",
@@ -240,6 +259,8 @@ class PPOConfig(RLConfig):
         value=1e-6,
         help="Small epsilon value to avoid division by zero.",
     )
+
+    # Optimizer parameters.
     learning_rate: float = xax.field(
         value=1e-4,
         help="Learning rate for PPO.",
@@ -248,10 +269,8 @@ class PPOConfig(RLConfig):
         value=0.5,
         help="Maximum gradient norm for clipping.",
     )
-    scale_rewards: bool = xax.field(
-        value=False,
-        help="Whether to scale rewards, see Engstrom, Ilyas, et al. (2020).",
-    )
+
+    # Advantage parameters.
     normalize_advantage: bool = xax.field(
         value=True,
         help="Whether to normalize advantages.",
@@ -259,22 +278,6 @@ class PPOConfig(RLConfig):
     normalize_advantage_in_minibatch: bool = xax.field(
         value=False,
         help="Whether to normalize advantages at the minibatch level as per OpenAI baselines.",
-    )
-    reward_scaling_alpha: float = xax.field(
-        value=0.0003,
-        help="Rate at which to update reward scaling online as per Hessel, Soyer, et al. (2018).",
-    )
-    obs_norm_alpha: float = xax.field(
-        value=0.0003,
-        help="Rate at which to update observation norm stats, Andrychowicz (2021) and Duan (2016).",
-    )
-    pretrained: str | None = xax.field(
-        value=None,
-        help="The path to a pretrained model to load.",
-    )
-    checkpoint_num: int | None = xax.field(
-        value=None,
-        help="The checkpoint number to load. Otherwise the latest checkpoint is loaded.",
     )
 
 
@@ -395,15 +398,16 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return new_model, new_opt_state, loss_val, FrozenDict(metrics)
 
-    def update_model(
+    def _update_model_on_batches(
         self,
         model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        transitions: Transition,
+        transition_batches: list[Transition],
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
-        """Returns the updated parameters, optimizer state, loss value, and metrics."""
+        breakpoint()
+
         # return self._single_step(
         #     model=model,
         #     optimizer=optimizer,
@@ -414,3 +418,28 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # TODO: Implement this.
         return model, opt_state, 0.0, FrozenDict({})
+
+    def update_model(
+        self,
+        model: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        transitions: Transition,
+        rng: PRNGKeyArray,
+    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
+        """Returns the updated parameters, optimizer state, loss value, and metrics."""
+        transition_batches = generate_transition_batches(
+            transitions,
+            batch_size=self.config.batch_size,
+            min_batch_size=self.config.min_batch_size,
+            group_by_length=self.config.group_batches_by_length,
+            include_last_batch=self.config.include_last_batch,
+        )
+
+        return self._update_model_on_batches(
+            model=model,
+            optimizer=optimizer,
+            opt_state=opt_state,
+            transition_batches=transition_batches,
+            rng=rng,
+        )
