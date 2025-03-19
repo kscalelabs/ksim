@@ -169,7 +169,14 @@ async def main(model_path: str, ip: str, no_render: bool) -> None:
     await reset(kos)
 
     target_time = time.time() + DT
+    observation = (await get_observation(kos)).reshape(1, -1)
+
+    # warm up model
+    model.infer(observation, cmd)
+
+    target_time = time.time() + DT
     observation = await get_observation(kos)
+
     try:
         while True:
             observation = observation.reshape(1, -1)
