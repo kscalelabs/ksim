@@ -629,8 +629,8 @@ class MujocoViewer(Callbacks):
         Returns:
             RGB image array, or tuple of (RGB, depth) arrays if depth=True
         """
-        # if self.render_mode == "window":
-        #     raise NotImplementedError("Use 'render()' in 'window' mode.")
+        if self.render_mode == "window":
+            raise NotImplementedError("Use 'render()' in 'window' mode.")
 
         self.viewport.width, self.viewport.height = glfw.get_framebuffer_size(self.window)
         mujoco.mjv_updateScene(

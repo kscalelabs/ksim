@@ -171,10 +171,6 @@ class RLConfig(xax.Config):
         value=None,
         help="If provided, run the environment loop for the given number of seconds.",
     )
-    run_environment_render_visualization: bool = xax.field(
-        value=True,
-        help="If set, render the environment loop.",
-    )
     run_environment_save_path: str | None = xax.field(
         value=None,
         help="If provided, save the rendered video to the given path.",
@@ -537,7 +533,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     if self.config.run_environment_num_seconds is None
                     else round(self.config.run_environment_num_seconds / self.config.ctrl_dt)
                 ),
-                render_visualization=self.config.run_environment_render_visualization,
                 save_path=self.config.run_environment_save_path,
             )
         else:
@@ -930,7 +925,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run_environment(
         self,
         num_steps: int | None = None,
-        render_visualization: bool = True,
         save_path: str | Path | None = None,
     ) -> None:
         """Provides an easy-to-use interface for debugging environments.
@@ -943,7 +937,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             num_steps: The number of steps to run the environment for. If not
                 provided, run until the user manually terminates the
                 environment visualizer.
-            render_visualization: If set, render the Mujoco visualizer.
             save_path: If provided, save the rendered video to the given path.
         """
         if save_path is not None:
@@ -975,25 +968,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, reset_rng = jax.random.split(rng)
             physics_state = engine.reset(mj_model, reset_rng)
 
-            viewer: MujocoViewer | None = None
+            viewer = MujocoViewer(
+                mj_model,
+                physics_state.data,
+                mode="window" if save_path is None else "offscreen",
+                height=self.config.render_height,
+                width=self.config.render_width,
+            )
 
-            if render_visualization or save_path is not None:
-                viewer = MujocoViewer(
-                    mj_model,
-                    physics_state.data,
-                    mode="window" if render_visualization else "offscreen",
-                    height=self.config.render_height,
-                    width=self.config.render_width,
-                )
-
-                # Sets the viewer camera.
-                viewer.cam.distance = self.config.render_distance
-                viewer.cam.azimuth = self.config.render_azimuth
-                viewer.cam.elevation = self.config.render_elevation
-                viewer.cam.lookat[:] = self.config.render_lookat
-                if self.config.render_track_body_id is not None:
-                    viewer.cam.trackbodyid = self.config.render_track_body_id
-                    viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+            # Sets the viewer camera.
+            viewer.cam.distance = self.config.render_distance
+            viewer.cam.azimuth = self.config.render_azimuth
+            viewer.cam.elevation = self.config.render_elevation
+            viewer.cam.lookat[:] = self.config.render_lookat
+            if self.config.render_track_body_id is not None:
+                viewer.cam.trackbodyid = self.config.render_track_body_id
+                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
             # These components remain constant across the entire episode.
             engine_constants = EngineConstants(
@@ -1036,22 +1026,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         lambda: mj_model,
                     )
 
-                    if viewer is not None:
-                        # We need to manually update the viewer data field, because
-                        # resetting the environment creates a new data object rather
-                        # than happening in-place, as Mujoco expects.
-                        viewer.data = engine_variables.physics_state.data
+                    # We need to manually update the viewer data field, because
+                    # resetting the environment creates a new data object rather
+                    # than happening in-place, as Mujoco expects.
+                    viewer.data = engine_variables.physics_state.data
 
-                        # Adds command elements to the scene.
-                        for command in commands:
-                            command.update_scene(viewer.scn, engine_variables.commands[command.command_name])
+                    # Adds command elements to the scene.
+                    for command in commands:
+                        command.update_scene(viewer.scn, engine_variables.commands[command.command_name])
 
-                        if render_visualization:
-                            viewer.render()
-
-                        # Logs the frames to render.
-                        if save_path is not None:
-                            frames.append(viewer.read_pixels(depth=False))
+                    # Logs the frames to render.
+                    if save_path is None:
+                        viewer.render()
+                    else:
+                        frames.append(viewer.read_pixels(depth=False))
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
