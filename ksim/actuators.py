@@ -1,5 +1,6 @@
 """Defines the base actuators class, along with some implementations."""
 
+import logging
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
@@ -9,6 +10,8 @@ from kscale.web.gen.api import JointMetadataOutput
 
 from ksim.env.data import PhysicsData, PhysicsModel
 from ksim.utils.named_access import get_ctrl_data_idx_by_name
+
+logger = logging.getLogger(__name__)
 
 
 class Actuators(ABC):
@@ -50,11 +53,14 @@ class MITPositionActuators(Actuators):
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
-        kps_list = [0.0] * len(ctrl_name_to_idx)
-        kds_list = [0.0] * len(ctrl_name_to_idx)
+        kps_list = [-1.0] * len(ctrl_name_to_idx)
+        kds_list = [-1.0] * len(ctrl_name_to_idx)
 
         for joint_name, params in joint_name_to_metadata.items():
             actuator_name = self.get_actuator_name(joint_name)
+            if actuator_name not in ctrl_name_to_idx:
+                logger.warning("Joint %s has no actuator name. Skipping.", joint_name)
+                continue
             actuator_idx = ctrl_name_to_idx[actuator_name]
 
             kp_str = params.kp
@@ -68,8 +74,11 @@ class MITPositionActuators(Actuators):
 
         self.kps = jnp.array(kps_list)
         self.kds = jnp.array(kds_list)
+
+        if any(self.kps < 0) or any(self.kds < 0):
+            raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
         if any(self.kps == 0) or any(self.kds == 0):
-            raise ValueError("Some kps or kds are 0. Check your actuators_metadata.")
+            logger.warning("Some KPs or KDs are 0. Check the provided metadata.")
 
     def get_actuator_name(self, joint_name: str) -> str:
         # This can be overridden if necessary.

@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import attrs
 import jax
 import jax.numpy as jnp
+import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
@@ -24,7 +25,6 @@ class Command(ABC):
         Returns:
             The initial command, with shape (command_dim).
         """
-        ...
 
     @abstractmethod
     def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
@@ -38,7 +38,14 @@ class Command(ABC):
         Returns:
             The command to perform, with shape (command_dim).
         """
-        ...
+
+    def update_scene(self, scene: mujoco.MjvScene, command: Array) -> None:
+        """Updates the scene with elements from the command.
+
+        Args:
+            scene: The scene to update.
+            command: The command to update the scene with.
+        """
 
     def get_name(self) -> str:
         """Get the name of the command."""
@@ -78,6 +85,11 @@ class LinearVelocityCommand(Command):
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
+
+    def update_scene(self, scene: mujoco.MjvScene, command: Array) -> None:
+        # TODO: Implement this so that we add an arrow to the scene pointing
+        # in the direction of the command.
+        pass
 
 
 @attrs.define(frozen=True)

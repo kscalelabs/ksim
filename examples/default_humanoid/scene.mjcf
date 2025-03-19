@@ -18,17 +18,8 @@
     <flag eulerdamp="disable"/>
   </option>
 
-  <visual>
-    <map force="0.1" zfar="30"/>
-    <rgba haze="0.15 0.25 0.35 1"/>
-    <global offwidth="2560" offheight="1440" elevation="-20" azimuth="120"/>
-  </visual>
-
-  <statistic center="0 0 0.7"/>
-
   <asset>
-    <texture type="skybox" builtin="gradient" rgb1=".3 .5 .7" rgb2="0 0 0" width="32" height="512"/>
-    <texture name="body" type="cube" builtin="flat" mark="cross" width="128" height="128" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" markrgb="1 1 1" random="0.01"/>
+    <texture name="body" type="cube" builtin="flat" mark="cross" width="512" height="512" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" markrgb="1 1 1" random="0.01"/>
     <material name="body" texture="body" texuniform="true" rgba="0.8 0.6 .4 1"/>
     <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1=".1 .2 .3" rgb2=".2 .3 .4"/>
     <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance=".2"/>
@@ -39,7 +30,6 @@
     <default class="body">
 
       <!-- geoms -->
-      <!-- TODO(robotics-simulation): support condim=1 for humanoid capsules. -->
       <geom type="capsule" condim="3" friction=".7" solimp=".9 .99 .003" solref=".015 1" material="body" contype="0" conaffinity="0"/>
       <default class="thigh">
         <geom size=".06"/>
@@ -195,17 +185,6 @@
     <pair geom1="foot2_right" geom2="floor"/>
   </contact>
 
-  <!-- <tendon>
-    <fixed name="hamstring_right" limited="true" range="-0.3 2">
-      <joint joint="hip_y_right" coef=".5"/>
-      <joint joint="knee_right" coef="-.5"/>
-    </fixed>
-    <fixed name="hamstring_left" limited="true" range="-0.3 2">
-      <joint joint="hip_y_left" coef=".5"/>
-      <joint joint="knee_left" coef="-.5"/>
-    </fixed>
-  </tendon> -->
-
   <actuator>
     <motor name="abdomen_y_ctrl"       gear="40"  joint="abdomen_y"/>
     <motor name="abdomen_z_ctrl"       gear="40"  joint="abdomen_z"/>
@@ -229,28 +208,4 @@
     <motor name="shoulder2_left_ctrl"  gear="20"  joint="shoulder2_left"/>
     <motor name="elbow_left_ctrl"      gear="40"  joint="elbow_left"/>
   </actuator>
-
-  <keyframe>
-    <!--
-    The values below are split into rows for readibility:
-      torso position
-      torso orientation
-      spinal
-      right leg
-      left leg
-      arms
-    -->
-    <key name="squat" qpos="0 0 0.596
-                            0.988015 0 0.154359 0
-                            0 0.4 0
-                            -0.25 -0.5 -2.5 -2.65 -0.8 0.56
-                            -0.25 -0.5 -2.5 -2.65 -0.8 0.56
-                            0 0 0 0 0 0"/>
-    <key name="stand_on_left_leg" qpos="0 0 1.21948
-                                        0.971588 -0.179973 0.135318 -0.0729076
-                                        -0.0516 -0.202 0.23
-                                        -0.24 -0.007 -0.34 -1.76 -0.466 -0.0415
-                                        -0.08 -0.01 -0.37 -0.685 -0.35 -0.09
-                                        0.109 -0.067 -0.7 -0.05 0.12 0.16"/>
-  </keyframe>
 </mujoco>

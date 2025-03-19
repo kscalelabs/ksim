@@ -136,9 +136,9 @@ def get_joint_metadata(
         name_start = model.name_jntadr[i]
         name = bytes(model.names[name_start:]).decode("utf-8").split("\x00")[0]
         metadata[name] = JointMetadataOutput(
-            kp=kp,
-            kd=kd,
-            armature=armature,
-            friction=friction,
+            kp=None if kp is None else str(kp),
+            kd=None if kd is None else str(kd),
+            armature=None if armature is None else str(armature),
+            friction=None if friction is None else str(friction),
         )
     return metadata
