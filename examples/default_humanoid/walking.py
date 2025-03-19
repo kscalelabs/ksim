@@ -235,14 +235,10 @@ if __name__ == "__main__":
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             num_envs=8,
+            batch_size=32,
             dt=0.005,
             ctrl_dt=0.02,
             learning_rate=1e-5,
-            save_every_n_steps=25,
-            only_save_most_recent=False,
-            reward_scaling_alpha=0.0,
-            obs_norm_alpha=0.0,
-            scale_rewards=False,
             gamma=0.97,
             lam=0.95,
             normalize_advantage=True,
