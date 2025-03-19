@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import mujoco
 import numpy as np
 import optax
+import PIL.Image
 import tqdm
 import xax
 from dpshdl.dataset import Dataset
@@ -1076,7 +1077,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                     writer.append_data(frame)
 
                         case ".gif":
-                            imageio.mimsave(save_path, frames, fps=fps)
+                            images = [PIL.Image.fromarray(frame) for frame in frames]
+                            images[0].save(
+                                save_path,
+                                save_all=True,
+                                append_images=images[1:],
+                                duration=int(1000 / fps),
+                                loop=0,
+                            )
 
                         case _:
                             raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
