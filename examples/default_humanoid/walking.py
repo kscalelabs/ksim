@@ -166,7 +166,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             mj_model,
             kp=self.config.kp,
             kd=self.config.kd,
-            armature=self.cfonfig.armature,
+            armature=self.config.armature,
             friction=self.config.friction,
         )
 

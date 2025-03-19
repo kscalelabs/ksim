@@ -71,7 +71,7 @@ class StaticFrictionRandomization(Randomization):
 class FloorFrictionRandomization(Randomization):
     """Randomizes the floor friction."""
 
-    name: str = "geom_friction"
+    floor_body_id: int = attrs.field()
     scale_lower: float = attrs.field(default=0.4)
     scale_upper: float = attrs.field(default=1.0)
     floor_body_id: int = attrs.field(default=MISSING)
@@ -89,6 +89,24 @@ class FloorFrictionRandomization(Randomization):
                     jax.random.uniform(rng, minval=self.scale_lower, maxval=self.scale_upper)
                 )
         return update_model_field(model, self.name, new_geom_friction)
+
+    @classmethod
+    def from_body_name(
+        cls,
+        model: PhysicsModel,
+        floor_body_name: str,
+        scale_lower: float = 0.4,
+        scale_upper: float = 1.0,
+    ) -> "FloorFrictionRandomization":
+        names_to_idxs = get_body_data_idx_by_name(model)
+        if floor_body_name not in names_to_idxs:
+            raise ValueError(f"Body name {floor_body_name} not found in model")
+        floor_body_id = names_to_idxs[floor_body_name]
+        return cls(
+            floor_body_id=floor_body_id,
+            scale_lower=scale_lower,
+            scale_upper=scale_upper,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -113,7 +131,7 @@ class ArmatureRandomization(Randomization):
 class TorsoMassRandomization(Randomization):
     """Randomizes the torso mass."""
 
-    name: str = "body_mass"
+    torso_body_id: int = attrs.field()
     scale_lower: float = attrs.field(default=-1.0)
     scale_upper: float = attrs.field(default=1.0)
     torso_body_id: int = attrs.field(default=MISSING)
@@ -131,20 +149,22 @@ class TorsoMassRandomization(Randomization):
         )
         return update_model_field(model, self.name, new_body_mass)
 
-
-@attrs.define(frozen=True, kw_only=True)
-class TorsoMassRandomizerBuilder(RandomizerBuilder[TorsoMassRandomization]):
-    scale_lower: float = attrs.field(default=-1.0)
-    scale_upper: float = attrs.field(default=1.0)
-    torso_body_name: str = attrs.field(default=MISSING)
-
-    def __call__(self, model: PhysicsModel) -> TorsoMassRandomization:
-        """Build a torso mass randomizer from a physical model."""
-        torso_body_id = get_body_data_idx_by_name(model)[self.torso_body_name]
-        return TorsoMassRandomization(
-            scale_lower=self.scale_lower,
-            scale_upper=self.scale_upper,
+    @classmethod
+    def from_body_name(
+        cls,
+        model: PhysicsModel,
+        torso_body_name: str,
+        scale_lower: float = 0.0,
+        scale_upper: float = 1.0,
+    ) -> "TorsoMassRandomization":
+        names_to_idxs = get_body_data_idx_by_name(model)
+        if torso_body_name not in names_to_idxs:
+            raise ValueError(f"Body name {torso_body_name} not found in model")
+        torso_body_id = names_to_idxs[torso_body_name]
+        return cls(
             torso_body_id=torso_body_id,
+            scale_lower=scale_lower,
+            scale_upper=scale_upper,
         )
 
 
