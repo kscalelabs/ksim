@@ -1072,9 +1072,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     match save_path.suffix.lower():
                         case ".mp4":
-                            with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
-                                for frame in frames:
-                                    writer.append_data(frame)
+                            try:
+                                with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
+                                    for frame in frames:
+                                        writer.append_data(frame)
+
+                            except Exception as e:
+                                raise RuntimeError(
+                                    "Failed to save video - note that saving .mp4 videos with imageio usually "
+                                    "requires the FFMPEG backend, which can be installed using `pip install "
+                                    "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
+                                    "your system."
+                                ) from e
 
                         case ".gif":
                             images = [PIL.Image.fromarray(frame) for frame in frames]
