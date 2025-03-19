@@ -239,17 +239,33 @@ class RLConfig(xax.Config):
         value=True,
         help="Whether to compile the entire unroll fn.",
     )
-    render_camera: int | str = xax.field(
-        value=-1,
-        help="The camera to render from.",
-    )
     render_height: int = xax.field(
-        value=640,
+        value=480,
         help="The height of the rendered images.",
     )
     render_width: int = xax.field(
-        value=480,
+        value=640,
         help="The width of the rendered images.",
+    )
+    render_track_body_id: int | None = xax.field(
+        value=None,
+        help="If set, the render camera will track the body with this ID.",
+    )
+    render_distance: float = xax.field(
+        value=5.0,
+        help="The distance of the camera from the target.",
+    )
+    render_azimuth: float = xax.field(
+        value=90.0,
+        help="The azimuth of the render camera.",
+    )
+    render_elevation: float = xax.field(
+        value=-30.0,
+        help="The elevation of the render camera.",
+    )
+    render_lookat: list[float] = xax.field(
+        value=[0.0, 0.0, 0.5],
+        help="The lookat point of the render camera.",
     )
     render_dir: str = xax.field(
         value="render",
@@ -756,7 +772,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, reset_rng = jax.random.split(rng)
             physics_state = engine.reset(mj_model, reset_rng)
 
-            viewer = mujoco_viewer.MujocoViewer(mj_model, physics_state.data, mode="window")
+            viewer = mujoco_viewer.MujocoViewer(
+                mj_model,
+                physics_state.data,
+                mode="window",
+                height=self.config.render_height,
+                width=self.config.render_width,
+                hide_menus=True,
+            )
+
+            viewer.cam.distance = self.config.render_distance
+            viewer.cam.azimuth = self.config.render_azimuth
+            viewer.cam.elevation = self.config.render_elevation
+            viewer.cam.lookat[:] = self.config.render_lookat
+
+            if self.config.render_track_body_id is not None:
+                viewer.cam.trackbodyid = self.config.render_track_body_id
+                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
             # These components remain constant across the entire episode.
             engine_constants = EngineConstants(
@@ -793,7 +825,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # We need to manually update the viewer data field, because
                     # resetting the environment creates a new data object rather
-                    # than happening in-place.
+                    # than happening in-place, as Mujoco expects.
                     viewer.data = engine_variables.physics_state.data
 
                     all_transitions_list.append(transition)
