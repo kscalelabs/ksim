@@ -16,6 +16,16 @@ from ksim.env.data import Transition
 from ksim.task.rl import RLConfig, RLTask
 
 
+@jax.tree_util.register_dataclass
+@dataclass
+class PPOMetrics:
+    initial_action_log_probs: Array
+    initial_values: Array
+    advantages: Array
+    value_targets: Array
+    returns: Array
+
+
 def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
     """Calculate returns from rewards and dones."""
 
@@ -102,7 +112,7 @@ def clipped_value_loss(
 def compute_ppo_loss(
     model: PyTree,
     transitions: Transition,
-    rollout_time_stats: PPORolloutTimeStats,
+    ppo_metrics: PPOMetrics,
     rng: PRNGKeyArray,
     *,
     normalize_advantage: bool = True,
@@ -129,12 +139,12 @@ def compute_ppo_loss(
     log_probs_per_action = model.action_distribution.log_prob(prediction, transitions.action)
     log_probs = jnp.sum(log_probs_per_action, axis=-1)
 
-    log_prob_diff = log_probs - rollout_time_stats.initial_action_log_probs
+    log_prob_diff = log_probs - ppo_metrics.initial_action_log_probs
     ratio = jnp.exp(log_prob_diff)
 
     # get the state-value estimates
-    advantages = rollout_time_stats.advantages
-    value_targets = rollout_time_stats.value_targets
+    advantages = ppo_metrics.advantages
+    value_targets = ppo_metrics.value_targets
 
     # Andrychowicz (2021) did not find any benefit in minibatch normalization.
     if normalize_advantage and normalize_advantage_in_minibatch:
@@ -154,7 +164,7 @@ def compute_ppo_loss(
         use_clipped_value_loss,
         lambda: 0.5
         * clipped_value_loss(
-            target_values=rollout_time_stats.initial_values,
+            target_values=ppo_metrics.initial_values,
             values=values,
             value_targets=value_targets,
             clip_param=clip_param,
@@ -180,7 +190,7 @@ def compute_ppo_loss(
         "ratio_max": jnp.max(ratio),
         "ratio_min": jnp.min(ratio),
         "log_prob_diff_mean": jnp.mean(log_prob_diff),
-        "advantage_norm_mean": jnp.mean(rollout_time_stats.advantages),
+        "advantage_norm_mean": jnp.mean(ppo_metrics.advantages),
         "action_mean": jnp.mean(transitions.action),
         "action_std": jnp.std(transitions.action),
         "action_max": jnp.max(transitions.action),
@@ -286,7 +296,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
     @eqx.filter_jit
-    def get_rollout_time_stats(self, transitions: Transition, model: PyTree) -> RolloutTimeStats:
+    def get_rollout_time_stats(self, transitions: Transition, model: PyTree) -> PPOMetrics:
         """Calculating advantages and returns for a rollout."""
         prediction = jax.vmap(model.actor_model.batched_forward_across_time, in_axes=(0, 0))(
             transitions.obs, transitions.command
@@ -321,7 +331,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         if self.config.normalize_advantage and not self.config.normalize_advantage_in_minibatch:
             advantages = (advantages - advantages.mean()) / (advantages.std() + self.config.eps)
 
-        return PPORolloutTimeStats(
+        return PPOMetrics(
             initial_action_log_probs=jax.lax.stop_gradient(initial_action_log_probs),
             initial_values=jax.lax.stop_gradient(initial_values),
             advantages=jax.lax.stop_gradient(advantages),
@@ -359,6 +369,32 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         (loss_val, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
         return loss_val, metrics, grads
 
+    def _single_step(
+        self,
+        model: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        transitions: Transition,
+        rng: PRNGKeyArray,
+    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
+        loss_val, metrics, grads = self.loss_metrics_grads(
+            model=model,
+            transitions=transitions,
+            rng=rng,
+        )
+
+        # Apply the gradient updates to the model.
+        updates, new_opt_state = optimizer.update(grads, opt_state, model)  # type: ignore[operator]
+        new_model = eqx.apply_updates(model, updates)
+
+        # Add global gradient norm and loss to the metrics, to monitor training.
+        grad_norm = optax.global_norm(grads)
+        assert isinstance(grad_norm, Array)
+        metrics["loss"] = loss_val
+        metrics["grad_norm"] = grad_norm
+
+        return new_model, new_opt_state, loss_val, FrozenDict(metrics)
+
     def update_model(
         self,
         model: PyTree,
@@ -368,20 +404,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        loss_val, metrics, grads = self.loss_metrics_grads(
-            model=model,
-            transitions=transitions,
-            rng=rng,
-        )
+        # return self._single_step(
+        #     model=model,
+        #     optimizer=optimizer,
+        #     opt_state=opt_state,
+        #     transitions=transitions,
+        #     rng=rng,
+        # )
 
-        # Apply the gradient updates to the model.
-        updates, new_opt_state = optimizer.update(grads, opt_state, model)  # type: ignore[operator]
-        new_model = eqx.apply_updates(model, updates)  # TODO: let's build our own debuggable apply_updates
-
-        # Add global gradient norm and loss to the metrics, to monitor training.
-        grad_norm = optax.global_norm(grads)
-        assert isinstance(grad_norm, Array)
-        metrics["loss"] = loss_val
-        metrics["grad_norm"] = grad_norm
-
-        return new_model, new_opt_state, loss_val, FrozenDict(metrics)
+        # TODO: Implement this.
+        return model, opt_state, 0.0, FrozenDict({})
