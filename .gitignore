@@ -31,3 +31,4 @@ run_*/
 # Other caching.
 .jaxcache/
 .DS_Store
+MUJOCO_LOG.TXT

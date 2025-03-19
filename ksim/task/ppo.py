@@ -1,8 +1,8 @@
 """Defines a standard task interface for training a policy."""
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 
 import equinox as eqx
 import jax
@@ -11,12 +11,19 @@ import optax
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from xax.nn.distributions import GaussianDistribution
 
 from ksim.env.data import Transition
-from ksim.model import ActorCriticAgent
 from ksim.task.rl import RLConfig, RLTask
-from ksim.task.types import PPORolloutTimeStats, RLDataset, RolloutTimeStats
+
+
+@jax.tree_util.register_dataclass
+@dataclass
+class PPOMetrics:
+    initial_action_log_probs: Array
+    initial_values: Array
+    advantages: Array
+    value_targets: Array
+    returns: Array
 
 
 def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
@@ -103,9 +110,9 @@ def clipped_value_loss(
 
 
 def compute_ppo_loss(
-    agent: ActorCriticAgent,
+    model: PyTree,
     transitions: Transition,
-    rollout_time_stats: PPORolloutTimeStats,
+    ppo_metrics: PPOMetrics,
     rng: PRNGKeyArray,
     *,
     normalize_advantage: bool = True,
@@ -122,22 +129,22 @@ def compute_ppo_loss(
     sampling function, these may be contiguous along the time dim.
     """
     # get the log probs of the current model
-    prediction = jax.vmap(agent.actor_model.batched_forward_across_time, in_axes=(0, 0))(
+    prediction = jax.vmap(model.actor_model.batched_forward_across_time, in_axes=(0, 0))(
         transitions.obs, transitions.command
     )  # TODO: maybe assume it'll be BT, vmap this... this will break otherwise...
-    values = jax.vmap(agent.critic_model.batched_forward_across_time, in_axes=(0, 0))(
+    values = jax.vmap(model.critic_model.batched_forward_across_time, in_axes=(0, 0))(
         transitions.obs, transitions.command
     )
     values = values.squeeze(axis=-1)
-    log_probs_per_action = agent.action_distribution.log_prob(prediction, transitions.action)
+    log_probs_per_action = model.action_distribution.log_prob(prediction, transitions.action)
     log_probs = jnp.sum(log_probs_per_action, axis=-1)
 
-    log_prob_diff = log_probs - rollout_time_stats.initial_action_log_probs
+    log_prob_diff = log_probs - ppo_metrics.initial_action_log_probs
     ratio = jnp.exp(log_prob_diff)
 
     # get the state-value estimates
-    advantages = rollout_time_stats.advantages
-    value_targets = rollout_time_stats.value_targets
+    advantages = ppo_metrics.advantages
+    value_targets = ppo_metrics.value_targets
 
     # Andrychowicz (2021) did not find any benefit in minibatch normalization.
     if normalize_advantage and normalize_advantage_in_minibatch:
@@ -157,7 +164,7 @@ def compute_ppo_loss(
         use_clipped_value_loss,
         lambda: 0.5
         * clipped_value_loss(
-            target_values=rollout_time_stats.initial_values,
+            target_values=ppo_metrics.initial_values,
             values=values,
             value_targets=value_targets,
             clip_param=clip_param,
@@ -167,7 +174,7 @@ def compute_ppo_loss(
     value_objective = value_loss_coef * value_mse
 
     # Entropy bonus term.
-    entropies = agent.action_distribution.entropy(prediction, rng)
+    entropies = model.action_distribution.entropy(prediction, rng)
     entropy_objective = entropy_coef * jnp.mean(entropies)
 
     total_objective = policy_objective - value_objective + entropy_objective
@@ -183,7 +190,7 @@ def compute_ppo_loss(
         "ratio_max": jnp.max(ratio),
         "ratio_min": jnp.min(ratio),
         "log_prob_diff_mean": jnp.mean(log_prob_diff),
-        "advantage_norm_mean": jnp.mean(rollout_time_stats.advantages),
+        "advantage_norm_mean": jnp.mean(ppo_metrics.advantages),
         "action_mean": jnp.mean(transitions.action),
         "action_std": jnp.std(transitions.action),
         "action_max": jnp.max(transitions.action),
@@ -199,58 +206,68 @@ def compute_ppo_loss(
         "action_nans_ratio": xax.compute_nan_ratio(transitions.action),
     }
 
-    if isinstance(agent.action_distribution, GaussianDistribution):
-        mu, sigma = agent.action_distribution.get_mean_std(prediction)
-        metrics_to_log["prediction_mu_mean"] = jnp.mean(mu)
-        metrics_to_log["prediction_sigma_mean"] = jnp.mean(sigma)
-        metrics_to_log["prediction_sigma_min"] = jnp.min(sigma)
-        metrics_to_log["prediction_sigma_max"] = jnp.max(sigma)
-
     return total_loss, metrics_to_log
 
 
 @jax.tree_util.register_dataclass
 @dataclass
 class PPOConfig(RLConfig):
-    # For the CLIP term (see Schulman et al. 2017)
-    clip_param: float = xax.field(value=0.2, help="Clipping parameter for PPO.")
-
-    # For the Value Function (VF) term
-    value_loss_coef: float = xax.field(value=0.5, help="Value loss coefficient for PPO.")
-    use_clipped_value_loss: bool = xax.field(value=True, help="Whether to use clipped value loss.")
-
-    # For the entropy bonus term
-    entropy_coef: float = xax.field(value=0.008, help="Entropy coefficient for PPO.")
-
-    # For the GAE computation
-    gamma: float = xax.field(value=0.99, help="Discount factor for PPO")
-    lam: float = xax.field(value=0.95, help="Lambda for GAE: high = more bias; low = more variance")
-    eps: float = xax.field(value=1e-6, help="Small epsilon value to avoid division by zero.")
-
-    # General training parameters
-    learning_rate: float = xax.field(value=1e-4, help="Learning rate for PPO.")
-    max_grad_norm: float = xax.field(value=0.5, help="Maximum gradient norm for clipping.")
-
-    # Normalization parameters
+    clip_param: float = xax.field(
+        value=0.2,
+        help="Clipping parameter for PPO, see Schulman et al. (2017)",
+    )
+    value_loss_coef: float = xax.field(
+        value=0.5,
+        help="Value loss coefficient for PPO.",
+    )
+    use_clipped_value_loss: bool = xax.field(
+        value=True,
+        help="Whether to use clipped value loss.",
+    )
+    entropy_coef: float = xax.field(
+        value=0.008,
+        help="Entropy coefficient for PPO.",
+    )
+    gamma: float = xax.field(
+        value=0.99,
+        help="Discount factor for PPO",
+    )
+    lam: float = xax.field(
+        value=0.95,
+        help="Lambda for GAE: high = more bias; low = more variance",
+    )
+    eps: float = xax.field(
+        value=1e-6,
+        help="Small epsilon value to avoid division by zero.",
+    )
+    learning_rate: float = xax.field(
+        value=1e-4,
+        help="Learning rate for PPO.",
+    )
+    max_grad_norm: float = xax.field(
+        value=0.5,
+        help="Maximum gradient norm for clipping.",
+    )
     scale_rewards: bool = xax.field(
         value=False,
-        help="Whether to scale rewards, see Engstrom, Ilyas, et al., (2020).",
+        help="Whether to scale rewards, see Engstrom, Ilyas, et al. (2020).",
     )
-    normalize_advantage: bool = xax.field(value=True, help="Whether to normalize advantages.")
+    normalize_advantage: bool = xax.field(
+        value=True,
+        help="Whether to normalize advantages.",
+    )
     normalize_advantage_in_minibatch: bool = xax.field(
         value=False,
         help="Whether to normalize advantages at the minibatch level as per OpenAI baselines.",
     )
-    # NOTE: if scale_rewards is True, advantages will still get its own normalization
     reward_scaling_alpha: float = xax.field(
         value=0.0003,
-        help="Rate at which to update reward scaling online as per Hessel, Soyer, et al., (2018).",
+        help="Rate at which to update reward scaling online as per Hessel, Soyer, et al. (2018).",
     )
     obs_norm_alpha: float = xax.field(
         value=0.0003,
         help="Rate at which to update observation norm stats, Andrychowicz (2021) and Duan (2016).",
     )
-    # NOTE: as per recommendations, going to enforce observation normalization.
     pretrained: str | None = xax.field(
         value=None,
         help="The path to a pretrained model to load.",
@@ -267,32 +284,29 @@ Config = TypeVar("Config", bound=PPOConfig)
 class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
 
-    def compute_loss(self, model: PyTree, batch: Any, output: Any) -> Array:  # noqa: ANN401
-        raise NotImplementedError(
-            "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
-            "PPO tasks use model_update and loss_metrics_grads instead."
+    def get_optimizer(self) -> optax.GradientTransformation:
+        """Builds the optimizer.
+
+        This provides a reasonable default optimizer for training PPO models,
+        but can be overridden by subclasses who want to do something different.
+        """
+        return optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.adam(self.config.learning_rate),
         )
 
-    @abstractmethod
-    def critic_predict_minibatch(
-        self,
-        agent: ActorCriticAgent,
-        obs_ET: Array,
-        cmd_ET: Array,
-    ) -> Array: ...
-
-    @eqx.filter_jit  # TODO: implement filter-like jit in xax
-    def get_rollout_time_stats(self, transitions: Transition, agent: ActorCriticAgent) -> RolloutTimeStats:
+    @eqx.filter_jit
+    def get_rollout_time_stats(self, transitions: Transition, model: PyTree) -> PPOMetrics:
         """Calculating advantages and returns for a rollout."""
-        prediction = jax.vmap(agent.actor_model.batched_forward_across_time, in_axes=(0, 0))(
+        prediction = jax.vmap(model.actor_model.batched_forward_across_time, in_axes=(0, 0))(
             transitions.obs, transitions.command
         )
-        initial_values = jax.vmap(agent.critic_model.batched_forward_across_time, in_axes=(0, 0))(
+        initial_values = jax.vmap(model.critic_model.batched_forward_across_time, in_axes=(0, 0))(
             transitions.obs, transitions.command
         )
         initial_values = initial_values.squeeze(axis=-1)
 
-        initial_action_log_probs_per_action = agent.action_distribution.log_prob(
+        initial_action_log_probs_per_action = model.action_distribution.log_prob(
             parameters=prediction,
             actions=transitions.action,
         )
@@ -317,7 +331,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         if self.config.normalize_advantage and not self.config.normalize_advantage_in_minibatch:
             advantages = (advantages - advantages.mean()) / (advantages.std() + self.config.eps)
 
-        return PPORolloutTimeStats(
+        return PPOMetrics(
             initial_action_log_probs=jax.lax.stop_gradient(initial_action_log_probs),
             initial_values=jax.lax.stop_gradient(initial_values),
             advantages=jax.lax.stop_gradient(advantages),
@@ -325,48 +339,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             returns=jax.lax.stop_gradient(returns),
         )
 
-    def model_update(
-        self,
-        agent: ActorCriticAgent,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
-        minibatch: RLDataset,
-        rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
-        """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        loss_val, metrics, grads = self.loss_metrics_grads(
-            agent=agent,
-            minibatch=minibatch,
-            rng=rng,
-        )
-
-        # updates and opt_state have complex types that are hard to type properly. TODO: fix.
-        updates, new_opt_state = optimizer.update(grads, opt_state, agent)  # type: ignore[operator]
-        new_agent = eqx.apply_updates(agent, updates)  # TODO: let's build our own debuggable apply_updates
-
-        # adding grad and loss to metrics
-        grad_norm = optax.global_norm(grads)
-        assert isinstance(grad_norm, Array)
-        metrics["loss"] = loss_val
-        metrics["grad_norm"] = grad_norm
-        frozen_metrics: FrozenDict[str, Array] = FrozenDict(metrics)
-
-        return new_agent, new_opt_state, loss_val, frozen_metrics
-
     def loss_metrics_grads(
         self,
-        agent: ActorCriticAgent,
-        minibatch: RLDataset,
+        model: PyTree,
+        transitions: Transition,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array], PyTree]:
         """Value_and_grad computation with metrics."""
 
-        def loss_fn(agent: ActorCriticAgent) -> tuple[Array, dict[str, Array]]:
-            """Agent is a PyTree and can be optimized via optax."""
+        def loss_fn(model: PyTree) -> tuple[Array, dict[str, Array]]:
+            """Model is a PyTree and can be optimized via optax."""
             rollout_time_stats = minibatch.rollout_time_stats
             assert isinstance(rollout_time_stats, PPORolloutTimeStats)
             return compute_ppo_loss(
-                agent=agent,
+                model=model,
                 transitions=minibatch.transitions,
                 rollout_time_stats=rollout_time_stats,
                 rng=rng,
@@ -380,5 +366,51 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             )
 
         # TODO: let's own our own debuggable filter value and grad
-        (loss_val, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(agent)
+        (loss_val, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
         return loss_val, metrics, grads
+
+    def _single_step(
+        self,
+        model: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        transitions: Transition,
+        rng: PRNGKeyArray,
+    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
+        loss_val, metrics, grads = self.loss_metrics_grads(
+            model=model,
+            transitions=transitions,
+            rng=rng,
+        )
+
+        # Apply the gradient updates to the model.
+        updates, new_opt_state = optimizer.update(grads, opt_state, model)  # type: ignore[operator]
+        new_model = eqx.apply_updates(model, updates)
+
+        # Add global gradient norm and loss to the metrics, to monitor training.
+        grad_norm = optax.global_norm(grads)
+        assert isinstance(grad_norm, Array)
+        metrics["loss"] = loss_val
+        metrics["grad_norm"] = grad_norm
+
+        return new_model, new_opt_state, loss_val, FrozenDict(metrics)
+
+    def update_model(
+        self,
+        model: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        transitions: Transition,
+        rng: PRNGKeyArray,
+    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
+        """Returns the updated parameters, optimizer state, loss value, and metrics."""
+        # return self._single_step(
+        #     model=model,
+        #     optimizer=optimizer,
+        #     opt_state=opt_state,
+        #     transitions=transitions,
+        #     rng=rng,
+        # )
+
+        # TODO: Implement this.
+        return model, opt_state, 0.0, FrozenDict({})

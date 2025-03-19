@@ -14,7 +14,7 @@ import jax.numpy as jnp
 import matplotlib
 from jaxtyping import Array, PyTree
 
-from ksim.env.mjx_engine import MjxEngine
+from ksim.env.engine import MjxEngine
 from ksim.task.rl import RLTask
 from ksim.utils.interactive.base import (
     InteractiveVisualizer,
