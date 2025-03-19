@@ -226,7 +226,7 @@ class PPOConfig(RLConfig):
         help="Whether to include the last batch if it's not full.",
     )
     min_batch_size: int = xax.field(
-        default=2,
+        value=2,
         help="The minimum number of transitions to include in a batch.",
     )
 

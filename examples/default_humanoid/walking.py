@@ -29,7 +29,9 @@ from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
 from ksim.utils.mujoco import get_joint_metadata
 
-NUM_INPUTS = 29
+OBS_SIZE = 21 # check this
+CMD_SIZE = 2
+NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
 
 class DefaultHumanoidActor(eqx.Module):
@@ -59,33 +61,6 @@ class DefaultHumanoidActor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
-    
-    def make_export_model(self) -> tuple[Callable, int]:
-        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
-
-        Returns:
-            A tuple containing the inference function and the size of the input vector.
-        """
-        input_size = self.mlp.in_size
-
-        if input_size == "scalar":
-            input_size = 1
-
-        distribution = xax.nn.distributions.TanhGaussianDistribution(action_dim=NUM_OUTPUTS)
-
-        def model_fn(input: Array) -> Array:
-            prediction = self.mlp(input)
-
-            mean = prediction[..., :NUM_OUTPUTS]
-            std = prediction[..., NUM_OUTPUTS:]
-
-            # Leaving room to make this stochastic
-            parameterization = jnp.concatenate([mean, std], axis=-1)
-            deterministic_action = distribution.mode(parameterization)
-
-            return deterministic_action
-
-        return model_fn, input_size
 
     def __call__(
         self,
@@ -255,6 +230,51 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         action_dist_n = model.actor(act_frc_obs_n, lin_vel_cmd_n)
         action_n = action_dist_n.sample(seed=rng)
         return action_n, None
+
+    def make_export_model(self, model: DefaultHumanoidModel, stochastic: bool = False, batched: bool = False) -> Callable:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+
+        Returns:
+            A tuple containing the inference function and the size of the input vector.
+        """
+        def deterministic_model_fn(obs: Array, cmd: Array) -> Array:
+            distribution = model.actor(obs, cmd)
+            return distribution.mode()
+
+        def stochastic_model_fn(obs: Array, cmd: Array) -> Array:
+            distribution = model.actor(obs, cmd)
+            return distribution.sample(seed=jax.random.PRNGKey(0))
+        
+        if stochastic:
+            model_fn = stochastic_model_fn
+        else:
+            model_fn = deterministic_model_fn
+
+        if batched:
+            def batched_model_fn(obs: Array, cmd: Array) -> Array:
+                return jax.vmap(model_fn)(obs, cmd)
+
+            return batched_model_fn
+
+        return model_fn
+
+    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
+        state = super().on_after_checkpoint_save(ckpt_path, state)
+
+        model: DefaultHumanoidModel = self.load_checkpoint(ckpt_path, part="model")
+
+        model_fn = self.make_export_model(model, stochastic=False, batched=True)
+
+        input_shapes = [(OBS_SIZE,), (CMD_SIZE,)]
+
+        xax.export(
+            model_fn,
+            input_shapes,
+            ckpt_path.parent / "tf_model",
+        )
+
+        return state
+
 
 if __name__ == "__main__":
     # python -m examples.default_humanoid.walking run_environment=True
