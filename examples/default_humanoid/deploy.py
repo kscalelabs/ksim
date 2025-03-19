@@ -2,18 +2,17 @@
 
 import argparse
 import asyncio
+import logging
+import signal
+import subprocess
+import sys
 import time
 from dataclasses import dataclass
-import subprocess
-import os
-import signal
-import sys
-from typing import Tuple, Callable, Optional, Any
+from typing import Any, Callable, Optional, Tuple
 
 import numpy as np
 import pykos
 import tensorflow as tf
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +80,7 @@ async def get_observation(kos: pykos.KOS) -> np.ndarray:
 async def send_actions(kos: pykos.KOS, actions: np.ndarray) -> None:
     actions = np.rad2deg(actions)
     # Use dict as an intermediate type that will be converted to ActuatorCommand by pykos
-    actuator_commands = [
+    actuator_commands: list[pykos.ActuatorCommand] = [
         {
             "actuator_id": ac.actuator_id,
             "position": actions[ac.nn_id],
@@ -113,11 +112,14 @@ async def reset(kos: pykos.KOS) -> None:
     )
 
 
-def spawn_kos_sim() -> Tuple[subprocess.Popen, Callable]:
+def spawn_kos_sim(no_render: bool) -> Tuple[subprocess.Popen, Callable]:
     """Spawn the KOS-Sim default-humanoid process and return the process object."""
     logger.info("Starting KOS-Sim default-humanoid...")
+    args = ["kos-sim", "default-humanoid"]
+    if no_render:
+        args.append("--no-render")
     process = subprocess.Popen(
-        ["kos-sim", "default-humanoid"],
+        args,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -144,7 +146,7 @@ def spawn_kos_sim() -> Tuple[subprocess.Popen, Callable]:
     return process, cleanup
 
 
-async def main(model_path: str, ip: str) -> None:
+async def main(model_path: str, ip: str, no_render: bool) -> None:
     model = tf.saved_model.load(model_path)
 
     cmd = [0.5, 0.0]  # x, y
@@ -164,7 +166,7 @@ async def main(model_path: str, ip: str) -> None:
     except Exception as e:
         logger.info("Could not connect to existing KOS-Sim: %s", e)
         logger.info("Starting a new KOS-Sim instance locally...")
-        sim_process, cleanup_fn = spawn_kos_sim()
+        sim_process, cleanup_fn = spawn_kos_sim(no_render)
         kos = pykos.KOS()
         try:
             await kos.sim.get_parameters()
@@ -180,18 +182,23 @@ async def main(model_path: str, ip: str) -> None:
     await reset(kos)
 
     target_time = time.time() + dt
-
+    observation = (await get_observation(kos)).reshape(1, -1)
     try:
         while True:
-            observation = await get_observation(kos)
+            action = np.array(model.infer(observation, cmd)).reshape(-1)
+
+            observation, _ = await asyncio.gather(
+                get_observation(kos),
+                send_actions(kos, action),
+            )
+
             observation = observation.reshape(1, -1)
 
-            # logger.debug(observation)
+            if time.time() < target_time:
+                await asyncio.sleep(max(0, target_time - time.time()))
+            else:
+                logger.info("Loop overran by %s seconds", time.time() - target_time)
 
-            action = np.array(model.infer(observation, cmd)).reshape(-1)
-            await send_actions(kos, action)
-
-            await asyncio.sleep(max(0, time.time() - target_time))
             target_time += dt
     except KeyboardInterrupt:
         logger.info("Exiting...")
@@ -208,7 +215,8 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--ip", type=str, default="localhost")
+    parser.add_argument("--no-render", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
-    asyncio.run(main(args.model_path, args.ip))
+    asyncio.run(main(args.model_path, args.ip, args.no_render))

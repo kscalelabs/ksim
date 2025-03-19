@@ -29,6 +29,9 @@ refs/
 *.gif
 run_*/
 
+# KOS-Sim
+.kos-sim/
+
 # Other caching.
 .jaxcache/
 .DS_Store
