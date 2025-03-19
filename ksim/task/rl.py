@@ -283,7 +283,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> PhysicsEngine:
         return get_physics_engine(
             engine_type=engine_type_from_physics_model(physics_model),
-            randomizations=self.get_randomization(physics_model),
             resets=self.get_resets(physics_model),
             actuators=self.get_actuators(physics_model, metadata),
             dt=self.config.dt,
