@@ -34,8 +34,6 @@ EngineType = Literal["mjx", "mujoco"]
 @dataclass(frozen=True)
 class EngineConstants:
     physics_model: PhysicsModel
-    initial_carry: PyTree
-    initial_command: FrozenDict[str, Array]
     obs_generators: Collection[Observation]
     command_generators: Collection[Command]
     reward_generators: Collection[Reward]
@@ -48,6 +46,7 @@ class EngineVariables:
     carry: PyTree
     commands: FrozenDict[str, Array]
     physics_state: PhysicsState
+    rng: PRNGKeyArray
 
 
 class PhysicsEngine(eqx.Module, ABC):

@@ -4,7 +4,6 @@ TODO: need to add SPMD and sharding support for super fast training :)
 """
 
 import bdb
-import functools
 import itertools
 import logging
 import signal
@@ -31,8 +30,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
-from omegaconf import MISSING
-from xax.utils.transformation import scan_model
+from omegaconf import II, MISSING
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
@@ -47,7 +45,6 @@ from ksim.env.engine import (
 from ksim.observation import Observation
 from ksim.resets import Reset
 from ksim.rewards import Reward
-from ksim.task.types import RLDataset
 from ksim.terminations import Termination
 from ksim.utils.named_access import get_joint_metadata
 
@@ -96,23 +93,6 @@ def get_rewards(
         chex.assert_shape(reward_val, (), custom_message=f"Reward {name} must be a scalar")
         rewards[name] = reward_val
     return FrozenDict(rewards)
-
-
-def post_accumulate_rewards(
-    reward_components: FrozenDict[str, Array],
-    done: Array,
-    *,
-    reward_generators: Collection[Reward],
-) -> FrozenDict[str, Array]:
-    """Post-accumulate rewards."""
-    post_accumulated_reward_components = dict(reward_components)
-    for reward_generator in reward_generators:
-        original_reward = reward_components[reward_generator.reward_name]
-        assert isinstance(original_reward, Array)
-        reward_val = reward_generator.post_accumulate(original_reward, done)
-        post_accumulated_reward_components[reward_generator.reward_name] = reward_val
-
-    return FrozenDict(post_accumulated_reward_components)
 
 
 def get_terminations(
@@ -202,42 +182,27 @@ class StepInput:
 @jax.tree_util.register_dataclass
 @dataclass
 class RLConfig(xax.Config):
+    # Debugging parameters.
     run_environment: bool = xax.field(
         value=False,
         help="Instead of dropping into the training loop, run the environment loop.",
     )
-    num_learning_epochs: int = xax.field(
-        value=MISSING,
-        help="Number of learning epochs per dataset.",
-    )
-    num_env_states_per_minibatch: int = xax.field(
-        value=MISSING,
-        help="The number of environment states to include in each minibatch.",
-    )
-    num_minibatches: int = xax.field(
-        value=MISSING,
-        help="The number of minibatches to use for training.",
-    )
+
+    # Training parameters.
     num_envs: int = xax.field(
         value=MISSING,
         help="The number of training environments to run in parallel.",
     )
-    eval_rollout_length: int = xax.field(
+    rollout_length_seconds: float = xax.field(
         value=MISSING,
-        help="The number of ctrl steps to rollout the model for evaluation.",
+        help="The number of seconds to rollout each environment during training.",
     )
-    checkpoint_num: int | None = xax.field(
-        value=None,
-        help="The checkpoint number to load. Otherwise the latest checkpoint is loaded.",
+    eval_rollout_length_seconds: float = xax.field(
+        value=II("rollout_length_seconds"),
+        help="The number of seconds to rollout the model for evaluation.",
     )
-    reshuffle_rollout: bool = xax.field(
-        value=True,
-        help="Whether to reshuffle the rollout dataset.",
-    )
-    compile_unroll: bool = xax.field(
-        value=True,
-        help="Whether to compile the entire unroll fn.",
-    )
+
+    # Rendering parameters.
     render_height: int = xax.field(
         value=480,
         help="The height of the rendered images.",
@@ -266,10 +231,8 @@ class RLConfig(xax.Config):
         value=[0.0, 0.0, 0.5],
         help="The lookat point of the render camera.",
     )
-    render_dir: str = xax.field(
-        value="render",
-        help="The directory to save the rendered images.",
-    )
+
+    # Engine parameters.
     ctrl_dt: float = xax.field(
         value=0.02,
         help="The time step of the control loop.",
@@ -415,28 +378,33 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             The action to take.
         """
 
+    @property
+    def rollout_length_steps(self) -> int:
+        return round(self.config.rollout_length_seconds / self.config.ctrl_dt)
+
+    @property
+    def eval_rollout_length_steps(self) -> int:
+        return round(self.config.eval_rollout_length_seconds / self.config.ctrl_dt)
+
     def step_engine(
         self,
         model: PyTree,
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
         engine_variables: EngineVariables,
-        rng: PRNGKeyArray,
     ) -> tuple[Transition, EngineVariables]:
         """Runs a single step of the physics engine.
 
         Args:
             model: The model, with parameters to be updated.
-            carry: The carry from the previous step.
             engine: The physics engine.
             engine_constants: The constants for the engine.
             engine_variables: The variables for the engine.
-            rng: The random key.
 
         Returns:
             A tuple containing the transition and the next engine variables.
         """
-        obs_rng, cmd_rng, act_rng, reset_rng, physics_rng = jax.random.split(rng, 5)
+        rng, obs_rng, cmd_rng, act_rng, reset_rng, physics_rng = jax.random.split(engine_variables.rng, 6)
 
         # Gets the observations from the physics state.
         observations = get_observation(
@@ -497,12 +465,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         next_carry = jax.lax.cond(
             terminated,
-            lambda: engine_constants.initial_carry,
+            lambda: self.get_initial_carry(),
             lambda: next_carry,
         )
         commands = jax.lax.cond(
             terminated,
-            lambda: engine_constants.initial_command,
+            lambda: get_initial_commands(
+                cmd_rng,
+                command_generators=engine_constants.command_generators,
+            ),
             lambda: commands,
         )
 
@@ -523,6 +494,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             carry=next_carry,
             commands=commands,
             physics_state=next_physics_state,
+            rng=rng,
         )
 
         return transition, next_variables
@@ -537,193 +509,264 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         else:
             self.run_training()
 
-    def get_reward_stats(
+    def log_reward_stats(
         self,
-        trajectory: Transition,
+        transitions: Transition,
         reward_generators: Collection[Reward],
-    ) -> dict[str, jnp.ndarray]:
-        """Get reward statistics from the trajectoryl (D)."""
+        namespace: str = "reward",
+    ) -> None:
+        """Log reward statistics from the trajectory or trajectories.
+
+        Args:
+            transitions: The transitions to log the reward statistics for.
+            reward_generators: The reward generators to log the statistics for.
+            namespace: The namespace to log the statistics to.
+        """
         reward_stats: dict[str, jnp.ndarray] = {}
 
-        num_episodes = jnp.sum(trajectory.done).clip(min=1)
-        terms = trajectory.reward_components
+        num_episodes = jnp.sum(transitions.done).clip(min=1)
+        terms = transitions.reward_components
         for generator in reward_generators:
             statistic = terms[generator.reward_name]
             assert isinstance(statistic, Array)
             reward_stats[generator.reward_name] = jnp.sum(statistic) / num_episodes
 
-        return reward_stats
+        for key, value in reward_stats.items():
+            self.logger.log_scalar(key=key, value=value, namespace=namespace)
 
-    def get_termination_stats(
+    def log_termination_stats(
         self,
-        trajectory: Transition,
+        transitions: Transition,
         termination_generators: Collection[Termination],
-    ) -> dict[str, jnp.ndarray]:
-        """Get termination statistics from the trajectory (D)."""
+        namespace: str = "termination",
+    ) -> None:
+        """Log termination statistics from the trajectory or trajectories.
+
+        Args:
+            transitions: The transitions to log the termination statistics for.
+            termination_generators: The termination generators to log the statistics for.
+            namespace: The namespace to log the statistics to.
+        """
         termination_stats: dict[str, jnp.ndarray] = {}
 
-        terms = trajectory.termination_components
+        terms = transitions.termination_components
         for generator in termination_generators:
             statistic = terms[generator.termination_name]
             assert isinstance(statistic, Array)
             termination_stats[generator.termination_name] = jnp.mean(statistic)
 
-        return termination_stats
-
-    def log_trajectory_stats(
-        self,
-        transitions: Transition,
-        reward_generators: Collection[Reward],
-        termination_generators: Collection[Termination],
-        eval: bool = False,
-    ) -> None:
-        """Logs the reward and termination stats for the trajectory."""
-        for key, value in self.get_reward_stats(transitions, reward_generators).items():
-            self.logger.log_scalar(
-                key=key,
-                value=value,
-                namespace="reward" if not eval else "eval/reward",
-            )
-        for key, value in self.get_termination_stats(transitions, termination_generators).items():
-            self.logger.log_scalar(
-                key=key,
-                value=value,
-                namespace="termination" if not eval else "eval/termination",
-            )
+        for key, value in termination_stats.items():
+            self.logger.log_scalar(key=key, value=value, namespace=namespace)
 
         # Logs the mean episode length.
         episode_num_per_env = jnp.sum(transitions.done, axis=0) + (1 - transitions.done[-1])
         episode_count = jnp.sum(episode_num_per_env)
         num_env_states = jnp.prod(jnp.array(transitions.done.shape))
         mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
-        self.logger.log_scalar(
-            key="mean_episode_seconds",
-            value=mean_episode_length_steps,
-            namespace="stats" if not eval else "eval/stats",
+        self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace=namespace)
+
+    def log_single_trajectory(
+        self,
+        transitions: Transition,
+        namespace: str = "trajectory",
+    ) -> None:
+        """Visualizes a single trajectory.
+
+        Args:
+            transitions: The transitions to visualize.
+            namespace: The namespace to log the statistics to.
+        """
+
+    @eqx.filter_jit
+    def _single_unroll(
+        self,
+        rng: PRNGKeyArray,
+        model: PyTree,
+        engine: PhysicsEngine,
+        engine_constants: EngineConstants,
+        num_steps: int,
+    ) -> Transition:
+        initial_carry = self.get_initial_carry()
+        rng, cmd_rng = jax.random.split(rng)
+        initial_commands = get_initial_commands(
+            cmd_rng,
+            command_generators=engine_constants.command_generators,
         )
 
-    def log_update_metrics(self, metrics: FrozenDict[str, Array]) -> None:
-        """Logs the update stats for the current update."""
-        for key, value in metrics.items():
-            assert isinstance(value, Array)
-            self.logger.log_scalar(
-                key=key,
-                value=value,
-                namespace="update",
-            )
+        # Reset the physics state.
+        rng, reset_rng = jax.random.split(rng)
+        physics_state = engine.reset(engine_constants.physics_model, reset_rng)
 
-    @xax.profile
-    def get_minibatch(
-        self,
-        dataset: RLDataset,
-        minibatch_idx: Array,
-    ) -> RLDataset:
-        """Selecting across E dim to go from (E, T) to (B, T)."""
-        starting_idx = minibatch_idx * self.num_envs_per_minibatch
-        minibatch = xax.slice_pytree(
-            dataset,
-            start=starting_idx,
-            slice_length=self.num_envs_per_minibatch,
-        )
-        return minibatch
-
-    @xax.profile
-    def scannable_minibatch_step(
-        self,
-        training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
-        minibatch_idx: Array,
-        *,
-        optimizer: optax.GradientTransformation,
-        dataset_ET: RLDataset,
-    ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
-        """Perform a single minibatch update step."""
-        agent, opt_state, rng = training_state
-        minibatch_BT = self.get_minibatch(dataset_ET, minibatch_idx)
-        agent, opt_state, _, metrics = self.model_update(
-            agent=agent,
-            optimizer=optimizer,
-            opt_state=opt_state,
-            minibatch=minibatch_BT,
+        engine_variables = EngineVariables(
+            carry=initial_carry,
+            commands=initial_commands,
+            physics_state=physics_state,
             rng=rng,
         )
-        rng, _ = jax.random.split(rng)
 
-        return (agent, opt_state, rng), metrics
-
-    @xax.profile
-    def scannable_train_epoch(
-        self,
-        training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
-        _: None,
-        *,
-        optimizer: optax.GradientTransformation,
-        dataset_ET: RLDataset,
-    ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
-        """Train a minibatch, returns the updated agent, optimizer state, loss, and metrics."""
-        agent = training_state[0]
-        opt_state = training_state[1]
-        rng = training_state[2]
-
-        if self.config.reshuffle_rollout:  # if doing recurrence, can't shuffle across T
-            dataset_ET = xax.reshuffle_pytree(  # TODO: confirm this actually reshuffles across T and E (for IID)
-                dataset_ET,
-                (self.config.num_envs, self.num_rollout_steps_per_env),
-                rng,
+        def scan_fn(carry: EngineVariables, _: None) -> tuple[EngineVariables, Transition]:
+            transition, next_engine_variables = self.step_engine(
+                model=model,
+                engine=engine,
+                engine_constants=engine_constants,
+                engine_variables=carry,
             )
-        rng, minibatch_rng = jax.random.split(rng)
+            return next_engine_variables, transition
 
-        partial_fn = functools.partial(
-            self.scannable_minibatch_step,
-            optimizer=optimizer,
-            dataset_ET=dataset_ET,
+        # Scans the engine for the desired number of steps.
+        _, transitions = jax.lax.scan(scan_fn, engine_variables, length=num_steps)
+
+        # Apply post_accumulate and scale to the fully unrolled rewards.
+        all_rewards = transitions.reward_components
+        reward_list = [
+            reward_fn.post_accumulate(all_rewards[reward_fn.reward_name], transitions.done)
+            for reward_fn in engine_constants.reward_generators
+        ]
+        rewards = jnp.stack(reward_list, axis=1)
+
+        return Transition(
+            obs=transitions.obs,
+            command=transitions.command,
+            action=transitions.action,
+            reward=rewards,
+            done=transitions.done,
+            timestep=transitions.timestep,
+            termination_components=transitions.termination_components,
+            reward_components=transitions.reward_components,
         )
 
-        (agent, opt_state, _), metrics = scan_model(
-            partial_fn,
-            agent,
-            (opt_state, minibatch_rng),
-            jnp.arange(self.config.num_minibatches),
-        )
-
-        # note that variables, opt_state are just the final values
-        # metrics is stacked over the minibatches
-        return (agent, opt_state, rng), metrics
-
-    @xax.profile
-    @eqx.filter_jit  # TODO: implement filter-like jit in xax
-    def rl_pass(
+    @eqx.filter_jit
+    def _vmapped_unroll(
         self,
-        agent: PyTree,
-        opt_state: optax.OptState,
-        reshuffle_rng: PRNGKeyArray,
-        optimizer: optax.GradientTransformation,
-        dataset_ET: RLDataset,
-    ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
-        """Perform multiple epochs of RL training on the current dataset."""
-        partial_fn = functools.partial(
-            self.scannable_train_epoch,
-            optimizer=optimizer,
-            dataset_ET=dataset_ET,
-        )
+        rng: PRNGKeyArray,
+        model: PyTree,
+        engine: PhysicsEngine,
+        engine_constants: EngineConstants,
+        num_steps: int,
+        num_envs: int,
+    ) -> Transition:
+        rngs = jax.random.split(rng, num_envs)
+        vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None))
+        return vmapped_unroll(rngs, model, engine, engine_constants, num_steps)
 
-        (agent, opt_state, reshuffle_rng), metrics = scan_model(
-            partial_fn,
-            agent,
-            (opt_state, reshuffle_rng),
-            None,
-            length=self.config.num_learning_epochs,
-        )
-        metrics = jax.tree.map(lambda x: jnp.mean(x), metrics)
-        return (agent, opt_state, reshuffle_rng), metrics
+    @abstractmethod
+    def update_model(
+        self,
+        model: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        trajectory: Transition,
+    ) -> tuple[PyTree, optax.GradientTransformation, optax.OptState, FrozenDict[str, Array]]:
+        """Updates the model on the given trajectory.
+
+        This function should be implemented according to the specific RL method
+        that we are using.
+
+        Args:
+            model: The model to update.
+            optimizer: The optimizer to use.
+            opt_state: The optimizer state.
+            trajectory: The trajectory to update the model on.
+
+        Returns:
+            A tuple containing the updated model, optimizer, optimizer state
+            and metrics to log.
+        """
 
     def rl_train_loop(
         self,
-        agent: PyTree,
+        model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        training_state: xax.State,
+        state: xax.State,
+        rng: PRNGKeyArray,
     ) -> None:
-        raise NotImplementedError("RL training loop not implemented")
+        mj_model: PhysicsModel = self.get_mujoco_model()
+        mjx_model = self.get_mjx_model(mj_model)
+        metadata = self.get_mujoco_model_metadata(mjx_model)
+        engine = self.get_engine(mjx_model, metadata)
+        observations = self.get_observations(mjx_model)
+        commands = self.get_commands(mjx_model)
+        rewards = self.get_rewards(mjx_model)
+        terminations = self.get_terminations(mjx_model)
+
+        # These remain constant across the entire episode.
+        engine_constants = EngineConstants(
+            physics_model=mjx_model,
+            obs_generators=observations,
+            command_generators=commands,
+            reward_generators=rewards,
+            termination_generators=terminations,
+        )
+
+        while not self.is_training_over(state):
+            # Validate by sampling and visualizing a single trajectory.
+            if self.valid_step_timer.is_valid_step(state):
+                state.raw_phase = "valid"
+                state.num_valid_steps += 1
+                state.num_valid_samples += self.eval_rollout_length_steps
+
+                rng, rollout_rng = jax.random.split(rng)
+                transitions = self._single_unroll(
+                    rng=rollout_rng,
+                    model=model,
+                    engine=engine,
+                    engine_constants=engine_constants,
+                    num_steps=self.eval_rollout_length_steps,
+                )
+
+                # Logs statistics from the trajectory.
+                with self.step_context("write_logs"):
+                    self.log_single_trajectory(transitions)
+                    self.log_reward_stats(transitions, rewards)
+                    self.log_termination_stats(transitions, terminations)
+                    self.logger.write(state)
+
+            breakpoint()
+
+            with self.step_context("on_step_start"):
+                state = self.on_step_start(state)
+
+            # Samples N trajectories in parallel.
+            rng, rollout_rng = jax.random.split(rng)
+            trajectory = self._vmapped_unroll(
+                rng=rollout_rng,
+                model=model,
+                engine=engine,
+                engine_constants=engine_constants,
+                num_steps=self.rollout_length_steps,
+                num_envs=self.config.num_envs,
+            )
+
+            # Optimizes the model on that trajectory.
+            model, optimizer, opt_state, train_metrics = self.update_model(
+                model=model,
+                optimizer=optimizer,
+                opt_state=opt_state,
+                trajectory=trajectory,
+            )
+
+            with self.step_context("write_logs"):
+                state.raw_phase = "train"
+                state.num_steps += 1
+                state.num_samples += self.rollout_length_steps * self.config.num_envs
+
+                # Logs statistics from the trajectory.
+                with self.step_context("write_logs"):
+                    self.log_reward_stats(transitions, rewards)
+                    self.log_termination_stats(transitions, terminations)
+                    self.logger.write(state)
+
+            with self.step_context("on_step_end"):
+                state = self.on_step_end(state)
+
+            if self.should_checkpoint(state):
+                self.save_checkpoint(
+                    model=model,
+                    optimizer=optimizer,
+                    opt_state=opt_state,
+                    state=state,
+                )
 
     def run_environment(
         self,
@@ -759,7 +802,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Gets initial variables.
             initial_carry = self.get_initial_carry()
-            initial_commands = get_initial_commands(rng, command_generators=commands)
+            rng, cmd_rng = jax.random.split(rng)
+            initial_commands = get_initial_commands(cmd_rng, command_generators=commands)
 
             # Resets the physics state.
             rng, reset_rng = jax.random.split(rng)
@@ -789,8 +833,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # These components remain constant across the entire episode.
             engine_constants = EngineConstants(
                 physics_model=mj_model,
-                initial_carry=initial_carry,
-                initial_command=initial_commands,
                 obs_generators=observations,
                 command_generators=commands,
                 reward_generators=rewards,
@@ -802,6 +844,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 carry=initial_carry,
                 commands=initial_commands,
                 physics_state=physics_state,
+                rng=rng,
             )
 
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
@@ -809,13 +852,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             step_id = 0
             try:
                 for step_id in iterator:
-                    rng, step_rng = jax.random.split(rng)
-                    transition, engine_variables = self.step_engine(
+                    _, engine_variables = self.step_engine(
                         model=model,
                         engine=engine,
                         engine_constants=engine_constants,
                         engine_variables=engine_variables,
-                        rng=step_rng,
                     )
 
                     if viewer is not None:
@@ -849,23 +890,24 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 Thread(target=self.log_state, daemon=True).start()
 
             rng, model_rng = jax.random.split(rng)
-            agent, optimizer, opt_state, training_state = self.load_initial_state(model_rng, load_optimizer=True)
+            model, optimizer, opt_state, training_state = self.load_initial_state(model_rng, load_optimizer=True)
 
             training_state = self.on_training_start(training_state)
             training_state.num_samples = 1  # prevents from checkpointing at start
 
             def on_exit() -> None:
-                self.save_checkpoint(agent, optimizer, opt_state, training_state)
+                self.save_checkpoint(model, optimizer, opt_state, training_state)
 
             # Handle user-defined interrupts during the training loop.
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
 
             try:
                 self.rl_train_loop(
-                    agent=agent,
+                    model=model,
                     optimizer=optimizer,
                     opt_state=opt_state,
-                    training_state=training_state,
+                    state=training_state,
+                    rng=rng,
                 )
 
             except xax.TrainingFinishedError:
@@ -875,7 +917,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         f"steps and {training_state.num_samples} samples"
                     )
                     xax.show_info(msg, important=True)
-                self.save_checkpoint(agent, optimizer, opt_state, training_state)
+                self.save_checkpoint(model, optimizer, opt_state, training_state)
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 if xax.is_master():
@@ -885,7 +927,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
-                self.save_checkpoint(agent, optimizer, opt_state, training_state)
+                self.save_checkpoint(model, optimizer, opt_state, training_state)
 
             finally:
                 training_state = self.on_training_end(training_state)

@@ -101,7 +101,7 @@ def clipped_value_loss(
 
 
 def compute_ppo_loss(
-    agent: PyTree,
+    model: PyTree,
     transitions: Transition,
     rollout_time_stats: PPORolloutTimeStats,
     rng: PRNGKeyArray,
@@ -120,14 +120,14 @@ def compute_ppo_loss(
     sampling function, these may be contiguous along the time dim.
     """
     # get the log probs of the current model
-    prediction = jax.vmap(agent.actor_model.batched_forward_across_time, in_axes=(0, 0))(
+    prediction = jax.vmap(model.actor_model.batched_forward_across_time, in_axes=(0, 0))(
         transitions.obs, transitions.command
     )  # TODO: maybe assume it'll be BT, vmap this... this will break otherwise...
-    values = jax.vmap(agent.critic_model.batched_forward_across_time, in_axes=(0, 0))(
+    values = jax.vmap(model.critic_model.batched_forward_across_time, in_axes=(0, 0))(
         transitions.obs, transitions.command
     )
     values = values.squeeze(axis=-1)
-    log_probs_per_action = agent.action_distribution.log_prob(prediction, transitions.action)
+    log_probs_per_action = model.action_distribution.log_prob(prediction, transitions.action)
     log_probs = jnp.sum(log_probs_per_action, axis=-1)
 
     log_prob_diff = log_probs - rollout_time_stats.initial_action_log_probs
@@ -165,7 +165,7 @@ def compute_ppo_loss(
     value_objective = value_loss_coef * value_mse
 
     # Entropy bonus term.
-    entropies = agent.action_distribution.entropy(prediction, rng)
+    entropies = model.action_distribution.entropy(prediction, rng)
     entropy_objective = entropy_coef * jnp.mean(entropies)
 
     total_objective = policy_objective - value_objective + entropy_objective
@@ -293,17 +293,17 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
     @eqx.filter_jit
-    def get_rollout_time_stats(self, transitions: Transition, agent: PyTree) -> RolloutTimeStats:
+    def get_rollout_time_stats(self, transitions: Transition, model: PyTree) -> RolloutTimeStats:
         """Calculating advantages and returns for a rollout."""
-        prediction = jax.vmap(agent.actor_model.batched_forward_across_time, in_axes=(0, 0))(
+        prediction = jax.vmap(model.actor_model.batched_forward_across_time, in_axes=(0, 0))(
             transitions.obs, transitions.command
         )
-        initial_values = jax.vmap(agent.critic_model.batched_forward_across_time, in_axes=(0, 0))(
+        initial_values = jax.vmap(model.critic_model.batched_forward_across_time, in_axes=(0, 0))(
             transitions.obs, transitions.command
         )
         initial_values = initial_values.squeeze(axis=-1)
 
-        initial_action_log_probs_per_action = agent.action_distribution.log_prob(
+        initial_action_log_probs_per_action = model.action_distribution.log_prob(
             parameters=prediction,
             actions=transitions.action,
         )
@@ -336,48 +336,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             returns=jax.lax.stop_gradient(returns),
         )
 
-    def model_update(
-        self,
-        agent: PyTree,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
-        minibatch: RLDataset,
-        rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
-        """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        loss_val, metrics, grads = self.loss_metrics_grads(
-            agent=agent,
-            minibatch=minibatch,
-            rng=rng,
-        )
-
-        # updates and opt_state have complex types that are hard to type properly. TODO: fix.
-        updates, new_opt_state = optimizer.update(grads, opt_state, agent)  # type: ignore[operator]
-        new_agent = eqx.apply_updates(agent, updates)  # TODO: let's build our own debuggable apply_updates
-
-        # adding grad and loss to metrics
-        grad_norm = optax.global_norm(grads)
-        assert isinstance(grad_norm, Array)
-        metrics["loss"] = loss_val
-        metrics["grad_norm"] = grad_norm
-        frozen_metrics: FrozenDict[str, Array] = FrozenDict(metrics)
-
-        return new_agent, new_opt_state, loss_val, frozen_metrics
-
     def loss_metrics_grads(
         self,
-        agent: PyTree,
+        model: PyTree,
         minibatch: RLDataset,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array], PyTree]:
         """Value_and_grad computation with metrics."""
 
-        def loss_fn(agent: PyTree) -> tuple[Array, dict[str, Array]]:
-            """Agent is a PyTree and can be optimized via optax."""
+        def loss_fn(model: PyTree) -> tuple[Array, dict[str, Array]]:
+            """Model is a PyTree and can be optimized via optax."""
             rollout_time_stats = minibatch.rollout_time_stats
             assert isinstance(rollout_time_stats, PPORolloutTimeStats)
             return compute_ppo_loss(
-                agent=agent,
+                model=model,
                 transitions=minibatch.transitions,
                 rollout_time_stats=rollout_time_stats,
                 rng=rng,
@@ -391,5 +363,35 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             )
 
         # TODO: let's own our own debuggable filter value and grad
-        (loss_val, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(agent)
+        (loss_val, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
         return loss_val, metrics, grads
+
+    def update_model(
+        self,
+        model: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        minibatch: RLDataset,
+        rng: PRNGKeyArray,
+    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
+        """Returns the updated parameters, optimizer state, loss value, and metrics."""
+        # loss_val, metrics, grads = self.loss_metrics_grads(
+        #     model=model,
+        #     minibatch=minibatch,
+        #     rng=rng,
+        # )
+
+        # # updates and opt_state have complex types that are hard to type properly. TODO: fix.
+        # updates, new_opt_state = optimizer.update(grads, opt_state, model)  # type: ignore[operator]
+        # new_model = eqx.apply_updates(model, updates)  # TODO: let's build our own debuggable apply_updates
+
+        # # adding grad and loss to metrics
+        # grad_norm = optax.global_norm(grads)
+        # assert isinstance(grad_norm, Array)
+        # metrics["loss"] = loss_val
+        # metrics["grad_norm"] = grad_norm
+        # frozen_metrics: FrozenDict[str, Array] = FrozenDict(metrics)
+
+        # return new_model, new_opt_state, loss_val, frozen_metrics
+
+        return model, opt_state, 0.0, FrozenDict({})

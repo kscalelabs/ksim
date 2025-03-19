@@ -3,7 +3,7 @@
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Callable, Generic, TypeVar
+from typing import Callable, Self
 
 import attrs
 import jax
@@ -42,7 +42,6 @@ class Reward(ABC):
         else:
             logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale)
 
-    # TODO: Use post_accumulate after unrolling
     def post_accumulate(self, reward: Array, done: Array) -> Array:
         """Runs a post-epoch accumulation step.
 
@@ -75,15 +74,6 @@ class Reward(ABC):
     @functools.cached_property
     def reward_name(self) -> str:
         return self.get_name()
-
-
-T = TypeVar("T", bound=Reward)
-
-
-class RewardBuilder(ABC, Generic[T]):
-    @abstractmethod
-    def __call__(self, physics_model: PhysicsModel) -> T:
-        """Builds a reward from a MuJoCo model."""
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -343,25 +333,25 @@ class FootSlipPenalty(Reward):
 
         return jnp.sum(jnp.linalg.norm(body_vel, axis=-1) * contacts)
 
-
-@attrs.define(frozen=True, kw_only=True)
-class FootSlipPenaltyBuilder(RewardBuilder[FootSlipPenalty]):
-    scale: float
-    foot_geom_names: list[str]
-
-    def __call__(self, physics_model: PhysicsModel) -> FootSlipPenalty:
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        foot_geom_names: list[str],
+        scale: float,
+    ) -> Self:
         geom_name_to_idx = get_geom_data_idx_by_name(physics_model)
         floor_idx = get_floor_idx(physics_model)
         illegal_geom_idxs = []
-        for geom_name in self.foot_geom_names:
+        for geom_name in foot_geom_names:
             illegal_geom_idxs.append(geom_name_to_idx[geom_name])
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
         if floor_idx is None:
             raise ValueError("No floor geom found in model")
 
-        return FootSlipPenalty(
-            scale=self.scale,
+        return cls(
+            scale=scale,
             foot_geom_idxs=illegal_geom_idxs,
             floor_idx=floor_idx,
         )
@@ -391,24 +381,25 @@ class FeetClearancePenalty(Reward):
 
         return jnp.sum(xax.get_norm(feet_heights - self.max_foot_height, self.norm))
 
-
-@attrs.define(frozen=True, kw_only=True)
-class FeetClearancePenaltyBuilder(RewardBuilder[FeetClearancePenalty]):
-    scale: float
-    foot_geom_names: list[str]
-    max_foot_height: float
-
-    def __call__(self, physics_model: PhysicsModel) -> FeetClearancePenalty:
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        foot_geom_names: list[str],
+        max_foot_height: float,
+        scale: float,
+    ) -> Self:
         geom_name_to_idx = get_geom_data_idx_by_name(physics_model)
         illegal_geom_idxs = []
-        for geom_name in self.foot_geom_names:
+        for geom_name in foot_geom_names:
             illegal_geom_idxs.append(geom_name_to_idx[geom_name])
+
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
-        return FeetClearancePenalty(
-            scale=self.scale,
+        return cls(
+            scale=scale,
             foot_geom_idxs=illegal_geom_idxs,
-            max_foot_height=self.max_foot_height,
+            max_foot_height=max_foot_height,
         )
 
 
@@ -533,25 +524,22 @@ class FeetAirTimeReward(Reward):
             )
         )
 
-    def get_name(self) -> str:
-        return super().get_name()
-
-
-@attrs.define(frozen=True, kw_only=True)
-class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
-    scale: float
-    left_foot_geom_names: list[str]
-    right_foot_geom_names: list[str]
-    contact_eps: float = attrs.field(default=1e-2)
-    skip_if_zero_command: tuple[str, ...] | None = attrs.field(default=None)
-    single_contact_reward: float = attrs.field(default=1.0)
-    no_contact_penalty: float = attrs.field(default=0.5)
-    all_contact_penalty: float = attrs.field(default=0.8)
-
-    def __call__(self, physics_model: PhysicsModel) -> FeetAirTimeReward:
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        left_foot_geom_names: list[str],
+        right_foot_geom_names: list[str],
+        scale: float,
+        contact_eps: float = 1e-2,
+        skip_if_zero_command: tuple[str, ...] | None = None,
+        single_contact_reward: float = 1.0,
+        no_contact_penalty: float = 0.5,
+        all_contact_penalty: float = 0.8,
+    ) -> Self:
         geom_name_to_idx = get_geom_data_idx_by_name(physics_model)
         left_foot_geom_idxs = []
-        for geom_name in self.left_foot_geom_names:
+        for geom_name in left_foot_geom_names:
             try:
                 left_foot_geom_idxs.append(geom_name_to_idx[geom_name])
             except KeyError:
@@ -559,7 +547,7 @@ class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
 
         left_foot_geom_idxs = jnp.array(left_foot_geom_idxs)
         right_foot_geom_idxs = []
-        for geom_name in self.right_foot_geom_names:
+        for geom_name in right_foot_geom_names:
             try:
                 right_foot_geom_idxs.append(geom_name_to_idx[geom_name])
             except KeyError:
@@ -567,15 +555,15 @@ class FeetAirTimeRewardBuilder(RewardBuilder[FeetAirTimeReward]):
 
         right_foot_geom_idxs = jnp.array(right_foot_geom_idxs)
 
-        return FeetAirTimeReward(
-            scale=self.scale,
+        return cls(
+            scale=scale,
             left_foot_geom_idxs=left_foot_geom_idxs,
             right_foot_geom_idxs=right_foot_geom_idxs,
-            contact_eps=self.contact_eps,
-            skip_if_zero_command=self.skip_if_zero_command if self.skip_if_zero_command else (),
-            single_contact_reward=self.single_contact_reward,
-            no_contact_penalty=self.no_contact_penalty,
-            all_contact_penalty=self.all_contact_penalty,
+            contact_eps=contact_eps,
+            skip_if_zero_command=skip_if_zero_command if skip_if_zero_command else (),
+            single_contact_reward=single_contact_reward,
+            no_contact_penalty=no_contact_penalty,
+            all_contact_penalty=all_contact_penalty,
         )
 
 
@@ -648,32 +636,29 @@ class FootContactPenalty(Reward):
             )
         )
 
-    def get_name(self) -> str:
-        return super().get_name()
-
-
-@attrs.define(frozen=True, kw_only=True)
-class FootContactPenaltyBuilder(RewardBuilder[FootContactPenalty]):
-    scale: float
-    foot_geom_names: list[str]
-    allowed_contact_prct: float
-    contact_eps: float = attrs.field(default=1e-2)
-    skip_if_zero_command: tuple[str, ...] | None = attrs.field(default=None)
-
-    def __call__(self, physics_model: PhysicsModel) -> FootContactPenalty:
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        foot_geom_names: list[str],
+        allowed_contact_prct: float,
+        scale: float,
+        contact_eps: float = 1e-2,
+        skip_if_zero_command: tuple[str, ...] | None = None,
+    ) -> Self:
         geom_name_to_idx = get_geom_data_idx_by_name(physics_model)
         illegal_geom_idxs = []
-        for geom_name in self.foot_geom_names:
+        for geom_name in foot_geom_names:
             illegal_geom_idxs.append(geom_name_to_idx[geom_name])
 
         illegal_geom_idxs = jnp.array(illegal_geom_idxs)
 
-        return FootContactPenalty(
-            scale=self.scale,
+        return cls(
+            scale=scale,
             illegal_geom_idxs=illegal_geom_idxs,
-            allowed_contact_prct=self.allowed_contact_prct,
-            contact_eps=self.contact_eps,
-            skip_if_zero_command=self.skip_if_zero_command if self.skip_if_zero_command else (),
+            allowed_contact_prct=allowed_contact_prct,
+            contact_eps=contact_eps,
+            skip_if_zero_command=skip_if_zero_command if skip_if_zero_command else (),
         )
 
 
@@ -705,27 +690,28 @@ class DefaultPoseDeviationPenalty(Reward):
         weighted_deviations = deviations * self.joint_deviation_weights
         return jnp.sum(xax.get_norm(weighted_deviations, self.norm))
 
-
-@attrs.define(frozen=True, kw_only=True)
-class DefaultPoseDeviationPenaltyBuilder(RewardBuilder[DefaultPoseDeviationPenalty]):
-    scale: float
-    default_positions: dict[str, float]
-    deviation_weights: dict[str, float]
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def __call__(self, physics_model: PhysicsModel) -> DefaultPoseDeviationPenalty:
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        default_positions: dict[str, float],
+        deviation_weights: dict[str, float],
+        scale: float,
+        norm: xax.NormType = "l2",
+        exclude_base_pose: bool = True,
+    ) -> Self:
         # Convert joint names to indices
         joint_indices = []
         default_positions_list = []
         joint_deviation_weights = []
 
-        for joint_name, position in self.default_positions.items():
+        for joint_name, position in default_positions.items():
             try:
                 idx_range = get_qpos_data_idxs_by_name(physics_model)[joint_name]
                 start_idx = idx_range[0]
                 joint_indices.append(start_idx)
                 default_positions_list.append(position)
-                joint_deviation_weights.append(self.deviation_weights[joint_name])
+                joint_deviation_weights.append(deviation_weights[joint_name])
             except KeyError:
                 raise ValueError(f"Joint '{joint_name}' not found in model")
 
@@ -733,12 +719,13 @@ class DefaultPoseDeviationPenaltyBuilder(RewardBuilder[DefaultPoseDeviationPenal
         default_positions_array = jnp.array(default_positions_list)
         joint_deviation_weights_array = jnp.array(joint_deviation_weights)
 
-        return DefaultPoseDeviationPenalty(
-            scale=self.scale,
+        return cls(
+            scale=scale,
             joint_indices=joint_indices_array,
             default_positions=default_positions_array,
             joint_deviation_weights=joint_deviation_weights_array,
-            norm=self.norm,
+            norm=norm,
+            exclude_base_pose=exclude_base_pose,
         )
 
 
@@ -776,37 +763,39 @@ class JointPosLimitPenalty(Reward):
 
         return jnp.sum(total_violations)
 
-
-@attrs.define(frozen=True, kw_only=True)
-class JointPosLimitPenaltyBuilder(RewardBuilder[JointPosLimitPenalty]):
-    scale: float
-    joint_limits: dict[str, tuple[float, float]]
-
-    def __call__(self, physics_model: PhysicsModel) -> JointPosLimitPenalty:
-        # Convert joint names to indices
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        joint_limits: dict[str, tuple[float, float]],
+        scale: float,
+    ) -> Self:
         joint_indices = []
-        soft_lowers = []
-        soft_uppers = []
-        qpos_name_to_idx = get_qpos_data_idxs_by_name(physics_model)
+        soft_lower_limits = []
+        soft_upper_limits = []
 
-        for joint_name, (lower, upper) in self.joint_limits.items():
-            if joint_name in qpos_name_to_idx:
-                idx_range = qpos_name_to_idx[joint_name]
+        for joint_name, (lower, upper) in joint_limits.items():
+            try:
+                idx_range = get_qpos_data_idxs_by_name(physics_model)[joint_name]
                 start_idx = idx_range[0]
                 joint_indices.append(start_idx)
-                soft_lowers.append(lower)
-                soft_uppers.append(upper)
-            else:
+                soft_lower_limits.append(lower)
+                soft_upper_limits.append(upper)
+            except KeyError:
                 raise ValueError(f"Joint '{joint_name}' not found in model")
 
         if not joint_indices:
-            raise ValueError("No valid joints specified for JointPosLimitPenalty")
+            raise ValueError("No valid joints specified")
 
-        return JointPosLimitPenalty(
-            scale=self.scale,
-            joint_indices=jnp.array(joint_indices),
-            soft_lower_limits=jnp.array(soft_lowers),
-            soft_upper_limits=jnp.array(soft_uppers),
+        joint_indices_array = jnp.array(joint_indices)
+        soft_lower_limits_array = jnp.array(soft_lower_limits)
+        soft_upper_limits_array = jnp.array(soft_upper_limits)
+
+        return cls(
+            scale=scale,
+            joint_indices=joint_indices_array,
+            soft_lower_limits=soft_lower_limits_array,
+            soft_upper_limits=soft_upper_limits_array,
         )
 
 
@@ -861,43 +850,43 @@ class SinusoidalFeetHeightReward(Reward):
 
         return reward
 
-
-@attrs.define(frozen=True, kw_only=True)
-class SinusoidalFeetHeightRewardBuilder(RewardBuilder[SinusoidalFeetHeightReward]):
-    left_foot_geom_name: str
-    right_foot_geom_name: str
-    amplitude: float  # radians
-    vertical_offset: float = attrs.field(default=0.0)
-    period: float  # seconds
-    scale: float
-    sensitivity: float = attrs.field(default=2.0)
-    penalty_scale: float = attrs.field(default=0.2)
-    error_clamp: float = attrs.field(default=0.5)
-
-    def __call__(self, physics_model: PhysicsModel) -> SinusoidalFeetHeightReward:
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        left_foot_geom_name: str,
+        right_foot_geom_name: str,
+        amplitude: float,
+        vertical_offset: float = 0.0,
+        period: float = 1.0,
+        scale: float = 1.0,
+        sensitivity: float = 2.0,
+        penalty_scale: float = 0.2,
+        error_clamp: float = 0.5,
+    ) -> Self:
         geom_name_to_idx = get_geom_data_idx_by_name(physics_model)
         try:
-            left_foot_geom_idx = geom_name_to_idx[self.left_foot_geom_name]
-            right_foot_geom_idx = geom_name_to_idx[self.right_foot_geom_name]
+            left_foot_geom_idx = geom_name_to_idx[left_foot_geom_name]
+            right_foot_geom_idx = geom_name_to_idx[right_foot_geom_name]
         except KeyError:
             raise ValueError(
-                f"Foot geom '{self.left_foot_geom_name}' or "
-                f"'{self.right_foot_geom_name}' not found in model. "
+                f"Foot geom '{left_foot_geom_name}' or "
+                f"'{right_foot_geom_name}' not found in model. "
                 f"Available geoms: {geom_name_to_idx.keys()}"
             )
 
         def sinusoidal_feet_height(time: Array) -> Array:
-            return self.amplitude * jnp.sin(2 * jnp.pi * time / self.period)
+            return amplitude * jnp.sin(2 * jnp.pi * time / period)
 
-        return SinusoidalFeetHeightReward(
-            scale=self.scale,
+        return cls(
+            scale=scale,
             left_foot_geom_idx=left_foot_geom_idx,
             right_foot_geom_idx=right_foot_geom_idx,
             sinusoidal_feet_height=sinusoidal_feet_height,
-            vertical_offset=self.vertical_offset,
-            sensitivity=self.sensitivity,
-            penalty_scale=self.penalty_scale,
-            error_clamp=self.error_clamp,
+            vertical_offset=vertical_offset,
+            sensitivity=sensitivity,
+            penalty_scale=penalty_scale,
+            error_clamp=error_clamp,
         )
 
 

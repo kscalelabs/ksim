@@ -225,11 +225,7 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
-            compile_unroll=False,
-            num_learning_epochs=8,
-            num_env_states_per_minibatch=20,
-            num_minibatches=5,
-            num_envs=10,
+            num_envs=8,
             dt=0.005,
             ctrl_dt=0.02,
             learning_rate=1e-5,
@@ -248,6 +244,7 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            eval_rollout_length=1000,
+            rollout_length_seconds=20.0,
+            eval_rollout_length_seconds=20.0,
         ),
     )
