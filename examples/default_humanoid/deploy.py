@@ -17,6 +17,8 @@ import tensorflow as tf
 
 logger = logging.getLogger(__name__)
 
+DT = 0.02  # Policy time step (50Hz)
+
 
 @dataclass
 class Actuator:
@@ -44,19 +46,11 @@ ACTUATOR_LIST: list[Actuator] = [
     Actuator(actuator_id=13, nn_id=12, kp=50.0, kd=1.0, max_torque=30.0, joint_name="knee_left"),
     Actuator(actuator_id=14, nn_id=13, kp=50.0, kd=1.0, max_torque=30.0, joint_name="ankle_x_left"),
     Actuator(actuator_id=15, nn_id=14, kp=50.0, kd=1.0, max_torque=30.0, joint_name="ankle_y_left"),
-    Actuator(
-        actuator_id=16, nn_id=15, kp=50.0, kd=1.0, max_torque=30.0, joint_name="shoulder1_right"
-    ),
-    Actuator(
-        actuator_id=17, nn_id=16, kp=50.0, kd=1.0, max_torque=30.0, joint_name="shoulder2_right"
-    ),
+    Actuator(actuator_id=16, nn_id=15, kp=50.0, kd=1.0, max_torque=30.0, joint_name="shoulder1_right"),
+    Actuator(actuator_id=17, nn_id=16, kp=50.0, kd=1.0, max_torque=30.0, joint_name="shoulder2_right"),
     Actuator(actuator_id=18, nn_id=17, kp=50.0, kd=1.0, max_torque=30.0, joint_name="elbow_right"),
-    Actuator(
-        actuator_id=19, nn_id=18, kp=50.0, kd=1.0, max_torque=30.0, joint_name="shoulder1_left"
-    ),
-    Actuator(
-        actuator_id=20, nn_id=19, kp=50.0, kd=1.0, max_torque=30.0, joint_name="shoulder2_left"
-    ),
+    Actuator(actuator_id=19, nn_id=18, kp=50.0, kd=1.0, max_torque=30.0, joint_name="shoulder1_left"),
+    Actuator(actuator_id=20, nn_id=19, kp=50.0, kd=1.0, max_torque=30.0, joint_name="shoulder2_left"),
     Actuator(actuator_id=21, nn_id=20, kp=50.0, kd=1.0, max_torque=30.0, joint_name="elbow_left"),
 ]
 
@@ -69,9 +63,7 @@ async def get_observation(kos: pykos.KOS) -> np.ndarray:
 
     state_dict = {state.actuator_id: state.position for state in actuator_states.states}
 
-    pos_obs = np.array(
-        [state_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)]
-    )
+    pos_obs = np.array([state_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
 
     pos_obs = np.deg2rad(pos_obs)
 
@@ -173,12 +165,10 @@ async def main(model_path: str, ip: str, no_render: bool) -> None:
                 sim_process.terminate()
             raise RuntimeError(f"Failed to connect to KOS-Sim: {connect_error}")
 
-    dt = 0.02
-
     await configure_actuators(kos)
     await reset(kos)
 
-    target_time = time.time() + dt
+    target_time = time.time() + DT
     observation = await get_observation(kos)
     try:
         while True:
@@ -195,7 +185,7 @@ async def main(model_path: str, ip: str, no_render: bool) -> None:
             else:
                 logger.info("Loop overran by %s seconds", time.time() - target_time)
 
-            target_time += dt
+            target_time += DT
     except KeyboardInterrupt:
         logger.info("Exiting...")
     finally:

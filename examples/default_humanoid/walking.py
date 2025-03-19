@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypeAlias
+from typing import Callable
 
 import distrax
 import equinox as eqx
@@ -29,10 +29,11 @@ from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
 from ksim.utils.mujoco import get_joint_metadata
 
-OBS_SIZE = 21 # check this
+OBS_SIZE = 21  # check this
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
+
 
 class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
@@ -231,12 +232,15 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         action_n = action_dist_n.sample(seed=rng)
         return action_n, None
 
-    def make_export_model(self, model: DefaultHumanoidModel, stochastic: bool = False, batched: bool = False) -> Callable:
+    def make_export_model(
+        self, model: DefaultHumanoidModel, stochastic: bool = False, batched: bool = False
+    ) -> Callable:
         """Makes a callable inference function that directly takes a flattened input vector and returns an action.
 
         Returns:
             A tuple containing the inference function and the size of the input vector.
         """
+
         def deterministic_model_fn(obs: Array, cmd: Array) -> Array:
             distribution = model.actor(obs, cmd)
             return distribution.mode()
@@ -244,13 +248,14 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         def stochastic_model_fn(obs: Array, cmd: Array) -> Array:
             distribution = model.actor(obs, cmd)
             return distribution.sample(seed=jax.random.PRNGKey(0))
-        
+
         if stochastic:
             model_fn = stochastic_model_fn
         else:
             model_fn = deterministic_model_fn
 
         if batched:
+
             def batched_model_fn(obs: Array, cmd: Array) -> Array:
                 return jax.vmap(model_fn)(obs, cmd)
 
