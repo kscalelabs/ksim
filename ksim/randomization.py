@@ -63,12 +63,7 @@ class StaticFrictionRandomization(Randomization):
             maxval=self.scale_upper,
         )
         # Skip the first 6 DOFs (free joint)
-        match type(model):
-            case mujoco.MjModel:
-                new_frictionloss = jnp.concatenate([model.dof_frictionloss[:6], frictionloss])
-            case mjx.Model:
-                new_frictionloss = model.dof_frictionloss.at[6:].set(frictionloss)
-
+        new_frictionloss = jnp.concatenate([model.dof_frictionloss[:6], frictionloss])
         return update_model_field(model, self.name, new_frictionloss)
 
 
@@ -110,12 +105,7 @@ class ArmatureRandomization(Randomization):
         armature = model.dof_armature[6:] * jax.random.uniform(
             rng, shape=(model.dof_armature.shape[0] - 6,), minval=self.scale_lower, maxval=self.scale_upper
         )
-        match type(model):
-            case mujoco.MjModel:
-                new_armature = jnp.concatenate([model.dof_armature[:6], armature])
-            case mjx.Model:
-                new_armature = model.dof_armature.at[6:].set(armature)
-
+        new_armature = jnp.concatenate([model.dof_armature[:6], armature])
         return update_model_field(model, self.name, new_armature)
 
 
@@ -132,18 +122,13 @@ class TorsoMassRandomization(Randomization):
         """Randomize the torso mass of the robot."""
         rng, key = jax.random.split(rng)
         dmass = jax.random.uniform(key, minval=self.scale_lower, maxval=self.scale_upper)
-        match type(model):
-            case mujoco.MjModel:
-                new_body_mass = jnp.concatenate(
-                    [
-                        model.body_mass[: self.torso_body_id],
-                        jnp.array([dmass]),
-                        model.body_mass[self.torso_body_id + 1 :],
-                    ]
-                )
-            case mjx.Model:
-                new_body_mass = model.body_mass.at[self.torso_body_id].set(model.body_mass[self.torso_body_id] + dmass)
-
+        new_body_mass = jnp.concatenate(
+            [
+                model.body_mass[: self.torso_body_id],
+                jnp.array([dmass]),
+                model.body_mass[self.torso_body_id + 1 :],
+            ]
+        )
         return update_model_field(model, self.name, new_body_mass)
 
 
@@ -177,10 +162,6 @@ class JointDampingRandomization(Randomization):
         kd = model.dof_damping[6:] * jax.random.uniform(
             key, shape=(model.dof_damping.shape[0] - 6,), minval=self.scale_lower, maxval=self.scale_upper
         )
-        match type(model):
-            case mujoco.MjModel:
-                dof_damping = jnp.concatenate([model.dof_damping[:6], kd])
-            case mjx.Model:
-                dof_damping = model.dof_damping.at[6:].set(kd)
+        dof_damping = jnp.concatenate([model.dof_damping[:6], kd])
 
         return update_model_field(model, self.name, dof_damping)
