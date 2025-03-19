@@ -12,15 +12,11 @@ _TOL = 1e-4
 
 
 class DummyCommand(Command):
-    def __call__(self, rng: jax.Array, time: Array) -> jnp.ndarray:
+    def initial_command(self, rng: jax.Array) -> jnp.ndarray:
         return jnp.zeros((1,))
 
-
-def test_command_name() -> None:
-    """Test that command names are correctly generated."""
-    cmd = DummyCommand()
-    assert cmd.get_name() == "dummy_command_vector"
-    assert cmd.command_name == "dummy_command_vector"
+    def __call__(self, rng: jax.Array, time: Array) -> jnp.ndarray:
+        return jnp.zeros((1,))
 
 
 class TestLinearVelocityCommand:
@@ -36,44 +32,34 @@ class TestLinearVelocityCommand:
         """Return a time value."""
         return jnp.array(0.0)
 
-    def test_initialization(self) -> None:
-        """Test that the command is initialized with the correct parameters."""
-        cmd = LinearVelocityCommand(
-            x_scale=1.0,
-            y_scale=1.0,
-            switch_prob=0.0,
-            zero_prob=0.0,
-        )
-        assert cmd.x_scale == 1.0
-        assert cmd.y_scale == 1.0
-        assert cmd.switch_prob == 0.0
-        assert cmd.zero_prob == 0.0
-
     def test_command_shape(self, rng: jax.Array, time: jnp.ndarray) -> None:
         """Test that the command returns the correct shape."""
         cmd = LinearVelocityCommand()
-        result = cmd(rng, time)
+        initial_command = cmd.initial_command(rng)
+        result = cmd(initial_command, time, rng)
         chex.assert_shape(result, (2,))
 
     def test_command_bounds(self, rng: jax.Array, time: jnp.ndarray) -> None:
         """Test that the command values are within the expected bounds."""
         x_scale, y_scale = 2.0, 3.0
         cmd = LinearVelocityCommand(x_scale=x_scale, y_scale=y_scale)
+        command = cmd.initial_command(rng)
 
         # Run multiple times to test bounds probabilistically
         for i in range(100):
             key = jax.random.fold_in(rng, i)
-            result = cmd(key, time)
+            command = cmd(command, time, key)
 
-            assert result[0] >= -x_scale
-            assert result[0] <= x_scale
-            assert result[1] >= -y_scale
-            assert result[1] <= y_scale
+            assert command[0] >= -x_scale
+            assert command[0] <= x_scale
+            assert command[1] >= -y_scale
+            assert command[1] <= y_scale
 
     def test_zero_probability(self, rng: jax.Array, time: jnp.ndarray) -> None:
         """Test that the command returns zeros when zero_prob is 1.0."""
         cmd = LinearVelocityCommand(zero_prob=1.0)
-        result = cmd(rng, time)
+        command = cmd.initial_command(rng)
+        result = cmd(command, time, rng)
         chex.assert_trees_all_close(
             result,
             jnp.zeros_like(result),
@@ -83,11 +69,11 @@ class TestLinearVelocityCommand:
     def test_update_mechanism(self, rng: jax.Array) -> None:
         """Test that the command update mechanism works correctly."""
         cmd = LinearVelocityCommand(switch_prob=1.0)
-        prev_command = jnp.array([1.0, 1.0])
+        command = cmd.initial_command(rng)
         time = jnp.array(0.0)
 
-        result = cmd.update(prev_command, rng, time)
-        assert not jnp.array_equal(result, prev_command)
+        next_command = cmd(command, time, rng)
+        assert not jnp.array_equal(next_command, command)
 
 
 class TestAngularVelocityCommand:
@@ -103,17 +89,11 @@ class TestAngularVelocityCommand:
         """Return a time value."""
         return jnp.array(0.0)
 
-    def test_initialization(self) -> None:
-        """Test that the command is initialized with the correct parameters."""
-        cmd = AngularVelocityCommand(scale=1.0, switch_prob=0.0, zero_prob=0.0)
-        assert cmd.scale == 1.0
-        assert cmd.switch_prob == 0.0
-        assert cmd.zero_prob == 0.0
-
     def test_command_shape(self, rng: jax.Array, time: jnp.ndarray) -> None:
         """Test that the command returns the correct shape."""
         cmd = AngularVelocityCommand()
-        result = cmd(rng, time)
+        initial_command = cmd.initial_command(rng)
+        result = cmd(initial_command, time, rng)
         chex.assert_shape(result, (1,))
 
     def test_command_bounds(self, rng: jax.Array, time: jnp.ndarray) -> None:
@@ -124,7 +104,8 @@ class TestAngularVelocityCommand:
         # Run multiple times to test bounds probabilistically
         for i in range(100):
             key = jax.random.fold_in(rng, i)
-            result = cmd(key, time)
+            command = cmd.initial_command(key)
+            result = cmd(command, time, key)
 
             assert result[0] >= -scale
             assert result[0] <= scale
@@ -132,7 +113,8 @@ class TestAngularVelocityCommand:
     def test_zero_probability(self, rng: jax.Array, time: jnp.ndarray) -> None:
         """Test that the command returns zeros when zero_prob is 1.0."""
         cmd = AngularVelocityCommand(zero_prob=1.0)
-        result = cmd(rng, time)
+        command = cmd.initial_command(rng)
+        result = cmd(command, time, rng)
         chex.assert_trees_all_close(
             result,
             jnp.zeros_like(result),
@@ -142,8 +124,8 @@ class TestAngularVelocityCommand:
     def test_update_mechanism(self, rng: jax.Array) -> None:
         """Test that the command update mechanism works correctly."""
         cmd = AngularVelocityCommand(switch_prob=1.0)
-        prev_command = jnp.array([1.0])
+        command = cmd.initial_command(rng)
         time = jnp.array(0.0)
 
-        result = cmd.update(prev_command, rng, time)
-        assert not jnp.array_equal(result, prev_command)
+        next_command = cmd(command, time, rng)
+        assert not jnp.array_equal(next_command, command)

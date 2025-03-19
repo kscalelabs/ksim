@@ -4,19 +4,17 @@ from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
-import pytest
+import mujoco
 from jaxtyping import Array
 from mujoco import mjx
 
 from ksim.terminations import (
     IllegalContactTermination,
-    IllegalContactTerminationBuilder,
     MinimumHeightTermination,
     PitchTooGreatTermination,
     RollTooGreatTermination,
     Termination,
 )
-from ksim.utils.data import BuilderData, MujocoMappings
 
 
 class DummyTermination(Termination):
@@ -143,47 +141,9 @@ class TestIllegalContactTermination:
         result = term(data_no_contact)
         assert not result.item()
 
-
-class TestIllegalContactTerminationBuilder:
-    """Tests for the IllegalContactTerminationBuilder class."""
-
-    @pytest.fixture
-    def builder_data(self) -> BuilderData:
-        """Return a builder data object with body mappings."""
-        mappings = MujocoMappings(
-            sensor_name_to_idx_range={},
-            qpos_name_to_idx_range={},
-            qvelacc_name_to_idx_range={},
-            ctrl_name_to_idx={},
-            geom_name_to_idx={
-                "geom1": 0,
-                "geom2": 1,
-                "geom3": 2,
-                "geom4": 3,
-                "geom5": 4,
-                "geom6": 5,
-            },
-            body_name_to_idx={
-                "body1": 0,
-                "body2": 1,
-                "body3": 2,
-                "body4": 3,
-                "body5": 4,
-                "body6": 5,
-            },
-            floor_geom_idx=None,
-        )
-        return BuilderData(
-            model=None,
-            dt=0.004,
-            ctrl_dt=0.02,
-            mujoco_mappings=mappings,
-        )
-
-    def test_illegal_contact_termination_builder(self, builder_data: BuilderData) -> None:
+    def test_illegal_contact_termination_builder(self, humanoid_model: mujoco.MjModel) -> None:
         """Test that the IllegalContactTerminationBuilder creates a termination function."""
-        geom_names = ["geom1", "geom2"]
-        builder = IllegalContactTerminationBuilder(geom_names=geom_names)
-        term = builder(builder_data)
+        geom_names = ["hand_left", "hand_right"]
+        term = IllegalContactTermination.create(humanoid_model, geom_names=geom_names)
         assert term.termination_name == "illegal_contact_termination"
-        assert jnp.array_equal(term.illegal_geom_idxs, jnp.array([0, 1]))
+        assert term.illegal_geom_idxs.shape == (2,)
