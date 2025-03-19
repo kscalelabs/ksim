@@ -135,6 +135,9 @@ def compute_ppo_loss(
         value_loss_coef: The value loss coefficient for PPO.
         entropy_coef: The entropy coefficient for PPO.
         use_clipped_value_loss: Whether to use clipped value loss.
+
+    Returns:
+        The PPO loss, with shape (B, T).
     """
     chex.assert_equal_shape_prefix(
         [
@@ -336,7 +339,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def get_ppo_metrics(
         self,
         transitions: Transition,
-        loss: Array,
+        loss_bt: Array,
         log_probs_btn: Array,
         entropy_btn: Array,
         values_bt: Array,
@@ -347,7 +350,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         Args:
             transitions: The batch of transitions to get metrics for.
-            loss: The PPO loss value.
+            loss_bt: The PPO loss value.
             log_probs_btn: The log probabilities of the actions, with shape (B, T, *A).
             entropy_btn: The entropy of the action distribution, with shape (B, T, *A).
             values_bt: The state-value estimates, with shape (B, T).
@@ -358,7 +361,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A dictionary of metrics to be logged.
         """
         return {
-            "loss": loss,
+            "loss_mean": loss_bt.mean(),
+            "loss_std": loss_bt.std(),
             "entropy_mean": entropy_btn.mean(),
             "entropy_std": entropy_btn.std(),
             "value_mean": values_bt.mean(),
@@ -406,7 +410,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             # TODO: These do not look correct...
             # returns_bt = compute_returns(transitions.reward, transitions.done, self.config.gamma)
 
-            loss = compute_ppo_loss(
+            loss_bt = compute_ppo_loss(
                 log_probs_btn=log_probs_btn,
                 values_bt=values_bt,
                 on_policy_log_probs_btn=on_policy_log_probs_btn,
@@ -420,17 +424,19 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 use_clipped_value_loss=self.config.use_clipped_value_loss,
             )
 
-            metrics = self.get_ppo_metrics(
-                transitions=transitions,
-                loss=loss,
-                log_probs_btn=log_probs_btn,
-                entropy_btn=entropy_btn,
-                values_bt=values_bt,
-                value_targets_bt=value_targets_bt,
-                advantages_bt=advantages_bt,
+            metrics = FrozenDict(
+                self.get_ppo_metrics(
+                    transitions=transitions,
+                    loss_bt=loss_bt,
+                    log_probs_btn=log_probs_btn,
+                    entropy_btn=entropy_btn,
+                    values_bt=values_bt,
+                    value_targets_bt=value_targets_bt,
+                    advantages_bt=advantages_bt,
+                )
             )
 
-            metrics = FrozenDict(metrics)
+            loss = loss_bt.mean()
 
             return loss, metrics
 
