@@ -533,7 +533,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Highest level entry point for RL tasks, determines what to run."""
         if self.config.run_environment:
             self.run_environment(
-                num_steps=round(self.config.run_environment_num_seconds / self.config.ctrl_dt),
+                num_steps=(
+                    None
+                    if self.config.run_environment_num_seconds is None
+                    else round(self.config.run_environment_num_seconds / self.config.ctrl_dt)
+                ),
                 render_visualization=self.config.run_environment_render_visualization,
                 save_path=self.config.run_environment_save_path,
             )

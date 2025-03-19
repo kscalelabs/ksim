@@ -216,7 +216,6 @@ class MujocoEngine(PhysicsEngine):
 
 def get_physics_engine(
     engine_type: EngineType,
-    randomizations: Collection[Randomization],
     resets: Collection[Reset],
     actuators: Actuators,
     *,
