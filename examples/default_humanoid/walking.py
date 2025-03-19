@@ -18,7 +18,11 @@ from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.observation import ActuatorForceObservation, Observation
-from ksim.randomization import Randomization, WeightRandomization
+from ksim.randomization import (
+    FloorFrictionRandomization,
+    Randomization,
+    TorsoMassRandomizerBuilder,
+)
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -173,13 +177,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         else:
             return TorqueActuators()
 
-    # randomizers=self.get_randomizer_generators(physics_model),
-    # def get_randomizer_generators(self, physics_model: PhysicsModel) -> Collection[Randomizer]:
-    #     return [TorsoMassRandomizerBuilder(torso_body_name="torso")(physics_model)]
-
     def get_randomization(self, physics_model: PhysicsModel) -> list[Randomization]:
         return [
-            WeightRandomization(scale=0.01),
+            # WeightRandomization(scale=0.01),
+            TorsoMassRandomizerBuilder(torso_body_name="torso")(physics_model),
+            FloorFrictionRandomization(floor_body_id=0),
         ]
 
     def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
@@ -232,7 +234,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.default_humanoid.walking
+    # python -m examples.default_humanoid.walking run_environment=True
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             num_envs=8,
