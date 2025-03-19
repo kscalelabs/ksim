@@ -10,7 +10,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.env.data import PhysicsData, PhysicsModel
-from ksim.utils.named_access import get_sensor_data_idxs_by_name
+from ksim.utils.mujoco import get_sensor_data_idxs_by_name
 
 NoiseType = Literal["gaussian", "uniform"]
 
