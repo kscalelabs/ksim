@@ -1,6 +1,6 @@
 """Defines a standard task interface for training a policy."""
 
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
@@ -260,16 +260,6 @@ class PPOConfig(RLConfig):
         help="Small epsilon value to avoid division by zero.",
     )
 
-    # Optimizer parameters.
-    learning_rate: float = xax.field(
-        value=1e-4,
-        help="Learning rate for PPO.",
-    )
-    max_grad_norm: float = xax.field(
-        value=0.5,
-        help="Maximum gradient norm for clipping.",
-    )
-
     # Advantage parameters.
     normalize_advantage: bool = xax.field(
         value=True,
@@ -287,16 +277,32 @@ Config = TypeVar("Config", bound=PPOConfig)
 class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
 
-    def get_optimizer(self) -> optax.GradientTransformation:
-        """Builds the optimizer.
+    @abstractmethod
+    def get_log_probs(self, model: PyTree, transitions: Transition, rng: PRNGKeyArray) -> Array:
+        """Gets the log probabilities of the given transitions.
 
-        This provides a reasonable default optimizer for training PPO models,
-        but can be overridden by subclasses who want to do something different.
+        Args:
+            model: The user-provided model.
+            transitions: The batch of transitions to get the log probabilities for.
+            rng: A random sed.
+
+        Returns:
+            The log probabilites of the given actions, with shape (B, T, *A).
         """
-        return optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            optax.adam(self.config.learning_rate),
-        )
+
+    @abstractmethod
+    def get_values(self, model: PyTree, transitions: Transition) -> Array:
+        """Gets the state-value estimates for the given transitions.
+
+        This is usually provided by a critic model.
+
+        Args:
+            model: The user-provided model.
+            transitions: The batch of transitions to get the state-value estimates for.
+
+        Returns:
+            The state-value estimates for the given transitions, with shape (B, T).
+        """
 
     @eqx.filter_jit
     def get_rollout_time_stats(self, transitions: Transition, model: PyTree) -> PPOMetrics:
@@ -352,11 +358,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         def loss_fn(model: PyTree) -> tuple[Array, dict[str, Array]]:
             """Model is a PyTree and can be optimized via optax."""
-            rollout_time_stats = minibatch.rollout_time_stats
-            assert isinstance(rollout_time_stats, PPORolloutTimeStats)
             return compute_ppo_loss(
                 model=model,
-                transitions=minibatch.transitions,
+                transitions=transitions,
                 rollout_time_stats=rollout_time_stats,
                 rng=rng,
                 normalize_advantage=self.config.normalize_advantage,
@@ -406,17 +410,18 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         transition_batches: list[Transition],
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
-        # TODO: Change this to use jax.lax after control flow is implemented.
+        # TODO: Change this to use jax.lax.scan after control flow is implemented.
         all_metrics = []
-        for batch in transition_batches:
-            model, opt_state, metrics = self._single_step(
-                model=model,
-                optimizer=optimizer,
-                opt_state=opt_state,
-                transitions=batch,
-                rng=rng,
-            )
-            all_metrics.append(metrics)
+        for _ in range(self.config.num_passes):
+            for batch in transition_batches:
+                model, opt_state, metrics = self._single_step(
+                    model=model,
+                    optimizer=optimizer,
+                    opt_state=opt_state,
+                    transitions=batch,
+                    rng=rng,
+                )
+                all_metrics.append(metrics)
 
         # Combine metrics from all batches.
         metrics_concat = jax.tree_map(lambda *x: jnp.stack(x, axis=0), *all_metrics)

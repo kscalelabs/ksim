@@ -8,6 +8,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mujoco
+import optax
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
@@ -16,7 +17,7 @@ from mujoco import mjx
 
 from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import PhysicsModel
+from ksim.env.data import PhysicsModel, Transition
 from ksim.observation import ActuatorForceObservation, Observation
 from ksim.randomization import (
     Randomization,
@@ -122,13 +123,20 @@ class DefaultHumanoidModel(eqx.Module):
 class HumanoidWalkingTaskConfig(PPOConfig):
     """Config for the humanoid walking task."""
 
+    # Optimizer parameters.
+    learning_rate: float = xax.field(
+        value=1e-4,
+        help="Learning rate for PPO.",
+    )
+    max_grad_norm: float = xax.field(
+        value=0.5,
+        help="Maximum gradient norm for clipping.",
+    )
+
+    # Mujoco parameters.
     use_mit_actuators: bool = xax.field(
         value=False,
         help="Whether to use the MIT actuator model, where the actions are position commands",
-    )
-    render_track_body_id: int | None = xax.field(
-        value=0,
-        help="The body id to track with the render camera.",
     )
     kp: float = xax.field(
         value=1.0,
@@ -147,8 +155,25 @@ class HumanoidWalkingTaskConfig(PPOConfig):
         help="The dynamic friction loss for the actuator",
     )
 
+    # Rendering parameters.
+    render_track_body_id: int | None = xax.field(
+        value=0,
+        help="The body id to track with the render camera.",
+    )
+
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
+    def get_optimizer(self) -> optax.GradientTransformation:
+        """Builds the optimizer.
+
+        This provides a reasonable default optimizer for training PPO models,
+        but can be overridden by subclasses who want to do something different.
+        """
+        return optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.adam(self.config.learning_rate),
+        )
+
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
@@ -213,6 +238,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_initial_carry(self) -> None:
         return None
+
+    def get_log_probs(self, model: DefaultHumanoidModel, transitions: Transition, rng: PRNGKeyArray) -> Array:
+        raise NotImplementedError("Not implemented")
+
+    def get_values(self, model: DefaultHumanoidModel, transitions: Transition) -> Array:
+        raise NotImplementedError("Not implemented")
 
     def sample_action(
         self,
