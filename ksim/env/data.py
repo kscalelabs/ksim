@@ -24,6 +24,8 @@ class PhysicsState:
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class Transition:
+    qpos: Array
+    qvel: Array
     obs: FrozenDict[str, Array]  # <- state
     command: FrozenDict[str, Array]  # <- prev command
     action: Array  # <- obs, command

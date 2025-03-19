@@ -479,6 +479,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Combines all the relevant data into a single object.
         transition = Transition(
+            qpos=next_physics_state.data.qpos,
+            qvel=next_physics_state.data.qvel,
             obs=observations,
             command=commands,
             action=action,
@@ -565,17 +567,64 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
         self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace=namespace)
 
+    def render_trajectory_video(
+        self,
+        transitions: Transition,
+        mj_model: mujoco.MjModel,
+    ) -> tuple[np.ndarray, int]:
+        """Render trajectory as video frames with computed FPS."""
+        fps = round(1 / self.config.ctrl_dt)
+
+        chex.assert_shape(transitions.done, (None,))
+        num_steps = transitions.done.shape[0]
+        transition_list: list[Transition] = [jax.tree.map(lambda arr: arr[i], transitions) for i in range(num_steps)]
+
+        # Holds the current data.
+        mj_data = mujoco.MjData(mj_model)
+
+        # Builds the camera for viewing the scene.
+        mj_camera = mujoco.MjvCamera()
+        mj_camera.distance = self.config.render_distance
+        mj_camera.azimuth = self.config.render_azimuth
+        mj_camera.elevation = self.config.render_elevation
+        mj_camera.lookat[:] = self.config.render_lookat
+        if self.config.render_track_body_id is not None:
+            mj_camera.trackbodyid = self.config.render_track_body_id
+            mj_camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+
+        renderer = mujoco.Renderer(
+            mj_model,
+            height=self.config.render_height,
+            width=self.config.render_width,
+        )
+
+        frame_list: list[np.ndarray] = []
+        for transition in transition_list:
+            mj_data.qpos[:] = transition.qpos
+            mj_data.qvel[:] = transition.qvel
+
+            # Renders the current frame.
+            renderer.update_scene(mj_data, camera=mj_camera)
+            frame = renderer.render()
+            frame_list.append(frame)
+
+        return np.stack(frame_list, axis=0), fps
+
     def log_single_trajectory(
         self,
         transitions: Transition,
+        mj_model: mujoco.MjModel,
         namespace: str = "trajectory",
     ) -> None:
         """Visualizes a single trajectory.
 
         Args:
             transitions: The transitions to visualize.
+            mj_model: The Mujoco model to render the scene with.
             namespace: The namespace to log the statistics to.
         """
+        frames, fps = self.render_trajectory_video(transitions, mj_model)
+        self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace=namespace)
 
     @eqx.filter_jit
     def _single_unroll(
@@ -625,6 +674,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rewards = jnp.stack(reward_list, axis=1)
 
         return Transition(
+            qpos=transitions.qpos,
+            qvel=transitions.qvel,
             obs=transitions.obs,
             command=transitions.command,
             action=transitions.action,
@@ -717,7 +768,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 # Logs statistics from the trajectory.
                 with self.step_context("write_logs"):
-                    self.log_single_trajectory(transitions)
+                    self.log_single_trajectory(transitions, mj_model)
                     self.log_reward_stats(transitions, rewards)
                     self.log_termination_stats(transitions, terminations)
                     self.logger.write(state)
@@ -825,7 +876,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 viewer.cam.azimuth = self.config.render_azimuth
                 viewer.cam.elevation = self.config.render_elevation
                 viewer.cam.lookat[:] = self.config.render_lookat
-
                 if self.config.render_track_body_id is not None:
                     viewer.cam.trackbodyid = self.config.render_track_body_id
                     viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
