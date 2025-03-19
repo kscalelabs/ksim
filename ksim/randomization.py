@@ -8,7 +8,6 @@ import jax.numpy as jnp
 import mujoco
 from jaxtyping import PRNGKeyArray
 from mujoco import mjx
-from omegaconf import MISSING
 
 from ksim.env.data import PhysicsModel
 from ksim.utils.mujoco import get_body_data_idx_by_name, update_model_field
@@ -53,7 +52,7 @@ class StaticFrictionRandomization(Randomization):
         )
         # Skip the first 6 DOFs (free joint)
         new_frictionloss = jnp.concatenate([model.dof_frictionloss[:6], frictionloss])
-        return update_model_field(model, self.name, new_frictionloss)
+        return update_model_field(model, "dof_frictionloss", new_frictionloss)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -63,7 +62,6 @@ class FloorFrictionRandomization(Randomization):
     floor_body_id: int = attrs.field()
     scale_lower: float = attrs.field(default=0.4)
     scale_upper: float = attrs.field(default=1.0)
-    floor_body_id: int = attrs.field(default=MISSING)
 
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
         """Randomize the floor friction of the robot."""
@@ -77,7 +75,7 @@ class FloorFrictionRandomization(Randomization):
                 new_geom_friction = model.geom_friction.at[self.floor_body_id, 0].set(
                     jax.random.uniform(rng, minval=self.scale_lower, maxval=self.scale_upper)
                 )
-        return update_model_field(model, self.name, new_geom_friction)
+        return update_model_field(model, "geom_friction", new_geom_friction)
 
     @classmethod
     def from_body_name(
@@ -112,7 +110,7 @@ class ArmatureRandomization(Randomization):
             rng, shape=(model.dof_armature.shape[0] - 6,), minval=self.scale_lower, maxval=self.scale_upper
         )
         new_armature = jnp.concatenate([model.dof_armature[:6], armature])
-        return update_model_field(model, self.name, new_armature)
+        return update_model_field(model, "dof_armature", new_armature)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -134,7 +132,7 @@ class TorsoMassRandomization(Randomization):
                 model.body_mass[self.torso_body_id + 1 :],
             ]
         )
-        return update_model_field(model, self.name, new_body_mass)
+        return update_model_field(model, "body_mass", new_body_mass)
 
     @classmethod
     def from_body_name(
@@ -170,4 +168,4 @@ class JointDampingRandomization(Randomization):
         )
         dof_damping = jnp.concatenate([model.dof_damping[:6], kd])
 
-        return update_model_field(model, self.name, dof_damping)
+        return update_model_field(model, "dof_damping", dof_damping)

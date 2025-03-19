@@ -55,7 +55,6 @@ class PhysicsEngine(eqx.Module, ABC):
 
     actuators: Actuators
     resets: Collection[Reset]
-    randomizations: Collection[Randomization]
     phys_steps_per_ctrl_steps: int
     min_action_latency_step: int
     max_action_latency_step: int
@@ -63,7 +62,6 @@ class PhysicsEngine(eqx.Module, ABC):
     def __init__(
         self,
         resets: Collection[Reset],
-        randomizations: Collection[Randomization],
         actuators: Actuators,
         phys_steps_per_ctrl_steps: int,
         min_action_latency_step: int,
@@ -72,7 +70,6 @@ class PhysicsEngine(eqx.Module, ABC):
         """Initialize the MJX engine with resetting and actuators."""
         self.actuators = actuators
         self.resets = resets
-        self.randomizations = randomizations
         self.phys_steps_per_ctrl_steps = phys_steps_per_ctrl_steps
         self.min_action_latency_step = min_action_latency_step
         self.max_action_latency_step = max_action_latency_step
@@ -222,7 +219,6 @@ def get_physics_engine(
     engine_type: EngineType,
     resets: Collection[Reset],
     actuators: Actuators,
-    randomizations: Collection[Randomization],
     *,
     dt: float,
     ctrl_dt: float,
@@ -246,7 +242,6 @@ def get_physics_engine(
             return MujocoEngine(
                 resets=resets,
                 actuators=actuators,
-                randomizations=randomizations,
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
@@ -256,7 +251,6 @@ def get_physics_engine(
             return MjxEngine(
                 resets=resets,
                 actuators=actuators,
-                randomizations=randomizations,
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
