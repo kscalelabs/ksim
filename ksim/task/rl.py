@@ -938,6 +938,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     hide_menus=True,
                 )
 
+                # Sets the viewer camera.
                 viewer.cam.distance = self.config.render_distance
                 viewer.cam.azimuth = self.config.render_azimuth
                 viewer.cam.elevation = self.config.render_elevation
@@ -980,6 +981,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         # resetting the environment creates a new data object rather
                         # than happening in-place, as Mujoco expects.
                         viewer.data = engine_variables.physics_state.data
+
+                        # Adds command elements to the scene.
+                        for command in commands:
+                            command.update_scene(viewer, engine_variables.commands[command.command_name])
+
                         viewer.render()
 
             except (KeyboardInterrupt, bdb.BdbQuit):
