@@ -643,14 +643,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model: The Mujoco model to render the scene with.
         """
         # Logs plots of the observations, commands, actions, rewards, and terminations.
-        # Using emojis for the namespace so that Tensorboard puts the less
-        # important ones at the bottom instead of the top.
+        # Emojis are used in order to prevent conflicts with user-specified namespaces.
         for namespace, arr_dict in (
-            ("👀 obs", transitions.obs),
-            ("🕹️ command", transitions.command),
-            ("🏃 action", {"action": transitions.action}),
-            ("💀 termination", transitions.termination_components),
-            ("reward", transitions.reward_components),
+            ("👀 obs images", transitions.obs),
+            ("🕹️ command images", transitions.command),
+            ("🏃 action images", {"action": transitions.action}),
+            ("💀 termination images", transitions.termination_components),
+            ("🎁 reward images", transitions.reward_components),
         ):
             for key, value in arr_dict.items():
                 plt.figure(figsize=self.config.plot_figsize)
@@ -680,7 +679,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(transitions, mj_model)
-        self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="trajectory")
+        self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
 
     @eqx.filter_jit
     def _single_unroll(
