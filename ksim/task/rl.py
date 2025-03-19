@@ -610,7 +610,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return np.stack(frame_list, axis=0), fps
 
-    def log_single_trajectory(self, transitions: Transition, mj_model: mujoco.MjModel) -> None:
+    def log_single_trajectory(
+        self,
+        transitions: Transition,
+        commands: Collection[Command],
+        mj_model: mujoco.MjModel,
+    ) -> None:
         """Visualizes a single trajectory.
 
         Args:
@@ -653,7 +658,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.logger.log_image(key=key, value=img, namespace=namespace)
 
         # Logs the video of the trajectory.
-        frames, fps = self.render_trajectory_video(transitions, mj_model)
+        frames, fps = self.render_trajectory_video(transitions, commands, mj_model)
         self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
 
     @eqx.filter_jit
@@ -797,7 +802,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 # Logs statistics from the trajectory.
                 with self.step_context("write_logs"):
-                    self.log_single_trajectory(transitions, mj_model)
+                    self.log_single_trajectory(transitions, commands, mj_model)
                     self.log_reward_stats(transitions, rewards)
                     self.log_termination_stats(transitions, terminations)
                     self.log_state_timers(state)
