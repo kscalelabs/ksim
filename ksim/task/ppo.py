@@ -225,6 +225,10 @@ class PPOConfig(RLConfig):
         value=True,
         help="Whether to include the last batch if it's not full.",
     )
+    min_batch_size: int = xax.field(
+        default=2,
+        help="The minimum number of transitions to include in a batch.",
+    )
 
     # PPO parameters.
     clip_param: float = xax.field(
@@ -427,6 +431,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         transition_batches = generate_transition_batches(
             transitions,
             batch_size=self.config.batch_size,
+            min_batch_size=self.config.min_batch_size,
             group_by_length=self.config.group_batches_by_length,
             include_last_batch=self.config.include_last_batch,
         )

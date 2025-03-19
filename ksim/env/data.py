@@ -1,6 +1,7 @@
 """Base Types for Environments."""
 
 from dataclasses import dataclass
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -97,22 +98,25 @@ def chunk_transitions(transitions: Transition) -> list[Transition]:
 def concatenate_transitions(transitions: list[Transition]) -> Transition:
     length = max(transition.done.shape[1] for transition in transitions)
 
-    def pad_array(x: jnp.ndarray, target_length: int) -> jnp.ndarray:
+    def pad_array(x: Any, target_length: int) -> Any:  # noqa: ANN401
         if x is None:
             return None
+        if not isinstance(x, jnp.ndarray):
+            return x
         ndim = x.ndim
         pad_width = [(0, 0)] * ndim
         if ndim > 1:
             pad_width[1] = (0, target_length - x.shape[1])
         return jnp.pad(x, pad_width, mode="constant")
 
-    padded_transitions = [jax.tree_map(lambda x: pad_array(x, length), transitions)]
+    padded_transitions = jax.tree_map(lambda x: pad_array(x, length), transitions)
     return jax.tree_map(lambda *x: jnp.concatenate(x, axis=0), *padded_transitions)
 
 
 def generate_transition_batches(
     transitions: Transition,
     batch_size: int,
+    min_batch_size: int = 2,
     group_by_length: bool = False,
     include_last_batch: bool = True,
 ) -> list[Transition]:
@@ -121,6 +125,7 @@ def generate_transition_batches(
     Args:
         transitions: The collected trajectories to batch.
         batch_size: The size of the batches to generate.
+        min_batch_size: The minimum number of transitions to include in a batch.
         group_by_length: Whether to group transitions by length, otherwise,
             transitions are grouped randomly.
         include_last_batch: Whether to include the last batch if it's not full.
@@ -138,6 +143,9 @@ def generate_transition_batches(
     batches: list[list[Transition]] = [
         transition_list[i : i + batch_size] for i in range(0, len(transition_list), batch_size)
     ]
+
+    # Remove batches that are smaller than `min_batch_size`.
+    batches = [batch for batch in batches if len(batch) >= min_batch_size]
 
     # Remove the last batch if it's not full and `include_last_batch` is False.
     if not include_last_batch and len(batches[-1]) < batch_size:
