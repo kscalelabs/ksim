@@ -654,6 +654,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         Args:
             transitions: The transitions to visualize.
+            commands: The commands to visualize.
             mj_model: The Mujoco model to render the scene with.
         """
         # Logs plots of the observations, commands, actions, rewards, and terminations.
