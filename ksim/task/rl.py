@@ -950,7 +950,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         # Adds command elements to the scene.
                         for command in commands:
-                            command.update_scene(viewer, engine_variables.commands[command.command_name])
+                            command.update_scene(viewer.scn, engine_variables.commands[command.command_name])
 
                         viewer.render()
 
