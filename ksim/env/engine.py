@@ -21,6 +21,7 @@ from ksim.actuators import Actuators
 from ksim.commands import Command
 from ksim.env.data import PhysicsModel, PhysicsState
 from ksim.observation import Observation
+from ksim.randomization import Randomization
 from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
@@ -33,11 +34,11 @@ EngineType = Literal["mjx", "mujoco"]
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class EngineConstants:
-    physics_model: PhysicsModel
     obs_generators: Collection[Observation]
     command_generators: Collection[Command]
     reward_generators: Collection[Reward]
     termination_generators: Collection[Termination]
+    randomization_generators: Collection[Randomization]
 
 
 @jax.tree_util.register_dataclass
@@ -215,6 +216,7 @@ class MujocoEngine(PhysicsEngine):
 
 def get_physics_engine(
     engine_type: EngineType,
+    randomizations: Collection[Randomization],
     resets: Collection[Reset],
     actuators: Actuators,
     *,

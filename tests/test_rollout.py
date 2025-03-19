@@ -19,7 +19,7 @@ from ksim.env.mjx_engine import MjxEngine
 from ksim.env.unroll import UnrollNaNDetector, unroll_trajectory
 from ksim.model import ActorCriticAgent, KSimModule, ModelCarry
 from ksim.observation import Observation
-from ksim.resets import RandomizeJointPositions, RandomizeJointVelocities
+from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
 
@@ -102,8 +102,8 @@ def engine(humanoid_model: mujoco.MjModel) -> MjxEngine:
     engine = MjxEngine(
         default_physics_model=mjx_model,
         resetters=[
-            RandomizeJointPositions(scale=0.01),
-            RandomizeJointVelocities(scale=0.01),
+            RandomJointPositionReset(scale=0.01),
+            RandomJointVelocityReset(scale=0.01),
         ],
         actuators=TorqueActuators(),
         dt=0.005,
