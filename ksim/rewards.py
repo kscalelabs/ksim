@@ -13,7 +13,7 @@ from flax.core import FrozenDict
 from jaxtyping import Array
 
 from ksim.env.data import PhysicsData, PhysicsModel
-from ksim.utils.named_access import (
+from ksim.utils.mujoco import (
     geoms_colliding,
     get_floor_idx,
     get_geom_data_idx_by_name,

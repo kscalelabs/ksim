@@ -23,7 +23,7 @@ from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Rese
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
-from ksim.utils.named_access import get_joint_metadata
+from ksim.utils.mujoco import get_joint_metadata
 
 NUM_INPUTS = 29
 NUM_OUTPUTS = 21

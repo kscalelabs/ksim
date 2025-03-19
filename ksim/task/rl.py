@@ -46,7 +46,7 @@ from ksim.randomization import Randomization
 from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
-from ksim.utils.named_access import get_joint_metadata
+from ksim.utils.mujoco import get_joint_metadata
 from ksim.viewer import MujocoViewer
 
 logger = logging.getLogger(__name__)
