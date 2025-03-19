@@ -153,6 +153,7 @@ def apply_randomizations(
     randomizations: Collection[Randomization],
     rng: PRNGKeyArray,
 ) -> PhysicsModel:
+    """Apply randomizations to the physics model."""
     for randomization in randomizations:
         rng, randomization_rng = jax.random.split(rng)
         physics_model = randomization(physics_model, randomization_rng)
@@ -948,7 +949,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.set_loggers()
 
             rng, model_rng = jax.random.split(rng)
-            model, _ = self.load_initial_state(model_rng, load_optimizer=False)
+            # TODO: fix it
+            model, _, _, _ = self.load_initial_state(model_rng)  # , load_optimizer=False)
 
             mj_model: PhysicsModel = self.get_mujoco_model()
             metadata = self.get_mujoco_model_metadata(mj_model)

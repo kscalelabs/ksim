@@ -18,7 +18,10 @@ from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.observation import ActuatorForceObservation, Observation
-from ksim.randomization import Randomization, WeightRandomization
+from ksim.randomization import (
+    Randomization,
+    WeightRandomization,
+)
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -228,7 +231,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.default_humanoid.walking
+    # python -m examples.default_humanoid.walking run_environment=True
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             num_envs=8,

@@ -208,6 +208,7 @@ class MujocoEngine(PhysicsEngine):
 
             torques = self.actuators.get_ctrl(ctrl, mujoco_data)
             mujoco_data.ctrl[:] = torques
+            # NOTE: forward here should not be needed
             mujoco.mj_forward(physics_model, mujoco_data)
             mujoco.mj_step(physics_model, mujoco_data)
 
