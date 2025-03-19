@@ -12,8 +12,7 @@ from mujoco import mjx
 from omegaconf import MISSING
 
 from ksim.env.data import PhysicsModel
-from ksim.utils.mujoco import update_model_field
-from ksim.utils.named_access import get_body_data_idx_by_name
+from ksim.utils.mujoco import get_body_data_idx_by_name, update_model_field
 
 
 @attrs.define(frozen=True, kw_only=True)

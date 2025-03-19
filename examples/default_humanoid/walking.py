@@ -19,15 +19,14 @@ from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel
 from ksim.observation import ActuatorForceObservation, Observation
 from ksim.randomization import (
-    FloorFrictionRandomization,
     Randomization,
-    TorsoMassRandomizerBuilder,
+    WeightRandomization,
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import DHForwardReward, HeightReward, Reward
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
-from ksim.utils.named_access import get_joint_metadata
+from ksim.utils.mujoco import get_joint_metadata
 
 NUM_INPUTS = 29
 NUM_OUTPUTS = 21
@@ -167,7 +166,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             mj_model,
             kp=self.config.kp,
             kd=self.config.kd,
-            armature=self.config.armature,
+            armature=self.cfonfig.armature,
             friction=self.config.friction,
         )
 
@@ -179,9 +178,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_randomization(self, physics_model: PhysicsModel) -> list[Randomization]:
         return [
-            # WeightRandomization(scale=0.01),
-            TorsoMassRandomizerBuilder(torso_body_name="torso")(physics_model),
-            FloorFrictionRandomization(floor_body_id=0),
+            WeightRandomization(scale=0.01),
         ]
 
     def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
