@@ -96,9 +96,17 @@ def chunk_transitions(transitions: Transition) -> list[Transition]:
 
 def concatenate_transitions(transitions: list[Transition]) -> Transition:
     length = max(transition.done.shape[1] for transition in transitions)
-    padded_transitions = [
-        jax.tree_map(lambda x: jnp.pad(x, ((0, 0), (0, length - x.shape[1])), mode="constant"), transitions)
-    ]
+
+    def pad_array(x: jnp.ndarray, target_length: int) -> jnp.ndarray:
+        if x is None:
+            return None
+        ndim = x.ndim
+        pad_width = [(0, 0)] * ndim
+        if ndim > 1:
+            pad_width[1] = (0, target_length - x.shape[1])
+        return jnp.pad(x, pad_width, mode="constant")
+
+    padded_transitions = [jax.tree_map(lambda x: pad_array(x, length), transitions)]
     return jax.tree_map(lambda *x: jnp.concatenate(x, axis=0), *padded_transitions)
 
 
@@ -120,14 +128,16 @@ def generate_transition_batches(
     Returns:
         An iterator over the batches of transitions.
     """
-    transitions = chunk_transitions(transitions)
+    transition_list = chunk_transitions(transitions)
 
     if group_by_length:
-        # Sort transitions by length
-        transitions.sort(key=lambda x: x.done.shape[1])
+        # Sort transitions so that adjacent transitions have similar lengths.
+        transition_list.sort(key=lambda x: x.done.shape[1])
 
     # Group transitions by batch size
-    batches: list[list[Transition]] = [transitions[i : i + batch_size] for i in range(0, len(transitions), batch_size)]
+    batches: list[list[Transition]] = [
+        transition_list[i : i + batch_size] for i in range(0, len(transition_list), batch_size)
+    ]
 
     # Remove the last batch if it's not full and `include_last_batch` is False.
     if not include_last_batch and len(batches[-1]) < batch_size:
