@@ -195,9 +195,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             RandomizeJointVelocities(scale=0.01),
         ]
 
-    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
-        return DefaultHumanoidModel(key)
-
     def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
         return [
             ActuatorForceObservation(),
@@ -218,6 +215,18 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         return [
             UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0),
         ]
+
+    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
+        return DefaultHumanoidModel(key)
+
+    def sample_action(
+        self,
+        model: DefaultHumanoidModel,
+        physics_model: PhysicsModel,
+        carry: None,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, None]:
+        raise NotImplementedError("Not implemented")
 
 
 if __name__ == "__main__":

@@ -13,9 +13,8 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from pathlib import Path
 from threading import Thread
-from typing import Collection, Generic, Literal, TypeVar
+from typing import Collection, Generic, TypeVar
 
 import equinox as eqx
 import jax
@@ -33,20 +32,32 @@ from xax.utils.transformation import scan_model
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.env.data import PhysicsModel, Transition
+from ksim.env.data import PhysicsModel, PhysicsState, Transition
 from ksim.env.engine import PhysicsEngine, get_physics_engine
 from ksim.env.unroll import (
     UnrollNaNDetector,
+    get_commands,
+    get_observation,
+    get_rewards,
+    get_terminations,
     unroll_trajectory,
 )
 from ksim.observation import Observation
 from ksim.resets import Reset
 from ksim.rewards import Reward
-from ksim.task.types import RLDataset, RolloutTimeStats
+from ksim.task.types import RLDataset
 from ksim.terminations import Termination
 from ksim.utils.named_access import get_joint_metadata
 
 logger = logging.getLogger(__name__)
+
+
+@jax.tree_util.register_dataclass
+@dataclass
+class StepInput:
+    prev_command: FrozenDict[str, Array]
+    physics_state: PhysicsState
+    rng: PRNGKeyArray
 
 
 @jax.tree_util.register_dataclass
@@ -75,10 +86,6 @@ class RLConfig(xax.Config):
     eval_rollout_length: int = xax.field(
         value=MISSING,
         help="The number of ctrl steps to rollout the model for evaluation.",
-    )
-    pretrained: str | None = xax.field(
-        value=None,
-        help="The path to a saved run to load from.",
     )
     checkpoint_num: int | None = xax.field(
         value=None,
@@ -177,110 +184,101 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> Actuators: ...
 
     @abstractmethod
-    def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]: ...
-
-    @abstractmethod
-    def get_commands(self, physics_model: PhysicsModel) -> Collection[Command]: ...
-
-    @abstractmethod
-    def get_rewards(self, physics_model: PhysicsModel) -> Collection[Reward]: ...
-
-    @abstractmethod
-    def get_terminations(self, physics_model: PhysicsModel) -> Collection[Termination]: ...
-
-    @abstractmethod
-    def get_optimizer(self) -> optax.GradientTransformation: ...
-
-    @abstractmethod
-    def get_rollout_time_stats(
-        self,
-        transitions: Transition,
-        agent: PyTree,
-    ) -> RolloutTimeStats:
-        """E.g. calculating advantages and returns for a rollout.
-
-        `transitions` should be (T, ...) shape, with no batch dimension, since
-        this is calculated per-trajectory.
+    def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]:
+        """Returns the observation generators for the current task.
 
         Args:
-            transitions: (T, ...) shape, with no batch dimension.
-            agent: The agent that generated the transitions.
+            physics_model: The physics model to get the observations for.
 
         Returns:
-            RolloutTimeStats: The rollout time stats.
+            A collection of observation generators.
         """
-        ...
 
     @abstractmethod
-    def model_update(
+    def get_commands(self, physics_model: PhysicsModel) -> Collection[Command]:
+        """Returns the command generators for the current task.
+
+        Args:
+            physics_model: The physics model to get the commands for.
+
+        Returns:
+            A collection of command generators.
+        """
+
+    @abstractmethod
+    def get_rewards(self, physics_model: PhysicsModel) -> Collection[Reward]:
+        """Returns the reward generators for the current task.
+
+        Args:
+            physics_model: The physics model to get the rewards for.
+
+        Returns:
+            A collection of reward generators.
+        """
+
+    @abstractmethod
+    def get_terminations(self, physics_model: PhysicsModel) -> Collection[Termination]:
+        """Returns the termination generators for the current task.
+
+        Args:
+            physics_model: The physics model to get the terminations for.
+
+        Returns:
+            A collection of termination generators.
+        """
+
+    def step_engine(
         self,
-        minibatch: RLDataset,
-        *,
-        agent: PyTree,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
+        model: PyTree,
+        physics_model: PhysicsModel,
+        engine: PhysicsEngine,
+        prev_command: FrozenDict[str, Array],
+        physics_state: PhysicsState,
+        observations: Collection[Observation],
+        commands: Collection[Command],
+        rewards: Collection[Reward],
+        terminations: Collection[Termination],
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
-        """Perform a single minibatch update step.
+    ) -> None:
+        obs_rng, cmd_rng, act_rng, reset_rng, physics_rng = jax.random.split(rng, 5)
+        obs = get_observation(physics_state, obs_rng, obs_generators=observations)
+        cmd = get_commands(prev_command, physics_state, cmd_rng, command_generators=commands)
+        action, next_carry = self.sample_action(model, physics_model, act_rng)
+        physics_state = engine.step(action, physics_state, physics_rng)
+        rew = get_rewards(physics_state, act_rng, reward_generators=rewards)
+        term = get_terminations(physics_state, act_rng, termination_generators=terminations)
 
-        Args:
-            minibatch: The minibatch to update.
-            agent: The agent to update.
-            optimizer: The optimizer to use.
-            opt_state: The optimizer state.
-            rng: The random number generator.
+    @abstractmethod
+    def get_initial_carry(self) -> PyTree:
+        """Returns the initial carry for the model.
 
         Returns:
-            The updated agent, optimizer state, loss, and metrics.
+            An arbitrary PyTree, representing any carry parameters that the
+            model needs.
         """
-        ...
 
-    @property
-    def dataset_size(self) -> int:
-        """The total number of environment states in the current PPO dataset.
+    @abstractmethod
+    def sample_action(
+        self,
+        model: PyTree,
+        physics_model: PhysicsModel,
+        carry: PyTree,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, PyTree]:
+        """Takes in the current model, the physics model, and a random key, and returns an action.
 
-        E.g. if you have 32 minibatches, with num_envs_per_minibatch=8192, then
-        you will have dataset size 32 * 8192 = 262144.
+        Args:
+            model: The current model.
+            physics_model: The physics model.
+            carry: The model carry from the previous step.
+            rng: The random key.
+
+        Returns:
+            The action to take.
         """
-        return self.config.num_env_states_per_minibatch * self.config.num_minibatches
 
-    @property
-    def num_rollout_steps_per_env(self) -> int:
-        """Number of steps to unroll per environment during dataset creation.
-
-        E.g. if you have 32 minibatches, with num_envs_per_minibatch=8192, with
-        2048 envs in total, then you will rollout 128 steps each env:
-        8192 * 32 / 2048 = 128
-        """
-        msg = "Dataset size must be divisible by number of envs"
-        assert self.dataset_size % self.config.num_envs == 0, msg
-        return self.dataset_size // self.config.num_envs
-
-    @property
-    def num_envs_per_minibatch(self) -> int:
-        """Number of environments per minibatch.
-
-        E.g. if you roll out 128 steps with 2048 envs in parallel with 32
-        minibatches, then you will have 64 parallel env lines per minibatch.
-
-        This helps us go from (2048, 128) to (64, 128) 32 times.
-        """
-        return self.config.num_envs // self.config.num_minibatches
-
-    def get_dataset(self, phase: Literal["train", "valid"]) -> Dataset:
-        """Get the dataset for the current task."""
-        raise NotImplementedError("Reinforcement learning tasks do not require datasets.")
-
-    def get_batch_size(self) -> int:
-        """Get the batch size for the current task."""
-        # TODO: this is a hack for xax... need to implement mini batching properly later.
-        return 1
-
-    def get_model(self, key: PRNGKeyArray) -> PyTree:
-        """Get the model for the current task."""
-        raise NotImplementedError(
-            "Reinforcement learning tasks must implement this method. Instead, we create an agent using dummy data."
-        )
+    def get_dataset(self, phase: xax.Phase) -> Dataset:
+        raise NotImplementedError("RL tasks do not require datasets, since trajectory histories are stored in-memory.")
 
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
@@ -288,29 +286,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.run_environment()
         else:
             self.run_training()
-
-    def get_checkpoint_number_and_path(self) -> tuple[int, Path]:
-        """Get the checkpoint number and path from config or latest checkpoint."""
-        error_msg = "Tried to load pretrained checkpoint but no path was provided."
-        assert self.config.pretrained is not None, error_msg
-
-        pretrained_path = Path(self.config.pretrained)
-        if not pretrained_path.exists():
-            raise ValueError(f"Checkpoint not found at {pretrained_path}")
-
-        if self.config.checkpoint_num is not None:
-            checkpoint_path = pretrained_path / "checkpoints" / f"ckpt.{self.config.checkpoint_num}.bin"
-            error_msg = f"Checkpoint number {self.config.checkpoint_num} not found at {checkpoint_path}"
-            assert checkpoint_path.exists(), error_msg
-            return self.config.checkpoint_num, checkpoint_path
-
-        # Get the latest checkpoint in the folder
-        ckpt_files = sorted(pretrained_path.glob("checkpoints/ckpt.*.bin"))
-        if not ckpt_files:
-            raise ValueError(f"No checkpoints found in {pretrained_path}/checkpoints/")
-        checkpoint_path = ckpt_files[-1]
-        ckpt_num = int(checkpoint_path.stem.split(".")[1])
-        return ckpt_num, checkpoint_path
 
     def get_render_name(self, state: xax.State | None = None) -> str:
         """Get a unique name for the render directory based on state and checkpoint info."""
@@ -320,11 +295,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # If training, label render with step count
         if state is not None:
             return f"{prefix}_{state.num_steps}_{time_string}"
-
-        # If resuming, use the checkpoint number
-        if self.config.pretrained is not None:
-            ckpt_num, _ = self.get_checkpoint_number_and_path()
-            return f"{prefix}_pretrained_{ckpt_num}_{time_string}"
 
         return f"{prefix}_no_state_{time_string}"
 
@@ -644,11 +614,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 with self.step_context("write_logs"):
                     self.log_trajectory_stats(transitions_ET, rewards, terminations, eval=True)
 
-    def run_environment(self) -> None:
+    def run_environment(self, use_mjx: bool = False, num_steps: int = 1000) -> None:
         """Wraps the environment loop.
 
         This provides an easy interface for developers to test out their
         models and environments before launching training jobs.
+
+        Args:
+            use_mjx: If set, use the MJX engine instead of the Mujoco engine.
+            num_steps: The number of steps to run the environment for.
         """
         with self:
             rng = self.prng_key()
@@ -657,7 +631,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, model_rng = jax.random.split(rng)
             agent, state = self.load_initial_state(model_rng, load_optimizer=False)
 
-            mj_model = self.get_mujoco_model()
+            mj_model: PhysicsModel = self.get_mujoco_model()
+            if use_mjx:
+                mj_model = self.get_mjx_model(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
             engine = self.get_engine(mj_model, metadata)
             observations = self.get_observations(mj_model)
@@ -665,9 +641,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rewards = self.get_rewards(mj_model)
             terminations = self.get_terminations(mj_model)
 
-            breakpoint()
+            # Resets the physics state.
+            rng, reset_rng = jax.random.split(rng)
+            physics_state = engine.reset(reset_rng)
 
-            asdf
+            for _ in range(num_steps):
+                rng, action_rng, step_rng = jax.random.split(rng, 3)
+                action = self.sample_action(agent, mj_model, action_rng)
+                physics_state = engine.step(action, physics_state, step_rng)
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""

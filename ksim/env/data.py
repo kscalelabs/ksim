@@ -17,8 +17,7 @@ PhysicsModel = mjx.Model | mujoco.MjModel
 class PhysicsState:
     """Everything you need for the engine to take an action and step physics."""
 
-    most_recent_action: Array  # since ctrl_dt > dt, we need this to simulate actuator logic
-    model: PhysicsModel
+    most_recent_action: Array
     data: PhysicsData
 
 
