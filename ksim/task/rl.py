@@ -34,7 +34,7 @@ from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.env.data import PhysicsData, PhysicsModel, PhysicsState, Transition
+from ksim.env.data import PhysicsModel, PhysicsState, Transition
 from ksim.env.engine import (
     EngineConstants,
     EngineVariables,
@@ -142,41 +142,6 @@ def get_initial_commands(
         command_val = command_generator.initial_command(cmd_rng)
         commands[command_name] = command_val
     return FrozenDict(commands)
-
-
-def render_data_to_frames(
-    data: PhysicsData,
-    default_mj_model: mujoco.MjModel,
-    camera: int | str | mujoco.MjvCamera = -1,
-    height: int = 240,
-    width: int = 320,
-) -> list[np.ndarray]:
-    """Render the data to a sequence of Numpy arrays."""
-    for leaf in jax.tree.leaves(data):
-        if isinstance(leaf, Array):
-            num_steps = leaf.shape[0]
-            break
-    else:
-        raise ValueError("No array found in data")
-
-    mjx_data_list = [jax.tree.map(lambda x: x[i], data) for i in range(num_steps)]
-    scene_option = mujoco.MjvOption()
-
-    renderer = mujoco.Renderer(default_mj_model, height=height, width=width)
-    frames = []
-    for mjx_data in mjx_data_list:
-        renderer.update_scene(mjx_data, camera=camera, scene_option=scene_option)
-        frames.append(renderer.render())
-
-    return frames
-
-
-@jax.tree_util.register_dataclass
-@dataclass
-class StepInput:
-    prev_command: FrozenDict[str, Array]
-    physics_state: PhysicsState
-    rng: PRNGKeyArray
 
 
 @jax.tree_util.register_dataclass
@@ -478,10 +443,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         commands = jax.lax.cond(
             terminated,
-            lambda: get_initial_commands(
-                cmd_rng,
-                command_generators=engine_constants.command_generators,
-            ),
+            lambda: get_initial_commands(cmd_rng, command_generators=engine_constants.command_generators),
             lambda: commands,
         )
 
@@ -593,6 +555,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def render_trajectory_video(
         self,
         transitions: Transition,
+        commands: Collection[Command],
         mj_model: mujoco.MjModel,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
@@ -629,6 +592,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
             renderer.update_scene(mj_data, camera=mj_camera)
+
+            # Adds command elements to the scene.
+            for command in commands:
+                command.update_scene(renderer.scene, transition.command[command.command_name])
+
+            # Renders the frame to a Numpy array.
             frame = renderer.render()
 
             # Overlays the frame number on the frame.
@@ -698,10 +667,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> Transition:
         initial_carry = self.get_initial_carry()
         rng, cmd_rng = jax.random.split(rng)
-        initial_commands = get_initial_commands(
-            cmd_rng,
-            command_generators=engine_constants.command_generators,
-        )
+        initial_commands = get_initial_commands(cmd_rng, command_generators=engine_constants.command_generators)
 
         # Reset the physics state.
         rng, reset_rng = jax.random.split(rng)
