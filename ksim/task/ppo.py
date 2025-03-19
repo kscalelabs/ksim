@@ -371,7 +371,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        minibatch: RLDataset,
+        trajectory: Transition,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""

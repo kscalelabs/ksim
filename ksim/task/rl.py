@@ -1,9 +1,7 @@
-"""Defines a standard task interface for training reinforcement learning agents.
-
-TODO: need to add SPMD and sharding support for super fast training :)
-"""
+"""Defines a standard task interface for training reinforcement learning agents."""
 
 import bdb
+import io
 import itertools
 import logging
 import signal
@@ -19,6 +17,7 @@ import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import mujoco
 import mujoco_viewer
 import numpy as np
@@ -31,6 +30,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 from omegaconf import II, MISSING
+from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
@@ -203,6 +203,14 @@ class RLConfig(xax.Config):
     )
 
     # Rendering parameters.
+    max_values_per_plot: int = xax.field(
+        value=8,
+        help="The maximum number of values to plot for each key.",
+    )
+    plot_figsize: tuple[float, float] = xax.field(
+        value=(12, 6),
+        help="The size of the figure for each plot.",
+    )
     render_height: int = xax.field(
         value=480,
         help="The height of the rendered images.",
@@ -599,32 +607,69 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         frame_list: list[np.ndarray] = []
-        for transition in transition_list:
-            mj_data.qpos[:] = transition.qpos
-            mj_data.qvel[:] = transition.qvel
+        for frame_id, transition in enumerate(transition_list):
+            mj_data.qpos = np.array(transition.qpos)
+            mj_data.qvel = np.array(transition.qvel)
 
             # Renders the current frame.
+            mujoco.mj_forward(mj_model, mj_data)
             renderer.update_scene(mj_data, camera=mj_camera)
             frame = renderer.render()
+
+            # Overlays the frame number on the frame.
+            frame_img = Image.fromarray(frame)
+            draw = ImageDraw.Draw(frame_img)
+            draw.text((10, 10), f"Frame {frame_id}", fill=(255, 255, 255))
+            frame = np.array(frame_img)
+
             frame_list.append(frame)
 
         return np.stack(frame_list, axis=0), fps
 
-    def log_single_trajectory(
-        self,
-        transitions: Transition,
-        mj_model: mujoco.MjModel,
-        namespace: str = "trajectory",
-    ) -> None:
+    def log_single_trajectory(self, transitions: Transition, mj_model: mujoco.MjModel) -> None:
         """Visualizes a single trajectory.
 
         Args:
             transitions: The transitions to visualize.
             mj_model: The Mujoco model to render the scene with.
-            namespace: The namespace to log the statistics to.
         """
+        # Logs plots of the observations, commands, actions, rewards, and terminations.
+        for namespace, arr_dict in (
+            ("👀 obs", transitions.obs),
+            ("🕹️ command", transitions.command),
+            ("🏃 action", {"action": transitions.action}),
+            ("💀 termination", transitions.termination_components),
+            ("💰 reward", transitions.reward_components),
+        ):
+            for key, value in arr_dict.items():
+                plt.figure(figsize=self.config.plot_figsize)
+
+                # Ensures a consistent shape and truncates if necessary.
+                value = value.reshape(value.shape[0], -1)
+                if value.shape[-1] > self.config.max_values_per_plot:
+                    logger.warning("Truncating %s to %d values per plot.", key, self.config.max_values_per_plot)
+                    value = value[..., : self.config.max_values_per_plot]
+
+                for i in range(value.shape[1]):
+                    plt.plot(value[:, i], label=f"{i}")
+
+                if value.shape[1] > 1:
+                    plt.legend()
+                plt.title(key)
+
+                # Converts to PIL image.
+                buf = io.BytesIO()
+                plt.savefig(buf, format="png")
+                plt.close()
+                buf.seek(0)
+                img = Image.open(buf)
+
+                # Logs the image.
+                self.logger.log_image(key=key, value=img, namespace=namespace)
+
+        # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(transitions, mj_model)
-        self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace=namespace)
+        self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="🚀 traj")
 
     @eqx.filter_jit
     def _single_unroll(
@@ -773,8 +818,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     self.log_termination_stats(transitions, terminations)
                     self.logger.write(state)
 
-            breakpoint()
-
             with self.step_context("on_step_start"):
                 state = self.on_step_start(state)
 
@@ -790,11 +833,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             # Optimizes the model on that trajectory.
+            rng, update_rng = jax.random.split(rng)
             model, optimizer, opt_state, train_metrics = self.update_model(
                 model=model,
                 optimizer=optimizer,
                 opt_state=opt_state,
                 trajectory=trajectory,
+                rng=update_rng,
             )
 
             with self.step_context("write_logs"):
