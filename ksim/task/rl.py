@@ -145,6 +145,17 @@ def get_initial_commands(
     return FrozenDict(commands)
 
 
+def apply_randomizations(
+    physics_model: PhysicsModel,
+    randomizations: Collection[Randomization],
+    rng: PRNGKeyArray,
+) -> PhysicsModel:
+    for randomization in randomizations:
+        rng, randomization_rng = jax.random.split(rng)
+        physics_model = randomization(physics_model, randomization_rng)
+    return physics_model
+
+
 @jax.tree_util.register_dataclass
 @dataclass
 class RLConfig(xax.Config):
@@ -178,11 +189,11 @@ class RLConfig(xax.Config):
         help="The size of the figure for each plot.",
     )
     render_height: int = xax.field(
-        value=480,
+        value=240,
         help="The height of the rendered images.",
     )
     render_width: int = xax.field(
-        value=640,
+        value=320,
         help="The width of the rendered images.",
     )
     render_track_body_id: int | None = xax.field(
@@ -699,9 +710,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         initial_commands = get_initial_commands(cmd_rng, command_generators=engine_constants.command_generators)
 
         # Apply randomizations to the environment.
-        for randomization in engine_constants.randomization_generators:
-            rng, randomization_rng = jax.random.split(rng)
-            physics_model = randomization(physics_model, randomization_rng)
+        rng, randomization_rng = jax.random.split(rng)
+        physics_model = apply_randomizations(
+            physics_model,
+            engine_constants.randomization_generators,
+            randomization_rng,
+        )
 
         # Reset the physics state.
         rng, reset_rng = jax.random.split(rng)
@@ -974,12 +988,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             step_id = 0
             try:
                 for step_id in iterator:
-                    _, engine_variables = self.step_engine(
+                    transition, engine_variables = self.step_engine(
                         physics_model=mj_model,
                         model=model,
                         engine=engine,
                         engine_constants=engine_constants,
                         engine_variables=engine_variables,
+                    )
+
+                    # We manually trigger randomizations on termination,
+                    # whereas during training the randomization is only applied
+                    # once per rollout for efficiency.
+                    rng, randomization_rng = jax.random.split(rng)
+                    mj_model = jax.lax.cond(
+                        transition.done,
+                        lambda: apply_randomizations(mj_model, randomizations, randomization_rng),
+                        lambda: mj_model,
                     )
 
                     if viewer is not None:
