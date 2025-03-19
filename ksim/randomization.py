@@ -1,7 +1,6 @@
 """Randomize each environment when gathering trajectories."""
 
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
 
 import attrs
 import jax
@@ -24,15 +23,6 @@ class Randomization(ABC):
         """Randomize the model for a single environment."""
 
 
-T = TypeVar("T", bound=Randomization)
-
-
-class RandomizerBuilder(ABC, Generic[T]):
-    @abstractmethod
-    def __call__(self, physics_model: PhysicsModel, rng: PRNGKeyArray) -> T:
-        """Builds a randomizer from a physical model."""
-
-
 @attrs.define(frozen=True, kw_only=True)
 class WeightRandomization(Randomization):
     """Randomize the body masses of the robot."""
@@ -49,7 +39,6 @@ class WeightRandomization(Randomization):
 class StaticFrictionRandomization(Randomization):
     """Randomizes the static friction."""
 
-    name: str = "dof_frictionloss"
     scale_lower: float = attrs.field(default=0.5)
     scale_upper: float = attrs.field(default=2.0)
 
@@ -113,7 +102,6 @@ class FloorFrictionRandomization(Randomization):
 class ArmatureRandomization(Randomization):
     """Randomizes the armature."""
 
-    name: str = "dof_armature"
     scale_lower: float = attrs.field(default=1.0)
     scale_upper: float = attrs.field(default=1.05)
 
@@ -134,7 +122,6 @@ class TorsoMassRandomization(Randomization):
     torso_body_id: int = attrs.field()
     scale_lower: float = attrs.field(default=-1.0)
     scale_upper: float = attrs.field(default=1.0)
-    torso_body_id: int = attrs.field(default=MISSING)
 
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
         """Randomize the torso mass of the robot."""
@@ -172,7 +159,6 @@ class TorsoMassRandomization(Randomization):
 class JointDampingRandomization(Randomization):
     """Randomizes the joint damping."""
 
-    name: str = "dof_damping"
     scale_lower: float = attrs.field(default=0.9)
     scale_upper: float = attrs.field(default=1.1)
 
