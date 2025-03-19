@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 import mujoco
 from flax.core import FrozenDict
-from jaxtyping import Array
+from jaxtyping import Array, PyTree
 from mujoco import mjx
 
 PhysicsData = mjx.Data | mujoco.MjData
@@ -37,6 +37,7 @@ class Transition:
 
     termination_components: FrozenDict[str, Array]
     reward_components: FrozenDict[str, Array]
+    aux_outputs: PyTree | None
 
 
 def chunk_transitions(transitions: Transition) -> list[Transition]:
@@ -126,6 +127,7 @@ def generate_transition_batches(
     transitions: Transition,
     batch_size: int,
     min_batch_size: int = 2,
+    min_trajectory_length: int = 3,
     group_by_length: bool = False,
     include_last_batch: bool = True,
 ) -> list[Transition]:
@@ -135,6 +137,8 @@ def generate_transition_batches(
         transitions: The collected trajectories to batch.
         batch_size: The size of the batches to generate.
         min_batch_size: The minimum number of transitions to include in a batch.
+        min_trajectory_length: The minimum number of transitions in a
+            trajectory for it to be included in the batch.
         group_by_length: Whether to group transitions by length, otherwise,
             transitions are grouped randomly.
         include_last_batch: Whether to include the last batch if it's not full.
@@ -144,9 +148,12 @@ def generate_transition_batches(
     """
     transition_list = chunk_transitions(transitions)
 
+    # Remove trajectories that are shorter than `min_trajectory_length`.
+    transition_list = [t for t in transition_list if t.done.shape[-1] >= min_trajectory_length]
+
     if group_by_length:
         # Sort transitions so that adjacent transitions have similar lengths.
-        transition_list.sort(key=lambda x: x.done.shape[1])
+        transition_list.sort(key=lambda x: x.done.shape[-1])
 
     # Group transitions by batch size
     batches: list[list[Transition]] = [

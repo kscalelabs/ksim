@@ -362,7 +362,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def get_initial_carry(self) -> PyTree:
+    def get_initial_carry(self) -> PyTree | None:
         """Returns the initial carry for the model.
 
         Returns:
@@ -379,8 +379,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, PyTree]:
-        """Takes in the current model, the physics model, and a random key, and returns an action.
+    ) -> tuple[Array, PyTree | None, PyTree | None]:
+        """Gets an action for the current observation.
+
+        This function returns the action to take, the next carry (for models
+        which look at multiple steps), and any auxiliary outputs. The auxiliary
+        outputs get stored in the final transition object and can be used to
+        compute metrics like log probabilities, values, etc.
 
         Args:
             model: The current model.
@@ -391,7 +396,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng: The random key.
 
         Returns:
-            The action to take.
+            The action to take, the next carry, and any auxiliary outputs.
         """
 
     @property
@@ -440,7 +445,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Samples an action from the model.
-        action, next_carry = self.sample_action(
+        action, next_carry, aux_outputs = self.sample_action(
             model=model,
             carry=engine_variables.carry,
             physics_model=physics_model,
@@ -504,6 +509,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             timestep=next_physics_state.data.time,
             termination_components=terminations,
             reward_components=rewards,
+            aux_outputs=aux_outputs,
         )
 
         # Gets the variables for the next step.
@@ -761,25 +767,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         _, transitions = jax.lax.scan(scan_fn, engine_variables, length=num_steps)
 
         # Apply post_accumulate and scale to the fully unrolled rewards.
-        all_rewards = transitions.reward_components
-        reward_list = [
-            reward_fn.post_accumulate(all_rewards[reward_fn.reward_name], transitions.done)
+        reward_components = {
+            reward_fn.reward_name: reward_fn.post_accumulate(
+                transitions.reward_components[reward_fn.reward_name], transitions.done
+            )
+            * reward_fn.scale
             for reward_fn in engine_constants.reward_generators
-        ]
-        rewards = jnp.stack(reward_list, axis=1)
+        }
+        rewards = jnp.stack(list(reward_components.values()), axis=1).sum(axis=-1)
 
-        return Transition(
-            qpos=transitions.qpos,
-            qvel=transitions.qvel,
-            obs=transitions.obs,
-            command=transitions.command,
-            action=transitions.action,
-            reward=rewards,
-            done=transitions.done,
-            timestep=transitions.timestep,
-            termination_components=transitions.termination_components,
-            reward_components=transitions.reward_components,
-        )
+        kwargs = transitions.__dict__
+        kwargs["reward"] = rewards
+        kwargs["reward_components"] = reward_components
+        return Transition(**kwargs)
 
     @eqx.filter_jit
     def _vmapped_unroll(
