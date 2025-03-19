@@ -404,6 +404,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
+        breakpoint()
+
         # return self._single_step(
         #     model=model,
         #     optimizer=optimizer,
