@@ -29,9 +29,6 @@ from ksim.utils.named_access import get_joint_metadata
 NUM_INPUTS = 29
 NUM_OUTPUTS = 21
 
-Observation: TypeAlias = FrozenDict[str, Array]
-Command: TypeAlias = FrozenDict[str, Array]
-
 class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
@@ -255,7 +252,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         action_dist_n = model.actor(act_frc_obs_n, lin_vel_cmd_n)
         action_n = action_dist_n.sample(seed=rng)
         return action_n, None
-
 
 if __name__ == "__main__":
     # python -m examples.default_humanoid.walking
