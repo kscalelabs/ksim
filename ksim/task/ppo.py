@@ -375,23 +375,26 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        # loss_val, metrics, grads = self.loss_metrics_grads(
-        #     model=model,
-        #     minibatch=minibatch,
-        #     rng=rng,
-        # )
+        minibatch = RLDataset(
+            transitions=transitions,
+            rollout_time_stats=self.get_rollout_time_stats(transitions, model),
+        )
 
-        # # updates and opt_state have complex types that are hard to type properly. TODO: fix.
-        # updates, new_opt_state = optimizer.update(grads, opt_state, model)  # type: ignore[operator]
-        # new_model = eqx.apply_updates(model, updates)  # TODO: let's build our own debuggable apply_updates
+        loss_val, metrics, grads = self.loss_metrics_grads(
+            model=model,
+            minibatch=minibatch,
+            rng=rng,
+        )
 
-        # # adding grad and loss to metrics
-        # grad_norm = optax.global_norm(grads)
-        # assert isinstance(grad_norm, Array)
-        # metrics["loss"] = loss_val
-        # metrics["grad_norm"] = grad_norm
-        # frozen_metrics: FrozenDict[str, Array] = FrozenDict(metrics)
+        # updates and opt_state have complex types that are hard to type properly. TODO: fix.
+        updates, new_opt_state = optimizer.update(grads, opt_state, model)  # type: ignore[operator]
+        new_model = eqx.apply_updates(model, updates)  # TODO: let's build our own debuggable apply_updates
 
-        # return new_model, new_opt_state, loss_val, frozen_metrics
+        # adding grad and loss to metrics
+        grad_norm = optax.global_norm(grads)
+        assert isinstance(grad_norm, Array)
+        metrics["loss"] = loss_val
+        metrics["grad_norm"] = grad_norm
+        frozen_metrics: FrozenDict[str, Array] = FrozenDict(metrics)
 
-        return model, opt_state, 0.0, FrozenDict({})
+        return new_model, new_opt_state, loss_val, frozen_metrics
