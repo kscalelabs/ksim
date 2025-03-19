@@ -922,6 +922,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rewards = self.get_rewards(mj_model)
             terminations = self.get_terminations(mj_model)
             randomizations = self.get_randomization(mj_model)
+
             # Gets initial variables.
             initial_carry = self.get_initial_carry()
             rng, cmd_rng = jax.random.split(rng)
