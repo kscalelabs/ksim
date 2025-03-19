@@ -519,7 +519,7 @@ class MujocoViewer(Callbacks):
         self.data = data
         self.render_mode = mode
         if self.render_mode not in get_args(RenderMode):
-            raise NotImplementedError("Invalid mode. Only 'offscreen' and 'window' are supported.")
+            raise NotImplementedError(f"Invalid mode: {self.render_mode}")
 
         self.is_alive = True
 
