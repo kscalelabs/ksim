@@ -1071,10 +1071,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     match save_path.suffix.lower():
                         case ".mp4":
-                            writer = imageio.get_writer(save_path, fps=fps)
-                            for frame in frames:
-                                writer.append_data(frame)
-                            writer.close()
+                            with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
+                                for frame in frames:
+                                    writer.append_data(frame)
 
                         case ".gif":
                             imageio.mimsave(save_path, frames, fps=fps)
