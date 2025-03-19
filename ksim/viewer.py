@@ -94,9 +94,9 @@ class MarkerManager:
             scene: MuJoCo scene object
         """
         self._scene = scene
-        self._markers: list[dict[str, Any]] = []
+        self._markers: list[dict[str, Any]] = []  # noqa: ANN401
 
-    def add_marker(self, **marker_params: Any) -> None:
+    def add_marker(self, **marker_params: Any) -> None:  # noqa: ANN401
         """Add a marker to the scene.
 
         Args:
@@ -113,7 +113,7 @@ class MarkerManager:
         for marker in self._markers:
             self._add_marker_to_scene(marker)
 
-    def _add_marker_to_scene(self, marker: dict[str, Any]) -> None:
+    def _add_marker_to_scene(self, marker: dict[str, Any]) -> None:  # noqa: ANN401
         """Add a marker to the current scene.
 
         Args:
@@ -180,8 +180,6 @@ class PlotManager:
     def _setup_figures(self) -> None:
         """Set up plotting figures."""
         max_num_figs = 3
-        width_adjustment = self._width % 4
-        fig_w, fig_h = int(self._width / 4), int(self._height / 4)
         for _ in range(max_num_figs):
             fig = mujoco.MjvFigure()
             mujoco.mjv_defaultFigure(fig)
@@ -296,7 +294,7 @@ class Callbacks:
 
     def _key_callback(
         self,
-        window: Any,
+        window: glfw._GLFWwindow,
         key: int,
         scancode: int,
         action: int,
@@ -320,15 +318,7 @@ class Callbacks:
             case _:
                 pass
 
-    def _switch_camera(self) -> None:
-        """Switch to the next camera."""
-        self.cam.fixedcamid += 1
-        self.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-        if self.cam.fixedcamid >= self.model.ncam:
-            self.cam.fixedcamid = -1
-            self.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
-
-    def _cursor_pos_callback(self, window: Any, xpos: float, ypos: float) -> None:
+    def _cursor_pos_callback(self, window: glfw._GLFWwindow, xpos: float, ypos: float) -> None:
         """Handle mouse movement events.
 
         Args:
@@ -364,7 +354,7 @@ class Callbacks:
         self._last_mouse_x = int(self._scale * xpos)
         self._last_mouse_y = int(self._scale * ypos)
 
-    def _mouse_button_callback(self, window: Any, button: int, act: int, mods: int) -> None:
+    def _mouse_button_callback(self, window: glfw._GLFWwindow, button: int, act: int, mods: int) -> None:
         """Handle mouse button events.
 
         Args:
@@ -394,7 +384,7 @@ class Callbacks:
         if act == glfw.RELEASE:
             self.pert.active = 0
 
-    def _scroll_callback(self, window: Any, x_offset: float, y_offset: float) -> None:
+    def _scroll_callback(self, window: glfw._GLFWwindow, x_offset: float, y_offset: float) -> None:
         """Handle mouse scroll events.
 
         Args:
@@ -444,9 +434,9 @@ class Callbacks:
         newperturb = 0
         if key and self.pert.select > 0:
             if self._button_right_pressed:
-                newperturb = mujoco.mjtPertBit.mjPERT_TRANSLATE
+                newperturb = mujoco.mjtPerturbBit.mjPERT_TRANSLATE
             if self._button_left_pressed:
-                newperturb = mujoco.mjtPertBit.mjPERT_ROTATE
+                newperturb = mujoco.mjtPerturbBit.mjPERT_ROTATE
 
             if newperturb and not self.pert.active:
                 mujoco.mjv_initPerturb(self.model, self.data, self.scn, self.pert)
@@ -615,7 +605,7 @@ class MujocoViewer(Callbacks):
         """
         self.plot_manager.add_data(line_name, line_data, fig_idx)
 
-    def add_marker(self, **marker_params: Any) -> None:
+    def add_marker(self, **marker_params: Any) -> None:  # noqa: ANN401
         """Add a marker to the scene.
 
         Args:
