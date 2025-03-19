@@ -10,11 +10,13 @@ import textwrap
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Thread
 from typing import Any, Collection, Generic, TypeVar
 
 import chex
 import equinox as eqx
+import imageio.v2 as imageio
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -163,6 +165,18 @@ class RLConfig(xax.Config):
     run_environment: bool = xax.field(
         value=False,
         help="Instead of dropping into the training loop, run the environment loop.",
+    )
+    run_environment_num_seconds: float | None = xax.field(
+        value=None,
+        help="If provided, run the environment loop for the given number of seconds.",
+    )
+    run_environment_render_visualization: bool = xax.field(
+        value=True,
+        help="If set, render the environment loop.",
+    )
+    run_environment_save_path: str | None = xax.field(
+        value=None,
+        help="If provided, save the rendered video to the given path.",
     )
 
     # Training parameters.
@@ -517,7 +531,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
         if self.config.run_environment:
-            self.run_environment()
+            self.run_environment(
+                num_steps=round(self.config.run_environment_num_seconds / self.config.ctrl_dt),
+                render_visualization=self.config.run_environment_render_visualization,
+                save_path=self.config.run_environment_save_path,
+            )
         else:
             self.run_training()
 
@@ -909,6 +927,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         num_steps: int | None = None,
         render_visualization: bool = True,
+        save_path: str | Path | None = None,
     ) -> None:
         """Provides an easy-to-use interface for debugging environments.
 
@@ -921,7 +940,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 provided, run until the user manually terminates the
                 environment visualizer.
             render_visualization: If set, render the Mujoco visualizer.
+            save_path: If provided, save the rendered video to the given path.
         """
+        if save_path is not None:
+            save_path = Path(save_path)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+
         with self, jax.disable_jit():
             rng = self.prng_key()
             self.set_loggers()
@@ -949,11 +973,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             viewer: MujocoViewer | None = None
 
-            if render_visualization:
+            if render_visualization or save_path is not None:
                 viewer = MujocoViewer(
                     mj_model,
                     physics_state.data,
-                    mode="window",
+                    mode="window" if render_visualization else "offscreen",
                     height=self.config.render_height,
                     width=self.config.render_width,
                 )
@@ -987,6 +1011,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
 
             step_id = 0
+            frames: list[np.ndarray] = []
             try:
                 for step_id in iterator:
                     transition, engine_variables = self.step_engine(
@@ -1017,14 +1042,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         for command in commands:
                             command.update_scene(viewer.scn, engine_variables.commands[command.command_name])
 
-                        viewer.render()
+                        if render_visualization:
+                            viewer.render()
+
+                        # Logs the frames to render.
+                        if save_path is not None:
+                            frames.append(viewer.read_pixels(depth=False))
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
             except Exception:
                 # Raise on the first step for debugging purposes.
-                if step_id == 0:
+                if step_id <= 1:
                     raise
 
                 logger.info("Keyboard interrupt, exiting environment loop")
@@ -1032,6 +1062,25 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             finally:
                 if viewer is not None:
                     viewer.close()
+
+                if save_path is not None:
+                    if len(frames) == 0:
+                        raise ValueError("No frames to save")
+
+                    fps = round(1 / self.config.ctrl_dt)
+
+                    match save_path.suffix.lower():
+                        case ".mp4":
+                            writer = imageio.get_writer(save_path, fps=fps)
+                            for frame in frames:
+                                writer.append_data(frame)
+                            writer.close()
+
+                        case ".gif":
+                            imageio.mimsave(save_path, frames, fps=fps)
+
+                        case _:
+                            raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
