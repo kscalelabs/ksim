@@ -11,7 +11,7 @@ import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from threading import Thread
-from typing import Collection, Generic, TypeVar
+from typing import Any, Collection, Generic, TypeVar
 
 import chex
 import equinox as eqx
@@ -512,6 +512,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_dataset(self, phase: xax.Phase) -> Dataset:
         raise NotImplementedError("RL tasks do not require datasets, since trajectory histories are stored in-memory.")
 
+    def compute_loss(self, model: PyTree, batch: Any, output: Any) -> Array:  # noqa: ANN401
+        raise NotImplementedError(
+            "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
+            "PPO tasks use model_update and loss_metrics_grads instead."
+        )
+
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
         if self.config.run_environment:
@@ -828,7 +834,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     self.log_single_trajectory(transitions, mj_model)
                     self.log_reward_stats(transitions, rewards)
                     self.log_termination_stats(transitions, terminations)
-                    self.logger.write(state)
+                    self.log_state_timers(state)
+                    self.write_logs(state)
 
             with self.step_context("on_step_start"):
                 state = self.on_step_start(state)
@@ -864,7 +871,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     self.log_reward_stats(transitions, rewards)
                     self.log_termination_stats(transitions, terminations)
                     self.log_train_metrics(train_metrics)
-                    self.logger.write(state)
+                    self.log_state_timers(state)
+                    self.write_logs(state)
 
             with self.step_context("on_step_end"):
                 state = self.on_step_end(state)

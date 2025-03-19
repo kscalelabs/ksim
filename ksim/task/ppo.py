@@ -2,7 +2,7 @@
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 
 import equinox as eqx
 import jax
@@ -14,7 +14,6 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.env.data import Transition
 from ksim.task.rl import RLConfig, RLTask
-from ksim.task.types import PPORolloutTimeStats, RLDataset, RolloutTimeStats
 
 
 def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
@@ -275,12 +274,6 @@ Config = TypeVar("Config", bound=PPOConfig)
 class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
 
-    def compute_loss(self, model: PyTree, batch: Any, output: Any) -> Array:  # noqa: ANN401
-        raise NotImplementedError(
-            "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
-            "PPO tasks use model_update and loss_metrics_grads instead."
-        )
-
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -339,7 +332,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def loss_metrics_grads(
         self,
         model: PyTree,
-        minibatch: RLDataset,
+        transitions: Transition,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array], PyTree]:
         """Value_and_grad computation with metrics."""
@@ -375,26 +368,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        minibatch = RLDataset(
-            transitions=transitions,
-            rollout_time_stats=self.get_rollout_time_stats(transitions, model),
-        )
-
         loss_val, metrics, grads = self.loss_metrics_grads(
             model=model,
-            minibatch=minibatch,
+            transitions=transitions,
             rng=rng,
         )
 
-        # updates and opt_state have complex types that are hard to type properly. TODO: fix.
+        # Apply the gradient updates to the model.
         updates, new_opt_state = optimizer.update(grads, opt_state, model)  # type: ignore[operator]
         new_model = eqx.apply_updates(model, updates)  # TODO: let's build our own debuggable apply_updates
 
-        # adding grad and loss to metrics
+        # Add global gradient norm and loss to the metrics, to monitor training.
         grad_norm = optax.global_norm(grads)
         assert isinstance(grad_norm, Array)
         metrics["loss"] = loss_val
         metrics["grad_norm"] = grad_norm
-        frozen_metrics: FrozenDict[str, Array] = FrozenDict(metrics)
 
-        return new_model, new_opt_state, loss_val, frozen_metrics
+        return new_model, new_opt_state, loss_val, FrozenDict(metrics)
