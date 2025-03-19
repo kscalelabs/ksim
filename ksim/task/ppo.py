@@ -406,6 +406,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         transition_batches: list[Transition],
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+        # TODO: Change this to use jax.lax after control flow is implemented.
         all_metrics = []
         for batch in transition_batches:
             model, opt_state, metrics = self._single_step(
