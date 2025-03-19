@@ -20,4 +20,3 @@ xax
 mujoco
 mujoco-mjx
 mujoco-scenes
-mujoco-python-viewer

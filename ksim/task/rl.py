@@ -19,7 +19,6 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import mujoco
-import mujoco_viewer
 import numpy as np
 import optax
 import tqdm
@@ -47,6 +46,7 @@ from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
 from ksim.utils.named_access import get_joint_metadata
+from ksim.viewer import MujocoViewer
 
 logger = logging.getLogger(__name__)
 
@@ -177,11 +177,11 @@ class RLConfig(xax.Config):
         help="The size of the figure for each plot.",
     )
     render_height: int = xax.field(
-        value=240,
+        value=480,
         help="The height of the rendered images.",
     )
     render_width: int = xax.field(
-        value=320,
+        value=640,
         help="The width of the rendered images.",
     )
     render_track_body_id: int | None = xax.field(
@@ -892,16 +892,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, reset_rng = jax.random.split(rng)
             physics_state = engine.reset(mj_model, reset_rng)
 
-            viewer: mujoco_viewer.MujocoViewer | None = None
+            viewer: MujocoViewer | None = None
 
             if render_visualization:
-                viewer = mujoco_viewer.MujocoViewer(
+                viewer = MujocoViewer(
                     mj_model,
                     physics_state.data,
                     mode="window",
                     height=self.config.render_height,
                     width=self.config.render_width,
-                    hide_menus=True,
                 )
 
                 # Sets the viewer camera.
