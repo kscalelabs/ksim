@@ -949,8 +949,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.set_loggers()
 
             rng, model_rng = jax.random.split(rng)
-            # TODO: fix it
-            model, _, _, _ = self.load_initial_state(model_rng)  # , load_optimizer=False)
+            model, _ = self.load_initial_state(model_rng, load_optimizer=False)
 
             mj_model: PhysicsModel = self.get_mujoco_model()
             metadata = self.get_mujoco_model_metadata(mj_model)
