@@ -575,6 +575,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
         self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace=namespace)
 
+    def log_train_metrics(self, train_metrics: dict[str, Array]) -> None:
+        """Logs the train metrics.
+
+        Args:
+            train_metrics: The train metrics to log.
+        """
+        for key, value in train_metrics.items():
+            self.logger.log_scalar(key=key, value=lambda: value.mean(), namespace="train")
+
     def render_trajectory_video(
         self,
         transitions: Transition,
@@ -753,7 +762,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        trajectory: Transition,
+        transitions: Transition,
+        rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.GradientTransformation, optax.OptState, FrozenDict[str, Array]]:
         """Updates the model on the given trajectory.
 
@@ -764,7 +774,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model: The model to update.
             optimizer: The optimizer to use.
             opt_state: The optimizer state.
-            trajectory: The trajectory to update the model on.
+            transitions: The trajectory to update the model on.
+            rng: The random seed.
 
         Returns:
             A tuple containing the updated model, optimizer, optimizer state
@@ -825,7 +836,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Samples N trajectories in parallel.
             rng, rollout_rng = jax.random.split(rng)
-            trajectory = self._vmapped_unroll(
+            transitions = self._vmapped_unroll(
                 rng=rollout_rng,
                 model=model,
                 engine=engine,
@@ -840,7 +851,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 model=model,
                 optimizer=optimizer,
                 opt_state=opt_state,
-                trajectory=trajectory,
+                transitions=transitions,
                 rng=update_rng,
             )
 
@@ -853,6 +864,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 with self.step_context("write_logs"):
                     self.log_reward_stats(transitions, rewards)
                     self.log_termination_stats(transitions, terminations)
+                    self.log_train_metrics(train_metrics)
                     self.logger.write(state)
 
             with self.step_context("on_step_end"):
