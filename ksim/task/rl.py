@@ -212,11 +212,11 @@ class RLConfig(xax.Config):
         help="The size of the figure for each plot.",
     )
     render_height: int = xax.field(
-        value=480,
+        value=240,
         help="The height of the rendered images.",
     )
     render_width: int = xax.field(
-        value=640,
+        value=320,
         help="The width of the rendered images.",
     )
     render_track_body_id: int | None = xax.field(
