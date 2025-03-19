@@ -27,7 +27,6 @@ class WeightRandomization(Randomization):
 
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
         """Randomize the model for a single environment."""
-        breakpoint()
         new_body_mass = model.body_mass * (jax.random.uniform(rng, model.body_mass.shape) * self.scale + 1.0)
         return update_model_field(model, "body_mass", new_body_mass)
 
