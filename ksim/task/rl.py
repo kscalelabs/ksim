@@ -10,7 +10,6 @@ import logging
 import signal
 import sys
 import textwrap
-import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -538,17 +537,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         else:
             self.run_training()
 
-    def get_render_name(self, state: xax.State | None = None) -> str:
-        """Get a unique name for the render directory based on state and checkpoint info."""
-        time_string = time.strftime("%Y%m%d_%H%M%S")
-        prefix = "render"
-
-        # If training, label render with step count
-        if state is not None:
-            return f"{prefix}_{state.num_steps}_{time_string}"
-
-        return f"{prefix}_no_state_{time_string}"
-
     def get_reward_stats(
         self,
         trajectory: Transition,
@@ -737,7 +725,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> None:
         raise NotImplementedError("RL training loop not implemented")
 
-    def run_environment(self, num_steps: int | None = None) -> None:
+    def run_environment(
+        self,
+        num_steps: int | None = None,
+        render_visualization: bool = True,
+    ) -> None:
         """Provides an easy-to-use interface for debugging environments.
 
         This function runs the environment for `num_steps`, rendering using
@@ -748,6 +740,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             num_steps: The number of steps to run the environment for. If not
                 provided, run until the user manually terminates the
                 environment visualizer.
+            render_visualization: If set, render the Mujoco visualizer.
         """
         with self, jax.disable_jit():
             rng = self.prng_key()
@@ -772,23 +765,26 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, reset_rng = jax.random.split(rng)
             physics_state = engine.reset(mj_model, reset_rng)
 
-            viewer = mujoco_viewer.MujocoViewer(
-                mj_model,
-                physics_state.data,
-                mode="window",
-                height=self.config.render_height,
-                width=self.config.render_width,
-                hide_menus=True,
-            )
+            viewer: mujoco_viewer.MujocoViewer | None = None
 
-            viewer.cam.distance = self.config.render_distance
-            viewer.cam.azimuth = self.config.render_azimuth
-            viewer.cam.elevation = self.config.render_elevation
-            viewer.cam.lookat[:] = self.config.render_lookat
+            if render_visualization:
+                viewer = mujoco_viewer.MujocoViewer(
+                    mj_model,
+                    physics_state.data,
+                    mode="window",
+                    height=self.config.render_height,
+                    width=self.config.render_width,
+                    hide_menus=True,
+                )
 
-            if self.config.render_track_body_id is not None:
-                viewer.cam.trackbodyid = self.config.render_track_body_id
-                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+                viewer.cam.distance = self.config.render_distance
+                viewer.cam.azimuth = self.config.render_azimuth
+                viewer.cam.elevation = self.config.render_elevation
+                viewer.cam.lookat[:] = self.config.render_lookat
+
+                if self.config.render_track_body_id is not None:
+                    viewer.cam.trackbodyid = self.config.render_track_body_id
+                    viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
             # These components remain constant across the entire episode.
             engine_constants = EngineConstants(
@@ -809,7 +805,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
-            all_transitions_list = []
 
             step_id = 0
             try:
@@ -823,24 +818,26 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         rng=step_rng,
                     )
 
-                    # We need to manually update the viewer data field, because
-                    # resetting the environment creates a new data object rather
-                    # than happening in-place, as Mujoco expects.
-                    viewer.data = engine_variables.physics_state.data
+                    if viewer is not None:
+                        # We need to manually update the viewer data field, because
+                        # resetting the environment creates a new data object rather
+                        # than happening in-place, as Mujoco expects.
+                        viewer.data = engine_variables.physics_state.data
+                        viewer.render()
 
-                    all_transitions_list.append(transition)
-                    viewer.render()
+            except (KeyboardInterrupt, bdb.BdbQuit):
+                logger.info("Keyboard interrupt, exiting environment loop")
 
-            except (KeyboardInterrupt, bdb.BdbQuit, Exception):
+            except Exception:
                 # Raise on the first step for debugging purposes.
                 if step_id == 0:
                     raise
 
                 logger.info("Keyboard interrupt, exiting environment loop")
-                viewer.close()
 
-            all_transitions = jax.tree.map(lambda *x: jnp.stack(x), *all_transitions_list)
-            return all_transitions
+            finally:
+                if viewer is not None:
+                    viewer.close()
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
