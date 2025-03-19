@@ -7,8 +7,9 @@ import signal
 import subprocess
 import sys
 import time
+import types
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple
+from typing import Callable
 
 import numpy as np
 import pykos
@@ -79,7 +80,6 @@ async def get_observation(kos: pykos.KOS) -> np.ndarray:
 
 async def send_actions(kos: pykos.KOS, actions: np.ndarray) -> None:
     actions = np.rad2deg(actions)
-    # Use dict as an intermediate type that will be converted to ActuatorCommand by pykos
     actuator_commands: list[pykos.ActuatorCommand] = [
         {
             "actuator_id": ac.actuator_id,
@@ -112,7 +112,7 @@ async def reset(kos: pykos.KOS) -> None:
     )
 
 
-def spawn_kos_sim(no_render: bool) -> Tuple[subprocess.Popen, Callable]:
+def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
     """Spawn the KOS-Sim default-humanoid process and return the process object."""
     logger.info("Starting KOS-Sim default-humanoid...")
     args = ["kos-sim", "default-humanoid"]
@@ -125,11 +125,9 @@ def spawn_kos_sim(no_render: bool) -> Tuple[subprocess.Popen, Callable]:
         text=True,
     )
 
-    # Give the server some time to start
     time.sleep(2)
 
-    # Register a cleanup function to terminate the server when the script exits
-    def cleanup(sig: Optional[int] = None, frame: Any = None) -> None:
+    def cleanup(sig: int | None = None, frame: types.FrameType | None = None) -> None:
         logger.info("Terminating KOS-Sim...")
         process.terminate()
         try:
@@ -153,7 +151,6 @@ async def main(model_path: str, ip: str, no_render: bool) -> None:
 
     cmd = np.array(cmd).reshape(1, -1)
 
-    # Spawn KOS-Sim if requested
     sim_process = None
     cleanup_fn = None
 
@@ -182,17 +179,16 @@ async def main(model_path: str, ip: str, no_render: bool) -> None:
     await reset(kos)
 
     target_time = time.time() + dt
-    observation = (await get_observation(kos)).reshape(1, -1)
+    observation = await get_observation(kos)
     try:
         while True:
+            observation = observation.reshape(1, -1)
             action = np.array(model.infer(observation, cmd)).reshape(-1)
 
             observation, _ = await asyncio.gather(
                 get_observation(kos),
                 send_actions(kos, action),
             )
-
-            observation = observation.reshape(1, -1)
 
             if time.time() < target_time:
                 await asyncio.sleep(max(0, target_time - time.time()))
@@ -203,7 +199,6 @@ async def main(model_path: str, ip: str, no_render: bool) -> None:
     except KeyboardInterrupt:
         logger.info("Exiting...")
     finally:
-        # Ensure cleanup if we spawned our own process
         if cleanup_fn:
             cleanup_fn()
 
