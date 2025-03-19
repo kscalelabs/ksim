@@ -379,7 +379,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         transitions: Transition,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
         loss_val, metrics, grads = self.loss_metrics_grads(
             model=model,
             transitions=transitions,
@@ -396,7 +396,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         metrics["loss"] = loss_val
         metrics["grad_norm"] = grad_norm
 
-        return new_model, new_opt_state, loss_val, FrozenDict(metrics)
+        return new_model, new_opt_state, FrozenDict(metrics)
 
     def _update_model_on_batches(
         self,
@@ -405,19 +405,22 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         transition_batches: list[Transition],
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
-        breakpoint()
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+        all_metrics = []
+        for batch in transition_batches:
+            model, opt_state, metrics = self._single_step(
+                model=model,
+                optimizer=optimizer,
+                opt_state=opt_state,
+                transitions=batch,
+                rng=rng,
+            )
+            all_metrics.append(metrics)
 
-        # return self._single_step(
-        #     model=model,
-        #     optimizer=optimizer,
-        #     opt_state=opt_state,
-        #     transitions=transitions,
-        #     rng=rng,
-        # )
+        # Combine metrics from all batches.
+        metrics_concat = jax.tree_map(lambda *x: jnp.stack(x, axis=0), *all_metrics)
 
-        # TODO: Implement this.
-        return model, opt_state, 0.0, FrozenDict({})
+        return model, opt_state, FrozenDict(metrics_concat)
 
     def update_model(
         self,
@@ -426,7 +429,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         transitions: Transition,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
         """Returns the updated parameters, optimizer state, loss value, and metrics."""
         transition_batches = generate_transition_batches(
             transitions,

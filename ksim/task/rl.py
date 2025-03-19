@@ -891,7 +891,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Optimizes the model on that trajectory.
             rng, update_rng = jax.random.split(rng)
-            model, optimizer, opt_state, train_metrics = self.update_model(
+            model, opt_state, train_metrics = self.update_model(
                 model=model,
                 optimizer=optimizer,
                 opt_state=opt_state,
