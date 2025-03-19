@@ -3,7 +3,7 @@
 import time
 from dataclasses import dataclass
 from threading import Lock
-from typing import Any, Literal, get_args
+from typing import Any, Literal, get_args, overload
 
 import glfw
 import mujoco
@@ -613,11 +613,13 @@ class MujocoViewer(Callbacks):
         mujoco.mjv_applyPerturbPose(self.model, self.data, self.pert, 0)
         mujoco.mjv_applyPerturbForce(self.model, self.data, self.pert)
 
-    def read_pixels(
-        self,
-        camid: int | None = None,
-        depth: bool = False,
-    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    @overload
+    def read_pixels(self, depth: Literal[True]) -> tuple[np.ndarray, np.ndarray]: ...
+
+    @overload
+    def read_pixels(self, depth: Literal[False] = False) -> np.ndarray: ...
+
+    def read_pixels(self, depth: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """Read pixel data from the scene.
 
         Args:
@@ -629,13 +631,6 @@ class MujocoViewer(Callbacks):
         """
         if self.render_mode == "window":
             raise NotImplementedError("Use 'render()' in 'window' mode.")
-
-        if camid is not None:
-            if camid == -1:
-                self.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
-            else:
-                self.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-            self.cam.fixedcamid = camid
 
         self.viewport.width, self.viewport.height = glfw.get_framebuffer_size(self.window)
         mujoco.mjv_updateScene(

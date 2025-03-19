@@ -26,6 +26,7 @@ refs/
 
 # Training artifacts.
 *.mp4
+*.gif
 run_*/
 
 # Other caching.
