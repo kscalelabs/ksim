@@ -23,24 +23,25 @@ from ksim.utils.mujoco import (
 logger = logging.getLogger(__name__)
 
 
+def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) -> None:
+    # Reward function classes should end with either "Reward" or "Penalty",
+    # which we use here to check if the scale is positive or negative.
+    name = inst.__class__.__name__
+    if name.lower().endswith("reward"):
+        if value < 0:
+            raise RuntimeError(f"Reward function {name} has a negative scale {value}")
+    elif name.lower().endswith("penalty"):
+        if value > 0:
+            raise RuntimeError(f"Penalty function {name} has a positive scale {value}")
+    else:
+        logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", name, value)
+
+
 @attrs.define(frozen=True, kw_only=True)
 class Reward(ABC):
     """Base class for defining reward functions."""
 
-    scale: float
-
-    def __post_init__(self) -> None:
-        # Reward function classes should end with either "Reward" or "Penalty",
-        # which we use here to check if the scale is positive or negative.
-        name = self.__class__.__name__.lower()
-        if name.lower().endswith("reward"):
-            if self.scale < 0:
-                raise RuntimeError(f"Reward function {name} has a negative scale {self.scale}")
-        elif name.lower().endswith("penalty"):
-            if self.scale > 0:
-                raise RuntimeError(f"Penalty function {name} has a positive scale {self.scale}")
-        else:
-            logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale)
+    scale: float = attrs.field(validator=reward_scale_validator)
 
     def post_accumulate(self, reward: Array, done: Array) -> Array:
         """Runs a post-epoch accumulation step.
