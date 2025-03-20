@@ -924,8 +924,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     self.log_state_timers(state)
                     self.write_logs(state)
 
-            with self.step_context("on_step_start"):
-                state = self.on_step_start(state)
+            state = self.on_step_start(state)
 
             # Samples N trajectories in parallel.
             with self.step_context("rollout"):
@@ -970,8 +969,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.log_state_timers(state)
                 self.write_logs(state)
 
-            with self.step_context("on_step_end"):
-                state = self.on_step_end(state)
+            state = self.on_step_end(state)
 
             if self.should_checkpoint(state):
                 model = eqx.combine(model_arr, model_static)
