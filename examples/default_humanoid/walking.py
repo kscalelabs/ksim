@@ -414,9 +414,10 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking run_environment=True
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
-            # Update parameters.
-            num_envs=64,
-            batch_size=32,
+            # Update parameters. These values are very small, which is useful
+            # for testing on your local machine.
+            num_envs=4,
+            batch_size=8,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,

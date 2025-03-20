@@ -176,6 +176,26 @@ class RLConfig(xax.Config):
         value=False,
         help="If true, log training trajectory videos.",
     )
+    log_qpos_qvel: bool = xax.field(
+        value=True,
+        help="If true, log qpos and qvel histograms.",
+    )
+    log_action_histograms: bool = xax.field(
+        value=True,
+        help="If true, log action histograms.",
+    )
+    log_observation_histograms: bool = xax.field(
+        value=True,
+        help="If true, log observation histograms.",
+    )
+    log_command_histograms: bool = xax.field(
+        value=True,
+        help="If true, log command histograms.",
+    )
+    log_train_metrics: bool = xax.field(
+        value=True,
+        help="If true, log train metrics.",
+    )
 
     # Training parameters.
     num_envs: int = xax.field(
@@ -552,13 +572,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             transitions: The transitions to log the action statistics for.
             namespace: The namespace to log the statistics to.
         """
-        self.logger.log_histogram(key="action", value=transitions.action, namespace="action")
-        for obs_key, obs_value in transitions.obs.items():
-            self.logger.log_histogram(key=obs_key, value=obs_value, namespace="observation")
-        for obs_key, obs_value in transitions.command.items():
-            self.logger.log_histogram(key=obs_key, value=obs_value, namespace="command")
-        self.logger.log_histogram(key="qpos", value=transitions.qpos, namespace="state")
-        self.logger.log_histogram(key="qvel", value=transitions.qvel, namespace="state")
+        if self.config.log_action_histograms:
+            self.logger.log_histogram(key="action", value=transitions.action, namespace="action")
+        if self.config.log_observation_histograms:
+            for obs_key, obs_value in transitions.obs.items():
+                self.logger.log_histogram(key=obs_key, value=obs_value, namespace="observation")
+        if self.config.log_observation_histograms:
+            for obs_key, obs_value in transitions.command.items():
+                self.logger.log_histogram(key=obs_key, value=obs_value, namespace="command")
+        if self.config.log_qpos_qvel:
+            self.logger.log_histogram(key="qpos", value=transitions.qpos[..., 7:], namespace="state")
+            self.logger.log_histogram(key="qvel", value=transitions.qvel[..., 6:], namespace="state")
 
     def log_reward_stats(self, transitions: Transition, reward_generators: Collection[Reward]) -> None:
         """Log reward statistics from the trajectory or trajectories.
@@ -571,9 +595,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         reward_stats: dict[str, jnp.ndarray] = {}
 
         num_episodes = jnp.sum(transitions.done).clip(min=1)
-        terms = transitions.reward_components
+        rewards = transitions.reward_components
         for generator in reward_generators:
-            statistic = terms[generator.reward_name]
+            statistic = rewards[generator.reward_name]
             assert isinstance(statistic, Array)
             reward_stats[generator.reward_name] = jnp.sum(statistic) / num_episodes
 
@@ -594,11 +618,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
         termination_stats: dict[str, jnp.ndarray] = {}
 
+        num_episodes = jnp.sum(transitions.done).clip(min=1)
         terms = transitions.termination_components
         for generator in termination_generators:
             statistic = terms[generator.termination_name]
             assert isinstance(statistic, Array)
-            termination_stats[generator.termination_name] = jnp.mean(statistic)
+            termination_stats[generator.termination_name] = jnp.sum(statistic) / num_episodes
 
         for key, value in termination_stats.items():
             self.logger.log_scalar(key=key, value=value, namespace="termination")
@@ -616,11 +641,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             train_metrics: The train metrics to log.
         """
-        for key, value in train_metrics.items():
-            if isinstance(value, tuple):
-                self.logger.log_distribution(key=key, value=value, namespace="train")
-            else:
-                self.logger.log_scalar(key=key, value=value, namespace="train")
+        if self.config.log_train_metrics:
+            for key, value in train_metrics.items():
+                if isinstance(value, tuple):
+                    self.logger.log_distribution(key=key, value=value, namespace="train")
+                else:
+                    self.logger.log_scalar(key=key, value=value, namespace="train")
 
     def render_trajectory_video(
         self,
