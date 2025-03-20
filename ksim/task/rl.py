@@ -634,7 +634,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
         self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace="termination")
 
-    def log_train_metrics(self, train_metrics: dict[str, Array | tuple[Array, Array]]) -> None:
+    def log_train_metrics(self, train_metrics: dict[str, Array]) -> None:
         """Logs the train metrics.
 
         Args:
@@ -642,10 +642,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
         if self.config.log_train_metrics:
             for key, value in train_metrics.items():
-                if isinstance(value, tuple):
-                    self.logger.log_distribution(key=key, value=value, namespace="train")
+                if value.size > 1:
+                    self.logger.log_histogram(key, value, namespace="train")
                 else:
-                    self.logger.log_scalar(key=key, value=value, namespace="train")
+                    self.logger.log_scalar(key, value, namespace="train")
 
     def render_trajectory_video(
         self,
@@ -833,7 +833,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         trajectory_batches: list[Trajectory],
         reward_batches: list[Array],
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.GradientTransformation, optax.OptState, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
         """Updates the model on the given trajectory.
 
         This function should be implemented according to the specific RL method
@@ -848,8 +848,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng: The random seed.
 
         Returns:
-            A tuple containing the updated model, optimizer, optimizer state
-            and metrics to log.
+            A tuple containing the updated model, optimizer state
+            and metrics to log. If a metric has a single element it is logged
+            as a scalar, otherwise it is logged as a histogram.
         """
 
     def rl_train_loop(

@@ -48,9 +48,8 @@ def compute_advantages_and_value_targets(
         return adv_t, adv_t
 
     def compute_gae_and_targets_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> tuple[Array, Array]:
-        # If the episode terminated at the last step, use 0 for bootstrapping.
-        bootstrap_value = jnp.where(dones_t[-1], 0.0, values_t[-1])
-        values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(bootstrap_value, 0)], axis=0)
+        # Use the last value as the bootstrap value.
+        values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
         mask_t = jnp.where(dones_t, 0.0, 1.0)
         deltas_t = get_deltas(rewards_t, values_t, values_shifted_t, mask_t, decay_gamma)
 
@@ -369,12 +368,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A dictionary of metrics to be logged.
         """
         return {
-            "loss": (loss_bt.mean(), loss_bt.std()),
-            "log_probs": (log_probs_btn.mean(), log_probs_btn.std()),
-            "entropy": (entropy_btn.mean(), entropy_btn.std()),
-            "value": (values_bt.mean(), values_bt.std()),
-            "value_targets": (value_targets_bt.mean(), value_targets_bt.std()),
-            "advantages": (advantages_bt.mean(), advantages_bt.std()),
+            "loss": loss_bt.mean(-1),
+            "log_probs": log_probs_btn.mean(-1),
+            "entropy": entropy_btn.mean(-1),
+            "value": values_bt.mean(-1),
+            "value_targets": value_targets_bt.mean(-1),
+            "advantages": advantages_bt.mean(-1),
         }
 
     def get_grad_metrics(self, grads: PyTree) -> dict[str, Array | tuple[Array, Array]]:
@@ -519,7 +518,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rng: A random seed.
 
         Returns:
-            A tuple containing the updated parameters, optimizer state, loss value, and metrics.
+            A tuple containing the updated parameters, optimizer state, and metrics.
         """
         # JAX requires that we partition the model into mutable and static
         # parts in order to use lax.scan, so that `arr` can be a PyTree.`
@@ -560,7 +559,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 carry, metrics = scan_fn(carry, i)
                 all_metrics.append(metrics)
 
-            metrics_concat = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *all_metrics)
+            metrics_concat = jax.tree.map(lambda *x: jnp.concatenate([i.reshape(-1) for i in x], axis=0), *all_metrics)
             return carry, metrics_concat
 
         # Applies gradient updates.
