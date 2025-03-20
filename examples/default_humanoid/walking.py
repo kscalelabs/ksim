@@ -412,7 +412,7 @@ if __name__ == "__main__":
             num_batches=32,
             num_passes=4,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.0025,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,

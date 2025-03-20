@@ -1,6 +1,7 @@
 """Defines a standard task interface for training reinforcement learning agents."""
 
 import bdb
+import contextlib
 import io
 import itertools
 import logging
@@ -164,6 +165,12 @@ class RLConfig(xax.Config):
         value=None,
         help="If provided, save the rendered video to the given path.",
     )
+    debug_nans: bool = xax.field(
+        value=False,
+        help="If true, check for NaNs in the model and print the stack trace.",
+    )
+
+    # Logging parameters.
     log_train_trajectory: bool = xax.field(
         value=False,
         help="If true, log training trajectory videos.",
@@ -1173,7 +1180,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
-        with self:
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(self)
+
+            if self.config.debug_nans:
+                stack.enter_context(jax.disable_jit())
+
+                # Turn on debugging flags.
+                jax.config.update("jax_debug_nans", True)
+                jax.config.update("jax_debug_infs", True)
+
             rng = self.prng_key()
             self.set_loggers()
 
