@@ -19,21 +19,13 @@ class MujocoViewerHandler:
     def sync(self):
         self.handle.sync()
         
-    def sync_engine_to_viewer(self, viewer_data: mujoco.MjData, engine_data: mujoco.MjData):
-        engine_data.ctrl[:] = viewer_data.ctrl[:]
-        engine_data.act[:] = viewer_data.act[:]
-        engine_data.xfrc_applied[:] = viewer_data.xfrc_applied[:]
-        engine_data.qpos[:] = viewer_data.qpos[:]
-        engine_data.qvel[:] = viewer_data.qvel[:]
-        engine_data.time = viewer_data.time
-        
-    def sync_viewer_to_engine(self, viewer_data: mujoco.MjData, engine_data: mujoco.MjData):
-        viewer_data.ctrl[:] = engine_data.ctrl[:]
-        viewer_data.act[:] = engine_data.act[:]
-        viewer_data.xfrc_applied[:] = engine_data.xfrc_applied[:]
-        viewer_data.qpos[:] = engine_data.qpos[:]
-        viewer_data.qvel[:] = engine_data.qvel[:]
-        viewer_data.time = engine_data.time
+    def copy_data(self, dst: mujoco.MjData, src: mujoco.MjData):
+        dst.ctrl[:] = src.ctrl[:]
+        dst.act[:] = src.act[:]
+        dst.xfrc_applied[:] = src.xfrc_applied[:]
+        dst.qpos[:] = src.qpos[:]
+        dst.qvel[:] = src.qvel[:]
+        dst.time = src.time
             
 def launch_passive(model, data, show_left_ui=False, show_right_ui=False, **kwargs):
     """Drop-in replacement for viewer.launch_passive."""

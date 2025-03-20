@@ -980,7 +980,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         
                         viewer.setup_camera(self.config)
                         for step_id in iterator:
-                            viewer.sync_engine_to_viewer(viewer_data, engine_variables.physics_state.data)
+                            viewer.copy_data(dst=engine_variables.physics_state.data, src=viewer_data)
                             
                             # Step physics using your engine implementation
                             transition, engine_variables = self.step_engine(
@@ -992,7 +992,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             )
 
                             # Copy updated state back    
-                            viewer.sync_viewer_to_engine(viewer_data, engine_variables.physics_state.data)
+                            viewer.copy_data(dst=viewer_data, src=engine_variables.physics_state.data)
                             mujoco.mj_forward(viewer_model, viewer_data)
 
                             viewer.sync()
