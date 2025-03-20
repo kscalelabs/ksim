@@ -362,7 +362,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def get_initial_carry(self) -> PyTree:
+    def get_initial_carry(self) -> PyTree | None:
         """Returns the initial carry for the model.
 
         Returns:
@@ -379,8 +379,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, PyTree]:
-        """Takes in the current model, the physics model, and a random key, and returns an action.
+    ) -> tuple[Array, PyTree | None, PyTree | None]:
+        """Gets an action for the current observation.
+
+        This function returns the action to take, the next carry (for models
+        which look at multiple steps), and any auxiliary outputs. The auxiliary
+        outputs get stored in the final transition object and can be used to
+        compute metrics like log probabilities, values, etc.
 
         Args:
             model: The current model.
@@ -391,7 +396,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng: The random key.
 
         Returns:
-            The action to take.
+            The action to take, the next carry, and any auxiliary outputs.
         """
 
     @property
@@ -440,7 +445,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Samples an action from the model.
-        action, next_carry = self.sample_action(
+        action, next_carry, aux_outputs = self.sample_action(
             model=model,
             carry=engine_variables.carry,
             physics_model=physics_model,
@@ -504,6 +509,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             timestep=next_physics_state.data.time,
             termination_components=terminations,
             reward_components=rewards,
+            aux_outputs=aux_outputs,
         )
 
         # Gets the variables for the next step.
@@ -595,14 +601,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
         self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace=namespace)
 
-    def log_train_metrics(self, train_metrics: dict[str, Array]) -> None:
+    def log_train_metrics(self, train_metrics: dict[str, Array | tuple[Array, Array]]) -> None:
         """Logs the train metrics.
 
         Args:
             train_metrics: The train metrics to log.
         """
         for key, value in train_metrics.items():
-            self.logger.log_scalar(key=key, value=lambda: value.mean(), namespace="train")
+            if isinstance(value, tuple):
+                self.logger.log_distribution(key=key, value=value, namespace="train")
+            else:
+                self.logger.log_scalar(key=key, value=value, namespace="train")
 
     def render_trajectory_video(
         self,
@@ -761,25 +770,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         _, transitions = jax.lax.scan(scan_fn, engine_variables, length=num_steps)
 
         # Apply post_accumulate and scale to the fully unrolled rewards.
-        all_rewards = transitions.reward_components
-        reward_list = [
-            reward_fn.post_accumulate(all_rewards[reward_fn.reward_name], transitions.done)
+        reward_components = {
+            reward_fn.reward_name: reward_fn.post_accumulate(
+                transitions.reward_components[reward_fn.reward_name], transitions.done
+            )
+            * reward_fn.scale
             for reward_fn in engine_constants.reward_generators
-        ]
-        rewards = jnp.stack(reward_list, axis=1)
+        }
+        rewards = jnp.stack(list(reward_components.values()), axis=1).sum(axis=-1)
 
-        return Transition(
-            qpos=transitions.qpos,
-            qvel=transitions.qvel,
-            obs=transitions.obs,
-            command=transitions.command,
-            action=transitions.action,
-            reward=rewards,
-            done=transitions.done,
-            timestep=transitions.timestep,
-            termination_components=transitions.termination_components,
-            reward_components=transitions.reward_components,
-        )
+        kwargs = transitions.__dict__
+        kwargs["reward"] = rewards
+        kwargs["reward_components"] = reward_components
+        return Transition(**kwargs)
 
     @eqx.filter_jit
     def _vmapped_unroll(
@@ -878,26 +881,30 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state = self.on_step_start(state)
 
             # Samples N trajectories in parallel.
-            rng, rollout_rng = jax.random.split(rng)
-            transitions = self._vmapped_unroll(
-                rng=rollout_rng,
-                physics_model=mjx_model,
-                model=model,
-                engine=engine,
-                engine_constants=engine_constants,
-                num_steps=self.rollout_length_steps,
-                num_envs=self.config.num_envs,
-            )
+            with xax.ContextTimer() as timer:
+                rng, rollout_rng = jax.random.split(rng)
+                transitions = self._vmapped_unroll(
+                    rng=rollout_rng,
+                    physics_model=mjx_model,
+                    model=model,
+                    engine=engine,
+                    engine_constants=engine_constants,
+                    num_steps=self.rollout_length_steps,
+                    num_envs=self.config.num_envs,
+                )
+            self.logger.log_scalar("rollout_dt", timer.elapsed_time, namespace="⏳ dt")
 
             # Optimizes the model on that trajectory.
-            rng, update_rng = jax.random.split(rng)
-            model, optimizer, opt_state, train_metrics = self.update_model(
-                model=model,
-                optimizer=optimizer,
-                opt_state=opt_state,
-                transitions=transitions,
-                rng=update_rng,
-            )
+            with xax.ContextTimer() as timer:
+                rng, update_rng = jax.random.split(rng)
+                model, opt_state, train_metrics = self.update_model(
+                    model=model,
+                    optimizer=optimizer,
+                    opt_state=opt_state,
+                    transitions=transitions,
+                    rng=update_rng,
+                )
+            self.logger.log_scalar("update_dt", timer.elapsed_time, namespace="⏳ dt")
 
             with self.step_context("write_logs"):
                 state.raw_phase = "train"

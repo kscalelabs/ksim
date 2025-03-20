@@ -8,6 +8,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mujoco
+import optax
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
@@ -16,7 +17,7 @@ from mujoco import mjx
 
 from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import PhysicsModel
+from ksim.env.data import PhysicsModel, Transition
 from ksim.observation import ActuatorForceObservation, Observation
 from ksim.randomization import (
     Randomization,
@@ -64,7 +65,7 @@ class DefaultHumanoidActor(eqx.Module):
         self,
         act_frc_obs_n: Array,
         lin_vel_cmd_n: Array,
-    ) -> distrax.Distribution:
+    ) -> distrax.Normal:
         x_n = jnp.concatenate([act_frc_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
 
         # Split the output into mean and standard deviation.
@@ -122,13 +123,20 @@ class DefaultHumanoidModel(eqx.Module):
 class HumanoidWalkingTaskConfig(PPOConfig):
     """Config for the humanoid walking task."""
 
+    # Optimizer parameters.
+    learning_rate: float = xax.field(
+        value=1e-4,
+        help="Learning rate for PPO.",
+    )
+    max_grad_norm: float = xax.field(
+        value=0.5,
+        help="Maximum gradient norm for clipping.",
+    )
+
+    # Mujoco parameters.
     use_mit_actuators: bool = xax.field(
         value=False,
         help="Whether to use the MIT actuator model, where the actions are position commands",
-    )
-    render_track_body_id: int | None = xax.field(
-        value=0,
-        help="The body id to track with the render camera.",
     )
     kp: float = xax.field(
         value=1.0,
@@ -147,8 +155,25 @@ class HumanoidWalkingTaskConfig(PPOConfig):
         help="The dynamic friction loss for the actuator",
     )
 
+    # Rendering parameters.
+    render_track_body_id: int | None = xax.field(
+        value=0,
+        help="The body id to track with the render camera.",
+    )
+
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
+    def get_optimizer(self) -> optax.GradientTransformation:
+        """Builds the optimizer.
+
+        This provides a reasonable default optimizer for training PPO models,
+        but can be overridden by subclasses who want to do something different.
+        """
+        return optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.adam(self.config.learning_rate),
+        )
+
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
@@ -214,6 +239,67 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_initial_carry(self) -> None:
         return None
 
+    def _run_actor(
+        self,
+        model: DefaultHumanoidModel,
+        observations: FrozenDict[str, Array],
+        commands: FrozenDict[str, Array],
+    ) -> distrax.Normal:
+        act_frc_obs_n = observations["actuator_force_observation"]
+        lin_vel_cmd_n = commands["linear_velocity_command"]
+        return model.actor(act_frc_obs_n, lin_vel_cmd_n)
+
+    def _run_critic(
+        self,
+        model: DefaultHumanoidModel,
+        observations: FrozenDict[str, Array],
+        commands: FrozenDict[str, Array],
+    ) -> Array:
+        act_frc_obs_n = observations["actuator_force_observation"]
+        lin_vel_cmd_n = commands["linear_velocity_command"]
+        return model.critic(act_frc_obs_n, lin_vel_cmd_n)
+
+    def get_on_policy_log_probs(
+        self,
+        model: DefaultHumanoidModel,
+        transitions: Transition,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        return transitions.aux_outputs
+
+    def get_log_probs(
+        self,
+        model: DefaultHumanoidModel,
+        transitions: Transition,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, Array]:
+        # Vectorize over both batch and time dimensions.
+        time_par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
+        batch_par_fn = jax.vmap(time_par_fn, in_axes=(None, 0, 0))
+        action_dist_btn = batch_par_fn(model, transitions.obs, transitions.command)
+
+        # Compute the log probabilities of the transition's actions according
+        # to the current policy.
+        action_btn = transitions.action
+        log_probs_btn = action_dist_btn.log_prob(action_btn)
+        entropy_btn = action_dist_btn.entropy()
+
+        return log_probs_btn, entropy_btn
+
+    def get_values(
+        self,
+        model: DefaultHumanoidModel,
+        transitions: Transition,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        # Vectorize over both batch and time dimensions.
+        time_par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
+        batch_par_fn = jax.vmap(time_par_fn, in_axes=(None, 0, 0))
+        values_bt1 = batch_par_fn(model, transitions.obs, transitions.command)
+
+        # Remove the last dimension.
+        return values_bt1.squeeze(-1)
+
     def sample_action(
         self,
         model: DefaultHumanoidModel,
@@ -222,34 +308,35 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None]:
-        act_frc_obs_n = observations["actuator_force_observation"]
-        lin_vel_cmd_n = commands["linear_velocity_command"]
-        action_dist_n = model.actor(act_frc_obs_n, lin_vel_cmd_n)
+    ) -> tuple[Array, None, Array]:
+        action_dist_n = self._run_actor(model, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
-        return action_n, None
+        action_log_prob_n = action_dist_n.log_prob(action_n)
+        return action_n, None, action_log_prob_n
 
 
 if __name__ == "__main__":
     # python -m examples.default_humanoid.walking run_environment=True
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
+            # Update parameters.
             num_envs=8,
             batch_size=32,
+            # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
-            learning_rate=1e-5,
-            gamma=0.97,
-            lam=0.95,
-            normalize_advantage=True,
-            normalize_advantage_in_minibatch=True,
-            entropy_coef=0.001,
-            clip_param=0.3,
-            use_clipped_value_loss=False,
-            max_grad_norm=1.0,
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=20.0,
             eval_rollout_length_seconds=5.0,
+            # Training parameters.
+            learning_rate=1e-5,
+            # PPO parameters
+            gamma=0.97,
+            lam=0.95,
+            entropy_coef=0.001,
+            clip_param=0.3,
+            use_clipped_value_loss=False,
+            max_grad_norm=1.0,
         ),
     )
