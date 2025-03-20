@@ -474,15 +474,18 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         (loss, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
         return loss, metrics, grads
 
+    @xax.jit(static_argnames=["self", "model_static", "optimizer"])
     def _single_step(
         self,
-        model: PyTree,
+        model_arr: PyTree,
+        model_static: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         trajectories: Trajectory,
         rewards: Array,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | tuple[Array, Array]]]:
+        model = eqx.combine(model_arr, model_static)
         _, ppo_metrics, grads = self.get_loss_metrics_and_grads(
             model=model,
             trajectories=trajectories,
@@ -491,18 +494,19 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         # Apply the gradient updates to the model.
-        updates, new_opt_state = optimizer.update(grads, opt_state, model)  # type: ignore[operator]
-        new_model = eqx.apply_updates(model, updates)
+        updates, new_opt_state = optimizer.update(grads, opt_state, model_arr)  # type: ignore[operator]
+        new_model_arr = eqx.apply_updates(model_arr, updates)
 
         # Monitor global gradient norm.
         grad_metrics = self.get_grad_metrics(grads)
 
-        return new_model, new_opt_state, FrozenDict(ppo_metrics | grad_metrics)
+        return new_model_arr, new_opt_state, FrozenDict(ppo_metrics | grad_metrics)
 
-    @eqx.filter_jit
+    @xax.jit(static_argnames=["self", "model_static", "optimizer"])
     def update_model(
         self,
-        model: PyTree,
+        model_arr: PyTree,
+        model_static: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         trajectories: Trajectory,
@@ -512,7 +516,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Runs PPO updates on a given set of trajectory batches.
 
         Args:
-            model: The model to update.
+            model_arr: The mutable part of the model to update.
+            model_static: The static part of the model to update.
             optimizer: The optimizer to use.
             opt_state: The optimizer state.
             trajectories: The trajectories to update the model on.
@@ -522,33 +527,30 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Returns:
             A tuple containing the updated parameters, optimizer state, and metrics.
         """
-        # JAX requires that we partition the model into mutable and static
-        # parts in order to use lax.scan, so that `arr` can be a PyTree.`
-        arr, static = eqx.partition(model, eqx.is_inexact_array)
 
         # Loops over the trajectory batches and applies gradient updates.
         def scan_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             xt: Array,
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
-            arr, opt_state, rng = carry
-            model = eqx.combine(arr, static)
+            model_arr, opt_state, rng = carry
             rng, batch_rng = jax.random.split(rng)
 
             # Gets the current batch of trajectories and rewards.
             trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
             reward_batch = rewards.total[xt]
 
-            model, opt_state, metrics = self._single_step(
-                model=model,
+            model_arr, opt_state, metrics = self._single_step(
+                model_arr=model_arr,
+                model_static=model_static,
                 optimizer=optimizer,
                 opt_state=opt_state,
                 trajectories=trajectory_batch,
                 rewards=reward_batch,
                 rng=batch_rng,
             )
-            arr, _ = eqx.partition(model, eqx.is_inexact_array)
-            return (arr, opt_state, rng), metrics
+
+            return (model_arr, opt_state, rng), metrics
 
         # Applines N steps of gradient updates.
         def batch_scan_fn(
@@ -556,21 +558,37 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             _: None,
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
             arr, opt_state, rng = carry
-            rng, indices_rng = jax.random.split(rng)
-            indices = jax.random.permutation(indices_rng, trajectories.done.shape[0])
+
+            # Shuffling causes a strange kernel caching issue on GPUs.
+            # rng, indices_rng = jax.random.split(rng)
+            # indices = jax.random.permutation(indices_rng, trajectories.done.shape[0])
+            indices = jnp.arange(trajectories.done.shape[0])
+
             indices = indices.reshape(self.config.num_batches, self.batch_size)
             carry = (arr, opt_state, rng)
+
             carry, metrics = jax.lax.scan(scan_fn, carry, indices)
+
+            # Manual version, instead of using scan.
+            # metrics = []
+            # for i in indices:
+            #     carry, metric = scan_fn(carry, i)
+            #     metrics.append(metric)
+            # metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
+
             return carry, metrics
 
+        carry = (model_arr, opt_state, rng)
+
         # Applies gradient updates.
-        (arr, opt_state, _), metrics = jax.lax.scan(
-            batch_scan_fn,
-            (arr, opt_state, rng),
-            length=self.config.num_passes,
-        )
+        carry, metrics = jax.lax.scan(batch_scan_fn, carry, length=self.config.num_passes)
 
-        # Recombines the mutable and static parts of the model.
-        model = eqx.combine(arr, static)
+        # Manual version, instead of using scan.
+        # metrics = []
+        # for _ in range(self.config.num_passes):
+        #     carry, metric = batch_scan_fn(carry, None)
+        #     metrics.append(metric)
+        # metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
 
-        return model, opt_state, metrics
+        model_arr, opt_state, _ = carry
+        return model_arr, opt_state, metrics

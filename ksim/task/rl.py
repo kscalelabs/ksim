@@ -68,7 +68,7 @@ def get_observation(
     return FrozenDict(observations)
 
 
-@eqx.filter_jit
+@xax.jit(static_argnames=["reward_generators", "ctrl_dt"])
 def get_rewards(
     trajectory: Trajectory,
     reward_generators: Collection[Reward],
@@ -755,12 +755,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         frames, fps = self.render_trajectory_video(trajectories, commands, mj_model)
         self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
 
-    @eqx.filter_jit
+    @xax.jit(static_argnames=["self", "model_static", "engine", "engine_constants", "num_steps"])
     def _single_unroll(
         self,
         rng: PRNGKeyArray,
         physics_model: PhysicsModel,
-        model: PyTree,
+        model_arr: PyTree,
+        model_static: PyTree,
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
         num_steps: int,
@@ -768,6 +769,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         initial_carry = self.get_initial_carry()
         rng, cmd_rng = jax.random.split(rng)
         initial_commands = get_initial_commands(cmd_rng, command_generators=engine_constants.command_generators)
+
+        # Recombines the mutable and static parts of the model.
+        model = eqx.combine(model_arr, model_static)
 
         # Apply randomizations to the environment.
         rng, randomization_rng = jax.random.split(rng)
@@ -811,25 +815,27 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return trajectory, reward
 
-    @eqx.filter_jit
+    @xax.jit(static_argnames=["self", "model_static", "engine", "engine_constants", "num_steps", "num_envs"])
     def _vmapped_unroll(
         self,
         rng: PRNGKeyArray,
         physics_model: PhysicsModel,
-        model: PyTree,
+        model_arr: PyTree,
+        model_static: PyTree,
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
         num_steps: int,
         num_envs: int,
     ) -> Trajectory:
         rngs = jax.random.split(rng, num_envs)
-        vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None, None))
-        return vmapped_unroll(rngs, physics_model, model, engine, engine_constants, num_steps)
+        vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None, None, None))
+        return vmapped_unroll(rngs, physics_model, model_arr, model_static, engine, engine_constants, num_steps)
 
     @abstractmethod
     def update_model(
         self,
-        model: PyTree,
+        model_arr: PyTree,
+        model_static: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         trajectories: Trajectory,
@@ -842,7 +848,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         that we are using.
 
         Args:
-            model: The model to update.
+            model_arr: The mutable part of the model to update.
+            model_static: The static part of the model to update.
             optimizer: The optimizer to use.
             opt_state: The optimizer state.
             trajectories: The trajectories to update the model on.
@@ -875,12 +882,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # These remain constant across the entire episode.
         engine_constants = EngineConstants(
-            obs_generators=observations,
-            command_generators=commands,
-            reward_generators=rewards,
-            termination_generators=terminations,
-            randomization_generators=randomizations,
+            obs_generators=tuple(observations),
+            command_generators=tuple(commands),
+            reward_generators=tuple(rewards),
+            termination_generators=tuple(terminations),
+            randomization_generators=tuple(randomizations),
         )
+
+        # JAX requires that we partition the model into mutable and static
+        # parts in order to use lax.scan, so that `arr` can be a PyTree.`
+        model_arr, model_static = eqx.partition(model, eqx.is_inexact_array)
 
         while not self.is_training_over(state):
             # Validate by sampling and visualizing a single trajectory.
@@ -891,10 +902,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 with self.step_context("rollout"):
                     rng, rollout_rng = jax.random.split(rng)
+
                     trajectories, rewards = self._vmapped_unroll(
                         rng=rollout_rng,
                         physics_model=mjx_model,
-                        model=model,
+                        model_arr=model_arr,
+                        model_static=model_static,
                         engine=engine,
                         engine_constants=engine_constants,
                         num_steps=self.eval_rollout_length_steps,
@@ -920,7 +933,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 trajectories, rewards = self._vmapped_unroll(
                     rng=rollout_rng,
                     physics_model=mjx_model,
-                    model=model,
+                    model_arr=model_arr,
+                    model_static=model_static,
                     engine=engine,
                     engine_constants=engine_constants,
                     num_steps=self.rollout_length_steps,
@@ -930,8 +944,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Optimizes the model on that trajectory.
             with self.step_context("update"):
                 rng, update_rng = jax.random.split(rng)
-                model, opt_state, train_metrics = self.update_model(
-                    model=model,
+                model_arr, opt_state, train_metrics = self.update_model(
+                    model_arr=model_arr,
+                    model_static=model_static,
                     optimizer=optimizer,
                     opt_state=opt_state,
                     trajectories=trajectories,
@@ -959,6 +974,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state = self.on_step_end(state)
 
             if self.should_checkpoint(state):
+                model = eqx.combine(model_arr, model_static)
+
                 self.save_checkpoint(
                     model=model,
                     optimizer=optimizer,
