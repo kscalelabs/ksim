@@ -5,7 +5,6 @@ import logging
 from abc import ABC, abstractmethod
 
 import attrs
-import jax.numpy as jnp
 import xax
 from jaxtyping import Array
 
@@ -49,8 +48,7 @@ class TerminationPenalty(Reward):
     """Penalty for terminating the episode."""
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        next_done = jnp.pad(trajectory.done[..., :-1], (1, 0), mode="constant", constant_values=0)
-        return next_done
+        return trajectory.done
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -73,3 +71,14 @@ class AngularVelocityXYPenalty(Reward):
     def __call__(self, trajectory: Trajectory) -> Array:
         ang_vel_xy = trajectory.qvel[..., 3:5]
         return xax.get_norm(ang_vel_xy, self.norm).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointVelocityPenalty(Reward):
+    """Penalty for how fast the joint angular velocities are changing."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        joint_vel = trajectory.qvel[..., 6:]
+        return xax.get_norm(joint_vel, self.norm).mean(axis=-1)

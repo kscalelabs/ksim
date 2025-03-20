@@ -25,9 +25,15 @@ from ksim.randomization import (
     WeightRandomization,
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
-from ksim.rewards import AngularVelocityXYPenalty, LinearVelocityZPenalty, Reward, TerminationPenalty
+from ksim.rewards import (
+    AngularVelocityXYPenalty,
+    JointVelocityPenalty,
+    LinearVelocityZPenalty,
+    Reward,
+    TerminationPenalty,
+)
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations import Termination, UnhealthyTermination
+from ksim.terminations import BadZTermination, FastAccelerationTermination, Termination
 from ksim.utils.mujoco import get_joint_metadata
 
 OBS_SIZE = 27
@@ -271,6 +277,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             DHForwardReward(scale=0.2),
             DHControlPenalty(scale=-0.01),
             TerminationPenalty(scale=-1.0),
+            JointVelocityPenalty(scale=-0.01),
             # These seem necessary to prevent some physics artifacts.
             LinearVelocityZPenalty(scale=-0.001),
             AngularVelocityXYPenalty(scale=-0.001),
@@ -278,7 +285,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
-            UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=4.0),
+            BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=4.0),
+            FastAccelerationTermination(),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
