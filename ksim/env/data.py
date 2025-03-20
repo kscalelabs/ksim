@@ -31,12 +31,9 @@ class Transition:
     obs: FrozenDict[str, Array]
     command: FrozenDict[str, Array]
     action: Array
-    reward: Array
     done: Array
     timestep: Array
-
     termination_components: FrozenDict[str, Array]
-    reward_components: FrozenDict[str, Array]
     aux_outputs: PyTree | None
 
 

@@ -14,7 +14,7 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.data import Transition, generate_transition_batches
+from ksim.env.data import Transition
 from ksim.task.rl import RLConfig, RLTask
 
 
@@ -413,6 +413,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         self,
         model: PyTree,
         transitions: Transition,
+        rewards: Array,
         rng: PRNGKeyArray,
     ) -> tuple[Array, FrozenDict[str, Array]]:
         """Computes the PPO loss and additional metrics.
@@ -420,6 +421,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Args:
             model: The model to optimize.
             transitions: The batch of transitions to compute the loss and metrics for.
+            rewards: The rewards for the transitions.
             rng: A random seed.
 
         Returns:
@@ -434,7 +436,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         advantages_bt, value_targets_bt = compute_advantages_and_value_targets(
             values_bt=values_bt,
-            rewards_bt=transitions.reward,
+            rewards_bt=rewards,
             dones_bt=transitions.done,
             decay_gamma=self.config.gamma,
             gae_lambda=self.config.lam,
@@ -479,9 +481,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         self,
         model: PyTree,
         transitions: Transition,
+        rewards: Array,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array | tuple[Array, Array]], PyTree]:
-        loss_fn = functools.partial(self.get_loss_and_metrics, transitions=transitions, rng=rng)
+        loss_fn = functools.partial(self.get_loss_and_metrics, transitions=transitions, rewards=rewards, rng=rng)
         (loss, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
         return loss, metrics, grads
 
@@ -490,12 +493,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        transitions: Transition,
+        xt: tuple[Transition, Array],
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | tuple[Array, Array]]]:
+        transitions, rewards = xt
         _, ppo_metrics, grads = self.get_loss_metrics_and_grads(
             model=model,
             transitions=transitions,
+            rewards=rewards,
             rng=rng,
         )
 
@@ -509,14 +514,28 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         return new_model, new_opt_state, FrozenDict(ppo_metrics | grad_metrics)
 
     @eqx.filter_jit
-    def _update_model_on_batches(
+    def update_model(
         self,
         model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         transition_batches: list[Transition],
+        reward_batches: list[Array],
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+        """Runs PPO updates on a given set of transition batches.
+
+        Args:
+            model: The model to update.
+            optimizer: The optimizer to use.
+            opt_state: The optimizer state.
+            transition_batches: The transition batches to update the model on.
+            reward_batches: The rewards for the transitions.
+            rng: A random seed.
+
+        Returns:
+            A tuple containing the updated parameters, optimizer state, loss value, and metrics.
+        """
         # JAX requires that we partition the model into mutable and static
         # parts in order to use lax.scan, so that `arr` can be a PyTree.`
         arr, static = eqx.partition(model, eqx.is_inexact_array)
@@ -524,7 +543,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # Loops over the transition batches and applies gradient updates.
         def scan_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
-            xt: Transition,
+            xt: tuple[Transition, Array],
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
             arr, opt_state, rng = carry
             model = eqx.combine(arr, static)
@@ -542,8 +561,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
             # Looping over the transition batches since it is a list of batches
             # with different lengths, rather than a vectorizable PyTree.
-            for transition_batch in transition_batches:
-                carry, metrics = scan_fn(carry, transition_batch)
+            for transition_batch, reward_batch in zip(transition_batches, reward_batches):
+                carry, metrics = scan_fn(carry, (transition_batch, reward_batch))
                 all_metrics.append(metrics)
 
             metrics_concat = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *all_metrics)
@@ -563,31 +582,3 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model = eqx.combine(arr, static)
 
         return model, opt_state, metrics
-
-    def update_model(
-        self,
-        model: PyTree,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
-        transitions: Transition,
-        rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
-        """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        transition_batches = generate_transition_batches(
-            transitions,
-            batch_size=self.config.batch_size,
-            min_batch_size=self.config.min_batch_size,
-            min_trajectory_length=self.config.min_trajectory_length,
-            group_by_length=self.config.group_batches_by_length,
-            include_last_batch=self.config.include_last_batch,
-        )
-
-        model, opt_state, batch_metrics = self._update_model_on_batches(
-            model=model,
-            optimizer=optimizer,
-            opt_state=opt_state,
-            transition_batches=transition_batches,
-            rng=rng,
-        )
-
-        return model, opt_state, batch_metrics
