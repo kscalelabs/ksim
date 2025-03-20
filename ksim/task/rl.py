@@ -53,6 +53,8 @@ from ksim.viewer import MujocoViewer
 
 logger = logging.getLogger(__name__)
 
+TOTAL_REWARD_NAME = "total"
+
 
 def get_observation(
     physics_state: PhysicsState,
@@ -80,7 +82,7 @@ def get_rewards(trajectory: Trajectory, reward_generators: Collection[Reward]) -
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
         rewards[reward_generator.reward_name] = reward_val
-    rewards["total"] = jax.tree.reduce(jnp.add, list(rewards.values()))
+    rewards[TOTAL_REWARD_NAME] = jax.tree.reduce(jnp.add, list(rewards.values()))
     return FrozenDict(rewards)
 
 
@@ -823,6 +825,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         trajectory_batches: list[Trajectory],
+        reward_batches: list[Array],
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.GradientTransformation, optax.OptState, FrozenDict[str, Array]]:
         """Updates the model on the given trajectory.
@@ -835,6 +838,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             optimizer: The optimizer to use.
             opt_state: The optimizer state.
             trajectory_batches: The trajectory to update the model on.
+            reward_batches: The rewards to update the model on.
             rng: The random seed.
 
         Returns:
@@ -938,7 +942,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     optimizer=optimizer,
                     opt_state=opt_state,
                     trajectory_batches=trajectory_batches,
-                    reward_batches=reward_batches,
+                    reward_batches=[reward[TOTAL_REWARD_NAME] for reward in reward_batches],
                     rng=update_rng,
                 )
             self.logger.log_scalar("update_dt", timer.elapsed_time, namespace="⏳ dt")
