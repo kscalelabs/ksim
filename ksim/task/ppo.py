@@ -478,7 +478,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         grads, metrics = loss_fn(model_arr, model_static, trajectories, rewards, rng)
         return metrics, grads
 
-    @xax.jit(static_argnames=["self", "optimizer"])
+    # @xax.jit(static_argnames=["self", "optimizer"])
     def _update_model(
         self,
         model_arr: PyTree,
@@ -510,7 +510,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return new_model_arr, new_opt_state, grad_metrics
 
-    @xax.jit(static_argnames=["self", "model_static", "optimizer"])
+    # @xax.jit(static_argnames=["self", "model_static", "optimizer"])
     def _single_step(
         self,
         model_arr: PyTree,
@@ -529,6 +529,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rng=rng,
         )
 
+        # TODO: Just logging.
+        for name, grad in xax.get_named_leaves(grads):
+            jax.debug.print("{}: {}", name, jnp.isnan(grad).any())
+
+        breakpoint()
+
         new_model_arr, new_opt_state, grad_metrics = self._update_model(
             model_arr=model_arr,
             grads=grads,
@@ -538,7 +544,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return new_model_arr, new_opt_state, FrozenDict(ppo_metrics | grad_metrics)
 
-    @xax.jit(static_argnames=["self", "model_static", "optimizer"])
+    # @xax.jit(static_argnames=["self", "model_static", "optimizer"])
     def update_model(
         self,
         model_arr: PyTree,
@@ -603,28 +609,28 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             indices = indices.reshape(self.config.num_batches, self.batch_size)
             carry = (arr, opt_state, rng)
 
-            carry, metrics = jax.lax.scan(scan_fn, carry, indices)
+            # carry, metrics = jax.lax.scan(scan_fn, carry, indices)
 
             # Manual version, instead of using scan.
-            # metrics = []
-            # for i in indices:
-            #     carry, metric = scan_fn(carry, i)
-            #     metrics.append(metric)
-            # metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
+            metrics = []
+            for i in indices:
+                carry, metric = scan_fn(carry, i)
+                metrics.append(metric)
+            metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
 
             return carry, metrics
 
         carry = (model_arr, opt_state, rng)
 
         # Applies gradient updates.
-        carry, metrics = jax.lax.scan(batch_scan_fn, carry, length=self.config.num_passes)
+        # carry, metrics = jax.lax.scan(batch_scan_fn, carry, length=self.config.num_passes)
 
         # Manual version, instead of using scan.
-        # metrics = []
-        # for _ in range(self.config.num_passes):
-        #     carry, metric = batch_scan_fn(carry, None)
-        #     metrics.append(metric)
-        # metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
+        metrics = []
+        for _ in range(self.config.num_passes):
+            carry, metric = batch_scan_fn(carry, None)
+            metrics.append(metric)
+        metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
 
         model_arr, opt_state, _ = carry
         return model_arr, opt_state, metrics
