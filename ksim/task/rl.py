@@ -1068,6 +1068,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 with launch_passive(
                     viewer_model, 
                     viewer_data,
+                    save_path=save_path,
+                    config=self.config,
                 ) as viewer:
                     
                     viewer.setup_camera(self.config)
@@ -1099,61 +1101,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         # than happening in-place, as Mujoco expects
                         viewer.copy_data(dst=viewer_data, src=engine_variables.physics_state.data)
                         mujoco.mj_forward(viewer_model, viewer_data)
-                        
                         viewer.add_commands(engine_variables.commands)
                         viewer.update_and_sync()
+
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
-            finally:
-                pass
-                # if viewer is not None:
-                #     viewer.close()
-
-                # if save_path is not None:
-                #     if len(frames) == 0:
-                #         raise ValueError("No frames to save")
-
-                #     fps = round(1 / self.config.ctrl_dt)
-
-                #     match save_path.suffix.lower():
-                #         case ".mp4":
-                #             try:
-                #                 import imageio.v2 as imageio
-
-                #             except ImportError:
-                #                 raise RuntimeError(
-                #                     "Failed to save video - note that saving .mp4 videos with imageio usually "
-                #                     "requires the FFMPEG backend, which can be installed using `pip install "
-                #                     "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
-                #                     "your system."
-                #                 )
-
-                #             try:
-                #                 with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
-                #                     for frame in frames:
-                #                         writer.append_data(frame)
-
-                #             except Exception as e:
-                #                 raise RuntimeError(
-                #                     "Failed to save video - note that saving .mp4 videos with imageio usually "
-                #                     "requires the FFMPEG backend, which can be installed using `pip install "
-                #                     "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
-                #                     "your system."
-                #                 ) from e
-
-                #         case ".gif":
-                #             images = [PIL.Image.fromarray(frame) for frame in frames]
-                #             images[0].save(
-                #                 save_path,
-                #                 save_all=True,
-                #                 append_images=images[1:],
-                #                 duration=int(1000 / fps),
-                #                 loop=0,
-                #             )
-
-                #         case _:
-                #             raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
