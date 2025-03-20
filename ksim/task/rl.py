@@ -80,7 +80,7 @@ def get_rewards(
     target_shape = trajectory.done.shape
     for reward_generator in reward_generators:
         reward_name = reward_generator.reward_name
-        reward_val = reward_generator(trajectory) * reward_generator.scale  # * ctrl_dt
+        reward_val = reward_generator(trajectory) * reward_generator.scale * ctrl_dt
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
         if clip_max is not None:

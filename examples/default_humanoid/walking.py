@@ -467,7 +467,7 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             save_every_n_steps=50,
-            rollout_length_seconds=5.0,
+            rollout_length_seconds=1.25,
             eval_rollout_length_seconds=4.0,
             # PPO parameters
             gamma=0.97,
