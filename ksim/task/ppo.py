@@ -1,6 +1,7 @@
 """Defines a standard task interface for training a policy."""
 
 import functools
+import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -14,7 +15,7 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.data import Transition, generate_transition_batches
+from ksim.env.data import Trajectory
 from ksim.task.rl import RLConfig, RLTask
 
 
@@ -47,9 +48,8 @@ def compute_advantages_and_value_targets(
         return adv_t, adv_t
 
     def compute_gae_and_targets_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> tuple[Array, Array]:
-        # If the episode terminated at the last step, use 0 for bootstrapping.
-        bootstrap_value = jnp.where(dones_t[-1], 0.0, values_t[-1])
-        values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(bootstrap_value, 0)], axis=0)
+        # Use the last value as the bootstrap value.
+        values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
         mask_t = jnp.where(dones_t, 0.0, 1.0)
         deltas_t = get_deltas(rewards_t, values_t, values_shifted_t, mask_t, decay_gamma)
 
@@ -212,25 +212,9 @@ def compute_ppo_loss(
 @dataclass
 class PPOConfig(RLConfig):
     # Batching parameters.
-    group_batches_by_length: bool = xax.field(
-        value=True,
-        help="Whether to group transitions by length, otherwise, transitions are grouped randomly.",
-    )
     num_passes: int = xax.field(
         value=1,
         help="The number of update passes over the set of trajectories",
-    )
-    include_last_batch: bool = xax.field(
-        value=True,
-        help="Whether to include the last batch if it's not full.",
-    )
-    min_batch_size: int = xax.field(
-        value=2,
-        help="The minimum number of transitions to include in a batch.",
-    )
-    min_trajectory_length: int = xax.field(
-        value=3,
-        help="The minimum number of transitions in a trajectory.",
     )
 
     # PPO parameters.
@@ -279,8 +263,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
 
     @abstractmethod
-    def get_on_policy_log_probs(self, model: PyTree, transitions: Transition, rng: PRNGKeyArray) -> Array:
-        """Gets the initial log probabilities of the given transitions.
+    def get_on_policy_log_probs(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> Array:
+        """Gets the initial log probabilities of the given trajectories.
 
         This function returns the log probabilities of the sampled actions,
         according to the original policy that was used to sample the actions.
@@ -289,7 +273,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         Args:
             model: The user-provided model.
-            transitions: The batch of transitions to get probabilities for.
+            trajectories: The batch of trajectories to get probabilities for.
             rng: A random seed.
 
         Returns:
@@ -297,15 +281,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def get_on_policy_values(self, model: PyTree, transitions: Transition, rng: PRNGKeyArray) -> Array:
-        """Gets the initial values of the given transitions.
+    def get_on_policy_values(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> Array:
+        """Gets the initial values of the given trajectories.
 
         This function returns the values of the sampled actions, according to
         the original policy that was used to sample the actions.
 
         Args:
             model: The user-provided model.
-            transitions: The batch of transitions to get probabilities for.
+            trajectories: The batch of trajectories to get probabilities for.
             rng: A random seed.
 
         Returns:
@@ -313,8 +297,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def get_log_probs(self, model: PyTree, transitions: Transition, rng: PRNGKeyArray) -> tuple[Array, Array | None]:
-        """Gets the log probabilities of the given transitions.
+    def get_log_probs(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> tuple[Array, Array | None]:
+        """Gets the log probabilities of the given trajectories.
 
         This function operates on the entire batch of actions, observations,
         and commands, so users who implement it should take care to vectorize
@@ -325,7 +309,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         Args:
             model: The user-provided model.
-            transitions: The batch of transitions to get probabilities for.
+            trajectories: The batch of trajectories to get probabilities for.
             rng: A random seed.
 
         Returns:
@@ -335,8 +319,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def get_values(self, model: PyTree, transitions: Transition, rng: PRNGKeyArray) -> Array:
-        """Gets the state-value estimates for the given transitions.
+    def get_values(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> Array:
+        """Gets the state-value estimates for the given trajectories.
 
         This is usually provided by a critic model.
 
@@ -346,16 +330,16 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         Args:
             model: The user-provided model.
-            transitions: The batch of transitions estimates for.
+            trajectories: The batch of trajectories estimates for.
             rng: A random seed.
 
         Returns:
-            The state-value estimates for the given transitions, with shape (B, T).
+            The state-value estimates for the given trajectories, with shape (B, T).
         """
 
     def get_ppo_metrics(
         self,
-        transitions: Transition,
+        trajectories: Trajectory,
         loss_bt: Array,
         on_policy_log_probs_btn: Array,
         log_probs_btn: Array,
@@ -371,7 +355,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         format and will be logged as a distribution.
 
         Args:
-            transitions: The batch of transitions to get metrics for.
+            trajectories: The batch of trajectories to get metrics for.
             loss_bt: The PPO loss value.
             on_policy_log_probs_btn: The log probabilities of the actions, with shape (B, T, *A).
             log_probs_btn: The log probabilities of the actions, with shape (B, T, *A).
@@ -383,13 +367,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Returns:
             A dictionary of metrics to be logged.
         """
+        len_b = (~trajectories.done).sum(-1, dtype=loss_bt.dtype) + 1e-6
+        batch_size = loss_bt.shape[0]
         return {
-            "loss": (loss_bt.mean(), loss_bt.std()),
-            "log_probs": (log_probs_btn.mean(), log_probs_btn.std()),
-            "entropy": (entropy_btn.mean(), entropy_btn.std()),
-            "value": (values_bt.mean(), values_bt.std()),
-            "value_targets": (value_targets_bt.mean(), value_targets_bt.std()),
-            "advantages": (advantages_bt.mean(), advantages_bt.std()),
+            "loss": loss_bt.sum(1) / len_b,
+            "log_probs": log_probs_btn.sum(1).reshape(batch_size, -1) / len_b[:, None],
+            "entropy": entropy_btn.sum(1).reshape(batch_size, -1) / len_b[:, None],
+            "value": values_bt.sum(1) / len_b,
+            "value_targets": value_targets_bt.sum(1) / len_b,
+            "advantages": advantages_bt.sum(1) / len_b,
         }
 
     def get_grad_metrics(self, grads: PyTree) -> dict[str, Array | tuple[Array, Array]]:
@@ -412,14 +398,16 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def get_loss_and_metrics(
         self,
         model: PyTree,
-        transitions: Transition,
+        trajectories: Trajectory,
+        rewards: Array,
         rng: PRNGKeyArray,
     ) -> tuple[Array, FrozenDict[str, Array]]:
         """Computes the PPO loss and additional metrics.
 
         Args:
             model: The model to optimize.
-            transitions: The batch of transitions to compute the loss and metrics for.
+            trajectories: The batch of trajectories to compute the loss and metrics for.
+            rewards: The rewards for the trajectories.
             rng: A random seed.
 
         Returns:
@@ -427,15 +415,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             metrics to log.
         """
         rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 5)
-        on_policy_log_probs_btn = self.get_on_policy_log_probs(model, transitions, rng1)
-        on_policy_values_bt = self.get_on_policy_values(model, transitions, rng2)
-        log_probs_btn, entropy_btn = self.get_log_probs(model, transitions, rng3)
-        values_bt = self.get_values(model, transitions, rng4)
+        on_policy_log_probs_btn = self.get_on_policy_log_probs(model, trajectories, rng1)
+        on_policy_values_bt = self.get_on_policy_values(model, trajectories, rng2)
+        log_probs_btn, entropy_btn = self.get_log_probs(model, trajectories, rng3)
+        values_bt = self.get_values(model, trajectories, rng4)
 
         advantages_bt, value_targets_bt = compute_advantages_and_value_targets(
             values_bt=values_bt,
-            rewards_bt=transitions.reward,
-            dones_bt=transitions.done,
+            rewards_bt=rewards,
+            dones_bt=trajectories.done,
             decay_gamma=self.config.gamma,
             gae_lambda=self.config.lam,
             normalize_advantages=self.config.normalize_advantages,
@@ -449,7 +437,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             on_policy_values_bt=on_policy_values_bt,
             advantages_bt=advantages_bt,
             value_targets_bt=value_targets_bt,
-            dones_bt=transitions.done,
+            dones_bt=trajectories.done,
             entropy_btn=entropy_btn,
             clip_param=self.config.clip_param,
             value_loss_coef=self.config.value_loss_coef,
@@ -459,7 +447,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         metrics = self.get_ppo_metrics(
-            transitions=transitions,
+            trajectories=trajectories,
             loss_bt=loss_bt,
             on_policy_log_probs_btn=on_policy_log_probs_btn,
             log_probs_btn=log_probs_btn,
@@ -469,8 +457,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             advantages_bt=advantages_bt,
         )
 
-        # Mean over all non-masked transitions.
-        num_valid = jnp.sum(~transitions.done)
+        # Mean over all non-masked trajectories.
+        num_valid = jnp.sum(~trajectories.done)
         loss = loss_bt.sum() / (num_valid + 1e-6)
 
         return loss, metrics
@@ -478,10 +466,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def get_loss_metrics_and_grads(
         self,
         model: PyTree,
-        transitions: Transition,
+        trajectories: Trajectory,
+        rewards: Array,
         rng: PRNGKeyArray,
     ) -> tuple[Array, dict[str, Array | tuple[Array, Array]], PyTree]:
-        loss_fn = functools.partial(self.get_loss_and_metrics, transitions=transitions, rng=rng)
+        loss_fn = functools.partial(self.get_loss_and_metrics, trajectories=trajectories, rewards=rewards, rng=rng)
         (loss, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
         return loss, metrics, grads
 
@@ -490,12 +479,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        transitions: Transition,
+        xt: tuple[Trajectory, Array],
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | tuple[Array, Array]]]:
+        trajectories, rewards = xt
         _, ppo_metrics, grads = self.get_loss_metrics_and_grads(
             model=model,
-            transitions=transitions,
+            trajectories=trajectories,
+            rewards=rewards,
             rng=rng,
         )
 
@@ -509,27 +500,49 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         return new_model, new_opt_state, FrozenDict(ppo_metrics | grad_metrics)
 
     @eqx.filter_jit
-    def _update_model_on_batches(
+    def update_model(
         self,
         model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        transition_batches: list[Transition],
+        trajectory_batches: list[Trajectory],
+        reward_batches: list[Array],
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+        """Runs PPO updates on a given set of trajectory batches.
+
+        Args:
+            model: The model to update.
+            optimizer: The optimizer to use.
+            opt_state: The optimizer state.
+            trajectory_batches: The trajectory batches to update the model on.
+            reward_batches: The rewards for the trajectories.
+            rng: A random seed.
+
+        Returns:
+            A tuple containing the updated parameters, optimizer state, and metrics.
+        """
         # JAX requires that we partition the model into mutable and static
         # parts in order to use lax.scan, so that `arr` can be a PyTree.`
         arr, static = eqx.partition(model, eqx.is_inexact_array)
 
-        # Loops over the transition batches and applies gradient updates.
+        # Loops over the trajectory batches and applies gradient updates.
         def scan_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
-            xt: Transition,
+            xt: int,
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
             arr, opt_state, rng = carry
             model = eqx.combine(arr, static)
             rng, batch_rng = jax.random.split(rng)
-            model, opt_state, metrics = self._single_step(model, optimizer, opt_state, xt, batch_rng)
+            trajectory_batch = trajectory_batches[xt]
+            reward_batch = reward_batches[xt]
+            model, opt_state, metrics = self._single_step(
+                model=model,
+                optimizer=optimizer,
+                opt_state=opt_state,
+                xt=(trajectory_batch, reward_batch),
+                rng=batch_rng,
+            )
             arr, _ = eqx.partition(model, eqx.is_inexact_array)
             return (arr, opt_state, rng), metrics
 
@@ -540,13 +553,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
             all_metrics = []
 
-            # Looping over the transition batches since it is a list of batches
+            # Looping over the trajectory batches since it is a list of batches
             # with different lengths, rather than a vectorizable PyTree.
-            for transition_batch in transition_batches:
-                carry, metrics = scan_fn(carry, transition_batch)
+            indices = list(range(len(trajectory_batches)))
+            random.shuffle(indices)
+            for i in indices:
+                carry, metrics = scan_fn(carry, i)
                 all_metrics.append(metrics)
 
-            metrics_concat = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *all_metrics)
+            metrics_concat = jax.tree.map(lambda *x: jnp.concatenate([i.reshape(-1) for i in x], axis=0), *all_metrics)
             return carry, metrics_concat
 
         # Applies gradient updates.
@@ -556,38 +571,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             length=self.config.num_passes,
         )
 
-        # Get mean metric values over all batches.
-        metrics = jax.tree.map(lambda x: x.mean(), metrics)
-
         # Recombines the mutable and static parts of the model.
         model = eqx.combine(arr, static)
 
         return model, opt_state, metrics
-
-    def update_model(
-        self,
-        model: PyTree,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
-        transitions: Transition,
-        rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
-        """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        transition_batches = generate_transition_batches(
-            transitions,
-            batch_size=self.config.batch_size,
-            min_batch_size=self.config.min_batch_size,
-            min_trajectory_length=self.config.min_trajectory_length,
-            group_by_length=self.config.group_batches_by_length,
-            include_last_batch=self.config.include_last_batch,
-        )
-
-        model, opt_state, batch_metrics = self._update_model_on_batches(
-            model=model,
-            optimizer=optimizer,
-            opt_state=opt_state,
-            transition_batches=transition_batches,
-            rng=rng,
-        )
-
-        return model, opt_state, batch_metrics

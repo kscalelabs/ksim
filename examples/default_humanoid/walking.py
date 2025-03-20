@@ -18,16 +18,22 @@ from mujoco import mjx
 
 from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import PhysicsData, PhysicsModel, Transition
+from ksim.env.data import PhysicsModel, Trajectory
 from ksim.observation import ActuatorForceObservation, Observation
 from ksim.randomization import (
     Randomization,
     WeightRandomization,
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
-from ksim.rewards import AngularVelocityXYPenalty, LinearVelocityZPenalty, Reward, TerminationPenalty
+from ksim.rewards import (
+    AngularVelocityXYPenalty,
+    JointVelocityPenalty,
+    LinearVelocityZPenalty,
+    Reward,
+    TerminationPenalty,
+)
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations import Termination, UnhealthyTermination
+from ksim.terminations import BadZTermination, FastAccelerationTermination, Termination
 from ksim.utils.mujoco import get_joint_metadata
 
 OBS_SIZE = 27
@@ -40,17 +46,9 @@ NUM_OUTPUTS = 21
 class DHForwardReward(Reward):
     """Incentives forward movement."""
 
-    def __call__(
-        self,
-        prev_action: Array | None,
-        physics_state: PhysicsData,
-        command: FrozenDict[str, Array],
-        action: Array,
-        next_physics_state: PhysicsData,
-        next_state_terminates: Array,
-    ) -> Array:
+    def __call__(self, trajectory: Trajectory) -> Array:
         # Take just the x velocity component
-        x_delta = -jnp.clip(next_physics_state.qvel[1], -1.0, 1.0)
+        x_delta = -jnp.clip(trajectory.qvel[..., 1], -1.0, 1.0)
         return x_delta
 
 
@@ -58,16 +56,8 @@ class DHForwardReward(Reward):
 class DHControlPenalty(Reward):
     """Legacy default humanoid control cost that penalizes squared action magnitude."""
 
-    def __call__(
-        self,
-        prev_action: Array | None,
-        physics_state: PhysicsData,
-        command: FrozenDict[str, Array],
-        action: Array,
-        next_physics_state: PhysicsData,
-        next_state_terminates: Array,
-    ) -> Array:
-        return jnp.sum(jnp.square(action))
+    def __call__(self, trajectory: Trajectory) -> Array:
+        return jnp.sum(jnp.square(trajectory.action), axis=-1)
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -287,6 +277,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             DHForwardReward(scale=0.2),
             DHControlPenalty(scale=-0.01),
             TerminationPenalty(scale=-1.0),
+            JointVelocityPenalty(scale=-0.01),
             # These seem necessary to prevent some physics artifacts.
             LinearVelocityZPenalty(scale=-0.001),
             AngularVelocityXYPenalty(scale=-0.001),
@@ -294,7 +285,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
-            UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=4.0),
+            BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=4.0),
+            FastAccelerationTermination(),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
@@ -326,35 +318,35 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_on_policy_log_probs(
         self,
         model: DefaultHumanoidModel,
-        transitions: Transition,
+        trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        log_probs, _ = transitions.aux_outputs
+        log_probs, _ = trajectories.aux_outputs
         return log_probs
 
     def get_on_policy_values(
         self,
         model: DefaultHumanoidModel,
-        transitions: Transition,
+        trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        _, values = transitions.aux_outputs
+        _, values = trajectories.aux_outputs
         return values
 
     def get_log_probs(
         self,
         model: DefaultHumanoidModel,
-        transitions: Transition,
+        trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         # Vectorize over both batch and time dimensions.
         time_par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
         batch_par_fn = jax.vmap(time_par_fn, in_axes=(None, 0, 0))
-        action_dist_btn = batch_par_fn(model, transitions.obs, transitions.command)
+        action_dist_btn = batch_par_fn(model, trajectories.obs, trajectories.command)
 
-        # Compute the log probabilities of the transition's actions according
+        # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
-        action_btn = transitions.action
+        action_btn = trajectories.action
         log_probs_btn = action_dist_btn.log_prob(action_btn)
         entropy_btn = action_dist_btn.entropy()
 
@@ -363,13 +355,13 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_values(
         self,
         model: DefaultHumanoidModel,
-        transitions: Transition,
+        trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
         # Vectorize over both batch and time dimensions.
         time_par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
         batch_par_fn = jax.vmap(time_par_fn, in_axes=(None, 0, 0))
-        values_bt1 = batch_par_fn(model, transitions.obs, transitions.command)
+        values_bt1 = batch_par_fn(model, trajectories.obs, trajectories.command)
 
         # Remove the last dimension.
         return values_bt1.squeeze(-1)
@@ -416,8 +408,8 @@ if __name__ == "__main__":
         HumanoidWalkingTaskConfig(
             # Update parameters. These values are very small, which is useful
             # for testing on your local machine.
-            num_envs=4,
-            batch_size=8,
+            num_envs=8,
+            batch_size=32,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
