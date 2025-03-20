@@ -23,8 +23,6 @@ from ksim.observation import (
     ActuatorForceObservation,
     CenterOfMassInertiaObservation,
     CenterOfMassVelocityObservation,
-    DHJointPositionObservation,
-    DHJointVelocityObservation,
     Observation,
 )
 from ksim.randomization import (
@@ -33,11 +31,7 @@ from ksim.randomization import (
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import (
-    AngularVelocityXYPenalty,
-    JointVelocityPenalty,
-    LinearVelocityZPenalty,
     Reward,
-    TerminationPenalty,
 )
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import BadZTermination, FastAccelerationTermination, Termination
@@ -47,6 +41,31 @@ OBS_SIZE = 336
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
+
+
+
+@attrs.define(frozen=True)
+class DHJointVelocityObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        qvel = state.qvel  # (N,)
+        return qvel
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return observation + jax.random.normal(rng, observation.shape) * self.noise
+
+
+@attrs.define(frozen=True)
+class DHJointPositionObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        qpos = state.qpos[2:]  # (N,)
+        return qpos
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
 @attrs.define(frozen=True, kw_only=True)

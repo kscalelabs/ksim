@@ -128,30 +128,6 @@ class JointPositionObservation(Observation):
 
 
 @attrs.define(frozen=True)
-class DHJointVelocityObservation(Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
-        qvel = state.qvel  # (N,)
-        return qvel
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
-
-@attrs.define(frozen=True)
-class DHJointPositionObservation(Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
-        qpos = state.qpos[2:]  # (N,)
-        return qpos
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
-
-@attrs.define(frozen=True)
 class JointVelocityObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
