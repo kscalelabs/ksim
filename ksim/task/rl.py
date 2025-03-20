@@ -601,14 +601,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
         self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace=namespace)
 
-    def log_train_metrics(self, train_metrics: dict[str, Array]) -> None:
+    def log_train_metrics(self, train_metrics: dict[str, Array | tuple[Array, Array]]) -> None:
         """Logs the train metrics.
 
         Args:
             train_metrics: The train metrics to log.
         """
         for key, value in train_metrics.items():
-            self.logger.log_scalar(key=key, value=value, namespace="train")
+            if isinstance(value, tuple):
+                self.logger.log_distribution(key=key, value=value, namespace="train")
+            else:
+                self.logger.log_scalar(key=key, value=value, namespace="train")
 
     def render_trajectory_video(
         self,

@@ -326,8 +326,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         values_bt: Array,
         value_targets_bt: Array,
         advantages_bt: Array,
-    ) -> dict[str, Array]:
+    ) -> dict[str, Array | tuple[Array, Array]]:
         """Gets the metrics to be logged.
+
+        If the metric is a scalar, it will be logged as a scalar. If the
+        metric is a tuple, it is assumed to be a distribution in (mean, std)
+        format and will be logged as a distribution.
 
         Args:
             transitions: The batch of transitions to get metrics for.
@@ -342,20 +346,19 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A dictionary of metrics to be logged.
         """
         return {
-            "loss_mean": loss_bt.mean(),
-            "loss_std": loss_bt.std(),
-            "entropy_mean": entropy_btn.mean(),
-            "entropy_std": entropy_btn.std(),
-            "value_mean": values_bt.mean(),
-            "value_std": values_bt.std(),
-            "value_targets_mean": value_targets_bt.mean(),
-            "value_targets_std": value_targets_bt.std(),
-            "advantages_mean": advantages_bt.mean(),
-            "advantages_std": advantages_bt.std(),
+            "loss": (loss_bt.mean(), loss_bt.std()),
+            "entropy": (entropy_btn.mean(), entropy_btn.std()),
+            "value": (values_bt.mean(), values_bt.std()),
+            "value_targets": (value_targets_bt.mean(), value_targets_bt.std()),
+            "advantages": (advantages_bt.mean(), advantages_bt.std()),
         }
 
-    def get_grad_metrics(self, grads: PyTree) -> dict[str, Array]:
+    def get_grad_metrics(self, grads: PyTree) -> dict[str, Array | tuple[Array, Array]]:
         """Gets the metrics to be logged for the gradients.
+
+        If the metric is a scalar, it will be logged as a scalar. If the
+        metric is a tuple, it is assumed to be a distribution in (mean, std)
+        format and will be logged as a distribution.
 
         Args:
             grads: The gradients of the model.
@@ -424,7 +427,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             advantages_bt=advantages_bt,
         )
 
-        loss = loss_bt.mean()
+        # Mean over all non-masked transitions.
+        loss = loss_bt.sum() / ((~transitions.done).sum() + 1e-6)
 
         return loss, metrics
 
@@ -433,7 +437,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: PyTree,
         transitions: Transition,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, dict[str, Array], PyTree]:
+    ) -> tuple[Array, dict[str, Array | tuple[Array, Array]], PyTree]:
         loss_fn = functools.partial(self.get_loss_and_metrics, transitions=transitions, rng=rng)
         (loss, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
         return loss, metrics, grads
@@ -445,7 +449,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         transitions: Transition,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | tuple[Array, Array]]]:
         _, ppo_metrics, grads = self.get_loss_metrics_and_grads(
             model=model,
             transitions=transitions,
