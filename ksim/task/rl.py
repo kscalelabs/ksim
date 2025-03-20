@@ -1073,10 +1073,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     for step_id in iterator:
 
                         # We need to manually sync the data back and forth between
-                        # the viewer and the engine.
+                        # the viewer and the engine, because the resetting the
+                        # environment creates a new data object rather than
+                        # happening in-place, as Mujoco expects.
                         viewer.copy_data(dst=engine_variables.physics_state.data, src=viewer_data)
 
-                        # Step physics using your engine implementation
                         transition, engine_variables = self.step_engine(
                             physics_model=mj_model,
                             model=model,
@@ -1095,9 +1096,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             lambda: mj_model,
                         )
 
-                        # We need to manually update the viewer data field, because
-                        # resetting the environment creates a new data object rather
-                        # than happening in-place, as Mujoco expects
+                        # Sync data again
                         viewer.copy_data(dst=viewer_data, src=engine_variables.physics_state.data)
                         mujoco.mj_forward(viewer_model, viewer_data)
                         viewer.add_commands(engine_variables.commands)
