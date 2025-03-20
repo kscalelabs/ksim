@@ -22,11 +22,11 @@ import matplotlib.pyplot as plt
 import mujoco
 import numpy as np
 import optax
-import PIL.Image
 import xax
 from dpshdl.dataset import Dataset
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from kmv.viewer import launch_passive
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 from omegaconf import II, MISSING
@@ -48,7 +48,6 @@ from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
 from ksim.utils.mujoco import get_joint_metadata
-from kmv.viewer import launch_passive
 
 logger = logging.getLogger(__name__)
 
@@ -1061,22 +1060,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 iterator = range(num_steps) if num_steps is not None else itertools.count()
 
             step_id = 0
-            frames: list[np.ndarray] = []
             try:
                 viewer_model = mj_model
                 viewer_data = physics_state.data
                 with launch_passive(
-                    viewer_model, 
+                    viewer_model,
                     viewer_data,
                     save_path=save_path,
                     config=self.config,
                 ) as viewer:
-                    
                     viewer.setup_camera(self.config)
                     for step_id in iterator:
-                        # Copy data from viewer_data to engine_variables.physics_state.data
+
+                        # We need to manually sync the data back and forth between
+                        # the viewer and the engine.
                         viewer.copy_data(dst=engine_variables.physics_state.data, src=viewer_data)
-                        
+
                         # Step physics using your engine implementation
                         transition, engine_variables = self.step_engine(
                             physics_model=mj_model,
@@ -1085,7 +1084,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             engine_constants=engine_constants,
                             engine_variables=engine_variables,
                         )
-                        
+
                         # We manually trigger randomizations on termination,
                         # whereas during training the randomization is only applied
                         # once per rollout for efficiency.
@@ -1106,7 +1105,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
-
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
