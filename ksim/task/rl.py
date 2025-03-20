@@ -47,8 +47,7 @@ from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
 from ksim.utils.named_access import get_joint_metadata
-# import mujoco.viewer as viewer
-from ksim.viewer import launch_passive
+from kmv.viewer import launch_passive
 
 logger = logging.getLogger(__name__)
 
