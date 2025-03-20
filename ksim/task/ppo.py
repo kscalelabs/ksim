@@ -321,6 +321,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         self,
         transitions: Transition,
         loss_bt: Array,
+        on_policy_log_probs_btn: Array,
         log_probs_btn: Array,
         entropy_btn: Array,
         values_bt: Array,
@@ -336,6 +337,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Args:
             transitions: The batch of transitions to get metrics for.
             loss_bt: The PPO loss value.
+            on_policy_log_probs_btn: The log probabilities of the actions, with shape (B, T, *A).
             log_probs_btn: The log probabilities of the actions, with shape (B, T, *A).
             entropy_btn: The entropy of the action distribution, with shape (B, T, *A).
             values_bt: The state-value estimates, with shape (B, T).
@@ -347,6 +349,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
         return {
             "loss": (loss_bt.mean(), loss_bt.std()),
+            "log_probs": (log_probs_btn.mean(), log_probs_btn.std()),"
             "entropy": (entropy_btn.mean(), entropy_btn.std()),
             "value": (values_bt.mean(), values_bt.std()),
             "value_targets": (value_targets_bt.mean(), value_targets_bt.std()),
@@ -420,6 +423,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         metrics = self.get_ppo_metrics(
             transitions=transitions,
             loss_bt=loss_bt,
+            on_policy_log_probs_btn=on_policy_log_probs_btn,
             log_probs_btn=log_probs_btn,
             entropy_btn=entropy_btn,
             values_bt=values_bt,
