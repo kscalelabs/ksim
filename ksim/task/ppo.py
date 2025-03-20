@@ -52,20 +52,15 @@ def compute_advantages_and_value_targets(
         decay_gamma: float,
         gae_lambda: float,
     ) -> tuple[Array, Array]:
-        # We use the last value as the bootstrap value (although it is not fully correct)
         values_shifted = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
         mask = jnp.where(dones_t, 0.0, 1.0)
-
         deltas = get_deltas(rewards_t, values_t, values_shifted, mask, decay_gamma)
 
+        # Compute GAE advantages directly.
         _, gae = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas, mask), reverse=True)
-        value_targets = jnp.add(gae, values_t)
+        value_targets = gae + values_t
 
-        # Following Brax and applying another TD step to get the value targets.
-        value_targets_shifted = jnp.concatenate([value_targets[1:], value_targets[-1:]], axis=0)
-        advantages = rewards_t + decay_gamma * value_targets_shifted * mask - values_t
-
-        return advantages, value_targets
+        return gae, value_targets
 
     # Compute the advantages and value targets for each sample in the batch.
     par_compute = jax.vmap(compute_for_sample, in_axes=(0, 0, 0, None, None))
@@ -94,6 +89,7 @@ def compute_ppo_loss(
     log_probs_btn: Array,
     values_bt: Array,
     on_policy_log_probs_btn: Array,
+    on_policy_values_bt: Array,
     advantages_bt: Array,
     value_targets_bt: Array,
     dones_bt: Array,
@@ -111,6 +107,8 @@ def compute_ppo_loss(
         values_bt: The state-value estimates, with shape (B, T).
         on_policy_log_probs_btn: The original policy's log probabilities of the
             actions, with shape (B, T, *A).
+        on_policy_values_bt: The original policy's values of the actions, with
+            shape (B, T).
         advantages_bt: The advantages, with shape (B, T).
         value_targets_bt: The value targets, with shape (B, T).
         dones_bt: The termination mask, with shape (B, T).
@@ -128,6 +126,7 @@ def compute_ppo_loss(
             log_probs_btn,
             values_bt,
             on_policy_log_probs_btn,
+            on_policy_values_bt,
             advantages_bt,
             value_targets_bt,
             dones_bt,
@@ -137,6 +136,7 @@ def compute_ppo_loss(
 
     # Only compute gradient to the current policy.
     on_policy_log_probs_btn = jax.lax.stop_gradient(on_policy_log_probs_btn)
+    on_policy_values_bt = jax.lax.stop_gradient(on_policy_values_bt)
     advantages_bt = jax.lax.stop_gradient(advantages_bt)
     value_targets_bt = jax.lax.stop_gradient(value_targets_bt)
 
@@ -144,6 +144,7 @@ def compute_ppo_loss(
         log_probs_n: Array,
         values: Array,
         on_policy_log_probs_n: Array,
+        on_policy_values: Array,
         advantages: Array,
         value_targets: Array,
         dones: Array,
@@ -160,7 +161,7 @@ def compute_ppo_loss(
         # Computes the value loss, with or without clipping.
         if use_clipped_value_loss:
             value_mse = 0.5 * clipped_value_loss(
-                target_values=values,
+                target_values=on_policy_values,
                 values=values,
                 value_targets=value_targets,
                 clip_param=clip_param,
@@ -281,6 +282,22 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
+    def get_on_policy_values(self, model: PyTree, transitions: Transition, rng: PRNGKeyArray) -> Array:
+        """Gets the initial values of the given transitions.
+
+        This function returns the values of the sampled actions, according to
+        the original policy that was used to sample the actions.
+
+        Args:
+            model: The user-provided model.
+            transitions: The batch of transitions to get probabilities for.
+            rng: A random seed.
+
+        Returns:
+            The values of the given actions, with shape (B, T).
+        """
+
+    @abstractmethod
     def get_log_probs(self, model: PyTree, transitions: Transition, rng: PRNGKeyArray) -> tuple[Array, Array | None]:
         """Gets the log probabilities of the given transitions.
 
@@ -394,10 +411,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A tuple containing the loss value as a scalar, and a dictionary of
             metrics to log.
         """
-        rng, log_probs_rng, values_rng = jax.random.split(rng, 3)
-        on_policy_log_probs_btn = self.get_on_policy_log_probs(model, transitions, log_probs_rng)
-        log_probs_btn, entropy_btn = self.get_log_probs(model, transitions, log_probs_rng)
-        values_bt = self.get_values(model, transitions, values_rng)
+        rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 3)
+        on_policy_log_probs_btn = self.get_on_policy_log_probs(model, transitions, rng1)
+        on_policy_values_bt = self.get_on_policy_values(model, transitions, rng2)
+        log_probs_btn, entropy_btn = self.get_log_probs(model, transitions, rng3)
+        values_bt = self.get_values(model, transitions, rng4)
 
         advantages_bt, value_targets_bt = compute_advantages_and_value_targets(
             values_bt=values_bt,
@@ -412,6 +430,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             log_probs_btn=log_probs_btn,
             values_bt=values_bt,
             on_policy_log_probs_btn=on_policy_log_probs_btn,
+            on_policy_values_bt=on_policy_values_bt,
             advantages_bt=advantages_bt,
             value_targets_bt=value_targets_bt,
             dones_bt=transitions.done,

@@ -273,7 +273,17 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         transitions: Transition,
         rng: PRNGKeyArray,
     ) -> Array:
-        return transitions.aux_outputs
+        log_probs, _ = transitions.aux_outputs
+        return log_probs
+
+    def get_on_policy_values(
+        self,
+        model: DefaultHumanoidModel,
+        transitions: Transition,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        _, values = transitions.aux_outputs
+        return values
 
     def get_log_probs(
         self,
@@ -316,11 +326,15 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, Array]:
+    ) -> tuple[Array, None, tuple[Array, Array]]:
         action_dist_n = self._run_actor(model, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
-        return action_n, None, action_log_prob_n
+
+        critic_n = self._run_critic(model, observations, commands)
+        value_n = critic_n.squeeze(-1)
+
+        return action_n, None, (action_log_prob_n, value_n)
 
     def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
         state = super().on_after_checkpoint_save(ckpt_path, state)
