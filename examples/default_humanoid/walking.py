@@ -107,8 +107,7 @@ class DefaultHumanoidActor(eqx.Module):
         mean_n = jnp.tanh(mean_n) * self.mean_scale
 
         # Softplus and clip to ensure positive standard deviations.
-        std_n = (jax.nn.softplus(std_n) + self.min_std) * self.var_scale
-        std_n = jnp.clip(std_n, self.min_std, self.max_std)
+        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
         # return distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
         return distrax.Normal(mean_n, std_n)
@@ -173,7 +172,7 @@ class HumanoidWalkingTaskConfig(PPOConfig):
 
     # Mujoco parameters.
     use_mit_actuators: bool = xax.field(
-        value=True,
+        value=False,
         help="Whether to use the MIT actuator model, where the actions are position commands",
     )
     kp: float = xax.field(
@@ -340,9 +339,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         # Vectorize over both batch and time dimensions.
-        time_par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        batch_par_fn = jax.vmap(time_par_fn, in_axes=(None, 0, 0))
-        action_dist_btn = batch_par_fn(model, trajectories.obs, trajectories.command)
+        par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
+        action_dist_btn = par_fn(model, trajectories.obs, trajectories.command)
 
         # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
@@ -359,9 +357,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         rng: PRNGKeyArray,
     ) -> Array:
         # Vectorize over both batch and time dimensions.
-        time_par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        batch_par_fn = jax.vmap(time_par_fn, in_axes=(None, 0, 0))
-        values_bt1 = batch_par_fn(model, trajectories.obs, trajectories.command)
+        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
+        values_bt1 = par_fn(model, trajectories.obs, trajectories.command)
 
         # Remove the last dimension.
         return values_bt1.squeeze(-1)
