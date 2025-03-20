@@ -124,7 +124,7 @@ class HumanoidWalkingTaskConfig(PPOConfig):
         help="Whether to use the MIT actuator model, where the actions are position commands",
     )
     render_track_body_id: int | None = xax.field(
-        value=0,
+        value=None,
         help="The body id to track with the render camera.",
     )
     kp: float = xax.field(
