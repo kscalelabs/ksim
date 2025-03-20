@@ -45,26 +45,19 @@ def compute_advantages_and_value_targets(
         adv_t = delta + decay_gamma * gae_lambda * mask * adv_t_plus_1
         return adv_t, adv_t
 
-    def compute_for_sample(
-        values_t: Array,
-        rewards_t: Array,
-        dones_t: Array,
-        decay_gamma: float,
-        gae_lambda: float,
-    ) -> tuple[Array, Array]:
-        values_shifted = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
+    def compute_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> tuple[Array, Array]:
+        # If the episode terminated at the last step, use 0 for bootstrapping.
+        bootstrap_value = jnp.where(dones_t[-1], 0.0, values_t[-1])
+        values_shifted = jnp.concatenate([values_t[1:], jnp.expand_dims(bootstrap_value, 0)], axis=0)
         mask = jnp.where(dones_t, 0.0, 1.0)
         deltas = get_deltas(rewards_t, values_t, values_shifted, mask, decay_gamma)
-
-        # Compute GAE advantages directly.
         _, gae = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas, mask), reverse=True)
         value_targets = gae + values_t
-
         return gae, value_targets
 
     # Compute the advantages and value targets for each sample in the batch.
-    par_compute = jax.vmap(compute_for_sample, in_axes=(0, 0, 0, None, None))
-    advantages_bt, value_targets_bt = par_compute(values_bt, rewards_bt, dones_bt, decay_gamma, gae_lambda)
+    par_compute = jax.vmap(compute_for_sample, in_axes=0)
+    advantages_bt, value_targets_bt = par_compute(values_bt, rewards_bt, dones_bt)
 
     if normalize_advantages:
         advantages_bt = advantages_bt / (advantages_bt.std(axis=-1, keepdims=True) + 1e-6)
@@ -454,7 +447,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         # Mean over all non-masked transitions.
-        loss = loss_bt.sum() / ((~transitions.done).sum() + 1e-6)
+        num_valid = jnp.sum(~transitions.done)
+        loss = loss_bt.sum() / (num_valid + 1e-6)
 
         return loss, metrics
 

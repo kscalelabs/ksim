@@ -111,7 +111,7 @@ def concatenate_transitions(transitions: list[Transition]) -> Transition:
         return jnp.pad(x, pad_width, mode="constant")
 
     def update_done_flag(transition: Transition) -> Transition:
-        new_done = jnp.cumsum(transition.done, axis=-1, dtype=transition.done.dtype)
+        new_done = jnp.cumsum(transition.done, axis=-1) > 0
 
         # Need to do it this way because we transitions are frozen.
         kwargs = transition.__dict__
