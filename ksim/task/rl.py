@@ -16,7 +16,6 @@ from typing import Any, Collection, Generic, TypeVar
 
 import chex
 import equinox as eqx
-import imageio.v2 as imageio
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -1071,6 +1070,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     match save_path.suffix.lower():
                         case ".mp4":
+                            try:
+                                import imageio.v2 as imageio
+
+                            except ImportError:
+                                raise RuntimeError(
+                                    "Failed to save video - note that saving .mp4 videos with imageio usually "
+                                    "requires the FFMPEG backend, which can be installed using `pip install "
+                                    "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
+                                    "your system."
+                                )
+
                             try:
                                 with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
                                     for frame in frames:

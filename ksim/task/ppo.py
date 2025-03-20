@@ -192,6 +192,7 @@ def compute_ppo_loss(
         log_probs_btn,
         values_bt,
         on_policy_log_probs_btn,
+        on_policy_values_bt,
         advantages_bt,
         value_targets_bt,
         dones_bt,
