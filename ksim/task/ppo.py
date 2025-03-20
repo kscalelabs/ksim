@@ -560,8 +560,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             indices = jax.random.permutation(indices_rng, trajectories.done.shape[0])
             indices = indices.reshape(self.config.num_batches, self.batch_size)
             carry = (arr, opt_state, rng)
-            carry, new_metrics = jax.lax.scan(scan_fn, carry, indices)
-            new_metrics = jax.tree.map(lambda x: x.reshape(x.shape[0] * x.shape[1], -1), new_metrics)
+            carry, metrics = jax.lax.scan(scan_fn, carry, indices)
             return carry, metrics
 
         # Applies gradient updates.
