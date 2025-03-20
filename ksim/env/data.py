@@ -55,6 +55,12 @@ def chunk_trajectory(trajectory: Trajectory) -> list[Trajectory]:
     """
     # Get the done flags from trajectories
     done_flags = trajectory.done
+
+    # Expand batch dimension if not present.
+    if done_flags.ndim == 1:
+        trajectory = jax.tree.map(lambda x: x[None], trajectory)
+        done_flags = done_flags[None]
+
     num_batches, num_steps = done_flags.shape
 
     # Initialize list to store chunked trajectories

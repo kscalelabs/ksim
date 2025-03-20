@@ -72,4 +72,4 @@ class AngularVelocityXYPenalty(Reward):
 
     def __call__(self, trajectory: Trajectory) -> Array:
         ang_vel_xy = trajectory.qvel[..., 3:5]
-        return xax.get_norm(ang_vel_xy, self.norm).sum(axis=-1)
+        return xax.get_norm(ang_vel_xy, self.norm).mean(axis=-1)

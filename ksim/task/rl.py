@@ -56,6 +56,15 @@ logger = logging.getLogger(__name__)
 TOTAL_REWARD_NAME = "total"
 
 
+def get_median_trajectory(trajectories: list[Trajectory]) -> Trajectory:
+    num_traj = np.ndarray([t.done.shape[0] for t in trajectories])
+    num_traj_cum = np.cumsum(num_traj)
+    median_list_idx = len(num_traj_cum) // 2
+    median_traj_idx = (num_traj_cum[-1] // 2) - num_traj_cum[max(median_list_idx - 1, 0)]
+    trajectory = trajectories[median_list_idx]
+    return jax.tree.map(lambda x: x[median_traj_idx], trajectory)
+
+
 def get_observation(
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
@@ -72,13 +81,17 @@ def get_observation(
 
 
 @eqx.filter_jit
-def get_rewards(trajectory: Trajectory, reward_generators: Collection[Reward]) -> FrozenDict[str, Array]:
+def get_rewards(
+    trajectory: Trajectory,
+    reward_generators: Collection[Reward],
+    ctrl_dt: float,
+) -> FrozenDict[str, Array]:
     """Get the rewards from the physics state."""
     rewards = {}
     target_shape = trajectory.done.shape
     for reward_generator in reward_generators:
         reward_name = reward_generator.reward_name
-        reward_val = reward_generator(trajectory)
+        reward_val = reward_generator(trajectory) * reward_generator.scale * ctrl_dt
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
         rewards[reward_generator.reward_name] = reward_val
@@ -87,9 +100,13 @@ def get_rewards(trajectory: Trajectory, reward_generators: Collection[Reward]) -
 
 
 @eqx.filter_jit
-def get_rewards_batch(trajectories: Trajectory, reward_generators: Collection[Reward]) -> FrozenDict[str, Array]:
+def get_rewards_batch(
+    trajectories: Trajectory,
+    reward_generators: Collection[Reward],
+    ctrl_dt: float,
+) -> FrozenDict[str, Array]:
     """Get the rewards from the physics state."""
-    return jax.vmap(get_rewards, in_axes=(0, None))(trajectories, reward_generators)
+    return jax.vmap(get_rewards, in_axes=(0, None, None))(trajectories, reward_generators, ctrl_dt)
 
 
 def get_terminations(
@@ -703,7 +720,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         commands: Collection[Command],
         rewards: FrozenDict[str, Array],
         mj_model: mujoco.MjModel,
-        name: str,
     ) -> None:
         """Visualizes a single trajectory.
 
@@ -717,11 +733,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Emojis are used in order to prevent conflicts with user-specified namespaces.
         for namespace, arr_dict in (
-            (f"👀 {name} obs images", trajectories.obs),
-            (f"🕹️ {name} command images", trajectories.command),
-            (f"🏃 {name} action images", {"action": trajectories.action}),
-            (f"💀 {name} termination images", trajectories.termination_components),
-            (f"🎁 {name} reward images", rewards),
+            ("👀 obs images", trajectories.obs),
+            ("🕹️ command images", trajectories.command),
+            ("🏃 action images", {"action": trajectories.action}),
+            ("💀 termination images", trajectories.termination_components),
+            ("🎁 reward images", rewards),
         ):
             for key, value in arr_dict.items():
                 plt.figure(figsize=self.config.plot_figsize)
@@ -751,7 +767,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(trajectories, commands, mj_model)
-        self.logger.log_video(key=f"{name}", value=frames, fps=fps, namespace="➡️ trajectory images")
+        self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
 
     @eqx.filter_jit
     def _single_unroll(
@@ -889,17 +905,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
 
                 # Gets the shortest and longest trajectories, for visualization.
-                trajectory_list = chunk_trajectory(trajectories).sort(key=lambda x: x.done.shape[-1])
-                short_trajectory, long_trajectory = trajectory_list[0], trajectory_list[-1]
-                short_rewards = get_rewards(short_trajectory, engine_constants.reward_generators)
-                long_rewards = get_rewards(long_trajectory, engine_constants.reward_generators)
+                trajectory_list = chunk_trajectory(trajectories)
+                trajectory_list.sort(key=lambda x: x.done.shape[-1])
+                trajectory = get_median_trajectory(trajectory_list)
+                reward = get_rewards(trajectory, engine_constants.reward_generators, self.config.ctrl_dt)
 
                 # Logs statistics from the trajectory.
                 with self.step_context("write_logs"):
-                    self.log_single_trajectory(short_trajectory, commands, short_rewards, mj_model, "short")
-                    self.log_single_trajectory(long_trajectory, commands, long_rewards, mj_model, "long")
-                    self.log_reward_stats(short_trajectory, short_rewards, "short")
-                    self.log_reward_stats(long_trajectory, long_rewards, "long")
+                    self.log_single_trajectory(trajectory, commands, reward, mj_model)
+                    self.log_reward_stats(trajectory, reward)
                     self.log_termination_stats(trajectories, terminations)
                     self.log_state_timers(state)
                     self.write_logs(state)
@@ -931,7 +945,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     group_by_length=self.config.group_batches_by_length,
                     include_last_batch=self.config.include_last_batch,
                 )
-                reward_batches = [get_rewards_batch(t, engine_constants.reward_generators) for t in trajectory_batches]
+                reward_batches = [
+                    get_rewards_batch(t, engine_constants.reward_generators, self.config.ctrl_dt)
+                    for t in trajectory_batches
+                ]
 
             # Optimizes the model on that trajectory.
             with xax.ContextTimer() as timer:
@@ -953,16 +970,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 # Logs statistics from the fpost_accumulatetrajectory.
                 with self.step_context("write_logs"):
-                    short_trajectory = jax.tree.map(lambda arr: arr[0], trajectory_batches[0])
-                    long_trajectory = jax.tree.map(lambda arr: arr[-1], trajectory_batches[-1])
-                    short_rewards = get_rewards(short_trajectory, engine_constants.reward_generators)
-                    long_rewards = get_rewards(long_trajectory, engine_constants.reward_generators)
+                    trajectory = get_median_trajectory(trajectory_batches)
+                    reward = get_rewards(trajectory, engine_constants.reward_generators, self.config.ctrl_dt)
                     if self.config.log_train_trajectory:
-                        self.log_single_trajectory(short_trajectory, commands, short_rewards, mj_model, "short")
-                        self.log_single_trajectory(long_trajectory, commands, long_rewards, mj_model, "long")
+                        self.log_single_trajectory(trajectory, commands, reward, mj_model)
+                    self.log_reward_stats(trajectory, reward)
                     self.log_trajectory_stats(trajectories)
-                    self.log_reward_stats(short_trajectory, short_rewards, "short")
-                    self.log_reward_stats(long_trajectory, long_rewards, "long")
                     self.log_termination_stats(trajectories, terminations)
                     self.log_train_metrics(train_metrics)
                     self.log_state_timers(state)

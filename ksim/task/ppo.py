@@ -1,6 +1,7 @@
 """Defines a standard task interface for training a policy."""
 
 import functools
+import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -543,9 +544,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
             all_metrics = []
 
+            # Shuffle trajectories and rewards together.
+            trajs, rews = zip(*random.shuffle(list(zip(trajectory_batches, reward_batches))))
+
             # Looping over the trajectory batches since it is a list of batches
             # with different lengths, rather than a vectorizable PyTree.
-            for trajectory_batch, reward_batch in zip(trajectory_batches, reward_batches):
+            for trajectory_batch, reward_batch in zip(trajs, rews):
                 carry, metrics = scan_fn(carry, (trajectory_batch, reward_batch))
                 all_metrics.append(metrics)
 
