@@ -569,7 +569,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         Args:
             trajectories: The trajectories to log the action statistics for.
-            namespace: The namespace to log the statistics to.
         """
         if self.config.log_action_histograms:
             self.logger.log_histogram(key="action", value=trajectories.action, namespace="action")
@@ -583,13 +582,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_histogram(key="qpos", value=trajectories.qpos[..., 7:], namespace="state")
             self.logger.log_histogram(key="qvel", value=trajectories.qvel[..., 6:], namespace="state")
 
-    def log_reward_stats(self, trajectories: Trajectory, rewards: FrozenDict[str, Array]) -> None:
+    def log_reward_stats(self, trajectories: Trajectory, rewards: FrozenDict[str, Array], name: str) -> None:
         """Log reward statistics from the trajectory or trajectories.
 
         Args:
             trajectories: The trajectories to log the reward statistics for.
             rewards: The rewards to log the statistics for.
-            namespace: The namespace to log the statistics to.
+            name: The name of the trajectory being logged.
         """
         reward_stats: dict[str, jnp.ndarray] = {}
 
@@ -599,7 +598,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             reward_stats[reward_name] = jnp.sum(reward_val) / num_episodes
 
         for key, value in reward_stats.items():
-            self.logger.log_scalar(key=key, value=value, namespace="reward")
+            self.logger.log_scalar(key=key, value=value, namespace=f"reward {name}")
 
     def log_termination_stats(self, trajectories: Trajectory, termination_generators: Collection[Termination]) -> None:
         """Log termination statistics from the trajectory or trajectories.
@@ -607,7 +606,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             trajectories: The trajectories to log the termination statistics for.
             termination_generators: The termination generators to log the statistics for.
-            namespace: The namespace to log the statistics to.
         """
         termination_stats: dict[str, jnp.ndarray] = {}
 
@@ -900,7 +898,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 with self.step_context("write_logs"):
                     self.log_single_trajectory(short_trajectory, commands, short_rewards, mj_model, "short")
                     self.log_single_trajectory(long_trajectory, commands, long_rewards, mj_model, "long")
-                    self.log_reward_stats(trajectories, rewards)
+                    self.log_reward_stats(short_trajectory, short_rewards, "short")
+                    self.log_reward_stats(long_trajectory, long_rewards, "long")
                     self.log_termination_stats(trajectories, terminations)
                     self.log_state_timers(state)
                     self.write_logs(state)
@@ -942,7 +941,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     optimizer=optimizer,
                     opt_state=opt_state,
                     trajectory_batches=trajectory_batches,
-                    reward_batches=[reward[TOTAL_REWARD_NAME] for reward in reward_batches],
+                    reward_batches=[r[TOTAL_REWARD_NAME] for r in reward_batches],
                     rng=update_rng,
                 )
             self.logger.log_scalar("update_dt", timer.elapsed_time, namespace="⏳ dt")
@@ -962,7 +961,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         self.log_single_trajectory(short_trajectory, commands, short_rewards, mj_model, "short")
                         self.log_single_trajectory(long_trajectory, commands, long_rewards, mj_model, "long")
                     self.log_trajectory_stats(trajectories)
-                    self.log_reward_stats(trajectories, rewards)
+                    self.log_reward_stats(short_trajectory, short_rewards, "short")
+                    self.log_reward_stats(long_trajectory, long_rewards, "long")
                     self.log_termination_stats(trajectories, terminations)
                     self.log_train_metrics(train_metrics)
                     self.log_state_timers(state)
