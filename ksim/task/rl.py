@@ -197,28 +197,14 @@ class RLConfig(xax.Config):
         help="If true, log train metrics.",
     )
 
-    # trajectory batching parameters.
-    group_batches_by_length: bool = xax.field(
-        value=True,
-        help="Whether to group trajectories by length, otherwise, trajectories are grouped randomly.",
-    )
-    include_last_batch: bool = xax.field(
-        value=True,
-        help="Whether to include the last batch if it's not full.",
-    )
-    min_batch_size: int = xax.field(
-        value=2,
-        help="The minimum number of trajectories to include in a batch.",
-    )
-    min_trajectory_length: int = xax.field(
-        value=3,
-        help="The minimum number of trajectories in a trajectory.",
-    )
-
     # Training parameters.
     num_envs: int = xax.field(
         value=MISSING,
         help="The number of training environments to run in parallel.",
+    )
+    num_batches: int = xax.field(
+        value=1,
+        help="The number of model update batches per trajectory batch. ",
     )
     rollout_length_seconds: float = xax.field(
         value=MISSING,
@@ -295,6 +281,19 @@ Config = TypeVar("Config", bound=RLConfig)
 
 class RLTask(xax.Task[Config], Generic[Config], ABC):
     """Base class for reinforcement learning tasks."""
+
+    def __init__(self, config: Config) -> None:
+        super().__init__(config)
+
+        if self.config.num_envs % self.config.num_batches != 0:
+            raise ValueError(
+                f"The number of environments ({self.config.num_envs}) must be divisible by "
+                f"the number of model update batches ({self.config.num_batches})"
+            )
+
+    @property
+    def batch_size(self) -> int:
+        return self.config.num_envs // self.config.num_batches
 
     @abstractmethod
     def get_mujoco_model(self) -> mujoco.MjModel: ...

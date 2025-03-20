@@ -18,14 +18,6 @@ from ksim.env.data import Rewards, Trajectory
 from ksim.task.rl import RLConfig, RLTask
 
 
-def normalize_tensor(x: Array) -> Array:
-    if x.ndim < 1:
-        x = x[None]
-    if x.ndim < 2:
-        x = x[:, None]
-    return x.reshape(x.shape[0], -1)
-
-
 def get_deltas(
     rewards: Array,
     values: Array,
@@ -464,7 +456,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             value_targets_bt=value_targets_bt,
             advantages_bt=advantages_bt,
         )
-        metrics = jax.tree.map(normalize_tensor, metrics)
 
         # Mean over all non-masked trajectories.
         num_valid = jnp.sum(~trajectories.done)
@@ -505,7 +496,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # Monitor global gradient norm.
         grad_metrics = self.get_grad_metrics(grads)
-        grad_metrics = jax.tree.map(normalize_tensor, grad_metrics)
 
         return new_model, new_opt_state, FrozenDict(ppo_metrics | grad_metrics)
 
@@ -535,7 +525,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # JAX requires that we partition the model into mutable and static
         # parts in order to use lax.scan, so that `arr` can be a PyTree.`
         arr, static = eqx.partition(model, eqx.is_inexact_array)
-        num_batches = trajectories.done.shape[0] // self.config.batch_size
 
         # Loops over the trajectory batches and applies gradient updates.
         def scan_fn(
@@ -569,19 +558,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             arr, opt_state, rng = carry
             rng, indices_rng = jax.random.split(rng)
             indices = jax.random.permutation(indices_rng, trajectories.done.shape[0])
-
-            # Run over the final batch, which may be shorter.
+            indices = indices.reshape(self.config.num_batches, self.batch_size)
             carry = (arr, opt_state, rng)
-            carry, metrics = scan_fn(carry, indices[num_batches * self.config.batch_size :])
-
-            # Scan over the trajectory batches.
-            if num_batches > 0:
-                batch_indices = indices[: num_batches * self.config.batch_size]
-                batch_indices = batch_indices.reshape(num_batches, self.config.batch_size)
-                carry, new_metrics = jax.lax.scan(scan_fn, carry, batch_indices)
-                new_metrics = jax.tree.map(lambda x: x.reshape(x.shape[0] * x.shape[1], -1), new_metrics)
-                metrics = jax.tree.map(lambda x, y: jnp.concatenate([x, y], axis=0), metrics, new_metrics)
-
+            carry, new_metrics = jax.lax.scan(scan_fn, carry, indices)
+            new_metrics = jax.tree.map(lambda x: x.reshape(x.shape[0] * x.shape[1], -1), new_metrics)
             return carry, metrics
 
         # Applies gradient updates.
