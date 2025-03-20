@@ -29,7 +29,7 @@ from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
 from ksim.utils.mujoco import get_joint_metadata
 
-OBS_SIZE = 21  # check this
+OBS_SIZE = 27
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21

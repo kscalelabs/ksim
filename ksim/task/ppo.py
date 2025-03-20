@@ -35,6 +35,7 @@ def compute_advantages_and_value_targets(
     dones_bt: Array,
     decay_gamma: float,
     gae_lambda: float,
+    normalize_advantages: bool = True,
 ) -> tuple[Array, Array]:
     """Computes the advantages using Generalized Advantage Estimation (GAE)."""
 
@@ -61,7 +62,6 @@ def compute_advantages_and_value_targets(
         value_targets = jnp.add(gae, values_t)
 
         # Following Brax and applying another TD step to get the value targets.
-        # TODO: Experiment with original GAE & value targets
         value_targets_shifted = jnp.concatenate([value_targets[1:], value_targets[-1:]], axis=0)
         advantages = rewards_t + decay_gamma * value_targets_shifted * mask - values_t
 
@@ -70,6 +70,9 @@ def compute_advantages_and_value_targets(
     # Compute the advantages and value targets for each sample in the batch.
     par_compute = jax.vmap(compute_for_sample, in_axes=(0, 0, 0, None, None))
     advantages_bt, value_targets_bt = par_compute(values_bt, rewards_bt, dones_bt, decay_gamma, gae_lambda)
+
+    if normalize_advantages:
+        advantages_bt = advantages_bt / (advantages_bt.std(axis=-1, keepdims=True) + 1e-6)
 
     return advantages_bt, value_targets_bt
 
@@ -146,7 +149,8 @@ def compute_ppo_loss(
         dones: Array,
         entropy_n: Array | None,
     ) -> Array:
-        ratio_n = jnp.exp(log_probs_n - on_policy_log_probs_n)
+        # Preventing underflow / overflow in calculating the ratio.
+        ratio_n = jnp.exp(jnp.clip(log_probs_n - on_policy_log_probs_n, -10, 10))
 
         # Computes clipped policy objective.
         clipped_ratio_n = jnp.clip(ratio_n, 1 - clip_param, 1 + clip_param)
@@ -154,26 +158,22 @@ def compute_ppo_loss(
         policy_objective = policy_objective_n.mean(axis=-1)
 
         # Computes the value loss, with or without clipping.
-        value_mse = jax.lax.cond(
-            use_clipped_value_loss,
-            lambda: 0.5
-            * clipped_value_loss(
+        if use_clipped_value_loss:
+            value_mse = 0.5 * clipped_value_loss(
                 target_values=values,
                 values=values,
                 value_targets=value_targets,
                 clip_param=clip_param,
-            ),
-            lambda: 0.5 * (value_targets - values) ** 2,
-        )
+            )
+        else:
+            value_mse = 0.5 * (value_targets - values) ** 2
+
         value_objective = value_loss_coef * value_mse
         total_objective = policy_objective - value_objective
 
         # Adds the entropy bonus term, if provided.
-        total_objective = jax.lax.cond(
-            entropy_n is not None,
-            lambda: total_objective + entropy_coef * entropy_n.mean(axis=-1),
-            lambda: total_objective,
-        )
+        if entropy_n is not None:
+            total_objective = total_objective + entropy_coef * entropy_n.mean(axis=-1)
 
         # Maximize the objective.
         total_loss = -total_objective
@@ -249,6 +249,10 @@ class PPOConfig(RLConfig):
     lam: float = xax.field(
         value=0.95,
         help="Lambda for GAE: high = more bias; low = more variance",
+    )
+    normalize_advantages: bool = xax.field(
+        value=True,
+        help="Whether to normalize the advantages.",
     )
 
 
@@ -349,7 +353,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
         return {
             "loss": (loss_bt.mean(), loss_bt.std()),
-            "log_probs": (log_probs_btn.mean(), log_probs_btn.std()),"
+            "log_probs": (log_probs_btn.mean(), log_probs_btn.std()),
             "entropy": (entropy_btn.mean(), entropy_btn.std()),
             "value": (values_bt.mean(), values_bt.std()),
             "value_targets": (value_targets_bt.mean(), value_targets_bt.std()),
@@ -401,10 +405,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             dones_bt=transitions.done,
             decay_gamma=self.config.gamma,
             gae_lambda=self.config.lam,
+            normalize_advantages=self.config.normalize_advantages,
         )
-
-        # TODO: These do not look correct...
-        # returns_bt = compute_returns(transitions.reward, transitions.done, self.config.gamma)
 
         loss_bt = compute_ppo_loss(
             log_probs_btn=log_probs_btn,
