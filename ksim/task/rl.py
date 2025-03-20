@@ -662,6 +662,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             for key, value in train_metrics.items():
                 if value.size > 1:
                     self.logger.log_histogram(key, value, namespace="➡️ train histograms")
+                    self.logger.log_scalar(key, value.mean(), namespace="➡️ train")
                 else:
                     self.logger.log_scalar(key, value, namespace="➡️ train")
 
