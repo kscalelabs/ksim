@@ -130,17 +130,17 @@ class HumanoidWalkingTaskConfig(PPOConfig):
         value=1e-4,
         help="Learning rate for PPO.",
     )
-    learning_rate_min_factor: float = xax.field(
-        value=0.1,
-        help="Minimum learning rate for PPO.",
+    learning_rate_pct_start: float = xax.field(
+        value=0.3,
+        help="Percentage of cycle spent increasing the learning rate.",
     )
-    learning_rate_warmup_steps: int = xax.field(
-        value=1000,
-        help="Number of steps to warm up the learning rate.",
+    learning_rate_div_factor: float = xax.field(
+        value=25.0,
+        help="Minimum learning rate is learning_rate / learning_rate_div_factor.",
     )
-    learning_rate_decay_steps: int = xax.field(
-        value=10000,
-        help="Number of steps to decay the learning rate.",
+    learning_rate_final_div_factor: float = xax.field(
+        value=1e4,
+        help="Minimum learning rate is learning_rate / learning_rate_final_div_factor.",
     )
     max_grad_norm: float = xax.field(
         value=0.5,
@@ -194,10 +194,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         but can be overridden by subclasses who want to do something different.
         """
         scheduler = optax.cosine_onecycle_schedule(
-            init_value=self.config.learning_rate,
-            end_value=self.config.learning_rate * self.config.learning_rate_min_factor,
-            warmup_steps=self.config.learning_rate_warmup_steps,
-            decay_steps=self.config.learning_rate_decay_steps,
+            transition_steps=self.config.learning_rate_div_factor,
+            peak_value=self.config.learning_rate,
+            pct_start=self.config.learning_rate_pct_start,
+            div_factor=self.config.learning_rate_div_factor,
+            final_div_factor=self.config.learning_rate_final_div_factor,
         )
 
         optimizer = optax.chain(
