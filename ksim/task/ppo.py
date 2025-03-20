@@ -491,7 +491,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         def apply(grads: PyTree, grad_norm: Array) -> tuple[PyTree, optax.OptState]:
             # Clip the global gradient norm to some desired range.
-            grad_factor = self.config.global_grad_clip / grad_norm
+            grad_factor = self.config.global_grad_clip / jnp.maximum(grad_norm, 1e-6)
             grads = jax.tree.map(lambda x: x * grad_factor, grads)
 
             # Apply the gradient updates.
