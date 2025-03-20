@@ -130,9 +130,25 @@ class HumanoidWalkingTaskConfig(PPOConfig):
         value=1e-4,
         help="Learning rate for PPO.",
     )
+    learning_rate_pct_start: float = xax.field(
+        value=0.3,
+        help="Percentage of cycle spent increasing the learning rate.",
+    )
+    learning_rate_div_factor: float = xax.field(
+        value=25.0,
+        help="Minimum learning rate is learning_rate / learning_rate_div_factor.",
+    )
+    learning_rate_final_div_factor: float = xax.field(
+        value=1e4,
+        help="Minimum learning rate is learning_rate / learning_rate_final_div_factor.",
+    )
     max_grad_norm: float = xax.field(
         value=0.5,
         help="Maximum gradient norm for clipping.",
+    )
+    adam_weight_decay: float = xax.field(
+        value=0.0,
+        help="Weight decay for the Adam optimizer.",
     )
 
     # Mujoco parameters.
@@ -177,10 +193,24 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         This provides a reasonable default optimizer for training PPO models,
         but can be overridden by subclasses who want to do something different.
         """
-        return optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            optax.adam(self.config.learning_rate),
+        scheduler = optax.cosine_onecycle_schedule(
+            transition_steps=self.config.learning_rate_div_factor,
+            peak_value=self.config.learning_rate,
+            pct_start=self.config.learning_rate_pct_start,
+            div_factor=self.config.learning_rate_div_factor,
+            final_div_factor=self.config.learning_rate_final_div_factor,
         )
+
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            (
+                optax.adam(scheduler)
+                if self.config.adam_weight_decay == 0.0
+                else optax.adamw(scheduler, weight_decay=self.config.adam_weight_decay)
+            ),
+        )
+
+        return optimizer
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
@@ -273,7 +303,17 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         transitions: Transition,
         rng: PRNGKeyArray,
     ) -> Array:
-        return transitions.aux_outputs
+        log_probs, _ = transitions.aux_outputs
+        return log_probs
+
+    def get_on_policy_values(
+        self,
+        model: DefaultHumanoidModel,
+        transitions: Transition,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        _, values = transitions.aux_outputs
+        return values
 
     def get_log_probs(
         self,
@@ -287,7 +327,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         action_dist_btn = batch_par_fn(model, transitions.obs, transitions.command)
 
         # Compute the log probabilities of the transition's actions according
-        # to the current policy.
+        # to the current policy, along with the entropy of the distribution.
         action_btn = transitions.action
         log_probs_btn = action_dist_btn.log_prob(action_btn)
         entropy_btn = action_dist_btn.entropy()
@@ -316,11 +356,15 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, Array]:
+    ) -> tuple[Array, None, tuple[Array, Array]]:
         action_dist_n = self._run_actor(model, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
-        return action_n, None, action_log_prob_n
+
+        critic_n = self._run_critic(model, observations, commands)
+        value_n = critic_n.squeeze(-1)
+
+        return action_n, None, (action_log_prob_n, value_n)
 
     def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
         state = super().on_after_checkpoint_save(ckpt_path, state)

@@ -16,7 +16,6 @@ from typing import Any, Collection, Generic, TypeVar
 
 import chex
 import equinox as eqx
-import imageio.v2 as imageio
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -545,12 +544,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         else:
             self.run_training()
 
-    def log_reward_stats(
-        self,
-        transitions: Transition,
-        reward_generators: Collection[Reward],
-        namespace: str = "reward",
-    ) -> None:
+    def log_transition_stats(self, transitions: Transition) -> None:
+        """Log action statistics from the trajectory or trajectories.
+
+        Args:
+            transitions: The transitions to log the action statistics for.
+            namespace: The namespace to log the statistics to.
+        """
+        self.logger.log_histogram(key="action", value=transitions.action, namespace="action")
+        for obs_key, obs_value in transitions.obs.items():
+            self.logger.log_histogram(key=obs_key, value=obs_value, namespace="observation")
+
+    def log_reward_stats(self, transitions: Transition, reward_generators: Collection[Reward]) -> None:
         """Log reward statistics from the trajectory or trajectories.
 
         Args:
@@ -568,14 +573,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             reward_stats[generator.reward_name] = jnp.sum(statistic) / num_episodes
 
         for key, value in reward_stats.items():
-            self.logger.log_scalar(key=key, value=value, namespace=namespace)
+            self.logger.log_scalar(key=key, value=value, namespace="reward")
 
-    def log_termination_stats(
-        self,
-        transitions: Transition,
-        termination_generators: Collection[Termination],
-        namespace: str = "termination",
-    ) -> None:
+    def log_termination_stats(self, transitions: Transition, termination_generators: Collection[Termination]) -> None:
         """Log termination statistics from the trajectory or trajectories.
 
         Args:
@@ -592,14 +592,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             termination_stats[generator.termination_name] = jnp.mean(statistic)
 
         for key, value in termination_stats.items():
-            self.logger.log_scalar(key=key, value=value, namespace=namespace)
+            self.logger.log_scalar(key=key, value=value, namespace="termination")
 
         # Logs the mean episode length.
         episode_num_per_env = jnp.sum(transitions.done, axis=0) + (1 - transitions.done[-1])
         episode_count = jnp.sum(episode_num_per_env)
         num_env_states = jnp.prod(jnp.array(transitions.done.shape))
         mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
-        self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace=namespace)
+        self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace="termination")
 
     def log_train_metrics(self, train_metrics: dict[str, Array | tuple[Array, Array]]) -> None:
         """Logs the train metrics.
@@ -913,6 +913,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 # Logs statistics from the trajectory.
                 with self.step_context("write_logs"):
+                    self.log_transition_stats(transitions)
                     self.log_reward_stats(transitions, rewards)
                     self.log_termination_stats(transitions, terminations)
                     self.log_train_metrics(train_metrics)
@@ -1071,6 +1072,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     match save_path.suffix.lower():
                         case ".mp4":
+                            try:
+                                import imageio.v2 as imageio
+
+                            except ImportError:
+                                raise RuntimeError(
+                                    "Failed to save video - note that saving .mp4 videos with imageio usually "
+                                    "requires the FFMPEG backend, which can be installed using `pip install "
+                                    "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
+                                    "your system."
+                                )
+
                             try:
                                 with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
                                     for frame in frames:
