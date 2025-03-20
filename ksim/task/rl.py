@@ -598,7 +598,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             reward_stats[reward_name] = jnp.sum(reward_val) / num_episodes
 
         for key, value in reward_stats.items():
-            self.logger.log_scalar(key=key, value=value, namespace=f"reward {name}")
+            self.logger.log_scalar(key=f"{key}_{name}", value=value, namespace="reward")
 
     def log_termination_stats(self, trajectories: Trajectory, termination_generators: Collection[Termination]) -> None:
         """Log termination statistics from the trajectory or trajectories.
@@ -953,11 +953,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 # Logs statistics from the fpost_accumulatetrajectory.
                 with self.step_context("write_logs"):
+                    short_trajectory = jax.tree.map(lambda arr: arr[0], trajectory_batches[0])
+                    long_trajectory = jax.tree.map(lambda arr: arr[-1], trajectory_batches[-1])
+                    short_rewards = get_rewards(short_trajectory, engine_constants.reward_generators)
+                    long_rewards = get_rewards(long_trajectory, engine_constants.reward_generators)
                     if self.config.log_train_trajectory:
-                        short_trajectory = jax.tree.map(lambda arr: arr[0], trajectory_batches[0])
-                        long_trajectory = jax.tree.map(lambda arr: arr[-1], trajectory_batches[-1])
-                        short_rewards = get_rewards(short_trajectory, engine_constants.reward_generators)
-                        long_rewards = get_rewards(long_trajectory, engine_constants.reward_generators)
                         self.log_single_trajectory(short_trajectory, commands, short_rewards, mj_model, "short")
                         self.log_single_trajectory(long_trajectory, commands, long_rewards, mj_model, "long")
                     self.log_trajectory_stats(trajectories)
