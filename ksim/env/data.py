@@ -46,7 +46,7 @@ def chunk_trajectory(trajectory: Trajectory) -> list[Trajectory]:
     terminated by either a `done` or the end of the trajectory.
 
     Args:
-        trajectories: A non-implicit trajectories PyTree.
+        trajectory: A non-implicit trajectories PyTree.
 
     Returns:
         A list of trajectories, where each trajectory represents a complete

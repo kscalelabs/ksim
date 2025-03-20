@@ -422,5 +422,7 @@ if __name__ == "__main__":
             lam=0.95,
             entropy_coef=0.001,
             clip_param=0.3,
+            # TODO: Remove this after figuring out Mujoco physics issues.
+            reward_clip_max=10.0,
         ),
     )
