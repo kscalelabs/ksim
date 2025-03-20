@@ -929,7 +929,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     num_steps=self.rollout_length_steps,
                     num_envs=self.config.num_envs,
                 )
-            self.logger.log_scalar("rollout_dt", timer.elapsed_time, namespace="⏳ dt")
+            self.logger.log_scalar("rollout", timer.elapsed_time, namespace="⏳ dt")
 
             # Reorganizes trajectories into batches and compute rewards.
             with xax.ContextTimer() as timer:
@@ -945,6 +945,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     get_rewards_batch(t, engine_constants.reward_generators, self.config.ctrl_dt)
                     for t in trajectory_batches
                 ]
+            self.logger.log_scalar("batch", timer.elapsed_time, namespace="⏳ dt")
 
             # Optimizes the model on that trajectory.
             with xax.ContextTimer() as timer:
@@ -957,7 +958,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     reward_batches=[r[TOTAL_REWARD_NAME] for r in reward_batches],
                     rng=update_rng,
                 )
-            self.logger.log_scalar("update_dt", timer.elapsed_time, namespace="⏳ dt")
+            self.logger.log_scalar("update", timer.elapsed_time, namespace="⏳ dt")
 
             with self.step_context("write_logs"):
                 state.raw_phase = "train"
