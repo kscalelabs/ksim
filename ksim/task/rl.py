@@ -47,7 +47,8 @@ from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
 from ksim.utils.named_access import get_joint_metadata
-import mujoco.viewer as viewer
+# import mujoco.viewer as viewer
+from ksim.viewer import launch_passive
 
 logger = logging.getLogger(__name__)
 
@@ -968,31 +969,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             step_id = 0
             try:
-            
+                # breakpoint()
                 if render_visualization:
-                    with viewer.launch_passive(
-                        mj_model, 
-                        physics_state.data,
-                        show_left_ui=False,
-                        show_right_ui=False
-                    ) as handle:
+                    viewer_model = mj_model
+                    viewer_data = physics_state.data
+                    with launch_passive(
+                        viewer_model, 
+                        viewer_data,
+                    ) as viewer:
                         
-                        handle.cam.distance = self.config.render_distance
-                        handle.cam.azimuth = self.config.render_azimuth
-                        handle.cam.elevation = self.config.render_elevation
-                        handle.cam.lookat[:] = self.config.render_lookat
-                        if self.config.render_track_body_id is not None:
-                            handle.cam.trackbodyid = self.config.render_track_body_id
-                            handle.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-                        steps_taken = 0
+                        viewer.setup_camera(self.config)
                         for step_id in iterator:
-                            engine_variables.physics_state.data.ctrl[:] = physics_state.data.ctrl[:]
-                            engine_variables.physics_state.data.act[:] = physics_state.data.act[:]
-                            engine_variables.physics_state.data.xfrc_applied[:] = physics_state.data.xfrc_applied[:]
-                            engine_variables.physics_state.data.qpos[:] = physics_state.data.qpos[:]
-                            engine_variables.physics_state.data.qvel[:] = physics_state.data.qvel[:]
-                            engine_variables.physics_state.data.time = physics_state.data.time
-                            # prev_physics_state = physics_state
+                            viewer.sync_engine_to_viewer(viewer_data, engine_variables.physics_state.data)
+                            
                             # Step physics using your engine implementation
                             transition, engine_variables = self.step_engine(
                                 physics_model=mj_model,
@@ -1002,18 +991,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 engine_variables=engine_variables,
                             )
 
-                                
-                            physics_state.data.ctrl[:] = engine_variables.physics_state.data.ctrl[:]
-                            physics_state.data.act[:] = engine_variables.physics_state.data.act[:]
-                            physics_state.data.xfrc_applied[:] = engine_variables.physics_state.data.xfrc_applied[:]
-                            physics_state.data.qpos[:] = engine_variables.physics_state.data.qpos[:]
-                            physics_state.data.qvel[:] = engine_variables.physics_state.data.qvel[:]
-                            physics_state.data.time = engine_variables.physics_state.data.time
-                            mujoco.mj_forward(mj_model, physics_state.data)
+                            # Copy updated state back    
+                            viewer.sync_viewer_to_engine(viewer_data, engine_variables.physics_state.data)
+                            mujoco.mj_forward(viewer_model, viewer_data)
 
-                            handle.sync()
-                            
-                            steps_taken += 1
+                            viewer.sync()
                 else:
                     for step_id in iterator:
                         transition, engine_variables = self.step_engine(
