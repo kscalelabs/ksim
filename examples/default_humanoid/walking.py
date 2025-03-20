@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import distrax
 import equinox as eqx
@@ -164,6 +163,12 @@ class HumanoidWalkingTaskConfig(PPOConfig):
         help="The body id to track with the render camera.",
     )
 
+    # Checkpointing parameters.
+    export_for_inference: bool = xax.field(
+        value=False,
+        help="Whether to export the model for inference.",
+    )
+
 
 class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_optimizer(self) -> optax.GradientTransformation:
@@ -317,51 +322,20 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         action_log_prob_n = action_dist_n.log_prob(action_n)
         return action_n, None, action_log_prob_n
 
-    def make_export_model(
-        self, model: DefaultHumanoidModel, stochastic: bool = False, batched: bool = False
-    ) -> Callable:
-        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
-
-        Returns:
-            A tuple containing the inference function and the size of the input vector.
-        """
-
-        def deterministic_model_fn(obs: Array, cmd: Array) -> Array:
-            distribution = model.actor(obs, cmd)
-            return distribution.mode()
-
-        def stochastic_model_fn(obs: Array, cmd: Array) -> Array:
-            distribution = model.actor(obs, cmd)
-            return distribution.sample(seed=jax.random.PRNGKey(0))
-
-        if stochastic:
-            model_fn = stochastic_model_fn
-        else:
-            model_fn = deterministic_model_fn
-
-        if batched:
-
-            def batched_model_fn(obs: Array, cmd: Array) -> Array:
-                return jax.vmap(model_fn)(obs, cmd)
-
-            return batched_model_fn
-
-        return model_fn
-
     def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
         state = super().on_after_checkpoint_save(ckpt_path, state)
 
+        if not self.config.export_for_inference:
+            return state
+
+        # Load the checkpoint and export it using xax's export function.
         model: DefaultHumanoidModel = self.load_checkpoint(ckpt_path, part="model")
 
-        model_fn = self.make_export_model(model, stochastic=False, batched=True)
+        def model_fn(obs: Array, cmd: Array) -> Array:
+            return model.actor(obs, cmd).mode()
 
         input_shapes = [(OBS_SIZE,), (CMD_SIZE,)]
-
-        xax.export(
-            model_fn,
-            input_shapes,
-            ckpt_path.parent / "tf_model",
-        )
+        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")
 
         return state
 
