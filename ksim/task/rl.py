@@ -23,7 +23,6 @@ import mujoco
 import numpy as np
 import optax
 import PIL.Image
-import tqdm
 import xax
 from dpshdl.dataset import Dataset
 from flax.core import FrozenDict
@@ -35,7 +34,7 @@ from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.env.data import PhysicsModel, PhysicsState, Trajectory, chunk_trajectory, generate_trajectory_batches
+from ksim.env.data import PhysicsModel, PhysicsState, Rewards, Trajectory
 from ksim.env.engine import (
     EngineConstants,
     EngineVariables,
@@ -77,7 +76,7 @@ def get_rewards(
     reward_generators: Collection[Reward],
     ctrl_dt: float,
     clip_max: float | None = None,
-) -> FrozenDict[str, Array]:
+) -> Rewards:
     """Get the rewards from the physics state."""
     rewards = {}
     target_shape = trajectory.done.shape
@@ -89,19 +88,8 @@ def get_rewards(
         if clip_max is not None:
             reward_val = jnp.clip(reward_val, -clip_max, clip_max)
         rewards[reward_generator.reward_name] = reward_val
-    rewards[TOTAL_REWARD_NAME] = jax.tree.reduce(jnp.add, list(rewards.values()))
-    return FrozenDict(rewards)
-
-
-@eqx.filter_jit
-def get_rewards_batch(
-    trajectories: Trajectory,
-    reward_generators: Collection[Reward],
-    ctrl_dt: float,
-    clip_max: float | None = None,
-) -> FrozenDict[str, Array]:
-    """Get the rewards from the physics state."""
-    return jax.vmap(get_rewards, in_axes=(0, None, None, None))(trajectories, reward_generators, ctrl_dt, clip_max)
+    total_reward = jax.tree.reduce(jnp.add, list(rewards.values()))
+    return Rewards(total=total_reward, components=FrozenDict(rewards))
 
 
 def get_terminations(
@@ -789,7 +777,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
         num_steps: int,
-    ) -> Trajectory:
+    ) -> tuple[Trajectory, Rewards]:
         initial_carry = self.get_initial_carry()
         rng, cmd_rng = jax.random.split(rng)
         initial_commands = get_initial_commands(cmd_rng, command_generators=engine_constants.command_generators)
@@ -824,9 +812,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return next_engine_variables, trajectory
 
         # Scans the engine for the desired number of steps.
-        _, trajectories = jax.lax.scan(scan_fn, engine_variables, length=num_steps)
+        _, trajectory = jax.lax.scan(scan_fn, engine_variables, length=num_steps)
 
-        return trajectories
+        # Gets the rewards.
+        reward = get_rewards(
+            trajectory=trajectory,
+            reward_generators=engine_constants.reward_generators,
+            ctrl_dt=self.config.ctrl_dt,
+            clip_max=self.config.reward_clip_max,
+        )
+
+        return trajectory, reward
 
     @eqx.filter_jit
     def _vmapped_unroll(
@@ -849,8 +845,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        trajectory_batches: list[Trajectory],
-        reward_batches: list[Array],
+        trajectories: Trajectory,
+        rewards: Rewards,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
         """Updates the model on the given trajectory.
@@ -862,8 +858,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model: The model to update.
             optimizer: The optimizer to use.
             opt_state: The optimizer state.
-            trajectory_batches: The trajectory to update the model on.
-            reward_batches: The rewards to update the model on.
+            trajectories: The trajectories to update the model on.
+            rewards: The rewards to update the model on.
             rng: The random seed.
 
         Returns:
@@ -907,7 +903,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state.num_valid_samples += self.eval_rollout_length_steps
 
                 rng, rollout_rng = jax.random.split(rng)
-                trajectories = self._single_unroll(
+                trajectory, reward = self._single_unroll(
                     rng=rollout_rng,
                     physics_model=mjx_model,
                     model=model,
@@ -916,23 +912,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     num_steps=self.eval_rollout_length_steps,
                 )
 
-                # Gets the shortest and longest trajectories, for visualization.
-                trajectory_list = chunk_trajectory(trajectories)
-                trajectory_list.sort(key=lambda x: x.done.shape[-1])
-                short_traj = jax.tree.map(lambda arr: arr[0], trajectory_list[0])
-                long_traj = jax.tree.map(lambda arr: arr[-1], trajectory_list[-1])
-                short_rewards = get_rewards(
-                    short_traj,
-                    engine_constants.reward_generators,
-                    self.config.ctrl_dt,
-                    self.config.reward_clip_max,
-                )
-                long_rewards = get_rewards(
-                    long_traj,
-                    engine_constants.reward_generators,
-                    self.config.ctrl_dt,
-                    self.config.reward_clip_max,
-                )
+                breakpoint()
+
                 # Logs statistics from the trajectory.
                 with self.step_context("write_logs"):
                     self.log_single_trajectory(short_traj, commands, short_rewards, mj_model, "short")
@@ -946,8 +927,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Samples N trajectories in parallel.
             with xax.ContextTimer() as timer:
+                logger.debug("Rolling out trajectories")
                 rng, rollout_rng = jax.random.split(rng)
-                trajectories = self._vmapped_unroll(
+                trajectories, rewards = self._vmapped_unroll(
                     rng=rollout_rng,
                     physics_model=mjx_model,
                     model=model,
@@ -956,28 +938,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     num_steps=self.rollout_length_steps,
                     num_envs=self.config.num_envs,
                 )
-            self.logger.log_scalar("rollout", timer.elapsed_time, namespace="⏳ dt")
-
-            # Reorganizes trajectories into batches and compute rewards.
-            with xax.ContextTimer() as timer:
-                trajectory_batches = generate_trajectory_batches(
-                    trajectories,
-                    batch_size=self.config.batch_size,
-                    min_batch_size=self.config.min_batch_size,
-                    min_trajectory_length=self.config.min_trajectory_length,
-                    group_by_length=self.config.group_batches_by_length,
-                    include_last_batch=self.config.include_last_batch,
-                )
-                reward_batches = [
-                    get_rewards_batch(
-                        t,
-                        engine_constants.reward_generators,
-                        self.config.ctrl_dt,
-                        self.config.reward_clip_max,
-                    )
-                    for t in trajectory_batches
-                ]
-            self.logger.log_scalar("batch", timer.elapsed_time, namespace="⏳ dt")
+                self.logger.log_scalar("rollout", timer.elapsed_time, namespace="⏳ dt")
 
             # Optimizes the model on that trajectory.
             with xax.ContextTimer() as timer:
@@ -986,8 +947,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     model=model,
                     optimizer=optimizer,
                     opt_state=opt_state,
-                    trajectory_batches=trajectory_batches,
-                    reward_batches=[r[TOTAL_REWARD_NAME] for r in reward_batches],
+                    trajectories=trajectories,
+                    rewards=rewards,
                     rng=update_rng,
                 )
             self.logger.log_scalar("update", timer.elapsed_time, namespace="⏳ dt")
@@ -999,6 +960,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 # Logs statistics from the fpost_accumulatetrajectory.
                 with self.step_context("write_logs"):
+                    breakpoint()
+
                     short_traj = jax.tree.map(lambda arr: arr[0], trajectory_batches[0])
                     long_traj = jax.tree.map(lambda arr: arr[-1], trajectory_batches[-1])
                     short_rewards = get_rewards(
@@ -1113,7 +1076,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng=rng,
             )
 
-            iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
+            try:
+                import tqdm
+
+                iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
+
+            except ImportError:
+                logger.warning("tqdm not installed, using range() instead")
+                iterator = range(num_steps) if num_steps is not None else itertools.count()
 
             step_id = 0
             frames: list[np.ndarray] = []

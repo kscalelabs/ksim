@@ -1,7 +1,6 @@
 """Defines a standard task interface for training a policy."""
 
 import functools
-import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -15,8 +14,16 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.data import Trajectory
+from ksim.env.data import Rewards, Trajectory
 from ksim.task.rl import RLConfig, RLTask
+
+
+def normalize_tensor(x: Array) -> Array:
+    if x.ndim < 1:
+        x = x[None]
+    if x.ndim < 2:
+        x = x[:, None]
+    return x.reshape(x.shape[0], -1)
 
 
 def get_deltas(
@@ -457,6 +464,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             value_targets_bt=value_targets_bt,
             advantages_bt=advantages_bt,
         )
+        metrics = jax.tree.map(normalize_tensor, metrics)
 
         # Mean over all non-masked trajectories.
         num_valid = jnp.sum(~trajectories.done)
@@ -480,10 +488,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        xt: tuple[Trajectory, Array],
+        trajectories: Trajectory,
+        rewards: Array,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | tuple[Array, Array]]]:
-        trajectories, rewards = xt
         _, ppo_metrics, grads = self.get_loss_metrics_and_grads(
             model=model,
             trajectories=trajectories,
@@ -497,6 +505,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # Monitor global gradient norm.
         grad_metrics = self.get_grad_metrics(grads)
+        grad_metrics = jax.tree.map(normalize_tensor, grad_metrics)
 
         return new_model, new_opt_state, FrozenDict(ppo_metrics | grad_metrics)
 
@@ -506,8 +515,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        trajectory_batches: list[Trajectory],
-        reward_batches: list[Array],
+        trajectories: Trajectory,
+        rewards: Rewards,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
         """Runs PPO updates on a given set of trajectory batches.
@@ -516,8 +525,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             model: The model to update.
             optimizer: The optimizer to use.
             opt_state: The optimizer state.
-            trajectory_batches: The trajectory batches to update the model on.
-            reward_batches: The rewards for the trajectories.
+            trajectories: The trajectories to update the model on.
+            rewards: The rewards for the trajectories.
             rng: A random seed.
 
         Returns:
@@ -526,22 +535,27 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # JAX requires that we partition the model into mutable and static
         # parts in order to use lax.scan, so that `arr` can be a PyTree.`
         arr, static = eqx.partition(model, eqx.is_inexact_array)
+        num_batches = trajectories.done.shape[0] // self.config.batch_size
 
         # Loops over the trajectory batches and applies gradient updates.
         def scan_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
-            xt: int,
+            xt: Array,
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
             arr, opt_state, rng = carry
             model = eqx.combine(arr, static)
             rng, batch_rng = jax.random.split(rng)
-            trajectory_batch = trajectory_batches[xt]
-            reward_batch = reward_batches[xt]
+
+            # Gets the current batch of trajectories and rewards.
+            trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
+            reward_batch = rewards.total[xt]
+
             model, opt_state, metrics = self._single_step(
                 model=model,
                 optimizer=optimizer,
                 opt_state=opt_state,
-                xt=(trajectory_batch, reward_batch),
+                trajectories=trajectory_batch,
+                rewards=reward_batch,
                 rng=batch_rng,
             )
             arr, _ = eqx.partition(model, eqx.is_inexact_array)
@@ -552,18 +566,23 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
-            all_metrics = []
+            arr, opt_state, rng = carry
+            rng, indices_rng = jax.random.split(rng)
+            indices = jax.random.permutation(indices_rng, trajectories.done.shape[0])
 
-            # Looping over the trajectory batches since it is a list of batches
-            # with different lengths, rather than a vectorizable PyTree.
-            indices = list(range(len(trajectory_batches)))
-            random.shuffle(indices)
-            for i in indices:
-                carry, metrics = scan_fn(carry, i)
-                all_metrics.append(metrics)
+            # Run over the final batch, which may be shorter.
+            carry = (arr, opt_state, rng)
+            carry, metrics = scan_fn(carry, indices[num_batches * self.config.batch_size :])
 
-            metrics_concat = jax.tree.map(lambda *x: jnp.concatenate([i.reshape(-1) for i in x], axis=0), *all_metrics)
-            return carry, metrics_concat
+            # Scan over the trajectory batches.
+            if num_batches > 0:
+                batch_indices = indices[: num_batches * self.config.batch_size]
+                batch_indices = batch_indices.reshape(num_batches, self.config.batch_size)
+                carry, new_metrics = jax.lax.scan(scan_fn, carry, batch_indices)
+                new_metrics = jax.tree.map(lambda x: x.reshape(x.shape[0] * x.shape[1], -1), new_metrics)
+                metrics = jax.tree.map(lambda x, y: jnp.concatenate([x, y], axis=0), metrics, new_metrics)
+
+            return carry, metrics
 
         # Applies gradient updates.
         (arr, opt_state, _), metrics = jax.lax.scan(
