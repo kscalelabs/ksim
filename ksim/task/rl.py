@@ -172,25 +172,29 @@ class RLConfig(xax.Config):
         value=True,
         help="If true, log qpos and qvel histograms.",
     )
-    log_reward_histograms: bool = xax.field(
+    log_reward: bool = xax.field(
         value=True,
         help="If true, log reward histograms.",
     )
-    log_trajectory_length_histograms: bool = xax.field(
+    log_trajectory_length: bool = xax.field(
         value=True,
         help="If true, log trajectory length histograms.",
     )
-    log_action_histograms: bool = xax.field(
+    log_actions: bool = xax.field(
         value=True,
         help="If true, log action histograms.",
     )
-    log_observation_histograms: bool = xax.field(
+    log_observations: bool = xax.field(
         value=True,
         help="If true, log observation histograms.",
     )
-    log_command_histograms: bool = xax.field(
+    log_commands: bool = xax.field(
         value=True,
         help="If true, log command histograms.",
+    )
+    log_terminations: bool = xax.field(
+        value=True,
+        help="If true, log termination histograms.",
     )
     log_train_metrics: bool = xax.field(
         value=True,
@@ -577,56 +581,54 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectories: Trajectory,
         rewards: Rewards,
+        termination_generators: Collection[Termination],
     ) -> None:
         """Log action statistics from the trajectory or trajectories.
 
         Args:
             trajectories: The trajectories to log the action statistics for.
             rewards: The rewards to log the statistics for.
+            termination_generators: The termination generators to log the statistics for.
         """
-        if self.config.log_reward_histograms:
+        if self.config.log_reward:
             for rew_name, rew_arr in rewards.components.items():
                 self.logger.log_histogram(key=rew_name, value=rew_arr, namespace="🎁 reward histograms")
-        if self.config.log_trajectory_length_histograms:
-            traj_lens = trajectories.done.sum(-1, dtype=trajectories.action.dtype) + 1
+                self.logger.log_scalar(key=rew_name, value=rew_arr.mean(), namespace="🎁 reward")
+            self.logger.log_histogram(key="total", value=rewards.total, namespace="🎁 reward histograms")
+            self.logger.log_scalar(key="total", value=rewards.total.mean(), namespace="🎁 reward")
+
+        if self.config.log_trajectory_length:
+            num_terms = trajectories.done.sum(-1, dtype=trajectories.action.dtype) + 1
+            traj_lens = (trajectories.done.shape[-1] / num_terms) * self.config.ctrl_dt
             self.logger.log_histogram(key="lengths", value=traj_lens, namespace="💀 termination histograms")
-        if self.config.log_action_histograms:
+            self.logger.log_scalar(key="lengths", value=traj_lens.mean(), namespace="💀 termination")
+
+        if self.config.log_actions:
             self.logger.log_histogram(key="action", value=trajectories.action, namespace="🏃 action histograms")
-        if self.config.log_observation_histograms:
+            self.logger.log_scalar(key="action", value=trajectories.action.mean(), namespace="🏃 action")
+
+        if self.config.log_observations:
             for obs_key, obs_value in trajectories.obs.items():
                 self.logger.log_histogram(key=obs_key, value=obs_value, namespace="👀 observation histograms")
-        if self.config.log_observation_histograms:
-            for obs_key, obs_value in trajectories.command.items():
-                self.logger.log_histogram(key=obs_key, value=obs_value, namespace="🕹️ command histograms")
+                self.logger.log_scalar(key=obs_key, value=obs_value.mean(), namespace="👀 observation")
+
+        if self.config.log_commands:
+            for cmd_key, cmd_value in trajectories.command.items():
+                self.logger.log_histogram(key=cmd_key, value=cmd_value, namespace="🕹️ command histograms")
+                self.logger.log_scalar(key=cmd_key, value=cmd_value.mean(), namespace="🕹️ command")
+
+        if self.config.log_terminations:
+            num_episodes = jnp.sum(trajectories.done).clip(min=1)
+            for term_name, term_value in trajectories.termination_components.items():
+                self.logger.log_scalar(
+                    key=term_name,
+                    value=term_value / num_episodes,
+                    namespace="💀 termination histograms",
+                )
+
         if self.config.log_qpos_qvel:
             self.logger.log_histogram(key="qpos", value=trajectories.qpos[..., 7:], namespace="🔩 state histograms")
             self.logger.log_histogram(key="qvel", value=trajectories.qvel[..., 6:], namespace="🔩 state histograms")
-
-    def log_termination_stats(self, trajectories: Trajectory, termination_generators: Collection[Termination]) -> None:
-        """Log termination statistics from the trajectory or trajectories.
-
-        Args:
-            trajectories: The trajectories to log the termination statistics for.
-            termination_generators: The termination generators to log the statistics for.
-        """
-        termination_stats: dict[str, jnp.ndarray] = {}
-
-        num_episodes = jnp.sum(trajectories.done).clip(min=1)
-        terms = trajectories.termination_components
-        for generator in termination_generators:
-            statistic = terms[generator.termination_name]
-            assert isinstance(statistic, Array)
-            termination_stats[generator.termination_name] = jnp.sum(statistic) / num_episodes
-
-        for key, value in termination_stats.items():
-            self.logger.log_scalar(key=key, value=value, namespace="💀 termination")
-
-        # Logs the mean episode length.
-        episode_num_per_env = jnp.sum(trajectories.done, axis=0) + (1 - trajectories.done[-1])
-        episode_count = jnp.sum(episode_num_per_env)
-        num_env_states = jnp.prod(jnp.array(trajectories.done.shape))
-        mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
-        self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace="💀 termination")
 
     def log_train_metrics(self, train_metrics: dict[str, Array]) -> None:
         """Logs the train metrics.
@@ -908,8 +910,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     reward = jax.tree.map(lambda arr: arr[0], rewards)
 
                     self.log_single_trajectory(trajectory, commands, reward, mj_model)
-                    self.log_trajectory_stats(trajectories, rewards)
-                    self.log_termination_stats(trajectories, terminations)
+                    self.log_trajectory_stats(trajectories, rewards, terminations)
                     self.log_state_timers(state)
                     self.write_logs(state)
 
@@ -952,8 +953,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 if self.config.log_train_trajectory:
                     self.log_single_trajectory(trajectory, commands, reward, mj_model)
-                self.log_trajectory_stats(trajectories, rewards)
-                self.log_termination_stats(trajectories, terminations)
+                self.log_trajectory_stats(trajectories, rewards, terminations)
                 self.log_train_metrics(train_metrics)
                 self.log_state_timers(state)
                 self.write_logs(state)
