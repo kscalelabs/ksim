@@ -77,6 +77,7 @@ class DefaultHumanoidActor(eqx.Module):
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
+    mean_scale: float = eqx.static_field()
 
     def __init__(
         self,
@@ -85,6 +86,7 @@ class DefaultHumanoidActor(eqx.Module):
         min_std: float,
         max_std: float,
         var_scale: float,
+        mean_scale: float,
     ) -> None:
         self.mlp = eqx.nn.MLP(
             in_size=NUM_INPUTS,
@@ -97,6 +99,7 @@ class DefaultHumanoidActor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
+        self.mean_scale = mean_scale
 
     def __call__(
         self,
@@ -109,6 +112,9 @@ class DefaultHumanoidActor(eqx.Module):
         prediction_n = self.mlp(x_n)
         mean_n = prediction_n[..., :NUM_OUTPUTS]
         std_n = prediction_n[..., NUM_OUTPUTS:]
+
+        # Scale the mean.
+        mean_n = jnp.tanh(mean_n) * self.mean_scale
 
         # Softplus and clip to ensure positive standard deviations.
         std_n = (jax.nn.softplus(std_n) + self.min_std) * self.var_scale
@@ -152,6 +158,7 @@ class DefaultHumanoidModel(eqx.Module):
             min_std=0.01,
             max_std=1.0,
             var_scale=1.0,
+            mean_scale=1.0,
         )
         self.critic = DefaultHumanoidCritic(key)
 
