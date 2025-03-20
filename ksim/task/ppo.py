@@ -411,7 +411,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A tuple containing the loss value as a scalar, and a dictionary of
             metrics to log.
         """
-        rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 3)
+        rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 5)
         on_policy_log_probs_btn = self.get_on_policy_log_probs(model, transitions, rng1)
         on_policy_values_bt = self.get_on_policy_values(model, transitions, rng2)
         log_probs_btn, entropy_btn = self.get_log_probs(model, transitions, rng3)
