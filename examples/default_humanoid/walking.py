@@ -415,7 +415,7 @@ if __name__ == "__main__":
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             # Update parameters.
-            num_envs=8,
+            num_envs=64,
             batch_size=32,
             # Simulation parameters.
             dt=0.005,
@@ -424,14 +424,10 @@ if __name__ == "__main__":
             min_action_latency=0.0,
             rollout_length_seconds=20.0,
             eval_rollout_length_seconds=5.0,
-            # Training parameters.
-            learning_rate=1e-5,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
             clip_param=0.3,
-            use_clipped_value_loss=False,
-            max_grad_norm=1.0,
         ),
     )
