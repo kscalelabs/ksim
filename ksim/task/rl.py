@@ -522,9 +522,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             lambda: engine.reset(physics_model, reset_rng),
             lambda: next_physics_state,
         )
+
+        # breakpoint()
         next_carry = jax.lax.cond(
             terminated,
-            lambda: self.get_initial_carry(),
+            lambda: engine_constants.initial_carry,
             lambda: next_carry,
         )
         commands = jax.lax.cond(
@@ -768,7 +770,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine_constants: EngineConstants,
         num_steps: int,
     ) -> tuple[Trajectory, Rewards]:
-        initial_carry = self.get_initial_carry()
         rng, cmd_rng = jax.random.split(rng)
         initial_commands = get_initial_commands(cmd_rng, command_generators=engine_constants.command_generators)
 
@@ -788,7 +789,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         physics_state = engine.reset(physics_model, reset_rng)
 
         engine_variables = EngineVariables(
-            carry=initial_carry,
+            carry=engine_constants.initial_carry,
             commands=initial_commands,
             physics_state=physics_state,
             rng=rng,
@@ -881,6 +882,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rewards = self.get_rewards(mjx_model)
         terminations = self.get_terminations(mjx_model)
         randomizations = self.get_randomization(mjx_model)
+        initial_carry = self.get_initial_carry()
 
         # These remain constant across the entire episode.
         engine_constants = EngineConstants(
@@ -889,6 +891,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             reward_generators=tuple(rewards),
             termination_generators=tuple(terminations),
             randomization_generators=tuple(randomizations),
+            initial_carry=initial_carry,
         )
 
         # JAX requires that we partition the model into mutable and static
@@ -1058,6 +1061,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 reward_generators=rewards,
                 termination_generators=terminations,
                 randomization_generators=randomizations,
+                initial_carry=initial_carry,
             )
 
             # These components are updated each step.
