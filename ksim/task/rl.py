@@ -22,11 +22,11 @@ import matplotlib.pyplot as plt
 import mujoco
 import numpy as np
 import optax
-import PIL.Image
 import xax
 from dpshdl.dataset import Dataset
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from kmv.viewer import launch_passive
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 from omegaconf import II, MISSING
@@ -48,7 +48,6 @@ from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
 from ksim.utils.mujoco import get_joint_metadata
-from ksim.viewer import MujocoViewer
 
 logger = logging.getLogger(__name__)
 
@@ -1034,23 +1033,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, reset_rng = jax.random.split(rng)
             physics_state = engine.reset(mj_model, reset_rng)
 
-            viewer = MujocoViewer(
-                mj_model,
-                physics_state.data,
-                mode="window" if save_path is None else "offscreen",
-                height=self.config.render_height,
-                width=self.config.render_width,
-            )
-
-            # Sets the viewer camera.
-            viewer.cam.distance = self.config.render_distance
-            viewer.cam.azimuth = self.config.render_azimuth
-            viewer.cam.elevation = self.config.render_elevation
-            viewer.cam.lookat[:] = self.config.render_lookat
-            if self.config.render_track_body_id is not None:
-                viewer.cam.trackbodyid = self.config.render_track_body_id
-                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-
             # These components remain constant across the entire episode.
             engine_constants = EngineConstants(
                 obs_generators=observations,
@@ -1078,100 +1060,50 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 iterator = range(num_steps) if num_steps is not None else itertools.count()
 
             step_id = 0
-            frames: list[np.ndarray] = []
             try:
-                for step_id in iterator:
-                    trajectory, engine_variables = self.step_engine(
-                        physics_model=mj_model,
-                        model=model,
-                        engine=engine,
-                        engine_constants=engine_constants,
-                        engine_variables=engine_variables,
-                    )
+                viewer_model = mj_model
+                viewer_data = physics_state.data
+                with launch_passive(
+                    viewer_model,
+                    viewer_data,
+                    save_path=save_path,
+                    config=self.config,
+                ) as viewer:
+                    viewer.setup_camera(self.config)
+                    for step_id in iterator:
 
-                    # We manually trigger randomizations on termination,
-                    # whereas during training the randomization is only applied
-                    # once per rollout for efficiency.
-                    rng, randomization_rng = jax.random.split(rng)
-                    mj_model = jax.lax.cond(
-                        trajectory.done,
-                        lambda: apply_randomizations(mj_model, randomizations, randomization_rng),
-                        lambda: mj_model,
-                    )
+                        # We need to manually sync the data back and forth between
+                        # the viewer and the engine, because the resetting the
+                        # environment creates a new data object rather than
+                        # happening in-place, as Mujoco expects.
+                        viewer.copy_data(dst=engine_variables.physics_state.data, src=viewer_data)
 
-                    # We need to manually update the viewer data field, because
-                    # resetting the environment creates a new data object rather
-                    # than happening in-place, as Mujoco expects.
-                    viewer.data = engine_variables.physics_state.data
+                        transition, engine_variables = self.step_engine(
+                            physics_model=mj_model,
+                            model=model,
+                            engine=engine,
+                            engine_constants=engine_constants,
+                            engine_variables=engine_variables,
+                        )
 
-                    # Adds command elements to the scene.
-                    for command in commands:
-                        command.update_scene(viewer.scn, engine_variables.commands[command.command_name])
+                        # We manually trigger randomizations on termination,
+                        # whereas during training the randomization is only applied
+                        # once per rollout for efficiency.
+                        rng, randomization_rng = jax.random.split(rng)
+                        mj_model = jax.lax.cond(
+                            transition.done,
+                            lambda: apply_randomizations(mj_model, randomizations, randomization_rng),
+                            lambda: mj_model,
+                        )
 
-                    # Logs the frames to render.
-                    if save_path is None:
-                        viewer.render()
-                    else:
-                        frames.append(viewer.read_pixels(depth=False))
+                        # Sync data again
+                        viewer.copy_data(dst=viewer_data, src=engine_variables.physics_state.data)
+                        mujoco.mj_forward(viewer_model, viewer_data)
+                        viewer.add_commands(engine_variables.commands)
+                        viewer.update_and_sync()
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
-
-            except Exception:
-                # Raise on the first step for debugging purposes.
-                if step_id <= 1:
-                    raise
-
-                logger.info("Keyboard interrupt, exiting environment loop")
-
-            finally:
-                if viewer is not None:
-                    viewer.close()
-
-                if save_path is not None:
-                    if len(frames) == 0:
-                        raise ValueError("No frames to save")
-
-                    fps = round(1 / self.config.ctrl_dt)
-
-                    match save_path.suffix.lower():
-                        case ".mp4":
-                            try:
-                                import imageio.v2 as imageio
-
-                            except ImportError:
-                                raise RuntimeError(
-                                    "Failed to save video - note that saving .mp4 videos with imageio usually "
-                                    "requires the FFMPEG backend, which can be installed using `pip install "
-                                    "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
-                                    "your system."
-                                )
-
-                            try:
-                                with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
-                                    for frame in frames:
-                                        writer.append_data(frame)
-
-                            except Exception as e:
-                                raise RuntimeError(
-                                    "Failed to save video - note that saving .mp4 videos with imageio usually "
-                                    "requires the FFMPEG backend, which can be installed using `pip install "
-                                    "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
-                                    "your system."
-                                ) from e
-
-                        case ".gif":
-                            images = [PIL.Image.fromarray(frame) for frame in frames]
-                            images[0].save(
-                                save_path,
-                                save_all=True,
-                                append_images=images[1:],
-                                duration=int(1000 / fps),
-                                loop=0,
-                            )
-
-                        case _:
-                            raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
