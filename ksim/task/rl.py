@@ -610,23 +610,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     reward_arrs[rew_name].append(jnp.sum(rew_arr, axis=1) / traj_lens)
 
             # Logs histograms of the concatenated reward arrays.
-            for rew_name, rew_arr in reward_arrs.items():
-                self.logger.log_histogram(key=rew_name, value=jnp.concatenate(rew_arr, axis=0), namespace="reward")
-
-            # Log histogram of trajectory lengths.
-            self.logger.log_histogram(key="traj_len", value=jnp.concatenate(traj_lens_arrs, axis=0), namespace="state")
+            for rew_name, rew_arr_list in reward_arrs.items():
+                rew_arr = jnp.concatenate(rew_arr_list, axis=0)
+                self.logger.log_histogram(key=rew_name, value=rew_arr, namespace="🎁 reward histograms")
 
         if self.config.log_action_histograms:
-            self.logger.log_histogram(key="action", value=trajectories.action, namespace="action")
+            self.logger.log_histogram(key="action", value=trajectories.action, namespace="🏃 action histograms")
         if self.config.log_observation_histograms:
             for obs_key, obs_value in trajectories.obs.items():
-                self.logger.log_histogram(key=obs_key, value=obs_value, namespace="observation")
+                self.logger.log_histogram(key=obs_key, value=obs_value, namespace="👀 observation histograms")
         if self.config.log_observation_histograms:
             for obs_key, obs_value in trajectories.command.items():
-                self.logger.log_histogram(key=obs_key, value=obs_value, namespace="command")
+                self.logger.log_histogram(key=obs_key, value=obs_value, namespace="🕹️ command histograms")
         if self.config.log_qpos_qvel:
-            self.logger.log_histogram(key="qpos", value=trajectories.qpos[..., 7:], namespace="state")
-            self.logger.log_histogram(key="qvel", value=trajectories.qvel[..., 6:], namespace="state")
+            self.logger.log_histogram(key="qpos", value=trajectories.qpos[..., 7:], namespace="🔩 state histograms")
+            self.logger.log_histogram(key="qvel", value=trajectories.qvel[..., 6:], namespace="🔩 state histograms")
 
     def log_termination_stats(self, trajectories: Trajectory, termination_generators: Collection[Termination]) -> None:
         """Log termination statistics from the trajectory or trajectories.
@@ -645,14 +643,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             termination_stats[generator.termination_name] = jnp.sum(statistic) / num_episodes
 
         for key, value in termination_stats.items():
-            self.logger.log_scalar(key=key, value=value, namespace="termination")
+            self.logger.log_scalar(key=key, value=value, namespace="💀 termination")
 
         # Logs the mean episode length.
         episode_num_per_env = jnp.sum(trajectories.done, axis=0) + (1 - trajectories.done[-1])
         episode_count = jnp.sum(episode_num_per_env)
         num_env_states = jnp.prod(jnp.array(trajectories.done.shape))
         mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
-        self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace="termination")
+        self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace="💀 termination")
 
     def log_train_metrics(self, train_metrics: dict[str, Array]) -> None:
         """Logs the train metrics.
@@ -663,9 +661,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if self.config.log_train_metrics:
             for key, value in train_metrics.items():
                 if value.size > 1:
-                    self.logger.log_histogram(key, value, namespace="train")
+                    self.logger.log_histogram(key, value, namespace="➡️ train histograms")
                 else:
-                    self.logger.log_scalar(key, value, namespace="train")
+                    self.logger.log_scalar(key, value, namespace="➡️ train")
 
     def render_trajectory_video(
         self,

@@ -371,6 +371,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         batch_size = loss_bt.shape[0]
         return {
             "loss": loss_bt.sum(1) / len_b,
+            "traj_len_seconds": len_b * self.config.ctrl_dt,
             "log_probs": log_probs_btn.sum(1).reshape(batch_size, -1) / len_b[:, None],
             "entropy": entropy_btn.sum(1).reshape(batch_size, -1) / len_b[:, None],
             "value": values_bt.sum(1) / len_b,
