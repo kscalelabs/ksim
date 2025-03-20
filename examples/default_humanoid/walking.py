@@ -194,7 +194,7 @@ class HumanoidWalkingTaskConfig(PPOConfig):
 
     # Rendering parameters.
     render_track_body_id: int | None = xax.field(
-        value=0,
+        value=None,
         help="The body id to track with the render camera.",
     )
 
