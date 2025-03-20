@@ -210,6 +210,12 @@ class PPOConfig(RLConfig):
         help="The number of update passes over the set of trajectories",
     )
 
+    # Gradient parameters.
+    global_grad_clip: float = xax.field(
+        value=10.0,
+        help="The maximum gradient norm to clip to.",
+    )
+
     # PPO parameters.
     clip_param: float = xax.field(
         value=0.2,
@@ -483,7 +489,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         grad_norm = optax.global_norm(grads)
         grad_metrics = {"grad_norm": grad_norm}
 
-        def apply(grads: PyTree) -> tuple[PyTree, optax.OptState]:
+        def apply(grads: PyTree, grad_norm: Array) -> tuple[PyTree, optax.OptState]:
+            # Clip the global gradient norm to some desired range.
+            grad_factor = self.config.global_grad_clip / grad_norm
+            grads = jax.tree.map(lambda x: x * grad_factor, grads)
+
+            # Apply the gradient updates.
             updates, new_opt_state = optimizer.update(grads, opt_state, model_arr)  # type: ignore[operator]
             new_model_arr = eqx.apply_updates(model_arr, updates)
             return new_model_arr, new_opt_state
@@ -491,9 +502,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # Don't apply updates if the gradient is NaN or Inf.
         new_model_arr, new_opt_state = jax.lax.cond(
             jnp.isnan(grad_norm) | jnp.isinf(grad_norm),
-            lambda _: (model_arr, opt_state),
+            lambda *_: (model_arr, opt_state),
             apply,
             grads,
+            grad_norm,
         )
 
         return new_model_arr, new_opt_state, grad_metrics
