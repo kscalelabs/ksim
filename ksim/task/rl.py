@@ -178,6 +178,10 @@ class RLConfig(xax.Config):
         value=True,
         help="If true, log reward histograms.",
     )
+    log_trajectory_length_histograms: bool = xax.field(
+        value=True,
+        help="If true, log trajectory length histograms.",
+    )
     log_action_histograms: bool = xax.field(
         value=True,
         help="If true, log action histograms.",
@@ -575,33 +579,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def log_trajectory_stats(
         self,
         trajectories: Trajectory,
-        trajectory_batches: list[Trajectory],
-        reward_batches: list[FrozenDict[str, Array]],
+        rewards: Rewards,
     ) -> None:
         """Log action statistics from the trajectory or trajectories.
 
         Args:
             trajectories: The trajectories to log the action statistics for.
-            trajectory_batches: The trajectory batches to log the statistics for.
-            reward_batches: The reward batches to log the statistics for.
+            rewards: The rewards to log the statistics for.
         """
         if self.config.log_reward_histograms:
-            # Gets the mean reward for each trajectory.
-            reward_arrs: dict[str, list[jnp.ndarray]] = {}
-            traj_lens_arrs: list[jnp.ndarray] = []
-            for trajectory_batch, reward_batch in zip(trajectory_batches, reward_batches):
-                traj_lens = (~trajectory_batch.done).sum(-1, dtype=trajectory_batch.action.dtype) + 1e-6
-                traj_lens_arrs.append(traj_lens)
-                for rew_name, rew_arr in reward_batch.items():
-                    if rew_name not in reward_arrs:
-                        reward_arrs[rew_name] = []
-                    reward_arrs[rew_name].append(jnp.sum(rew_arr, axis=1) / traj_lens)
-
-            # Logs histograms of the concatenated reward arrays.
-            for rew_name, rew_arr_list in reward_arrs.items():
-                rew_arr = jnp.concatenate(rew_arr_list, axis=0)
+            for rew_name, rew_arr in rewards.components.items():
                 self.logger.log_histogram(key=rew_name, value=rew_arr, namespace="🎁 reward histograms")
-
+        if self.config.log_trajectory_length_histograms:
+            traj_lens = trajectories.done.sum(-1, dtype=trajectories.action.dtype) + 1
+            self.logger.log_histogram(key="lengths", value=traj_lens, namespace="💀 termination histograms")
         if self.config.log_action_histograms:
             self.logger.log_histogram(key="action", value=trajectories.action, namespace="🏃 action histograms")
         if self.config.log_observation_histograms:
@@ -716,7 +707,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectories: Trajectory,
         commands: Collection[Command],
-        rewards: FrozenDict[str, Array],
+        rewards: Rewards,
         mj_model: mujoco.MjModel,
         name: str,
     ) -> None:
@@ -903,21 +894,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state.num_valid_samples += self.eval_rollout_length_steps
 
                 rng, rollout_rng = jax.random.split(rng)
-                trajectory, reward = self._single_unroll(
+                trajectories, rewards = self._vmapped_unroll(
                     rng=rollout_rng,
                     physics_model=mjx_model,
                     model=model,
                     engine=engine,
                     engine_constants=engine_constants,
                     num_steps=self.eval_rollout_length_steps,
+                    num_envs=1,
                 )
 
-                breakpoint()
+                trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
+                reward = jax.tree.map(lambda arr: arr[0], rewards)
 
                 # Logs statistics from the trajectory.
                 with self.step_context("write_logs"):
-                    self.log_single_trajectory(short_traj, commands, short_rewards, mj_model, "short")
-                    self.log_single_trajectory(long_traj, commands, long_rewards, mj_model, "long")
+                    self.log_single_trajectory(trajectory, commands, reward, mj_model)
+                    self.log_trajectory_stats(trajectories, rewards)
                     self.log_termination_stats(trajectories, terminations)
                     self.log_state_timers(state)
                     self.write_logs(state)
@@ -960,26 +953,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 # Logs statistics from the fpost_accumulatetrajectory.
                 with self.step_context("write_logs"):
-                    breakpoint()
+                    trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
+                    reward = jax.tree.map(lambda arr: arr[0], rewards)
 
-                    short_traj = jax.tree.map(lambda arr: arr[0], trajectory_batches[0])
-                    long_traj = jax.tree.map(lambda arr: arr[-1], trajectory_batches[-1])
-                    short_rewards = get_rewards(
-                        short_traj,
-                        engine_constants.reward_generators,
-                        self.config.ctrl_dt,
-                        self.config.reward_clip_max,
-                    )
-                    long_rewards = get_rewards(
-                        long_traj,
-                        engine_constants.reward_generators,
-                        self.config.ctrl_dt,
-                        self.config.reward_clip_max,
-                    )
                     if self.config.log_train_trajectory:
-                        self.log_single_trajectory(short_traj, commands, short_rewards, mj_model, "short")
-                        self.log_single_trajectory(long_traj, commands, long_rewards, mj_model, "long")
-                    self.log_trajectory_stats(trajectories, trajectory_batches, reward_batches)
+                        self.log_single_trajectory(trajectory, commands, reward, mj_model)
+                    self.log_trajectory_stats(trajectories, rewards)
                     self.log_termination_stats(trajectories, terminations)
                     self.log_train_metrics(train_metrics)
                     self.log_state_timers(state)
