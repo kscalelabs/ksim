@@ -55,47 +55,6 @@ class DHForwardReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(Reward):
-    """Legacy default humanoid healthy reward that gives binary reward based on height."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(
-        self,
-        prev_action: Array | None,
-        physics_state: PhysicsData,
-        command: FrozenDict[str, Array],
-        action: Array,
-        next_physics_state: PhysicsData,
-        next_state_terminates: Array,
-    ) -> Array:
-        return jnp.array(1.0)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHTerminationPenalty(Reward):
-    """Penalty for terminating the episode."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(
-        self,
-        prev_action: Array | None,
-        physics_state: PhysicsData,
-        command: FrozenDict[str, Array],
-        action: Array,
-        next_physics_state: PhysicsData,
-        next_state_terminates: Array,
-    ) -> Array:
-        height = physics_state.qpos[2]
-        is_unhealthy = jnp.where(height < self.healthy_z_lower, 1.0, 0.0)
-        is_unhealthy = jnp.where(height > self.healthy_z_upper, 1.0, is_unhealthy)
-        return is_unhealthy
-
-
-@attrs.define(frozen=True, kw_only=True)
 class DHControlPenalty(Reward):
     """Legacy default humanoid control cost that penalizes squared action magnitude."""
 
@@ -340,8 +299,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         return [
             HeightReward(scale=1.0, height_target=0.7),
             DHForwardReward(scale=0.2),
-            DHTerminationPenalty(scale=-0.1, healthy_z_lower=0.8, healthy_z_upper=4.0),
-            DHHealthyReward(scale=0.1, healthy_z_lower=0.8, healthy_z_upper=4.0),
             DHControlPenalty(scale=0.01),
             TerminationPenalty(scale=-1.0),
         ]
