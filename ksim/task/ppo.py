@@ -1,5 +1,6 @@
 """Defines a standard task interface for training a policy."""
 
+import functools
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -373,75 +374,76 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "advantages_std": advantages_bt.std(),
         }
 
-    def loss_metrics_grads(
+    def get_loss_and_metrics(
         self,
         model: PyTree,
         transitions: Transition,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, FrozenDict[str, Array], PyTree]:
-        """Computes the PPO loss and gradients, along with additional metrics.
+    ) -> tuple[Array, FrozenDict[str, Array]]:
+        """Computes the PPO loss and additional metrics.
 
         Args:
             model: The model to optimize.
-            transitions: The batch of transitions to compute the loss and gradients for.
+            transitions: The batch of transitions to compute the loss and metrics for.
             rng: A random seed.
 
         Returns:
-            A tuple containing the loss value, a dictionary of metrics,
-            and the gradients. In order to compute additional metrics, override
-            the `get_ppo_metrics` method instead of this method.
+            A tuple containing the loss value as a scalar, and a dictionary of
+            metrics to log.
         """
+        rng, log_probs_rng, values_rng = jax.random.split(rng, 3)
+        on_policy_log_probs_btn = self.get_on_policy_log_probs(model, transitions, log_probs_rng)
+        log_probs_btn, entropy_btn = self.get_log_probs(model, transitions, log_probs_rng)
+        values_bt = self.get_values(model, transitions, values_rng)
 
-        def loss_fn(model: PyTree, rng: PRNGKeyArray) -> tuple[Array, FrozenDict[str, Array]]:
-            """Model is a PyTree and can be optimized via optax."""
-            rng, log_probs_rng, values_rng = jax.random.split(rng, 3)
-            on_policy_log_probs_btn = self.get_on_policy_log_probs(model, transitions, log_probs_rng)
-            log_probs_btn, entropy_btn = self.get_log_probs(model, transitions, log_probs_rng)
-            values_bt = self.get_values(model, transitions, values_rng)
+        advantages_bt, value_targets_bt = compute_advantages_and_value_targets(
+            values_bt=values_bt,
+            rewards_bt=transitions.reward,
+            dones_bt=transitions.done,
+            decay_gamma=self.config.gamma,
+            gae_lambda=self.config.lam,
+        )
 
-            advantages_bt, value_targets_bt = compute_advantages_and_value_targets(
-                values_bt=values_bt,
-                rewards_bt=transitions.reward,
-                dones_bt=transitions.done,
-                decay_gamma=self.config.gamma,
-                gae_lambda=self.config.lam,
-            )
+        # TODO: These do not look correct...
+        # returns_bt = compute_returns(transitions.reward, transitions.done, self.config.gamma)
 
-            # TODO: These do not look correct...
-            # returns_bt = compute_returns(transitions.reward, transitions.done, self.config.gamma)
+        loss_bt = compute_ppo_loss(
+            log_probs_btn=log_probs_btn,
+            values_bt=values_bt,
+            on_policy_log_probs_btn=on_policy_log_probs_btn,
+            advantages_bt=advantages_bt,
+            value_targets_bt=value_targets_bt,
+            dones_bt=transitions.done,
+            entropy_btn=entropy_btn,
+            clip_param=self.config.clip_param,
+            value_loss_coef=self.config.value_loss_coef,
+            entropy_coef=self.config.entropy_coef,
+            use_clipped_value_loss=self.config.use_clipped_value_loss,
+        )
 
-            loss_bt = compute_ppo_loss(
-                log_probs_btn=log_probs_btn,
-                values_bt=values_bt,
-                on_policy_log_probs_btn=on_policy_log_probs_btn,
-                advantages_bt=advantages_bt,
-                value_targets_bt=value_targets_bt,
-                dones_bt=transitions.done,
-                entropy_btn=entropy_btn,
-                clip_param=self.config.clip_param,
-                value_loss_coef=self.config.value_loss_coef,
-                entropy_coef=self.config.entropy_coef,
-                use_clipped_value_loss=self.config.use_clipped_value_loss,
-            )
+        metrics = self.get_ppo_metrics(
+            transitions=transitions,
+            loss_bt=loss_bt,
+            log_probs_btn=log_probs_btn,
+            entropy_btn=entropy_btn,
+            values_bt=values_bt,
+            value_targets_bt=value_targets_bt,
+            advantages_bt=advantages_bt,
+        )
 
-            metrics = FrozenDict(
-                self.get_ppo_metrics(
-                    transitions=transitions,
-                    loss_bt=loss_bt,
-                    log_probs_btn=log_probs_btn,
-                    entropy_btn=entropy_btn,
-                    values_bt=values_bt,
-                    value_targets_bt=value_targets_bt,
-                    advantages_bt=advantages_bt,
-                )
-            )
+        loss = loss_bt.mean()
 
-            loss = loss_bt.mean()
+        return loss, metrics
 
-            return loss, metrics
-
-        (loss, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model, rng)
-        return loss, FrozenDict(metrics), grads
+    def get_loss_metrics_and_grads(
+        self,
+        model: PyTree,
+        transitions: Transition,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, dict[str, Array], PyTree]:
+        loss_fn = functools.partial(self.get_loss_and_metrics, transitions=transitions, rng=rng)
+        (loss, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
+        return loss, metrics, grads
 
     def _single_step(
         self,
@@ -451,7 +453,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         transitions: Transition,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
-        loss_val, metrics, grads = self.loss_metrics_grads(
+        _, metrics, grads = self.get_loss_metrics_and_grads(
             model=model,
             transitions=transitions,
             rng=rng,
@@ -461,11 +463,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         updates, new_opt_state = optimizer.update(grads, opt_state, model)  # type: ignore[operator]
         new_model = eqx.apply_updates(model, updates)
 
-        # Add global gradient norm and loss to the metrics, to monitor training.
-        grad_norm = optax.global_norm(grads)
-        assert isinstance(grad_norm, Array)
-        metrics["loss"] = loss_val
-        metrics["grad_norm"] = grad_norm
+        # Monitor global gradient norm.
+        metrics["grad_norm"] = optax.global_norm(grads)
 
         return new_model, new_opt_state, FrozenDict(metrics)
 
@@ -477,23 +476,33 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         transition_batches: list[Transition],
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
-        # TODO: Change this to use jax.lax.scan after control flow is implemented.
-        all_metrics = []
-        for _ in range(self.config.num_passes):
-            for batch in transition_batches:
-                model, opt_state, metrics = self._single_step(
-                    model=model,
-                    optimizer=optimizer,
-                    opt_state=opt_state,
-                    transitions=batch,
-                    rng=rng,
-                )
-                all_metrics.append(metrics)
 
-        # Combine metrics from all batches.
-        metrics_concat = jax.tree_map(lambda *x: jnp.stack(x, axis=0), *all_metrics)
+        def scan_fn(
+            carry: tuple[PyTree, optax.OptState],
+            xt: tuple[Transition, PRNGKeyArray],
+        ) -> tuple[tuple[PyTree, optax.OptState], FrozenDict[str, Array]]:
+            model, opt_state = carry
+            batch, batch_rng = xt
+            model, opt_state, metrics = self._single_step(model, optimizer, opt_state, batch, batch_rng)
+            return (model, opt_state), metrics
 
-        return model, opt_state, FrozenDict(metrics_concat)
+        def batch_scan_fn(
+            carry: tuple[PyTree, optax.OptState],
+            _: None,
+            transition_batches: list[Transition],
+        ) -> tuple[tuple[PyTree, optax.OptState], FrozenDict[str, Array]]:
+            xs = (transition_batches, jax.random.split(rng, len(transition_batches)))
+            (model, opt_state), metrics = jax.lax.scan(scan_fn, carry, xs)
+            return (model, opt_state), metrics
+
+        # Applies gradient updates.
+        (model, opt_state), metrics = jax.lax.scan(
+            functools.partial(batch_scan_fn, transition_batches=transition_batches),
+            (model, opt_state),
+            length=self.config.num_passes,
+        )
+
+        return model, opt_state, metrics
 
     def update_model(
         self,
