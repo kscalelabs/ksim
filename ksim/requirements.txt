@@ -15,7 +15,7 @@ jax
 mediapy
 optax
 scipy
-xaxk
+xax
 
 # Mujoco
 mujoco
