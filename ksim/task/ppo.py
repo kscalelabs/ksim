@@ -18,26 +18,6 @@ from ksim.env.data import Transition, generate_transition_batches
 from ksim.task.rl import RLConfig, RLTask
 
 
-@eqx.filter_jit
-def compute_returns(rewards_bt: Array, dones_bt: Array, gamma: float) -> Array:
-    """Calculate returns from rewards and dones."""
-
-    def scan_fn(returns_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
-        """Scanning this computes the returns in reverse order."""
-        reward, mask = x
-        returns = reward + gamma * mask * returns_t_plus_1
-        return returns, returns
-
-    def compute_return_for_sample(rewards_t: Array, dones_t: Array, gamma: float) -> Array:
-        _, returns = jax.lax.scan(scan_fn, jnp.zeros_like(rewards_t[-1]), (rewards_t, dones_t), reverse=True)
-        return returns
-
-    # Compute returns for each sample in the batch.
-    returns_bt = jax.vmap(compute_return_for_sample, in_axes=(0, 0, None))(rewards_bt, dones_bt, gamma)
-
-    return returns_bt
-
-
 def get_deltas(
     rewards: Array,
     values: Array,
@@ -374,6 +354,19 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "advantages_std": advantages_bt.std(),
         }
 
+    def get_grad_metrics(self, grads: PyTree) -> dict[str, Array]:
+        """Gets the metrics to be logged for the gradients.
+
+        Args:
+            grads: The gradients of the model.
+
+        Returns:
+            A dictionary of metrics to be logged.
+        """
+        return {
+            "grad_norm": optax.global_norm(grads),
+        }
+
     def get_loss_and_metrics(
         self,
         model: PyTree,
@@ -453,7 +446,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         transitions: Transition,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
-        _, metrics, grads = self.get_loss_metrics_and_grads(
+        _, ppo_metrics, grads = self.get_loss_metrics_and_grads(
             model=model,
             transitions=transitions,
             rng=rng,
@@ -464,9 +457,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         new_model = eqx.apply_updates(model, updates)
 
         # Monitor global gradient norm.
-        metrics["grad_norm"] = optax.global_norm(grads)
+        grad_metrics = self.get_grad_metrics(grads)
 
-        return new_model, new_opt_state, FrozenDict(metrics)
+        return new_model, new_opt_state, FrozenDict(ppo_metrics | grad_metrics)
 
     @eqx.filter_jit
     def _update_model_on_batches(
@@ -477,31 +470,47 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         transition_batches: list[Transition],
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+        # JAX requires that we partition the model into mutable and static
+        # parts in order to use lax.scan, so that `arr` can be a PyTree.`
+        arr, static = eqx.partition(model, eqx.is_inexact_array)
 
+        # Loops over the transition batches and applies gradient updates.
         def scan_fn(
-            carry: tuple[PyTree, optax.OptState],
-            xt: tuple[Transition, PRNGKeyArray],
-        ) -> tuple[tuple[PyTree, optax.OptState], FrozenDict[str, Array]]:
-            model, opt_state = carry
-            batch, batch_rng = xt
-            model, opt_state, metrics = self._single_step(model, optimizer, opt_state, batch, batch_rng)
-            return (model, opt_state), metrics
+            carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
+            xt: Transition,
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+            arr, opt_state, rng = carry
+            model = eqx.combine(arr, static)
+            rng, batch_rng = jax.random.split(rng)
+            model, opt_state, metrics = self._single_step(model, optimizer, opt_state, xt, batch_rng)
+            arr, _ = eqx.partition(model, eqx.is_inexact_array)
+            return (arr, opt_state, rng), metrics
 
+        # Applines N steps of gradient updates.
         def batch_scan_fn(
-            carry: tuple[PyTree, optax.OptState],
+            carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
-            transition_batches: list[Transition],
-        ) -> tuple[tuple[PyTree, optax.OptState], FrozenDict[str, Array]]:
-            xs = (transition_batches, jax.random.split(rng, len(transition_batches)))
-            (model, opt_state), metrics = jax.lax.scan(scan_fn, carry, xs)
-            return (model, opt_state), metrics
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+            all_metrics = []
+
+            # Looping over the transition batches since it is a list of batches
+            # with different lengths, rather than a vectorizable PyTree.
+            for transition_batch in transition_batches:
+                carry, metrics = scan_fn(carry, transition_batch)
+                all_metrics.append(metrics)
+
+            metrics_concat = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *all_metrics)
+            return carry, metrics_concat
 
         # Applies gradient updates.
-        (model, opt_state), metrics = jax.lax.scan(
-            functools.partial(batch_scan_fn, transition_batches=transition_batches),
-            (model, opt_state),
+        (arr, opt_state, _), metrics = jax.lax.scan(
+            batch_scan_fn,
+            (arr, opt_state, rng),
             length=self.config.num_passes,
         )
+
+        # Recombines the mutable and static parts of the model.
+        model = eqx.combine(arr, static)
 
         return model, opt_state, metrics
 
