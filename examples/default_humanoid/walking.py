@@ -304,7 +304,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
         return [
-            DHForwardReward(scale=0.2),
+            DHForwardReward(scale=0.25),
             DHControlPenalty(scale=-0.01),
             DHHealthyReward(scale=0.5),
             # TerminationPenalty(scale=-100.0),
@@ -445,8 +445,8 @@ if __name__ == "__main__":
         HumanoidWalkingTaskConfig(
             # Update parameters. These values are very small, which is useful
             # for testing on your local machine.
-            num_envs=1024,
-            num_batches=32,
+            num_envs=2048,
+            num_batches=64,
             num_passes=8,
             # Simulation parameters.
             dt=0.005,
@@ -460,11 +460,11 @@ if __name__ == "__main__":
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
-            learning_rate=1e-5,
+            learning_rate=3e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
             # TODO: Remove this after figuring out Mujoco physics issues.
             reward_clip_max=10.0,
-            use_mit_actuators=False,
+            use_mit_actuators=True,
         ),
     )
