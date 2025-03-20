@@ -47,7 +47,7 @@ from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
 from ksim.utils.named_access import get_joint_metadata
-from ksim.viewer import MujocoViewer
+import mujoco.viewer as viewer
 
 logger = logging.getLogger(__name__)
 
@@ -947,26 +947,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, reset_rng = jax.random.split(rng)
             physics_state = engine.reset(mj_model, reset_rng)
 
-            viewer: MujocoViewer | None = None
-
-            if render_visualization:
-                viewer = MujocoViewer(
-                    mj_model,
-                    physics_state.data,
-                    mode="window",
-                    height=self.config.render_height,
-                    width=self.config.render_width,
-                )
-
-                # Sets the viewer camera.
-                viewer.cam.distance = self.config.render_distance
-                viewer.cam.azimuth = self.config.render_azimuth
-                viewer.cam.elevation = self.config.render_elevation
-                viewer.cam.lookat[:] = self.config.render_lookat
-                if self.config.render_track_body_id is not None:
-                    viewer.cam.trackbodyid = self.config.render_track_body_id
-                    viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-
             # These components remain constant across the entire episode.
             engine_constants = EngineConstants(
                 obs_generators=observations,
@@ -988,37 +968,61 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             step_id = 0
             try:
-                for step_id in iterator:
-                    transition, engine_variables = self.step_engine(
-                        physics_model=mj_model,
-                        model=model,
-                        engine=engine,
-                        engine_constants=engine_constants,
-                        engine_variables=engine_variables,
-                    )
+            
+                if render_visualization:
+                    with viewer.launch_passive(
+                        mj_model, 
+                        physics_state.data,
+                        show_left_ui=False,
+                        show_right_ui=False
+                    ) as handle:
+                        
+                        handle.cam.distance = self.config.render_distance
+                        handle.cam.azimuth = self.config.render_azimuth
+                        handle.cam.elevation = self.config.render_elevation
+                        handle.cam.lookat[:] = self.config.render_lookat
+                        if self.config.render_track_body_id is not None:
+                            handle.cam.trackbodyid = self.config.render_track_body_id
+                            handle.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+                        steps_taken = 0
+                        for step_id in iterator:
+                            engine_variables.physics_state.data.ctrl[:] = physics_state.data.ctrl[:]
+                            engine_variables.physics_state.data.act[:] = physics_state.data.act[:]
+                            engine_variables.physics_state.data.xfrc_applied[:] = physics_state.data.xfrc_applied[:]
+                            engine_variables.physics_state.data.qpos[:] = physics_state.data.qpos[:]
+                            engine_variables.physics_state.data.qvel[:] = physics_state.data.qvel[:]
+                            engine_variables.physics_state.data.time = physics_state.data.time
+                            # prev_physics_state = physics_state
+                            # Step physics using your engine implementation
+                            transition, engine_variables = self.step_engine(
+                                physics_model=mj_model,
+                                model=model,
+                                engine=engine,
+                                engine_constants=engine_constants,
+                                engine_variables=engine_variables,
+                            )
 
-                    # We manually trigger randomizations on termination,
-                    # whereas during training the randomization is only applied
-                    # once per rollout for efficiency.
-                    rng, randomization_rng = jax.random.split(rng)
-                    mj_model = jax.lax.cond(
-                        transition.done,
-                        lambda: apply_randomizations(mj_model, randomizations, randomization_rng),
-                        lambda: mj_model,
-                    )
+                                
+                            physics_state.data.ctrl[:] = engine_variables.physics_state.data.ctrl[:]
+                            physics_state.data.act[:] = engine_variables.physics_state.data.act[:]
+                            physics_state.data.xfrc_applied[:] = engine_variables.physics_state.data.xfrc_applied[:]
+                            physics_state.data.qpos[:] = engine_variables.physics_state.data.qpos[:]
+                            physics_state.data.qvel[:] = engine_variables.physics_state.data.qvel[:]
+                            physics_state.data.time = engine_variables.physics_state.data.time
+                            mujoco.mj_forward(mj_model, physics_state.data)
 
-                    if viewer is not None:
-                        # We need to manually update the viewer data field, because
-                        # resetting the environment creates a new data object rather
-                        # than happening in-place, as Mujoco expects.
-                        viewer.data = engine_variables.physics_state.data
-
-                        # Adds command elements to the scene.
-                        for command in commands:
-                            command.update_scene(viewer.scn, engine_variables.commands[command.command_name])
-
-                        viewer.render()
-
+                            handle.sync()
+                            
+                            steps_taken += 1
+                else:
+                    for step_id in iterator:
+                        transition, engine_variables = self.step_engine(
+                            physics_model=mj_model,
+                            model=model,
+                            engine=engine,
+                            engine_constants=engine_constants,
+                            engine_variables=engine_variables,
+                        )
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
@@ -1028,10 +1032,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     raise
 
                 logger.info("Keyboard interrupt, exiting environment loop")
-
-            finally:
-                if viewer is not None:
-                    viewer.close()
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""

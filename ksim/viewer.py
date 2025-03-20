@@ -109,10 +109,10 @@ class MarkerManager:
         g.objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
         g.objid = -1
         g.category = mujoco.mjtCatBit.mjCAT_DECOR
-        g.texid = -1
-        g.texuniform = 0
-        g.texrepeat[0] = 1
-        g.texrepeat[1] = 1
+        g.matid = -1
+        # g.texuniform = 0
+        # g.texrepeat[0] = 1
+        # g.texrepeat[1] = 1
         g.emission = 0
         g.specular = 0.5
         g.shininess = 0.5
@@ -129,16 +129,12 @@ class MarkerManager:
             elif isinstance(value, (tuple, list, np.ndarray)):
                 attr = getattr(g, key)
                 attr[:] = np.asarray(value).reshape(attr.shape)
-            elif isinstance(value, str):
-                assert key == "label", "Only label is a string in mjtGeom."
-                if value is None:
-                    g.label[0] = 0
-                else:
-                    g.label = value
-            elif hasattr(g, key):
-                raise ValueError(f"mjtGeom has attr {key} but type {type(value)} is invalid")
+            elif isinstance(value, bytes):
+                setattr(g, key, value)
             else:
-                raise ValueError(f"mjtGeom doesn't have field {key}")
+                raise ValueError(
+                    f"Invalid type for attribute '{key}': {type(value)}"
+                )
 
         self._scene.ngeom += 1
 
@@ -593,6 +589,44 @@ class MujocoViewer(Callbacks):
             **marker_params: Parameters for the marker
         """
         self.marker_manager.add_marker(**marker_params)
+
+    def add_direct_geom(self, geom_type, size, pos, rgba) -> None:
+        """Add a geometry directly to the scene, bypassing the marker manager.
+        
+        This is a simpler approach that directly manipulates the scene geometry.
+        
+        Args:
+            geom_type: Type of geometry (e.g., mujoco.mjtGeom.mjGEOM_SPHERE)
+            size: Size array for the geometry
+            pos: Position [x, y, z]
+            rgba: Color and transparency [r, g, b, a]
+        """
+        if self.scn.ngeom >= self.scn.maxgeom:
+            raise RuntimeError(f"Ran out of geoms. maxgeom: {self.scn.maxgeom}")
+            
+        g = self.scn.geoms[self.scn.ngeom]
+        # Set default values
+        g.dataid = -1
+        g.objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
+        g.objid = -1
+        g.category = mujoco.mjtCatBit.mjCAT_DECOR
+        g.matid = -1
+        g.emission = 0
+        g.specular = 0.5
+        g.shininess = 0.5
+        g.reflectance = 0
+        g.type = geom_type
+        
+        # Set size, position and color
+        g.size[:] = np.asarray(size).reshape(g.size.shape)
+        g.pos[:] = np.asarray(pos).reshape(g.pos.shape)
+        g.rgba[:] = np.asarray(rgba).reshape(g.rgba.shape)
+        
+        # Set default orientation (identity matrix)
+        g.mat[:] = np.eye(3)
+        
+        # Increment the scene's geometry count
+        self.scn.ngeom += 1
 
     def _create_overlay(self) -> None:
         """Create overlay text for the current frame."""
