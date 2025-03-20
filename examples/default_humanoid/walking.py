@@ -285,11 +285,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
         return [
             DHForwardReward(scale=0.2),
-            DHControlPenalty(scale=0.01),
+            DHControlPenalty(scale=-0.01),
             TerminationPenalty(scale=-1.0),
             # These seem necessary to prevent some physics artifacts.
-            LinearVelocityZPenalty(scale=0.01),
-            AngularVelocityXYPenalty(scale=0.01),
+            LinearVelocityZPenalty(scale=-0.001),
+            AngularVelocityXYPenalty(scale=-0.001),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
@@ -309,7 +309,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> distrax.Normal:
-        act_frc_obs_n = observations["actuator_force_observation"]
+        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
         lin_vel_cmd_n = commands["linear_velocity_command"]
         return model.actor(act_frc_obs_n, lin_vel_cmd_n)
 
@@ -319,7 +319,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> Array:
-        act_frc_obs_n = observations["actuator_force_observation"]
+        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
         lin_vel_cmd_n = commands["linear_velocity_command"]
         return model.critic(act_frc_obs_n, lin_vel_cmd_n)
 
