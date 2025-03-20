@@ -40,11 +40,7 @@ class TorqueActuators(Actuators):
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData) -> Array:
         """Just use the action as the torque, the simplest actuator model."""
-        action_max = 0.4
-        action_min = -0.4
-        ctrl = (action + 1) * (action_max - action_min) * 0.5 + action_min
- 
-        return ctrl
+        return action
 
 
 class MITPositionActuators(Actuators):
