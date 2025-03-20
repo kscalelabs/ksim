@@ -327,7 +327,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         action_dist_btn = batch_par_fn(model, transitions.obs, transitions.command)
 
         # Compute the log probabilities of the transition's actions according
-        # to the current policy.
+        # to the current policy, along with the entropy of the distribution.
         action_btn = transitions.action
         log_probs_btn = action_dist_btn.log_prob(action_btn)
         entropy_btn = action_dist_btn.entropy()

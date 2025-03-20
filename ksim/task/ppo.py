@@ -45,18 +45,25 @@ def compute_advantages_and_value_targets(
         adv_t = delta + decay_gamma * gae_lambda * mask * adv_t_plus_1
         return adv_t, adv_t
 
-    def compute_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> tuple[Array, Array]:
+    def compute_gae_and_targets_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> tuple[Array, Array]:
         # If the episode terminated at the last step, use 0 for bootstrapping.
         bootstrap_value = jnp.where(dones_t[-1], 0.0, values_t[-1])
-        values_shifted = jnp.concatenate([values_t[1:], jnp.expand_dims(bootstrap_value, 0)], axis=0)
-        mask = jnp.where(dones_t, 0.0, 1.0)
-        deltas = get_deltas(rewards_t, values_t, values_shifted, mask, decay_gamma)
-        _, gae = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas, mask), reverse=True)
-        value_targets = gae + values_t
-        return gae, value_targets
+        values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(bootstrap_value, 0)], axis=0)
+        mask_t = jnp.where(dones_t, 0.0, 1.0)
+        deltas_t = get_deltas(rewards_t, values_t, values_shifted_t, mask_t, decay_gamma)
+
+        # Compute the GAE.
+        _, gae_t = jax.lax.scan(scan_fn, jnp.zeros_like(deltas_t[-1]), (deltas_t, mask_t), reverse=True)
+        value_targets_t = gae_t + values_t
+
+        # Apply another TD step to get the value targets.
+        values_targets_shifted_t = jnp.concatenate([value_targets_t[1:], value_targets_t[-1:]], axis=0)
+        advantages_t = rewards_t + decay_gamma * values_targets_shifted_t * mask_t - values_t
+
+        return advantages_t, value_targets_t
 
     # Compute the advantages and value targets for each sample in the batch.
-    par_compute = jax.vmap(compute_for_sample, in_axes=0)
+    par_compute = jax.vmap(compute_gae_and_targets_for_sample, in_axes=0)
     advantages_bt, value_targets_bt = par_compute(values_bt, rewards_bt, dones_bt)
 
     if normalize_advantages:
@@ -133,7 +140,7 @@ def compute_ppo_loss(
     advantages_bt = jax.lax.stop_gradient(advantages_bt)
     value_targets_bt = jax.lax.stop_gradient(value_targets_bt)
 
-    def compute_for_sample(
+    def compute_loss_for_sample(
         log_probs_n: Array,
         values: Array,
         on_policy_log_probs_n: Array,
@@ -144,12 +151,12 @@ def compute_ppo_loss(
         entropy_n: Array | None,
     ) -> Array:
         # Preventing underflow / overflow in calculating the ratio.
-        ratio_n = jnp.exp(jnp.clip(log_probs_n - on_policy_log_probs_n, -10, 10))
-
-        # Computes clipped policy objective.
-        clipped_ratio_n = jnp.clip(ratio_n, 1 - clip_param, 1 + clip_param)
-        policy_objective_n = jnp.minimum(ratio_n * advantages[..., None], clipped_ratio_n * advantages[..., None])
-        policy_objective = policy_objective_n.mean(axis=-1)
+        log_ratio = jnp.sum(log_probs_n - on_policy_log_probs_n, axis=-1)
+        ratio = jnp.exp(jnp.clip(log_ratio, -10.0, 10.0))
+        clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
+        surrogate_1 = ratio * advantages
+        surrogate_2 = clipped_ratio * advantages
+        policy_objective = jnp.minimum(surrogate_1, surrogate_2)
 
         # Computes the value loss, with or without clipping.
         if use_clipped_value_loss:
@@ -177,7 +184,7 @@ def compute_ppo_loss(
 
         return total_loss
 
-    par_time = jax.vmap(compute_for_sample, in_axes=0)
+    par_time = jax.vmap(compute_loss_for_sample, in_axes=0)
     par_batch = jax.vmap(par_time, in_axes=0)
 
     # Computes the vectorized loss.
