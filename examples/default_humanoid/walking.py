@@ -408,8 +408,9 @@ if __name__ == "__main__":
         HumanoidWalkingTaskConfig(
             # Update parameters. These values are very small, which is useful
             # for testing on your local machine.
-            num_envs=8,
-            batch_size=32,
+            num_envs=1024,
+            num_batches=32,
+            num_passes=4,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
