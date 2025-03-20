@@ -528,12 +528,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # Loops over the trajectory batches and applies gradient updates.
         def scan_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
-            xt: tuple[Trajectory, Array],
+            xt: int,
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
             arr, opt_state, rng = carry
             model = eqx.combine(arr, static)
             rng, batch_rng = jax.random.split(rng)
-            model, opt_state, metrics = self._single_step(model, optimizer, opt_state, xt, batch_rng)
+            trajectory_batch = trajectory_batches[xt]
+            reward_batch = reward_batches[xt]
+            model, opt_state, metrics = self._single_step(
+                model=model,
+                optimizer=optimizer,
+                opt_state=opt_state,
+                xt=(trajectory_batch, reward_batch),
+                rng=batch_rng,
+            )
             arr, _ = eqx.partition(model, eqx.is_inexact_array)
             return (arr, opt_state, rng), metrics
 
@@ -544,13 +552,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
             all_metrics = []
 
-            # Shuffle trajectories and rewards together.
-            trajs, rews = zip(*random.shuffle(list(zip(trajectory_batches, reward_batches))))
-
             # Looping over the trajectory batches since it is a list of batches
             # with different lengths, rather than a vectorizable PyTree.
-            for trajectory_batch, reward_batch in zip(trajs, rews):
-                carry, metrics = scan_fn(carry, (trajectory_batch, reward_batch))
+            indices = list(range(len(trajectory_batches)))
+            random.shuffle(indices)
+            for i in indices:
+                carry, metrics = scan_fn(carry, i)
                 all_metrics.append(metrics)
 
             metrics_concat = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *all_metrics)
