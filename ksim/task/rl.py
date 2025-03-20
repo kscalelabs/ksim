@@ -182,6 +182,10 @@ class RLConfig(xax.Config):
         value=True,
         help="If true, log qpos and qvel histograms.",
     )
+    log_reward_histograms: bool = xax.field(
+        value=True,
+        help="If true, log reward histograms.",
+    )
     log_action_histograms: bool = xax.field(
         value=True,
         help="If true, log action histograms.",
@@ -572,12 +576,33 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         else:
             self.run_training()
 
-    def log_trajectory_stats(self, trajectories: Trajectory) -> None:
+    def log_trajectory_stats(
+        self,
+        trajectories: Trajectory,
+        trajectory_batches: list[Trajectory],
+        reward_batches: list[FrozenDict[str, Array]],
+    ) -> None:
         """Log action statistics from the trajectory or trajectories.
 
         Args:
             trajectories: The trajectories to log the action statistics for.
+            trajectory_batches: The trajectory batches to log the statistics for.
+            reward_batches: The reward batches to log the statistics for.
         """
+        if self.config.log_reward_histograms:
+            # Gets the mean reward for each trajectory.
+            reward_arrs: dict[str, jnp.ndarray] = {}
+            for trajectory_batch, reward_batch in zip(trajectory_batches, reward_batches):
+                traj_lens = (~trajectory_batch.done).sum(-1, dtype=trajectory_batch.action.dtype) + 1e-6
+                for rew_name, rew_arr in reward_batch.items():
+                    if rew_name not in reward_arrs:
+                        reward_arrs[rew_name] = []
+                    reward_arrs[rew_name].append(jnp.sum(rew_arr, axis=1) / traj_lens)
+
+            # Logs histograms of the concatenated reward arrays.
+            for rew_name, rew_arr in reward_arrs.items():
+                self.logger.log_histogram(key=rew_name, value=jnp.concatenate(rew_arr, axis=0), namespace="reward")
+
         if self.config.log_action_histograms:
             self.logger.log_histogram(key="action", value=trajectories.action, namespace="action")
         if self.config.log_observation_histograms:
@@ -589,24 +614,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if self.config.log_qpos_qvel:
             self.logger.log_histogram(key="qpos", value=trajectories.qpos[..., 7:], namespace="state")
             self.logger.log_histogram(key="qvel", value=trajectories.qvel[..., 6:], namespace="state")
-
-    def log_reward_stats(self, trajectories: Trajectory, rewards: FrozenDict[str, Array], name: str) -> None:
-        """Log reward statistics from the trajectory or trajectories.
-
-        Args:
-            trajectories: The trajectories to log the reward statistics for.
-            rewards: The rewards to log the statistics for.
-            name: The name of the trajectory being logged.
-        """
-        reward_stats: dict[str, jnp.ndarray] = {}
-
-        num_episodes = jnp.sum(trajectories.done).clip(min=1)
-        for reward_name, reward_val in rewards.items():
-            assert isinstance(reward_val, Array)
-            reward_stats[reward_name] = jnp.sum(reward_val) / num_episodes
-
-        for key, value in reward_stats.items():
-            self.logger.log_scalar(key=f"{name}/{key}", value=value, namespace="reward")
 
     def log_termination_stats(self, trajectories: Trajectory, termination_generators: Collection[Termination]) -> None:
         """Log termination statistics from the trajectory or trajectories.
@@ -909,8 +916,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 with self.step_context("write_logs"):
                     self.log_single_trajectory(short_traj, commands, short_rewards, mj_model, "short")
                     self.log_single_trajectory(long_traj, commands, long_rewards, mj_model, "long")
-                    self.log_reward_stats(short_traj, short_rewards, "short")
-                    self.log_reward_stats(long_traj, long_rewards, "long")
                     self.log_termination_stats(trajectories, terminations)
                     self.log_state_timers(state)
                     self.write_logs(state)
@@ -975,9 +980,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     if self.config.log_train_trajectory:
                         self.log_single_trajectory(short_traj, commands, short_rewards, mj_model, "short")
                         self.log_single_trajectory(long_traj, commands, long_rewards, mj_model, "long")
-                    self.log_trajectory_stats(trajectories)
-                    self.log_reward_stats(short_traj, short_rewards, "short")
-                    self.log_reward_stats(long_traj, long_rewards, "long")
+                    self.log_trajectory_stats(trajectories, trajectory_batches, reward_batches)
                     self.log_termination_stats(trajectories, terminations)
                     self.log_train_metrics(train_metrics)
                     self.log_state_timers(state)
