@@ -1,6 +1,5 @@
 """Defines a standard task interface for training a policy."""
 
-import functools
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -29,10 +28,11 @@ def get_deltas(
     return rewards + decay_gamma * values_shifted * termination_mask - values
 
 
+@xax.jit(static_argnames=["decay_gamma", "gae_lambda", "normalize_advantages", "use_two_step_td_target"])
 def compute_advantages_and_value_targets(
-    values_bt: Array,
-    rewards_bt: Array,
-    dones_bt: Array,
+    values_t: Array,
+    rewards_t: Array,
+    dones_t: Array,
     decay_gamma: float,
     gae_lambda: float,
     normalize_advantages: bool = True,
@@ -66,15 +66,15 @@ def compute_advantages_and_value_targets(
         return advantages_t, value_targets_t
 
     # Compute the advantages and value targets for each sample in the batch.
-    par_compute = jax.vmap(compute_gae_and_targets_for_sample, in_axes=0)
-    advantages_bt, value_targets_bt = par_compute(values_bt, rewards_bt, dones_bt)
+    advantages_t, value_targets_t = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t)
 
     if normalize_advantages:
-        advantages_bt = advantages_bt / (advantages_bt.std(axis=-1, keepdims=True) + 1e-6)
+        advantages_t = advantages_t / (advantages_t.std(axis=-1, keepdims=True) + 1e-6)
 
-    return advantages_bt, value_targets_bt
+    return advantages_t, value_targets_t
 
 
+@xax.jit(static_argnames=["clip_param"])
 def clipped_value_loss(
     target_values: Array,
     values: Array,
@@ -88,16 +88,17 @@ def clipped_value_loss(
     return jnp.maximum(error**2, clipped_error**2)
 
 
+@xax.jit(static_argnames=["clip_param", "value_loss_coef", "entropy_coef", "log_clip_value", "use_clipped_value_loss"])
 def compute_ppo_loss(
-    log_probs_btn: Array,
-    values_bt: Array,
-    on_policy_log_probs_btn: Array,
-    on_policy_values_bt: Array,
-    advantages_bt: Array,
-    value_targets_bt: Array,
-    dones_bt: Array,
+    log_probs_tn: Array,
+    values_t: Array,
+    on_policy_log_probs_tn: Array,
+    on_policy_values_t: Array,
+    advantages_t: Array,
+    value_targets_t: Array,
+    dones_t: Array,
     *,
-    entropy_btn: Array | None = None,
+    entropy_tn: Array | None = None,
     clip_param: float = 0.2,
     value_loss_coef: float = 0.5,
     entropy_coef: float = 0.008,
@@ -107,16 +108,16 @@ def compute_ppo_loss(
     """Compute PPO loss.
 
     Args:
-        log_probs_btn: The log probabilities of the actions, with shape (B, T, *A).
-        values_bt: The state-value estimates, with shape (B, T).
-        on_policy_log_probs_btn: The original policy's log probabilities of the
-            actions, with shape (B, T, *A).
-        on_policy_values_bt: The original policy's values of the actions, with
-            shape (B, T).
-        advantages_bt: The advantages, with shape (B, T).
-        value_targets_bt: The value targets, with shape (B, T).
-        dones_bt: The termination mask, with shape (B, T).
-        entropy_btn: The entropy of the action distribution, with shape (B, T, *A).
+        log_probs_tn: The log probabilities of the actions, with shape (T, *A).
+        values_t: The state-value estimates, with shape (T,).
+        on_policy_log_probs_tn: The original policy's log probabilities of the
+            actions, with shape (T, *A).
+        on_policy_values_t: The original policy's values of the actions, with
+            shape (T,).
+        advantages_t: The advantages, with shape (T,).
+        value_targets_t: The value targets, with shape (T,).
+        dones_t: The termination mask, with shape (T,).
+        entropy_tn: The entropy of the action distribution, with shape (T, *A).
         clip_param: The clip parameter for PPO.
         value_loss_coef: The value loss coefficient for PPO.
         entropy_coef: The entropy coefficient for PPO.
@@ -124,26 +125,20 @@ def compute_ppo_loss(
         use_clipped_value_loss: Whether to use clipped value loss.
 
     Returns:
-        The PPO loss, with shape (B, T).
+        The PPO loss, with shape (T,).
     """
     chex.assert_equal_shape_prefix(
         [
-            log_probs_btn,
-            values_bt,
-            on_policy_log_probs_btn,
-            on_policy_values_bt,
-            advantages_bt,
-            value_targets_bt,
-            dones_bt,
+            log_probs_tn,
+            values_t,
+            on_policy_log_probs_tn,
+            on_policy_values_t,
+            advantages_t,
+            value_targets_t,
+            dones_t,
         ],
-        prefix_len=2,
+        prefix_len=1,
     )
-
-    # Only compute gradient to the current policy.
-    on_policy_log_probs_btn = jax.lax.stop_gradient(on_policy_log_probs_btn)
-    on_policy_values_bt = jax.lax.stop_gradient(on_policy_values_bt)
-    advantages_bt = jax.lax.stop_gradient(advantages_bt)
-    value_targets_bt = jax.lax.stop_gradient(value_targets_bt)
 
     def compute_loss_for_sample(
         log_probs_n: Array,
@@ -189,22 +184,21 @@ def compute_ppo_loss(
 
         return total_loss
 
-    par_time = jax.vmap(compute_loss_for_sample, in_axes=0)
-    par_batch = jax.vmap(par_time, in_axes=0)
+    par_fn = jax.vmap(compute_loss_for_sample, in_axes=0)
 
     # Computes the vectorized loss.
-    total_loss_bt = par_batch(
-        log_probs_btn,
-        values_bt,
-        on_policy_log_probs_btn,
-        on_policy_values_bt,
-        advantages_bt,
-        value_targets_bt,
-        dones_bt,
-        entropy_btn,
+    total_loss_t = par_fn(
+        log_probs_tn,
+        values_t,
+        on_policy_log_probs_tn,
+        on_policy_values_t,
+        advantages_t,
+        value_targets_t,
+        dones_t,
+        entropy_tn,
     )
 
-    return total_loss_bt
+    return total_loss_t
 
 
 @jax.tree_util.register_dataclass
@@ -339,14 +333,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def get_ppo_metrics(
         self,
         trajectories: Trajectory,
-        loss_bt: Array,
-        on_policy_log_probs_btn: Array,
-        log_probs_btn: Array,
-        entropy_btn: Array,
-        values_bt: Array,
-        value_targets_bt: Array,
-        advantages_bt: Array,
-    ) -> dict[str, Array | tuple[Array, Array]]:
+        loss_t: Array,
+        on_policy_log_probs_tn: Array,
+        log_probs_tn: Array,
+        entropy_tn: Array,
+        values_t: Array,
+        value_targets_t: Array,
+        advantages_t: Array,
+    ) -> dict[str, Array]:
         """Gets the metrics to be logged.
 
         If the metric is a scalar, it will be logged as a scalar. If the
@@ -355,49 +349,33 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         Args:
             trajectories: The batch of trajectories to get metrics for.
-            loss_bt: The PPO loss value.
-            on_policy_log_probs_btn: The log probabilities of the actions, with shape (B, T, *A).
-            log_probs_btn: The log probabilities of the actions, with shape (B, T, *A).
-            entropy_btn: The entropy of the action distribution, with shape (B, T, *A).
-            values_bt: The state-value estimates, with shape (B, T).
-            value_targets_bt: The value targets, with shape (B, T).
-            advantages_bt: The advantages, with shape (B, T).
+            loss_t: The PPO loss value.
+            on_policy_log_probs_tn: The log probabilities of the actions, with shape (T, *A).
+            log_probs_tn: The log probabilities of the actions, with shape (T, *A).
+            entropy_tn: The entropy of the action distribution, with shape (T, *A).
+            values_t: The state-value estimates, with shape (T,).
+            value_targets_t: The value targets, with shape (T,).
+            advantages_t: The advantages, with shape (T,).
 
         Returns:
             A dictionary of metrics to be logged.
         """
-        len_b = (~trajectories.done).sum(-1, dtype=loss_bt.dtype) + 1e-6
-        batch_size = loss_bt.shape[0]
+        slen = (~trajectories.done).sum(dtype=loss_t.dtype) + 1e-6
         return {
-            "loss": loss_bt.sum(1) / len_b,
-            "traj_len_seconds": len_b * self.config.ctrl_dt,
-            "log_probs": log_probs_btn.sum(1).reshape(batch_size, -1) / len_b[:, None],
-            "entropy": entropy_btn.sum(1).reshape(batch_size, -1) / len_b[:, None],
-            "value": values_bt.sum(1) / len_b,
-            "value_targets": value_targets_bt.sum(1) / len_b,
-            "advantages": advantages_bt.sum(1) / len_b,
+            "loss": loss_t.sum() / slen,
+            "traj_len_seconds": slen * self.config.ctrl_dt,
+            "log_probs": log_probs_tn.sum(0).flatten() / slen,
+            "entropy": entropy_tn.sum(0).flatten() / slen,
+            "value": values_t.sum() / slen,
+            "value_targets": value_targets_t.sum() / slen,
+            "advantages": advantages_t.sum() / slen,
         }
 
-    def get_grad_metrics(self, grads: PyTree) -> dict[str, Array | tuple[Array, Array]]:
-        """Gets the metrics to be logged for the gradients.
-
-        If the metric is a scalar, it will be logged as a scalar. If the
-        metric is a tuple, it is assumed to be a distribution in (mean, std)
-        format and will be logged as a distribution.
-
-        Args:
-            grads: The gradients of the model.
-
-        Returns:
-            A dictionary of metrics to be logged.
-        """
-        return {
-            "grad_norm": optax.global_norm(grads),
-        }
-
+    @xax.jit(static_argnames=["self", "model_static"])
     def get_loss_and_metrics(
         self,
-        model: PyTree,
+        model_arr: PyTree,
+        model_static: PyTree,
         trajectories: Trajectory,
         rewards: Array,
         rng: PRNGKeyArray,
@@ -405,7 +383,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """Computes the PPO loss and additional metrics.
 
         Args:
-            model: The model to optimize.
+            model_arr: The mutable part of the model to optimize.
+            model_static: The static part of the model to optimize.
             trajectories: The batch of trajectories to compute the loss and metrics for.
             rewards: The rewards for the trajectories.
             rng: A random seed.
@@ -414,65 +393,110 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A tuple containing the loss value as a scalar, and a dictionary of
             metrics to log.
         """
-        rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 5)
-        on_policy_log_probs_btn = self.get_on_policy_log_probs(model, trajectories, rng1)
-        on_policy_values_bt = self.get_on_policy_values(model, trajectories, rng2)
-        log_probs_btn, entropy_btn = self.get_log_probs(model, trajectories, rng3)
-        values_bt = self.get_values(model, trajectories, rng4)
+        model = eqx.combine(model_arr, model_static)
 
-        advantages_bt, value_targets_bt = compute_advantages_and_value_targets(
-            values_bt=values_bt,
-            rewards_bt=rewards,
-            dones_bt=trajectories.done,
-            decay_gamma=self.config.gamma,
-            gae_lambda=self.config.lam,
-            normalize_advantages=self.config.normalize_advantages,
-            use_two_step_td_target=self.config.use_two_step_td_target,
-        )
+        def loss_and_metrics_fn(
+            model: PyTree,
+            trajectories: Trajectory,
+            rewards: Array,
+            rng: PRNGKeyArray,
+        ) -> tuple[Array, FrozenDict[str, Array]]:
+            rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 5)
 
-        loss_bt = compute_ppo_loss(
-            log_probs_btn=log_probs_btn,
-            values_bt=values_bt,
-            on_policy_log_probs_btn=on_policy_log_probs_btn,
-            on_policy_values_bt=on_policy_values_bt,
-            advantages_bt=advantages_bt,
-            value_targets_bt=value_targets_bt,
-            dones_bt=trajectories.done,
-            entropy_btn=entropy_btn,
-            clip_param=self.config.clip_param,
-            value_loss_coef=self.config.value_loss_coef,
-            entropy_coef=self.config.entropy_coef,
-            log_clip_value=self.config.log_clip_value,
-            use_clipped_value_loss=self.config.use_clipped_value_loss,
-        )
+            on_policy_log_probs_tn = jax.lax.stop_gradient(self.get_on_policy_log_probs(model, trajectories, rng1))
+            on_policy_values_t = jax.lax.stop_gradient(self.get_on_policy_values(model, trajectories, rng2))
+            log_probs_tn, entropy_tn = self.get_log_probs(model, trajectories, rng3)
+            values_t = self.get_values(model, trajectories, rng4)
 
-        metrics = self.get_ppo_metrics(
-            trajectories=trajectories,
-            loss_bt=loss_bt,
-            on_policy_log_probs_btn=on_policy_log_probs_btn,
-            log_probs_btn=log_probs_btn,
-            entropy_btn=entropy_btn,
-            values_bt=values_bt,
-            value_targets_bt=value_targets_bt,
-            advantages_bt=advantages_bt,
-        )
+            advantages_t, value_targets_t = compute_advantages_and_value_targets(
+                values_t=jax.lax.stop_gradient(values_t),
+                rewards_t=rewards,
+                dones_t=trajectories.done,
+                decay_gamma=self.config.gamma,
+                gae_lambda=self.config.lam,
+                normalize_advantages=self.config.normalize_advantages,
+                use_two_step_td_target=self.config.use_two_step_td_target,
+            )
 
-        # Mean over all non-masked trajectories.
-        num_valid = jnp.sum(~trajectories.done)
-        loss = loss_bt.sum() / (num_valid + 1e-6)
+            loss_t = compute_ppo_loss(
+                log_probs_tn=log_probs_tn,
+                values_t=values_t,
+                on_policy_log_probs_tn=on_policy_log_probs_tn,
+                on_policy_values_t=on_policy_values_t,
+                advantages_t=advantages_t,
+                value_targets_t=value_targets_t,
+                dones_t=trajectories.done,
+                entropy_tn=entropy_tn,
+                clip_param=self.config.clip_param,
+                value_loss_coef=self.config.value_loss_coef,
+                entropy_coef=self.config.entropy_coef,
+                log_clip_value=self.config.log_clip_value,
+                use_clipped_value_loss=self.config.use_clipped_value_loss,
+            )
 
-        return loss, metrics
+            metrics = self.get_ppo_metrics(
+                trajectories=trajectories,
+                loss_t=loss_t,
+                on_policy_log_probs_tn=on_policy_log_probs_tn,
+                log_probs_tn=log_probs_tn,
+                entropy_tn=entropy_tn,
+                values_t=values_t,
+                value_targets_t=value_targets_t,
+                advantages_t=advantages_t,
+            )
 
-    def get_loss_metrics_and_grads(
+            # Mean over all non-masked trajectories.
+            num_valid = jnp.sum(~trajectories.done)
+            loss = loss_t.sum() / (num_valid + 1e-6)
+
+            return loss, metrics
+
+        # Gets the loss and metrics for each trajectory in the batch.
+        rngs = jax.random.split(rng, rewards.shape[0])
+        par_fn = jax.vmap(loss_and_metrics_fn, in_axes=(None, 0, 0, 0))
+        loss, metrics = par_fn(model, trajectories, rewards, rngs)
+
+        return loss.mean(), metrics
+
+    @xax.jit(static_argnames=["self", "model_static"])
+    def _get_loss_metrics_and_grads(
         self,
-        model: PyTree,
+        model_arr: PyTree,
+        model_static: PyTree,
         trajectories: Trajectory,
         rewards: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, dict[str, Array | tuple[Array, Array]], PyTree]:
-        loss_fn = functools.partial(self.get_loss_and_metrics, trajectories=trajectories, rewards=rewards, rng=rng)
-        (loss, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
-        return loss, metrics, grads
+    ) -> tuple[dict[str, Array], PyTree]:
+        loss_fn = jax.grad(self.get_loss_and_metrics, argnums=0, has_aux=True)
+        loss_fn = xax.jit(static_argnums=[1])(loss_fn)
+        grads, metrics = loss_fn(model_arr, model_static, trajectories, rewards, rng)
+        return metrics, grads
+
+    @xax.jit(static_argnames=["self", "optimizer"])
+    def _update_model(
+        self,
+        model_arr: PyTree,
+        grads: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+    ) -> tuple[PyTree, optax.OptState, dict[str, Array]]:
+        grad_norm = optax.global_norm(grads)
+        grad_metrics = {"grad_norm": grad_norm}
+
+        def apply(grads: PyTree) -> tuple[PyTree, optax.OptState]:
+            updates, new_opt_state = optimizer.update(grads, opt_state, model_arr)  # type: ignore[operator]
+            new_model_arr = eqx.apply_updates(model_arr, updates)
+            return new_model_arr, new_opt_state
+
+        # Don't apply updates if the gradient is NaN or Inf.
+        new_model_arr, new_opt_state = jax.lax.cond(
+            jnp.isnan(grad_norm) | jnp.isinf(grad_norm),
+            lambda _: (model_arr, opt_state),
+            apply,
+            grads,
+        )
+
+        return new_model_arr, new_opt_state, grad_metrics
 
     @xax.jit(static_argnames=["self", "model_static", "optimizer"])
     def _single_step(
@@ -484,21 +508,21 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | tuple[Array, Array]]]:
-        model = eqx.combine(model_arr, model_static)
-        _, ppo_metrics, grads = self.get_loss_metrics_and_grads(
-            model=model,
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+        ppo_metrics, grads = self._get_loss_metrics_and_grads(
+            model_arr=model_arr,
+            model_static=model_static,
             trajectories=trajectories,
             rewards=rewards,
             rng=rng,
         )
 
-        # Apply the gradient updates to the model.
-        updates, new_opt_state = optimizer.update(grads, opt_state, model_arr)  # type: ignore[operator]
-        new_model_arr = eqx.apply_updates(model_arr, updates)
-
-        # Monitor global gradient norm.
-        grad_metrics = self.get_grad_metrics(grads)
+        new_model_arr, new_opt_state, grad_metrics = self._update_model(
+            model_arr=model_arr,
+            grads=grads,
+            optimizer=optimizer,
+            opt_state=opt_state,
+        )
 
         return new_model_arr, new_opt_state, FrozenDict(ppo_metrics | grad_metrics)
 
