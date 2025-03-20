@@ -85,7 +85,7 @@ def get_rewards(
         reward_val = reward_generator(trajectory) * reward_generator.scale * ctrl_dt
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
-        rewards[reward_generator.reward_name] = trajectory.done
+        rewards[reward_generator.reward_name] = reward_val
     rewards[TOTAL_REWARD_NAME] = jax.tree.reduce(jnp.add, list(rewards.values()))
     return FrozenDict(rewards)
 
