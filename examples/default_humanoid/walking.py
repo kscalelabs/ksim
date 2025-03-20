@@ -25,7 +25,7 @@ from ksim.randomization import (
     WeightRandomization,
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
-from ksim.rewards import HeightReward, Reward, TerminationPenalty
+from ksim.rewards import AngularVelocityXYPenalty, LinearVelocityZPenalty, Reward, TerminationPenalty
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
 from ksim.utils.mujoco import get_joint_metadata
@@ -284,10 +284,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
         return [
-            HeightReward(scale=1.0, height_target=0.7),
             DHForwardReward(scale=0.2),
             DHControlPenalty(scale=0.01),
             TerminationPenalty(scale=-1.0),
+            # These seem necessary to prevent some physics artifacts.
+            LinearVelocityZPenalty(scale=0.01),
+            AngularVelocityXYPenalty(scale=0.01),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
