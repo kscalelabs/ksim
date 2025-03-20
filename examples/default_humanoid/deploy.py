@@ -117,7 +117,8 @@ def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
         text=True,
     )
 
-    time.sleep(2)
+    logger.info("Waiting for KOS-Sim to start...")
+    time.sleep(5)
 
     def cleanup(sig: int | None = None, frame: types.FrameType | None = None) -> None:
         logger.info("Terminating KOS-Sim...")
@@ -129,14 +130,12 @@ def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
         if sig:
             sys.exit(0)
 
-    # Register signal handlers for clean shutdown
-    signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
     return process, cleanup
 
 
-async def main(model_path: str, ip: str, no_render: bool) -> None:
+async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -> None:
     model = tf.saved_model.load(model_path)
 
     cmd = [0.5, 0.0]  # x, y
@@ -157,18 +156,27 @@ async def main(model_path: str, ip: str, no_render: bool) -> None:
         logger.info("Starting a new KOS-Sim instance locally...")
         sim_process, cleanup_fn = spawn_kos_sim(no_render)
         kos = pykos.KOS()
-        try:
-            await kos.sim.get_parameters()
-            logger.info("Connected to new KOS-Sim instance.")
-        except Exception as connect_error:
-            if sim_process:
-                sim_process.terminate()
-            raise RuntimeError(f"Failed to connect to KOS-Sim: {connect_error}")
+        attempts = 0
+        while attempts < 5:
+            try:
+                await kos.sim.get_parameters()
+                logger.info("Connected to new KOS-Sim instance.")
+                break
+            except Exception as connect_error:
+                attempts += 1
+                logger.info("Failed to connect to KOS-Sim: %s", connect_error)
+                time.sleep(2)
+
+        if attempts == 5:
+            raise RuntimeError("Failed to connect to KOS-Sim")
 
     await configure_actuators(kos)
     await reset(kos)
 
     observation = (await get_observation(kos)).reshape(1, -1)
+
+    if no_render:
+        await kos.process_manager.start_kclip("deployment")
 
     # warm up model
     model.infer(observation, cmd)
@@ -176,8 +184,10 @@ async def main(model_path: str, ip: str, no_render: bool) -> None:
     target_time = time.time() + DT
     observation = await get_observation(kos)
 
+    end_time = time.time() + episode_length
+
     try:
-        while True:
+        while time.time() < end_time:
             observation = observation.reshape(1, -1)
             action = np.array(model.infer(observation, cmd)).reshape(-1)
 
@@ -192,11 +202,24 @@ async def main(model_path: str, ip: str, no_render: bool) -> None:
                 logger.info("Loop overran by %s seconds", time.time() - target_time)
 
             target_time += DT
-    except KeyboardInterrupt:
+    except asyncio.CancelledError:
         logger.info("Exiting...")
-    finally:
+        if no_render:
+            save_path = await kos.process_manager.stop_kclip("deployment")
+            logger.info("KClip saved to %s", save_path)
+
         if cleanup_fn:
             cleanup_fn()
+
+        raise KeyboardInterrupt
+
+    logger.info("Episode finished!")
+
+    if no_render:
+        await kos.process_manager.stop_kclip("deployment")
+
+    if cleanup_fn:
+        cleanup_fn()
 
 
 # (optionally) start the KOS-Sim server before running this script
@@ -206,8 +229,9 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--ip", type=str, default="localhost")
+    parser.add_argument("--episode_length", type=int, default=10)  # seconds
     parser.add_argument("--no-render", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
-    asyncio.run(main(args.model_path, args.ip, args.no_render))
+    asyncio.run(main(args.model_path, args.ip, args.no_render, args.episode_length))
