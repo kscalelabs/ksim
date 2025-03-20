@@ -56,15 +56,6 @@ logger = logging.getLogger(__name__)
 TOTAL_REWARD_NAME = "total"
 
 
-def get_median_trajectory(trajectories: list[Trajectory]) -> Trajectory:
-    num_traj = np.ndarray([t.done.shape[0] for t in trajectories])
-    num_traj_cum = np.cumsum(num_traj)
-    median_list_idx = len(num_traj_cum) // 2
-    median_traj_idx = (num_traj_cum[-1] // 2) - num_traj_cum[max(median_list_idx - 1, 0)]
-    trajectory = trajectories[median_list_idx]
-    return jax.tree.map(lambda x: x[median_traj_idx], trajectory)
-
-
 def get_observation(
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
@@ -615,7 +606,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             reward_stats[reward_name] = jnp.sum(reward_val) / num_episodes
 
         for key, value in reward_stats.items():
-            self.logger.log_scalar(key=f"{key}_{name}", value=value, namespace="reward")
+            self.logger.log_scalar(key=f"{name}/{key}", value=value, namespace="reward")
 
     def log_termination_stats(self, trajectories: Trajectory, termination_generators: Collection[Termination]) -> None:
         """Log termination statistics from the trajectory or trajectories.
@@ -720,6 +711,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         commands: Collection[Command],
         rewards: FrozenDict[str, Array],
         mj_model: mujoco.MjModel,
+        name: str,
     ) -> None:
         """Visualizes a single trajectory.
 
@@ -763,11 +755,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 img = Image.open(buf)
 
                 # Logs the image.
-                self.logger.log_image(key=key, value=img, namespace=namespace)
+                self.logger.log_image(key=f"{name}/{key}", value=img, namespace=namespace)
 
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(trajectories, commands, mj_model)
-        self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
+        self.logger.log_video(key=f"{name}", value=frames, fps=fps, namespace="➡️ trajectory images")
 
     @eqx.filter_jit
     def _single_unroll(
@@ -907,13 +899,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 # Gets the shortest and longest trajectories, for visualization.
                 trajectory_list = chunk_trajectory(trajectories)
                 trajectory_list.sort(key=lambda x: x.done.shape[-1])
-                trajectory = get_median_trajectory(trajectory_list)
-                reward = get_rewards(trajectory, engine_constants.reward_generators, self.config.ctrl_dt)
+                short_traj = jax.tree.map(lambda arr: arr[0], trajectory_list[0])
+                long_traj = jax.tree.map(lambda arr: arr[-1], trajectory_list[-1])
+                short_rewards = get_rewards(short_traj, engine_constants.reward_generators, self.config.ctrl_dt)
+                long_rewards = get_rewards(long_traj, engine_constants.reward_generators, self.config.ctrl_dt)
 
                 # Logs statistics from the trajectory.
                 with self.step_context("write_logs"):
-                    self.log_single_trajectory(trajectory, commands, reward, mj_model)
-                    self.log_reward_stats(trajectory, reward)
+                    self.log_single_trajectory(short_traj, commands, short_rewards, mj_model, "short")
+                    self.log_single_trajectory(long_traj, commands, long_rewards, mj_model, "long")
+                    self.log_reward_stats(short_traj, short_rewards, "short")
+                    self.log_reward_stats(long_traj, long_rewards, "long")
                     self.log_termination_stats(trajectories, terminations)
                     self.log_state_timers(state)
                     self.write_logs(state)
@@ -970,12 +966,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 # Logs statistics from the fpost_accumulatetrajectory.
                 with self.step_context("write_logs"):
-                    trajectory = get_median_trajectory(trajectory_batches)
-                    reward = get_rewards(trajectory, engine_constants.reward_generators, self.config.ctrl_dt)
+                    short_traj = jax.tree.map(lambda arr: arr[0], trajectory_batches[0])
+                    long_traj = jax.tree.map(lambda arr: arr[-1], trajectory_batches[-1])
+                    short_rewards = get_rewards(short_traj, engine_constants.reward_generators, self.config.ctrl_dt)
+                    long_rewards = get_rewards(long_traj, engine_constants.reward_generators, self.config.ctrl_dt)
                     if self.config.log_train_trajectory:
-                        self.log_single_trajectory(trajectory, commands, reward, mj_model)
-                    self.log_reward_stats(trajectory, reward)
+                        self.log_single_trajectory(short_traj, commands, short_rewards, mj_model, "short")
+                        self.log_single_trajectory(long_traj, commands, long_rewards, mj_model, "long")
                     self.log_trajectory_stats(trajectories)
+                    self.log_reward_stats(short_traj, short_rewards, "short")
+                    self.log_reward_stats(long_traj, long_rewards, "long")
                     self.log_termination_stats(trajectories, terminations)
                     self.log_train_metrics(train_metrics)
                     self.log_state_timers(state)
