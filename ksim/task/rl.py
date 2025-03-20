@@ -81,16 +81,13 @@ def get_rewards(
     """Get the rewards from the physics state."""
     rewards = {}
     for reward_generator in reward_generators:
-        reward_val = (
-            reward_generator(
-                prev_action=physics_state.most_recent_action,
-                physics_state=physics_state.data,
-                command=command,
-                action=action,
-                next_physics_state=next_physics_state.data,
-                next_state_terminates=next_state_terminates,
-            )
-            * reward_generator.scale
+        reward_val = reward_generator(
+            prev_action=physics_state.most_recent_action,
+            physics_state=physics_state.data,
+            command=command,
+            action=action,
+            next_physics_state=next_physics_state.data,
+            next_state_terminates=next_state_terminates,
         )
         name = reward_generator.reward_name
         chex.assert_shape(reward_val, (), custom_message=f"Reward {name} must be a scalar")
