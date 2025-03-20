@@ -130,9 +130,25 @@ class HumanoidWalkingTaskConfig(PPOConfig):
         value=1e-4,
         help="Learning rate for PPO.",
     )
+    learning_rate_min_factor: float = xax.field(
+        value=0.1,
+        help="Minimum learning rate for PPO.",
+    )
+    learning_rate_warmup_steps: int = xax.field(
+        value=1000,
+        help="Number of steps to warm up the learning rate.",
+    )
+    learning_rate_decay_steps: int = xax.field(
+        value=10000,
+        help="Number of steps to decay the learning rate.",
+    )
     max_grad_norm: float = xax.field(
         value=0.5,
         help="Maximum gradient norm for clipping.",
+    )
+    adam_weight_decay: float = xax.field(
+        value=0.0,
+        help="Weight decay for the Adam optimizer.",
     )
 
     # Mujoco parameters.
@@ -177,10 +193,23 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         This provides a reasonable default optimizer for training PPO models,
         but can be overridden by subclasses who want to do something different.
         """
-        return optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            optax.adam(self.config.learning_rate),
+        scheduler = optax.cosine_onecycle_schedule(
+            init_value=self.config.learning_rate,
+            end_value=self.config.learning_rate * self.config.learning_rate_min_factor,
+            warmup_steps=self.config.learning_rate_warmup_steps,
+            decay_steps=self.config.learning_rate_decay_steps,
         )
+
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            (
+                optax.adam(scheduler)
+                if self.config.adam_weight_decay == 0.0
+                else optax.adamw(scheduler, weight_decay=self.config.adam_weight_decay)
+            ),
+        )
+
+        return optimizer
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
