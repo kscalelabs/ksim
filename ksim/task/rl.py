@@ -35,7 +35,7 @@ from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.env.data import PhysicsModel, PhysicsState, Transition, generate_transition_batches
+from ksim.env.data import PhysicsModel, PhysicsState, Trajectory, chunk_trajectory, generate_trajectory_batches
 from ksim.env.engine import (
     EngineConstants,
     EngineVariables,
@@ -70,26 +70,25 @@ def get_observation(
 
 
 @eqx.filter_jit
-def get_rewards(transition: Transition, *, reward_generators: Collection[Reward]) -> FrozenDict[str, Array]:
+def get_rewards(trajectory: Trajectory, reward_generators: Collection[Reward]) -> FrozenDict[str, Array]:
     """Get the rewards from the physics state."""
     rewards = {}
     for reward_generator in reward_generators:
-        reward_val = reward_generator(transition)
-        chex.assert_equal_shape(reward_val, transition.done)
+        reward_val = reward_generator(trajectory)
+        chex.assert_equal_shape(reward_val, trajectory.done)
         rewards[reward_generator.reward_name] = reward_val
     rewards["total"] = jax.tree.reduce(jnp.add, list(rewards.values()))
     return FrozenDict(rewards)
 
 
 @eqx.filter_jit
-def get_rewards_batch(transitions: Transition, *, reward_generators: Collection[Reward]) -> FrozenDict[str, Array]:
+def get_rewards_batch(trajectories: Trajectory, reward_generators: Collection[Reward]) -> FrozenDict[str, Array]:
     """Get the rewards from the physics state."""
-    return jax.vmap(get_rewards, in_axes=(0, None))(transitions, reward_generators)
+    return jax.vmap(get_rewards, in_axes=(0, None))(trajectories, reward_generators)
 
 
 def get_terminations(
     physics_state: PhysicsState,
-    *,
     termination_generators: Collection[Termination],
 ) -> FrozenDict[str, Array]:
     """Get the terminations from the physics state."""
@@ -106,7 +105,6 @@ def get_commands(
     prev_commands: FrozenDict[str, Array],
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
-    *,
     command_generators: Collection[Command],
 ) -> FrozenDict[str, Array]:
     """Get the commands from the physics state."""
@@ -123,7 +121,6 @@ def get_commands(
 
 def get_initial_commands(
     rng: PRNGKeyArray,
-    *,
     command_generators: Collection[Command],
 ) -> FrozenDict[str, Array]:
     """Get the initial commands from the physics state."""
@@ -187,6 +184,24 @@ class RLConfig(xax.Config):
     log_train_metrics: bool = xax.field(
         value=True,
         help="If true, log train metrics.",
+    )
+
+    # trajectory batching parameters.
+    group_batches_by_length: bool = xax.field(
+        value=True,
+        help="Whether to group trajectories by length, otherwise, trajectories are grouped randomly.",
+    )
+    include_last_batch: bool = xax.field(
+        value=True,
+        help="Whether to include the last batch if it's not full.",
+    )
+    min_batch_size: int = xax.field(
+        value=2,
+        help="The minimum number of trajectories to include in a batch.",
+    )
+    min_trajectory_length: int = xax.field(
+        value=3,
+        help="The minimum number of trajectories in a trajectory.",
     )
 
     # Training parameters.
@@ -396,7 +411,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         This function returns the action to take, the next carry (for models
         which look at multiple steps), and any auxiliary outputs. The auxiliary
-        outputs get stored in the final transition object and can be used to
+        outputs get stored in the final trajectory object and can be used to
         compute metrics like log probabilities, values, etc.
 
         Args:
@@ -426,7 +441,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
         engine_variables: EngineVariables,
-    ) -> tuple[Transition, EngineVariables]:
+    ) -> tuple[Trajectory, EngineVariables]:
         """Runs a single step of the physics engine.
 
         Args:
@@ -437,7 +452,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             engine_variables: The variables for the engine.
 
         Returns:
-            A tuple containing the transition and the next engine variables.
+            A tuple containing the trajectory and the next engine variables.
         """
         rng, obs_rng, cmd_rng, act_rng, reset_rng, physics_rng = jax.random.split(engine_variables.rng, 6)
 
@@ -499,7 +514,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Combines all the relevant data into a single object.
-        transition = Transition(
+        trajectory = Trajectory(
             qpos=next_physics_state.data.qpos,
             qvel=next_physics_state.data.qvel,
             obs=observations,
@@ -519,7 +534,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-        return transition, next_variables
+        return trajectory, next_variables
 
     def get_dataset(self, phase: xax.Phase) -> Dataset:
         raise NotImplementedError("RL tasks do not require datasets, since trajectory histories are stored in-memory.")
@@ -544,36 +559,36 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         else:
             self.run_training()
 
-    def log_transition_stats(self, transitions: Transition) -> None:
+    def log_trajectory_stats(self, trajectories: Trajectory) -> None:
         """Log action statistics from the trajectory or trajectories.
 
         Args:
-            transitions: The transitions to log the action statistics for.
+            trajectories: The trajectories to log the action statistics for.
             namespace: The namespace to log the statistics to.
         """
         if self.config.log_action_histograms:
-            self.logger.log_histogram(key="action", value=transitions.action, namespace="action")
+            self.logger.log_histogram(key="action", value=trajectories.action, namespace="action")
         if self.config.log_observation_histograms:
-            for obs_key, obs_value in transitions.obs.items():
+            for obs_key, obs_value in trajectories.obs.items():
                 self.logger.log_histogram(key=obs_key, value=obs_value, namespace="observation")
         if self.config.log_observation_histograms:
-            for obs_key, obs_value in transitions.command.items():
+            for obs_key, obs_value in trajectories.command.items():
                 self.logger.log_histogram(key=obs_key, value=obs_value, namespace="command")
         if self.config.log_qpos_qvel:
-            self.logger.log_histogram(key="qpos", value=transitions.qpos[..., 7:], namespace="state")
-            self.logger.log_histogram(key="qvel", value=transitions.qvel[..., 6:], namespace="state")
+            self.logger.log_histogram(key="qpos", value=trajectories.qpos[..., 7:], namespace="state")
+            self.logger.log_histogram(key="qvel", value=trajectories.qvel[..., 6:], namespace="state")
 
-    def log_reward_stats(self, transitions: Transition, rewards: FrozenDict[str, Array]) -> None:
+    def log_reward_stats(self, trajectories: Trajectory, rewards: FrozenDict[str, Array]) -> None:
         """Log reward statistics from the trajectory or trajectories.
 
         Args:
-            transitions: The transitions to log the reward statistics for.
+            trajectories: The trajectories to log the reward statistics for.
             rewards: The rewards to log the statistics for.
             namespace: The namespace to log the statistics to.
         """
         reward_stats: dict[str, jnp.ndarray] = {}
 
-        num_episodes = jnp.sum(transitions.done).clip(min=1)
+        num_episodes = jnp.sum(trajectories.done).clip(min=1)
         for reward_name, reward_val in rewards.items():
             assert isinstance(reward_val, Array)
             reward_stats[reward_name] = jnp.sum(reward_val) / num_episodes
@@ -581,18 +596,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         for key, value in reward_stats.items():
             self.logger.log_scalar(key=key, value=value, namespace="reward")
 
-    def log_termination_stats(self, transitions: Transition, termination_generators: Collection[Termination]) -> None:
+    def log_termination_stats(self, trajectories: Trajectory, termination_generators: Collection[Termination]) -> None:
         """Log termination statistics from the trajectory or trajectories.
 
         Args:
-            transitions: The transitions to log the termination statistics for.
+            trajectories: The trajectories to log the termination statistics for.
             termination_generators: The termination generators to log the statistics for.
             namespace: The namespace to log the statistics to.
         """
         termination_stats: dict[str, jnp.ndarray] = {}
 
-        num_episodes = jnp.sum(transitions.done).clip(min=1)
-        terms = transitions.termination_components
+        num_episodes = jnp.sum(trajectories.done).clip(min=1)
+        terms = trajectories.termination_components
         for generator in termination_generators:
             statistic = terms[generator.termination_name]
             assert isinstance(statistic, Array)
@@ -602,9 +617,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_scalar(key=key, value=value, namespace="termination")
 
         # Logs the mean episode length.
-        episode_num_per_env = jnp.sum(transitions.done, axis=0) + (1 - transitions.done[-1])
+        episode_num_per_env = jnp.sum(trajectories.done, axis=0) + (1 - trajectories.done[-1])
         episode_count = jnp.sum(episode_num_per_env)
-        num_env_states = jnp.prod(jnp.array(transitions.done.shape))
+        num_env_states = jnp.prod(jnp.array(trajectories.done.shape))
         mean_episode_length_steps = num_env_states / episode_count * self.config.ctrl_dt
         self.logger.log_scalar(key="mean_episode_seconds", value=mean_episode_length_steps, namespace="termination")
 
@@ -623,16 +638,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def render_trajectory_video(
         self,
-        transitions: Transition,
+        trajectories: Trajectory,
         commands: Collection[Command],
         mj_model: mujoco.MjModel,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
         fps = round(1 / self.config.ctrl_dt)
 
-        chex.assert_shape(transitions.done, (None,))
-        num_steps = transitions.done.shape[0]
-        transition_list: list[Transition] = [jax.tree.map(lambda arr: arr[i], transitions) for i in range(num_steps)]
+        chex.assert_shape(trajectories.done, (None,))
+        num_steps = trajectories.done.shape[0]
+        trajectory_list: list[Trajectory] = [jax.tree.map(lambda arr: arr[i], trajectories) for i in range(num_steps)]
 
         # Holds the current data.
         mj_data = mujoco.MjData(mj_model)
@@ -654,9 +669,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         frame_list: list[np.ndarray] = []
-        for frame_id, transition in enumerate(transition_list):
-            mj_data.qpos = np.array(transition.qpos)
-            mj_data.qvel = np.array(transition.qvel)
+        for frame_id, trajectory in enumerate(trajectory_list):
+            mj_data.qpos = np.array(trajectory.qpos)
+            mj_data.qvel = np.array(trajectory.qvel)
 
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
@@ -664,7 +679,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Adds command elements to the scene.
             for command in commands:
-                command.update_scene(renderer.scene, transition.command[command.command_name])
+                command.update_scene(renderer.scene, trajectory.command[command.command_name])
 
             # Renders the frame to a Numpy array.
             frame = renderer.render()
@@ -681,27 +696,29 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def log_single_trajectory(
         self,
-        transitions: Transition,
+        trajectories: Trajectory,
         commands: Collection[Command],
         rewards: FrozenDict[str, Array],
         mj_model: mujoco.MjModel,
+        name: str,
     ) -> None:
         """Visualizes a single trajectory.
 
         Args:
-            transitions: The transitions to visualize.
+            trajectories: The trajectories to visualize.
             commands: The commands to visualize.
             rewards: The rewards to visualize.
             mj_model: The Mujoco model to render the scene with.
+            name: The name of the trajectory being logged.
         """
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Emojis are used in order to prevent conflicts with user-specified namespaces.
         for namespace, arr_dict in (
-            ("👀 obs images", transitions.obs),
-            ("🕹️ command images", transitions.command),
-            ("🏃 action images", {"action": transitions.action}),
-            ("💀 termination images", transitions.termination_components),
-            ("🎁 reward images", rewards),
+            (f"👀 {name} obs images", trajectories.obs),
+            (f"🕹️ {name} command images", trajectories.command),
+            (f"🏃 {name} action images", {"action": trajectories.action}),
+            (f"💀 {name} termination images", trajectories.termination_components),
+            (f"🎁 {name} reward images", rewards),
         ):
             for key, value in arr_dict.items():
                 plt.figure(figsize=self.config.plot_figsize)
@@ -730,8 +747,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.logger.log_image(key=key, value=img, namespace=namespace)
 
         # Logs the video of the trajectory.
-        frames, fps = self.render_trajectory_video(transitions, commands, mj_model)
-        self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
+        frames, fps = self.render_trajectory_video(trajectories, commands, mj_model)
+        self.logger.log_video(key=f"{name}", value=frames, fps=fps, namespace="➡️ trajectory images")
 
     @eqx.filter_jit
     def _single_unroll(
@@ -742,7 +759,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
         num_steps: int,
-    ) -> Transition:
+    ) -> Trajectory:
         initial_carry = self.get_initial_carry()
         rng, cmd_rng = jax.random.split(rng)
         initial_commands = get_initial_commands(cmd_rng, command_generators=engine_constants.command_generators)
@@ -766,20 +783,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-        def scan_fn(carry: EngineVariables, _: None) -> tuple[EngineVariables, Transition]:
-            transition, next_engine_variables = self.step_engine(
+        def scan_fn(carry: EngineVariables, _: None) -> tuple[EngineVariables, Trajectory]:
+            trajectory, next_engine_variables = self.step_engine(
                 physics_model=physics_model,
                 model=model,
                 engine=engine,
                 engine_constants=engine_constants,
                 engine_variables=carry,
             )
-            return next_engine_variables, transition
+            return next_engine_variables, trajectory
 
         # Scans the engine for the desired number of steps.
-        _, transitions = jax.lax.scan(scan_fn, engine_variables, length=num_steps)
+        _, trajectories = jax.lax.scan(scan_fn, engine_variables, length=num_steps)
 
-        return transitions
+        return trajectories
 
     @eqx.filter_jit
     def _vmapped_unroll(
@@ -791,7 +808,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine_constants: EngineConstants,
         num_steps: int,
         num_envs: int,
-    ) -> Transition:
+    ) -> Trajectory:
         rngs = jax.random.split(rng, num_envs)
         vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None, None))
         return vmapped_unroll(rngs, physics_model, model, engine, engine_constants, num_steps)
@@ -802,7 +819,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        transition_batches: list[Transition],
+        trajectory_batches: list[Trajectory],
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.GradientTransformation, optax.OptState, FrozenDict[str, Array]]:
         """Updates the model on the given trajectory.
@@ -814,7 +831,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model: The model to update.
             optimizer: The optimizer to use.
             opt_state: The optimizer state.
-            transition_batches: The trajectory to update the model on.
+            trajectory_batches: The trajectory to update the model on.
             rng: The random seed.
 
         Returns:
@@ -857,7 +874,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state.num_valid_samples += self.eval_rollout_length_steps
 
                 rng, rollout_rng = jax.random.split(rng)
-                transitions = self._single_unroll(
+                trajectories = self._single_unroll(
                     rng=rollout_rng,
                     physics_model=mjx_model,
                     model=model,
@@ -865,13 +882,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     engine_constants=engine_constants,
                     num_steps=self.eval_rollout_length_steps,
                 )
-                rewards = get_rewards(transitions, engine_constants.reward_generators)
+
+                # Gets the shortest and longest trajectories, for visualization.
+                trajectory_list = chunk_trajectory(trajectories).sort(key=lambda x: x.done.shape[-1])
+                short_trajectory, long_trajectory = trajectory_list[0], trajectory_list[-1]
+                short_rewards = get_rewards(short_trajectory, engine_constants.reward_generators)
+                long_rewards = get_rewards(long_trajectory, engine_constants.reward_generators)
 
                 # Logs statistics from the trajectory.
                 with self.step_context("write_logs"):
-                    self.log_single_trajectory(transitions, commands, rewards, mj_model)
-                    self.log_reward_stats(transitions, rewards)
-                    self.log_termination_stats(transitions, terminations)
+                    self.log_single_trajectory(short_trajectory, commands, short_rewards, mj_model, "short")
+                    self.log_single_trajectory(long_trajectory, commands, long_rewards, mj_model, "long")
+                    self.log_reward_stats(trajectories, rewards)
+                    self.log_termination_stats(trajectories, terminations)
                     self.log_state_timers(state)
                     self.write_logs(state)
 
@@ -881,7 +904,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Samples N trajectories in parallel.
             with xax.ContextTimer() as timer:
                 rng, rollout_rng = jax.random.split(rng)
-                transitions = self._vmapped_unroll(
+                trajectories = self._vmapped_unroll(
                     rng=rollout_rng,
                     physics_model=mjx_model,
                     model=model,
@@ -892,17 +915,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
             self.logger.log_scalar("rollout_dt", timer.elapsed_time, namespace="⏳ dt")
 
-            # Reorganizes transitions into batches and compute rewards.
+            # Reorganizes trajectories into batches and compute rewards.
             with xax.ContextTimer() as timer:
-                transition_batches = generate_transition_batches(
-                    transitions,
+                trajectory_batches = generate_trajectory_batches(
+                    trajectories,
                     batch_size=self.config.batch_size,
                     min_batch_size=self.config.min_batch_size,
                     min_trajectory_length=self.config.min_trajectory_length,
                     group_by_length=self.config.group_batches_by_length,
                     include_last_batch=self.config.include_last_batch,
                 )
-                rewards = get_rewards_batch(transition_batches, reward_generators=engine_constants.reward_generators)
+                reward_batches = [get_rewards_batch(t, engine_constants.reward_generators) for t in trajectory_batches]
 
             # Optimizes the model on that trajectory.
             with xax.ContextTimer() as timer:
@@ -911,8 +934,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     model=model,
                     optimizer=optimizer,
                     opt_state=opt_state,
-                    transition_batches=transition_batches,
-                    reward_batches=rewards,
+                    trajectory_batches=trajectory_batches,
+                    reward_batches=reward_batches,
                     rng=update_rng,
                 )
             self.logger.log_scalar("update_dt", timer.elapsed_time, namespace="⏳ dt")
@@ -925,12 +948,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 # Logs statistics from the fpost_accumulatetrajectory.
                 with self.step_context("write_logs"):
                     if self.config.log_train_trajectory:
-                        single_transition = jax.tree.map(lambda arr: arr[0], transitions)
-                        single_rewards = jax.tree.map(lambda arr: arr[0], rewards)
-                        self.log_single_trajectory(single_transition, commands, single_rewards, mj_model)
-                    self.log_transition_stats(transitions)
-                    self.log_reward_stats(transitions, rewards)
-                    self.log_termination_stats(transitions, terminations)
+                        short_trajectory = jax.tree.map(lambda arr: arr[0], trajectory_batches[0])
+                        long_trajectory = jax.tree.map(lambda arr: arr[-1], trajectory_batches[-1])
+                        short_rewards = get_rewards(short_trajectory, engine_constants.reward_generators)
+                        long_rewards = get_rewards(long_trajectory, engine_constants.reward_generators)
+                        self.log_single_trajectory(short_trajectory, commands, short_rewards, mj_model, "short")
+                        self.log_single_trajectory(long_trajectory, commands, long_rewards, mj_model, "long")
+                    self.log_trajectory_stats(trajectories)
+                    self.log_reward_stats(trajectories, rewards)
+                    self.log_termination_stats(trajectories, terminations)
                     self.log_train_metrics(train_metrics)
                     self.log_state_timers(state)
                     self.write_logs(state)
@@ -1032,7 +1058,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             frames: list[np.ndarray] = []
             try:
                 for step_id in iterator:
-                    transition, engine_variables = self.step_engine(
+                    trajectory, engine_variables = self.step_engine(
                         physics_model=mj_model,
                         model=model,
                         engine=engine,
@@ -1045,7 +1071,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     # once per rollout for efficiency.
                     rng, randomization_rng = jax.random.split(rng)
                     mj_model = jax.lax.cond(
-                        transition.done,
+                        trajectory.done,
                         lambda: apply_randomizations(mj_model, randomizations, randomization_rng),
                         lambda: mj_model,
                     )

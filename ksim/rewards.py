@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array
 
-from ksim.env.data import Transition
+from ksim.env.data import Trajectory
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class Reward(ABC):
     scale: float = attrs.field(validator=reward_scale_validator)
 
     @abstractmethod
-    def __call__(self, transition: Transition) -> Array: ...
+    def __call__(self, trajectory: Trajectory) -> Array: ...
 
     def get_name(self) -> str:
         return xax.camelcase_to_snakecase(self.__class__.__name__)
@@ -48,9 +48,9 @@ class Reward(ABC):
 class TerminationPenalty(Reward):
     """Penalty for terminating the episode."""
 
-    def __call__(self, transition: Transition) -> Array:
-        breakpoint()
-        return jnp.sum(next_state_terminates.any())
+    def __call__(self, trajectory: Trajectory) -> Array:
+        next_done = jnp.pad(trajectory.done[..., :-1], (1, 0), mode="constant", constant_values=0)
+        return next_done
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -59,9 +59,8 @@ class LinearVelocityZPenalty(Reward):
 
     norm: xax.NormType = attrs.field(default="l2")
 
-    def __call__(self, transition: Transition) -> Array:
-        breakpoint()
-        lin_vel_z = next_physics_state.qvel[2]
+    def __call__(self, trajectory: Trajectory) -> Array:
+        lin_vel_z = trajectory.qvel[..., 2]
         return xax.get_norm(lin_vel_z, self.norm)
 
 
@@ -71,7 +70,6 @@ class AngularVelocityXYPenalty(Reward):
 
     norm: xax.NormType = attrs.field(default="l2")
 
-    def __call__(self, transition: Transition) -> Array:
-        breakpoint()
-        ang_vel_xy = next_physics_state.qvel[3:5]
+    def __call__(self, trajectory: Trajectory) -> Array:
+        ang_vel_xy = trajectory.qvel[..., 3:5]
         return xax.get_norm(ang_vel_xy, self.norm).sum(axis=-1)

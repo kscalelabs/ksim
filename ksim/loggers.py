@@ -9,14 +9,14 @@ import jax.numpy as jnp
 import xax
 from flax.core import FrozenDict
 
-from ksim.env.data import Transition
+from ksim.env.data import Trajectory
 
 
 @jax.tree_util.register_dataclass
 @dataclass
 class LoggingData:
     update_metrics: FrozenDict[str, jnp.ndarray]
-    trajectory: Transition | None = None
+    trajectory: Trajectory | None = None
 
 
 @attrs.define(frozen=True, kw_only=True)

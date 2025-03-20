@@ -25,7 +25,7 @@ class PhysicsState:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class Transition:
+class Trajectory:
     qpos: Array
     qvel: Array
     obs: FrozenDict[str, Array]
@@ -37,28 +37,28 @@ class Transition:
     aux_outputs: PyTree | None
 
 
-def chunk_transitions(transitions: Transition) -> list[Transition]:
-    """Chunks a non-implicit transitions PyTree using `done`.
+def chunk_trajectory(trajectory: Trajectory) -> list[Trajectory]:
+    """Chunks a non-implicit trajectory PyTree using `done`.
 
-    After collecting a trajectory of transitions, we end up with transitions
+    After collecting a trajectory of trajectories, we end up with trajectories
     whose `done` has shape `(num_batches, num_steps)`. This function splits
-    these transitions into a list of transitions where each transition is
+    these trajectories into a list of trajectories where each trajectory is
     terminated by either a `done` or the end of the trajectory.
 
     Args:
-        transitions: A non-implicit transitions PyTree.
+        trajectories: A non-implicit trajectories PyTree.
 
     Returns:
-        A list of transitions, where each transition represents a complete
+        A list of trajectories, where each trajectory represents a complete
         episode or a segment ending with the trajectory's end. Note that the
-        batch dimension is preserved in each transition.
+        batch dimension is preserved in each trajectory.
     """
-    # Get the done flags from transitions
-    done_flags = transitions.done
+    # Get the done flags from trajectories
+    done_flags = trajectory.done
     num_batches, num_steps = done_flags.shape
 
-    # Initialize list to store chunked transitions
-    chunked_transitions: list[Transition] = []
+    # Initialize list to store chunked trajectories
+    chunked_trajectories: list[Trajectory] = []
 
     # Process each batch
     for batch_idx in range(num_batches):
@@ -72,16 +72,16 @@ def chunk_transitions(transitions: Transition) -> list[Transition]:
         # Initialize the start index for slicing
         start_idx = 0
 
-        # Split the transitions based on episode ends
+        # Split the trajectories based on episode ends
         for end_idx in episode_ends:
             # Create a slice for this episode
             batch_slice = slice(batch_idx, batch_idx + 1)
             step_slice = slice(start_idx, end_idx + 1)
 
             # Extract the chunk using tree_map to handle the PyTree structure
-            chunk = jax.tree_map(lambda x: x[batch_slice, step_slice] if x is not None else None, transitions)
+            chunk = jax.tree_map(lambda x: x[batch_slice, step_slice] if x is not None else None, trajectory)
 
-            chunked_transitions.append(chunk)
+            chunked_trajectories.append(chunk)
 
             # Update start index for next chunk
             start_idx = end_idx + 1
@@ -90,11 +90,11 @@ def chunk_transitions(transitions: Transition) -> list[Transition]:
             if end_idx == num_steps - 1:
                 break
 
-    return chunked_transitions
+    return chunked_trajectories
 
 
-def concatenate_transitions(transitions: list[Transition]) -> Transition:
-    length = max(transition.done.shape[1] for transition in transitions)
+def concatenate_trajectories(trajectories: list[Trajectory]) -> Trajectory:
+    length = max(trajectory.done.shape[1] for trajectory in trajectories)
 
     def pad_array(x: Any, target_length: int) -> Any:  # noqa: ANN401
         if x is None:
@@ -107,54 +107,54 @@ def concatenate_transitions(transitions: list[Transition]) -> Transition:
             pad_width[1] = (0, target_length - x.shape[1])
         return jnp.pad(x, pad_width, mode="constant")
 
-    def update_done_flag(transition: Transition) -> Transition:
-        new_done = jnp.cumsum(transition.done, axis=-1) > 0
+    def update_done_flag(trajectory: Trajectory) -> Trajectory:
+        new_done = jnp.cumsum(trajectory.done, axis=-1) > 0
 
-        # Need to do it this way because we transitions are frozen.
-        kwargs = transition.__dict__
+        # Need to do it this way because we trajectories are frozen.
+        kwargs = trajectory.__dict__
         kwargs["done"] = new_done
-        return Transition(**kwargs)
+        return Trajectory(**kwargs)
 
-    padded_transitions: list[Transition] = jax.tree_map(lambda x: pad_array(x, length), transitions)
-    padded_transitions = [update_done_flag(transition) for transition in padded_transitions]
-    return jax.tree_map(lambda *x: jnp.concatenate(x, axis=0), *padded_transitions)
+    padded_trajectories: list[Trajectory] = jax.tree_map(lambda x: pad_array(x, length), trajectories)
+    padded_trajectories = [update_done_flag(trajectory) for trajectory in padded_trajectories]
+    return jax.tree_map(lambda *x: jnp.concatenate(x, axis=0), *padded_trajectories)
 
 
-def generate_transition_batches(
-    transitions: Transition,
+def generate_trajectory_batches(
+    trajectories: Trajectory,
     batch_size: int,
     min_batch_size: int = 2,
     min_trajectory_length: int = 3,
     group_by_length: bool = False,
     include_last_batch: bool = True,
-) -> list[Transition]:
-    """Generates batches of transitions.
+) -> list[Trajectory]:
+    """Generates batches of trajectories.
 
     Args:
-        transitions: The collected trajectories to batch.
+        trajectories: The collected trajectories to batch.
         batch_size: The size of the batches to generate.
-        min_batch_size: The minimum number of transitions to include in a batch.
-        min_trajectory_length: The minimum number of transitions in a
+        min_batch_size: The minimum number of trajectories to include in a batch.
+        min_trajectory_length: The minimum number of trajectories in a
             trajectory for it to be included in the batch.
-        group_by_length: Whether to group transitions by length, otherwise,
-            transitions are grouped randomly.
+        group_by_length: Whether to group trajectories by length, otherwise,
+            trajectories are grouped randomly.
         include_last_batch: Whether to include the last batch if it's not full.
 
     Returns:
-        An iterator over the batches of transitions.
+        An iterator over the batches of trajectories.
     """
-    transition_list = chunk_transitions(transitions)
+    trajectory_list = chunk_trajectory(trajectories)
 
     # Remove trajectories that are shorter than `min_trajectory_length`.
-    transition_list = [t for t in transition_list if t.done.shape[-1] >= min_trajectory_length]
+    trajectory_list = [t for t in trajectory_list if t.done.shape[-1] >= min_trajectory_length]
 
     if group_by_length:
-        # Sort transitions so that adjacent transitions have similar lengths.
-        transition_list.sort(key=lambda x: x.done.shape[-1])
+        # Sort trajectories so that adjacent trajectories have similar lengths.
+        trajectory_list.sort(key=lambda x: x.done.shape[-1])
 
-    # Group transitions by batch size
-    batches: list[list[Transition]] = [
-        transition_list[i : i + batch_size] for i in range(0, len(transition_list), batch_size)
+    # Group trajectories by batch size
+    batches: list[list[Trajectory]] = [
+        trajectory_list[i : i + batch_size] for i in range(0, len(trajectory_list), batch_size)
     ]
 
     # Remove batches that are smaller than `min_batch_size`.
@@ -164,4 +164,4 @@ def generate_transition_batches(
     if not include_last_batch and len(batches[-1]) < batch_size:
         batches = batches[:-1]
 
-    return [concatenate_transitions(batch) for batch in batches]
+    return [concatenate_trajectories(batch) for batch in batches]

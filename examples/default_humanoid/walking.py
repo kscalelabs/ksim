@@ -18,7 +18,7 @@ from mujoco import mjx
 
 from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import PhysicsData, PhysicsModel, Transition
+from ksim.env.data import PhysicsModel, Trajectory
 from ksim.observation import ActuatorForceObservation, Observation
 from ksim.randomization import (
     Randomization,
@@ -40,17 +40,9 @@ NUM_OUTPUTS = 21
 class DHForwardReward(Reward):
     """Incentives forward movement."""
 
-    def __call__(
-        self,
-        prev_action: Array | None,
-        physics_state: PhysicsData,
-        command: FrozenDict[str, Array],
-        action: Array,
-        next_physics_state: PhysicsData,
-        next_state_terminates: Array,
-    ) -> Array:
+    def __call__(self, trajectory: Trajectory) -> Array:
         # Take just the x velocity component
-        x_delta = -jnp.clip(next_physics_state.qvel[1], -1.0, 1.0)
+        x_delta = -jnp.clip(trajectory.qvel[..., 1], -1.0, 1.0)
         return x_delta
 
 
@@ -58,16 +50,8 @@ class DHForwardReward(Reward):
 class DHControlPenalty(Reward):
     """Legacy default humanoid control cost that penalizes squared action magnitude."""
 
-    def __call__(
-        self,
-        prev_action: Array | None,
-        physics_state: PhysicsData,
-        command: FrozenDict[str, Array],
-        action: Array,
-        next_physics_state: PhysicsData,
-        next_state_terminates: Array,
-    ) -> Array:
-        return jnp.sum(jnp.square(action))
+    def __call__(self, trajectory: Trajectory) -> Array:
+        return jnp.sum(jnp.square(trajectory.action))
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -326,35 +310,35 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_on_policy_log_probs(
         self,
         model: DefaultHumanoidModel,
-        transitions: Transition,
+        trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        log_probs, _ = transitions.aux_outputs
+        log_probs, _ = trajectories.aux_outputs
         return log_probs
 
     def get_on_policy_values(
         self,
         model: DefaultHumanoidModel,
-        transitions: Transition,
+        trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        _, values = transitions.aux_outputs
+        _, values = trajectories.aux_outputs
         return values
 
     def get_log_probs(
         self,
         model: DefaultHumanoidModel,
-        transitions: Transition,
+        trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         # Vectorize over both batch and time dimensions.
         time_par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
         batch_par_fn = jax.vmap(time_par_fn, in_axes=(None, 0, 0))
-        action_dist_btn = batch_par_fn(model, transitions.obs, transitions.command)
+        action_dist_btn = batch_par_fn(model, trajectories.obs, trajectories.command)
 
-        # Compute the log probabilities of the transition's actions according
+        # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
-        action_btn = transitions.action
+        action_btn = trajectories.action
         log_probs_btn = action_dist_btn.log_prob(action_btn)
         entropy_btn = action_dist_btn.entropy()
 
@@ -363,13 +347,13 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_values(
         self,
         model: DefaultHumanoidModel,
-        transitions: Transition,
+        trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
         # Vectorize over both batch and time dimensions.
         time_par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
         batch_par_fn = jax.vmap(time_par_fn, in_axes=(None, 0, 0))
-        values_bt1 = batch_par_fn(model, transitions.obs, transitions.command)
+        values_bt1 = batch_par_fn(model, trajectories.obs, trajectories.command)
 
         # Remove the last dimension.
         return values_bt1.squeeze(-1)

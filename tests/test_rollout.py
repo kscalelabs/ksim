@@ -148,7 +148,7 @@ def test_unroll_shapes(engine: MjxEngine, agent: ActorCriticAgent) -> None:
     rng = jax.random.PRNGKey(0)
     initial_physics_state = engine.reset(rng)
 
-    transitions, final_state, unroll_nan_detector, intermediate_data = unroll_trajectory(
+    trajectories, final_state, unroll_nan_detector, intermediate_data = unroll_trajectory(
         physics_state=initial_physics_state,
         rng=rng,
         agent=agent,
@@ -161,8 +161,8 @@ def test_unroll_shapes(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         return_intermediate_physics_data=False,
     )
 
-    assert transitions.obs["dummy_observation"].shape == (4, 1)
-    assert transitions.command["dummy_command"].shape == (4, 1)
+    assert trajectories.obs["dummy_observation"].shape == (4, 1)
+    assert trajectories.command["dummy_command"].shape == (4, 1)
     assert final_state.data.qpos.shape == (28,)
     assert intermediate_data is None
     _assert_nan_detector_is_none(unroll_nan_detector)
@@ -206,7 +206,7 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
     )
     jit_unroll = eqx.filter_jit(vmapped_unroll_trajectory)
 
-    transitions, final_state, unroll_nan_detector, _ = jit_unroll(
+    trajectories, final_state, unroll_nan_detector, _ = jit_unroll(
         initial_physics_states,
         rngs,
         agent,
@@ -219,8 +219,8 @@ def test_unroll_vmappable(engine: MjxEngine, agent: ActorCriticAgent) -> None:
         False,
     )
 
-    assert transitions.obs["dummy_observation"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
-    assert transitions.command["dummy_command"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
+    assert trajectories.obs["dummy_observation"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
+    assert trajectories.command["dummy_command"].shape == (_NUM_ENVS, _NUM_STEPS, 1)
     assert final_state.data.qpos.shape == (_NUM_ENVS, 28)
     assert jnp.unique(final_state.data.qpos[:, 0]).shape[0] == _NUM_ENVS
     _assert_nan_detector_is_none(unroll_nan_detector)
