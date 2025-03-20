@@ -664,7 +664,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     self.logger.log_histogram(key, value, namespace="➡️ train histograms")
                     self.logger.log_scalar(key, value.mean(), namespace="➡️ train")
                 else:
-                    self.logger.log_scalar(key, value, namespace="➡️ train")
+                    self.logger.log_scalar(key, value.mean(), namespace="➡️ train")
 
     def render_trajectory_video(
         self,
