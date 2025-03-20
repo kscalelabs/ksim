@@ -52,8 +52,6 @@ from ksim.viewer import MujocoViewer
 
 logger = logging.getLogger(__name__)
 
-TOTAL_REWARD_NAME = "total"
-
 
 def get_observation(
     physics_state: PhysicsState,
@@ -726,7 +724,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ("🕹️ command images", trajectories.command),
             ("🏃 action images", {"action": trajectories.action}),
             ("💀 termination images", trajectories.termination_components),
-            ("🎁 reward images", rewards),
+            ("🎁 reward images", rewards.components),
+            ("🎁 reward images", {"total": rewards.total}),
         ):
             for key, value in arr_dict.items():
                 plt.figure(figsize=self.config.plot_figsize)
@@ -892,22 +891,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state.num_valid_steps += 1
                 state.num_valid_samples += self.eval_rollout_length_steps
 
-                rng, rollout_rng = jax.random.split(rng)
-                trajectories, rewards = self._vmapped_unroll(
-                    rng=rollout_rng,
-                    physics_model=mjx_model,
-                    model=model,
-                    engine=engine,
-                    engine_constants=engine_constants,
-                    num_steps=self.eval_rollout_length_steps,
-                    num_envs=1,
-                )
-
-                trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
-                reward = jax.tree.map(lambda arr: arr[0], rewards)
+                with self.step_context("rollout"):
+                    rng, rollout_rng = jax.random.split(rng)
+                    trajectories, rewards = self._vmapped_unroll(
+                        rng=rollout_rng,
+                        physics_model=mjx_model,
+                        model=model,
+                        engine=engine,
+                        engine_constants=engine_constants,
+                        num_steps=self.eval_rollout_length_steps,
+                        num_envs=1,
+                    )
 
                 # Logs statistics from the trajectory.
                 with self.step_context("write_logs"):
+                    trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
+                    reward = jax.tree.map(lambda arr: arr[0], rewards)
+
                     self.log_single_trajectory(trajectory, commands, reward, mj_model)
                     self.log_trajectory_stats(trajectories, rewards)
                     self.log_termination_stats(trajectories, terminations)
@@ -918,8 +918,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state = self.on_step_start(state)
 
             # Samples N trajectories in parallel.
-            with xax.ContextTimer() as timer:
-                logger.debug("Rolling out trajectories")
+            with self.step_context("rollout"):
                 rng, rollout_rng = jax.random.split(rng)
                 trajectories, rewards = self._vmapped_unroll(
                     rng=rollout_rng,
@@ -930,10 +929,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     num_steps=self.rollout_length_steps,
                     num_envs=self.config.num_envs,
                 )
-                self.logger.log_scalar("rollout", timer.elapsed_time, namespace="⏳ dt")
 
             # Optimizes the model on that trajectory.
-            with xax.ContextTimer() as timer:
+            with self.step_context("update"):
                 rng, update_rng = jax.random.split(rng)
                 model, opt_state, train_metrics = self.update_model(
                     model=model,
@@ -943,7 +941,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     rewards=rewards,
                     rng=update_rng,
                 )
-            self.logger.log_scalar("update", timer.elapsed_time, namespace="⏳ dt")
 
             with self.step_context("write_logs"):
                 state.raw_phase = "train"
@@ -951,17 +948,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state.num_samples += self.rollout_length_steps * self.config.num_envs
 
                 # Logs statistics from the fpost_accumulatetrajectory.
-                with self.step_context("write_logs"):
-                    trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
-                    reward = jax.tree.map(lambda arr: arr[0], rewards)
+                trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
+                reward = jax.tree.map(lambda arr: arr[0], rewards)
 
-                    if self.config.log_train_trajectory:
-                        self.log_single_trajectory(trajectory, commands, reward, mj_model)
-                    self.log_trajectory_stats(trajectories, rewards)
-                    self.log_termination_stats(trajectories, terminations)
-                    self.log_train_metrics(train_metrics)
-                    self.log_state_timers(state)
-                    self.write_logs(state)
+                if self.config.log_train_trajectory:
+                    self.log_single_trajectory(trajectory, commands, reward, mj_model)
+                self.log_trajectory_stats(trajectories, rewards)
+                self.log_termination_stats(trajectories, terminations)
+                self.log_train_metrics(train_metrics)
+                self.log_state_timers(state)
+                self.write_logs(state)
 
             with self.step_context("on_step_end"):
                 state = self.on_step_end(state)
@@ -973,6 +969,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     opt_state=opt_state,
                     state=state,
                 )
+
+    def on_context_stop(self, step: str, elapsed_time: float) -> None:
+        super().on_context_stop(step, elapsed_time)
+
+        self.logger.log_scalar(key=step, value=elapsed_time, namespace="🔧 dt")
 
     def run_environment(
         self,
