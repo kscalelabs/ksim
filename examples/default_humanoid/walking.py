@@ -51,7 +51,7 @@ class DHControlPenalty(Reward):
     """Legacy default humanoid control cost that penalizes squared action magnitude."""
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        return jnp.sum(jnp.square(trajectory.action))
+        return jnp.sum(jnp.square(trajectory.action), axis=-1)
 
 
 class DefaultHumanoidActor(eqx.Module):

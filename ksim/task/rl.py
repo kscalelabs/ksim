@@ -73,9 +73,12 @@ def get_observation(
 def get_rewards(trajectory: Trajectory, reward_generators: Collection[Reward]) -> FrozenDict[str, Array]:
     """Get the rewards from the physics state."""
     rewards = {}
+    target_shape = trajectory.done.shape
     for reward_generator in reward_generators:
+        reward_name = reward_generator.reward_name
         reward_val = reward_generator(trajectory)
-        chex.assert_equal_shape(reward_val, trajectory.done)
+        if reward_val.shape != trajectory.done.shape:
+            raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
         rewards[reward_generator.reward_name] = reward_val
     rewards["total"] = jax.tree.reduce(jnp.add, list(rewards.values()))
     return FrozenDict(rewards)
