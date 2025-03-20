@@ -61,7 +61,6 @@ def compute_advantages_and_value_targets(
         value_targets = jnp.add(gae, values_t)
 
         # Following Brax and applying another TD step to get the value targets.
-        # TODO: Experiment with original GAE & value targets
         value_targets_shifted = jnp.concatenate([value_targets[1:], value_targets[-1:]], axis=0)
         advantages = rewards_t + decay_gamma * value_targets_shifted * mask - values_t
 
@@ -154,26 +153,22 @@ def compute_ppo_loss(
         policy_objective = policy_objective_n.mean(axis=-1)
 
         # Computes the value loss, with or without clipping.
-        value_mse = jax.lax.cond(
-            use_clipped_value_loss,
-            lambda: 0.5
-            * clipped_value_loss(
+        if use_clipped_value_loss:
+            value_mse = clipped_value_loss(
                 target_values=values,
                 values=values,
                 value_targets=value_targets,
                 clip_param=clip_param,
-            ),
-            lambda: 0.5 * (value_targets - values) ** 2,
-        )
+            )
+        else:
+            value_mse = 0.5 * (value_targets - values) ** 2
+
         value_objective = value_loss_coef * value_mse
         total_objective = policy_objective - value_objective
 
         # Adds the entropy bonus term, if provided.
-        total_objective = jax.lax.cond(
-            entropy_n is not None,
-            lambda: total_objective + entropy_coef * entropy_n.mean(axis=-1),
-            lambda: total_objective,
-        )
+        if entropy_n is not None:
+            total_objective = total_objective + entropy_coef * entropy_n.mean(axis=-1)
 
         # Maximize the objective.
         total_loss = -total_objective
@@ -349,7 +344,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
         return {
             "loss": (loss_bt.mean(), loss_bt.std()),
-            "log_probs": (log_probs_btn.mean(), log_probs_btn.std()),"
+            "log_probs": (log_probs_btn.mean(), log_probs_btn.std()),
             "entropy": (entropy_btn.mean(), entropy_btn.std()),
             "value": (values_bt.mean(), values_bt.std()),
             "value_targets": (value_targets_bt.mean(), value_targets_bt.std()),
@@ -402,9 +397,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             decay_gamma=self.config.gamma,
             gae_lambda=self.config.lam,
         )
-
-        # TODO: These do not look correct...
-        # returns_bt = compute_returns(transitions.reward, transitions.done, self.config.gamma)
 
         loss_bt = compute_ppo_loss(
             log_probs_btn=log_probs_btn,
