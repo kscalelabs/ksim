@@ -409,7 +409,7 @@ if __name__ == "__main__":
             # Update parameters. These values are very small, which is useful
             # for testing on your local machine.
             num_envs=32,
-            batch_size=8,
+            num_batches=4,
             num_passes=4,
             # Simulation parameters.
             dt=0.005,
