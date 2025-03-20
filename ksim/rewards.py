@@ -35,10 +35,10 @@ class Reward(ABC):
         name = self.__class__.__name__.lower()
         if name.lower().endswith("reward"):
             if self.scale < 0:
-                logger.warning("Reward function %s has a negative scale: %f", name, self.scale)
+                raise RuntimeError(f"Reward function {name} has a negative scale {self.scale}")
         elif name.lower().endswith("penalty"):
             if self.scale > 0:
-                logger.warning("Penalty function %s has a positive scale: %f", name, self.scale)
+                raise RuntimeError(f"Penalty function {name} has a positive scale {self.scale}")
         else:
             logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale)
 

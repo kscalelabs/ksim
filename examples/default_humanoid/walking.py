@@ -340,8 +340,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         return [
             HeightReward(scale=1.0, height_target=0.7),
             DHForwardReward(scale=0.2),
-            DHTerminationPenalty(healthy_z_lower=0.8, healthy_z_upper=4.0),
-            DHHealthyReward(healthy_z_lower=0.8, healthy_z_upper=4.0),
+            DHTerminationPenalty(scale=-0.1, healthy_z_lower=0.8, healthy_z_upper=4.0),
+            DHHealthyReward(scale=0.1, healthy_z_lower=0.8, healthy_z_upper=4.0),
             DHControlPenalty(scale=0.01),
             TerminationPenalty(scale=-1.0),
         ]
