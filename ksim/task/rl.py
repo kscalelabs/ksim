@@ -555,6 +555,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self.logger.log_histogram(key="action", value=transitions.action, namespace="action")
         for obs_key, obs_value in transitions.obs.items():
             self.logger.log_histogram(key=obs_key, value=obs_value, namespace="observation")
+        for obs_key, obs_value in transitions.command.items():
+            self.logger.log_histogram(key=obs_key, value=obs_value, namespace="command")
+        self.logger.log_histogram(key="qpos", value=transitions.qpos, namespace="state")
+        self.logger.log_histogram(key="qvel", value=transitions.qvel, namespace="state")
 
     def log_reward_stats(self, transitions: Transition, reward_generators: Collection[Reward]) -> None:
         """Log reward statistics from the trajectory or trajectories.
