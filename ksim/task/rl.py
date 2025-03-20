@@ -76,6 +76,7 @@ def get_rewards(
     trajectory: Trajectory,
     reward_generators: Collection[Reward],
     ctrl_dt: float,
+    clip_max: float | None = None,
 ) -> FrozenDict[str, Array]:
     """Get the rewards from the physics state."""
     rewards = {}
@@ -85,6 +86,8 @@ def get_rewards(
         reward_val = reward_generator(trajectory) * reward_generator.scale * ctrl_dt
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
+        if clip_max is not None:
+            reward_val = jnp.clip(reward_val, -clip_max, clip_max)
         rewards[reward_generator.reward_name] = reward_val
     rewards[TOTAL_REWARD_NAME] = jax.tree.reduce(jnp.add, list(rewards.values()))
     return FrozenDict(rewards)
@@ -95,9 +98,10 @@ def get_rewards_batch(
     trajectories: Trajectory,
     reward_generators: Collection[Reward],
     ctrl_dt: float,
+    clip_max: float | None = None,
 ) -> FrozenDict[str, Array]:
     """Get the rewards from the physics state."""
-    return jax.vmap(get_rewards, in_axes=(0, None, None))(trajectories, reward_generators, ctrl_dt)
+    return jax.vmap(get_rewards, in_axes=(0, None, None, None))(trajectories, reward_generators, ctrl_dt, clip_max)
 
 
 def get_terminations(
@@ -289,6 +293,10 @@ class RLConfig(xax.Config):
     max_action_latency: float = xax.field(
         value=0.0,
         help="The maximum latency of the action.",
+    )
+    reward_clip_max: float | None = xax.field(
+        value=None,
+        help="The maximum value of the reward.",
     )
 
 
@@ -591,9 +599,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
         if self.config.log_reward_histograms:
             # Gets the mean reward for each trajectory.
-            reward_arrs: dict[str, jnp.ndarray] = {}
+            reward_arrs: dict[str, list[jnp.ndarray]] = {}
+            traj_lens_arrs: list[jnp.ndarray] = []
             for trajectory_batch, reward_batch in zip(trajectory_batches, reward_batches):
                 traj_lens = (~trajectory_batch.done).sum(-1, dtype=trajectory_batch.action.dtype) + 1e-6
+                traj_lens_arrs.append(traj_lens)
                 for rew_name, rew_arr in reward_batch.items():
                     if rew_name not in reward_arrs:
                         reward_arrs[rew_name] = []
@@ -602,6 +612,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Logs histograms of the concatenated reward arrays.
             for rew_name, rew_arr in reward_arrs.items():
                 self.logger.log_histogram(key=rew_name, value=jnp.concatenate(rew_arr, axis=0), namespace="reward")
+
+            # Log histogram of trajectory lengths.
+            self.logger.log_histogram(key="traj_len", value=jnp.concatenate(traj_lens_arrs, axis=0), namespace="state")
 
         if self.config.log_action_histograms:
             self.logger.log_histogram(key="action", value=trajectories.action, namespace="action")
@@ -909,9 +922,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 trajectory_list.sort(key=lambda x: x.done.shape[-1])
                 short_traj = jax.tree.map(lambda arr: arr[0], trajectory_list[0])
                 long_traj = jax.tree.map(lambda arr: arr[-1], trajectory_list[-1])
-                short_rewards = get_rewards(short_traj, engine_constants.reward_generators, self.config.ctrl_dt)
-                long_rewards = get_rewards(long_traj, engine_constants.reward_generators, self.config.ctrl_dt)
-
+                short_rewards = get_rewards(
+                    short_traj,
+                    engine_constants.reward_generators,
+                    self.config.ctrl_dt,
+                    self.config.reward_clip_max,
+                )
+                long_rewards = get_rewards(
+                    long_traj,
+                    engine_constants.reward_generators,
+                    self.config.ctrl_dt,
+                    self.config.reward_clip_max,
+                )
                 # Logs statistics from the trajectory.
                 with self.step_context("write_logs"):
                     self.log_single_trajectory(short_traj, commands, short_rewards, mj_model, "short")
@@ -948,7 +970,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     include_last_batch=self.config.include_last_batch,
                 )
                 reward_batches = [
-                    get_rewards_batch(t, engine_constants.reward_generators, self.config.ctrl_dt)
+                    get_rewards_batch(
+                        t,
+                        engine_constants.reward_generators,
+                        self.config.ctrl_dt,
+                        self.config.reward_clip_max,
+                    )
                     for t in trajectory_batches
                 ]
             self.logger.log_scalar("batch", timer.elapsed_time, namespace="⏳ dt")
@@ -975,8 +1002,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 with self.step_context("write_logs"):
                     short_traj = jax.tree.map(lambda arr: arr[0], trajectory_batches[0])
                     long_traj = jax.tree.map(lambda arr: arr[-1], trajectory_batches[-1])
-                    short_rewards = get_rewards(short_traj, engine_constants.reward_generators, self.config.ctrl_dt)
-                    long_rewards = get_rewards(long_traj, engine_constants.reward_generators, self.config.ctrl_dt)
+                    short_rewards = get_rewards(
+                        short_traj,
+                        engine_constants.reward_generators,
+                        self.config.ctrl_dt,
+                        self.config.reward_clip_max,
+                    )
+                    long_rewards = get_rewards(
+                        long_traj,
+                        engine_constants.reward_generators,
+                        self.config.ctrl_dt,
+                        self.config.reward_clip_max,
+                    )
                     if self.config.log_train_trajectory:
                         self.log_single_trajectory(short_traj, commands, short_rewards, mj_model, "short")
                         self.log_single_trajectory(long_traj, commands, long_rewards, mj_model, "long")

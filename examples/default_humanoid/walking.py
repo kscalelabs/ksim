@@ -276,7 +276,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         return [
             DHForwardReward(scale=0.2),
             DHControlPenalty(scale=-0.01),
-            TerminationPenalty(scale=-1.0),
+            TerminationPenalty(scale=-100.0),
             JointVelocityPenalty(scale=-0.01),
             # These seem necessary to prevent some physics artifacts.
             LinearVelocityZPenalty(scale=-0.001),
@@ -422,5 +422,7 @@ if __name__ == "__main__":
             lam=0.95,
             entropy_coef=0.001,
             clip_param=0.3,
+            # TODO: Remove this after figuring out Mujoco physics issues.
+            reward_clip_max=10.0,
         ),
     )
