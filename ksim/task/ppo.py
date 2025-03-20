@@ -468,6 +468,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return new_model, new_opt_state, FrozenDict(metrics)
 
+    @eqx.filter_jit
     def _update_model_on_batches(
         self,
         model: PyTree,
