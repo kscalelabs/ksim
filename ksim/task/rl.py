@@ -602,8 +602,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if self.config.log_trajectory_length:
             num_terms = trajectories.done.sum(-1, dtype=trajectories.action.dtype) + 1
             traj_lens = (trajectories.done.shape[-1] / num_terms) * self.config.ctrl_dt
-            self.logger.log_histogram(key="lengths", value=traj_lens, namespace="💀 termination histograms")
-            self.logger.log_scalar(key="lengths", value=traj_lens.mean(), namespace="💀 termination")
+            self.logger.log_histogram(key="traj_len_seconds", value=traj_lens, namespace="💀 termination histograms")
+            self.logger.log_scalar(key="traj_len_seconds", value=traj_lens.mean(), namespace="💀 termination")
 
         if self.config.log_actions:
             self.logger.log_histogram(key="action", value=trajectories.action, namespace="🏃 action histograms")

@@ -369,7 +369,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         slen = (~trajectories.done).sum(dtype=loss_t.dtype) + 1e-6
         return {
             "loss": loss_t.sum() / slen,
-            "traj_len_seconds": slen * self.config.ctrl_dt,
             "log_probs": log_probs_tn.sum(0).flatten() / slen,
             "entropy": entropy_tn.sum(0).flatten() / slen,
             "value": values_t.sum() / slen,
