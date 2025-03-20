@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import jax
 import mujoco
 from flax.core import FrozenDict
-from jaxtyping import Array
+from jaxtyping import Array, PyTree
 from mujoco import mjx
 
 PhysicsData = mjx.Data | mujoco.MjData
@@ -23,15 +23,20 @@ class PhysicsState:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class Transition:
+class Trajectory:
     qpos: Array
     qvel: Array
     obs: FrozenDict[str, Array]
     command: FrozenDict[str, Array]
     action: Array
-    reward: Array
     done: Array
     timestep: Array
-
     termination_components: FrozenDict[str, Array]
-    reward_components: FrozenDict[str, Array]
+    aux_outputs: PyTree | None
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Rewards:
+    total: Array
+    components: FrozenDict[str, Array]

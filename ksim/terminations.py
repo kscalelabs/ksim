@@ -12,7 +12,7 @@ import xax
 from jaxtyping import Array
 
 from ksim.env.data import PhysicsData, PhysicsModel
-from ksim.utils.named_access import (
+from ksim.utils.mujoco import (
     get_geom_data_idx_by_name,
     get_sensor_data_idxs_by_name,
 )
@@ -198,12 +198,26 @@ class IllegalContactTermination(Termination):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class UnhealthyTermination(Termination):
+class BadZTermination(Termination):
     """Terminates the episode if the robot is unhealthy."""
 
-    unhealthy_z_lower: float = attrs.field(default=1.0)
-    unhealthy_z_upper: float = attrs.field(default=2.0)
+    unhealthy_z_lower: float = attrs.field()
+    unhealthy_z_upper: float = attrs.field()
 
     def __call__(self, state: PhysicsData) -> Array:
         height = state.qpos[2]
         return (height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FastAccelerationTermination(Termination):
+    """Terminates the episode if the robot is moving too fast."""
+
+    # Good default value for Mujoco physics errors.
+    max_ang_vel: float = attrs.field(default=100.0)
+    max_lin_vel: float = attrs.field(default=100.0)
+
+    def __call__(self, state: PhysicsData) -> Array:
+        lin_vel = state.cvel[..., :3]
+        ang_vel = state.cvel[..., 3:]
+        return (lin_vel > self.max_lin_vel).any() | (ang_vel > self.max_ang_vel).any()

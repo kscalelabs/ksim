@@ -26,7 +26,11 @@ refs/
 
 # Training artifacts.
 *.mp4
+*.gif
 run_*/
+
+# KOS-Sim
+.kos-sim/
 
 # Other caching.
 .jaxcache/

@@ -9,7 +9,7 @@ from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
 
 from ksim.env.data import PhysicsData, PhysicsModel
-from ksim.utils.named_access import get_ctrl_data_idx_by_name
+from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
 logger = logging.getLogger(__name__)
 

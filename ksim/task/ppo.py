@@ -1,9 +1,10 @@
 """Defines a standard task interface for training a policy."""
 
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
+import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -12,38 +13,8 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.data import Transition
+from ksim.env.data import Rewards, Trajectory
 from ksim.task.rl import RLConfig, RLTask
-
-
-@jax.tree_util.register_dataclass
-@dataclass
-class PPOMetrics:
-    initial_action_log_probs: Array
-    initial_values: Array
-    advantages: Array
-    value_targets: Array
-    returns: Array
-
-
-def compute_returns(rewards: Array, dones: Array, gamma: float) -> Array:
-    """Calculate returns from rewards and dones."""
-
-    # Calculating returns separately using gamma.
-    def scan_fn(returns_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
-        """Scanning this computes the returns in reverse order."""
-        reward, mask = x
-        returns = reward + gamma * mask * returns_t_plus_1
-        return returns, returns
-
-    _, returns = jax.lax.scan(
-        scan_fn,
-        jnp.zeros_like(rewards[-1]),
-        (rewards, dones),
-        reverse=True,
-    )
-
-    return returns
 
 
 def get_deltas(
@@ -54,24 +25,20 @@ def get_deltas(
     decay_gamma: float,
 ) -> Array:
     """Computes the TD residuals for a rollout."""
-    deltas = rewards + decay_gamma * values_shifted * termination_mask - values
-    return deltas
+    return rewards + decay_gamma * values_shifted * termination_mask - values
 
 
+@xax.jit(static_argnames=["decay_gamma", "gae_lambda", "normalize_advantages", "use_two_step_td_target"])
 def compute_advantages_and_value_targets(
-    values: Array,
-    rewards: Array,
-    dones: Array,
+    values_t: Array,
+    rewards_t: Array,
+    dones_t: Array,
     decay_gamma: float,
     gae_lambda: float,
+    normalize_advantages: bool = True,
+    use_two_step_td_target: bool = False,
 ) -> tuple[Array, Array]:
-    """Computes the advantages using Generalized Advantage Estimation (GAE).
-
-    Note that some of this logic is NOT stock PPO, using Brax's PPO
-    implementation as a reference.
-
-    Values, rewards, dones must have shape of (time, *batch_dims, ...).
-    """
+    """Computes the advantages using Generalized Advantage Estimation (GAE)."""
 
     def scan_fn(adv_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
         """Scanning this computes the advantages in reverse order."""
@@ -79,23 +46,35 @@ def compute_advantages_and_value_targets(
         adv_t = delta + decay_gamma * gae_lambda * mask * adv_t_plus_1
         return adv_t, adv_t
 
-    # We use the last value as the bootstrap value (although it is not fully correct)
-    values_shifted = jnp.concatenate([values[1:], jnp.expand_dims(values[-1], 0)], axis=0)
-    mask = jnp.where(dones, 0.0, 1.0)
+    def compute_gae_and_targets_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> tuple[Array, Array]:
+        # Use the last value as the bootstrap value.
+        values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
+        mask_t = jnp.where(dones_t, 0.0, 1.0)
+        deltas_t = get_deltas(rewards_t, values_t, values_shifted_t, mask_t, decay_gamma)
 
-    deltas = get_deltas(rewards, values, values_shifted, mask, decay_gamma)
+        # Compute the GAE.
+        _, gae_t = jax.lax.scan(scan_fn, jnp.zeros_like(deltas_t[-1]), (deltas_t, mask_t), reverse=True)
+        value_targets_t = gae_t + values_t
 
-    _, gae = jax.lax.scan(scan_fn, jnp.zeros_like(deltas[-1]), (deltas, mask), reverse=True)
-    value_targets = jnp.add(gae, values)
+        if not use_two_step_td_target:
+            return gae_t, value_targets_t
 
-    # Following Brax and applying another TD step to get the value targets.
-    # TODO: Experiment with original GAE & value targets
-    value_targets_shifted = jnp.concatenate([value_targets[1:], value_targets[-1:]], axis=0)
-    advantages = rewards + decay_gamma * value_targets_shifted * mask - values
+        # Apply another TD step to get the value targets.
+        value_targets_shifted_t = jnp.concatenate([value_targets_t[1:], value_targets_t[-1:]], axis=0)
+        advantages_t = rewards_t + decay_gamma * value_targets_shifted_t * mask_t - values_t
 
-    return advantages, value_targets
+        return advantages_t, value_targets_t
+
+    # Compute the advantages and value targets for each sample in the batch.
+    advantages_t, value_targets_t = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t)
+
+    if normalize_advantages:
+        advantages_t = advantages_t / (advantages_t.std(axis=-1, keepdims=True) + 1e-6)
+
+    return advantages_t, value_targets_t
 
 
+@xax.jit(static_argnames=["clip_param"])
 def clipped_value_loss(
     target_values: Array,
     values: Array,
@@ -106,112 +85,138 @@ def clipped_value_loss(
     value_clipped = target_values + (values - target_values).clip(-clip_param, clip_param)
     clipped_error = value_clipped - value_targets
     error = values - value_targets
-    return jnp.maximum(error**2, clipped_error**2).mean()
+    return jnp.maximum(error**2, clipped_error**2)
 
 
+@xax.jit(static_argnames=["clip_param", "value_loss_coef", "entropy_coef", "log_clip_value", "use_clipped_value_loss"])
 def compute_ppo_loss(
-    model: PyTree,
-    transitions: Transition,
-    ppo_metrics: PPOMetrics,
-    rng: PRNGKeyArray,
+    log_probs_tn: Array,
+    values_t: Array,
+    on_policy_log_probs_tn: Array,
+    on_policy_values_t: Array,
+    advantages_t: Array,
+    value_targets_t: Array,
+    dones_t: Array,
     *,
-    normalize_advantage: bool = True,
-    normalize_advantage_in_minibatch: bool = False,
-    eps: float = 1e-6,
+    entropy_tn: Array | None = None,
     clip_param: float = 0.2,
     value_loss_coef: float = 0.5,
     entropy_coef: float = 0.008,
+    log_clip_value: float = 10.0,
     use_clipped_value_loss: bool = True,
-) -> tuple[Array, dict[str, Array]]:
-    """Compute the PPO loss.
+) -> Array:
+    """Compute PPO loss.
 
-    Note: minibatches will be shape: (time, env, ...). Depending on the
-    sampling function, these may be contiguous along the time dim.
+    Args:
+        log_probs_tn: The log probabilities of the actions, with shape (T, *A).
+        values_t: The state-value estimates, with shape (T,).
+        on_policy_log_probs_tn: The original policy's log probabilities of the
+            actions, with shape (T, *A).
+        on_policy_values_t: The original policy's values of the actions, with
+            shape (T,).
+        advantages_t: The advantages, with shape (T,).
+        value_targets_t: The value targets, with shape (T,).
+        dones_t: The termination mask, with shape (T,).
+        entropy_tn: The entropy of the action distribution, with shape (T, *A).
+        clip_param: The clip parameter for PPO.
+        value_loss_coef: The value loss coefficient for PPO.
+        entropy_coef: The entropy coefficient for PPO.
+        log_clip_value: The log clip value for PPO, for numerical stability.
+        use_clipped_value_loss: Whether to use clipped value loss.
+
+    Returns:
+        The PPO loss, with shape (T,).
     """
-    # get the log probs of the current model
-    prediction = jax.vmap(model.actor_model.batched_forward_across_time, in_axes=(0, 0))(
-        transitions.obs, transitions.command
-    )  # TODO: maybe assume it'll be BT, vmap this... this will break otherwise...
-    values = jax.vmap(model.critic_model.batched_forward_across_time, in_axes=(0, 0))(
-        transitions.obs, transitions.command
-    )
-    values = values.squeeze(axis=-1)
-    log_probs_per_action = model.action_distribution.log_prob(prediction, transitions.action)
-    log_probs = jnp.sum(log_probs_per_action, axis=-1)
-
-    log_prob_diff = log_probs - ppo_metrics.initial_action_log_probs
-    ratio = jnp.exp(log_prob_diff)
-
-    # get the state-value estimates
-    advantages = ppo_metrics.advantages
-    value_targets = ppo_metrics.value_targets
-
-    # Andrychowicz (2021) did not find any benefit in minibatch normalization.
-    if normalize_advantage and normalize_advantage_in_minibatch:
-        advantages = (advantages - advantages.mean()) / (advantages.std() + eps)
-
-    # Policy loss, with clipping
-    clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
-    policy_objective = jnp.mean(
-        jnp.minimum(
-            ratio * advantages,
-            clipped_ratio * advantages,
-        )
+    chex.assert_equal_shape_prefix(
+        [
+            log_probs_tn,
+            values_t,
+            on_policy_log_probs_tn,
+            on_policy_values_t,
+            advantages_t,
+            value_targets_t,
+            dones_t,
+        ],
+        prefix_len=1,
     )
 
-    # value loss term
-    value_mse = jax.lax.cond(
-        use_clipped_value_loss,
-        lambda: 0.5
-        * clipped_value_loss(
-            target_values=ppo_metrics.initial_values,
-            values=values,
-            value_targets=value_targets,
-            clip_param=clip_param,
-        ),
-        lambda: 0.5 * jnp.mean((value_targets - values) ** 2),
+    def compute_loss_for_sample(
+        log_probs_n: Array,
+        values: Array,
+        on_policy_log_probs_n: Array,
+        on_policy_values: Array,
+        advantages: Array,
+        value_targets: Array,
+        dones: Array,
+        entropy_n: Array | None,
+    ) -> Array:
+        # Preventing underflow / overflow in calculating the ratio.
+        log_ratio = jnp.sum(log_probs_n - on_policy_log_probs_n, axis=-1)
+        ratio = jnp.exp(jnp.clip(log_ratio, -log_clip_value, log_clip_value))
+        clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
+        surrogate_1 = ratio * advantages
+        surrogate_2 = clipped_ratio * advantages
+        policy_objective = jnp.minimum(surrogate_1, surrogate_2)
+
+        # Computes the value loss, with or without clipping.
+        if use_clipped_value_loss:
+            value_mse = 0.5 * clipped_value_loss(
+                target_values=on_policy_values,
+                values=values,
+                value_targets=value_targets,
+                clip_param=clip_param,
+            )
+        else:
+            value_mse = 0.5 * (value_targets - values) ** 2
+
+        value_objective = value_loss_coef * value_mse
+        total_objective = policy_objective - value_objective
+
+        # Adds the entropy bonus term, if provided.
+        if entropy_n is not None:
+            total_objective = total_objective + entropy_coef * entropy_n.mean(axis=-1)
+
+        # Maximize the objective.
+        total_loss = -total_objective
+
+        # Zero out the loss for terminated trajectories.
+        total_loss = jnp.where(dones, 0.0, total_loss)
+
+        return total_loss
+
+    par_fn = jax.vmap(compute_loss_for_sample, in_axes=0)
+
+    # Computes the vectorized loss.
+    total_loss_t = par_fn(
+        log_probs_tn,
+        values_t,
+        on_policy_log_probs_tn,
+        on_policy_values_t,
+        advantages_t,
+        value_targets_t,
+        dones_t,
+        entropy_tn,
     )
-    value_objective = value_loss_coef * value_mse
 
-    # Entropy bonus term.
-    entropies = model.action_distribution.entropy(prediction, rng)
-    entropy_objective = entropy_coef * jnp.mean(entropies)
-
-    total_objective = policy_objective - value_objective + entropy_objective
-    total_loss = -total_objective
-
-    metrics_to_log: dict[str, Array] = {
-        "policy_objective": policy_objective,
-        "value_objective": value_objective,
-        "entropy_objective": entropy_objective,
-        "total_objective": total_objective,
-        "ratio_mean": jnp.mean(ratio),
-        "ratio_std": jnp.std(ratio),
-        "ratio_max": jnp.max(ratio),
-        "ratio_min": jnp.min(ratio),
-        "log_prob_diff_mean": jnp.mean(log_prob_diff),
-        "advantage_norm_mean": jnp.mean(ppo_metrics.advantages),
-        "action_mean": jnp.mean(transitions.action),
-        "action_std": jnp.std(transitions.action),
-        "action_max": jnp.max(transitions.action),
-        "action_min": jnp.min(transitions.action),
-        "prediction_mean": jnp.mean(prediction),
-        "prediction_std": jnp.std(prediction),
-        "log_prob_mean": jnp.mean(log_probs),
-        "log_prob_max": jnp.max(log_probs),
-        "log_prob_min": jnp.min(log_probs),
-        "values_std": jnp.std(values),
-        "values_mean": jnp.mean(values),
-        "obs_nans_ratio": xax.compute_nan_ratio(transitions.obs),
-        "action_nans_ratio": xax.compute_nan_ratio(transitions.action),
-    }
-
-    return total_loss, metrics_to_log
+    return total_loss_t
 
 
 @jax.tree_util.register_dataclass
 @dataclass
 class PPOConfig(RLConfig):
+    # Batching parameters.
+    num_passes: int = xax.field(
+        value=1,
+        help="The number of update passes over the set of trajectories",
+    )
+
+    # Gradient parameters.
+    global_grad_clip: float = xax.field(
+        value=10.0,
+        help="The maximum gradient norm to clip to.",
+    )
+
+    # PPO parameters.
     clip_param: float = xax.field(
         value=0.2,
         help="Clipping parameter for PPO, see Schulman et al. (2017)",
@@ -228,6 +233,10 @@ class PPOConfig(RLConfig):
         value=0.008,
         help="Entropy coefficient for PPO.",
     )
+    log_clip_value: float = xax.field(
+        value=10.0,
+        help="The log clip value for PPO, for numerical stability.",
+    )
     gamma: float = xax.field(
         value=0.99,
         help="Discount factor for PPO",
@@ -236,45 +245,13 @@ class PPOConfig(RLConfig):
         value=0.95,
         help="Lambda for GAE: high = more bias; low = more variance",
     )
-    eps: float = xax.field(
-        value=1e-6,
-        help="Small epsilon value to avoid division by zero.",
-    )
-    learning_rate: float = xax.field(
-        value=1e-4,
-        help="Learning rate for PPO.",
-    )
-    max_grad_norm: float = xax.field(
-        value=0.5,
-        help="Maximum gradient norm for clipping.",
-    )
-    scale_rewards: bool = xax.field(
-        value=False,
-        help="Whether to scale rewards, see Engstrom, Ilyas, et al. (2020).",
-    )
-    normalize_advantage: bool = xax.field(
+    normalize_advantages: bool = xax.field(
         value=True,
-        help="Whether to normalize advantages.",
+        help="Whether to normalize the advantages.",
     )
-    normalize_advantage_in_minibatch: bool = xax.field(
+    use_two_step_td_target: bool = xax.field(
         value=False,
-        help="Whether to normalize advantages at the minibatch level as per OpenAI baselines.",
-    )
-    reward_scaling_alpha: float = xax.field(
-        value=0.0003,
-        help="Rate at which to update reward scaling online as per Hessel, Soyer, et al. (2018).",
-    )
-    obs_norm_alpha: float = xax.field(
-        value=0.0003,
-        help="Rate at which to update observation norm stats, Andrychowicz (2021) and Duan (2016).",
-    )
-    pretrained: str | None = xax.field(
-        value=None,
-        help="The path to a pretrained model to load.",
-    )
-    checkpoint_num: int | None = xax.field(
-        value=None,
-        help="The checkpoint number to load. Otherwise the latest checkpoint is loaded.",
+        help="Whether to use two-step TD targets.",
     )
 
 
@@ -284,133 +261,369 @@ Config = TypeVar("Config", bound=PPOConfig)
 class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
 
-    def get_optimizer(self) -> optax.GradientTransformation:
-        """Builds the optimizer.
+    @abstractmethod
+    def get_on_policy_log_probs(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> Array:
+        """Gets the initial log probabilities of the given trajectories.
 
-        This provides a reasonable default optimizer for training PPO models,
-        but can be overridden by subclasses who want to do something different.
+        This function returns the log probabilities of the sampled actions,
+        according to the original policy that was used to sample the actions.
+        One way to implement this is to compute the log probabilities when
+        sampling the actions and store them in the `aux_outputs` field.
+
+        Args:
+            model: The user-provided model.
+            trajectories: The batch of trajectories to get probabilities for.
+            rng: A random seed.
+
+        Returns:
+            The log probabilities of the given actions, with shape (B, T, *A).
         """
-        return optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            optax.adam(self.config.learning_rate),
-        )
 
-    @eqx.filter_jit
-    def get_rollout_time_stats(self, transitions: Transition, model: PyTree) -> PPOMetrics:
-        """Calculating advantages and returns for a rollout."""
-        prediction = jax.vmap(model.actor_model.batched_forward_across_time, in_axes=(0, 0))(
-            transitions.obs, transitions.command
-        )
-        initial_values = jax.vmap(model.critic_model.batched_forward_across_time, in_axes=(0, 0))(
-            transitions.obs, transitions.command
-        )
-        initial_values = initial_values.squeeze(axis=-1)
+    @abstractmethod
+    def get_on_policy_values(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> Array:
+        """Gets the initial values of the given trajectories.
 
-        initial_action_log_probs_per_action = model.action_distribution.log_prob(
-            parameters=prediction,
-            actions=transitions.action,
-        )
-        initial_action_log_probs = jnp.sum(initial_action_log_probs_per_action, axis=-1)
+        This function returns the values of the sampled actions, according to
+        the original policy that was used to sample the actions.
 
-        advantages, value_targets = compute_advantages_and_value_targets(
-            values=initial_values,
-            rewards=transitions.reward,
-            dones=transitions.done,
-            decay_gamma=self.config.gamma,
-            gae_lambda=self.config.lam,
-        )
+        Args:
+            model: The user-provided model.
+            trajectories: The batch of trajectories to get probabilities for.
+            rng: A random seed.
 
-        # we decouple the computation of returns from the value targets.
-        returns = compute_returns(
-            rewards=transitions.reward,
-            dones=transitions.done,
-            gamma=self.config.gamma,
-        )
+        Returns:
+            The values of the given actions, with shape (B, T).
+        """
 
-        # normalizing at the trajectory dataset level
-        if self.config.normalize_advantage and not self.config.normalize_advantage_in_minibatch:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + self.config.eps)
+    @abstractmethod
+    def get_log_probs(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> tuple[Array, Array | None]:
+        """Gets the log probabilities of the given trajectories.
 
-        return PPOMetrics(
-            initial_action_log_probs=jax.lax.stop_gradient(initial_action_log_probs),
-            initial_values=jax.lax.stop_gradient(initial_values),
-            advantages=jax.lax.stop_gradient(advantages),
-            value_targets=jax.lax.stop_gradient(value_targets),
-            returns=jax.lax.stop_gradient(returns),
-        )
+        This function operates on the entire batch of actions, observations,
+        and commands, so users who implement it should take care to vectorize
+        over the relevant dimensions.
 
-    def loss_metrics_grads(
+        We can also pass an additional entropy term, which is used to add an
+        entropy bonus term to the loss function to encourage exploration.
+
+        Args:
+            model: The user-provided model.
+            trajectories: The batch of trajectories to get probabilities for.
+            rng: A random seed.
+
+        Returns:
+            The log probabilites of the given actions, with shape (B, T, *A),
+            and the entropy of the action distribution, with shape (B, T, *A),
+            or None if we do not want to use the entropy bonus term.
+        """
+
+    @abstractmethod
+    def get_values(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> Array:
+        """Gets the state-value estimates for the given trajectories.
+
+        This is usually provided by a critic model.
+
+        This function operates on the entire batch of actions, observations,
+        and commands, so users who implement it should take care to vectorize
+        over the relevant dimensions.
+
+        Args:
+            model: The user-provided model.
+            trajectories: The batch of trajectories estimates for.
+            rng: A random seed.
+
+        Returns:
+            The state-value estimates for the given trajectories, with shape (B, T).
+        """
+
+    def get_ppo_metrics(
         self,
-        model: PyTree,
-        transitions: Transition,
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, dict[str, Array], PyTree]:
-        """Value_and_grad computation with metrics."""
+        trajectories: Trajectory,
+        loss_t: Array,
+        on_policy_log_probs_tn: Array,
+        log_probs_tn: Array,
+        entropy_tn: Array,
+        values_t: Array,
+        value_targets_t: Array,
+        advantages_t: Array,
+    ) -> dict[str, Array]:
+        """Gets the metrics to be logged.
 
-        def loss_fn(model: PyTree) -> tuple[Array, dict[str, Array]]:
-            """Model is a PyTree and can be optimized via optax."""
-            rollout_time_stats = minibatch.rollout_time_stats
-            assert isinstance(rollout_time_stats, PPORolloutTimeStats)
-            return compute_ppo_loss(
-                model=model,
-                transitions=minibatch.transitions,
-                rollout_time_stats=rollout_time_stats,
-                rng=rng,
-                normalize_advantage=self.config.normalize_advantage,
-                normalize_advantage_in_minibatch=self.config.normalize_advantage_in_minibatch,
-                eps=self.config.eps,
+        If the metric is a scalar, it will be logged as a scalar. If the
+        metric is a tuple, it is assumed to be a distribution in (mean, std)
+        format and will be logged as a distribution.
+
+        Args:
+            trajectories: The batch of trajectories to get metrics for.
+            loss_t: The PPO loss value.
+            on_policy_log_probs_tn: The log probabilities of the actions, with shape (T, *A).
+            log_probs_tn: The log probabilities of the actions, with shape (T, *A).
+            entropy_tn: The entropy of the action distribution, with shape (T, *A).
+            values_t: The state-value estimates, with shape (T,).
+            value_targets_t: The value targets, with shape (T,).
+            advantages_t: The advantages, with shape (T,).
+
+        Returns:
+            A dictionary of metrics to be logged.
+        """
+        slen = (~trajectories.done).sum(dtype=loss_t.dtype) + 1e-6
+        return {
+            "loss": loss_t.sum() / slen,
+            "log_probs": log_probs_tn.sum(0).flatten() / slen,
+            "entropy": entropy_tn.sum(0).flatten() / slen,
+            "value": values_t.sum() / slen,
+            "value_targets": value_targets_t.sum() / slen,
+            "advantages": advantages_t.sum() / slen,
+        }
+
+    @xax.jit(static_argnames=["self", "model_static"])
+    def get_loss_and_metrics(
+        self,
+        model_arr: PyTree,
+        model_static: PyTree,
+        trajectories: Trajectory,
+        rewards: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, FrozenDict[str, Array]]:
+        """Computes the PPO loss and additional metrics.
+
+        Args:
+            model_arr: The mutable part of the model to optimize.
+            model_static: The static part of the model to optimize.
+            trajectories: The batch of trajectories to compute the loss and metrics for.
+            rewards: The rewards for the trajectories.
+            rng: A random seed.
+
+        Returns:
+            A tuple containing the loss value as a scalar, and a dictionary of
+            metrics to log.
+        """
+        model = eqx.combine(model_arr, model_static)
+
+        def loss_and_metrics_fn(
+            model: PyTree,
+            trajectories: Trajectory,
+            rewards: Array,
+            rng: PRNGKeyArray,
+        ) -> tuple[Array, FrozenDict[str, Array]]:
+            rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 5)
+
+            on_policy_log_probs_tn = jax.lax.stop_gradient(self.get_on_policy_log_probs(model, trajectories, rng1))
+            on_policy_values_t = jax.lax.stop_gradient(self.get_on_policy_values(model, trajectories, rng2))
+            log_probs_tn, entropy_tn = self.get_log_probs(model, trajectories, rng3)
+            values_t = self.get_values(model, trajectories, rng4)
+
+            advantages_t, value_targets_t = compute_advantages_and_value_targets(
+                values_t=jax.lax.stop_gradient(values_t),
+                rewards_t=rewards,
+                dones_t=trajectories.done,
+                decay_gamma=self.config.gamma,
+                gae_lambda=self.config.lam,
+                normalize_advantages=self.config.normalize_advantages,
+                use_two_step_td_target=self.config.use_two_step_td_target,
+            )
+
+            loss_t = compute_ppo_loss(
+                log_probs_tn=log_probs_tn,
+                values_t=values_t,
+                on_policy_log_probs_tn=on_policy_log_probs_tn,
+                on_policy_values_t=on_policy_values_t,
+                advantages_t=advantages_t,
+                value_targets_t=value_targets_t,
+                dones_t=trajectories.done,
+                entropy_tn=entropy_tn,
                 clip_param=self.config.clip_param,
                 value_loss_coef=self.config.value_loss_coef,
                 entropy_coef=self.config.entropy_coef,
+                log_clip_value=self.config.log_clip_value,
                 use_clipped_value_loss=self.config.use_clipped_value_loss,
             )
 
-        # TODO: let's own our own debuggable filter value and grad
-        (loss_val, metrics), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
-        return loss_val, metrics, grads
+            metrics = self.get_ppo_metrics(
+                trajectories=trajectories,
+                loss_t=loss_t,
+                on_policy_log_probs_tn=on_policy_log_probs_tn,
+                log_probs_tn=log_probs_tn,
+                entropy_tn=entropy_tn,
+                values_t=values_t,
+                value_targets_t=value_targets_t,
+                advantages_t=advantages_t,
+            )
 
-    def _single_step(
+            # Mean over all non-masked trajectories.
+            num_valid = jnp.sum(~trajectories.done)
+            loss = loss_t.sum() / (num_valid + 1e-6)
+
+            return loss, metrics
+
+        # Gets the loss and metrics for each trajectory in the batch.
+        rngs = jax.random.split(rng, rewards.shape[0])
+        par_fn = jax.vmap(loss_and_metrics_fn, in_axes=(None, 0, 0, 0))
+        loss, metrics = par_fn(model, trajectories, rewards, rngs)
+
+        return loss.mean(), metrics
+
+    @xax.jit(static_argnames=["self", "model_static"])
+    def _get_loss_metrics_and_grads(
         self,
-        model: PyTree,
+        model_arr: PyTree,
+        model_static: PyTree,
+        trajectories: Trajectory,
+        rewards: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[dict[str, Array], PyTree]:
+        loss_fn = jax.grad(self.get_loss_and_metrics, argnums=0, has_aux=True)
+        loss_fn = xax.jit(static_argnums=[1])(loss_fn)
+        grads, metrics = loss_fn(model_arr, model_static, trajectories, rewards, rng)
+        return metrics, grads
+
+    @xax.jit(static_argnames=["self", "optimizer"])
+    def _update_model(
+        self,
+        model_arr: PyTree,
+        grads: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        transitions: Transition,
+    ) -> tuple[PyTree, optax.OptState, dict[str, Array]]:
+        grad_norm = optax.global_norm(grads)
+        grad_metrics = {"grad_norm": grad_norm}
+
+        def apply(grads: PyTree, grad_norm: Array) -> tuple[PyTree, optax.OptState]:
+            # Clip the global gradient norm to some desired range.
+            grad_factor = self.config.global_grad_clip / jnp.maximum(grad_norm, 1e-6)
+            grads = jax.tree.map(lambda x: x * grad_factor, grads)
+
+            # Apply the gradient updates.
+            updates, new_opt_state = optimizer.update(grads, opt_state, model_arr)  # type: ignore[operator]
+            new_model_arr = eqx.apply_updates(model_arr, updates)
+            return new_model_arr, new_opt_state
+
+        # Don't apply updates if the gradient is NaN or Inf.
+        new_model_arr, new_opt_state = jax.lax.cond(
+            jnp.isnan(grad_norm) | jnp.isinf(grad_norm),
+            lambda *_: (model_arr, opt_state),
+            apply,
+            grads,
+            grad_norm,
+        )
+
+        return new_model_arr, new_opt_state, grad_metrics
+
+    @xax.jit(static_argnames=["self", "model_static", "optimizer"])
+    def _single_step(
+        self,
+        model_arr: PyTree,
+        model_static: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        trajectories: Trajectory,
+        rewards: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
-        loss_val, metrics, grads = self.loss_metrics_grads(
-            model=model,
-            transitions=transitions,
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+        ppo_metrics, grads = self._get_loss_metrics_and_grads(
+            model_arr=model_arr,
+            model_static=model_static,
+            trajectories=trajectories,
+            rewards=rewards,
             rng=rng,
         )
 
-        # Apply the gradient updates to the model.
-        updates, new_opt_state = optimizer.update(grads, opt_state, model)  # type: ignore[operator]
-        new_model = eqx.apply_updates(model, updates)
+        new_model_arr, new_opt_state, grad_metrics = self._update_model(
+            model_arr=model_arr,
+            grads=grads,
+            optimizer=optimizer,
+            opt_state=opt_state,
+        )
 
-        # Add global gradient norm and loss to the metrics, to monitor training.
-        grad_norm = optax.global_norm(grads)
-        assert isinstance(grad_norm, Array)
-        metrics["loss"] = loss_val
-        metrics["grad_norm"] = grad_norm
+        return new_model_arr, new_opt_state, FrozenDict(ppo_metrics | grad_metrics)
 
-        return new_model, new_opt_state, loss_val, FrozenDict(metrics)
-
+    @xax.jit(static_argnames=["self", "model_static", "optimizer"])
     def update_model(
         self,
-        model: PyTree,
+        model_arr: PyTree,
+        model_static: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
-        transitions: Transition,
+        trajectories: Trajectory,
+        rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Array, FrozenDict[str, Array]]:
-        """Returns the updated parameters, optimizer state, loss value, and metrics."""
-        # return self._single_step(
-        #     model=model,
-        #     optimizer=optimizer,
-        #     opt_state=opt_state,
-        #     transitions=transitions,
-        #     rng=rng,
-        # )
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+        """Runs PPO updates on a given set of trajectory batches.
 
-        # TODO: Implement this.
-        return model, opt_state, 0.0, FrozenDict({})
+        Args:
+            model_arr: The mutable part of the model to update.
+            model_static: The static part of the model to update.
+            optimizer: The optimizer to use.
+            opt_state: The optimizer state.
+            trajectories: The trajectories to update the model on.
+            rewards: The rewards for the trajectories.
+            rng: A random seed.
+
+        Returns:
+            A tuple containing the updated parameters, optimizer state, and metrics.
+        """
+
+        # Loops over the trajectory batches and applies gradient updates.
+        def scan_fn(
+            carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
+            xt: Array,
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+            model_arr, opt_state, rng = carry
+            rng, batch_rng = jax.random.split(rng)
+
+            # Gets the current batch of trajectories and rewards.
+            trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
+            reward_batch = rewards.total[xt]
+
+            model_arr, opt_state, metrics = self._single_step(
+                model_arr=model_arr,
+                model_static=model_static,
+                optimizer=optimizer,
+                opt_state=opt_state,
+                trajectories=trajectory_batch,
+                rewards=reward_batch,
+                rng=batch_rng,
+            )
+
+            return (model_arr, opt_state, rng), metrics
+
+        # Applines N steps of gradient updates.
+        def batch_scan_fn(
+            carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
+            _: None,
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+            arr, opt_state, rng = carry
+
+            # Shuffling causes a strange kernel caching issue on GPUs.
+            # rng, indices_rng = jax.random.split(rng)
+            # indices = jax.random.permutation(indices_rng, trajectories.done.shape[0])
+            indices = jnp.arange(trajectories.done.shape[0])
+
+            indices = indices.reshape(self.config.num_batches, self.batch_size)
+            carry = (arr, opt_state, rng)
+
+            carry, metrics = jax.lax.scan(scan_fn, carry, indices)
+
+            # Manual version, instead of using scan.
+            # metrics = []
+            # for i in indices:
+            #     carry, metric = scan_fn(carry, i)
+            #     metrics.append(metric)
+            # metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
+
+            return carry, metrics
+
+        carry = (model_arr, opt_state, rng)
+
+        # Applies gradient updates.
+        carry, metrics = jax.lax.scan(batch_scan_fn, carry, length=self.config.num_passes)
+
+        # Manual version, instead of using scan.
+        # metrics = []
+        # for _ in range(self.config.num_passes):
+        #     carry, metric = batch_scan_fn(carry, None)
+        #     metrics.append(metric)
+        # metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
+
+        model_arr, opt_state, _ = carry
+        return model_arr, opt_state, metrics
