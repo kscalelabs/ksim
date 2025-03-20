@@ -268,7 +268,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
         return [
-            LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
+            LinearVelocityCommand(x_scale=5.0, y_scale=5.0, switch_prob=0.02, zero_prob=0.3),
         ]
 
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
