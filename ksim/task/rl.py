@@ -980,6 +980,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         
                         viewer.setup_camera(self.config)
                         for step_id in iterator:
+                            # Copy data from viewer_data to engine_variables.physics_state.data
                             viewer.copy_data(dst=engine_variables.physics_state.data, src=viewer_data)
                             
                             # Step physics using your engine implementation
@@ -990,12 +991,25 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 engine_constants=engine_constants,
                                 engine_variables=engine_variables,
                             )
+                            
+                            # We manually trigger randomizations on termination,
+                            # whereas during training the randomization is only applied
+                            # once per rollout for efficiency.
+                            rng, randomization_rng = jax.random.split(rng)
+                            mj_model = jax.lax.cond(
+                                transition.done,
+                                lambda: apply_randomizations(mj_model, randomizations, randomization_rng),
+                                lambda: mj_model,
+                            )
 
-                            # Copy updated state back    
+                            # We need to manually update the viewer data field, because
+                            # resetting the environment creates a new data object rather
+                            # than happening in-place, as Mujoco expects
                             viewer.copy_data(dst=viewer_data, src=engine_variables.physics_state.data)
                             mujoco.mj_forward(viewer_model, viewer_data)
-
-                            viewer.sync()
+                            
+                            viewer.add_commands(engine_variables.commands)
+                            viewer.update_and_sync()
                 else:
                     for step_id in iterator:
                         transition, engine_variables = self.step_engine(
