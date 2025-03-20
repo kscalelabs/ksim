@@ -156,7 +156,7 @@ def compute_ppo_loss(
     ) -> Array:
         # Preventing underflow / overflow in calculating the ratio.
         log_ratio = jnp.sum(log_probs_n - on_policy_log_probs_n, axis=-1)
-        ratio = jnp.exp(jnp.clip(log_ratio, -10.0, 10.0))
+        ratio = jnp.exp(log_ratio)
         clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
         surrogate_1 = ratio * advantages
         surrogate_2 = clipped_ratio * advantages
