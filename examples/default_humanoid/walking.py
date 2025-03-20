@@ -18,28 +18,53 @@ from mujoco import mjx
 
 from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import PhysicsModel, Trajectory
-from ksim.observation import ActuatorForceObservation, Observation
+from ksim.env.data import PhysicsData, PhysicsModel, Trajectory
+from ksim.observation import (
+    ActuatorForceObservation,
+    CenterOfMassInertiaObservation,
+    CenterOfMassVelocityObservation,
+    Observation,
+)
 from ksim.randomization import (
     Randomization,
     WeightRandomization,
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import (
-    AngularVelocityXYPenalty,
-    JointVelocityPenalty,
-    LinearVelocityZPenalty,
     Reward,
-    TerminationPenalty,
 )
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import BadZTermination, FastAccelerationTermination, Termination
 from ksim.utils.mujoco import get_joint_metadata
 
-OBS_SIZE = 27
+OBS_SIZE = 336
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
+
+
+@attrs.define(frozen=True)
+class DHJointVelocityObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        qvel = state.qvel  # (N,)
+        return qvel
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return observation + jax.random.normal(rng, observation.shape) * self.noise
+
+
+@attrs.define(frozen=True)
+class DHJointPositionObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        qpos = state.qpos[2:]  # (N,)
+        return qpos
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -58,6 +83,20 @@ class DHControlPenalty(Reward):
 
     def __call__(self, trajectory: Trajectory) -> Array:
         return jnp.sum(jnp.square(trajectory.action), axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class DHHealthyReward(Reward):
+    """Legacy default humanoid healthy reward that gives binary reward based on height."""
+
+    healthy_z_lower: float = attrs.field(default=0.5)
+    healthy_z_upper: float = attrs.field(default=1.5)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        height = trajectory.qpos[:, 2]
+        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
+        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
+        return is_healthy
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -93,10 +132,16 @@ class DefaultHumanoidActor(eqx.Module):
 
     def __call__(
         self,
+        dh_joint_pos_n: Array,
+        dh_joint_vel_n: Array,
+        com_inertia_n: Array,
+        com_vel_n: Array,
         act_frc_obs_n: Array,
         lin_vel_cmd_n: Array,
     ) -> distrax.Normal:
-        x_n = jnp.concatenate([act_frc_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
+        x_n = jnp.concatenate(
+            [dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n], axis=-1
+        )  # (NUM_INPUTS)
 
         # Split the output into mean and standard deviation.
         prediction_n = self.mlp(x_n)
@@ -130,10 +175,16 @@ class DefaultHumanoidCritic(eqx.Module):
 
     def __call__(
         self,
+        dh_joint_pos_n: Array,
+        dh_joint_vel_n: Array,
+        com_inertia_n: Array,
+        com_vel_n: Array,
         act_frc_obs_n: Array,
         lin_vel_cmd_n: Array,
     ) -> Array:
-        x_n = jnp.concatenate([act_frc_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
+        x_n = jnp.concatenate(
+            [dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n], axis=-1
+        )  # (NUM_INPUTS)
         return self.mlp(x_n)
 
 
@@ -263,7 +314,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
         return [
+            DHJointPositionObservation(),
+            DHJointVelocityObservation(),
             ActuatorForceObservation(),
+            CenterOfMassInertiaObservation(),
+            CenterOfMassVelocityObservation(),
         ]
 
     def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
@@ -272,19 +327,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
-        return [
-            DHForwardReward(scale=0.2),
-            DHControlPenalty(scale=-0.01),
-            TerminationPenalty(scale=-100.0),
-            JointVelocityPenalty(scale=-0.01),
-            # These seem necessary to prevent some physics artifacts.
-            LinearVelocityZPenalty(scale=-0.001),
-            AngularVelocityXYPenalty(scale=-0.001),
-        ]
+        return [DHForwardReward(scale=0.25), DHControlPenalty(scale=-0.01), DHHealthyReward(scale=0.5)]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
-            BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=4.0),
+            BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0),
             FastAccelerationTermination(),
         ]
 
@@ -300,9 +347,13 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> distrax.Normal:
+        dh_joint_pos_n = observations["dhjoint_position_observation"]
+        dh_joint_vel_n = observations["dhjoint_velocity_observation"]
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.actor(act_frc_obs_n, lin_vel_cmd_n)
+        return model.actor(dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n)
 
     def _run_critic(
         self,
@@ -310,9 +361,13 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> Array:
+        dh_joint_pos_n = observations["dhjoint_position_observation"]
+        dh_joint_vel_n = observations["dhjoint_velocity_observation"]
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.critic(act_frc_obs_n, lin_vel_cmd_n)
+        return model.critic(dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n)
 
     def get_on_policy_log_probs(
         self,
@@ -403,24 +458,24 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking run_environment=True
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
-            # Update parameters. These values are very small, which is useful
-            # for testing on your local machine.
-            num_envs=1024,
-            num_batches=32,
-            num_passes=4,
+            num_envs=4096,
+            num_batches=64,
+            num_passes=8,
             # Simulation parameters.
-            dt=0.0025,
+            dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            rollout_length_seconds=20.0,
-            eval_rollout_length_seconds=5.0,
+            save_every_n_steps=50,
+            rollout_length_seconds=1.25,
+            eval_rollout_length_seconds=4.0,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
+            learning_rate=3e-4,
             clip_param=0.3,
-            # TODO: Remove this after figuring out Mujoco physics issues.
-            reward_clip_max=10.0,
+            max_grad_norm=1.0,
+            use_mit_actuators=True,
         ),
     )
