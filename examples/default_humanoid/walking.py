@@ -445,17 +445,17 @@ if __name__ == "__main__":
         HumanoidWalkingTaskConfig(
             # Update parameters. These values are very small, which is useful
             # for testing on your local machine.
-            num_envs=4,
-            num_batches=1,
-            num_passes=1,
+            num_envs=1024,
+            num_batches=32,
+            num_passes=8,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
             save_every_n_steps=50,
-            rollout_length_seconds=2.0,
-            eval_rollout_length_seconds=5.0,
+            rollout_length_seconds=10.0,
+            eval_rollout_length_seconds=4.0,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
@@ -465,5 +465,6 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             # TODO: Remove this after figuring out Mujoco physics issues.
             reward_clip_max=10.0,
+            use_mit_actuators=False,
         ),
     )
