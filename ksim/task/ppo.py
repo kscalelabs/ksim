@@ -367,13 +367,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Returns:
             A dictionary of metrics to be logged.
         """
+        len_b = (~trajectories.done).sum(-1, dtype=loss_bt.dtype) + 1e-6
+        batch_size = loss_bt.shape[0]
         return {
-            "loss": loss_bt.mean(-1),
-            "log_probs": log_probs_btn.mean(-1),
-            "entropy": entropy_btn.mean(-1),
-            "value": values_bt.mean(-1),
-            "value_targets": value_targets_bt.mean(-1),
-            "advantages": advantages_bt.mean(-1),
+            "loss": loss_bt.sum(1) / len_b,
+            "log_probs": log_probs_btn.sum(1).reshape(batch_size, -1) / len_b[:, None],
+            "entropy": entropy_btn.sum(1).reshape(batch_size, -1) / len_b[:, None],
+            "value": values_bt.sum(1) / len_b,
+            "value_targets": value_targets_bt.sum(1) / len_b,
+            "advantages": advantages_bt.sum(1) / len_b,
         }
 
     def get_grad_metrics(self, grads: PyTree) -> dict[str, Array | tuple[Array, Array]]:
@@ -568,9 +570,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             (arr, opt_state, rng),
             length=self.config.num_passes,
         )
-
-        # Get mean metric values over all batches.
-        metrics = jax.tree.map(lambda x: x.mean(), metrics)
 
         # Recombines the mutable and static parts of the model.
         model = eqx.combine(arr, static)
