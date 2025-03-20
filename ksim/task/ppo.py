@@ -159,7 +159,7 @@ def compute_ppo_loss(
 
         # Computes the value loss, with or without clipping.
         if use_clipped_value_loss:
-            value_mse = clipped_value_loss(
+            value_mse = 0.5 * clipped_value_loss(
                 target_values=values,
                 values=values,
                 value_targets=value_targets,
