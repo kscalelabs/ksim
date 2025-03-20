@@ -165,18 +165,6 @@ class HumanoidWalkingTaskConfig(PPOConfig):
         value=1e-4,
         help="Learning rate for PPO.",
     )
-    learning_rate_pct_start: float = xax.field(
-        value=0.3,
-        help="Percentage of cycle spent increasing the learning rate.",
-    )
-    learning_rate_div_factor: float = xax.field(
-        value=25.0,
-        help="Minimum learning rate is learning_rate / learning_rate_div_factor.",
-    )
-    learning_rate_final_div_factor: float = xax.field(
-        value=1e4,
-        help="Minimum learning rate is learning_rate / learning_rate_final_div_factor.",
-    )
     max_grad_norm: float = xax.field(
         value=0.5,
         help="Maximum gradient norm for clipping.",
@@ -228,20 +216,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         This provides a reasonable default optimizer for training PPO models,
         but can be overridden by subclasses who want to do something different.
         """
-        scheduler = optax.cosine_onecycle_schedule(
-            transition_steps=self.config.learning_rate_div_factor,
-            peak_value=self.config.learning_rate,
-            pct_start=self.config.learning_rate_pct_start,
-            div_factor=self.config.learning_rate_div_factor,
-            final_div_factor=self.config.learning_rate_final_div_factor,
-        )
-
         optimizer = optax.chain(
             optax.clip_by_global_norm(self.config.max_grad_norm),
             (
-                optax.adam(scheduler)
+                optax.adam(self.config.learning_rate)
                 if self.config.adam_weight_decay == 0.0
-                else optax.adamw(scheduler, weight_decay=self.config.adam_weight_decay)
+                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
             ),
         )
 
