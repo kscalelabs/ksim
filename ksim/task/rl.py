@@ -605,25 +605,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         if self.config.log_actions:
             self.logger.log_histogram(key="action", value=trajectories.action, namespace="🏃 action histograms")
-            self.logger.log_scalar(key="action", value=trajectories.action.mean(), namespace="🏃 action")
 
         if self.config.log_observations:
             for obs_key, obs_value in trajectories.obs.items():
                 self.logger.log_histogram(key=obs_key, value=obs_value, namespace="👀 observation histograms")
-                self.logger.log_scalar(key=obs_key, value=obs_value.mean(), namespace="👀 observation")
 
         if self.config.log_commands:
             for cmd_key, cmd_value in trajectories.command.items():
                 self.logger.log_histogram(key=cmd_key, value=cmd_value, namespace="🕹️ command histograms")
-                self.logger.log_scalar(key=cmd_key, value=cmd_value.mean(), namespace="🕹️ command")
 
         if self.config.log_terminations:
             num_episodes = jnp.sum(trajectories.done).clip(min=1)
             for term_name, term_value in trajectories.termination_components.items():
                 self.logger.log_scalar(
                     key=term_name,
-                    value=term_value / num_episodes,
-                    namespace="💀 termination histograms",
+                    value=term_value.sum() / num_episodes,
+                    namespace="💀 termination",
                 )
 
         if self.config.log_qpos_qvel:
