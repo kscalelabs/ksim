@@ -709,7 +709,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         commands: Collection[Command],
         rewards: Rewards,
         mj_model: mujoco.MjModel,
-        name: str,
     ) -> None:
         """Visualizes a single trajectory.
 
@@ -753,11 +752,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 img = Image.open(buf)
 
                 # Logs the image.
-                self.logger.log_image(key=f"{name}/{key}", value=img, namespace=namespace)
+                self.logger.log_image(key=key, value=img, namespace=namespace)
 
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(trajectories, commands, mj_model)
-        self.logger.log_video(key=f"{name}", value=frames, fps=fps, namespace="➡️ trajectory images")
+        self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
 
     @eqx.filter_jit
     def _single_unroll(
