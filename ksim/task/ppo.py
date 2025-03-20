@@ -35,6 +35,7 @@ def compute_advantages_and_value_targets(
     dones_bt: Array,
     decay_gamma: float,
     gae_lambda: float,
+    normalize_advantages: bool = True,
 ) -> tuple[Array, Array]:
     """Computes the advantages using Generalized Advantage Estimation (GAE)."""
 
@@ -69,6 +70,9 @@ def compute_advantages_and_value_targets(
     # Compute the advantages and value targets for each sample in the batch.
     par_compute = jax.vmap(compute_for_sample, in_axes=(0, 0, 0, None, None))
     advantages_bt, value_targets_bt = par_compute(values_bt, rewards_bt, dones_bt, decay_gamma, gae_lambda)
+
+    if normalize_advantages:
+        advantages_bt = advantages_bt / (advantages_bt.std(axis=-1, keepdims=True) + 1e-6)
 
     return advantages_bt, value_targets_bt
 
@@ -145,7 +149,8 @@ def compute_ppo_loss(
         dones: Array,
         entropy_n: Array | None,
     ) -> Array:
-        ratio_n = jnp.exp(log_probs_n - on_policy_log_probs_n)
+        # Preventing underflow / overflow in calculating the ratio.
+        ratio_n = jnp.exp(jnp.clip(log_probs_n - on_policy_log_probs_n, -10, 10))
 
         # Computes clipped policy objective.
         clipped_ratio_n = jnp.clip(ratio_n, 1 - clip_param, 1 + clip_param)
@@ -244,6 +249,10 @@ class PPOConfig(RLConfig):
     lam: float = xax.field(
         value=0.95,
         help="Lambda for GAE: high = more bias; low = more variance",
+    )
+    normalize_advantages: bool = xax.field(
+        value=True,
+        help="Whether to normalize the advantages.",
     )
 
 
@@ -396,6 +405,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             dones_bt=transitions.done,
             decay_gamma=self.config.gamma,
             gae_lambda=self.config.lam,
+            normalize_advantages=self.config.normalize_advantages,
         )
 
         loss_bt = compute_ppo_loss(
