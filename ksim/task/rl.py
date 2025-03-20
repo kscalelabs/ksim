@@ -878,26 +878,30 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state = self.on_step_start(state)
 
             # Samples N trajectories in parallel.
-            rng, rollout_rng = jax.random.split(rng)
-            transitions = self._vmapped_unroll(
-                rng=rollout_rng,
-                physics_model=mjx_model,
-                model=model,
-                engine=engine,
-                engine_constants=engine_constants,
-                num_steps=self.rollout_length_steps,
-                num_envs=self.config.num_envs,
-            )
+            with xax.ContextTimer() as timer:
+                rng, rollout_rng = jax.random.split(rng)
+                transitions = self._vmapped_unroll(
+                    rng=rollout_rng,
+                    physics_model=mjx_model,
+                    model=model,
+                    engine=engine,
+                    engine_constants=engine_constants,
+                    num_steps=self.rollout_length_steps,
+                    num_envs=self.config.num_envs,
+                )
+            self.logger.log_scalar("rollout_dt", timer.elapsed_time, namespace="⏰")
 
             # Optimizes the model on that trajectory.
-            rng, update_rng = jax.random.split(rng)
-            model, opt_state, train_metrics = self.update_model(
-                model=model,
-                optimizer=optimizer,
-                opt_state=opt_state,
-                transitions=transitions,
-                rng=update_rng,
-            )
+            with xax.ContextTimer() as timer:
+                rng, update_rng = jax.random.split(rng)
+                model, opt_state, train_metrics = self.update_model(
+                    model=model,
+                    optimizer=optimizer,
+                    opt_state=opt_state,
+                    transitions=transitions,
+                    rng=update_rng,
+                )
+            self.logger.log_scalar("update_dt", timer.elapsed_time, namespace="⏰")
 
             with self.step_context("write_logs"):
                 state.raw_phase = "train"
