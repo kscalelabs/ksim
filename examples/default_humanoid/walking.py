@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+import attrs
 import distrax
 import equinox as eqx
 import jax
@@ -17,14 +18,14 @@ from mujoco import mjx
 
 from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import PhysicsModel, Transition
+from ksim.env.data import PhysicsData, PhysicsModel, Transition
 from ksim.observation import ActuatorForceObservation, Observation
 from ksim.randomization import (
     Randomization,
     WeightRandomization,
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
-from ksim.rewards import DHForwardReward, HeightReward, Reward
+from ksim.rewards import HeightReward, Reward, TerminationPenalty
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import Termination, UnhealthyTermination
 from ksim.utils.mujoco import get_joint_metadata
@@ -33,6 +34,24 @@ OBS_SIZE = 27
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
+
+
+@attrs.define(frozen=True, kw_only=True)
+class DHForwardReward(Reward):
+    """Incentives forward movement."""
+
+    def __call__(
+        self,
+        prev_action: Array | None,
+        physics_state: PhysicsData,
+        command: FrozenDict[str, Array],
+        action: Array,
+        next_physics_state: PhysicsData,
+        next_state_terminates: Array,
+    ) -> Array:
+        # Take just the x velocity component
+        x_delta = -jnp.clip(next_physics_state.qvel[1], -1.0, 1.0)
+        return x_delta
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -264,11 +283,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         return [
             HeightReward(scale=1.0, height_target=0.7),
             DHForwardReward(scale=0.2),
+            TerminationPenalty(scale=-1.0),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
-            UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0),
+            UnhealthyTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=4.0),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:

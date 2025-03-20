@@ -891,24 +891,6 @@ class SinusoidalFeetHeightReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class DHForwardReward(Reward):
-    """Legacy default humanoid forward reward that linearly scales velocity."""
-
-    def __call__(
-        self,
-        prev_action: Array | None,
-        physics_state: PhysicsData,
-        command: FrozenDict[str, Array],
-        action: Array,
-        next_physics_state: PhysicsData,
-        next_state_terminates: Array,
-    ) -> Array:
-        # Take just the x velocity component
-        x_delta = -next_physics_state.qvel[1]
-        return x_delta
-
-
-@attrs.define(frozen=True, kw_only=True)
 class XPosReward(Reward):
     """Reward for how far the robot has moved in the x direction."""
 
