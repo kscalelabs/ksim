@@ -509,6 +509,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             length=self.config.num_passes,
         )
 
+        # Get mean metric values over all batches.
+        metrics = jax.tree.map(lambda x: x.mean(), metrics)
+
         # Recombines the mutable and static parts of the model.
         model = eqx.combine(arr, static)
 
