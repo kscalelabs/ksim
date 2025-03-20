@@ -35,10 +35,10 @@ class Reward(ABC):
         name = self.__class__.__name__.lower()
         if name.lower().endswith("reward"):
             if self.scale < 0:
-                logger.warning("Reward function %s has a negative scale: %f", name, self.scale)
+                raise RuntimeError(f"Reward function {name} has a negative scale {self.scale}")
         elif name.lower().endswith("penalty"):
             if self.scale > 0:
-                logger.warning("Penalty function %s has a positive scale: %f", name, self.scale)
+                raise RuntimeError(f"Penalty function {name} has a positive scale {self.scale}")
         else:
             logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", name, self.scale)
 
@@ -891,24 +891,6 @@ class SinusoidalFeetHeightReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class DHForwardReward(Reward):
-    """Legacy default humanoid forward reward that linearly scales velocity."""
-
-    def __call__(
-        self,
-        prev_action: Array | None,
-        physics_state: PhysicsData,
-        command: FrozenDict[str, Array],
-        action: Array,
-        next_physics_state: PhysicsData,
-        next_state_terminates: Array,
-    ) -> Array:
-        # Take just the x velocity component
-        x_delta = -next_physics_state.qvel[1]
-        return x_delta
-
-
-@attrs.define(frozen=True, kw_only=True)
 class XPosReward(Reward):
     """Reward for how far the robot has moved in the x direction."""
 
@@ -923,60 +905,3 @@ class XPosReward(Reward):
     ) -> Array:
         x_pos = next_physics_state.qpos[0]
         return x_pos
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(Reward):
-    """Legacy default humanoid healthy reward that gives binary reward based on height."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(
-        self,
-        prev_action: Array | None,
-        physics_state: PhysicsData,
-        command: FrozenDict[str, Array],
-        action: Array,
-        next_physics_state: PhysicsData,
-        next_state_terminates: Array,
-    ) -> Array:
-        return jnp.array(1.0)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHTerminationPenalty(Reward):
-    """Penalty for terminating the episode."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(
-        self,
-        prev_action: Array | None,
-        physics_state: PhysicsData,
-        command: FrozenDict[str, Array],
-        action: Array,
-        next_physics_state: PhysicsData,
-        next_state_terminates: Array,
-    ) -> Array:
-        height = physics_state.qpos[2]
-        is_unhealthy = jnp.where(height < self.healthy_z_lower, 1.0, 0.0)
-        is_unhealthy = jnp.where(height > self.healthy_z_upper, 1.0, is_unhealthy)
-        return is_unhealthy
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(Reward):
-    """Legacy default humanoid control cost that penalizes squared action magnitude."""
-
-    def __call__(
-        self,
-        prev_action: Array | None,
-        physics_state: PhysicsData,
-        command: FrozenDict[str, Array],
-        action: Array,
-        next_physics_state: PhysicsData,
-        next_state_terminates: Array,
-    ) -> Array:
-        return jnp.sum(jnp.square(action))

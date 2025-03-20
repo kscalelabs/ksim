@@ -175,6 +175,10 @@ class RLConfig(xax.Config):
         value=None,
         help="If provided, save the rendered video to the given path.",
     )
+    log_train_trajectory: bool = xax.field(
+        value=False,
+        help="If true, log training trajectory videos.",
+    )
 
     # Training parameters.
     num_envs: int = xax.field(
@@ -913,6 +917,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 # Logs statistics from the trajectory.
                 with self.step_context("write_logs"):
+                    if self.config.log_train_trajectory:
+                        single_transition = jax.tree.map(lambda arr: arr[0], transitions)
+                        self.log_single_trajectory(single_transition, commands, mj_model)
                     self.log_transition_stats(transitions)
                     self.log_reward_stats(transitions, rewards)
                     self.log_termination_stats(transitions, terminations)

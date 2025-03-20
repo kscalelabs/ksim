@@ -36,6 +36,7 @@ def compute_advantages_and_value_targets(
     decay_gamma: float,
     gae_lambda: float,
     normalize_advantages: bool = True,
+    use_two_step_td_target: bool = False,
 ) -> tuple[Array, Array]:
     """Computes the advantages using Generalized Advantage Estimation (GAE)."""
 
@@ -56,9 +57,12 @@ def compute_advantages_and_value_targets(
         _, gae_t = jax.lax.scan(scan_fn, jnp.zeros_like(deltas_t[-1]), (deltas_t, mask_t), reverse=True)
         value_targets_t = gae_t + values_t
 
+        if not use_two_step_td_target:
+            return gae_t, value_targets_t
+
         # Apply another TD step to get the value targets.
-        values_targets_shifted_t = jnp.concatenate([value_targets_t[1:], value_targets_t[-1:]], axis=0)
-        advantages_t = rewards_t + decay_gamma * values_targets_shifted_t * mask_t - values_t
+        value_targets_shifted_t = jnp.concatenate([value_targets_t[1:], value_targets_t[-1:]], axis=0)
+        advantages_t = rewards_t + decay_gamma * value_targets_shifted_t * mask_t - values_t
 
         return advantages_t, value_targets_t
 
@@ -256,6 +260,10 @@ class PPOConfig(RLConfig):
         value=True,
         help="Whether to normalize the advantages.",
     )
+    use_two_step_td_target: bool = xax.field(
+        value=False,
+        help="Whether to use two-step TD targets.",
+    )
 
 
 Config = TypeVar("Config", bound=PPOConfig)
@@ -425,6 +433,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             decay_gamma=self.config.gamma,
             gae_lambda=self.config.lam,
             normalize_advantages=self.config.normalize_advantages,
+            use_two_step_td_target=self.config.use_two_step_td_target,
         )
 
         loss_bt = compute_ppo_loss(
