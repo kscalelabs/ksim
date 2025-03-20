@@ -984,7 +984,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def on_context_stop(self, step: str, elapsed_time: float) -> None:
         super().on_context_stop(step, elapsed_time)
 
-        self.logger.log_scalar(key=step, value=elapsed_time, namespace="🔧 dt")
+        self.logger.log_scalar(key=step, value=elapsed_time, namespace="⌛ dt")
 
     def run_environment(
         self,

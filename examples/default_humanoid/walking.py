@@ -173,7 +173,7 @@ class HumanoidWalkingTaskConfig(PPOConfig):
 
     # Mujoco parameters.
     use_mit_actuators: bool = xax.field(
-        value=False,
+        value=True,
         help="Whether to use the MIT actuator model, where the actions are position commands",
     )
     kp: float = xax.field(
