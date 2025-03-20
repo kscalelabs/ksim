@@ -85,7 +85,7 @@ def get_rewards(
         reward_val = reward_generator(trajectory) * reward_generator.scale * ctrl_dt
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
-        rewards[reward_generator.reward_name] = reward_val
+        rewards[reward_generator.reward_name] = jnp.where(trajectory.done, 0.0, reward_val)
     rewards[TOTAL_REWARD_NAME] = jax.tree.reduce(jnp.add, list(rewards.values()))
     return FrozenDict(rewards)
 
@@ -237,7 +237,7 @@ class RLConfig(xax.Config):
         help="The maximum number of values to plot for each key.",
     )
     plot_figsize: tuple[float, float] = xax.field(
-        value=(12, 6),
+        value=(8, 4),
         help="The size of the figure for each plot.",
     )
     render_height: int = xax.field(
