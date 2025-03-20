@@ -532,10 +532,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             include_last_batch=self.config.include_last_batch,
         )
 
-        return self._update_model_on_batches(
+        model, opt_state, batch_metrics = self._update_model_on_batches(
             model=model,
             optimizer=optimizer,
             opt_state=opt_state,
             transition_batches=transition_batches,
             rng=rng,
         )
+
+        return model, opt_state, batch_metrics

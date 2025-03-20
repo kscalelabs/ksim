@@ -608,7 +608,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             train_metrics: The train metrics to log.
         """
         for key, value in train_metrics.items():
-            self.logger.log_scalar(key=key, value=lambda: value.mean(), namespace="train")
+            self.logger.log_scalar(key=key, value=value, namespace="train")
 
     def render_trajectory_video(
         self,
