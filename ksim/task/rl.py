@@ -81,16 +81,13 @@ def get_rewards(
     """Get the rewards from the physics state."""
     rewards = {}
     for reward_generator in reward_generators:
-        reward_val = (
-            reward_generator(
-                prev_action=physics_state.most_recent_action,
-                physics_state=physics_state.data,
-                command=command,
-                action=action,
-                next_physics_state=next_physics_state.data,
-                next_state_terminates=next_state_terminates,
-            )
-            * reward_generator.scale
+        reward_val = reward_generator(
+            prev_action=physics_state.most_recent_action,
+            physics_state=physics_state.data,
+            command=command,
+            action=action,
+            next_physics_state=next_physics_state.data,
+            next_state_terminates=next_state_terminates,
         )
         name = reward_generator.reward_name
         chex.assert_shape(reward_val, (), custom_message=f"Reward {name} must be a scalar")
@@ -579,6 +576,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         for key, value in reward_stats.items():
             self.logger.log_scalar(key=key, value=value, namespace="reward")
 
+        # Logs the total reward.
+        total_reward = jnp.sum(transitions.reward) / num_episodes
+        self.logger.log_scalar(key="total", value=total_reward, namespace="reward")
+
     def log_termination_stats(self, transitions: Transition, termination_generators: Collection[Termination]) -> None:
         """Log termination statistics from the trajectory or trajectories.
 
@@ -695,7 +696,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ("🕹️ command images", transitions.command),
             ("🏃 action images", {"action": transitions.action}),
             ("💀 termination images", transitions.termination_components),
-            ("🎁 reward images", transitions.reward_components),
+            ("🎁 reward images", transitions.reward_components | {"total": transitions.reward}),
         ):
             for key, value in arr_dict.items():
                 plt.figure(figsize=self.config.plot_figsize)

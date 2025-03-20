@@ -98,7 +98,8 @@ class TerminationPenalty(Reward):
 class HeightReward(Reward):
     """Reward for how high the robot is."""
 
-    height_target: float = attrs.field(default=1.4)
+    height_target: float = attrs.field()
+    closeness_scale: float = attrs.field(default=50.0)
 
     def __call__(
         self,
@@ -110,7 +111,7 @@ class HeightReward(Reward):
         next_state_terminates: Array,
     ) -> Array:
         height = next_physics_state.qpos[2]
-        reward = jnp.exp(-jnp.abs(height - self.height_target) * 50)
+        reward = jnp.exp(-jnp.abs(height - self.height_target) * self.closeness_scale)
         return reward
 
 
