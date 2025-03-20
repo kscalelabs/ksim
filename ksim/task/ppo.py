@@ -102,6 +102,7 @@ def compute_ppo_loss(
     clip_param: float = 0.2,
     value_loss_coef: float = 0.5,
     entropy_coef: float = 0.008,
+    log_clip_value: float = 10.0,
     use_clipped_value_loss: bool = True,
 ) -> Array:
     """Compute PPO loss.
@@ -120,6 +121,7 @@ def compute_ppo_loss(
         clip_param: The clip parameter for PPO.
         value_loss_coef: The value loss coefficient for PPO.
         entropy_coef: The entropy coefficient for PPO.
+        log_clip_value: The log clip value for PPO, for numerical stability.
         use_clipped_value_loss: Whether to use clipped value loss.
 
     Returns:
@@ -156,7 +158,7 @@ def compute_ppo_loss(
     ) -> Array:
         # Preventing underflow / overflow in calculating the ratio.
         log_ratio = jnp.sum(log_probs_n - on_policy_log_probs_n, axis=-1)
-        ratio = jnp.exp(log_ratio)
+        ratio = jnp.exp(jnp.clip(log_ratio, -log_clip_value, log_clip_value))
         clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
         surrogate_1 = ratio * advantages
         surrogate_2 = clipped_ratio * advantages
@@ -247,6 +249,10 @@ class PPOConfig(RLConfig):
     entropy_coef: float = xax.field(
         value=0.008,
         help="Entropy coefficient for PPO.",
+    )
+    log_clip_value: float = xax.field(
+        value=10.0,
+        help="The log clip value for PPO, for numerical stability.",
     )
     gamma: float = xax.field(
         value=0.99,
@@ -448,6 +454,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             clip_param=self.config.clip_param,
             value_loss_coef=self.config.value_loss_coef,
             entropy_coef=self.config.entropy_coef,
+            log_clip_value=self.config.log_clip_value,
             use_clipped_value_loss=self.config.use_clipped_value_loss,
         )
 
