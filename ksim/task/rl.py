@@ -599,9 +599,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
         if self.config.log_reward_histograms:
             # Gets the mean reward for each trajectory.
-            reward_arrs: dict[str, jnp.ndarray] = {}
+            reward_arrs: dict[str, list[jnp.ndarray]] = {}
+            traj_lens_arrs: list[jnp.ndarray] = []
             for trajectory_batch, reward_batch in zip(trajectory_batches, reward_batches):
                 traj_lens = (~trajectory_batch.done).sum(-1, dtype=trajectory_batch.action.dtype) + 1e-6
+                traj_lens_arrs.append(traj_lens)
                 for rew_name, rew_arr in reward_batch.items():
                     if rew_name not in reward_arrs:
                         reward_arrs[rew_name] = []
@@ -610,6 +612,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Logs histograms of the concatenated reward arrays.
             for rew_name, rew_arr in reward_arrs.items():
                 self.logger.log_histogram(key=rew_name, value=jnp.concatenate(rew_arr, axis=0), namespace="reward")
+
+            # Log histogram of trajectory lengths.
+            self.logger.log_histogram(key="traj_len", value=jnp.concatenate(traj_lens_arrs, axis=0), namespace="state")
 
         if self.config.log_action_histograms:
             self.logger.log_histogram(key="action", value=trajectories.action, namespace="action")
