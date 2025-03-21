@@ -108,24 +108,39 @@ class DHJointPositionObservation(Observation):
 class MultiLayerLSTM(eqx.Module):
     layers: tuple[eqx.nn.LSTMCell, ...]
     depth: int = eqx.field(static=True)
+    input_size: int = eqx.field(static=True)
+    hidden_size: int = eqx.field(static=True)
 
-    def __init__(self, key: PRNGKeyArray, *, hidden_size: int, depth: int) -> None:
-        self.layers = tuple(
+    def __init__(self, key: PRNGKeyArray, *, input_size: int, hidden_size: int, depth: int) -> None:
+        if depth < 1:
+            raise ValueError("Depth must be at least 1")
+        
+        first_layer = eqx.nn.LSTMCell(input_size=input_size, hidden_size=hidden_size, use_bias=True, key=key)
+
+        other_layers = tuple(
             eqx.nn.LSTMCell(input_size=hidden_size, hidden_size=hidden_size, use_bias=True, key=key)
-            for _ in range(depth)
+            for _ in range(depth-1)
         )
+
+        self.layers = (first_layer, *other_layers)
         self.depth = depth
+        self.input_size = input_size
+        self.hidden_size = hidden_size
 
     def __call__(
         self, x_n: Array, hidden_states: tuple[tuple[Array, Array], ...]
-    ) -> tuple[Array, tuple[tuple[Array, Array], ...]]:
-
+    ) -> tuple[Array, Array, tuple[tuple[Array, Array], ...]]:
         new_states = []
-        for layer, hidden_state in zip(self.layers, hidden_states):
-            new_x, new_hidden = layer(x_n, hidden_state)
-            new_states.append(new_hidden)
-            x_n = new_x
-        return x_n, tuple(new_states)
+        h, c = self.layers[0](x_n, hidden_states[0])
+        new_states.append((h, c))
+
+
+        if self.depth > 1:
+            for layer, hidden_state in zip(self.layers[1:], hidden_states[1:]):
+                h, c = layer(h, hidden_state)
+                new_states.append((h, c))
+
+        return h, c, tuple(new_states)
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -151,6 +166,7 @@ class DefaultHumanoidActor(eqx.Module):
     ) -> None:
         self.multi_layer_lstm = MultiLayerLSTM(
             key,
+            input_size=NUM_INPUTS,
             hidden_size=hidden_size,
             depth=3,
         )
@@ -201,9 +217,8 @@ class DefaultHumanoidActor(eqx.Module):
         x_n = jnp.concatenate([flat_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
 
         # Process through LSTM cell
-        h_s, new_hidden_states = self.multi_layer_lstm(x_n, hidden_states)
-
-        out_n = self.projector(h_s)
+        last_h, _, new_hidden_states = self.multi_layer_lstm(x_n, hidden_states)
+        out_n = self.projector(last_h)
 
         mean_n = out_n[..., :NUM_OUTPUTS]
         std_n = out_n[..., NUM_OUTPUTS:]
@@ -405,9 +420,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
-    def get_initial_carry(self) -> tuple[Array, Array]:
+    def get_initial_carry(self) -> tuple[tuple[Array, Array], ...]:
         # Initialize the hidden state for LSTM
-        return (jnp.zeros((HIDDEN_SIZE,)), jnp.zeros((HIDDEN_SIZE,)))
+        return tuple((jnp.zeros((HIDDEN_SIZE,)), jnp.zeros((HIDDEN_SIZE,))) for _ in range(3))
 
     def _run_actor(
         self,
@@ -488,7 +503,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             entropy_n = action_dist_n.entropy()
             return carry, (log_probs_n, entropy_n)
 
-        initial_hidden_states = (jnp.zeros((model.actor.hidden_size,)), jnp.zeros((model.actor.hidden_size,)))
+        initial_hidden_states = self.get_initial_carry()
         _, (log_probs_tn, entropy_tn) = jax.lax.scan(scan_fn, initial_hidden_states, trajectories)
 
         return log_probs_tn, entropy_tn
