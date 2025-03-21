@@ -49,21 +49,6 @@ class EpisodeLengthLog(LogMetric):
         )
 
 
-@attrs.define(frozen=True, kw_only=True)
-class AverageRewardLog(LogMetric):
-    def __call__(self, logger: xax.Logger, data: LoggingData) -> None:
-        if data.trajectory is None:
-            raise ValueError("Trajectory cannot be None for AverageRewardLog")
-        trajectory = data.trajectory
-        total_reward = jnp.sum(trajectory.reward)
-        episode_count = jnp.sum(trajectory.done).clip(min=1)
-        logger.log_scalar(
-            "average_reward",
-            total_reward / episode_count,
-            namespace="📉",
-        )
-
-
 @attrs.define(frozen=True)
 class ModelUpdateLog(LogMetric):
     def __call__(self, logger: xax.Logger, data: LoggingData) -> None:

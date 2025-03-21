@@ -1,6 +1,7 @@
 """Base Types for Environments."""
 
 from dataclasses import dataclass
+from typing import TypeAlias
 
 import jax
 import mujoco
@@ -8,8 +9,8 @@ from flax.core import FrozenDict
 from jaxtyping import Array, PyTree
 from mujoco import mjx
 
-PhysicsData = mjx.Data | mujoco.MjData
-PhysicsModel = mjx.Model | mujoco.MjModel
+PhysicsData: TypeAlias = mjx.Data | mujoco.MjData
+PhysicsModel: TypeAlias = mjx.Model | mujoco.MjModel
 
 
 @jax.tree_util.register_dataclass

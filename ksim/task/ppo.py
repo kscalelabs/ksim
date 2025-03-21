@@ -369,7 +369,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         slen = (~trajectories.done).sum(dtype=loss_t.dtype) + 1e-6
         return {
             "loss": loss_t.sum() / slen,
-            "traj_len_seconds": slen * self.config.ctrl_dt,
             "log_probs": log_probs_tn.sum(0).flatten() / slen,
             "entropy": entropy_tn.sum(0).flatten() / slen,
             "value": values_t.sum() / slen,
@@ -440,6 +439,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 use_clipped_value_loss=self.config.use_clipped_value_loss,
             )
 
+            if entropy_tn is None:
+                raise ValueError("Entropy is required for PPO metrics")
+
             metrics = self.get_ppo_metrics(
                 trajectories=trajectories,
                 loss_t=loss_t,
@@ -455,7 +457,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_valid = jnp.sum(~trajectories.done)
             loss = loss_t.sum() / (num_valid + 1e-6)
 
-            return loss, metrics
+            return loss, FrozenDict(metrics)
 
         # Gets the loss and metrics for each trajectory in the batch.
         rngs = jax.random.split(rng, rewards.shape[0])
@@ -495,7 +497,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             grads = jax.tree.map(lambda x: x * grad_factor, grads)
 
             # Apply the gradient updates.
-            updates, new_opt_state = optimizer.update(grads, opt_state, model_arr)  # type: ignore[operator]
+            updates, new_opt_state = optimizer.update(grads, opt_state, model_arr)
             new_model_arr = eqx.apply_updates(model_arr, updates)
             return new_model_arr, new_opt_state
 
@@ -536,7 +538,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             opt_state=opt_state,
         )
 
-        return new_model_arr, new_opt_state, FrozenDict(ppo_metrics | grad_metrics)
+        return new_model_arr, new_opt_state, FrozenDict(dict(ppo_metrics) | dict(grad_metrics))
 
     @xax.jit(static_argnames=["self", "model_static", "optimizer"])
     def update_model(

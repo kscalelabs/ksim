@@ -1,13 +1,14 @@
 """Tests for observations in the ksim package."""
 
-from dataclasses import dataclass
 from pathlib import Path
 
+import attrs
 import jax
 import jax.numpy as jnp
 import mujoco
 import pytest
 from jaxtyping import Array, PRNGKeyArray
+from mujoco import mjx
 
 from ksim.env.data import PhysicsData
 from ksim.observation import Observation
@@ -15,6 +16,7 @@ from ksim.observation import Observation
 _TOL = 1e-4
 
 
+@attrs.define(frozen=True)
 class DummyObservation(Observation):
     """A dummy observation for testing."""
 
@@ -27,9 +29,7 @@ class DummyObservation(Observation):
         return observation
 
 
-@jax.tree_util.register_dataclass
-@dataclass
-class DummyMjxData(PhysicsData):
+class DummyMjxData(mjx.Data):
     """Mock mjx.Data for testing."""
 
     qpos: Array

@@ -199,6 +199,10 @@ class MujocoEngine(PhysicsEngine):
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         mujoco_data = physics_state.data
+
+        if not isinstance(mujoco_data, mujoco.MjData):
+            raise ValueError("Mujoco data is not a MjData")
+
         mujoco.mj_forward(physics_model, mujoco_data)
         phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
@@ -234,7 +238,7 @@ def get_physics_engine(
     dt: float,
     ctrl_dt: float,
     min_action_latency: float,
-    max_action_latency: int,
+    max_action_latency: float,
 ) -> PhysicsEngine:
     if min_action_latency > ctrl_dt:
         raise RuntimeError(f"`{min_action_latency=}` cannot be greater than `{ctrl_dt=}`")
@@ -245,7 +249,7 @@ def get_physics_engine(
 
     # Converts to steps.
     min_action_latency_step = max(round(min_action_latency / dt), 0)
-    max_action_latency_step = max(round(max_action_latency / dt), min_action_latency)
+    max_action_latency_step = max(round(max_action_latency / dt), min_action_latency_step)
     phys_steps_per_ctrl_steps = round(ctrl_dt / dt)
 
     match engine_type:

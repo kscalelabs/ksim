@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+import attrs
 import jax
 import jax.numpy as jnp
 import mujoco
@@ -17,6 +18,7 @@ from ksim.terminations import (
 )
 
 
+@attrs.define(frozen=True)
 class DummyTermination(Termination):
     """Dummy termination for testing."""
 

@@ -3,6 +3,7 @@
 # Utilities
 numpy
 matplotlib
+kmv
 
 # K-Scale CLI
 kscale
@@ -20,3 +21,6 @@ xax
 mujoco
 mujoco-mjx
 mujoco-scenes
+
+# Deployment
+pykos

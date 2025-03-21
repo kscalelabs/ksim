@@ -142,6 +142,9 @@ def get_joint_metadata(
             kd=None if kd is None else str(kd),
             armature=None if armature is None else str(armature),
             friction=None if friction is None else str(friction),
+            id=None,
+            flipped=None,
+            offset=None,
         )
     return metadata
 
