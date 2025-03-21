@@ -47,7 +47,7 @@ CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
 
-HIDDEN_SIZE = 64
+HIDDEN_SIZE = 64 # `_s`
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -160,9 +160,9 @@ class DefaultHumanoidActor(eqx.Module):
 
         # Initialize hidden state if not provided
         if hidden_state is None:
-            h = jnp.zeros((self.hidden_size,))
-            c = jnp.zeros((self.hidden_size,))
-            hidden_state = (h, c)
+            h_s = jnp.zeros((self.hidden_size,))
+            c_s = jnp.zeros((self.hidden_size,))
+            hidden_state = (h_s, c_s)
 
         return self.call_flat_obs(obs_n, lin_vel_cmd_n, hidden_state)
 
@@ -175,9 +175,9 @@ class DefaultHumanoidActor(eqx.Module):
         x_n = jnp.concatenate([flat_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
 
         # Process through LSTM cell
-        h, c = self.cell(x_n, hidden_state)
+        h_s, c_s = self.cell(x_n, hidden_state)
 
-        out_n = self.projector(h)
+        out_n = self.projector(h_s)
 
         mean_n = out_n[..., :NUM_OUTPUTS]
         std_n = out_n[..., NUM_OUTPUTS:]
@@ -188,7 +188,7 @@ class DefaultHumanoidActor(eqx.Module):
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
-        return distrax.Normal(mean_n, std_n), (h, c)
+        return distrax.Normal(mean_n, std_n), (h_s, c_s)
 
 
 class DefaultHumanoidCritic(eqx.Module):
@@ -507,9 +507,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         # Load the checkpoint and export it using xax's export function.
         model: DefaultHumanoidModel = self.load_checkpoint(ckpt_path, part="model")
 
-        def model_fn(obs: Array, cmd: Array, h: Array, c: Array) -> tuple[Array, Array, Array]:
-            dist, (h, c) = model.actor.call_flat_obs(obs, cmd, (h, c))
-            return dist.mode(), h, c
+        def model_fn(obs: Array, cmd: Array, h_s: Array, c_s: Array) -> tuple[Array, Array, Array]:
+            dist, (h_s, c_s) = model.actor.call_flat_obs(obs, cmd, (h_s, c_s))
+            return dist.mode(), h_s, c_s
 
         input_shapes = [(OBS_SIZE,), (CMD_SIZE,), (HIDDEN_SIZE,), (HIDDEN_SIZE,)]
         xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
