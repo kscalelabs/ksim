@@ -39,6 +39,21 @@ class EngineConstants:
     reward_generators: Collection[Reward]
     termination_generators: Collection[Termination]
     randomization_generators: Collection[Randomization]
+    initial_carry: PyTree
+
+    def __hash__(self) -> int:
+        """Custom hash that excludes initial_carry which contains unhashable JAX arrays."""
+        return hash(
+            (
+                self.obs_generators,
+                self.command_generators,
+                self.reward_generators,
+                self.termination_generators,
+                self.randomization_generators,
+                # Use type/structure information instead of the actual arrays
+                str(type(self.initial_carry)),
+            )
+        )
 
 
 @jax.tree_util.register_dataclass
