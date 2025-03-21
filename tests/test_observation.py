@@ -1,6 +1,5 @@
 """Tests for observations in the ksim package."""
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import attrs
