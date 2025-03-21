@@ -46,7 +46,7 @@ class EngineConstants:
 class EngineVariables:
     carry: PyTree
     commands: FrozenDict[str, Array]
-    randomizations: FrozenDict[str, Array]
+    randomization: FrozenDict[str, Array]
     physics_state: PhysicsState
     rng: PRNGKeyArray
 
