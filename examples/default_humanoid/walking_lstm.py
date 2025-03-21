@@ -47,6 +47,7 @@ NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
 
 HIDDEN_SIZE = 256  # `_s`
+DEPTH = 1
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -168,14 +169,14 @@ class DefaultHumanoidActor(eqx.Module):
             key,
             input_size=NUM_INPUTS,
             hidden_size=hidden_size,
-            depth=3,
+            depth=DEPTH,
         )
 
         self.projector = eqx.nn.MLP(
             in_size=hidden_size,
             out_size=NUM_OUTPUTS * 2,
             width_size=64,
-            depth=3,
+            depth=1,
             key=key,
             activation=jax.nn.relu,
         )
@@ -422,7 +423,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_initial_carry(self) -> tuple[tuple[Array, Array], ...]:
         # Initialize the hidden state for LSTM
-        return tuple((jnp.zeros((HIDDEN_SIZE,)), jnp.zeros((HIDDEN_SIZE,))) for _ in range(3))
+        return tuple((jnp.zeros((HIDDEN_SIZE,)), jnp.zeros((HIDDEN_SIZE,))) for _ in range(DEPTH))
 
     def _run_actor(
         self,
@@ -576,7 +577,7 @@ if __name__ == "__main__":
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
-            learning_rate=3e-4,
+            learning_rate=3e-5,
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
