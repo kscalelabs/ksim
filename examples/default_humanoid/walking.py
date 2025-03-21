@@ -157,6 +157,23 @@ class DefaultHumanoidActor(eqx.Module):
         # return distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
         return distrax.Normal(mean_n, std_n)
 
+    def call_flat_obs(
+        self,
+        flat_obs_n: Array,
+        cmd_n: Array,
+    ) -> distrax.Normal:
+        prediction_n = self.mlp(flat_obs_n)
+        mean_n = prediction_n[..., :NUM_OUTPUTS]
+        std_n = prediction_n[..., NUM_OUTPUTS:]
+
+        # Scale the mean.
+        mean_n = jnp.tanh(mean_n) * self.mean_scale
+
+        # Softplus and clip to ensure positive standard deviations.
+        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
+
+        return distrax.Normal(mean_n, std_n)
+
 
 class DefaultHumanoidCritic(eqx.Module):
     """Critic for the walking task."""
@@ -295,8 +312,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             friction=self.config.friction,
         )
 
-    def get_actuators(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> Actuators:
+    def get_actuators(
+        self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
+    ) -> Actuators:
         if self.config.use_mit_actuators:
+            if metadata is None:
+                raise ValueError("Metadata is required for MIT actuators")
             return MITPositionActuators(physics_model, metadata)
         else:
             return TorqueActuators()
@@ -327,7 +348,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
-        return [DHForwardReward(scale=0.25), DHControlPenalty(scale=-0.01), DHHealthyReward(scale=0.5)]
+        return [
+            DHForwardReward(scale=0.25),
+            DHControlPenalty(scale=-0.01),
+            DHHealthyReward(scale=0.5),
+        ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
@@ -375,7 +400,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        log_probs, _ = trajectories.aux_outputs
+        if trajectories.aux_outputs is None:
+            raise ValueError("No aux outputs found in trajectories")
+        _, log_probs = trajectories.aux_outputs
         return log_probs
 
     def get_on_policy_values(
@@ -384,6 +411,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
+        if trajectories.aux_outputs is None:
+            raise ValueError("No aux outputs found in trajectories")
         _, values = trajectories.aux_outputs
         return values
 
@@ -446,10 +475,10 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         model: DefaultHumanoidModel = self.load_checkpoint(ckpt_path, part="model")
 
         def model_fn(obs: Array, cmd: Array) -> Array:
-            return model.actor(obs, cmd).mode()
+            return model.actor.call_flat_obs(obs, cmd).mode()
 
         input_shapes = [(OBS_SIZE,), (CMD_SIZE,)]
-        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")
+        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
 
         return state
 

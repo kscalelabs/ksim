@@ -109,7 +109,7 @@ class FallTermination(Termination):
     def create_from_quaternion_sensor(cls, physics_model: PhysicsModel, quaternion_sensor: str) -> Self:
         try:
             _ = get_sensor_data_idxs_by_name(physics_model)[quaternion_sensor]
-            return FallTermination(
+            return cls(
                 sensor_name=quaternion_sensor,
                 sensor_type="quaternion_orientation",
             )
@@ -120,7 +120,7 @@ class FallTermination(Termination):
     def create_from_projected_gravity_sensor(cls, physics_model: PhysicsModel, projected_gravity_sensor: str) -> Self:
         try:
             _ = get_sensor_data_idxs_by_name(physics_model)[projected_gravity_sensor]
-            return FallTermination(
+            return cls(
                 sensor_name=projected_gravity_sensor,
                 sensor_type="gravity_vector",
             )
@@ -143,7 +143,7 @@ class FallTermination(Termination):
         if projected_gravity_sensor:
             return cls.create_from_projected_gravity_sensor(physics_model, projected_gravity_sensor)
 
-        return FallTermination(
+        return cls(
             sensor_name="base",
             sensor_type="base_orientation",
         )

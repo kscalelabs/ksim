@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Collection, Generic, TypeVar
+from typing import Any, Collection, Generic, Iterable, TypeVar
 
 import chex
 import equinox as eqx
@@ -628,7 +628,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_histogram(key="qpos", value=trajectories.qpos[..., 7:], namespace="🔩 state histograms")
             self.logger.log_histogram(key="qvel", value=trajectories.qvel[..., 6:], namespace="🔩 state histograms")
 
-    def log_train_metrics(self, train_metrics: dict[str, Array]) -> None:
+    def log_train_metrics(self, train_metrics: FrozenDict[str, Array]) -> None:
         """Logs the train metrics.
 
         Args:
@@ -827,7 +827,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine_constants: EngineConstants,
         num_steps: int,
         num_envs: int,
-    ) -> Trajectory:
+    ) -> tuple[Trajectory, Rewards]:
         rngs = jax.random.split(rng, num_envs)
         vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None, None, None))
         return vmapped_unroll(rngs, physics_model, model_arr, model_static, engine, engine_constants, num_steps)
@@ -877,7 +877,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine = self.get_engine(mjx_model, metadata)
         observations = self.get_observations(mjx_model)
         commands = self.get_commands(mjx_model)
-        rewards = self.get_rewards(mjx_model)
+        rewards_terms = self.get_rewards(mjx_model)
         terminations = self.get_terminations(mjx_model)
         randomizations = self.get_randomization(mjx_model)
 
@@ -885,7 +885,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine_constants = EngineConstants(
             obs_generators=tuple(observations),
             command_generators=tuple(commands),
-            reward_generators=tuple(rewards),
+            reward_generators=tuple(rewards_terms),
             termination_generators=tuple(terminations),
             randomization_generators=tuple(randomizations),
         )
@@ -1050,6 +1050,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng=rng,
             )
 
+            iterator: Iterable[int]
+
             try:
                 import tqdm
 
@@ -1071,7 +1073,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 ) as viewer:
                     viewer.setup_camera(self.config)
                     for step_id in iterator:
-
                         # We need to manually sync the data back and forth between
                         # the viewer and the engine, because the resetting the
                         # environment creates a new data object rather than
@@ -1099,7 +1100,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         # Sync data again
                         viewer.copy_data(dst=viewer_data, src=engine_variables.physics_state.data)
                         mujoco.mj_forward(viewer_model, viewer_data)
-                        viewer.add_commands(engine_variables.commands)
+                        viewer.add_commands(dict(engine_variables.commands))
                         viewer.update_and_sync()
 
             except (KeyboardInterrupt, bdb.BdbQuit):

@@ -15,7 +15,7 @@ class DummyCommand(Command):
     def initial_command(self, rng: jax.Array) -> jnp.ndarray:
         return jnp.zeros((1,))
 
-    def __call__(self, rng: jax.Array, time: Array) -> jnp.ndarray:
+    def __call__(self, prev_command: Array, time: Array, rng: jax.Array) -> jnp.ndarray:
         return jnp.zeros((1,))
 
 

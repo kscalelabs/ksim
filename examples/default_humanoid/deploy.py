@@ -72,7 +72,7 @@ async def get_observation(kos: pykos.KOS) -> np.ndarray:
 
 async def send_actions(kos: pykos.KOS, actions: np.ndarray) -> None:
     actions = np.rad2deg(actions)
-    actuator_commands: list[pykos.ActuatorCommand] = [
+    actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
         {
             "actuator_id": ac.actuator_id,
             "position": actions[ac.nn_id],
