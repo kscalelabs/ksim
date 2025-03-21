@@ -414,7 +414,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
-            BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=4.0),
+            BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=4.0),
             FastAccelerationTermination(),
         ]
 

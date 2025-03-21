@@ -32,6 +32,7 @@ from ksim.randomization import (
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import (
     Reward,
+    TerminationPenalty,
 )
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import BadZTermination, FastAccelerationTermination, Termination
@@ -215,7 +216,7 @@ class DefaultHumanoidModel(eqx.Module):
             min_std=0.01,
             max_std=1.0,
             var_scale=1.0,
-            mean_scale=1.0,
+            mean_scale=0.5,
         )
         self.critic = DefaultHumanoidCritic(key)
 
@@ -349,14 +350,15 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
         return [
-            DHForwardReward(scale=0.25),
+            DHForwardReward(scale=0.75),
             DHControlPenalty(scale=-0.01),
-            DHHealthyReward(scale=0.5),
+            DHHealthyReward(scale=1.5),
+            TerminationPenalty(scale=-100.0),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
-            BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0),
+            BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=2.0),
             FastAccelerationTermination(),
         ]
 
@@ -428,7 +430,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
         # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
-        action_btn = trajectories.action
+        action_btn = trajectories.action / model.actor.mean_scale
         log_probs_btn = action_dist_btn.log_prob(action_btn)
         entropy_btn = action_dist_btn.entropy()
 
@@ -487,7 +489,7 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking run_environment=True
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
-            num_envs=4096,
+            num_envs=8192,
             num_batches=64,
             num_passes=8,
             # Simulation parameters.
@@ -496,7 +498,7 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             save_every_n_steps=50,
-            rollout_length_seconds=1.25,
+            rollout_length_seconds=5.0,
             eval_rollout_length_seconds=4.0,
             # PPO parameters
             gamma=0.97,
