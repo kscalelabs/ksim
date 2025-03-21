@@ -46,7 +46,7 @@ CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
 
-HIDDEN_SIZE = 256 # `_s`
+HIDDEN_SIZE = 256  # `_s`
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -105,11 +105,34 @@ class DHJointPositionObservation(Observation):
         return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
+class MultiLayerLSTM(eqx.Module):
+    layers: tuple[eqx.nn.LSTMCell, ...]
+    depth: int = eqx.field(static=True)
+
+    def __init__(self, key: PRNGKeyArray, *, hidden_size: int, depth: int) -> None:
+        self.layers = tuple(
+            eqx.nn.LSTMCell(input_size=hidden_size, hidden_size=hidden_size, use_bias=True, key=key)
+            for _ in range(depth)
+        )
+        self.depth = depth
+
+    def __call__(
+        self, x_n: Array, hidden_states: tuple[tuple[Array, Array], ...]
+    ) -> tuple[Array, tuple[tuple[Array, Array], ...]]:
+
+        new_states = []
+        for layer, hidden_state in zip(self.layers, hidden_states):
+            new_x, new_hidden = layer(x_n, hidden_state)
+            new_states.append(new_hidden)
+            x_n = new_x
+        return x_n, tuple(new_states)
+
+
 class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
-    cell: eqx.nn.LSTMCell
-    projector: eqx.nn.Linear
+    multi_layer_lstm: MultiLayerLSTM
+    projector: eqx.nn.MLP
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
@@ -126,17 +149,19 @@ class DefaultHumanoidActor(eqx.Module):
         mean_scale: float,
         hidden_size: int,
     ) -> None:
-        self.cell = eqx.nn.LSTMCell(
-            input_size=NUM_INPUTS,
+        self.multi_layer_lstm = MultiLayerLSTM(
+            key,
             hidden_size=hidden_size,
-            use_bias=True,
-            key=key,
+            depth=3,
         )
 
-        self.projector = eqx.nn.Linear(
-            in_features=hidden_size,
-            out_features=NUM_OUTPUTS * 2,
+        self.projector = eqx.nn.MLP(
+            in_size=hidden_size,
+            out_size=NUM_OUTPUTS * 2,
+            width_size=64,
+            depth=3,
             key=key,
+            activation=jax.nn.relu,
         )
 
         self.min_std = min_std
@@ -153,28 +178,30 @@ class DefaultHumanoidActor(eqx.Module):
         com_vel_n: Array,
         act_frc_obs_n: Array,
         lin_vel_cmd_n: Array,
-        hidden_state: tuple[Array, Array] | None = None,
-    ) -> tuple[distrax.Normal, tuple[Array, Array]]:
+        hidden_states: tuple[tuple[Array, Array], ...] | None = None,
+    ) -> tuple[distrax.Normal, tuple[tuple[Array, Array], ...]]:
         obs_n = jnp.concatenate([dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n])
 
         # Initialize hidden state if not provided
-        if hidden_state is None:
+        if hidden_states is None:
+            # Initialize hidden states for each layer in the multi-layer LSTM
             h_s = jnp.zeros((self.hidden_size,))
             c_s = jnp.zeros((self.hidden_size,))
-            hidden_state = (h_s, c_s)
+            # Create a tuple of (h_s, c_s) for each layer
+            hidden_states = tuple((h_s, c_s) for _ in range(self.multi_layer_lstm.depth))
 
-        return self.call_flat_obs(obs_n, lin_vel_cmd_n, hidden_state)
+        return self.call_flat_obs(obs_n, lin_vel_cmd_n, hidden_states)
 
     def call_flat_obs(
         self,
         flat_obs_n: Array,
         lin_vel_cmd_n: Array,
-        hidden_state: tuple[Array, Array],
-    ) -> tuple[distrax.Normal, tuple[Array, Array]]:
+        hidden_states: tuple[tuple[Array, Array], ...],
+    ) -> tuple[distrax.Normal, tuple[tuple[Array, Array], ...]]:
         x_n = jnp.concatenate([flat_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
 
         # Process through LSTM cell
-        h_s, c_s = self.cell(x_n, hidden_state)
+        h_s, new_hidden_states = self.multi_layer_lstm(x_n, hidden_states)
 
         out_n = self.projector(h_s)
 
@@ -187,7 +214,7 @@ class DefaultHumanoidActor(eqx.Module):
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
-        return distrax.Normal(mean_n, std_n), (h_s, c_s)
+        return distrax.Normal(mean_n, std_n), new_hidden_states
 
 
 class DefaultHumanoidCritic(eqx.Module):
