@@ -17,7 +17,7 @@ from ksim.observation import Observation
 _TOL = 1e-4
 
 
-@attrs.define(frozen=True, kw_only=True)
+@attrs.define(frozen=True)
 class DummyObservation(Observation):
     """A dummy observation for testing."""
 
@@ -30,8 +30,6 @@ class DummyObservation(Observation):
         return observation
 
 
-@jax.tree_util.register_dataclass
-@dataclass
 class DummyMjxData(mjx.Data):
     """Mock mjx.Data for testing."""
 

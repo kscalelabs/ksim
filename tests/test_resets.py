@@ -1,5 +1,6 @@
 """Tests for reset builders in the ksim package."""
 
+import attrs
 import jax
 import jax.numpy as jnp
 import mujoco
@@ -10,6 +11,7 @@ from mujoco import mjx
 from ksim.resets import Reset, get_xy_position_reset
 
 
+@attrs.define(frozen=True)
 class DummyReset(Reset):
     """Dummy reset for testing."""
 

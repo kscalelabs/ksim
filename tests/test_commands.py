@@ -1,5 +1,6 @@
 """Tests for command builders in the ksim package."""
 
+import attrs
 import chex
 import jax
 import jax.numpy as jnp
@@ -11,6 +12,7 @@ from ksim.commands import AngularVelocityCommand, Command, LinearVelocityCommand
 _TOL = 1e-4
 
 
+@attrs.define(frozen=True)
 class DummyCommand(Command):
     def initial_command(self, rng: jax.Array) -> jnp.ndarray:
         return jnp.zeros((1,))

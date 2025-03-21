@@ -21,3 +21,6 @@ xax
 mujoco
 mujoco-mjx
 mujoco-scenes
+
+# Deployment
+pykos
