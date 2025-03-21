@@ -21,7 +21,6 @@ from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsData, PhysicsModel, Trajectory
 from ksim.observation import (
     ActuatorForceObservation,
-    BaseOrientationObservation,
     CenterOfMassInertiaObservation,
     CenterOfMassVelocityObservation,
     Observation,
@@ -47,7 +46,7 @@ CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
 
-HIDDEN_SIZE = 64 # `_s`
+HIDDEN_SIZE = 256 # `_s`
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -349,7 +348,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             DHJointPositionObservation(),
             DHJointVelocityObservation(),
             ActuatorForceObservation(),
-            BaseOrientationObservation(),
             CenterOfMassInertiaObservation(),
             CenterOfMassVelocityObservation(),
         ]
@@ -361,9 +359,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
         return [
-            DHForwardReward(scale=0.2),
+            DHForwardReward(scale=0.5),
             DHControlPenalty(scale=-0.01),
-            DHHealthyReward(scale=0.5),
+            DHHealthyReward(scale=0.75),
             TerminationPenalty(scale=-100.0),
             JointVelocityPenalty(scale=-0.01),
             # These seem necessary to prevent some physics artifacts.

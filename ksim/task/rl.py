@@ -522,7 +522,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             lambda: next_physics_state,
         )
 
-        # breakpoint()
         next_carry = jax.lax.cond(
             terminated,
             lambda: engine_constants.initial_carry,
