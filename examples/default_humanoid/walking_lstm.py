@@ -115,12 +115,12 @@ class MultiLayerLSTM(eqx.Module):
     def __init__(self, key: PRNGKeyArray, *, input_size: int, hidden_size: int, depth: int) -> None:
         if depth < 1:
             raise ValueError("Depth must be at least 1")
-        
+
         first_layer = eqx.nn.LSTMCell(input_size=input_size, hidden_size=hidden_size, use_bias=True, key=key)
 
         other_layers = tuple(
             eqx.nn.LSTMCell(input_size=hidden_size, hidden_size=hidden_size, use_bias=True, key=key)
-            for _ in range(depth-1)
+            for _ in range(depth - 1)
         )
 
         self.layers = (first_layer, *other_layers)
@@ -134,7 +134,6 @@ class MultiLayerLSTM(eqx.Module):
         new_states = []
         h, c = self.layers[0](x_n, hidden_states[0])
         new_states.append((h, c))
-
 
         if self.depth > 1:
             for layer, hidden_state in zip(self.layers[1:], hidden_states[1:]):
@@ -432,7 +431,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         commands: FrozenDict[str, Array],
         carry: tuple[Array, Array],
     ) -> tuple[distrax.Normal, tuple[Array, Array]]:
-
         dh_joint_pos_n = observations.get("dhjoint_position_observation", jnp.zeros((0,)))
         dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,)))
         com_inertia_n = observations.get("center_of_mass_inertia_observation", jnp.zeros((0,)))
