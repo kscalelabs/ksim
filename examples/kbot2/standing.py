@@ -193,7 +193,7 @@ class KbotActor(eqx.Module):
 
 
 class KbotCritic(eqx.Module):
-    """Critic for the walking task."""
+    """Critic for the standing task."""
 
     mlp: eqx.nn.MLP
 
@@ -239,7 +239,7 @@ class KbotModel(eqx.Module):
 
 @dataclass
 class KbotStandingTaskConfig(PPOConfig):
-    """Config for the KBot walking task."""
+    """Config for the KBot standing task."""
 
     robot_urdf_path: str = xax.field(
         value="examples/kscale-assets/kbot-v2-feet/",
@@ -510,7 +510,7 @@ if __name__ == "__main__":
     # python -m examples.kbot2.standing run_environment=True
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
-            num_envs=4096,
+            num_envs=4096,  # 512_000 steps
             num_batches=64,
             num_passes=8,
             # Simulation parameters.
@@ -525,7 +525,7 @@ if __name__ == "__main__":
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
-            learning_rate=3e-4,
+            learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
