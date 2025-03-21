@@ -18,8 +18,14 @@ from mujoco import mjx
 
 from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import PhysicsModel, Trajectory
-from ksim.observation import ActuatorForceObservation, BaseOrientationObservation, Observation
+from ksim.env.data import PhysicsData, PhysicsModel, Trajectory
+from ksim.observation import (
+    ActuatorForceObservation,
+    BaseOrientationObservation,
+    CenterOfMassInertiaObservation,
+    CenterOfMassVelocityObservation,
+    Observation,
+)
 from ksim.randomization import (
     Randomization,
     WeightRandomization,
@@ -36,7 +42,7 @@ from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import BadZTermination, FastAccelerationTermination, Termination
 from ksim.utils.mujoco import get_joint_metadata
 
-OBS_SIZE = 27
+OBS_SIZE = 336
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
@@ -60,6 +66,44 @@ class DHControlPenalty(Reward):
 
     def __call__(self, trajectory: Trajectory) -> Array:
         return jnp.sum(jnp.square(trajectory.action), axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class DHHealthyReward(Reward):
+    """Legacy default humanoid healthy reward that gives binary reward based on height."""
+
+    healthy_z_lower: float = attrs.field(default=0.5)
+    healthy_z_upper: float = attrs.field(default=1.5)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        height = trajectory.qpos[:, 2]
+        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
+        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
+        return is_healthy
+
+
+@attrs.define(frozen=True)
+class DHJointVelocityObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        qvel = state.qvel  # (N,)
+        return qvel
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return observation + jax.random.normal(rng, observation.shape) * self.noise
+
+
+@attrs.define(frozen=True)
+class DHJointPositionObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        qpos = state.qpos[2:]  # (N,)
+        return qpos
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -104,17 +148,31 @@ class DefaultHumanoidActor(eqx.Module):
 
     def __call__(
         self,
+        dh_joint_pos_n: Array,
+        dh_joint_vel_n: Array,
+        com_inertia_n: Array,
+        com_vel_n: Array,
         act_frc_obs_n: Array,
         lin_vel_cmd_n: Array,
         hidden_state: tuple[Array, Array] | None = None,
     ) -> tuple[distrax.Normal, tuple[Array, Array]]:
-        x_n = jnp.concatenate([act_frc_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
+        obs_n = jnp.concatenate([dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n])
 
         # Initialize hidden state if not provided
         if hidden_state is None:
             h = jnp.zeros((self.hidden_size,))
             c = jnp.zeros((self.hidden_size,))
             hidden_state = (h, c)
+
+        return self.call_flat_obs(obs_n, lin_vel_cmd_n, hidden_state)
+
+    def call_flat_obs(
+        self,
+        flat_obs_n: Array,
+        lin_vel_cmd_n: Array,
+        hidden_state: tuple[Array, Array],
+    ) -> tuple[distrax.Normal, tuple[Array, Array]]:
+        x_n = jnp.concatenate([flat_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
 
         # Process through LSTM cell
         h, c = self.cell(x_n, hidden_state)
@@ -265,8 +323,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             friction=self.config.friction,
         )
 
-    def get_actuators(self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput]) -> Actuators:
+    def get_actuators(
+        self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
+    ) -> Actuators:
         if self.config.use_mit_actuators:
+            if metadata is None:
+                raise ValueError("Metadata is required for MIT actuators")
             return MITPositionActuators(physics_model, metadata)
         else:
             return TorqueActuators()
@@ -284,8 +346,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
         return [
+            DHJointPositionObservation(),
+            DHJointVelocityObservation(),
             ActuatorForceObservation(),
             BaseOrientationObservation(),
+            CenterOfMassInertiaObservation(),
+            CenterOfMassVelocityObservation(),
         ]
 
     def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
@@ -297,6 +363,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         return [
             DHForwardReward(scale=0.2),
             DHControlPenalty(scale=-0.01),
+            DHHealthyReward(scale=0.5),
             TerminationPenalty(scale=-100.0),
             JointVelocityPenalty(scale=-0.01),
             # These seem necessary to prevent some physics artifacts.
@@ -324,9 +391,23 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         commands: FrozenDict[str, Array],
         carry: tuple[Array, Array],
     ) -> tuple[distrax.Normal, tuple[Array, Array]]:
+
+        dh_joint_pos_n = observations.get("dhjoint_position_observation", jnp.zeros((0,)))
+        dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,)))
+        com_inertia_n = observations.get("center_of_mass_inertia_observation", jnp.zeros((0,)))
+        com_vel_n = observations.get("center_of_mass_velocity_observation", jnp.zeros((0,)))
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.actor(act_frc_obs_n, lin_vel_cmd_n, carry)
+
+        return model.actor(
+            dh_joint_pos_n,
+            dh_joint_vel_n,
+            com_inertia_n,
+            com_vel_n,
+            act_frc_obs_n,
+            lin_vel_cmd_n,
+            carry,
+        )
 
     def _run_critic(
         self,
@@ -334,9 +415,16 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> Array:
+        dh_joint_pos_n = observations.get("dhjoint_position_observation", jnp.zeros((0,)))
+        dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,)))
+        com_inertia_n = observations.get("center_of_mass_inertia_observation", jnp.zeros((0,)))
+        com_vel_n = observations.get("center_of_mass_velocity_observation", jnp.zeros((0,)))
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.critic(act_frc_obs_n, lin_vel_cmd_n)
+
+        # Concatenate all observations
+        obs_n = jnp.concatenate([dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n])
+        return model.critic(obs_n, lin_vel_cmd_n)
 
     def get_on_policy_log_probs(
         self,
@@ -344,7 +432,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        log_probs, _ = trajectories.aux_outputs
+        if trajectories.aux_outputs is None:
+            raise ValueError("No aux outputs found in trajectories")
+        _, log_probs = trajectories.aux_outputs
         return log_probs
 
     def get_on_policy_values(
@@ -353,6 +443,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
+        if trajectories.aux_outputs is None:
+            raise ValueError("No aux outputs found in trajectories")
         _, values = trajectories.aux_outputs
         return values
 
@@ -362,7 +454,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
-
         def scan_fn(
             carry: tuple[Array, Array],
             inputs: Trajectory,
@@ -416,11 +507,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         # Load the checkpoint and export it using xax's export function.
         model: DefaultHumanoidModel = self.load_checkpoint(ckpt_path, part="model")
 
-        def model_fn(obs: Array, cmd: Array) -> Array:
-            return model.actor(obs, cmd).mode()
+        def model_fn(obs: Array, cmd: Array, h: Array, c: Array) -> tuple[Array, Array, Array]:
+            dist, (h, c) = model.actor.call_flat_obs(obs, cmd, (h, c))
+            return dist.mode(), h, c
 
-        input_shapes = [(OBS_SIZE,), (CMD_SIZE,)]
-        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")
+        input_shapes = [(OBS_SIZE,), (CMD_SIZE,), (HIDDEN_SIZE,), (HIDDEN_SIZE,)]
+        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
 
         return state
 
@@ -429,24 +521,24 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking run_environment=True
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
-            # Update parameters. These values are very small, which is useful
-            # for testing on your local machine.
-            num_envs=1024,
-            num_batches=32,
-            num_passes=4,
+            num_envs=4096,
+            num_batches=64,
+            num_passes=8,
             # Simulation parameters.
-            dt=0.0025,
+            dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            rollout_length_seconds=20.0,
-            eval_rollout_length_seconds=5.0,
+            save_every_n_steps=50,
+            rollout_length_seconds=1.25,
+            eval_rollout_length_seconds=4.0,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
+            learning_rate=3e-4,
             clip_param=0.3,
-            # TODO: Remove this after figuring out Mujoco physics issues.
-            reward_clip_max=10.0,
+            max_grad_norm=1.0,
+            use_mit_actuators=True,
         ),
     )
