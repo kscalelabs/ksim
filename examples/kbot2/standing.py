@@ -48,18 +48,6 @@ NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 20
 
 
-@attrs.define(frozen=True, kw_only=True)
-class HeightReward(Reward):
-    """Reward for how high the robot is."""
-
-    height_target: float = attrs.field(default=1.4)
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
-        reward = jnp.exp(-jnp.abs(height - self.height_target) * 30)
-        return reward
-
-
 @attrs.define(frozen=True)
 class DHJointVelocityObservation(Observation):
     noise: float = attrs.field(default=0.0)
