@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from kscale import K
-from kscale.web.gen.api import RobotURDFMetadataOutput
+from kscale.web.gen.api import JointMetadataOutput, RobotURDFMetadataOutput
 from kscale.web.utils import get_robots_dir, should_refresh_file
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ async def get_mujoco_model_path(model_name: str, cache: bool = True) -> str | Pa
     return mjcf_path
 
 
-async def get_mujoco_model_metadata(model_name: str, cache: bool = True) -> RobotURDFMetadataOutput:
+async def get_mujoco_model_metadata(model_name: str, cache: bool = True) -> JointMetadataOutput:
     """Downloads and caches the model metadata."""
     try:
         directory = Path(model_name)
@@ -55,7 +55,7 @@ async def get_mujoco_model_metadata(model_name: str, cache: bool = True) -> Robo
     with open(metadata_path, "r") as f:
         metadata = RobotURDFMetadataOutput.model_validate_json(f.read())
 
-    return metadata
+    return metadata.joint_name_to_metadata
 
 
 async def get_mujoco_model_and_metadata(
