@@ -498,8 +498,8 @@ if __name__ == "__main__":
     # python -m examples.kbot2.standing run_environment=True
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
-            num_envs=4096,  # 512_000 steps
-            num_batches=64,
+            num_envs=1024,  # 512_000 steps
+            num_batches=16,
             num_passes=8,
             # Simulation parameters.
             dt=0.002,
