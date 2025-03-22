@@ -8,7 +8,7 @@ import pytest
 from jaxtyping import Array
 from mujoco import mjx
 
-from ksim.resets import Reset, get_xy_position_reset
+from ksim.resets import HFieldXYPositionReset, PlaneXYPositionReset, Reset, get_xy_position_reset
 
 
 @attrs.define(frozen=True)
@@ -68,3 +68,23 @@ class TestXYPositionResetBuilder:
 
         # Check that the result is a DummyMjxData object
         assert isinstance(result, DummyMjxData)
+
+
+@pytest.mark.parametrize(
+    "reset",
+    [
+        HFieldXYPositionReset(
+            bounds=(0.0, 0.0, 0.0, 0.0),
+            padded_bounds=(0.0, 0.0, 0.0, 0.0),
+            x_range=1.0,
+            y_range=1.0,
+            hfield_data=jnp.zeros((10, 10)),
+        ),
+        PlaneXYPositionReset(
+            bounds=(0.0, 0.0, 0.0), padded_bounds=(0.0, 0.0, 0.0, 0.0), x_range=1.0, y_range=1.0, robot_base_height=0.0
+        ),
+    ],
+)
+def test_reset_hashable(reset: Reset) -> None:
+    """Test that all resets are hashable."""
+    assert hash(reset) is not None
