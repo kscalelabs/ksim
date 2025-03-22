@@ -32,7 +32,6 @@ from ksim.randomization import (
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import (
     Reward,
-    TerminationPenalty,
 )
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import BadZTermination, FastAccelerationTermination, Termination
@@ -140,12 +139,18 @@ class DefaultHumanoidActor(eqx.Module):
         act_frc_obs_n: Array,
         lin_vel_cmd_n: Array,
     ) -> distrax.Normal:
-        x_n = jnp.concatenate(
-            [dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n], axis=-1
+        obs_n = jnp.concatenate(
+            [dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n], axis=-1
         )  # (NUM_INPUTS)
 
-        # Split the output into mean and standard deviation.
-        prediction_n = self.mlp(x_n)
+        return self.call_flat_obs(obs_n, lin_vel_cmd_n)
+
+    def call_flat_obs(
+        self,
+        flat_obs_n: Array,
+        cmd_n: Array,
+    ) -> distrax.Normal:
+        prediction_n = self.mlp(jnp.concatenate([flat_obs_n, cmd_n], axis=-1))  # (NUM_INPUTS,)
         mean_n = prediction_n[..., :NUM_OUTPUTS]
         std_n = prediction_n[..., NUM_OUTPUTS:]
 
@@ -156,23 +161,6 @@ class DefaultHumanoidActor(eqx.Module):
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
         # return distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
-        return distrax.Normal(mean_n, std_n)
-
-    def call_flat_obs(
-        self,
-        flat_obs_n: Array,
-        cmd_n: Array,
-    ) -> distrax.Normal:
-        prediction_n = self.mlp(flat_obs_n)
-        mean_n = prediction_n[..., :NUM_OUTPUTS]
-        std_n = prediction_n[..., NUM_OUTPUTS:]
-
-        # Scale the mean.
-        mean_n = jnp.tanh(mean_n) * self.mean_scale
-
-        # Softplus and clip to ensure positive standard deviations.
-        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
-
         return distrax.Normal(mean_n, std_n)
 
 
@@ -216,7 +204,7 @@ class DefaultHumanoidModel(eqx.Module):
             min_std=0.01,
             max_std=1.0,
             var_scale=1.0,
-            mean_scale=0.5,
+            mean_scale=1.0,
         )
         self.critic = DefaultHumanoidCritic(key)
 
@@ -263,7 +251,7 @@ class HumanoidWalkingTaskConfig(PPOConfig):
 
     # Rendering parameters.
     render_track_body_id: int | None = xax.field(
-        value=None,
+        value=0,
         help="The body id to track with the render camera.",
     )
 
@@ -345,20 +333,15 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
         return [
-            LinearVelocityCommand(x_scale=5.0, y_scale=5.0, switch_prob=0.02, zero_prob=0.3),
+            LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
         ]
 
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
-        return [
-            DHForwardReward(scale=0.75),
-            DHControlPenalty(scale=-0.01),
-            DHHealthyReward(scale=1.5),
-            TerminationPenalty(scale=-100.0),
-        ]
+        return [DHForwardReward(scale=0.5), DHControlPenalty(scale=-0.01), DHHealthyReward(scale=0.5)]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
-            BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=2.0),
+            BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0),
             FastAccelerationTermination(),
         ]
 
@@ -404,7 +387,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     ) -> Array:
         if trajectories.aux_outputs is None:
             raise ValueError("No aux outputs found in trajectories")
-        _, log_probs = trajectories.aux_outputs
+        log_probs, _ = trajectories.aux_outputs
         return log_probs
 
     def get_on_policy_values(
@@ -489,7 +472,7 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking run_environment=True
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
-            num_envs=8192,
+            num_envs=4096,
             num_batches=64,
             num_passes=8,
             # Simulation parameters.
@@ -498,7 +481,7 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             save_every_n_steps=50,
-            rollout_length_seconds=5.0,
+            rollout_length_seconds=21.0,
             eval_rollout_length_seconds=4.0,
             # PPO parameters
             gamma=0.97,
@@ -507,6 +490,6 @@ if __name__ == "__main__":
             learning_rate=3e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
-            use_mit_actuators=True,
+            use_mit_actuators=False,
         ),
     )
