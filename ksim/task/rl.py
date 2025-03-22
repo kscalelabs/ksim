@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Collection, Generic, Iterable, TypeVar
+from typing import Any, Collection, Generic, TypeVar
 
 import chex
 import equinox as eqx
@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 import mujoco
 import numpy as np
 import optax
+import tqdm
 import xax
 from dpshdl.dataset import Dataset
 from flax.core import FrozenDict
@@ -1053,18 +1054,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng=rng,
             )
 
-            iterator: Iterable[int]
+            iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
 
-            try:
-                import tqdm
-
-                iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
-
-            except ImportError:
-                logger.warning("tqdm not installed, using range() instead")
-                iterator = range(num_steps) if num_steps is not None else itertools.count()
-
-            step_id = 0
             try:
                 viewer_model = mj_model
                 viewer_data = physics_state.data
@@ -1072,9 +1063,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     viewer_model,
                     viewer_data,
                     save_path=save_path,
-                    config=self.config,
+                    render_width=self.config.render_width,
+                    render_height=self.config.render_height,
+                    ctrl_dt=self.config.ctrl_dt,
                 ) as viewer:
-                    viewer.setup_camera(self.config)
+                    viewer.setup_camera(
+                        render_distance=self.config.render_distance,
+                        render_azimuth=self.config.render_azimuth,
+                        render_elevation=self.config.render_elevation,
+                        render_lookat=self.config.render_lookat,
+                    )
                     for step_id in iterator:
                         # We need to manually sync the data back and forth between
                         # the viewer and the engine, because the resetting the
