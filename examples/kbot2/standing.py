@@ -32,6 +32,8 @@ from ksim.randomization import (
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import (
+    BaseHeightReward,
+    LinearVelocityTrackingReward,
     Reward,
 )
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -167,7 +169,7 @@ class KbotActor(eqx.Module):
         flat_obs_n: Array,
         cmd_n: Array,
     ) -> distrax.Normal:
-        prediction_n = self.mlp(flat_obs_n)
+        prediction_n = self.mlp(jnp.concatenate([flat_obs_n, cmd_n], axis=-1))
         mean_n = prediction_n[..., :NUM_OUTPUTS]
         std_n = prediction_n[..., NUM_OUTPUTS:]
 
@@ -226,8 +228,8 @@ class KbotModel(eqx.Module):
 
 
 @dataclass
-class KbotWalkingTaskConfig(PPOConfig):
-    """Config for the KBot walking task."""
+class KbotStandingTaskConfig(PPOConfig):
+    """Config for the KBot standing task."""
 
     robot_urdf_path: str = xax.field(
         value="examples/kscale-assets/kbot-v2-feet/",
@@ -288,7 +290,7 @@ class KbotWalkingTaskConfig(PPOConfig):
     )
 
 
-class KbotWalkingTask(PPOTask[KbotWalkingTaskConfig]):
+class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -360,7 +362,8 @@ class KbotWalkingTask(PPOTask[KbotWalkingTaskConfig]):
 
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
         return [
-            DHForwardReward(scale=0.25),
+            LinearVelocityTrackingReward(scale=0.25),
+            BaseHeightReward(scale=1.0, height_target=0.7),
             DHControlPenalty(scale=-0.01),
             DHHealthyReward(scale=0.5),
         ]
@@ -495,9 +498,9 @@ class KbotWalkingTask(PPOTask[KbotWalkingTaskConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.kbot2.walking run_environment=True
-    KbotWalkingTask.launch(
-        KbotWalkingTaskConfig(
+    # python -m examples.kbot2.standing run_environment=True
+    KbotStandingTask.launch(
+        KbotStandingTaskConfig(
             num_envs=1024,  # 512_000 steps
             num_batches=16,
             num_passes=8,
