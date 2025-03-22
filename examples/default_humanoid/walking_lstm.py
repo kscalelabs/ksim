@@ -260,7 +260,7 @@ class DefaultHumanoidModel(eqx.Module):
     def __init__(self, key: PRNGKeyArray) -> None:
         self.actor = DefaultHumanoidActor(
             key,
-            min_std=0.1,
+            min_std=0.01,
             max_std=1.0,
             var_scale=1.0,
             mean_scale=1.0,
