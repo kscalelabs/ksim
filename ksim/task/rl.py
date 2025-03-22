@@ -7,6 +7,7 @@ import logging
 import signal
 import sys
 import textwrap
+import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 from omegaconf import II, MISSING
 from PIL import Image, ImageDraw
+from pynput import keyboard
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
@@ -49,9 +51,26 @@ from ksim.randomization import Randomization
 from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
-from ksim.utils.mujoco import get_joint_metadata
+from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata
 
 logger = logging.getLogger(__name__)
+
+paused = False
+
+
+def on_press(key):
+    global paused
+    if key == keyboard.Key.space:
+        paused = not paused
+        print("Paused" if paused else "Resumed")
+    elif key == keyboard.Key.esc:
+        # Returning False stops the listener.
+        return False
+
+
+# Start the listener in a separate thread.
+listener = keyboard.Listener(on_press=on_press)
+listener.start()
 
 
 def get_observation(
@@ -67,6 +86,42 @@ def get_observation(
         observation_value = observation(physics_state.data, obs_rng)
         observations[observation.observation_name] = observation_value
     return FrozenDict(observations)
+
+
+def compute_step_rewards(
+    transition: Trajectory,
+    reward_generators: Collection[Reward],
+    ctrl_dt: float,
+    clip_max: float | None = None,
+) -> Rewards:
+    """Get the rewards for a single step/transition.
+
+    Similar to get_rewards but designed for a single step rather than a full trajectory.
+
+    Args:
+        transition: A single-step trajectory
+        reward_generators: Collection of reward generator functions
+        ctrl_dt: Control timestep
+        clip_max: Optional maximum value to clip rewards
+
+    Returns:
+        Rewards object with total reward and components
+    """
+    # Add batch dimension to the transition - reward functions expect this
+    batched_transition = jax.tree.map(lambda x: jnp.expand_dims(x, axis=0), transition)
+
+    rewards = {}
+    for reward_generator in reward_generators:
+        reward_name = reward_generator.reward_name
+        # Compute reward with batch dimension
+        reward_val = reward_generator(batched_transition) * reward_generator.scale * ctrl_dt
+        # Remove batch dimension for the result
+        reward_val = jnp.squeeze(reward_val, axis=0)
+        if clip_max is not None:
+            reward_val = jnp.clip(reward_val, -clip_max, clip_max)
+        rewards[reward_generator.reward_name] = reward_val
+    total_reward = jax.tree.reduce(jnp.add, list(rewards.values()))
+    return Rewards(total=total_reward, components=FrozenDict(rewards))
 
 
 @xax.jit(static_argnames=["reward_generators", "ctrl_dt"])
@@ -1119,6 +1174,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     render_width=self.config.render_width,
                     render_height=self.config.render_height,
                     ctrl_dt=self.config.ctrl_dt,
+                    make_plots=True,
                 ) as viewer:
                     viewer.setup_camera(
                         render_distance=self.config.render_distance,
@@ -1126,6 +1182,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         render_elevation=self.config.render_elevation,
                         render_lookat=self.config.render_lookat,
                     )
+
+                    ctrl_idx_to_name = {v: k for k, v in get_ctrl_data_idx_by_name(mj_model).items()}
+                    viewer.add_plot_group(title="Actions", index_mapping=ctrl_idx_to_name, y_axis_min=-2, y_axis_max=2)
+
+                    # We'll set up reward component plots in the first iteration
+                    reward_component_mapping = None
+
                     for _ in iterator:
                         # We need to manually sync the data back and forth between
                         # the viewer and the engine, because the resetting the
@@ -1133,12 +1196,25 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         # happening in-place, as Mujoco expects.
                         viewer.copy_data(dst=engine_variables.physics_state.data, src=viewer_data)
 
+                        # If paused, only update the viewer
+                        if paused:
+                            viewer.update_and_sync()
+                            time.sleep(0.005)
+                            continue
+
                         transition, engine_variables = self.step_engine(
                             physics_model=mj_model,
                             model=model,
                             engine=engine,
                             engine_constants=engine_constants,
                             engine_variables=engine_variables,
+                        )
+
+                        step_rewards = compute_step_rewards(
+                            transition=transition,
+                            reward_generators=rewards,
+                            ctrl_dt=self.config.ctrl_dt,
+                            clip_max=self.config.reward_clip_max,
                         )
 
                         # We manually trigger randomizations on termination,
@@ -1157,6 +1233,25 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         viewer.add_commands(dict(engine_variables.commands))
                         viewer.update_and_sync()
 
+                        # Create rewards group on first step
+                        if step_id == 0:
+                            # First element is the total reward
+                            # Remaining elements are the individual reward components
+                            component_names = list(step_rewards.components.keys())
+                            reward_component_mapping = {0: "total_reward"}
+                            for i, name in enumerate(component_names):
+                                reward_component_mapping[i + 1] = name
+                            viewer.add_plot_group(title="Reward Components", index_mapping=reward_component_mapping)
+
+                        # Update reward components
+                        reward_values = [float(step_rewards.total)]
+                        reward_values.extend([float(val) for val in step_rewards.components.values()])
+                        viewer.update_plot_group("Reward Components", reward_values)
+
+                        # Update actions
+                        viewer.update_plot_group(
+                            "Actions", np.array(engine_variables.physics_state.most_recent_action).tolist()
+                        )
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
