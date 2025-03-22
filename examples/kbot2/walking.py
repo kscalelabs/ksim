@@ -78,7 +78,7 @@ class DHForwardReward(Reward):
 
     def __call__(self, trajectory: Trajectory) -> Array:
         # Take just the x velocity component
-        x_delta = -jnp.clip(trajectory.qvel[..., 1], -1.0, 1.0)
+        x_delta = jnp.clip(trajectory.qvel[..., 0], -1.0, 1.0)
         return x_delta
 
 

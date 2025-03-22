@@ -109,3 +109,4 @@ class BaseHeightReward(Reward):
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
         return xax.get_norm(base_height - self.height_target, self.norm)
+
