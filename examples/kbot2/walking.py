@@ -36,8 +36,8 @@ from ksim.rewards import (
 )
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import (
-    BadZTermination,
-    FastAccelerationTermination,
+    PitchTooGreatTermination,
+    RollTooGreatTermination,
     Termination,
 )
 from ksim.utils.api import get_mujoco_model_metadata
@@ -46,6 +46,41 @@ OBS_SIZE = 445
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 20
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointDeviationPenalty(Reward):
+    """Penalty for joint deviations."""
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        diff = trajectory.qpos[:, 7:] - jnp.zeros_like(trajectory.qpos[:, 7:])
+        x = jnp.sum(jnp.square(diff), axis=-1)
+        # y = jnp.abs(diff)
+        # y2 = jnp.exp(-2 * jnp.abs(diff)) - 0.2 * jnp.abs(diff).clip(0, 0.5)
+        return x
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TorquePenalty(Reward):
+    """Penalty for high torques."""
+
+    height_target: float = attrs.field(default=1.4)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        torque = jnp.abs(trajectory.actuator_force)
+        return torque
+
+
+@attrs.define(frozen=True, kw_only=True)
+class HeightReward(Reward):
+    """Reward for how high the robot is."""
+
+    height_target: float = attrs.field(default=1.4)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        height = trajectory.qpos[:, 2]
+        reward = jnp.exp(-jnp.abs(height - self.height_target) * 10)
+        return reward
 
 
 @attrs.define(frozen=True)
@@ -78,7 +113,7 @@ class DHForwardReward(Reward):
 
     def __call__(self, trajectory: Trajectory) -> Array:
         # Take just the x velocity component
-        x_delta = jnp.clip(trajectory.qvel[..., 0], -1.0, 1.0)
+        x_delta = -jnp.clip(trajectory.qvel[..., 1], -1.0, 1.0)
         return x_delta
 
 
@@ -358,17 +393,33 @@ class KbotWalkingTask(PPOTask[KbotWalkingTaskConfig]):
             LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.0, zero_prob=0.0),
         ]
 
+    # from ksim.rewards import AngularVelocityXYPenalty, LinearVelocityZPenalty,TerminationPenalty, JointVelocityPenalty
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
+        # return [
+        #     DHControlPenalty(scale=-0.01),
+        #     HeightReward(scale=5.0, height_target=0.7),
+        #     # ActionSmoothnessPenalty(scale=-0.01),
+        # ]
         return [
-            DHForwardReward(scale=0.25),
-            DHControlPenalty(scale=-0.01),
+            JointDeviationPenalty(scale=-1.0),
+            DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
+            # TerminationPenalty(scale=-10.0),
+            # JointVelocityPenalty(scale=-0.05),
+            # These seem necessary to prevent some physics artifacts.
+            # LinearVelocityZPenalty(scale=-0.001),
+            # AngularVelocityXYPenalty(scale=-0.001),
+            # DHForwardReward(scale=0.25),
+            DHControlPenalty(scale=-0.01),
+            # HeightReward(scale=.5, height_target=0.7),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
-            BadZTermination(unhealthy_z_lower=0.4, unhealthy_z_upper=1.6),
-            FastAccelerationTermination(),
+            # BadZTermination(unhealthy_z_lower=0.4, unhealthy_z_upper=3.0),
+            RollTooGreatTermination(max_roll=1.04),
+            PitchTooGreatTermination(max_pitch=1.04),
+            # FastAccelerationTermination(),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
@@ -498,24 +549,26 @@ if __name__ == "__main__":
     # python -m examples.kbot2.walking run_environment=True
     KbotWalkingTask.launch(
         KbotWalkingTaskConfig(
-            num_envs=1024,  # 512_000 steps
-            num_batches=16,
-            num_passes=8,
+            num_envs=4096,
+            num_batches=64,
+            num_passes=10,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
             valid_every_n_steps=25,
+            valid_first_n_steps=0,
             rollout_length_seconds=2.5,
             eval_rollout_length_seconds=2.5,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
-            learning_rate=1e-4,
+            learning_rate=3e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
+            action_scale=0.5,
         ),
     )

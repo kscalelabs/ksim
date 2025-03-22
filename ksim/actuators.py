@@ -84,7 +84,7 @@ class MITPositionActuators(Actuators):
         """Get the control signal from the (position) action vector."""
         current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
         current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
-
+        action = action * 0.5  # pfb30
         target_velocities = jnp.zeros_like(action)
         pos_delta = action - current_pos
         vel_delta = target_velocities - current_vel
