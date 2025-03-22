@@ -31,11 +31,7 @@ from ksim.randomization import (
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import (
-    AngularVelocityXYPenalty,
-    JointVelocityPenalty,
-    LinearVelocityZPenalty,
     Reward,
-    TerminationPenalty,
 )
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import BadZTermination, FastAccelerationTermination, Termination
@@ -46,8 +42,8 @@ CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
 
-HIDDEN_SIZE = 256  # `_s`
-DEPTH = 1
+HIDDEN_SIZE = 128  # `_s`
+DEPTH = 2
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -56,7 +52,7 @@ class DHForwardReward(Reward):
 
     def __call__(self, trajectory: Trajectory) -> Array:
         # Take just the x velocity component
-        x_delta = -jnp.clip(trajectory.qvel[..., 1], -1.0, 1.0)
+        x_delta = jnp.clip(trajectory.qvel[..., 0], -1.0, 1.0)
         return x_delta
 
 
@@ -115,7 +111,6 @@ class MultiLayerLSTM(eqx.Module):
     def __init__(self, key: PRNGKeyArray, *, input_size: int, hidden_size: int, depth: int) -> None:
         if depth < 1:
             raise ValueError("Depth must be at least 1")
-
         first_layer = eqx.nn.LSTMCell(input_size=input_size, hidden_size=hidden_size, use_bias=True, key=key)
 
         other_layers = tuple(
@@ -177,7 +172,7 @@ class DefaultHumanoidActor(eqx.Module):
             in_size=hidden_size,
             out_size=NUM_OUTPUTS * 2,
             width_size=64,
-            depth=1,
+            depth=2,
             key=key,
             activation=jax.nn.relu,
         )
@@ -406,11 +401,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             DHForwardReward(scale=0.5),
             DHControlPenalty(scale=-0.01),
             DHHealthyReward(scale=0.75),
-            TerminationPenalty(scale=-100.0),
-            JointVelocityPenalty(scale=-0.01),
+            # TerminationPenalty(scale=-30.0),
+            # JointVelocityPenalty(scale=-0.01),
             # These seem necessary to prevent some physics artifacts.
-            LinearVelocityZPenalty(scale=-0.001),
-            AngularVelocityXYPenalty(scale=-0.001),
+            # LinearVelocityZPenalty(scale=-0.001),
+            # AngularVelocityXYPenalty(scale=-0.001),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
@@ -434,9 +429,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         carry: tuple[tuple[Array, Array], ...],
     ) -> tuple[distrax.Normal, tuple[tuple[Array, Array], ...]]:
         dh_joint_pos_n = observations.get("dhjoint_position_observation", jnp.zeros((0,)))
-        dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,)))
+        dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,))) / 50.0
         com_inertia_n = observations.get("center_of_mass_inertia_observation", jnp.zeros((0,)))
-        com_vel_n = observations.get("center_of_mass_velocity_observation", jnp.zeros((0,)))
+        com_vel_n = observations.get("center_of_mass_velocity_observation", jnp.zeros((0,))) / 50.0
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
         lin_vel_cmd_n = commands["linear_velocity_command"]
 
@@ -457,9 +452,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         commands: FrozenDict[str, Array],
     ) -> Array:
         dh_joint_pos_n = observations.get("dhjoint_position_observation", jnp.zeros((0,)))
-        dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,)))
+        dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,))) / 50.0
         com_inertia_n = observations.get("center_of_mass_inertia_observation", jnp.zeros((0,)))
-        com_vel_n = observations.get("center_of_mass_velocity_observation", jnp.zeros((0,)))
+        com_vel_n = observations.get("center_of_mass_velocity_observation", jnp.zeros((0,))) / 50.0
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
         lin_vel_cmd_n = commands["linear_velocity_command"]
 
@@ -475,7 +470,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     ) -> Array:
         if trajectories.aux_outputs is None:
             raise ValueError("No aux outputs found in trajectories")
-        _, log_probs = trajectories.aux_outputs
+        log_probs, _ = trajectories.aux_outputs
         return log_probs
 
     def get_on_policy_values(
@@ -500,7 +495,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             inputs: Trajectory,
         ) -> tuple[tuple[tuple[Array, Array], ...], tuple[Array, Array]]:
             action_dist_n, carry = self._run_actor(model, inputs.obs, inputs.command, carry)
-            log_probs_n = action_dist_n.log_prob(inputs.action)
+            log_probs_n = action_dist_n.log_prob(inputs.action / model.actor.mean_scale)
             entropy_n = action_dist_n.entropy()
             return carry, (log_probs_n, entropy_n)
 
@@ -539,6 +534,28 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         value_n = critic_n.squeeze(-1)
         return action_n, next_carry, (action_log_prob_n, value_n)
 
+    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
+        state = super().on_after_checkpoint_save(ckpt_path, state)
+
+        if not self.config.export_for_inference:
+            return state
+
+        # Load the checkpoint and export it using xax's export function.
+        model: DefaultHumanoidModel = self.load_checkpoint(ckpt_path, part="model")
+
+        def model_fn(
+            obs: Array, cmd: Array, hidden_states: tuple[tuple[Array, Array], ...]
+        ) -> tuple[Array, tuple[Array, ...]]:
+            dist, hidden_states = model.actor.call_flat_obs(obs, cmd, hidden_states)
+            # Concatenate h and c for each layer
+            concat_hidden_states = tuple(jnp.concatenate([h, c]) for h, c in hidden_states)
+            return dist.mode(), concat_hidden_states
+
+        input_shapes = [(OBS_SIZE,), (CMD_SIZE,)] + [(HIDDEN_SIZE,)] * DEPTH
+        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
+
+        return state
+
 
 if __name__ == "__main__":
     # python -m examples.default_humanoid.walking run_environment=True
@@ -553,15 +570,15 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             save_every_n_steps=50,
-            rollout_length_seconds=1.25,
+            rollout_length_seconds=10.0,
             eval_rollout_length_seconds=4.0,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
-            learning_rate=3e-5,
+            learning_rate=1e-3,
             clip_param=0.3,
-            max_grad_norm=1.0,
-            use_mit_actuators=True,
+            max_grad_norm=10.0,
+            use_mit_actuators=False,
         ),
     )
