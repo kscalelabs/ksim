@@ -35,7 +35,7 @@ from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.env.data import PhysicsModel, PhysicsState, Rewards, Trajectory
+from ksim.env.data import PhysicsData, PhysicsModel, PhysicsState, Rewards, Trajectory
 from ksim.env.engine import (
     EngineConstants,
     EngineVariables,
@@ -136,16 +136,35 @@ def get_initial_commands(
     return FrozenDict(commands)
 
 
+def get_initial_randomization(
+    rng: PRNGKeyArray,
+    randomization_generators: Collection[Randomization],
+) -> PyTree:
+    """Get the initial randomizations from the physics state."""
+    randomizations = {}
+    for randomization in randomization_generators:
+        rng, randomization_rng = jax.random.split(rng)
+        randomization_name = randomization.randomization_name
+        randomization_val = randomization.initial_randomization(randomization_rng)
+        randomizations[randomization_name] = randomization_val
+    return FrozenDict(randomizations)
+
+
 def apply_randomizations(
     physics_model: PhysicsModel,
     randomizations: Collection[Randomization],
+    randomization_state: FrozenDict[str, Array],
     rng: PRNGKeyArray,
-) -> PhysicsModel:
+    physics_data: PhysicsData | None = None,
+) -> tuple[PhysicsModel, PhysicsData | None, FrozenDict[str, Array]]:
     """Apply randomizations to the physics model."""
     for randomization in randomizations:
         rng, randomization_rng = jax.random.split(rng)
-        physics_model = randomization(physics_model, randomization_rng)
-    return physics_model
+        randomization_state, physics_model, physics_data = randomization(
+            randomization_state, physics_model, physics_data, randomization_rng
+        )
+    jax.debug.print("randomization_state {randomization_state}", randomization_state=randomization_state)
+    return randomization_state, physics_model, physics_data
 
 
 @jax.tree_util.register_dataclass
@@ -336,7 +355,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
     @abstractmethod
-    def get_randomization(self, physics_model: PhysicsModel) -> Collection[Randomization]:
+    def get_randomization(self, physics_model: PhysicsModel, data: PhysicsData) -> Collection[Randomization]:
         """Returns randomizers, for randomizing each environment.
 
         Args:
@@ -474,7 +493,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Returns:
             A tuple containing the trajectory and the next engine variables.
         """
-        rng, obs_rng, cmd_rng, act_rng, reset_rng, physics_rng = jax.random.split(engine_variables.rng, 6)
+        rng, obs_rng, cmd_rng, act_rng, reset_rng, physics_rng, randomization_rng = jax.random.split(
+            engine_variables.rng, 7
+        )
 
         # Gets the observations from the physics state.
         observations = get_observation(
@@ -499,6 +520,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             observations=observations,
             commands=commands,
             rng=act_rng,
+        )
+
+        # This probably needs to be done in the engine step
+        # Apply randomizations to the environment.
+        new_randomization_state, new_physics_model, new_physics_data = apply_randomizations(
+            physics_model,
+            engine_constants.randomization_generators,
+            engine_variables.randomization,
+            randomization_rng,
+            engine_variables.physics_state.data,  # data
         )
 
         # Steps the physics engine.
@@ -528,10 +559,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             lambda: engine_constants.initial_carry,
             lambda: next_carry,
         )
+
         commands = jax.lax.cond(
             terminated,
             lambda: get_initial_commands(cmd_rng, command_generators=engine_constants.command_generators),
             lambda: commands,
+        )
+        randomization_state = jax.lax.cond(
+            jnp.bool_(True),
+            lambda: get_initial_randomization(
+                cmd_rng, randomization_generators=engine_constants.randomization_generators
+            ),
+            lambda: new_randomization_state,
         )
 
         # Combines all the relevant data into a single object.
@@ -550,8 +589,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Gets the variables for the next step.
         next_variables = EngineVariables(
             carry=next_carry,
-            commands=commands,
             physics_state=next_physics_state,
+            commands=commands,
+            randomization=randomization_state,
             rng=rng,
         )
 
@@ -771,17 +811,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> tuple[Trajectory, Rewards]:
         rng, cmd_rng = jax.random.split(rng)
         initial_commands = get_initial_commands(cmd_rng, command_generators=engine_constants.command_generators)
-
+        initial_randomizations = get_initial_randomization(
+            cmd_rng, randomization_generators=engine_constants.randomization_generators
+        )
         # Recombines the mutable and static parts of the model.
         model = eqx.combine(model_arr, model_static)
 
-        # Apply randomizations to the environment.
-        rng, randomization_rng = jax.random.split(rng)
-        physics_model = apply_randomizations(
-            physics_model,
-            engine_constants.randomization_generators,
-            randomization_rng,
-        )
+        # NOTE: This should be merged with reset
+        # # Apply randomizations to the environment.
+        # rng, randomization_rng = jax.random.split(rng)
+        # physics_model, _ = apply_randomizations(
+        #     physics_model,
+        #     engine_constants.randomization_generators,
+        #     randomization_rng,
+        #     None, # data
+        # )
 
         # Reset the physics state.
         rng, reset_rng = jax.random.split(rng)
@@ -790,6 +834,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine_variables = EngineVariables(
             carry=engine_constants.initial_carry,
             commands=initial_commands,
+            randomization=initial_randomizations,
             physics_state=physics_state,
             rng=rng,
         )
@@ -962,7 +1007,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state.num_steps += 1
                 state.num_samples += self.rollout_length_steps * self.config.num_envs
 
-                # Logs statistics from the fpost_accumulatetrajectory.
+                # Logs statistics from the post-accumulation trajectory.
                 trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
                 reward = jax.tree.map(lambda arr: arr[0], rewards)
 
@@ -1031,6 +1076,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             initial_carry = self.get_initial_carry()
             rng, cmd_rng = jax.random.split(rng)
             initial_commands = get_initial_commands(cmd_rng, command_generators=commands)
+            initial_randomizations = get_initial_randomization(cmd_rng, randomization_generators=randomizations)
 
             # Resets the physics state.
             rng, reset_rng = jax.random.split(rng)
@@ -1050,6 +1096,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             engine_variables = EngineVariables(
                 carry=initial_carry,
                 commands=initial_commands,
+                randomizations=initial_randomizations,
                 physics_state=physics_state,
                 rng=rng,
             )
@@ -1092,10 +1139,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         # whereas during training the randomization is only applied
                         # once per rollout for efficiency.
                         rng, randomization_rng = jax.random.split(rng)
-                        mj_model = jax.lax.cond(
+                        mj_model, temporary_data = jax.lax.cond(
                             transition.done,
-                            lambda: apply_randomizations(mj_model, randomizations, randomization_rng),
-                            lambda: mj_model,
+                            lambda: apply_randomizations(
+                                mj_model, randomizations, randomization_rng, engine_variables.physics_state.data
+                            ),
+                            lambda: (mj_model, engine_variables.physics_state.data),
                         )
 
                         # Sync data again

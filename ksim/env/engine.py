@@ -66,6 +66,7 @@ class EngineConstants:
 class EngineVariables:
     carry: PyTree
     commands: FrozenDict[str, Array]
+    randomization: FrozenDict[str, Array]
     physics_state: PhysicsState
     rng: PRNGKeyArray
 
@@ -165,7 +166,7 @@ class MjxEngine(PhysicsEngine):
 
             torques = self.actuators.get_ctrl(ctrl, data)
             data_with_ctrl = data.replace(ctrl=torques)
-            # data_with_ctrl = mjx.forward(physics_model, data_with_ctrl)
+
             new_data = mjx.step(physics_model, data_with_ctrl)
             return (new_data, step_num + 1.0), None
 
@@ -232,7 +233,7 @@ class MujocoEngine(PhysicsEngine):
 
             torques = self.actuators.get_ctrl(ctrl, mujoco_data)
             mujoco_data.ctrl[:] = torques
-            # mujoco.mj_forward(physics_model, mujoco_data)
+
             mujoco.mj_step(physics_model, mujoco_data)
 
         return PhysicsState(data=mujoco_data, most_recent_action=action)

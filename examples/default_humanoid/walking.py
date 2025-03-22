@@ -28,6 +28,7 @@ from ksim.observation import (
 from ksim.randomization import (
     Randomization,
     WeightRandomization,
+    ForceRandomization,
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import (
@@ -325,6 +326,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_randomization(self, physics_model: PhysicsModel) -> list[Randomization]:
         return [
             WeightRandomization(scale=0.01),
+            ForceRandomization(
+                push_magnitude_range=(0.0, 4.0), 
+                push_interval_range=(0.0, 1.0), 
+                dt=self.config.dt
+            ),
         ]
 
     def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
@@ -356,8 +362,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
-            BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0),
-            FastAccelerationTermination(),
+            BadZTermination(unhealthy_z_lower=0.1, unhealthy_z_upper=10.0),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
