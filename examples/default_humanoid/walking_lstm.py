@@ -115,12 +115,11 @@ class MultiLayerLSTM(eqx.Module):
     def __init__(self, key: PRNGKeyArray, *, input_size: int, hidden_size: int, depth: int) -> None:
         if depth < 1:
             raise ValueError("Depth must be at least 1")
-        
         first_layer = eqx.nn.LSTMCell(input_size=input_size, hidden_size=hidden_size, use_bias=True, key=key)
 
         other_layers = tuple(
             eqx.nn.LSTMCell(input_size=hidden_size, hidden_size=hidden_size, use_bias=True, key=key)
-            for _ in range(depth-1)
+            for _ in range(depth - 1)
         )
 
         self.layers = (first_layer, *other_layers)
@@ -129,12 +128,13 @@ class MultiLayerLSTM(eqx.Module):
         self.hidden_size = hidden_size
 
     def __call__(
-        self, x_n: Array, hidden_states: tuple[tuple[Array, Array], ...]
+        self,
+        x_n: Array,
+        hidden_states: tuple[tuple[Array, Array], ...],
     ) -> tuple[Array, Array, tuple[tuple[Array, Array], ...]]:
         new_states = []
         h, c = self.layers[0](x_n, hidden_states[0])
         new_states.append((h, c))
-
 
         if self.depth > 1:
             for layer, hidden_state in zip(self.layers[1:], hidden_states[1:]):
@@ -414,7 +414,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
-            BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=4.0),
+            BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=4.0),
             FastAccelerationTermination(),
         ]
 
@@ -430,9 +430,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         model: DefaultHumanoidModel,
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
-        carry: tuple[Array, Array],
-    ) -> tuple[distrax.Normal, tuple[Array, Array]]:
-
+        carry: tuple[tuple[Array, Array], ...],
+    ) -> tuple[distrax.Normal, tuple[tuple[Array, Array], ...]]:
         dh_joint_pos_n = observations.get("dhjoint_position_observation", jnp.zeros((0,)))
         dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,)))
         com_inertia_n = observations.get("center_of_mass_inertia_observation", jnp.zeros((0,)))
@@ -496,9 +495,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         def scan_fn(
-            carry: tuple[Array, Array],
+            carry: tuple[tuple[Array, Array], ...],
             inputs: Trajectory,
-        ) -> tuple[tuple[Array, Array], tuple[Array, Array]]:
+        ) -> tuple[tuple[tuple[Array, Array], ...], tuple[Array, Array]]:
             action_dist_n, carry = self._run_actor(model, inputs.obs, inputs.command, carry)
             log_probs_n = action_dist_n.log_prob(inputs.action)
             entropy_n = action_dist_n.entropy()
@@ -525,12 +524,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def sample_action(
         self,
         model: DefaultHumanoidModel,
-        carry: tuple[Array, Array],
+        carry: tuple[tuple[Array, Array], ...],
         physics_model: PhysicsModel,
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, tuple[Array, Array], tuple[Array, Array]]:
+    ) -> tuple[Array, tuple[tuple[Array, Array], ...], tuple[Array, Array]]:
         action_dist_n, next_carry = self._run_actor(model, observations, commands, carry)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
@@ -556,7 +555,6 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
 
         return state
-
 
 if __name__ == "__main__":
     # python -m examples.default_humanoid.walking run_environment=True

@@ -462,8 +462,8 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         def model_fn(obs: Array, cmd: Array) -> Array:
             return model.actor.call_flat_obs(obs, cmd).mode()
 
-        input_shapes = [(OBS_SIZE,), (CMD_SIZE,)]
-        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
+        input_shapes: list[tuple[int, ...]] = [(OBS_SIZE,), (CMD_SIZE,)]
+        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")
 
         return state
 
