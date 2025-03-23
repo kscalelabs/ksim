@@ -3,6 +3,7 @@
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import attrs
 import distrax
@@ -164,7 +165,6 @@ class KbotActor(eqx.Module):
     def call_flat_obs(
         self,
         flat_obs_n: Array,
-        cmd_n: Array,
     ) -> distrax.Normal:
         prediction_n = self.mlp(flat_obs_n)
         mean_n = prediction_n[..., :NUM_OUTPUTS]
@@ -278,7 +278,6 @@ class KbotStandingTaskConfig(PPOConfig):
 class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
-
         This provides a reasonable default optimizer for training PPO models,
         but can be overridden by subclasses who want to do something different.
         """
@@ -463,20 +462,48 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
         return action_n, None, (action_log_prob_n, value_n)
 
+    def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
+        """Makes a callable inference function that directly takes a flattened input vector and returns an action.
+
+        Returns:
+            A tuple containing the inference function and the size of the input vector.
+        """
+
+        def deterministic_model_fn(obs: Array) -> Array:
+            return model.actor.call_flat_obs(obs).mode()
+
+        def stochastic_model_fn(obs: Array) -> Array:
+            distribution = model.actor.call_flat_obs(obs)
+            return distribution.sample(seed=jax.random.PRNGKey(0))
+
+        if stochastic:
+            model_fn = stochastic_model_fn
+        else:
+            model_fn = deterministic_model_fn
+
+        if batched:
+
+            def batched_model_fn(obs: Array) -> Array:
+                return jax.vmap(model_fn)(obs)
+
+            return batched_model_fn
+
+        return model_fn
+
     def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
         state = super().on_after_checkpoint_save(ckpt_path, state)
 
-        if not self.config.export_for_inference:
-            return state
-
-        # Load the checkpoint and export it using xax's export function.
         model: KbotModel = self.load_checkpoint(ckpt_path, part="model")
 
-        def model_fn(obs: Array, cmd: Array) -> Array:
-            return model.actor.call_flat_obs(obs, cmd).mode()
+        model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
-        input_shapes = [(OBS_SIZE,), (CMD_SIZE,)]
-        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
+        input_shapes = [(NUM_INPUTS,)]
+
+        xax.export(
+            model_fn,
+            input_shapes,
+            ckpt_path.parent / "tf_model",
+        )
 
         return state
 
@@ -485,7 +512,7 @@ if __name__ == "__main__":
     # python -m examples.kbot2.standing run_environment=True
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
-            num_envs=4096,
+            num_envs=2048,
             num_batches=64,
             num_passes=10,
             # Simulation parameters.
@@ -495,8 +522,8 @@ if __name__ == "__main__":
             min_action_latency=0.0,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
-            rollout_length_seconds=2.5,
-            eval_rollout_length_seconds=2.5,
+            rollout_length_seconds=5.0,
+            eval_rollout_length_seconds=5.0,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
@@ -506,5 +533,7 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             use_mit_actuators=True,
             action_scale=0.5,
+            export_for_inference=True,
+            save_every_n_steps=25,
         ),
     )
