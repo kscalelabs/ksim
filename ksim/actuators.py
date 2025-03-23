@@ -46,7 +46,12 @@ class TorqueActuators(Actuators):
 class MITPositionActuators(Actuators):
     """MIT Controller, as used by the Robstride actuators."""
 
-    def __init__(self, physics_model: PhysicsModel, joint_name_to_metadata: dict[str, JointMetadataOutput]) -> None:
+    def __init__(
+        self,
+        physics_model: PhysicsModel,
+        joint_name_to_metadata: dict[str, JointMetadataOutput],
+        action_scale: float = 1.0,
+    ) -> None:
         """Creates easily vector multipliable kps and kds."""
         ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
         kps_list = [-1.0] * len(ctrl_name_to_idx)
@@ -70,6 +75,7 @@ class MITPositionActuators(Actuators):
 
         self.kps = jnp.array(kps_list)
         self.kds = jnp.array(kds_list)
+        self.action_scale = action_scale
 
         if any(self.kps < 0) or any(self.kds < 0):
             raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
@@ -84,7 +90,7 @@ class MITPositionActuators(Actuators):
         """Get the control signal from the (position) action vector."""
         current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
         current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
-        action = action * 0.5  # pfb30
+        action = action * self.action_scale
         target_velocities = jnp.zeros_like(action)
         pos_delta = action - current_pos
         vel_delta = target_velocities - current_vel

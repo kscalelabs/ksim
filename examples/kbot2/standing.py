@@ -32,14 +32,12 @@ from ksim.randomization import (
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import (
-    BaseHeightReward,
-    LinearVelocityTrackingReward,
     Reward,
 )
 from ksim.task.ppo import PPOConfig, PPOTask
 from ksim.terminations import (
-    BadZTermination,
-    FastAccelerationTermination,
+    PitchTooGreatTermination,
+    RollTooGreatTermination,
     Termination,
 )
 from ksim.utils.api import get_mujoco_model_metadata
@@ -48,6 +46,15 @@ OBS_SIZE = 445
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 20
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointDeviationPenalty(Reward):
+    """Penalty for joint deviations."""
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        diff = trajectory.qpos[:, 7:] - jnp.zeros_like(trajectory.qpos[:, 7:])
+        return jnp.sum(jnp.square(diff), axis=-1)
 
 
 @attrs.define(frozen=True)
@@ -72,16 +79,6 @@ class DHJointPositionObservation(Observation):
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
         return observation + jax.random.normal(rng, observation.shape) * self.noise
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHForwardReward(Reward):
-    """Incentives forward movement."""
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        # Take just the x velocity component
-        x_delta = -jnp.clip(trajectory.qvel[..., 1], -1.0, 1.0)
-        return x_delta
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -169,7 +166,7 @@ class KbotActor(eqx.Module):
         flat_obs_n: Array,
         cmd_n: Array,
     ) -> distrax.Normal:
-        prediction_n = self.mlp(jnp.concatenate([flat_obs_n, cmd_n], axis=-1))
+        prediction_n = self.mlp(flat_obs_n)
         mean_n = prediction_n[..., :NUM_OUTPUTS]
         std_n = prediction_n[..., NUM_OUTPUTS:]
 
@@ -229,7 +226,7 @@ class KbotModel(eqx.Module):
 
 @dataclass
 class KbotStandingTaskConfig(PPOConfig):
-    """Config for the KBot standing task."""
+    """Config for the KBot walking task."""
 
     robot_urdf_path: str = xax.field(
         value="examples/kscale-assets/kbot-v2-feet/",
@@ -260,21 +257,9 @@ class KbotStandingTaskConfig(PPOConfig):
         value=False,
         help="Whether to use the MIT actuator model, where the actions are position commands",
     )
-    kp: float = xax.field(
-        value=1.0,
-        help="The Kp for the actuators",
-    )
-    kd: float = xax.field(
-        value=0.1,
-        help="The Kd for the actuators",
-    )
-    armature: float = xax.field(
-        value=1e-2,
-        help="A value representing the effective inertia of the actuator armature",
-    )
-    friction: float = xax.field(
-        value=1e-6,
-        help="The dynamic friction loss for the actuator",
+    action_scale: float = xax.field(
+        value=0.5,
+        help="The scale to apply to the actions.",
     )
 
     # Rendering parameters.
@@ -331,7 +316,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         if self.config.use_mit_actuators:
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
-            return MITPositionActuators(physics_model, metadata)
+            return MITPositionActuators(physics_model, metadata, action_scale=self.config.action_scale)
         else:
             return TorqueActuators()
 
@@ -362,16 +347,15 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
         return [
-            LinearVelocityTrackingReward(scale=0.25),
-            BaseHeightReward(scale=1.0, height_target=0.7),
-            DHControlPenalty(scale=-0.01),
+            JointDeviationPenalty(scale=-1.0),
+            DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
         return [
-            BadZTermination(unhealthy_z_lower=0.4, unhealthy_z_upper=1.6),
-            FastAccelerationTermination(),
+            RollTooGreatTermination(max_roll=1.04),
+            PitchTooGreatTermination(max_pitch=1.04),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
@@ -501,24 +485,26 @@ if __name__ == "__main__":
     # python -m examples.kbot2.standing run_environment=True
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
-            num_envs=1024,  # 512_000 steps
-            num_batches=16,
-            num_passes=8,
+            num_envs=4096,
+            num_batches=64,
+            num_passes=10,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
             valid_every_n_steps=25,
+            valid_first_n_steps=0,
             rollout_length_seconds=2.5,
             eval_rollout_length_seconds=2.5,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
-            learning_rate=1e-4,
+            learning_rate=3e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
+            action_scale=0.5,
         ),
     )
