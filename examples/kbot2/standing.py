@@ -278,6 +278,7 @@ class KbotStandingTaskConfig(PPOConfig):
 class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
+
         This provides a reasonable default optimizer for training PPO models,
         but can be overridden by subclasses who want to do something different.
         """
