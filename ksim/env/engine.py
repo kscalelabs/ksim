@@ -129,7 +129,7 @@ class MjxEngine(PhysicsEngine):
 
         mjx_data = mjx.forward(physics_model, mjx_data)
         assert isinstance(mjx_data, mjx.Data)
-        default_action = mjx_data.ctrl
+        default_action = self.actuators.get_default_action(mjx_data)
 
         return PhysicsState(data=mjx_data, most_recent_action=default_action)
 

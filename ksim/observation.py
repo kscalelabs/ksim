@@ -212,6 +212,9 @@ class SensorObservation(Observation):
             sensor_name=sensor_name,
             sensor_idx_range=sensor_name_to_idx_range[sensor_name],
         )
+    
+    def get_name(self) -> str:
+        return f"{self.sensor_name}_obs"
 
     def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         sensor_data = state.sensordata[self.sensor_idx_range[0] : self.sensor_idx_range[1]].ravel()

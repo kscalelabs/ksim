@@ -18,14 +18,14 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
+from ksim.actuators import Actuators, MITPositionVelocityActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import PhysicsData, PhysicsModel, Trajectory
+from ksim.env.data import PhysicsModel, Trajectory
 from ksim.observation import (
-    ActuatorForceObservation,
-    CenterOfMassInertiaObservation,
-    CenterOfMassVelocityObservation,
+    JointPositionObservation,
+    JointVelocityObservation,
     Observation,
+    SensorObservation,
 )
 from ksim.randomization import (
     Randomization,
@@ -33,6 +33,7 @@ from ksim.randomization import (
 )
 from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import (
+    BaseHeightReward,
     Reward,
 )
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -43,10 +44,10 @@ from ksim.terminations import (
 )
 from ksim.utils.api import get_mujoco_model_metadata
 
-OBS_SIZE = 445
+OBS_SIZE = 20 * 2 + 3 + 3 # position + velocity + imu_acc + imu_gyro
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_OUTPUTS = 20
+NUM_OUTPUTS = 20 * 2 # position + velocity
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -56,30 +57,6 @@ class JointDeviationPenalty(Reward):
     def __call__(self, trajectory: Trajectory) -> Array:
         diff = trajectory.qpos[:, 7:] - jnp.zeros_like(trajectory.qpos[:, 7:])
         return jnp.sum(jnp.square(diff), axis=-1)
-
-
-@attrs.define(frozen=True)
-class DHJointVelocityObservation(Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
-        qvel = state.qvel  # (N,)
-        return qvel
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
-
-@attrs.define(frozen=True)
-class DHJointPositionObservation(Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
-        qpos = state.qpos[2:]  # (N,)
-        return qpos
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -137,15 +114,21 @@ class KbotActor(eqx.Module):
 
     def __call__(
         self,
-        dh_joint_pos_n: Array,
-        dh_joint_vel_n: Array,
-        com_inertia_n: Array,
-        com_vel_n: Array,
-        act_frc_obs_n: Array,
+        joint_pos_n: Array,
+        joint_vel_n: Array,
+        imu_acc_n: Array,
+        imu_gyro_n: Array,
         lin_vel_cmd_n: Array,
     ) -> distrax.Normal:
         x_n = jnp.concatenate(
-            [dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n], axis=-1
+            [
+                joint_pos_n,
+                joint_vel_n,
+                imu_acc_n,
+                imu_gyro_n,
+                lin_vel_cmd_n,
+            ],
+            axis=-1,
         )  # (NUM_INPUTS)
 
         # Split the output into mean and standard deviation.
@@ -196,15 +179,21 @@ class KbotCritic(eqx.Module):
 
     def __call__(
         self,
-        dh_joint_pos_n: Array,
-        dh_joint_vel_n: Array,
-        com_inertia_n: Array,
-        com_vel_n: Array,
-        act_frc_obs_n: Array,
+        joint_pos_n: Array,
+        joint_vel_n: Array,
+        imu_acc_n: Array,
+        imu_gyro_n: Array,
         lin_vel_cmd_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
-            [dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n], axis=-1
+            [
+                joint_pos_n,
+                joint_vel_n,
+                imu_acc_n,
+                imu_gyro_n,
+                lin_vel_cmd_n,
+            ],
+            axis=-1,
         )  # (NUM_INPUTS)
         return self.mlp(x_n)
 
@@ -255,11 +244,17 @@ class KbotStandingTaskConfig(PPOConfig):
     # Mujoco parameters.
     use_mit_actuators: bool = xax.field(
         value=False,
-        help="Whether to use the MIT actuator model, where the actions are position commands",
+        help="Whether to use the MIT actuator model, where the actions are position + velocity commands",
     )
-    action_scale: float = xax.field(
+
+    position_scale: float = xax.field(
         value=0.5,
-        help="The scale to apply to the actions.",
+        help="The scale to apply to the position actions.",
+    )
+
+    velocity_scale: float = xax.field(
+        value=1.0,
+        help="The scale to apply to the velocity actions.",
     )
 
     # Rendering parameters.
@@ -287,7 +282,9 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
             (
                 optax.adam(self.config.learning_rate)
                 if self.config.adam_weight_decay == 0.0
-                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
+                else optax.adamw(
+                    self.config.learning_rate, weight_decay=self.config.adam_weight_decay
+                )
             ),
         )
 
@@ -316,7 +313,12 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         if self.config.use_mit_actuators:
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
-            return MITPositionActuators(physics_model, metadata, action_scale=self.config.action_scale)
+            return MITPositionVelocityActuators(
+                physics_model,
+                metadata,
+                position_scale=self.config.position_scale,
+                velocity_scale=self.config.velocity_scale,
+            )
         else:
             return TorqueActuators()
 
@@ -333,11 +335,10 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
     def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
         return [
-            DHJointPositionObservation(),
-            DHJointVelocityObservation(),
-            ActuatorForceObservation(),
-            CenterOfMassInertiaObservation(),
-            CenterOfMassVelocityObservation(),
+            JointPositionObservation(),
+            JointVelocityObservation(),
+            SensorObservation.create(physics_model, "imu_acc"),
+            SensorObservation.create(physics_model, "imu_gyro"),
         ]
 
     def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
@@ -350,6 +351,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
             JointDeviationPenalty(scale=-1.0),
             DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
+            BaseHeightReward(scale=1.0, height_target=0.7),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
@@ -370,13 +372,14 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> distrax.Normal:
-        dh_joint_pos_n = observations["dhjoint_position_observation"]
-        dh_joint_vel_n = observations["dhjoint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
+        joint_pos_n = observations["joint_position_observation"]
+        joint_vel_n = observations["joint_velocity_observation"]
+        imu_acc_n = observations["imu_acc_obs"]
+        imu_gyro_n = observations["imu_gyro_obs"]
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.actor(dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n)
+        return model.actor(
+            joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n
+        )
 
     def _run_critic(
         self,
@@ -384,13 +387,14 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> Array:
-        dh_joint_pos_n = observations["dhjoint_position_observation"]
-        dh_joint_vel_n = observations["dhjoint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
+        joint_pos_n = observations["joint_position_observation"]
+        joint_vel_n = observations["joint_velocity_observation"]
+        imu_acc_n = observations["imu_acc_obs"]
+        imu_gyro_n = observations["imu_gyro_obs"]
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.critic(dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n)
+        return model.critic(
+            joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n
+        )
 
     def get_on_policy_log_probs(
         self,
@@ -463,7 +467,9 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
         return action_n, None, (action_log_prob_n, value_n)
 
-    def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
+    def make_export_model(
+        self, model: KbotModel, stochastic: bool = False, batched: bool = False
+    ) -> Callable:
         """Makes a callable inference function that directly takes a flattened input vector and returns an action.
 
         Returns:
