@@ -1253,9 +1253,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         viewer.update_plot_group("Reward Components", reward_values)
 
                         # Update actions
-                        viewer.update_plot_group(
-                            "Actions", np.array(engine_variables.physics_state.most_recent_action).tolist()
-                        )
+                        # Convert actions to a flat list of floats
+                        action_values = np.array(engine_variables.physics_state.most_recent_action, dtype=float)
+                        action_values_flat = [float(x) for x in action_values.flatten().tolist()]
+                        viewer.update_plot_group("Actions", action_values_flat)
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
