@@ -58,14 +58,19 @@ logger = logging.getLogger(__name__)
 paused = False
 
 
+<<<<<<< HEAD
 def on_press(key):
+=======
+def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> None:
+>>>>>>> 67ec810 (lint)
     global paused
     if key == keyboard.Key.space:
         paused = not paused
         print("Paused" if paused else "Resumed")
     elif key == keyboard.Key.esc:
-        # Returning False stops the listener.
-        return False
+        # Stop listener using a different approach
+        listener.stop()
+
 
 
 # Start the listener in a separate thread.
@@ -112,7 +117,6 @@ def compute_step_rewards(
 
     rewards = {}
     for reward_generator in reward_generators:
-        reward_name = reward_generator.reward_name
         # Compute reward with batch dimension
         reward_val = reward_generator(batched_transition) * reward_generator.scale * ctrl_dt
         # Remove batch dimension for the result
@@ -1189,7 +1193,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     # We'll set up reward component plots in the first iteration
                     reward_component_mapping = None
 
-                    for _ in iterator:
+                    for step_id in iterator:
                         # We need to manually sync the data back and forth between
                         # the viewer and the engine, because the resetting the
                         # environment creates a new data object rather than
