@@ -132,9 +132,9 @@ class RandomJointPositionReset(Reset):
     scale: float = attrs.field(default=0.01)
 
     def __call__(self, data: PhysicsData, rng: PRNGKeyArray) -> PhysicsData:
-        qpos = data.qpos
-        qpos = qpos + jax.random.uniform(rng, qpos.shape, minval=-self.scale, maxval=self.scale)
-        data = update_data_field(data, "qpos", qpos)
+        new_qpos = data.qpos[7:] + jax.random.uniform(rng, data.qpos[7:].shape, minval=-self.scale, maxval=self.scale)
+        new_qpos = jnp.concatenate([data.qpos[:7], new_qpos])
+        data = update_data_field(data, "qpos", new_qpos)
         return data
 
 
@@ -145,9 +145,9 @@ class RandomJointVelocityReset(Reset):
     scale: float = attrs.field(default=0.01)
 
     def __call__(self, data: PhysicsData, rng: PRNGKeyArray) -> PhysicsData:
-        qvel = data.qvel
-        qvel = qvel + jax.random.uniform(rng, qvel.shape, minval=-self.scale, maxval=self.scale)
-        data = update_data_field(data, "qvel", qvel)
+        new_qvel = data.qvel[6:] + jax.random.uniform(rng, data.qvel[6:].shape, minval=-self.scale, maxval=self.scale)
+        new_qvel = jnp.concatenate([data.qvel[:6], new_qvel])
+        data = update_data_field(data, "qvel", new_qvel)
         return data
 
 
@@ -163,8 +163,9 @@ class RandomBaseVelocityXYReset(Reset):
             case mujoco.MjData:
                 qvel[0:2] = jax.random.uniform(rng, qvel[0:2].shape, minval=-self.scale, maxval=self.scale)
             case mjx.Data:
-                qvel = qvel.at[0:2].set(jax.random.uniform(rng, qvel[0:2].shape, minval=-self.scale, maxval=self.scale))
-        return update_data_field(data, "qvel", qvel)
+                qvel.at[0:2].set(jax.random.uniform(rng, qvel[0:2].shape, minval=-self.scale, maxval=self.scale))
+        data = update_data_field(data, "qvel", qvel)
+        return data
 
 
 def get_xy_position_reset(
