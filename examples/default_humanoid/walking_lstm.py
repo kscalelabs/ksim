@@ -260,7 +260,7 @@ class DefaultHumanoidModel(eqx.Module):
 
 
 @dataclass
-class HumanoidWalkingTaskConfig(ksim.RLConfig):
+class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
     # Optimizer parameters.
