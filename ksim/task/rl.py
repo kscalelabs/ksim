@@ -41,7 +41,6 @@ from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.types import Histogram, Metrics, PhysicsModel, PhysicsState, Rewards, Trajectory
 from ksim.engine import (
     EngineConstants,
     EngineVariables,
@@ -55,6 +54,7 @@ from ksim.randomization import Randomization
 from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
+from ksim.types import Histogram, Metrics, PhysicsModel, PhysicsState, Rewards, Trajectory
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata
 
 logger = logging.getLogger(__name__)
@@ -1299,7 +1299,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
-                    msg = f"Finished training after {state.num_steps}" f"steps and {state.num_samples} samples"
+                    msg = f"Finished training after {state.num_steps}steps and {state.num_samples} samples"
                     xax.show_info(msg, important=True)
 
                 model = eqx.combine(model_arr, model_static)

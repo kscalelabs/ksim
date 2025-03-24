@@ -18,8 +18,8 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.types import Rewards, Trajectory
 from ksim.task.rl import RLConfig, RLTask
+from ksim.types import Rewards, Trajectory
 
 
 def get_deltas(
