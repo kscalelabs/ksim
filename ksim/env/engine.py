@@ -7,7 +7,7 @@ model and data.
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Collection, Literal
+from typing import Callable, Collection, Literal
 
 import equinox as eqx
 import jax
@@ -78,6 +78,9 @@ class PhysicsEngine(eqx.Module, ABC):
     phys_steps_per_ctrl_steps: int
     min_action_latency_step: int
     max_action_latency_step: int
+    action_randomization_type: Literal["none", "uniform", "gaussian"]
+    action_randomization_scale: float
+    action_randomization_fn: Callable[[Array, PRNGKeyArray], Array]
 
     def __init__(
         self,
@@ -86,6 +89,8 @@ class PhysicsEngine(eqx.Module, ABC):
         phys_steps_per_ctrl_steps: int,
         min_action_latency_step: int,
         max_action_latency_step: int,
+        action_randomization_type: Literal["none", "uniform", "gaussian"],
+        action_randomization_scale: float,
     ) -> None:
         """Initialize the MJX engine with resetting and actuators."""
         self.actuators = actuators
@@ -93,8 +98,19 @@ class PhysicsEngine(eqx.Module, ABC):
         self.phys_steps_per_ctrl_steps = phys_steps_per_ctrl_steps
         self.min_action_latency_step = min_action_latency_step
         self.max_action_latency_step = max_action_latency_step
+        self.action_randomization_type = action_randomization_type
+        self.action_randomization_scale = action_randomization_scale
 
-    @abstractmethod
+        if action_randomization_type == "none":
+            self.action_randomization_fn = lambda x, _: x
+        elif action_randomization_type == "uniform":
+            self.action_randomization_fn = lambda x, rng: jax.random.uniform(rng, x.shape) * action_randomization_scale
+        elif action_randomization_type == "gaussian":
+            self.action_randomization_fn = lambda x, rng: jax.random.normal(rng, x.shape) * action_randomization_scale
+        else:
+            raise ValueError(f"Invalid action_randomization_type: {action_randomization_type}")
+
+    @abstractmethod 
     def reset(
         self,
         physics_model: PhysicsModel,
@@ -145,9 +161,11 @@ class MjxEngine(PhysicsEngine):
         phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
 
+        latency_rng, action_rng = jax.random.split(rng)
+
         # We wait some random amount before actually applying the action.
         latency_steps = jax.random.randint(
-            key=rng,
+            key=latency_rng,
             shape=(),
             minval=self.min_action_latency_step,
             maxval=self.max_action_latency_step,
@@ -163,7 +181,9 @@ class MjxEngine(PhysicsEngine):
                 prev_action,
             )
 
-            torques = self.actuators.get_ctrl(ctrl, data)
+            randomized_ctrl = ctrl + self.action_randomization_fn(ctrl, action_rng)
+
+            torques = self.actuators.get_ctrl(randomized_ctrl, data)
             data_with_ctrl = data.replace(ctrl=torques)
             # data_with_ctrl = mjx.forward(physics_model, data_with_ctrl)
             new_data = mjx.step(physics_model, data_with_ctrl)
@@ -215,9 +235,11 @@ class MujocoEngine(PhysicsEngine):
         phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
 
+        latency_rng, action_rng = jax.random.split(rng)
+
         # We wait some random amount before actually applying the action.
         latency_steps = jax.random.randint(
-            key=rng,
+            key=latency_rng,
             shape=(),
             minval=self.min_action_latency_step,
             maxval=self.max_action_latency_step,
@@ -230,7 +252,9 @@ class MujocoEngine(PhysicsEngine):
                 prev_action,
             )
 
-            torques = self.actuators.get_ctrl(ctrl, mujoco_data)
+            randomized_ctrl = ctrl + self.action_randomization_fn(ctrl, action_rng)
+
+            torques = self.actuators.get_ctrl(randomized_ctrl, mujoco_data)
             mujoco_data.ctrl[:] = torques
             # mujoco.mj_forward(physics_model, mujoco_data)
             mujoco.mj_step(physics_model, mujoco_data)
@@ -247,6 +271,8 @@ def get_physics_engine(
     ctrl_dt: float,
     min_action_latency: float,
     max_action_latency: float,
+    action_randomization_type: Literal["none", "uniform", "gaussian"],
+    action_randomization_scale: float,
 ) -> PhysicsEngine:
     if min_action_latency > ctrl_dt:
         raise RuntimeError(f"`{min_action_latency=}` cannot be greater than `{ctrl_dt=}`")
@@ -268,6 +294,8 @@ def get_physics_engine(
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
+                action_randomization_type=action_randomization_type,
+                action_randomization_scale=action_randomization_scale,
             )
 
         case "mjx":
@@ -277,6 +305,8 @@ def get_physics_engine(
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
+                action_randomization_type=action_randomization_type,
+                action_randomization_scale=action_randomization_scale,
             )
 
         case _:

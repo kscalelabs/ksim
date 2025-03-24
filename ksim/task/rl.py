@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Collection, Generic, TypeVar
+from typing import Any, Collection, Generic, Literal, TypeVar
 
 import chex
 import equinox as eqx
@@ -280,8 +280,14 @@ class RLConfig(xax.Config):
         value=None,
         help="The maximum value of the reward.",
     )
-
-
+    action_randomization_type: str = xax.field(
+        value="none",
+        help="The type of action randomization to use [none, uniform, gaussian].",
+    )
+    action_randomization_scale: float = xax.field(
+        value=0.0,
+        help="The scale of the action randomization.",
+    )
 Config = TypeVar("Config", bound=RLConfig)
 
 
@@ -333,6 +339,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ctrl_dt=self.config.ctrl_dt,
             min_action_latency=self.config.min_action_latency,
             max_action_latency=self.config.max_action_latency,
+            action_randomization_type=self.config.action_randomization_type,
+            action_randomization_scale=self.config.action_randomization_scale,
         )
 
     @abstractmethod
