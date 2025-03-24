@@ -9,6 +9,7 @@ __all__ = [
     "LinearVelocityTrackingReward",
     "BaseHeightReward",
     "ActionSmoothnessPenalty",
+    "ActuatorForcePenalty",
 ]
 
 import functools
