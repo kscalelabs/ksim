@@ -202,6 +202,10 @@ class RLConfig(xax.Config):
         value=True,
         help="If true, log train metrics.",
     )
+    epochs_per_log_step: int = xax.field(
+        value=1,
+        help="The number of epochs between logging steps.",
+    )
 
     # Training parameters.
     num_envs: int = xax.field(
@@ -878,29 +882,33 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         prev_trajectories: Trajectory,
         prev_rewards: Rewards,
     ) -> tuple[tuple[PyTree, optax.OptState, FrozenDict[str, Array]], tuple[Trajectory, Rewards]]:
-        # Runs update on the previous trajectory.
-        rng, update_rng, rollout_rng = jax.random.split(rng, 3)
-        model_arr, opt_state, train_metrics = self.update_model(
-            model_arr=model_arr,
-            model_static=model_static,
-            optimizer=optimizer,
-            opt_state=opt_state,
-            trajectories=prev_trajectories,
-            rewards=prev_rewards,
-            rng=update_rng,
-        )
+        trajectories, rewards = prev_trajectories, prev_rewards
 
-        # Rolls out a new trajectory.
-        trajectories, rewards = self._vmapped_unroll(
-            rng=rollout_rng,
-            physics_model=physics_model,
-            model_arr=model_arr,
-            model_static=model_static,
-            engine=engine,
-            engine_constants=engine_constants,
-            num_steps=self.rollout_length_steps,
-            num_envs=self.config.num_envs,
-        )
+        for _ in range(self.config.epochs_per_log_step):
+
+            # Runs update on the previous trajectory.
+            rng, update_rng, rollout_rng = jax.random.split(rng, 3)
+            model_arr, opt_state, train_metrics = self.update_model(
+                model_arr=model_arr,
+                model_static=model_static,
+                optimizer=optimizer,
+                opt_state=opt_state,
+                trajectories=trajectories,
+                rewards=rewards,
+                rng=update_rng,
+            )
+
+            # Rolls out a new trajectory.
+            trajectories, rewards = self._vmapped_unroll(
+                rng=rollout_rng,
+                physics_model=physics_model,
+                model_arr=model_arr,
+                model_static=model_static,
+                engine=engine,
+                engine_constants=engine_constants,
+                num_steps=self.rollout_length_steps,
+                num_envs=self.config.num_envs,
+            )
 
         return (model_arr, opt_state, train_metrics), (trajectories, rewards)
 
@@ -1009,8 +1017,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             with self.step_context("write_logs"):
                 state.raw_phase = "train"
-                state.num_steps += 1
-                state.num_samples += self.rollout_length_steps * self.config.num_envs
+                state.num_steps += self.config.epochs_per_log_step
+                state.num_samples += self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
 
                 # Logs statistics from the fpost_accumulatetrajectory.
                 trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
