@@ -44,10 +44,10 @@ from ksim.terminations import (
 )
 from ksim.utils.api import get_mujoco_model_metadata
 
-OBS_SIZE = 20 * 2 + 3 + 3 # position + velocity + imu_acc + imu_gyro
+OBS_SIZE = 20 * 2 + 3 + 3  # = 46 position + velocity + imu_acc + imu_gyro
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_OUTPUTS = 20 * 2 # position + velocity
+NUM_OUTPUTS = 20 * 2  # position + velocity
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -248,7 +248,7 @@ class KbotStandingTaskConfig(PPOConfig):
     )
 
     position_scale: float = xax.field(
-        value=0.5,
+        value=1.0,
         help="The scale to apply to the position actions.",
     )
 
@@ -282,9 +282,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
             (
                 optax.adam(self.config.learning_rate)
                 if self.config.adam_weight_decay == 0.0
-                else optax.adamw(
-                    self.config.learning_rate, weight_decay=self.config.adam_weight_decay
-                )
+                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
             ),
         )
 
@@ -377,9 +375,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         imu_acc_n = observations["imu_acc_obs"]
         imu_gyro_n = observations["imu_gyro_obs"]
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.actor(
-            joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n
-        )
+        return model.actor(joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n)
 
     def _run_critic(
         self,
@@ -392,9 +388,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         imu_acc_n = observations["imu_acc_obs"]
         imu_gyro_n = observations["imu_gyro_obs"]
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.critic(
-            joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n
-        )
+        return model.critic(joint_pos_n, joint_vel_n, imu_acc_n, imu_gyro_n, lin_vel_cmd_n)
 
     def get_on_policy_log_probs(
         self,
@@ -459,7 +453,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         rng: PRNGKeyArray,
     ) -> tuple[Array, None, tuple[Array, Array]]:
         action_dist_n = self._run_actor(model, observations, commands)
-        action_n = action_dist_n.sample(seed=rng) * self.config.action_scale
+        action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
 
         critic_n = self._run_critic(model, observations, commands)
@@ -467,9 +461,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
         return action_n, None, (action_log_prob_n, value_n)
 
-    def make_export_model(
-        self, model: KbotModel, stochastic: bool = False, batched: bool = False
-    ) -> Callable:
+    def make_export_model(self, model: KbotModel, stochastic: bool = False, batched: bool = False) -> Callable:
         """Makes a callable inference function that directly takes a flattened input vector and returns an action.
 
         Returns:
@@ -535,11 +527,12 @@ if __name__ == "__main__":
             gamma=0.97,
             lam=0.95,
             entropy_coef=0.001,
-            learning_rate=3e-4,
+            learning_rate=1e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
-            action_scale=0.5,
+            position_scale=1.0,
+            velocity_scale=1.0,
             export_for_inference=True,
             save_every_n_steps=25,
         ),

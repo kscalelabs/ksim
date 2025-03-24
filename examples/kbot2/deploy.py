@@ -31,26 +31,26 @@ class Actuator:
 
 
 ACTUATOR_LIST: list[Actuator] = [
-    Actuator(actuator_id=11, nn_id=0, kp=1.0, kd=5.0, max_torque=40.0, joint_name="left_shoulder_pitch_03"),
-    Actuator(actuator_id=12, nn_id=1, kp=1.0, kd=5.0, max_torque=30.0, joint_name="left_shoulder_roll_03"),
-    Actuator(actuator_id=13, nn_id=2, kp=1.0, kd=5.0, max_torque=30.0, joint_name="left_shoulder_yaw_02"),
-    Actuator(actuator_id=14, nn_id=3, kp=1.0, kd=5.0, max_torque=40.0, joint_name="left_elbow_02"),
+    Actuator(actuator_id=11, nn_id=0, kp=1.0, kd=5.0, max_torque=10.0, joint_name="left_shoulder_pitch_03"),
+    Actuator(actuator_id=12, nn_id=1, kp=1.0, kd=5.0, max_torque=10.0, joint_name="left_shoulder_roll_03"),
+    Actuator(actuator_id=13, nn_id=2, kp=1.0, kd=5.0, max_torque=10.0, joint_name="left_shoulder_yaw_02"),
+    Actuator(actuator_id=14, nn_id=3, kp=1.0, kd=5.0, max_torque=10.0, joint_name="left_elbow_02"),
     Actuator(actuator_id=15, nn_id=4, kp=1.0, kd=5.0, max_torque=10.0, joint_name="left_wrist_02"),
-    Actuator(actuator_id=21, nn_id=5, kp=1.0, kd=5.0, max_torque=40.0, joint_name="right_shoulder_pitch_03"),
-    Actuator(actuator_id=22, nn_id=6, kp=1.0, kd=5.0, max_torque=30.0, joint_name="right_shoulder_roll_03"),
-    Actuator(actuator_id=23, nn_id=7, kp=1.0, kd=5.0, max_torque=30.0, joint_name="right_shoulder_yaw_02"),
-    Actuator(actuator_id=24, nn_id=8, kp=1.0, kd=5.0, max_torque=40.0, joint_name="right_elbow_02"),
+    Actuator(actuator_id=21, nn_id=5, kp=1.0, kd=5.0, max_torque=10.0, joint_name="right_shoulder_pitch_03"),
+    Actuator(actuator_id=22, nn_id=6, kp=1.0, kd=5.0, max_torque=10.0, joint_name="right_shoulder_roll_03"),
+    Actuator(actuator_id=23, nn_id=7, kp=1.0, kd=5.0, max_torque=10.0, joint_name="right_shoulder_yaw_02"),
+    Actuator(actuator_id=24, nn_id=8, kp=1.0, kd=5.0, max_torque=10.0, joint_name="right_elbow_02"),
     Actuator(actuator_id=25, nn_id=9, kp=1.0, kd=5.0, max_torque=10.0, joint_name="right_wrist_02"),
-    Actuator(actuator_id=31, nn_id=10, kp=120.0, kd=5.0, max_torque=40.0, joint_name="left_hip_pitch_04"),
-    Actuator(actuator_id=32, nn_id=11, kp=80.0, kd=5.0, max_torque=30.0, joint_name="left_hip_roll_03"),
-    Actuator(actuator_id=33, nn_id=12, kp=80.0, kd=5.0, max_torque=30.0, joint_name="left_hip_yaw_03"),
-    Actuator(actuator_id=34, nn_id=13, kp=120.0, kd=5.0, max_torque=40.0, joint_name="left_knee_04"),
-    Actuator(actuator_id=35, nn_id=14, kp=20.0, kd=5.0, max_torque=10.0, joint_name="left_ankle_02"),
-    Actuator(actuator_id=41, nn_id=15, kp=120.0, kd=5.0, max_torque=40.0, joint_name="right_hip_pitch_04"),
-    Actuator(actuator_id=42, nn_id=16, kp=80.0, kd=5.0, max_torque=30.0, joint_name="right_hip_roll_03"),
-    Actuator(actuator_id=43, nn_id=17, kp=80.0, kd=5.0, max_torque=30.0, joint_name="right_hip_yaw_03"),
-    Actuator(actuator_id=44, nn_id=18, kp=120.0, kd=5.0, max_torque=40.0, joint_name="right_knee_04"),
-    Actuator(actuator_id=45, nn_id=19, kp=20.0, kd=5.0, max_torque=10.0, joint_name="right_ankle_02"),
+    Actuator(actuator_id=31, nn_id=10, kp=80.0, kd=5.0, max_torque=80.0, joint_name="left_hip_pitch_04"),
+    Actuator(actuator_id=32, nn_id=11, kp=40.0, kd=5.0, max_torque=40.0, joint_name="left_hip_roll_03"),
+    Actuator(actuator_id=33, nn_id=12, kp=40.0, kd=5.0, max_torque=40.0, joint_name="left_hip_yaw_03"),
+    Actuator(actuator_id=34, nn_id=13, kp=80.0, kd=5.0, max_torque=80.0, joint_name="left_knee_04"),
+    Actuator(actuator_id=35, nn_id=14, kp=17.0, kd=5.0, max_torque=17.0, joint_name="left_ankle_02"),
+    Actuator(actuator_id=41, nn_id=15, kp=80.0, kd=5.0, max_torque=80.0, joint_name="right_hip_pitch_04"),
+    Actuator(actuator_id=42, nn_id=16, kp=40.0, kd=5.0, max_torque=40.0, joint_name="right_hip_roll_03"),
+    Actuator(actuator_id=43, nn_id=17, kp=40.0, kd=5.0, max_torque=40.0, joint_name="right_hip_yaw_03"),
+    Actuator(actuator_id=44, nn_id=18, kp=80.0, kd=5.0, max_torque=80.0, joint_name="right_knee_04"),
+    Actuator(actuator_id=45, nn_id=19, kp=17.0, kd=5.0, max_torque=17.0, joint_name="right_ankle_02"),
 ]
 
 
@@ -73,16 +73,19 @@ async def get_observation(kos: pykos.KOS) -> np.ndarray:
     return observation
 
 
-async def send_actions(kos: pykos.KOS, actions: np.ndarray) -> None:
-    actions = np.rad2deg(actions)
+async def send_actions(kos: pykos.KOS, position: np.ndarray, velocity: np.ndarray) -> None:
+    position = np.rad2deg(position)
+    velocity = np.rad2deg(velocity)
     actuator_commands: list[pykos.services.actuator.ActuatorCommand] = [
         {
             "actuator_id": ac.actuator_id,
-            "position": actions[ac.nn_id],
+            "position": position[ac.nn_id],
+            "velocity": velocity[ac.nn_id],
         }
         for ac in ACTUATOR_LIST
     ]
     logger.debug(actuator_commands)
+
     await kos.actuator.command_actuators(actuator_commands)
 
 
@@ -188,21 +191,19 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
             observation = observation.reshape(1, -1)
             # move it all to the infer call
             action = np.array(model.infer(observation)).reshape(-1)
-            action = action[: len(ACTUATOR_LIST)]  # get the mean
-            action *= 0.5  # scale down the action
-            # action = np.random.uniform(-1.0, 1.0, size=observation[0].shape)
-
+            position = action[: len(ACTUATOR_LIST)]
+            velocity = action[len(ACTUATOR_LIST) :]
             observation, _ = await asyncio.gather(
                 get_observation(kos),
-                send_actions(kos, action),
+                send_actions(kos, position, velocity),
             )
-
             if time.time() < target_time:
                 await asyncio.sleep(max(0, target_time - time.time()))
             else:
                 logger.info("Loop overran by %s seconds", time.time() - target_time)
 
             target_time += DT
+
     except asyncio.CancelledError:
         logger.info("Exiting...")
         if no_render:
