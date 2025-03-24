@@ -1153,7 +1153,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         render_elevation=self.config.render_elevation,
                         render_lookat=self.config.render_lookat,
                     )
-                    for step_id in iterator:
+                    for _ in iterator:
                         # We need to manually sync the data back and forth between
                         # the viewer and the engine, because the resetting the
                         # environment creates a new data object rather than
