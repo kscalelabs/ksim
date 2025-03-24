@@ -493,9 +493,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         def scan_fn(
-            carry: tuple[tuple[Array, Array], ...],
+            carry: Array,
             inputs: Trajectory,
-        ) -> tuple[tuple[tuple[Array, Array], ...], tuple[Array, Array]]:
+        ) -> tuple[Array, tuple[Array, Array]]:
             action_dist_n, carry = self._run_actor(model, inputs.obs, inputs.command, carry)
             log_probs_n = action_dist_n.log_prob(inputs.action / model.actor.mean_scale)
             entropy_n = action_dist_n.entropy()
@@ -527,7 +527,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, tuple[tuple[Array, Array], ...], tuple[Array, Array]]:
+    ) -> tuple[Array, Array, tuple[Array, Array]]:
         action_dist_n, next_carry = self._run_actor(model, observations, commands, carry)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
@@ -553,7 +553,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             return jax.vmap(model_fn)(obs, cmd, hidden_states)
 
         input_shapes = [(OBS_SIZE,), (CMD_SIZE,), (DEPTH, 2, HIDDEN_SIZE)]
-        xax.export(batched_model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
+        xax.export(batched_model_fn, input_shapes, ckpt_path.parent / "tf_model")
 
         return state
 
