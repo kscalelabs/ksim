@@ -782,14 +782,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Recombines the mutable and static parts of the model.
         model = eqx.combine(model_arr, model_static)
 
-        # Apply randomizations to the environment.
-        rng, randomization_rng = jax.random.split(rng)
-        physics_model = apply_randomizations(
-            physics_model,
-            engine_constants.randomization_generators,
-            randomization_rng,
-        )
-
         # Reset the physics state.
         rng, reset_rng = jax.random.split(rng)
         physics_state = engine.reset(physics_model, reset_rng)
@@ -828,7 +820,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def _vmapped_unroll(
         self,
         rng: PRNGKeyArray,
-        physics_model: PhysicsModel,
+        physics_models: PhysicsModel,
         model_arr: PyTree,
         model_static: PyTree,
         engine: PhysicsEngine,
@@ -837,8 +829,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         num_envs: int,
     ) -> tuple[Trajectory, Rewards]:
         rngs = jax.random.split(rng, num_envs)
-        vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None, None, None))
-        return vmapped_unroll(rngs, physics_model, model_arr, model_static, engine, engine_constants, num_steps)
+        vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, 0, None, None, None, None, None))
+        return vmapped_unroll(rngs, physics_models, model_arr, model_static, engine, engine_constants, num_steps)
 
     @abstractmethod
     def update_model(
@@ -923,7 +915,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def _rl_train_loop_step(
         self,
         rng: PRNGKeyArray,
-        physics_model: PhysicsModel,
+        physics_models: PhysicsModel,
         model_arr: PyTree,
         model_static: PyTree,
         optimizer: optax.GradientTransformation,
@@ -941,7 +933,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Rolls out a new trajectory.
             trajectories, rewards = self._vmapped_unroll(
                 rng=rollout_rng,
-                physics_model=physics_model,
+                physics_models=physics_models,
                 model_arr=model_arr,
                 model_static=model_static,
                 engine=engine,
@@ -1011,6 +1003,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # parts in order to use lax.scan, so that `arr` can be a PyTree.`
         model_arr, model_static = eqx.partition(model, eqx.is_inexact_array)
 
+        # Applies randomizations to the environment.
+        rng, randomization_rng, valid_rng = jax.random.split(rng, 3)
+        randomization_rngs = jax.random.split(randomization_rng, self.config.num_envs)
+        randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, 0))
+        mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, randomization_rngs)
+        valid_mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, valid_rng)
+
         while not self.is_training_over(state):
             # Validate by sampling and visualizing a single trajectory.
             if self.valid_step_timer.is_valid_step(state):
@@ -1022,7 +1021,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng, rollout_rng = jax.random.split(rng)
                 trajectories, rewards = self._vmapped_unroll(
                     rng=rollout_rng,
-                    physics_model=mjx_model,
+                    physics_models=valid_mjx_models,
                     model_arr=model_arr,
                     model_static=model_static,
                     engine=engine,
@@ -1046,7 +1045,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, update_rng = jax.random.split(rng)
             model_arr, opt_state, metrics = self._rl_train_loop_step(
                 rng=update_rng,
-                physics_model=mjx_model,
+                physics_models=mjx_models,
                 model_arr=model_arr,
                 model_static=model_static,
                 optimizer=optimizer,
