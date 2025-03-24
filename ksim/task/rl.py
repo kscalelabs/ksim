@@ -906,7 +906,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | Histogram]]:
         def single_step_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
