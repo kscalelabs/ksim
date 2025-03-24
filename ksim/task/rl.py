@@ -35,7 +35,7 @@ from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.env.data import PhysicsModel, PhysicsState, Rewards, Trajectory
+from ksim.env.data import Histogram, PhysicsModel, PhysicsState, Rewards, Trajectory
 from ksim.env.engine import (
     EngineConstants,
     EngineVariables,
@@ -51,6 +51,20 @@ from ksim.terminations import Termination
 from ksim.utils.mujoco import get_joint_metadata
 
 logger = logging.getLogger(__name__)
+
+
+def reduce_histogram(histogram: Histogram) -> Histogram:
+    """Reduce a histogram to a single value."""
+    if not isinstance(histogram, Histogram):
+        return histogram
+    return Histogram(
+        counts=histogram.counts.flatten(),
+        limits=histogram.limits.flatten(),
+        min=histogram.min.min(),
+        max=histogram.max.max(),
+        sum=histogram.sum.sum(),
+        sum_squares=histogram.sum_squares.sum(),
+    )
 
 
 def get_observation(
@@ -634,7 +648,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_histogram(key="qpos", value=trajectories.qpos[..., 7:], namespace="🔩 state histograms")
             self.logger.log_histogram(key="qvel", value=trajectories.qvel[..., 6:], namespace="🔩 state histograms")
 
-    def log_train_metrics(self, train_metrics: FrozenDict[str, Array]) -> None:
+    def log_train_metrics(self, train_metrics: FrozenDict[str, Array | Histogram]) -> None:
         """Logs the train metrics.
 
         Args:
@@ -642,9 +656,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
         if self.config.log_train_metrics:
             for key, value in train_metrics.items():
-                if value.size > 1:
-                    self.logger.log_histogram(key, value, namespace="➡️ train histograms")
-                    self.logger.log_scalar(key, value.mean(), namespace="➡️ train")
+                if isinstance(value, Histogram):
+                    self.logger.log_histogram_raw(
+                        key,
+                        counts=value.counts,
+                        limits=value.limits,
+                        minv=value.min,
+                        maxv=value.max,
+                        sumv=value.sum,
+                        sum_squaresv=value.sum_squares,
+                        namespace="➡️ train histograms",
+                    )
                 else:
                     self.logger.log_scalar(key, value.mean(), namespace="➡️ train")
 
@@ -847,7 +869,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | Histogram]]:
         """Updates the model on the given trajectory.
 
         This function should be implemented according to the specific RL method
@@ -879,14 +901,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
-    ) -> tuple[tuple[PyTree, optax.OptState, FrozenDict[str, Array]], tuple[Trajectory, Rewards]]:
+    ) -> tuple[tuple[PyTree, optax.OptState, FrozenDict[str, Array | Histogram]], tuple[Trajectory, Rewards]]:
 
         def single_step_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
         ) -> tuple[
             tuple[PyTree, optax.OptState, PRNGKeyArray],
-            tuple[Trajectory, Rewards, FrozenDict[str, Array]],
+            tuple[Trajectory, Rewards, FrozenDict[str, Array | Histogram]],
         ]:
             model_arr, opt_state, rng = carry
             rng, update_rng, rollout_rng = jax.random.split(rng, 3)
@@ -921,6 +943,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             (model_arr, opt_state, rng),
             length=self.config.epochs_per_log_step,
         )
+
+        # Finally, clean up the histogram values.
+        train_metrics = jax.tree.map(reduce_histogram, train_metrics, is_leaf=lambda x: isinstance(x, Histogram))
 
         return (model_arr, opt_state, train_metrics), (trajectories, rewards)
 
@@ -957,9 +982,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # parts in order to use lax.scan, so that `arr` can be a PyTree.`
         model_arr, model_static = eqx.partition(model, eqx.is_inexact_array)
 
-        # Holds the trajectories we will use to update the model.
-        prev_trajectory: tuple[Trajectory, Rewards] | None = None
-
         while not self.is_training_over(state):
             # Validate by sampling and visualizing a single trajectory.
             if self.valid_step_timer.is_valid_step(state):
@@ -967,29 +989,27 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state.num_valid_steps += 1
                 state.num_valid_samples += self.eval_rollout_length_steps
 
-                with self.step_context("rollout"):
-                    rng, rollout_rng = jax.random.split(rng)
-
-                    trajectories, rewards = self._vmapped_unroll(
-                        rng=rollout_rng,
-                        physics_model=mjx_model,
-                        model_arr=model_arr,
-                        model_static=model_static,
-                        engine=engine,
-                        engine_constants=engine_constants,
-                        num_steps=self.eval_rollout_length_steps,
-                        num_envs=1,
-                    )
+                # Rolls out a new trajectory.
+                rng, rollout_rng = jax.random.split(rng)
+                trajectories, rewards = self._vmapped_unroll(
+                    rng=rollout_rng,
+                    physics_model=mjx_model,
+                    model_arr=model_arr,
+                    model_static=model_static,
+                    engine=engine,
+                    engine_constants=engine_constants,
+                    num_steps=self.eval_rollout_length_steps,
+                    num_envs=1,
+                )
 
                 # Logs statistics from the trajectory.
-                with self.step_context("write_logs"):
-                    trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
-                    reward = jax.tree.map(lambda arr: arr[0], rewards)
+                trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
+                reward = jax.tree.map(lambda arr: arr[0], rewards)
 
-                    self.log_single_trajectory(trajectory, commands, reward, mj_model)
-                    self.log_trajectory_stats(trajectories, rewards, terminations)
-                    self.log_state_timers(state)
-                    self.write_logs(state)
+                self.log_single_trajectory(trajectory, commands, reward, mj_model)
+                self.log_trajectory_stats(trajectories, rewards, terminations)
+                self.log_state_timers(state)
+                self.write_logs(state)
 
             state = self.on_step_start(state)
 
@@ -1007,20 +1027,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     engine_constants=engine_constants,
                 )
 
-            with self.step_context("write_logs"):
-                state.raw_phase = "train"
-                state.num_steps += self.config.epochs_per_log_step
-                state.num_samples += self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
+            state.raw_phase = "train"
+            state.num_steps += self.config.epochs_per_log_step
+            state.num_samples += self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
 
-                # Logs statistics from the fpost_accumulatetrajectory.
-                trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
-                reward = jax.tree.map(lambda arr: arr[0], rewards)
-
-                if self.config.log_train_trajectory:
+            if self.config.log_train_trajectory:
+                with self.step_context("log-traj"):
+                    trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
+                    reward = jax.tree.map(lambda arr: arr[0], rewards)
                     self.log_single_trajectory(trajectory, commands, reward, mj_model)
+
+            with self.step_context("log-stats"):
                 self.log_trajectory_stats(trajectories, rewards, terminations)
+            with self.step_context("log-metrics"):
                 self.log_train_metrics(train_metrics)
+            with self.step_context("log-timers"):
                 self.log_state_timers(state)
+            with self.step_context("write-logs"):
                 self.write_logs(state)
 
             state = self.on_step_end(state)

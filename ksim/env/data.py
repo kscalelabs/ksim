@@ -41,3 +41,14 @@ class Trajectory:
 class Rewards:
     total: Array
     components: FrozenDict[str, Array]
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Histogram:
+    counts: Array
+    limits: Array
+    min: Array
+    max: Array
+    sum: Array
+    sum_squares: Array

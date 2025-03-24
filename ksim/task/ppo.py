@@ -13,7 +13,7 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.data import Rewards, Trajectory
+from ksim.env.data import Histogram, Rewards, Trajectory
 from ksim.task.rl import RLConfig, RLTask
 
 
@@ -336,6 +336,27 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             The state-value estimates for the given trajectories, with shape (B, T).
         """
 
+    def get_histogram(self, arr: Array, bins: int = 100) -> Histogram:
+        """Gets the histogram of the given array.
+
+        Args:
+            arr: The array to get the histogram for.
+            bins: The number of bins to use for the histogram.
+
+        Returns:
+            The histogram of the given array.
+        """
+        arr = arr.flatten()
+        counts, limits = jnp.histogram(arr, bins=bins)
+        return Histogram(
+            counts=counts,
+            limits=limits[..., 1:],
+            min=arr.min(),
+            max=arr.max(),
+            sum=arr.sum(),
+            sum_squares=arr.dot(arr),
+        )
+
     def get_ppo_metrics(
         self,
         trajectories: Trajectory,
@@ -346,7 +367,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         values_t: Array,
         value_targets_t: Array,
         advantages_t: Array,
-    ) -> dict[str, Array]:
+    ) -> dict[str, Array | Histogram]:
         """Gets the metrics to be logged.
 
         If the metric is a scalar, it will be logged as a scalar. If the
@@ -368,12 +389,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
         slen = (~trajectories.done).sum(dtype=loss_t.dtype) + 1e-6
         return {
-            "loss": loss_t.sum() / slen,
-            "log_probs": log_probs_tn.sum(0).flatten() / slen,
-            "entropy": entropy_tn.sum(0).flatten() / slen,
-            "value": values_t.sum() / slen,
-            "value_targets": value_targets_t.sum() / slen,
-            "advantages": advantages_t.sum() / slen,
+            "loss": self.get_histogram(loss_t.sum() / slen),
+            "log_probs": self.get_histogram(log_probs_tn.sum(0).flatten() / slen),
+            "entropy": self.get_histogram(entropy_tn.sum(0).flatten() / slen),
+            "value": self.get_histogram(values_t.sum() / slen),
+            "value_targets": self.get_histogram(value_targets_t.sum() / slen),
+            "advantages": self.get_histogram(advantages_t.sum() / slen),
         }
 
     @xax.jit(static_argnames=["self", "model_static"])
@@ -384,7 +405,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, FrozenDict[str, Array]]:
+    ) -> tuple[Array, FrozenDict[str, Array | Histogram]]:
         """Computes the PPO loss and additional metrics.
 
         Args:
@@ -405,7 +426,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             trajectories: Trajectory,
             rewards: Array,
             rng: PRNGKeyArray,
-        ) -> tuple[Array, FrozenDict[str, Array]]:
+        ) -> tuple[Array, FrozenDict[str, Array | Histogram]]:
             rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 5)
 
             on_policy_log_probs_tn = jax.lax.stop_gradient(self.get_on_policy_log_probs(model, trajectories, rng1))
@@ -474,7 +495,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[dict[str, Array], PyTree]:
+    ) -> tuple[dict[str, Array | Histogram], PyTree]:
         loss_fn = jax.grad(self.get_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1])(loss_fn)
         grads, metrics = loss_fn(model_arr, model_static, trajectories, rewards, rng)
@@ -522,7 +543,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | Histogram]]:
         ppo_metrics, grads = self._get_loss_metrics_and_grads(
             model_arr=model_arr,
             model_static=model_static,
@@ -550,7 +571,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | Histogram]]:
         """Runs PPO updates on a given set of trajectory batches.
 
         Args:
@@ -570,7 +591,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         def scan_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             xt: Array,
-        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array | Histogram]]:
             model_arr, opt_state, rng = carry
             rng, batch_rng = jax.random.split(rng)
 
@@ -594,7 +615,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         def batch_scan_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
-        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array | Histogram]]:
             arr, opt_state, rng = carry
 
             # Shuffling causes a strange kernel caching issue on GPUs.
