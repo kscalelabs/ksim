@@ -370,7 +370,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
         return {
             "loss": loss_t.mean(),
-            "reward": rewards.total.mean(),
             "log_probs": log_probs_tn.mean(0).flatten(),
             "entropy": entropy_tn.mean(0).flatten(),
             "value": values_t.mean(),

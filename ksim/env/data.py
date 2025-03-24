@@ -1,7 +1,7 @@
 """Base Types for Environments."""
 
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Mapping, TypeAlias
 
 import jax
 import mujoco
@@ -53,3 +53,11 @@ class Histogram:
     sum: Array
     sum_squares: Array
     mean: Array
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Metrics:
+    train: Mapping[str, Array | Histogram]
+    reward: Mapping[str, Array | Histogram]
+    termination: Mapping[str, Array | Histogram]
