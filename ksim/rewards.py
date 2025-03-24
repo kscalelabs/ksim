@@ -114,8 +114,8 @@ class LinearVelocityTrackingReward(Reward):
 class BaseHeightReward(Reward):
     """Reward for tracking the base height target."""
 
+    height_target: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l2")
-    height_target: float = attrs.field(default=0.0)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
