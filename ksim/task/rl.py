@@ -882,9 +882,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         prev_trajectories: Trajectory,
         prev_rewards: Rewards,
     ) -> tuple[tuple[PyTree, optax.OptState, FrozenDict[str, Array]], tuple[Trajectory, Rewards]]:
-        trajectories, rewards = prev_trajectories, prev_rewards
 
-        for _ in range(self.config.epochs_per_log_step):
+        def single_step_fn(
+            carry: tuple[
+                tuple[PyTree, optax.OptState],
+                tuple[Trajectory, Rewards],
+                PRNGKeyArray,
+            ],
+            _: None,
+        ) -> tuple[
+            tuple[
+                tuple[PyTree, optax.OptState],
+                tuple[Trajectory, Rewards],
+                PRNGKeyArray,
+            ],
+            FrozenDict[str, Array],
+        ]:
+            (model_arr, opt_state), (trajectories, rewards), rng = carry
 
             # Runs update on the previous trajectory.
             rng, update_rng, rollout_rng = jax.random.split(rng, 3)
@@ -909,6 +923,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 num_steps=self.rollout_length_steps,
                 num_envs=self.config.num_envs,
             )
+
+            return ((model_arr, opt_state), (trajectories, rewards), rng), train_metrics
+
+        ((model_arr, opt_state), (trajectories, rewards), _), train_metrics = jax.lax.scan(
+            single_step_fn,
+            ((model_arr, opt_state), (prev_trajectories, prev_rewards), rng),
+            length=self.config.epochs_per_log_step,
+        )
 
         return (model_arr, opt_state, train_metrics), (trajectories, rewards)
 
