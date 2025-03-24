@@ -545,15 +545,11 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         # Load the checkpoint and export it using xax's export function.
         model: DefaultHumanoidModel = self.load_checkpoint(ckpt_path, part="model")
 
-        def model_fn(
-            obs: Array, cmd: Array, hidden_states: Array
-        ) -> tuple[Array, Array]:
+        def model_fn(obs: Array, cmd: Array, hidden_states: Array) -> tuple[Array, Array]:
             dist, hidden_states = model.actor.call_flat_obs(obs, cmd, hidden_states)
             return dist.mode(), hidden_states
 
-        def batched_model_fn(
-            obs: Array, cmd: Array, hidden_states: Array
-        ) -> tuple[Array, Array]:
+        def batched_model_fn(obs: Array, cmd: Array, hidden_states: Array) -> tuple[Array, Array]:
             return jax.vmap(model_fn)(obs, cmd, hidden_states)
 
         input_shapes = [(OBS_SIZE,), (CMD_SIZE,), (DEPTH, 2, HIDDEN_SIZE)]
