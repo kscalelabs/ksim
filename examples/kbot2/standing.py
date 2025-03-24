@@ -325,15 +325,15 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
     def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
         return [
-            RandomBaseVelocityXYReset(scale=0.1),
+            RandomBaseVelocityXYReset(scale=0.01),
             RandomJointPositionReset(scale=0.02),
             RandomJointVelocityReset(scale=0.02),
         ]
 
     def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
         return [
-            JointPositionObservation(noise=0.1),
-            JointVelocityObservation(noise=0.8),
+            JointPositionObservation(noise=0.02),
+            JointVelocityObservation(noise=0.2),
             SensorObservation.create(physics_model, "imu_acc", noise=0.05),
             SensorObservation.create(physics_model, "imu_gyro", noise=0.05),
         ]
@@ -519,7 +519,7 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             action_randomization_type="uniform",
-            action_randomization_scale=0.2,
+            action_randomization_scale=0.1,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
             rollout_length_seconds=5.0,

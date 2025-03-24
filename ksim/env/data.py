@@ -12,7 +12,6 @@ from mujoco import mjx
 PhysicsData: TypeAlias = mjx.Data | mujoco.MjData
 PhysicsModel: TypeAlias = mjx.Model | mujoco.MjModel
 
-
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class PhysicsState:
@@ -20,6 +19,7 @@ class PhysicsState:
 
     most_recent_action: Array
     data: PhysicsData
+    event_info: FrozenDict[str, PyTree]
 
 
 @jax.tree_util.register_dataclass

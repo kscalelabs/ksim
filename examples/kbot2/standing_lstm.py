@@ -21,6 +21,7 @@ from mujoco import mjx
 from ksim.actuators import Actuators, MITPositionVelocityActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsModel, Trajectory
+from ksim.events import Event, PushEvent
 from ksim.observation import (
     JointPositionObservation,
     JointVelocityObservation,
@@ -402,13 +403,13 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         return [
             RandomJointPositionReset(scale=0.01),
             RandomJointVelocityReset(scale=0.01),
-            RandomBaseVelocityXYReset(scale=0.1),
+            RandomBaseVelocityXYReset(scale=0.01),
         ]
 
     def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
         return [
-            JointPositionObservation(noise=0.1),
-            JointVelocityObservation(noise=0.8),
+            JointPositionObservation(noise=0.02),
+            JointVelocityObservation(noise=0.2),
             SensorObservation.create(physics_model, "imu_acc", noise=0.05),
             SensorObservation.create(physics_model, "imu_gyro", noise=0.05),
         ]
@@ -416,6 +417,15 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
         return [
             LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.0, zero_prob=0.0),
+        ]
+
+    def get_events(self, physics_model: PhysicsModel) -> list[Event]:
+        return [
+            PushEvent(
+                event_probability=0.002,
+                interval_range=(5, 500),
+                linear_force_scale=0.1,
+            ),
         ]
 
     def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
@@ -590,7 +600,7 @@ if __name__ == "__main__":
     # python -m examples.kbot2.standing run_environment=True
     KbotStandingTask.launch(
         KbotStandingTaskConfig(
-            num_envs=2048,
+            num_envs=4096,
             num_batches=64,
             num_passes=10,
             # Simulation parameters.
@@ -599,7 +609,7 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             action_randomization_type="uniform",
-            action_randomization_scale=0.2,
+            action_randomization_scale=0.1,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
             rollout_length_seconds=5.0,
