@@ -23,10 +23,7 @@ import xax
 from jaxtyping import Array
 
 from ksim.types import PhysicsData, PhysicsModel
-from ksim.utils.mujoco import (
-    get_geom_data_idx_by_name,
-    get_sensor_data_idxs_by_name,
-)
+from ksim.utils.mujoco import get_geom_data_idx_by_name, get_sensor_data_idxs_by_name
 
 logger = logging.getLogger(__name__)
 
