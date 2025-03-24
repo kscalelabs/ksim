@@ -6,7 +6,7 @@ from typing import Mapping, TypeAlias
 import jax
 import mujoco
 from flax.core import FrozenDict
-from jaxtyping import Array
+from jaxtyping import Array, PyTree
 from mujoco import mjx
 
 PhysicsData: TypeAlias = mjx.Data | mujoco.MjData

@@ -393,8 +393,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     ) -> Array:
         if trajectories.aux_outputs is None:
             raise ValueError("No aux outputs found in trajectories")
-        log_probs, _ = trajectories.aux_outputs
-        return log_probs
+        return trajectories.aux_outputs.log_probs
 
     def get_on_policy_values(
         self,
@@ -404,8 +403,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     ) -> Array:
         if trajectories.aux_outputs is None:
             raise ValueError("No aux outputs found in trajectories")
-        _, values = trajectories.aux_outputs
-        return values
+        return trajectories.aux_outputs.values
 
     def get_log_probs(
         self,
