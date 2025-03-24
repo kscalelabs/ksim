@@ -13,6 +13,7 @@ from typing import Callable
 
 import numpy as np
 import pykos
+import tensorflow as tf
 
 logger = logging.getLogger(__name__)
 
@@ -54,18 +55,22 @@ ACTUATOR_LIST: list[Actuator] = [
 
 
 async def get_observation(kos: pykos.KOS) -> np.ndarray:
-    (actuator_states,) = await asyncio.gather(
+    (actuator_states, imu) = await asyncio.gather(
         kos.actuator.get_actuators_state([ac.actuator_id for ac in ACTUATOR_LIST]),
-        # kos.imu.get_imu_values(),
+        kos.imu.get_imu_values(),
     )
-
-    state_dict = {state.actuator_id: state.position for state in actuator_states.states}
-
-    pos_obs = np.array([state_dict[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
-
-    pos_obs = np.deg2rad(pos_obs)
-
-    return pos_obs
+    state_dict_pos = {state.actuator_id: state.position for state in actuator_states.states}
+    pos_obs = np.deg2rad(
+        np.array([state_dict_pos[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
+    )
+    state_dict_vel = {state.actuator_id: state.velocity for state in actuator_states.states}
+    vel_obs = np.deg2rad(
+        np.array([state_dict_vel[ac.actuator_id] for ac in sorted(ACTUATOR_LIST, key=lambda x: x.nn_id)])
+    )
+    imu_obs = np.array([imu.accel_x, imu.accel_y, imu.accel_z, imu.gyro_x, imu.gyro_y, imu.gyro_z])
+    cmd = np.array([0.0, 0.0])
+    observation = np.concatenate([pos_obs, vel_obs, imu_obs, cmd], axis=-1)
+    return observation
 
 
 async def send_actions(kos: pykos.KOS, actions: np.ndarray) -> None:
@@ -77,7 +82,6 @@ async def send_actions(kos: pykos.KOS, actions: np.ndarray) -> None:
         }
         for ac in ACTUATOR_LIST
     ]
-
     logger.debug(actuator_commands)
     await kos.actuator.command_actuators(actuator_commands)
 
@@ -93,7 +97,7 @@ async def configure_actuators(kos: pykos.KOS) -> None:
 
 async def reset(kos: pykos.KOS) -> None:
     await kos.sim.reset(
-        pos={"x": 0.0, "y": 0.0, "z": 1.0},
+        pos={"x": 0.0, "y": 0.0, "z": 0.80},
         quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
         joints=[
             {"name": actuator.joint_name, "pos": pos}
@@ -134,12 +138,7 @@ def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
 
 
 async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -> None:
-    # model = tf.saved_model.load(model_path)
-
-    cmd = [0.0, 0.0]  # x, y
-
-    cmd = np.array(cmd).reshape(1, -1)
-
+    model = tf.saved_model.load(model_path)
     sim_process = None
     cleanup_fn = None
 
@@ -177,7 +176,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
         await kos.process_manager.start_kclip("deployment")
 
     # warm up model
-    # model.infer(observation, cmd)
+    model.infer(observation)
 
     target_time = time.time() + DT
     observation = await get_observation(kos)
@@ -187,9 +186,11 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
     try:
         while time.time() < end_time:
             observation = observation.reshape(1, -1)
-            # action = np.array(model.infer(observation)).reshape(-1)
-
-            action = np.random.uniform(-1.0, 1.0, size=observation[0].shape)
+            # move it all to the infer call
+            action = np.array(model.infer(observation)).reshape(-1)
+            action = action[: len(ACTUATOR_LIST)]  # get the mean
+            action *= 0.5  # scale down the action
+            # action = np.random.uniform(-1.0, 1.0, size=observation[0].shape)
 
             observation, _ = await asyncio.gather(
                 get_observation(kos),
