@@ -417,7 +417,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
-    def get_initial_carry(self) -> tuple[tuple[Array, Array], ...]:
+    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[tuple[Array, Array], ...]:
         # Initialize the hidden state for LSTM
         return tuple((jnp.zeros((HIDDEN_SIZE,)), jnp.zeros((HIDDEN_SIZE,))) for _ in range(DEPTH))
 
@@ -499,7 +499,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
             entropy_n = action_dist_n.entropy()
             return carry, (log_probs_n, entropy_n)
 
-        initial_hidden_states = self.get_initial_carry()
+        initial_hidden_states = self.get_initial_carry(rng)
         _, (log_probs_tn, entropy_tn) = jax.lax.scan(scan_fn, initial_hidden_states, trajectories)
 
         return log_probs_tn, entropy_tn

@@ -348,7 +348,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
-    def get_initial_carry(self) -> None:
+    def get_initial_carry(self, rng: PRNGKeyArray) -> None:
         return None
 
     def _run_actor(
