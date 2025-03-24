@@ -869,7 +869,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | Histogram]]:
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
         """Updates the model on the given trajectory.
 
         This function should be implemented according to the specific RL method
@@ -890,6 +890,27 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             as a scalar, otherwise it is logged as a histogram.
         """
 
+    def get_histogram(self, arr: Array, bins: int = 100) -> Histogram:
+        """Gets the histogram of the given array.
+
+        Args:
+            arr: The array to get the histogram for.
+            bins: The number of bins to use for the histogram.
+
+        Returns:
+            The histogram of the given array.
+        """
+        arr = arr.flatten()
+        counts, limits = jnp.histogram(arr, bins=bins)
+        return Histogram(
+            counts=counts,
+            limits=limits[..., 1:],
+            min=arr.min(),
+            max=arr.max(),
+            sum=arr.sum(),
+            sum_squares=arr.dot(arr),
+        )
+
     @xax.jit(static_argnames=["self", "model_static", "optimizer", "engine", "engine_constants"])
     def _rl_train_loop_step(
         self,
@@ -902,7 +923,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | Histogram]]:
-
         def single_step_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
@@ -934,6 +954,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 trajectories=trajectories,
                 rewards=rewards,
                 rng=update_rng,
+            )
+
+            # Convert any array with more than one element to a histogram.
+            train_metrics = jax.tree.map(
+                lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x,
+                train_metrics,
             )
 
             return (model_arr, opt_state, rng), (train_metrics,)
