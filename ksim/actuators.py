@@ -54,7 +54,6 @@ class MITPositionActuators(Actuators):
         self,
         physics_model: PhysicsModel,
         joint_name_to_metadata: dict[str, JointMetadataOutput],
-        action_scale: float = 1.0,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
@@ -79,7 +78,6 @@ class MITPositionActuators(Actuators):
 
         self.kps = jnp.array(kps_list)
         self.kds = jnp.array(kds_list)
-        self.position_scale = action_scale
 
         if any(self.kps < 0) or any(self.kds < 0):
             raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
@@ -94,7 +92,6 @@ class MITPositionActuators(Actuators):
         """Get the control signal from the (position) action vector."""
         current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
         current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
-        action = action * self.position_scale
         target_velocities = jnp.zeros_like(action)
         pos_delta = action - current_pos
         vel_delta = target_velocities - current_vel
@@ -104,22 +101,12 @@ class MITPositionActuators(Actuators):
 
 
 class MITPositionVelocityActuators(MITPositionActuators):
-    def __init__(
-        self,
-        physics_model: PhysicsModel,
-        joint_name_to_metadata: dict[str, JointMetadataOutput],
-        position_scale: float = 1.0,
-        velocity_scale: float = 1.0,
-    ) -> None:
-        super().__init__(physics_model, joint_name_to_metadata, position_scale)
-        self.velocity_scale = velocity_scale
-
     def get_ctrl(self, action: Array, physics_data: PhysicsData) -> Array:
         """Get the control signal from the (position and velocity) action vector."""
         current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
         current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
-        target_position = action[: len(current_pos)] * self.position_scale
-        target_velocity = action[len(current_pos) :] * self.velocity_scale
+        target_position = action[: len(current_pos)]
+        target_velocity = action[len(current_pos) :]
 
         pos_delta = target_position - current_pos
         vel_delta = target_velocity - current_vel
