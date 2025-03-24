@@ -18,7 +18,7 @@ from mujoco import mjx
 
 from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import AuxOutputs, PhysicsData, PhysicsModel, Trajectory
+from ksim.env.data import PhysicsData, PhysicsModel, Trajectory
 from ksim.events import Event
 from ksim.observation import (
     ActuatorForceObservation,
@@ -45,6 +45,12 @@ NUM_OUTPUTS = 21
 
 HIDDEN_SIZE = 128  # `_s`
 DEPTH = 2
+
+
+@attrs.define(frozen=True)
+class AuxOutputs:
+    log_probs: Array
+    values: Array
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -474,7 +480,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        if trajectories.aux_outputs is None:
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.log_probs
 
@@ -484,7 +490,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        if trajectories.aux_outputs is None:
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.values
 

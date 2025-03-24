@@ -45,6 +45,12 @@ NUM_OUTPUTS = 21
 
 
 @attrs.define(frozen=True)
+class AuxOutputs:
+    log_probs: Array
+    values: Array
+
+
+@attrs.define(frozen=True)
 class DHJointVelocityObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
@@ -391,7 +397,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        if trajectories.aux_outputs is None:
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.log_probs
 
@@ -401,7 +407,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         trajectories: Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        if trajectories.aux_outputs is None:
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.values
 
@@ -444,7 +450,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, tuple[Array, Array]]:
+    ) -> tuple[Array, None, AuxOutputs]:
         action_dist_n = self._run_actor(model, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
@@ -452,7 +458,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         critic_n = self._run_critic(model, observations, commands)
         value_n = critic_n.squeeze(-1)
 
-        return action_n, None, (action_log_prob_n, value_n)
+        return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
     def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
         state = super().on_after_checkpoint_save(ckpt_path, state)
