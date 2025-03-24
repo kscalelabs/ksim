@@ -239,6 +239,10 @@ class RLConfig(xax.Config):
         value=MISSING,
         help="The number of training environments to run in parallel.",
     )
+    num_valid_envs: int = xax.field(
+        value=1,
+        help="The number of validation environments to run in parallel.",
+    )
     num_batches: int = xax.field(
         value=1,
         help="The number of model update batches per trajectory batch. ",
@@ -517,7 +521,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Returns:
             A tuple containing the trajectory and the next engine variables.
         """
-        rng, obs_rng, cmd_rng, act_rng, reset_rng, carry_rng, physics_rng = jax.random.split(engine_variables.rng, 6)
+        rng, obs_rng, cmd_rng, act_rng, reset_rng, carry_rng, physics_rng = jax.random.split(engine_variables.rng, 7)
 
         # Gets the observations from the physics state.
         observations = get_observation(
@@ -775,20 +779,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine_constants: EngineConstants,
         engine_variables: EngineVariables,
         num_steps: int,
-    ) -> tuple[Trajectory, Rewards]:
+    ) -> tuple[Trajectory, Rewards, EngineVariables]:
         # Recombines the mutable and static parts of the model.
         model = eqx.combine(model_arr, model_static)
-
-        # Reset the physics state.
-        rng, reset_rng = jax.random.split(rng)
-        physics_state = engine.reset(physics_model, reset_rng)
-
-        engine_variables = EngineVariables(
-            carry=self.get_initial_carry(reset_rng),
-            commands=initial_commands,
-            physics_state=physics_state,
-            rng=rng,
-        )
 
         def scan_fn(carry: EngineVariables, _: None) -> tuple[EngineVariables, Trajectory]:
             trajectory, next_engine_variables = self.step_engine(
@@ -801,7 +794,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return next_engine_variables, trajectory
 
         # Scans the engine for the desired number of steps.
-        _, trajectory = jax.lax.scan(scan_fn, engine_variables, length=num_steps)
+        next_engine_variables, trajectory = jax.lax.scan(scan_fn, engine_variables, length=num_steps)
 
         # Gets the rewards.
         reward = get_rewards(
@@ -811,7 +804,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             clip_max=self.config.reward_clip_max,
         )
 
-        return trajectory, reward
+        return trajectory, reward, next_engine_variables
 
     @xax.jit(static_argnames=["self", "model_static", "engine", "engine_constants", "num_steps"])
     def _vmapped_unroll(
@@ -823,7 +816,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine_constants: EngineConstants,
         engine_variables: EngineVariables,
         num_steps: int,
-    ) -> tuple[Trajectory, Rewards]:
+    ) -> tuple[Trajectory, Rewards, EngineVariables]:
         vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None, 0, None))
         return vmapped_unroll(
             physics_models,
@@ -926,16 +919,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
         engine_variables: EngineVariables,
-    ) -> tuple[PyTree, optax.OptState, Metrics]:
+    ) -> tuple[PyTree, optax.OptState, Metrics, EngineVariables]:
         def single_step_fn(
-            carry: tuple[PyTree, optax.OptState],
+            carry: tuple[PyTree, optax.OptState, EngineVariables],
             rng: PRNGKeyArray,
-        ) -> tuple[tuple[PyTree, optax.OptState], Metrics]:
-            model_arr, opt_state = carry
-            rng, update_rng, rollout_rng = jax.random.split(rng, 3)
+        ) -> tuple[tuple[PyTree, optax.OptState, EngineVariables], Metrics]:
+            model_arr, opt_state, engine_variables = carry
+            rng, update_rng = jax.random.split(rng)
 
             # Rolls out a new trajectory.
-            trajectories, rewards = self._vmapped_unroll(
+            trajectories, rewards, engine_variables = self._vmapped_unroll(
                 physics_models=physics_models,
                 model_arr=model_arr,
                 model_static=model_static,
@@ -962,18 +955,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 termination=FrozenDict(self.get_termination_metrics(trajectories)),
             )
 
-            return (model_arr, opt_state), metrics
+            return (model_arr, opt_state, engine_variables), metrics
 
-        ((model_arr, opt_state), metrics) = jax.lax.scan(
+        ((model_arr, opt_state, engine_variables), metrics) = jax.lax.scan(
             single_step_fn,
-            (model_arr, opt_state),
+            (model_arr, opt_state, engine_variables),
             jax.random.split(rng, self.config.epochs_per_log_step),
         )
 
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x, metrics)
 
-        return model_arr, opt_state, metrics
+        return model_arr, opt_state, metrics, engine_variables
 
     def rl_train_loop(
         self,
@@ -1006,22 +999,31 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # parts in order to use lax.scan, so that `arr` can be a PyTree.`
         model_arr, model_static = eqx.partition(model, eqx.is_inexact_array)
 
-        # Randomizes the environment.
-        train_rngs = jax.random.split(rng, self.config.num_envs)
-        valid_rngs = jax.random.split(rng, 1)
+        # Defines the vectorized initialization functions.
         randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, 0))
-        mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, train_rngs)
-        valid_mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, valid_rngs)
+        carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
+        command_fn = jax.vmap(get_initial_commands, in_axes=(0, None))
+        state_fn = jax.vmap(engine.reset, in_axes=(0, 0))
 
-        # Gets the variables for each environment.
+        # Builds the variables for the training environment.
+        train_rngs = jax.random.split(rng, self.config.num_envs)
+        mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, train_rngs)
         engine_variables = EngineVariables(
-            carry=jax.vmap(self.get_initial_carry, in_axes=0)(train_rngs),
-            commands=jax.vmap(get_initial_commands, in_axes=(0, None))(train_rngs, engine_constants.command_generators),
-            physics_state=jax.vmap(engine.reset, in_axes=(0, 0))(mjx_models, train_rngs),
+            carry=carry_fn(train_rngs),
+            commands=command_fn(train_rngs, engine_constants.command_generators),
+            physics_state=state_fn(mjx_models, train_rngs),
             rng=train_rngs,
         )
 
-        breakpoint()
+        # Builds the variables for the validation environment.
+        valid_rngs = jax.random.split(rng, self.config.num_valid_envs)
+        valid_mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, valid_rngs)
+        valid_engine_variables = EngineVariables(
+            carry=carry_fn(valid_rngs),
+            commands=command_fn(valid_rngs, engine_constants.command_generators),
+            physics_state=state_fn(valid_mjx_models, valid_rngs),
+            rng=valid_rngs,
+        )
 
         while not self.is_training_over(state):
             # Validate by sampling and visualizing a single trajectory.
@@ -1031,15 +1033,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state.num_valid_samples += self.eval_rollout_length_steps
 
                 # Rolls out a new trajectory.
-                rng, rollout_rng = jax.random.split(rng)
-                trajectories, rewards = self._vmapped_unroll(
+                trajectories, rewards, valid_engine_variables = self._vmapped_unroll(
                     physics_models=valid_mjx_models,
                     model_arr=model_arr,
                     model_static=model_static,
                     engine=engine,
                     engine_constants=engine_constants,
                     num_steps=self.eval_rollout_length_steps,
-                    engine_variables=engine_variables,
+                    engine_variables=valid_engine_variables,
                 )
 
                 # Logs statistics from the trajectory.
@@ -1055,7 +1056,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Optimizes the model on that trajectory.
             rng, update_rng = jax.random.split(rng)
-            model_arr, opt_state, metrics = self._rl_train_loop_step(
+            model_arr, opt_state, metrics, engine_variables = self._rl_train_loop_step(
                 rng=update_rng,
                 physics_models=mjx_models,
                 model_arr=model_arr,
