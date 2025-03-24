@@ -879,38 +879,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
-        prev_trajectories: Trajectory,
-        prev_rewards: Rewards,
     ) -> tuple[tuple[PyTree, optax.OptState, FrozenDict[str, Array]], tuple[Trajectory, Rewards]]:
 
         def single_step_fn(
-            carry: tuple[
-                tuple[PyTree, optax.OptState],
-                tuple[Trajectory, Rewards],
-                PRNGKeyArray,
-            ],
+            carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
         ) -> tuple[
-            tuple[
-                tuple[PyTree, optax.OptState],
-                tuple[Trajectory, Rewards],
-                PRNGKeyArray,
-            ],
-            FrozenDict[str, Array],
+            tuple[PyTree, optax.OptState, PRNGKeyArray],
+            tuple[Trajectory, Rewards, FrozenDict[str, Array]],
         ]:
-            (model_arr, opt_state), (trajectories, rewards), rng = carry
-
-            # Runs update on the previous trajectory.
+            model_arr, opt_state, rng = carry
             rng, update_rng, rollout_rng = jax.random.split(rng, 3)
-            model_arr, opt_state, train_metrics = self.update_model(
-                model_arr=model_arr,
-                model_static=model_static,
-                optimizer=optimizer,
-                opt_state=opt_state,
-                trajectories=trajectories,
-                rewards=rewards,
-                rng=update_rng,
-            )
 
             # Rolls out a new trajectory.
             trajectories, rewards = self._vmapped_unroll(
@@ -924,11 +903,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 num_envs=self.config.num_envs,
             )
 
-            return ((model_arr, opt_state), (trajectories, rewards), rng), train_metrics
+            # Runs update on the previous trajectory.
+            model_arr, opt_state, train_metrics = self.update_model(
+                model_arr=model_arr,
+                model_static=model_static,
+                optimizer=optimizer,
+                opt_state=opt_state,
+                trajectories=trajectories,
+                rewards=rewards,
+                rng=update_rng,
+            )
 
-        ((model_arr, opt_state), (trajectories, rewards), _), train_metrics = jax.lax.scan(
+            return (model_arr, opt_state, rng), (trajectories, rewards, train_metrics)
+
+        ((model_arr, opt_state, _), (trajectories, rewards, train_metrics)) = jax.lax.scan(
             single_step_fn,
-            ((model_arr, opt_state), (prev_trajectories, prev_rewards), rng),
+            (model_arr, opt_state, rng),
             length=self.config.epochs_per_log_step,
         )
 
@@ -1003,26 +993,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             state = self.on_step_start(state)
 
-            # Samples N trajectories in parallel.
-            if prev_trajectory is None:
-                with self.step_context("rollout"):
-                    rng, rollout_rng = jax.random.split(rng)
-                    trajectories, rewards = self._vmapped_unroll(
-                        rng=rollout_rng,
-                        physics_model=mjx_model,
-                        model_arr=model_arr,
-                        model_static=model_static,
-                        engine=engine,
-                        engine_constants=engine_constants,
-                        num_steps=self.rollout_length_steps,
-                        num_envs=self.config.num_envs,
-                    )
-                    prev_trajectory = trajectories, rewards
-
             # Optimizes the model on that trajectory.
             with self.step_context("update"):
                 rng, update_rng = jax.random.split(rng)
-                prev_trajectories, prev_rewards = prev_trajectory
                 (model_arr, opt_state, train_metrics), (trajectories, rewards) = self._rl_train_loop_step(
                     rng=update_rng,
                     physics_model=mjx_model,
@@ -1032,10 +1005,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     opt_state=opt_state,
                     engine=engine,
                     engine_constants=engine_constants,
-                    prev_trajectories=prev_trajectories,
-                    prev_rewards=prev_rewards,
                 )
-                prev_trajectory = trajectories, rewards
 
             with self.step_context("write_logs"):
                 state.raw_phase = "train"
