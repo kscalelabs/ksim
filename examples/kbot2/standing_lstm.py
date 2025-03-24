@@ -572,7 +572,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
-        input_shapes = [(NUM_INPUTS,), (HIDDEN_SIZE * DEPTH * 2,)]
+        input_shapes = [(NUM_INPUTS,), (DEPTH, 2, HIDDEN_SIZE)]
 
         xax.export(
             model_fn,
