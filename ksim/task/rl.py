@@ -1021,27 +1021,25 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             state = self.on_step_start(state)
 
             # Optimizes the model on that trajectory.
-            with self.step_context("update"):
-                rng, update_rng = jax.random.split(rng)
-                model_arr, opt_state, train_metrics = self._rl_train_loop_step(
-                    rng=update_rng,
-                    physics_model=mjx_model,
-                    model_arr=model_arr,
-                    model_static=model_static,
-                    optimizer=optimizer,
-                    opt_state=opt_state,
-                    engine=engine,
-                    engine_constants=engine_constants,
-                )
+            rng, update_rng = jax.random.split(rng)
+            model_arr, opt_state, train_metrics = self._rl_train_loop_step(
+                rng=update_rng,
+                physics_model=mjx_model,
+                model_arr=model_arr,
+                model_static=model_static,
+                optimizer=optimizer,
+                opt_state=opt_state,
+                engine=engine,
+                engine_constants=engine_constants,
+            )
 
             state.raw_phase = "train"
             state.num_steps += self.config.epochs_per_log_step
             state.num_samples += self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
 
-            with self.step_context("log"):
-                self.log_train_metrics(train_metrics)
-                self.log_state_timers(state)
-                self.write_logs(state)
+            self.log_train_metrics(train_metrics)
+            self.log_state_timers(state)
+            self.write_logs(state)
 
             state = self.on_step_end(state)
 
