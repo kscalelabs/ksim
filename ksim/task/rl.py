@@ -1029,7 +1029,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
                 reward = jax.tree.map(lambda arr: arr[0], rewards)
 
-                self.log_single_trajectory(trajectory, commands, reward, mj_model)
+                if state.num_valid_steps % self.config.log_single_traj_every_n_valid_steps == 0:
+                    self.log_single_trajectory(trajectory, commands, reward, mj_model)
                 self.log_trajectory_stats(trajectories, rewards)
                 self.log_state_timers(state)
                 self.write_logs(state)
