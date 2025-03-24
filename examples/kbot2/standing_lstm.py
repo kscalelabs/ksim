@@ -109,18 +109,31 @@ class MultiLayerLSTM(eqx.Module):
     def __call__(
         self,
         x_n: Array,
-        hidden_states: tuple[tuple[Array, Array], ...],
-    ) -> tuple[Array, Array, tuple[tuple[Array, Array], ...]]:
+        hidden_states: Array,
+    ) -> tuple[Array, Array, Array]:
+        h_states = []
+        c_states = []
+
+        for i in range(self.depth):
+            h_idx = i * 2
+            c_idx = i * 2 + 1
+            h_states.append(hidden_states[h_idx])
+            c_states.append(hidden_states[c_idx])
+
+        hidden_states = tuple((h, c) for h, c in zip(h_states, c_states))
+
         new_states = []
-        h, c = self.layers[0](x_n, hidden_states[0])
-        new_states.append((h, c))
+        h, c = self.layers[0](x_n, (h_states[0], c_states[0]))
+        new_states.append(h)
+        new_states.append(c)
 
         if self.depth > 1:
             for layer, hidden_state in zip(self.layers[1:], hidden_states[1:]):
                 h, c = layer(h, hidden_state)
-                new_states.append((h, c))
+                new_states.append(h)
+                new_states.append(c)
 
-        return h, c, tuple(new_states)
+        return h, c, jnp.array(new_states)
 
 
 class KbotActor(eqx.Module):
@@ -173,8 +186,8 @@ class KbotActor(eqx.Module):
         imu_acc_n: Array,
         imu_gyro_n: Array,
         lin_vel_cmd_n: Array,
-        hidden_states: tuple[tuple[Array, Array], ...] | None = None,
-    ) -> tuple[distrax.Normal, tuple[tuple[Array, Array], ...]]:
+        hidden_states: Array,
+    ) -> tuple[distrax.Normal, Array]:
         x_n = jnp.concatenate(
             [
                 joint_pos_n,
@@ -185,14 +198,6 @@ class KbotActor(eqx.Module):
             ],
             axis=-1,
         )  # (NUM_INPUTS)
-
-        # Initialize hidden state if not provided
-        if hidden_states is None:
-            # Initialize hidden states for each layer in the multi-layer LSTM
-            h_s = jnp.zeros((self.hidden_size,))
-            c_s = jnp.zeros((self.hidden_size,))
-            # Create a tuple of (h_s, c_s) for each layer
-            hidden_states = tuple((h_s, c_s) for _ in range(self.multi_layer_lstm.depth))
 
         # Process through LSTM cell
         last_h, _, new_hidden_states = self.multi_layer_lstm(x_n, hidden_states)
@@ -212,14 +217,8 @@ class KbotActor(eqx.Module):
     def call_flat_obs(
         self,
         flat_obs_n: Array,
-        hidden_states: tuple[tuple[Array, Array], ...] | None = None,
-    ) -> tuple[distrax.Normal, tuple[tuple[Array, Array], ...]]:
-        # Initialize hidden state if not provided
-        if hidden_states is None:
-            h_s = jnp.zeros((self.hidden_size,))
-            c_s = jnp.zeros((self.hidden_size,))
-            hidden_states = tuple((h_s, c_s) for _ in range(self.multi_layer_lstm.depth))
-
+        hidden_states: Array,
+    ) -> tuple[distrax.Normal, Array]:
         # Process through LSTM cell
         last_h, _, new_hidden_states = self.multi_layer_lstm(flat_obs_n, hidden_states)
         out_n = self.projector(last_h)
@@ -436,17 +435,17 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> KbotModel:
         return KbotModel(key)
 
-    def get_initial_carry(self) -> tuple[tuple[Array, Array], ...]:
+    def get_initial_carry(self) -> Array:
         # Initialize the hidden state for LSTM
-        return tuple((jnp.zeros((HIDDEN_SIZE,)), jnp.zeros((HIDDEN_SIZE,))) for _ in range(DEPTH))
+        return jnp.zeros((HIDDEN_SIZE*DEPTH*2,))
 
     def _run_actor(
         self,
         model: KbotModel,
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
-        carry: tuple[tuple[Array, Array], ...],
-    ) -> tuple[distrax.Normal, tuple[tuple[Array, Array], ...]]:
+        carry: Array,
+    ) -> tuple[distrax.Normal, Array]:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         imu_acc_n = observations["imu_acc_obs"]
@@ -496,9 +495,9 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         def scan_fn(
-            carry: tuple[tuple[Array, Array], ...],
+            carry: Array,
             inputs: Trajectory,
-        ) -> tuple[tuple[tuple[Array, Array], ...], tuple[Array, Array]]:
+        ) -> tuple[Array, tuple[Array, Array]]:
             action_dist_n, carry = self._run_actor(model, inputs.obs, inputs.command, carry)
             log_probs_n = action_dist_n.log_prob(inputs.action)
             entropy_n = action_dist_n.entropy()
@@ -525,12 +524,12 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def sample_action(
         self,
         model: KbotModel,
-        carry: tuple[tuple[Array, Array], ...],
+        carry: Array,
         physics_model: PhysicsModel,
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, tuple[tuple[Array, Array], ...], tuple[Array, Array]]:
+    ) -> tuple[Array, Array, tuple[Array, Array]]:
         action_dist_n, next_carry = self._run_actor(model, observations, commands, carry)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
@@ -548,14 +547,14 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         """
 
         def deterministic_model_fn(
-            obs: Array, hidden_states: tuple[tuple[Array, Array], ...]
-        ) -> tuple[Array, tuple[tuple[Array, Array], ...]]:
+            obs: Array, hidden_states: Array
+        ) -> tuple[Array, Array]:
             distribution, hidden_states = model.actor.call_flat_obs(obs, hidden_states)
             return distribution.mode(), hidden_states
 
         def stochastic_model_fn(
-            obs: Array, hidden_states: tuple[tuple[Array, Array], ...]
-        ) -> tuple[Array, tuple[tuple[Array, Array], ...]]:
+            obs: Array, hidden_states: Array
+        ) -> tuple[Array, Array]:
             distribution, hidden_states = model.actor.call_flat_obs(obs, hidden_states)
             return distribution.sample(seed=jax.random.PRNGKey(0)), hidden_states
 
@@ -567,8 +566,8 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         if batched:
 
             def batched_model_fn(
-                obs: Array, hidden_states: tuple[tuple[Array, Array], ...]
-            ) -> tuple[Array, tuple[tuple[Array, Array], ...]]:
+                obs: Array, hidden_states: Array
+            ) -> tuple[Array, Array]:
                 return jax.vmap(model_fn)(obs, hidden_states)
 
             return batched_model_fn
@@ -582,11 +581,11 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
         model_fn = self.make_export_model(model, stochastic=False, batched=True)
 
-        input_shapes = [(NUM_INPUTS,)] + [(HIDDEN_SIZE,) for _ in range(DEPTH)]
+        input_shapes = [(NUM_INPUTS,), (HIDDEN_SIZE*DEPTH*2,)]
 
         xax.export(
             model_fn,
-            input_shapes,
+            input_shapes, # type: ignore [arg-type]
             ckpt_path.parent / "tf_model",
         )
 
