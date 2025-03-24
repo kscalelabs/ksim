@@ -376,6 +376,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "value": values_t.mean(),
             "value_targets": value_targets_t.mean(),
             "advantages": advantages_t.mean(),
+            **{key: value.mean() for key, value in rewards.components.items()},
         }
 
     @xax.jit(static_argnames=["self", "model_static"])

@@ -52,3 +52,4 @@ class Histogram:
     max: Array
     sum: Array
     sum_squares: Array
+    mean: Array

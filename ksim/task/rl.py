@@ -53,20 +53,6 @@ from ksim.utils.mujoco import get_joint_metadata
 logger = logging.getLogger(__name__)
 
 
-def reduce_histogram(histogram: Histogram) -> Histogram:
-    """Reduce a histogram to a single value."""
-    if not isinstance(histogram, Histogram):
-        return histogram
-    return Histogram(
-        counts=histogram.counts.flatten(),
-        limits=histogram.limits.flatten(),
-        min=histogram.min.min(),
-        max=histogram.max.max(),
-        sum=histogram.sum.sum(),
-        sum_squares=histogram.sum_squares.sum(),
-    )
-
-
 def get_observation(
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
@@ -663,6 +649,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         sum_squaresv=value.sum_squares,
                         namespace="➡️ train histograms",
                     )
+                    self.logger.log_scalar(key, value.mean, namespace="➡️ train")
                 else:
                     self.logger.log_scalar(key, value.mean(), namespace="➡️ train")
 
@@ -905,6 +892,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             max=arr.max(),
             sum=arr.sum(),
             sum_squares=arr.dot(arr),
+            mean=arr.mean(),
         )
 
     @xax.jit(static_argnames=["self", "model_static", "optimizer", "engine", "engine_constants"])
@@ -918,13 +906,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         engine: PhysicsEngine,
         engine_constants: EngineConstants,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | Histogram]]:
+    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
         def single_step_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
         ) -> tuple[
             tuple[PyTree, optax.OptState, PRNGKeyArray],
-            tuple[FrozenDict[str, Array | Histogram]],
+            tuple[FrozenDict[str, Array]],
         ]:
             model_arr, opt_state, rng = carry
             rng, update_rng, rollout_rng = jax.random.split(rng, 3)
@@ -952,12 +940,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng=update_rng,
             )
 
-            # Convert any array with more than one element to a histogram.
-            train_metrics = jax.tree.map(
-                lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x,
-                train_metrics,
-            )
-
             return (model_arr, opt_state, rng), (train_metrics,)
 
         ((model_arr, opt_state, _), (train_metrics,)) = jax.lax.scan(
@@ -966,8 +948,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             length=self.config.epochs_per_log_step,
         )
 
-        # Finally, clean up the histogram values.
-        train_metrics = jax.tree.map(reduce_histogram, train_metrics, is_leaf=lambda x: isinstance(x, Histogram))
+        # Convert any array with more than one element to a histogram.
+        train_metrics = jax.tree.map(
+            lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x,
+            train_metrics,
+        )
 
         return model_arr, opt_state, train_metrics
 
