@@ -10,17 +10,16 @@ import pytest
 from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
-from ksim.env.data import PhysicsData
-from ksim.observation import Observation
+import ksim
 
 _TOL = 1e-4
 
 
 @attrs.define(frozen=True)
-class DummyObservation(Observation):
+class DummyObservation(ksim.Observation):
     """A dummy observation for testing."""
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
         """Get a dummy observation from the state."""
         return jnp.zeros(1)
 

@@ -1,5 +1,19 @@
 """Defines the base observation class."""
 
+__all__ = [
+    "Observation",
+    "BasePositionObservation",
+    "BaseOrientationObservation",
+    "BaseLinearVelocityObservation",
+    "BaseAngularVelocityObservation",
+    "JointPositionObservation",
+    "JointVelocityObservation",
+    "CenterOfMassInertiaObservation",
+    "CenterOfMassVelocityObservation",
+    "ActuatorForceObservation",
+    "SensorObservation",
+]
+
 import functools
 from abc import ABC, abstractmethod
 from typing import Literal
@@ -9,7 +23,7 @@ import jax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.env.data import PhysicsData, PhysicsModel
+from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import get_sensor_data_idxs_by_name
 
 NoiseType = Literal["gaussian", "uniform"]

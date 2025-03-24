@@ -1,5 +1,21 @@
 """Defines some Mujoco utility functions."""
 
+__all__ = [
+    "get_sensor_data_idxs_by_name",
+    "get_qpos_data_idxs_by_name",
+    "get_qvelacc_data_idxs_by_name",
+    "get_ctrl_data_idx_by_name",
+    "get_geom_data_idx_by_name",
+    "get_body_data_idx_by_name",
+    "get_floor_idx",
+    "is_body_in_contact",
+    "get_collision_info",
+    "geoms_colliding",
+    "get_joint_metadata",
+    "update_model_field",
+    "update_data_field",
+]
+
 import logging
 from typing import Hashable, TypeVar
 
@@ -10,7 +26,7 @@ from jaxtyping import Array, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-from ksim.env.data import PhysicsData, PhysicsModel
+from ksim.types import PhysicsData, PhysicsModel
 
 logger = logging.getLogger(__name__)
 

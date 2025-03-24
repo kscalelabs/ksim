@@ -1,5 +1,16 @@
 """Defines the base termination class."""
 
+__all__ = [
+    "Termination",
+    "PitchTooGreatTermination",
+    "RollTooGreatTermination",
+    "MinimumHeightTermination",
+    "FallTermination",
+    "IllegalContactTermination",
+    "BadZTermination",
+    "FastAccelerationTermination",
+]
+
 import functools
 import logging
 from abc import ABC, abstractmethod
@@ -11,11 +22,8 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array
 
-from ksim.env.data import PhysicsData, PhysicsModel
-from ksim.utils.mujoco import (
-    get_geom_data_idx_by_name,
-    get_sensor_data_idxs_by_name,
-)
+from ksim.types import PhysicsData, PhysicsModel
+from ksim.utils.mujoco import get_geom_data_idx_by_name, get_sensor_data_idxs_by_name
 
 logger = logging.getLogger(__name__)
 

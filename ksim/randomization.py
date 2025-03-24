@@ -1,5 +1,15 @@
 """Randomize each environment when gathering trajectories."""
 
+__all__ = [
+    "Randomization",
+    "WeightRandomization",
+    "StaticFrictionRandomization",
+    "FloorFrictionRandomization",
+    "ArmatureRandomization",
+    "TorsoMassRandomization",
+    "JointDampingRandomization",
+]
+
 from abc import ABC, abstractmethod
 
 import attrs
@@ -9,7 +19,7 @@ import mujoco
 from jaxtyping import PRNGKeyArray
 from mujoco import mjx
 
-from ksim.env.data import PhysicsModel
+from ksim.types import PhysicsModel
 from ksim.utils.mujoco import get_body_data_idx_by_name, update_model_field
 
 

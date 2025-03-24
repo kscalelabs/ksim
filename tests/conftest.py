@@ -9,7 +9,7 @@ from _pytest.fixtures import SubRequest
 from _pytest.python import Function
 from mujoco import mjx
 
-from ksim.env.data import PhysicsModel
+import ksim
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +31,7 @@ def get_mjx_humanoid_model() -> mjx.Model:
 
 
 @pytest.fixture(params=["mjx", "mujoco"])
-def humanoid_model(request: SubRequest) -> PhysicsModel:
+def humanoid_model(request: SubRequest) -> ksim.PhysicsModel:
     """Get a humanoid model."""
     return get_mujoco_humanoid_model() if request.param == "mujoco" else get_mjx_humanoid_model()
 

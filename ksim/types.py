@@ -1,5 +1,15 @@
 """Base Types for Environments."""
 
+__all__ = [
+    "PhysicsData",
+    "PhysicsModel",
+    "PhysicsState",
+    "Trajectory",
+    "Rewards",
+    "Histogram",
+    "Metrics",
+]
+
 from dataclasses import dataclass
 from typing import Mapping, TypeAlias
 

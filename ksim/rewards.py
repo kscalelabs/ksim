@@ -1,5 +1,15 @@
 """Defines a base interface for defining reward functions."""
 
+__all__ = [
+    "Reward",
+    "TerminationPenalty",
+    "LinearVelocityZPenalty",
+    "AngularVelocityXYPenalty",
+    "JointVelocityPenalty",
+    "LinearVelocityTrackingReward",
+    "BaseHeightReward",
+]
+
 import functools
 import logging
 from abc import ABC, abstractmethod
@@ -8,7 +18,7 @@ import attrs
 import xax
 from jaxtyping import Array
 
-from ksim.env.data import Trajectory
+from ksim.types import Trajectory
 
 logger = logging.getLogger(__name__)
 

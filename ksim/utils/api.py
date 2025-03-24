@@ -1,5 +1,11 @@
 """Defines utility functions for pulling from the K-Scale API."""
 
+__all__ = [
+    "get_mujoco_model_path",
+    "get_mujoco_model_metadata",
+    "get_mujoco_model_and_metadata",
+]
+
 import asyncio
 import json
 import logging

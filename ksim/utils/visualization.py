@@ -1,5 +1,10 @@
 """Utilities for visualization and rendering."""
 
+__all__ = [
+    "save_video_with_rewards",
+    "save_trajectory_visualization",
+]
+
 import logging
 import os
 import time
