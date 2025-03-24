@@ -100,7 +100,7 @@ async def configure_actuators(kos: pykos.KOS) -> None:
 
 async def reset(kos: pykos.KOS) -> None:
     await kos.sim.reset(
-        pos={"x": 0.0, "y": 0.0, "z": 0.80},
+        pos={"x": 0.0, "y": 0.0, "z": 0.80024304},
         quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
         joints=[
             {"name": actuator.joint_name, "pos": pos}
@@ -110,8 +110,8 @@ async def reset(kos: pykos.KOS) -> None:
 
 
 def spawn_kos_sim(no_render: bool) -> tuple[subprocess.Popen, Callable]:
-    """Spawn the KOS-Sim default-humanoid process and return the process object."""
-    logger.info("Starting KOS-Sim default-humanoid...")
+    """Spawn the KOS-Sim KBot2 process and return the process object."""
+    logger.info("Starting KOS-Sim kbot2-feet...")
     args = ["kos-sim", "kbot2-feet"]
     if no_render:
         args.append("--no-render")
@@ -197,6 +197,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
                 get_observation(kos),
                 send_actions(kos, position, velocity),
             )
+
             if time.time() < target_time:
                 await asyncio.sleep(max(0, target_time - time.time()))
             else:
@@ -231,7 +232,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--ip", type=str, default="localhost")
-    parser.add_argument("--episode_length", type=int, default=10)  # seconds
+    parser.add_argument("--episode_length", type=int, default=5)  # seconds
     parser.add_argument("--no-render", action="store_true")
     args = parser.parse_args()
 

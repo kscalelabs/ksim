@@ -1,0 +1,106 @@
+{
+    "joint_name_to_metadata": {
+      "left_shoulder_pitch_03": {
+        "id": 11,
+        "kp": "1.0",
+        "kd": "5"
+      },
+      "left_shoulder_roll_03": {
+        "id": 12,
+        "kp": "1.0",
+        "kd": "5"
+      },
+      "left_shoulder_yaw_02": {
+        "id": 13,
+        "kp": "1.0",
+        "kd": "5"
+      },
+      "left_elbow_02": {
+        "id": 14,
+        "kp": "1.0",
+        "kd": "5"
+      },
+      "left_wrist_02": {
+        "id": 15,
+        "kp": "1.0",
+        "kd": "5"
+      },
+      "right_shoulder_pitch_03": {
+        "id": 21,
+        "kp": "1.0",
+        "kd": "5"
+      },
+      "right_shoulder_roll_03": {
+        "id": 22,
+        "kp": "1.0",
+        "kd": "5"
+      },
+      "right_shoulder_yaw_02": {
+        "id": 23,
+        "kp": "1.0",
+        "kd": "5"
+      },
+      "right_elbow_02": {
+        "id": 24,
+        "kp": "1.0",
+        "kd": "5"
+      },
+      "right_wrist_02": {
+        "id": 25,
+        "kp": "1.0",
+        "kd": "5"
+      },
+      "left_hip_pitch_04": {
+        "id": 31,
+        "kp": "80.0",
+        "kd": "5"
+      },
+      "left_hip_roll_03": {
+        "id": 32,
+        "kp": "40.0",
+        "kd": "5"
+      },
+      "left_hip_yaw_03": {
+        "id": 33,
+        "kp": "40.0",
+        "kd": "5"
+      },
+      "left_knee_04": {
+        "id": 34,
+        "kp": "80.0",
+        "kd": "5"
+      },
+      "left_ankle_02": {
+        "id": 35,
+        "kp": "17.0",
+        "kd": "5"
+      },
+      "right_hip_pitch_04": {
+        "id": 41,
+        "kp": "80.0",
+        "kd": "5"
+      },
+      "right_hip_roll_03": {
+        "id": 42,
+        "kp": "40.0",
+        "kd": "5"
+      },
+      "right_hip_yaw_03": {
+        "id": 43,
+        "kp": "40.0",
+        "kd": "5"
+      },
+      "right_knee_04": {
+        "id": 44,
+        "kp": "80.0",
+        "kd": "5"
+      },
+      "right_ankle_02": {
+        "id": 45,
+        "kp": "17.0",
+        "kd": "5"
+      }
+    },
+    "control_frequency": "50.0"
+  }
+  
