@@ -403,8 +403,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def get_initial_carry(self) -> PyTree | None:
+    def get_initial_carry(self, rng: PRNGKeyArray) -> PyTree | None:
         """Returns the initial carry for the model.
+
+        Args:
+            rng: The random key to use.
 
         Returns:
             An arbitrary PyTree, representing any carry parameters that the
@@ -519,7 +522,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         next_carry = jax.lax.cond(
             terminated,
-            lambda: engine_constants.initial_carry,
+            lambda: self.get_initial_carry(reset_rng),
             lambda: next_carry,
         )
         commands = jax.lax.cond(
@@ -746,7 +749,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         physics_state = engine.reset(physics_model, reset_rng)
 
         engine_variables = EngineVariables(
-            carry=engine_constants.initial_carry,
+            carry=self.get_initial_carry(reset_rng),
             commands=initial_commands,
             physics_state=physics_state,
             rng=rng,
@@ -948,7 +951,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rewards_terms = self.get_rewards(mjx_model)
         terminations = self.get_terminations(mjx_model)
         randomizations = self.get_randomization(mjx_model)
-        initial_carry = self.get_initial_carry()
 
         # These remain constant across the entire episode.
         engine_constants = EngineConstants(
@@ -957,7 +959,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             reward_generators=tuple(rewards_terms),
             termination_generators=tuple(terminations),
             randomization_generators=tuple(randomizations),
-            initial_carry=initial_carry,
         )
 
         # JAX requires that we partition the model into mutable and static
@@ -1071,8 +1072,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             randomizations = self.get_randomization(mj_model)
 
             # Gets initial variables.
-            initial_carry = self.get_initial_carry()
-            rng, cmd_rng = jax.random.split(rng)
+            rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
+            initial_carry = self.get_initial_carry(carry_rng)
             initial_commands = get_initial_commands(cmd_rng, command_generators=commands)
 
             # Resets the physics state.
@@ -1086,7 +1087,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 reward_generators=rewards,
                 termination_generators=terminations,
                 randomization_generators=randomizations,
-                initial_carry=initial_carry,
             )
 
             # These components are updated each step.

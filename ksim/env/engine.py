@@ -39,26 +39,6 @@ class EngineConstants:
     reward_generators: Collection[Reward]
     termination_generators: Collection[Termination]
     randomization_generators: Collection[Randomization]
-    initial_carry: PyTree
-
-    def __hash__(self) -> int:
-        """Custom hash that excludes initial_carry which contains unhashable JAX arrays.
-
-        This is used for determining when Jax should recompile a kernel at
-        runtime. Since we only create EngineConstants once, we don't expect
-        the user to change `initial_carry` at runtime, so we exclude it from
-        the hash. However, this might cause issues with the Jax compiler if the
-        user does change `initial_carry` at runtime.
-        """
-        return hash(
-            (
-                self.obs_generators,
-                self.command_generators,
-                self.reward_generators,
-                self.termination_generators,
-                self.randomization_generators,
-            )
-        )
 
 
 @jax.tree_util.register_dataclass
