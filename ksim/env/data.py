@@ -12,6 +12,7 @@ from mujoco import mjx
 PhysicsData: TypeAlias = mjx.Data | mujoco.MjData
 PhysicsModel: TypeAlias = mjx.Model | mujoco.MjModel
 
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class PhysicsState:

@@ -21,7 +21,7 @@ def event_probability_validator(inst: "Event", attr: attrs.Attribute, value: flo
 class Event(ABC):
     """Base class for all events."""
 
-    event_probability: float = attrs.field(validator=event_probability_validator)
+    probability: float = attrs.field(validator=event_probability_validator)
 
     @abstractmethod
     def __call__(self, persistent_data: PyTree, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, PyTree]:
@@ -41,7 +41,7 @@ class PushEvent(Event):
 
     linear_force_scale: float = attrs.field(default=1.0)
     angular_force_scale: float = attrs.field(default=1.0)
-    interval_range: tuple[int, int] = attrs.field(default=(0.0, 0.0))  # num physics steps
+    interval_range: tuple[float, float] = attrs.field(default=(0.0, 0.0))
 
     def __call__(self, persistent_data: PyTree, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, PyTree]:
         """Apply the event to the data.
@@ -61,7 +61,7 @@ class PushEvent(Event):
         # Determine whether to reset based on interval and probability
         needs_reset = remaining_interval[0] <= 0.0
         reset_prob = jax.random.uniform(rng1)
-        should_reset = needs_reset & (reset_prob < self.event_probability)
+        should_reset = needs_reset & (reset_prob < self.probability)
 
         # Generate new values
         rng_interval, rng_linear, rng_angular = jax.random.split(rng2, 3)
