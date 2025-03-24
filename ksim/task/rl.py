@@ -216,6 +216,10 @@ class RLConfig(xax.Config):
         value=1,
         help="The number of epochs between logging steps.",
     )
+    valid_every_n_seconds: float | None = xax.field(
+        value=60.0,
+        help="Run validation every N seconds",
+    )
 
     # Training parameters.
     num_envs: int = xax.field(
