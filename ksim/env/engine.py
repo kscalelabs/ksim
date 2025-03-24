@@ -283,8 +283,6 @@ def get_physics_engine(
     ctrl_dt: float,
     min_action_latency: float,
     max_action_latency: float,
-    action_randomization_type: Literal["none", "uniform", "gaussian"],
-    action_randomization_scale: float,
 ) -> PhysicsEngine:
     if min_action_latency > ctrl_dt:
         raise RuntimeError(f"`{min_action_latency=}` cannot be greater than `{ctrl_dt=}`")
@@ -307,8 +305,6 @@ def get_physics_engine(
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
-                action_randomization_type=action_randomization_type,
-                action_randomization_scale=action_randomization_scale,
             )
 
         case "mjx":
@@ -319,8 +315,6 @@ def get_physics_engine(
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
-                action_randomization_type=action_randomization_type,
-                action_randomization_scale=action_randomization_scale,
             )
 
         case _:
