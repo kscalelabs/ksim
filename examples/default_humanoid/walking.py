@@ -476,7 +476,7 @@ if __name__ == "__main__":
     # python -m examples.default_humanoid.walking run_environment=True
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
-            num_envs=4096,
+            num_envs=2048,
             num_batches=64,
             num_passes=8,
             # Simulation parameters.
