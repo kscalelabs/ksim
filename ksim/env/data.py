@@ -25,6 +25,13 @@ class PhysicsState:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
+class AuxOutputs:
+    log_probs: Array
+    values: Array
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
 class Trajectory:
     qpos: Array
     qvel: Array
@@ -34,7 +41,7 @@ class Trajectory:
     done: Array
     timestep: Array
     termination_components: FrozenDict[str, Array]
-    aux_outputs: PyTree | None
+    aux_outputs: AuxOutputs | None
 
 
 @jax.tree_util.register_dataclass
