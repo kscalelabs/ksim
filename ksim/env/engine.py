@@ -7,7 +7,7 @@ model and data.
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Collection, Literal
+from typing import Collection, Literal
 
 import equinox as eqx
 import jax
@@ -80,9 +80,6 @@ class PhysicsEngine(eqx.Module, ABC):
     phys_steps_per_ctrl_steps: int
     min_action_latency_step: int
     max_action_latency_step: int
-    action_randomization_type: Literal["none", "uniform", "gaussian"]
-    action_randomization_scale: float
-    action_randomization_fn: Callable[[Array, PRNGKeyArray], Array] = lambda x, _: x
 
     def __init__(
         self,
@@ -92,8 +89,6 @@ class PhysicsEngine(eqx.Module, ABC):
         phys_steps_per_ctrl_steps: int,
         min_action_latency_step: int,
         max_action_latency_step: int,
-        action_randomization_type: Literal["none", "uniform", "gaussian"],
-        action_randomization_scale: float,
     ) -> None:
         """Initialize the MJX engine with resetting and actuators."""
         self.actuators = actuators
@@ -102,17 +97,6 @@ class PhysicsEngine(eqx.Module, ABC):
         self.phys_steps_per_ctrl_steps = phys_steps_per_ctrl_steps
         self.min_action_latency_step = min_action_latency_step
         self.max_action_latency_step = max_action_latency_step
-        self.action_randomization_type = action_randomization_type
-        self.action_randomization_scale = action_randomization_scale
-
-        if action_randomization_type == "none":
-            self.action_randomization_fn = lambda x, _: x
-        elif action_randomization_type == "uniform":
-            self.action_randomization_fn = lambda x, rng: jax.random.uniform(rng, x.shape) * action_randomization_scale
-        elif action_randomization_type == "gaussian":
-            self.action_randomization_fn = lambda x, rng: jax.random.normal(rng, x.shape) * action_randomization_scale
-        else:
-            raise ValueError(f"Invalid action_randomization_type: {action_randomization_type}")
 
     @abstractmethod
     def reset(
@@ -181,7 +165,7 @@ class MjxEngine(PhysicsEngine):
 
         def move_physics(
             carry: tuple[mjx.Data, Array, FrozenDict[str, PyTree]],
-            _: None,
+            rng: PRNGKeyArray,
         ) -> tuple[tuple[mjx.Data, Array, FrozenDict[str, PyTree]], None]:
             data, step_num, event_info = carry
 
@@ -195,12 +179,12 @@ class MjxEngine(PhysicsEngine):
             # Apply the events.
             new_event_info = {}
             for event in self.events:
-                data, event_info = event(event_info[event.get_name()], data, rng)
+                rng, event_rng = jax.random.split(rng)
+                data, event_info = event(event_info[event.get_name()], data, event_rng)
                 new_event_info[event.get_name()] = event_info
 
-            randomized_ctrl = ctrl + self.action_randomization_fn(ctrl, action_rng)
-
-            torques = self.actuators.get_ctrl(randomized_ctrl, data)
+            rng, ctrl_rng = jax.random.split(rng)
+            torques = self.actuators.get_ctrl(ctrl, data, ctrl_rng)
             data_with_ctrl = data.replace(ctrl=torques)
             # data_with_ctrl = mjx.forward(physics_model, data_with_ctrl)
             new_data = mjx.step(physics_model, data_with_ctrl)
@@ -210,8 +194,7 @@ class MjxEngine(PhysicsEngine):
         (mjx_data, *_, event_info), _ = jax.lax.scan(
             move_physics,
             (mjx_data, jnp.array(0.0), physics_state.event_info),
-            None,
-            length=phys_steps_per_ctrl_steps,
+            jax.random.split(rng, phys_steps_per_ctrl_steps),
         )
 
         return PhysicsState(data=mjx_data, most_recent_action=action, event_info=FrozenDict(event_info))
