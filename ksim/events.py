@@ -7,6 +7,7 @@ __all__ = [
 ]
 
 from abc import ABC, abstractmethod
+from typing import Self
 
 import attrs
 import jax
@@ -41,11 +42,25 @@ class Event(ABC):
         """Get the initial info for the event."""
 
 
+@jax.tree_util.register_pytree_node_class
 @attrs.define(frozen=True, kw_only=True)
 class PushEventInfo:
     remaining_interval: Array
     linear_force: Array
     angular_force: Array
+
+    def tree_flatten(self) -> tuple[tuple, None]:
+        return (self.remaining_interval, self.linear_force, self.angular_force), None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data: None, children: tuple) -> Self:
+        """Reconstruct the class from flattened representation."""
+        remaining_interval, linear_force, angular_force = children
+        return cls(
+            remaining_interval=remaining_interval,
+            linear_force=linear_force,
+            angular_force=angular_force,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -75,7 +90,7 @@ class PushEvent(Event):
         rng1, rng2 = jax.random.split(rng)
 
         # Determine whether to reset based on interval and probability
-        needs_reset = persistent_data.remaining_interval <= 0.0
+        needs_reset = persistent_data.remaining_interval[0] <= 0.0
         reset_prob = jax.random.uniform(rng1)
         should_reset = needs_reset & (reset_prob < self.probability)
 
@@ -114,13 +129,13 @@ class PushEvent(Event):
 
         # Apply force when appropriate (either continuing or newly reset)
         should_apply_force = (~needs_reset) | should_reset
+        should_apply_force_scalar = jnp.bool_(should_apply_force)
 
         new_data_qvel = data.qvel
         new_data_qvel = new_data_qvel.at[0:3].set(new_linear_force)
 
-        # Use JAX's functional update for data
         updated_data = jax.lax.cond(
-            should_apply_force,
+            should_apply_force_scalar,
             lambda: update_data_field(data, "qvel", new_data_qvel),
             lambda: data,
         )
