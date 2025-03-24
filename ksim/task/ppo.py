@@ -388,6 +388,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A dictionary of metrics to be logged.
         """
         slen = (~trajectories.done).sum(dtype=loss_t.dtype) + 1e-6
+
         return {
             "loss": self.get_histogram(loss_t.sum() / slen),
             "log_probs": self.get_histogram(log_probs_tn.sum(0).flatten() / slen),
