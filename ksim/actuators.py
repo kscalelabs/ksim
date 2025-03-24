@@ -25,6 +25,7 @@ class Actuators(ABC):
         """Get the default action for the actuators."""
         return physics_data.ctrl
 
+
 T = TypeVar("T", bound=Actuators)
 
 
@@ -101,8 +102,8 @@ class MITPositionActuators(Actuators):
         ctrl = self.kps * pos_delta + self.kds * vel_delta
         return ctrl
 
-class MITPositionVelocityActuators(MITPositionActuators):
 
+class MITPositionVelocityActuators(MITPositionActuators):
     def __init__(
         self,
         physics_model: PhysicsModel,
@@ -117,8 +118,8 @@ class MITPositionVelocityActuators(MITPositionActuators):
         """Get the control signal from the (position and velocity) action vector."""
         current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
         current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
-        target_position = action[:len(current_pos)] * self.position_scale
-        target_velocity = action[len(current_pos):] * self.velocity_scale
+        target_position = action[: len(current_pos)] * self.position_scale
+        target_velocity = action[len(current_pos) :] * self.velocity_scale
 
         pos_delta = target_position - current_pos
         vel_delta = target_velocity - current_vel

@@ -212,7 +212,7 @@ class SensorObservation(Observation):
             sensor_name=sensor_name,
             sensor_idx_range=sensor_name_to_idx_range[sensor_name],
         )
-    
+
     def get_name(self) -> str:
         return f"{self.sensor_name}_obs"
 
