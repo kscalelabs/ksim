@@ -29,9 +29,10 @@ from ksim.observation import (
 )
 from ksim.randomization import (
     Randomization,
+    StaticFrictionRandomization,
     WeightRandomization,
 )
-from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
+from ksim.resets import RandomBaseVelocityXYReset, RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import (
     BaseHeightReward,
     Reward,
@@ -394,20 +395,22 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
     def get_randomization(self, physics_model: PhysicsModel) -> list[Randomization]:
         return [
             WeightRandomization(scale=0.01),
+            StaticFrictionRandomization(scale_lower=0.1, scale_upper=1.5),
         ]
 
     def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
         return [
             RandomJointPositionReset(scale=0.01),
             RandomJointVelocityReset(scale=0.01),
+            RandomBaseVelocityXYReset(scale=0.1),
         ]
 
     def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
         return [
-            JointPositionObservation(),
-            JointVelocityObservation(),
-            SensorObservation.create(physics_model, "imu_acc"),
-            SensorObservation.create(physics_model, "imu_gyro"),
+            JointPositionObservation(noise=0.1),
+            JointVelocityObservation(noise=0.8),
+            SensorObservation.create(physics_model, "imu_acc", noise=0.05),
+            SensorObservation.create(physics_model, "imu_gyro", noise=0.05),
         ]
 
     def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
@@ -420,7 +423,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
             JointDeviationPenalty(scale=-1.0),
             DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
-            BaseHeightReward(scale=1.0, height_target=0.7),
+            BaseHeightReward(scale=1.0, height_target=1.0),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
@@ -595,6 +598,8 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            action_randomization_type="uniform",
+            action_randomization_scale=0.2,
             valid_every_n_steps=25,
             valid_first_n_steps=0,
             rollout_length_seconds=5.0,

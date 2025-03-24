@@ -332,7 +332,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
     def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
         return [
-            JointPositionObservation(noise=0.2),
+            JointPositionObservation(noise=0.1),
             JointVelocityObservation(noise=0.8),
             SensorObservation.create(physics_model, "imu_acc", noise=0.05),
             SensorObservation.create(physics_model, "imu_gyro", noise=0.05),
