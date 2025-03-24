@@ -289,8 +289,8 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         return optimizer
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+        mjcf_path = Path(self.config.robot_urdf_path) / "scene.mjcf"
+        mj_model = mujoco.MjModel.from_xml_path(mjcf_path.as_posix())
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
