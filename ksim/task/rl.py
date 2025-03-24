@@ -33,7 +33,6 @@ from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 from omegaconf import II, MISSING
 from PIL import Image, ImageDraw
-from pynput import keyboard
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
@@ -54,28 +53,6 @@ from ksim.terminations import Termination
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata
 
 logger = logging.getLogger(__name__)
-
-paused = False
-
-
-<<<<<<< HEAD
-def on_press(key):
-=======
-def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> None:
->>>>>>> 67ec810 (lint)
-    global paused
-    if key == keyboard.Key.space:
-        paused = not paused
-        print("Paused" if paused else "Resumed")
-    elif key == keyboard.Key.esc:
-        # Stop listener using a different approach
-        listener.stop()
-
-
-
-# Start the listener in a separate thread.
-listener = keyboard.Listener(on_press=on_press)
-listener.start()
 
 
 def get_observation(
@@ -1124,6 +1101,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             save_path = Path(save_path)
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
+        try:
+            from pynput import keyboard
+
+        except ImportError:
+            raise ImportError("pynput is not installed. Please install it using 'pip install pynput'.")
+
         with self, jax.disable_jit():
             rng = self.prng_key()
             self.set_loggers()
@@ -1167,6 +1150,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
+
+            paused = False
+
+            def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> None:
+                nonlocal paused
+                if key == keyboard.Key.space:
+                    paused = not paused
+                    print("Paused" if paused else "Resumed")
+                elif key == keyboard.Key.esc:
+                    # Stop listener using a different approach
+                    listener.stop()
+
+            # Start the listener in a separate thread.
+            listener = keyboard.Listener(on_press=on_press)
+            listener.start()
 
             try:
                 viewer_model = mj_model
