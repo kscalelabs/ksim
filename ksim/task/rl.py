@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Collection, Generic, Literal, TypeVar
+from typing import Any, Collection, Generic, TypeVar
 
 import chex
 import equinox as eqx
@@ -289,6 +289,8 @@ class RLConfig(xax.Config):
         value=0.0,
         help="The scale of the action randomization.",
     )
+
+
 Config = TypeVar("Config", bound=RLConfig)
 
 

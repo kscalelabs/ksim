@@ -6,7 +6,6 @@ import attrs
 import jax
 import jax.numpy as jnp
 import xax
-from jax import Array
 from jaxtyping import PRNGKeyArray, PyTree
 
 from ksim.env.data import PhysicsData
@@ -69,9 +68,7 @@ class PushEvent(Event):
 
         # Calculate new interval (either new random interval or decremented existing one)
         interval_range = self.interval_range
-        random_interval = jax.random.randint(
-            rng_interval, (1,), minval=interval_range[0], maxval=interval_range[1]
-        )
+        random_interval = jax.random.randint(rng_interval, (1,), minval=interval_range[0], maxval=interval_range[1])
         continued_interval = remaining_interval - 1
 
         # Select new interval value

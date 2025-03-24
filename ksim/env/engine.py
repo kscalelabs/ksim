@@ -232,7 +232,7 @@ class MujocoEngine(PhysicsEngine):
             mujoco_data = reset(mujoco_data, reset_rng)
 
         mujoco.mj_forward(physics_model, mujoco_data)
-        default_action = mujoco_data.ctrl
+        default_action = self.actuators.get_default_action(mujoco_data)
 
         return PhysicsState(
             data=mujoco_data,
@@ -282,7 +282,6 @@ class MujocoEngine(PhysicsEngine):
                 new_event_info[event.get_name()] = event_info
 
             event_info = FrozenDict(new_event_info)
-
             randomized_ctrl = ctrl + self.action_randomization_fn(ctrl, action_rng)
 
             torques = self.actuators.get_ctrl(randomized_ctrl, mujoco_data)
