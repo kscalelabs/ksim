@@ -44,7 +44,8 @@ NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
 
 
-@attrs.define(frozen=True)
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
 class AuxOutputs:
     log_probs: Array
     values: Array
