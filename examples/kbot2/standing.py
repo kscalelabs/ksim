@@ -27,11 +27,8 @@ from ksim.observation import (
     Observation,
     SensorObservation,
 )
-from ksim.randomization import (
-    Randomization,
-    WeightRandomization,
-)
 from ksim.resets import RandomBaseVelocityXYReset, RandomJointPositionReset, RandomJointVelocityReset, Reset
+from ksim.randomization import Randomization, StaticFrictionRandomization, WeightRandomization
 from ksim.rewards import (
     BaseHeightReward,
     Reward,
@@ -322,14 +319,15 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
 
     def get_randomization(self, physics_model: PhysicsModel) -> list[Randomization]:
         return [
-            WeightRandomization(scale=0.01),
+            WeightRandomization(scale=0.03),
+            StaticFrictionRandomization(scale_lower=0.1, scale_upper=1.5),
         ]
 
     def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
         return [
-            RandomJointPositionReset(scale=0.01),
-            RandomJointVelocityReset(scale=0.01),
             RandomBaseVelocityXYReset(scale=0.1),
+            RandomJointPositionReset(scale=0.02),
+            RandomJointVelocityReset(scale=0.02),
         ]
 
     def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
