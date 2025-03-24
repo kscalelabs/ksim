@@ -1,5 +1,10 @@
 """Defines a standard task interface for training reinforcement learning agents."""
 
+__all__ = [
+    "RLConfig",
+    "RLTask",
+]
+
 import bdb
 import io
 import itertools
@@ -36,8 +41,8 @@ from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.env.data import Histogram, Metrics, PhysicsModel, PhysicsState, Rewards, Trajectory
-from ksim.env.engine import (
+from ksim.types import Histogram, Metrics, PhysicsModel, PhysicsState, Rewards, Trajectory
+from ksim.engine import (
     EngineConstants,
     EngineVariables,
     PhysicsEngine,

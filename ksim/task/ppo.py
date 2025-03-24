@@ -1,5 +1,10 @@
 """Defines a standard task interface for training a policy."""
 
+__all__ = [
+    "PPOConfig",
+    "PPOTask",
+]
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -13,7 +18,7 @@ import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.data import Rewards, Trajectory
+from ksim.types import Rewards, Trajectory
 from ksim.task.rl import RLConfig, RLTask
 
 

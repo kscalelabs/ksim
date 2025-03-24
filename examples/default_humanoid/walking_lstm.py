@@ -16,27 +16,7 @@ from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
-from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
-from ksim.commands import Command, LinearVelocityCommand
-from ksim.env.data import PhysicsData, PhysicsModel, Trajectory
-from ksim.events import Event
-from ksim.observation import (
-    ActuatorForceObservation,
-    CenterOfMassInertiaObservation,
-    CenterOfMassVelocityObservation,
-    Observation,
-)
-from ksim.randomization import (
-    Randomization,
-    WeightRandomization,
-)
-from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
-from ksim.rewards import (
-    Reward,
-)
-from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.terminations import BadZTermination, FastAccelerationTermination, Termination
-from ksim.utils.mujoco import get_joint_metadata
+import ksim
 
 OBS_SIZE = 336
 CMD_SIZE = 2
@@ -55,31 +35,31 @@ class AuxOutputs:
 
 
 @attrs.define(frozen=True, kw_only=True)
-class DHForwardReward(Reward):
+class DHForwardReward(ksim.Reward):
     """Incentives forward movement."""
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
         # Take just the x velocity component
         x_delta = jnp.clip(trajectory.qvel[..., 0], -1.0, 1.0)
         return x_delta
 
 
 @attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(Reward):
+class DHControlPenalty(ksim.Reward):
     """Legacy default humanoid control cost that penalizes squared action magnitude."""
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
         return jnp.sum(jnp.square(trajectory.action), axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(Reward):
+class DHHealthyReward(ksim.Reward):
     """Legacy default humanoid healthy reward that gives binary reward based on height."""
 
     healthy_z_lower: float = attrs.field(default=0.5)
     healthy_z_upper: float = attrs.field(default=1.5)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
         height = trajectory.qpos[:, 2]
         is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
         is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
@@ -87,10 +67,10 @@ class DHHealthyReward(Reward):
 
 
 @attrs.define(frozen=True)
-class DHJointVelocityObservation(Observation):
+class DHJointVelocityObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel  # (N,)
         return qvel
 
@@ -99,10 +79,10 @@ class DHJointVelocityObservation(Observation):
 
 
 @attrs.define(frozen=True)
-class DHJointPositionObservation(Observation):
+class DHJointPositionObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[2:]  # (N,)
         return qpos
 
@@ -280,7 +260,7 @@ class DefaultHumanoidModel(eqx.Module):
 
 
 @dataclass
-class HumanoidWalkingTaskConfig(PPOConfig):
+class HumanoidWalkingTaskConfig(ksim.RLConfig):
     """Config for the humanoid walking task."""
 
     # Optimizer parameters.
@@ -332,7 +312,7 @@ class HumanoidWalkingTaskConfig(PPOConfig):
     )
 
 
-class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
+class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -363,7 +343,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         return mj_model
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        return get_joint_metadata(
+        return ksim.get_joint_metadata(
             mj_model,
             kp=self.config.kp,
             kd=self.config.kd,
@@ -372,59 +352,59 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         )
 
     def get_actuators(
-        self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
-    ) -> Actuators:
+        self, physics_model: ksim.PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
+    ) -> ksim.Actuators:
         if self.config.use_mit_actuators:
             if metadata is None:
                 raise ValueError("Metadata is required for MIT actuators")
-            return MITPositionActuators(physics_model, metadata)
+            return ksim.MITPositionActuators(physics_model, metadata)
         else:
-            return TorqueActuators()
+            return ksim.TorqueActuators()
 
-    def get_randomization(self, physics_model: PhysicsModel) -> list[Randomization]:
+    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
-            WeightRandomization(scale=0.01),
+            ksim.WeightRandomization(scale=0.01),
         ]
 
-    def get_events(self, physics_model: PhysicsModel) -> list[Event]:
+    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return []
 
-    def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
+    def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
-            RandomJointPositionReset(scale=0.01),
-            RandomJointVelocityReset(scale=0.01),
+            ksim.RandomJointPositionReset(scale=0.01),
+            ksim.RandomJointVelocityReset(scale=0.01),
         ]
 
-    def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
+    def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             DHJointPositionObservation(),
             DHJointVelocityObservation(),
-            ActuatorForceObservation(),
-            CenterOfMassInertiaObservation(),
-            CenterOfMassVelocityObservation(),
+            ksim.ActuatorForceObservation(),
+            ksim.CenterOfMassInertiaObservation(),
+            ksim.CenterOfMassVelocityObservation(),
         ]
 
-    def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
+    def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
+            ksim.LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
         ]
 
-    def get_rewards(self, physics_model: PhysicsModel) -> list[Reward]:
+    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             DHForwardReward(scale=0.5),
             DHControlPenalty(scale=-0.01),
             DHHealthyReward(scale=0.75),
-            # TerminationPenalty(scale=-30.0),
-            # JointVelocityPenalty(scale=-0.01),
+            # ksim.TerminationPenalty(scale=-30.0),
+            # ksim.JointVelocityPenalty(scale=-0.01),
             # These seem necessary to prevent some physics artifacts.
-            # LinearVelocityZPenalty(scale=-0.001),
-            # AngularVelocityXYPenalty(scale=-0.001),
+            # ksim.LinearVelocityZPenalty(scale=-0.001),
+            # ksim.AngularVelocityXYPenalty(scale=-0.001),
         ]
 
-    def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
+    def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=4.0),
-            FastAccelerationTermination(),
+            ksim.BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=4.0),
+            ksim.FastAccelerationTermination(),
         ]
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
@@ -478,7 +458,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_on_policy_log_probs(
         self,
         model: DefaultHumanoidModel,
-        trajectories: Trajectory,
+        trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
         if not isinstance(trajectories.aux_outputs, AuxOutputs):
@@ -488,7 +468,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_on_policy_values(
         self,
         model: DefaultHumanoidModel,
-        trajectories: Trajectory,
+        trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
         if not isinstance(trajectories.aux_outputs, AuxOutputs):
@@ -498,12 +478,12 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_log_probs(
         self,
         model: DefaultHumanoidModel,
-        trajectories: Trajectory,
+        trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array]:
         def scan_fn(
             carry: Array,
-            inputs: Trajectory,
+            inputs: ksim.Trajectory,
         ) -> tuple[Array, tuple[Array, Array]]:
             action_dist_n, carry = self._run_actor(model, inputs.obs, inputs.command, carry)
             log_probs_n = action_dist_n.log_prob(inputs.action / model.actor.mean_scale)
@@ -518,7 +498,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_values(
         self,
         model: DefaultHumanoidModel,
-        trajectories: Trajectory,
+        trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
         # Vectorize over both batch and time dimensions.
@@ -532,7 +512,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         self,
         model: DefaultHumanoidModel,
         carry: Array,
-        physics_model: PhysicsModel,
+        physics_model: ksim.PhysicsModel,
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,

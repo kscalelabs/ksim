@@ -1,5 +1,12 @@
 """Defines the base actuators class, along with some implementations."""
 
+__all__ = [
+    "Actuators",
+    "TorqueActuators",
+    "MITPositionActuators",
+    "MITPositionVelocityActuators",
+]
+
 import logging
 from abc import ABC, abstractmethod
 from typing import Generic, Literal, TypeVar
@@ -9,7 +16,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 
-from ksim.env.data import PhysicsData, PhysicsModel
+from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
 logger = logging.getLogger(__name__)

@@ -4,6 +4,16 @@ Designed to be easily extensible to any physics engine that separates
 model and data.
 """
 
+__all__ = [
+    "EngineConstants",
+    "EngineVariables",
+    "PhysicsEngine",
+    "MjxEngine",
+    "MujocoEngine",
+    "get_physics_engine",
+    "engine_type_from_physics_model",
+]
+
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -19,13 +29,13 @@ from mujoco import mjx
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.env.data import PhysicsModel, PhysicsState
 from ksim.events import Event
 from ksim.observation import Observation
 from ksim.randomization import Randomization
 from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
+from ksim.types import PhysicsModel, PhysicsState
 
 logger = logging.getLogger(__name__)
 

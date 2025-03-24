@@ -1,5 +1,10 @@
 """Utilities for handling trajectory data."""
 
+__all__ = [
+    "split_and_pad_trajectories",
+    "unpad_trajectories",
+]
+
 import jax
 import jax.numpy as jnp
 

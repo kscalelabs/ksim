@@ -9,7 +9,7 @@ from _pytest.fixtures import SubRequest
 from _pytest.python import Function
 from mujoco import mjx
 
-from ksim.env.data import PhysicsModel
+from ksim.types import PhysicsModel
 
 
 @pytest.fixture(autouse=True)

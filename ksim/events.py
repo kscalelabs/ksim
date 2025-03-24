@@ -1,5 +1,11 @@
 """Defines the base event classes and builders. Events are triggered during a rollout."""
 
+__all__ = [
+    "Event",
+    "PushEvent",
+    "PushEventInfo",
+]
+
 from abc import ABC, abstractmethod
 
 import attrs
@@ -8,7 +14,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.env.data import PhysicsData
+from ksim.types import PhysicsData
 from ksim.utils.mujoco import update_data_field
 
 

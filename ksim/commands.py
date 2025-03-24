@@ -1,5 +1,11 @@
 """Defines the base command class."""
 
+__all__ = [
+    "Command",
+    "LinearVelocityCommand",
+    "AngularVelocityCommand",
+]
+
 import functools
 from abc import ABC, abstractmethod
 

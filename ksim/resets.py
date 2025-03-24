@@ -1,5 +1,15 @@
 """Defines the base reset classes and builders."""
 
+__all__ = [
+    "Reset",
+    "HFieldXYPositionReset",
+    "PlaneXYPositionReset",
+    "RandomJointPositionReset",
+    "RandomJointVelocityReset",
+    "RandomBaseVelocityXYReset",
+    "get_xy_position_reset",
+]
+
 import functools
 import logging
 from abc import ABC, abstractmethod
@@ -12,7 +22,7 @@ import xax
 from jaxtyping import PRNGKeyArray
 from mujoco import mjx
 
-from ksim.env.data import PhysicsData, PhysicsModel
+from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import update_data_field
 
 logger = logging.getLogger(__name__)

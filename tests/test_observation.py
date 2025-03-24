@@ -10,7 +10,7 @@ import pytest
 from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
-from ksim.env.data import PhysicsData
+from ksim.types import PhysicsData
 from ksim.observation import Observation
 
 _TOL = 1e-4
