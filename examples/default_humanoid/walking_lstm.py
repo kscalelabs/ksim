@@ -126,18 +126,28 @@ class MultiLayerLSTM(eqx.Module):
     def __call__(
         self,
         x_n: Array,
-        hidden_states: tuple[tuple[Array, Array], ...],
-    ) -> tuple[Array, Array, tuple[tuple[Array, Array], ...]]:
-        new_states = []
-        h, c = self.layers[0](x_n, hidden_states[0])
-        new_states.append((h, c))
+        hidden_states: Array,  # (depth, 2, hidden_size)
+    ) -> tuple[Array, Array, Array]:  # (output_h, output_c, new_hidden_states)
+        h_states = hidden_states[:, 0]  # All h states
+        c_states = hidden_states[:, 1]  # All c states
+
+        new_h_states = []
+        new_c_states = []
+
+        h, c = self.layers[0](x_n, (h_states[0], c_states[0]))
+        new_h_states.append(h)
+        new_c_states.append(c)
 
         if self.depth > 1:
-            for layer, hidden_state in zip(self.layers[1:], hidden_states[1:]):
-                h, c = layer(h, hidden_state)
-                new_states.append((h, c))
+            for layer, h_state, c_state in zip(self.layers[1:], h_states[1:], c_states[1:]):
+                h, c = layer(h, (h_state, c_state))
+                new_h_states.append(h)
+                new_c_states.append(c)
 
-        return h, c, tuple(new_states)
+        stacked_h = jnp.stack(new_h_states, axis=0)  # (depth, hidden_size)
+        stacked_c = jnp.stack(new_c_states, axis=0)  # (depth, hidden_size)
+
+        return h, c, jnp.stack([stacked_h, stacked_c], axis=1)  # h_last, c_last, (depth, 2, hidden_size)
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -191,17 +201,9 @@ class DefaultHumanoidActor(eqx.Module):
         com_vel_n: Array,
         act_frc_obs_n: Array,
         lin_vel_cmd_n: Array,
-        hidden_states: tuple[tuple[Array, Array], ...] | None = None,
-    ) -> tuple[distrax.Normal, tuple[tuple[Array, Array], ...]]:
+        hidden_states: Array,
+    ) -> tuple[distrax.Normal, Array]:
         obs_n = jnp.concatenate([dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n])
-
-        # Initialize hidden state if not provided
-        if hidden_states is None:
-            # Initialize hidden states for each layer in the multi-layer LSTM
-            h_s = jnp.zeros((self.hidden_size,))
-            c_s = jnp.zeros((self.hidden_size,))
-            # Create a tuple of (h_s, c_s) for each layer
-            hidden_states = tuple((h_s, c_s) for _ in range(self.multi_layer_lstm.depth))
 
         return self.call_flat_obs(obs_n, lin_vel_cmd_n, hidden_states)
 
@@ -209,8 +211,8 @@ class DefaultHumanoidActor(eqx.Module):
         self,
         flat_obs_n: Array,
         lin_vel_cmd_n: Array,
-        hidden_states: tuple[tuple[Array, Array], ...],
-    ) -> tuple[distrax.Normal, tuple[tuple[Array, Array], ...]]:
+        hidden_states: Array,
+    ) -> tuple[distrax.Normal, Array]:
         x_n = jnp.concatenate([flat_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
 
         # Process through LSTM cell
@@ -417,17 +419,17 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[tuple[Array, Array], ...]:
+    def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
         # Initialize the hidden state for LSTM
-        return tuple((jnp.zeros((HIDDEN_SIZE,)), jnp.zeros((HIDDEN_SIZE,))) for _ in range(DEPTH))
+        return jnp.zeros((DEPTH, 2, HIDDEN_SIZE))
 
     def _run_actor(
         self,
         model: DefaultHumanoidModel,
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
-        carry: tuple[tuple[Array, Array], ...],
-    ) -> tuple[distrax.Normal, tuple[tuple[Array, Array], ...]]:
+        carry: Array,
+    ) -> tuple[distrax.Normal, Array]:
         dh_joint_pos_n = observations.get("dhjoint_position_observation", jnp.zeros((0,)))
         dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,))) / 50.0
         com_inertia_n = observations.get("center_of_mass_inertia_observation", jnp.zeros((0,)))
@@ -520,7 +522,7 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
     def sample_action(
         self,
         model: DefaultHumanoidModel,
-        carry: tuple[tuple[Array, Array], ...],
+        carry: Array,
         physics_model: PhysicsModel,
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
@@ -544,15 +546,18 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         model: DefaultHumanoidModel = self.load_checkpoint(ckpt_path, part="model")
 
         def model_fn(
-            obs: Array, cmd: Array, hidden_states: tuple[tuple[Array, Array], ...]
-        ) -> tuple[Array, tuple[Array, ...]]:
+            obs: Array, cmd: Array, hidden_states: Array
+        ) -> tuple[Array, Array]:
             dist, hidden_states = model.actor.call_flat_obs(obs, cmd, hidden_states)
-            # Concatenate h and c for each layer
-            concat_hidden_states = tuple(jnp.concatenate([h, c]) for h, c in hidden_states)
-            return dist.mode(), concat_hidden_states
+            return dist.mode(), hidden_states
 
-        input_shapes = [(OBS_SIZE,), (CMD_SIZE,)] + [(HIDDEN_SIZE,)] * DEPTH
-        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
+        def batched_model_fn(
+            obs: Array, cmd: Array, hidden_states: Array
+        ) -> tuple[Array, Array]:
+            return jax.vmap(model_fn)(obs, cmd, hidden_states)
+
+        input_shapes = [(OBS_SIZE,), (CMD_SIZE,), (DEPTH, 2, HIDDEN_SIZE)]
+        xax.export(batched_model_fn, input_shapes, ckpt_path.parent / "tf_model")  # type: ignore [arg-type]
 
         return state
 
