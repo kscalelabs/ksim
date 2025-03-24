@@ -433,7 +433,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
             JointDeviationPenalty(scale=-1.0),
             DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
-            BaseHeightReward(scale=1.0, height_target=1.0),
+            BaseHeightReward(scale=1.0, height_target=1.1),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
