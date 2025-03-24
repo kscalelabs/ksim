@@ -19,6 +19,7 @@ from mujoco import mjx
 from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsData, PhysicsModel, Trajectory
+from ksim.events import Event
 from ksim.observation import (
     ActuatorForceObservation,
     CenterOfMassInertiaObservation,
@@ -313,7 +314,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         )
 
     def get_actuators(
-        self, physics_model: PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
+        self,
+        physics_model: PhysicsModel,
+        metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> Actuators:
         if self.config.use_mit_actuators:
             if metadata is None:
@@ -326,6 +329,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         return [
             WeightRandomization(scale=0.01),
         ]
+
+    def get_events(self, physics_model: PhysicsModel) -> list[Event]:
+        return []
 
     def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
         return [

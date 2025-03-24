@@ -19,6 +19,7 @@ from mujoco import mjx
 from ksim.actuators import Actuators, MITPositionActuators, TorqueActuators
 from ksim.commands import Command, LinearVelocityCommand
 from ksim.env.data import PhysicsData, PhysicsModel, Trajectory
+from ksim.events import Event
 from ksim.observation import (
     ActuatorForceObservation,
     CenterOfMassInertiaObservation,
@@ -380,6 +381,9 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
         return [
             WeightRandomization(scale=0.01),
         ]
+
+    def get_events(self, physics_model: PhysicsModel) -> list[Event]:
+        return []
 
     def get_resets(self, physics_model: PhysicsModel) -> list[Reset]:
         return [

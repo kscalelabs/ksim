@@ -89,9 +89,10 @@ class LinearVelocityTrackingReward(Reward):
     """Reward for tracking the linear velocity command."""
 
     norm: xax.NormType = attrs.field(default="l2")
+    command_name: str = attrs.field(default="linear_velocity_command")
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        lin_vel_cmd = trajectory.command["linear_velocity_command"]
+        lin_vel_cmd = trajectory.command[self.command_name]
         lin_vel_x_cmd = lin_vel_cmd[..., 0]
         lin_vel_y_cmd = lin_vel_cmd[..., 1]
         lin_vel_x = trajectory.qvel[..., 1]

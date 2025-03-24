@@ -265,9 +265,7 @@ class MujocoEngine(PhysicsEngine):
                 new_event_info[event.get_name()] = event_info
 
             event_info = FrozenDict(new_event_info)
-            randomized_ctrl = ctrl + self.action_randomization_fn(ctrl, action_rng)
-
-            torques = self.actuators.get_ctrl(randomized_ctrl, mujoco_data)
+            torques = self.actuators.get_ctrl(ctrl, mujoco_data, action_rng)
             mujoco_data.ctrl[:] = torques
             # mujoco.mj_forward(physics_model, mujoco_data)
             mujoco.mj_step(physics_model, mujoco_data)
