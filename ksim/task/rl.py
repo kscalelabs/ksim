@@ -590,6 +590,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         trajectory = Trajectory(
             qpos=next_physics_state.data.qpos,
             qvel=next_physics_state.data.qvel,
+            actuator_frc=next_physics_state.data.actuator_force,
             obs=observations,
             command=commands,
             action=action,

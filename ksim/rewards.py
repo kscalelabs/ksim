@@ -16,9 +16,9 @@ import logging
 from abc import ABC, abstractmethod
 
 import attrs
+import jax.numpy as jnp
 import xax
 from jaxtyping import Array
-import jax.numpy as jnp
 
 from ksim.types import Trajectory
 
@@ -145,3 +145,13 @@ class ActionSmoothnessPenalty(Reward):
         action_deltas = current_actions - previous_actions
 
         return xax.get_norm(action_deltas, self.norm).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ActuatorForcePenalty(Reward):
+    """Penalty for high actuator forces."""
+
+    norm: xax.NormType = attrs.field(default="l1")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        return xax.get_norm(trajectory.actuator_frc, self.norm).mean(axis=-1)
