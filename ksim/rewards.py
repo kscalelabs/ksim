@@ -82,3 +82,31 @@ class JointVelocityPenalty(Reward):
     def __call__(self, trajectory: Trajectory) -> Array:
         joint_vel = trajectory.qvel[..., 6:]
         return xax.get_norm(joint_vel, self.norm).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class LinearVelocityTrackingReward(Reward):
+    """Reward for tracking the linear velocity command."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+    command_name: str = attrs.field(default="linear_velocity_command")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        lin_vel_cmd = trajectory.command[self.command_name]
+        lin_vel_x_cmd = lin_vel_cmd[..., 0]
+        lin_vel_y_cmd = lin_vel_cmd[..., 1]
+        lin_vel_x = trajectory.qvel[..., 1]
+        lin_vel_y = trajectory.qvel[..., 2]
+        return xax.get_norm(lin_vel_x - lin_vel_x_cmd, self.norm) + xax.get_norm(lin_vel_y - lin_vel_y_cmd, self.norm)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class BaseHeightReward(Reward):
+    """Reward for tracking the base height target."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+    height_target: float = attrs.field(default=0.0)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        base_height = trajectory.qpos[..., 2]
+        return xax.get_norm(base_height - self.height_target, self.norm)

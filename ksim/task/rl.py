@@ -43,6 +43,7 @@ from ksim.env.engine import (
     engine_type_from_physics_model,
     get_physics_engine,
 )
+from ksim.events import Event
 from ksim.observation import Observation
 from ksim.randomization import Randomization
 from ksim.resets import Reset
@@ -322,6 +323,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return get_physics_engine(
             engine_type=engine_type_from_physics_model(physics_model),
             resets=self.get_resets(physics_model),
+            events=self.get_events(physics_model),
             actuators=self.get_actuators(physics_model, metadata),
             dt=self.config.dt,
             ctrl_dt=self.config.ctrl_dt,
@@ -349,6 +351,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         Returns:
             A collection of reset generators.
+        """
+
+    @abstractmethod
+    def get_events(self, physics_model: PhysicsModel) -> Collection[Event]:
+        """Returns the event generators for the current task.
+
+        Args:
+            physics_model: The physics model to get the events for.
         """
 
     @abstractmethod

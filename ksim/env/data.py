@@ -20,6 +20,7 @@ class PhysicsState:
 
     most_recent_action: Array
     data: PhysicsData
+    event_info: FrozenDict[str, PyTree]
 
 
 @jax.tree_util.register_dataclass
