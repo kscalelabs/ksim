@@ -6,16 +6,15 @@ import jax.numpy as jnp
 import mujoco
 import pytest
 from jaxtyping import Array
-from mujoco import mjx
 
-from ksim.resets import HFieldXYPositionReset, PlaneXYPositionReset, Reset, get_xy_position_reset
+import ksim
 
 
 @attrs.define(frozen=True)
-class DummyReset(Reset):
+class DummyReset(ksim.Reset):
     """Dummy reset for testing."""
 
-    def __call__(self, data: mjx.Data, rng: jax.Array) -> dict[str, Array]:
+    def __call__(self, data: ksim.PhysicsData, rng: jax.Array) -> dict[str, Array]:
         return {"qpos": jnp.zeros((3,))}
 
 
@@ -62,7 +61,7 @@ class TestXYPositionResetBuilder:
 
     def test_xy_position_reset(self, humanoid_model: mujoco.MjModel, rng: jax.Array) -> None:
         """Test that the XYPositionReset resets the XY position."""
-        reset = get_xy_position_reset(humanoid_model)
+        reset = ksim.get_xy_position_reset(humanoid_model)
         data = DummyMjxData()
         result = reset(data, rng)
 
@@ -73,18 +72,18 @@ class TestXYPositionResetBuilder:
 @pytest.mark.parametrize(
     "reset",
     [
-        HFieldXYPositionReset(
+        ksim.HFieldXYPositionReset(
             bounds=(0.0, 0.0, 0.0, 0.0),
             padded_bounds=(0.0, 0.0, 0.0, 0.0),
             x_range=1.0,
             y_range=1.0,
             hfield_data=jnp.zeros((10, 10)),
         ),
-        PlaneXYPositionReset(
+        ksim.PlaneXYPositionReset(
             bounds=(0.0, 0.0, 0.0), padded_bounds=(0.0, 0.0, 0.0, 0.0), x_range=1.0, y_range=1.0, robot_base_height=0.0
         ),
     ],
 )
-def test_reset_hashable(reset: Reset) -> None:
+def test_reset_hashable(reset: ksim.Reset) -> None:
     """Test that all resets are hashable."""
     assert hash(reset) is not None
