@@ -339,6 +339,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     def get_ppo_metrics(
         self,
         trajectories: Trajectory,
+        rewards: Rewards,
         loss_t: Array,
         on_policy_log_probs_tn: Array,
         log_probs_tn: Array,
@@ -355,6 +356,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         Args:
             trajectories: The batch of trajectories to get metrics for.
+            rewards: The rewards for the trajectories.
             loss_t: The PPO loss value.
             on_policy_log_probs_tn: The log probabilities of the actions, with shape (T, *A).
             log_probs_tn: The log probabilities of the actions, with shape (T, *A).
@@ -366,14 +368,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Returns:
             A dictionary of metrics to be logged.
         """
-        slen = (~trajectories.done).sum(dtype=loss_t.dtype) + 1e-6
         return {
-            "loss": loss_t.sum() / slen,
-            "log_probs": log_probs_tn.sum(0).flatten() / slen,
-            "entropy": entropy_tn.sum(0).flatten() / slen,
-            "value": values_t.sum() / slen,
-            "value_targets": value_targets_t.sum() / slen,
-            "advantages": advantages_t.sum() / slen,
+            "loss": loss_t.mean(),
+            "log_probs": log_probs_tn.mean(0).flatten(),
+            "entropy": entropy_tn.mean(0).flatten(),
+            "value": values_t.mean(),
+            "value_targets": value_targets_t.mean(),
+            "advantages": advantages_t.mean(),
         }
 
     @xax.jit(static_argnames=["self", "model_static"])
@@ -382,7 +383,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model_arr: PyTree,
         model_static: PyTree,
         trajectories: Trajectory,
-        rewards: Array,
+        rewards: Rewards,
         rng: PRNGKeyArray,
     ) -> tuple[Array, FrozenDict[str, Array]]:
         """Computes the PPO loss and additional metrics.
@@ -403,7 +404,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         def loss_and_metrics_fn(
             model: PyTree,
             trajectories: Trajectory,
-            rewards: Array,
+            rewards: Rewards,
             rng: PRNGKeyArray,
         ) -> tuple[Array, FrozenDict[str, Array]]:
             rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 5)
@@ -415,7 +416,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
             advantages_t, value_targets_t = compute_advantages_and_value_targets(
                 values_t=jax.lax.stop_gradient(values_t),
-                rewards_t=rewards,
+                rewards_t=rewards.total,
                 dones_t=trajectories.done,
                 decay_gamma=self.config.gamma,
                 gae_lambda=self.config.lam,
@@ -444,6 +445,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
             metrics = self.get_ppo_metrics(
                 trajectories=trajectories,
+                rewards=rewards,
                 loss_t=loss_t,
                 on_policy_log_probs_tn=on_policy_log_probs_tn,
                 log_probs_tn=log_probs_tn,
@@ -460,7 +462,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             return loss, FrozenDict(metrics)
 
         # Gets the loss and metrics for each trajectory in the batch.
-        rngs = jax.random.split(rng, rewards.shape[0])
+        rngs = jax.random.split(rng, rewards.total.shape[0])
         par_fn = jax.vmap(loss_and_metrics_fn, in_axes=(None, 0, 0, 0))
         loss, metrics = par_fn(model, trajectories, rewards, rngs)
 
@@ -472,7 +474,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model_arr: PyTree,
         model_static: PyTree,
         trajectories: Trajectory,
-        rewards: Array,
+        rewards: Rewards,
         rng: PRNGKeyArray,
     ) -> tuple[dict[str, Array], PyTree]:
         loss_fn = jax.grad(self.get_loss_and_metrics, argnums=0, has_aux=True)
@@ -520,7 +522,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         trajectories: Trajectory,
-        rewards: Array,
+        rewards: Rewards,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
         ppo_metrics, grads = self._get_loss_metrics_and_grads(
@@ -576,7 +578,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
             # Gets the current batch of trajectories and rewards.
             trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
-            reward_batch = rewards.total[xt]
+            reward_batch = jax.tree.map(lambda x: x[xt], rewards)
 
             model_arr, opt_state, metrics = self._single_step(
                 model_arr=model_arr,
