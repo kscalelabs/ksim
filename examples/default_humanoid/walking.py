@@ -473,7 +473,14 @@ class HumanoidWalkingTask(PPOTask[HumanoidWalkingTaskConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.default_humanoid.walking run_environment=True
+    # To run training, use the following command:
+    #   python -m examples.default_humanoid.walking run_environment=True
+    # To visualize the environment, use the following command:
+    #   python -m examples.default_humanoid.walking run_environment=True
+    # On MacOS or other devices with less memory, you can change the number
+    # of environments and batch size to reduce memory usage. Here's an example
+    # from the command line:
+    #   python -m examples.default_humanoid.walking num_envs=8 num_batches=2
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             num_envs=2048,
