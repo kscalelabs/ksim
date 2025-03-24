@@ -1139,7 +1139,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Gets initial variables.
             rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
             initial_carry = self.get_initial_carry(carry_rng)
-            rng, cmd_rng = jax.random.split(rng)
             initial_commands = get_initial_commands(cmd_rng, command_generators=commands)
 
             # Resets the physics state.
