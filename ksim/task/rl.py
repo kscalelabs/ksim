@@ -864,20 +864,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             as a scalar, otherwise it is logged as a histogram.
         """
 
-    @xax.jit(
-        static_argnames=[
-            "self",
-            "mjx_model",
-            "model_static",
-            "optimizer",
-            "engine",
-            "engine_constants",
-        ]
-    )
+    @xax.jit(static_argnames=["self", "model_static", "optimizer", "engine", "engine_constants"])
     def _rl_train_loop_step(
         self,
         rng: PRNGKeyArray,
-        mjx_model: mjx.Model,
+        physics_model: PhysicsModel,
         model_arr: PyTree,
         model_static: PyTree,
         optimizer: optax.GradientTransformation,
@@ -902,7 +893,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Rolls out a new trajectory.
         trajectories, rewards = self._vmapped_unroll(
             rng=rollout_rng,
-            physics_model=mjx_model,
+            physics_model=physics_model,
             model_arr=model_arr,
             model_static=model_static,
             engine=engine,
@@ -1004,7 +995,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 prev_trajectories, prev_rewards = prev_trajectory
                 (model_arr, opt_state, train_metrics), (trajectories, rewards) = self._rl_train_loop_step(
                     rng=update_rng,
-                    mjx_model=mjx_model,
+                    physics_model=mjx_model,
                     model_arr=model_arr,
                     model_static=model_static,
                     optimizer=optimizer,
