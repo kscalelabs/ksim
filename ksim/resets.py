@@ -148,6 +148,18 @@ class RandomJointVelocityReset(Reset):
         qvel = qvel + jax.random.uniform(rng, qvel.shape, minval=-self.scale, maxval=self.scale)
         data = update_data_field(data, "qvel", qvel)
         return data
+    
+@attrs.define(frozen=True, kw_only=True)
+class RandomBaseVelocityXYReset(Reset):
+    """Resets the base velocity of the robot to random values."""
+
+    scale: float = attrs.field(default=0.01)
+
+    def __call__(self, data: PhysicsData, rng: PRNGKeyArray) -> PhysicsData:
+        qvel = data.qvel
+        qvel = qvel.at[0:2].set(jax.random.uniform(rng, qvel[0:2].shape, minval=-self.scale, maxval=self.scale))
+        data = update_data_field(data, "qvel", qvel)
+        return data
 
 
 def get_xy_position_reset(

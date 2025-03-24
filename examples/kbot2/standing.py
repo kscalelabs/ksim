@@ -31,7 +31,7 @@ from ksim.randomization import (
     Randomization,
     WeightRandomization,
 )
-from ksim.resets import RandomJointPositionReset, RandomJointVelocityReset, Reset
+from ksim.resets import RandomBaseVelocityXYReset, RandomJointPositionReset, RandomJointVelocityReset, Reset
 from ksim.rewards import (
     BaseHeightReward,
     Reward,
@@ -329,14 +329,15 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
         return [
             RandomJointPositionReset(scale=0.01),
             RandomJointVelocityReset(scale=0.01),
+            RandomBaseVelocityXYReset(scale=0.1),
         ]
 
     def get_observations(self, physics_model: PhysicsModel) -> list[Observation]:
         return [
-            JointPositionObservation(noise=0.01),
-            JointVelocityObservation(noise=0.01),
-            SensorObservation.create(physics_model, "imu_acc"),
-            SensorObservation.create(physics_model, "imu_gyro"),
+            JointPositionObservation(noise=0.2),
+            JointVelocityObservation(noise=0.8),
+            SensorObservation.create(physics_model, "imu_acc", noise=0.05),
+            SensorObservation.create(physics_model, "imu_gyro", noise=0.05),
         ]
 
     def get_commands(self, physics_model: PhysicsModel) -> list[Command]:
@@ -349,7 +350,7 @@ class KbotStandingTask(PPOTask[KbotStandingTaskConfig]):
             JointDeviationPenalty(scale=-1.0),
             DHControlPenalty(scale=-0.05),
             DHHealthyReward(scale=0.5),
-            BaseHeightReward(scale=1.0, height_target=0.7),
+            BaseHeightReward(scale=1.0, height_target=0.9),
         ]
 
     def get_terminations(self, physics_model: PhysicsModel) -> list[Termination]:
