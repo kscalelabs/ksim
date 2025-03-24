@@ -968,126 +968,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return model_arr, opt_state, metrics, engine_variables
 
-    def rl_train_loop(
-        self,
-        model: PyTree,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
-        state: xax.State,
-        rng: PRNGKeyArray,
-    ) -> None:
-        mj_model: PhysicsModel = self.get_mujoco_model()
-        mjx_model = self.get_mjx_model(mj_model)
-        metadata = self.get_mujoco_model_metadata(mjx_model)
-        engine = self.get_engine(mjx_model, metadata)
-        observations = self.get_observations(mjx_model)
-        commands = self.get_commands(mjx_model)
-        rewards_terms = self.get_rewards(mjx_model)
-        terminations = self.get_terminations(mjx_model)
-        randomizations = self.get_randomization(mjx_model)
-
-        # These remain constant across the entire episode.
-        engine_constants = EngineConstants(
-            obs_generators=tuple(observations),
-            command_generators=tuple(commands),
-            reward_generators=tuple(rewards_terms),
-            termination_generators=tuple(terminations),
-            randomization_generators=tuple(randomizations),
-        )
-
-        # JAX requires that we partition the model into mutable and static
-        # parts in order to use lax.scan, so that `arr` can be a PyTree.`
-        model_arr, model_static = eqx.partition(model, eqx.is_inexact_array)
-
-        # Defines the vectorized initialization functions.
-        randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, 0))
-        carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
-        command_fn = jax.vmap(get_initial_commands, in_axes=(0, None))
-        state_fn = jax.vmap(engine.reset, in_axes=(0, 0))
-
-        # Builds the variables for the training environment.
-        train_rngs = jax.random.split(rng, self.config.num_envs)
-        mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, train_rngs)
-        engine_variables = EngineVariables(
-            carry=carry_fn(train_rngs),
-            commands=command_fn(train_rngs, engine_constants.command_generators),
-            physics_state=state_fn(mjx_models, train_rngs),
-            rng=train_rngs,
-        )
-
-        # Builds the variables for the validation environment.
-        valid_rngs = jax.random.split(rng, self.config.num_valid_envs)
-        valid_mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, valid_rngs)
-        valid_engine_variables = EngineVariables(
-            carry=carry_fn(valid_rngs),
-            commands=command_fn(valid_rngs, engine_constants.command_generators),
-            physics_state=state_fn(valid_mjx_models, valid_rngs),
-            rng=valid_rngs,
-        )
-
-        while not self.is_training_over(state):
-            # Validate by sampling and visualizing a single trajectory.
-            if self.valid_step_timer.is_valid_step(state):
-                state.raw_phase = "valid"
-                state.num_valid_steps += 1
-                state.num_valid_samples += self.eval_rollout_length_steps
-
-                # Rolls out a new trajectory.
-                trajectories, rewards, valid_engine_variables = self._vmapped_unroll(
-                    physics_models=valid_mjx_models,
-                    model_arr=model_arr,
-                    model_static=model_static,
-                    engine=engine,
-                    engine_constants=engine_constants,
-                    num_steps=self.eval_rollout_length_steps,
-                    engine_variables=valid_engine_variables,
-                )
-
-                # Logs statistics from the trajectory.
-                trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
-                reward = jax.tree.map(lambda arr: arr[0], rewards)
-
-                if state.num_valid_steps % self.config.log_single_traj_every_n_valid_steps == 0:
-                    self.log_single_trajectory(trajectory, commands, reward, mj_model)
-                self.log_state_timers(state)
-                self.write_logs(state)
-
-            state = self.on_step_start(state)
-
-            # Optimizes the model on that trajectory.
-            rng, update_rng = jax.random.split(rng)
-            model_arr, opt_state, metrics, engine_variables = self._rl_train_loop_step(
-                rng=update_rng,
-                physics_models=mjx_models,
-                model_arr=model_arr,
-                model_static=model_static,
-                optimizer=optimizer,
-                opt_state=opt_state,
-                engine=engine,
-                engine_constants=engine_constants,
-                engine_variables=engine_variables,
-            )
-
-            state.raw_phase = "train"
-            state.num_steps += self.config.epochs_per_log_step
-            state.num_samples += self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
-
-            self.log_train_metrics(metrics)
-            self.log_state_timers(state)
-            self.write_logs(state)
-
-            state = self.on_step_end(state)
-
-            if self.should_checkpoint(state):
-                model = eqx.combine(model_arr, model_static)
-
-                self.save_checkpoint(
-                    model=model,
-                    optimizer=optimizer,
-                    opt_state=opt_state,
-                    state=state,
-                )
-
     def on_context_stop(self, step: str, elapsed_time: float) -> None:
         super().on_context_stop(step, elapsed_time)
 
@@ -1281,34 +1161,149 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 Thread(target=self.log_state, daemon=True).start()
 
             rng, model_rng = jax.random.split(rng)
-            model, optimizer, opt_state, training_state = self.load_initial_state(model_rng, load_optimizer=True)
+            model, optimizer, opt_state, state = self.load_initial_state(model_rng, load_optimizer=True)
 
-            training_state = self.on_training_start(training_state)
-            training_state.num_samples = 1  # prevents from checkpointing at start
+            mj_model: PhysicsModel = self.get_mujoco_model()
+            mjx_model = self.get_mjx_model(mj_model)
+            metadata = self.get_mujoco_model_metadata(mjx_model)
+            engine = self.get_engine(mjx_model, metadata)
+            observations = self.get_observations(mjx_model)
+            commands = self.get_commands(mjx_model)
+            rewards_terms = self.get_rewards(mjx_model)
+            terminations = self.get_terminations(mjx_model)
+            randomizations = self.get_randomization(mjx_model)
+
+            # These remain constant across the entire episode.
+            engine_constants = EngineConstants(
+                obs_generators=tuple(observations),
+                command_generators=tuple(commands),
+                reward_generators=tuple(rewards_terms),
+                termination_generators=tuple(terminations),
+                randomization_generators=tuple(randomizations),
+            )
+
+            # JAX requires that we partition the model into mutable and static
+            # parts in order to use lax.scan, so that `arr` can be a PyTree.`
+            model_arr, model_static = eqx.partition(model, eqx.is_inexact_array)
+
+            # Defines the vectorized initialization functions.
+            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, 0))
+            carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
+            command_fn = jax.vmap(get_initial_commands, in_axes=(0, None))
+            state_fn = jax.vmap(engine.reset, in_axes=(0, 0))
+
+            # Builds the variables for the training environment.
+            train_rngs = jax.random.split(rng, self.config.num_envs)
+            mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, train_rngs)
+            engine_variables = EngineVariables(
+                carry=carry_fn(train_rngs),
+                commands=command_fn(train_rngs, engine_constants.command_generators),
+                physics_state=state_fn(mjx_models, train_rngs),
+                rng=train_rngs,
+            )
+
+            # Builds the variables for the validation environment.
+            valid_rngs = jax.random.split(rng, self.config.num_valid_envs)
+            valid_mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, valid_rngs)
+            valid_engine_variables = EngineVariables(
+                carry=carry_fn(valid_rngs),
+                commands=command_fn(valid_rngs, engine_constants.command_generators),
+                physics_state=state_fn(valid_mjx_models, valid_rngs),
+                rng=valid_rngs,
+            )
+
+            state = self.on_training_start(state)
+            state.num_samples = 1  # prevents from checkpointing at start
 
             def on_exit() -> None:
-                self.save_checkpoint(model, optimizer, opt_state, training_state)
+                model = eqx.combine(model_arr, model_static)
+                self.save_checkpoint(
+                    model=model,
+                    optimizer=optimizer,
+                    opt_state=opt_state,
+                    state=state,
+                )
 
             # Handle user-defined interrupts during the training loop.
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
 
             try:
-                self.rl_train_loop(
-                    model=model,
-                    optimizer=optimizer,
-                    opt_state=opt_state,
-                    state=training_state,
-                    rng=rng,
-                )
+                while not self.is_training_over(state):
+                    # Validate by sampling and visualizing a single trajectory.
+                    if self.valid_step_timer.is_valid_step(state):
+                        state.raw_phase = "valid"
+                        state.num_valid_steps += 1
+                        state.num_valid_samples += self.eval_rollout_length_steps
+
+                        # Rolls out a new trajectory.
+                        trajectories, rewards, valid_engine_variables = self._vmapped_unroll(
+                            physics_models=valid_mjx_models,
+                            model_arr=model_arr,
+                            model_static=model_static,
+                            engine=engine,
+                            engine_constants=engine_constants,
+                            num_steps=self.eval_rollout_length_steps,
+                            engine_variables=valid_engine_variables,
+                        )
+
+                        # Logs statistics from the trajectory.
+                        trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
+                        reward = jax.tree.map(lambda arr: arr[0], rewards)
+
+                        if state.num_valid_steps % self.config.log_single_traj_every_n_valid_steps == 0:
+                            self.log_single_trajectory(trajectory, commands, reward, mj_model)
+                        self.log_state_timers(state)
+                        self.write_logs(state)
+
+                    state = self.on_step_start(state)
+
+                    # Optimizes the model on that trajectory.
+                    rng, update_rng = jax.random.split(rng)
+                    model_arr, opt_state, metrics, engine_variables = self._rl_train_loop_step(
+                        rng=update_rng,
+                        physics_models=mjx_models,
+                        model_arr=model_arr,
+                        model_static=model_static,
+                        optimizer=optimizer,
+                        opt_state=opt_state,
+                        engine=engine,
+                        engine_constants=engine_constants,
+                        engine_variables=engine_variables,
+                    )
+
+                    state.raw_phase = "train"
+                    state.num_steps += self.config.epochs_per_log_step
+                    state.num_samples += (
+                        self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
+                    )
+
+                    self.log_train_metrics(metrics)
+                    self.log_state_timers(state)
+                    self.write_logs(state)
+
+                    state = self.on_step_end(state)
+
+                    if self.should_checkpoint(state):
+                        model = eqx.combine(model_arr, model_static)
+                        self.save_checkpoint(
+                            model=model,
+                            optimizer=optimizer,
+                            opt_state=opt_state,
+                            state=state,
+                        )
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
-                    msg = (
-                        f"Finished training after {training_state.num_steps}"
-                        f"steps and {training_state.num_samples} samples"
-                    )
+                    msg = f"Finished training after {state.num_steps}" f"steps and {state.num_samples} samples"
                     xax.show_info(msg, important=True)
-                self.save_checkpoint(model, optimizer, opt_state, training_state)
+
+                model = eqx.combine(model_arr, model_static)
+                self.save_checkpoint(
+                    model=model,
+                    optimizer=optimizer,
+                    opt_state=opt_state,
+                    state=state,
+                )
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 if xax.is_master():
@@ -1318,7 +1313,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
-                self.save_checkpoint(model, optimizer, opt_state, training_state)
+
+                model = eqx.combine(model_arr, model_static)
+                self.save_checkpoint(
+                    model=model,
+                    optimizer=optimizer,
+                    opt_state=opt_state,
+                    state=state,
+                )
 
             finally:
-                training_state = self.on_training_end(training_state)
+                state = self.on_training_end(state)
