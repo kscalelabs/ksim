@@ -165,6 +165,28 @@ class RLConfig(xax.Config):
         help="If provided, save the rendered video to the given path.",
     )
 
+    # Validation parameters.
+    valid_every_n_steps: int | None = xax.field(
+        None,
+        help="Number of training steps to run per validation step",
+    )
+    valid_first_n_steps: int = xax.field(
+        0,
+        help="Treat the first N steps as validation steps",
+    )
+    valid_every_n_seconds: float | None = xax.field(
+        60.0,
+        help="Run validation every N seconds",
+    )
+    valid_first_n_seconds: float | None = xax.field(
+        60.0,
+        help="Run first validation after N seconds",
+    )
+    log_single_traj_every_n_valid_steps: int = xax.field(
+        value=10,
+        help="The number of valid steps between logging a full trajectory video.",
+    )
+
     # Logging parameters.
     log_qpos_qvel: bool = xax.field(
         value=True,
@@ -580,18 +602,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         else:
             self.run_training()
 
-    def log_trajectory_stats(
-        self,
-        trajectories: Trajectory,
-        rewards: Rewards,
-        termination_generators: Collection[Termination],
-    ) -> None:
+    def log_trajectory_stats(self, trajectories: Trajectory, rewards: Rewards) -> None:
         """Log action statistics from the trajectory or trajectories.
 
         Args:
             trajectories: The trajectories to log the action statistics for.
             rewards: The rewards to log the statistics for.
-            termination_generators: The termination generators to log the statistics for.
         """
         if self.config.log_reward:
             for rew_name, rew_arr in rewards.components.items():
@@ -908,13 +924,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine_constants: EngineConstants,
     ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array | Histogram]]:
         def single_step_fn(
-            carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
-            _: None,
+            carry: tuple[PyTree, optax.OptState],
+            rng: PRNGKeyArray,
         ) -> tuple[
-            tuple[PyTree, optax.OptState, PRNGKeyArray],
+            tuple[PyTree, optax.OptState],
             tuple[FrozenDict[str, Array]],
         ]:
-            model_arr, opt_state, rng = carry
+            model_arr, opt_state = carry
             rng, update_rng, rollout_rng = jax.random.split(rng, 3)
 
             # Rolls out a new trajectory.
@@ -940,12 +956,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng=update_rng,
             )
 
-            return (model_arr, opt_state, rng), (train_metrics,)
+            return (model_arr, opt_state), (train_metrics,)
 
-        ((model_arr, opt_state, _), (train_metrics,)) = jax.lax.scan(
+        ((model_arr, opt_state), (train_metrics,)) = jax.lax.scan(
             single_step_fn,
-            (model_arr, opt_state, rng),
-            length=self.config.epochs_per_log_step,
+            (model_arr, opt_state),
+            jax.random.split(rng, self.config.epochs_per_log_step),
         )
 
         # Convert any array with more than one element to a histogram.
@@ -1014,7 +1030,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 reward = jax.tree.map(lambda arr: arr[0], rewards)
 
                 self.log_single_trajectory(trajectory, commands, reward, mj_model)
-                self.log_trajectory_stats(trajectories, rewards, terminations)
+                self.log_trajectory_stats(trajectories, rewards)
                 self.log_state_timers(state)
                 self.write_logs(state)
 
