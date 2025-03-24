@@ -111,16 +111,9 @@ class MultiLayerLSTM(eqx.Module):
         x_n: Array,
         hidden_states: Array,
     ) -> tuple[Array, Array, Array]:
-        h_states = []
-        c_states = []
-
-        for i in range(self.depth):
-            h_idx = i * 2
-            c_idx = i * 2 + 1
-            h_states.append(hidden_states[h_idx])
-            c_states.append(hidden_states[c_idx])
-
-        hidden_states = tuple((h, c) for h, c in zip(h_states, c_states))
+        hidden_states = hidden_states.reshape(self.depth, 2, -1)
+        h_states = hidden_states[:, 0]  # All h states
+        c_states = hidden_states[:, 1]  # All c states
 
         new_states = []
         h, c = self.layers[0](x_n, (h_states[0], c_states[0]))
@@ -128,8 +121,8 @@ class MultiLayerLSTM(eqx.Module):
         new_states.append(c)
 
         if self.depth > 1:
-            for layer, hidden_state in zip(self.layers[1:], hidden_states[1:]):
-                h, c = layer(h, hidden_state)
+            for layer, h_state, c_state in zip(self.layers[1:], h_states[1:], c_states[1:]):
+                h, c = layer(h, (h_state, c_state))
                 new_states.append(h)
                 new_states.append(c)
 
