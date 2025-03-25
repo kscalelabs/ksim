@@ -1,7 +1,9 @@
+# mypy: disable-error-code="override"
 """Defines simple task for training a walking policy for K-Bot."""
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Generic, TypeVar
 
 import distrax
 import equinox as eqx
@@ -200,7 +202,10 @@ class HumanoidWalkingLSTMTaskConfig(HumanoidWalkingTaskConfig):
     pass
 
 
-class HumanoidWalkingLSTMTask(HumanoidWalkingTask[HumanoidWalkingLSTMTaskConfig]):
+Config = TypeVar("Config", bound=HumanoidWalkingLSTMTaskConfig)
+
+
+class HumanoidWalkingLSTMTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
