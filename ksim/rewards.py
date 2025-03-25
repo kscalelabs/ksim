@@ -2,6 +2,7 @@
 
 __all__ = [
     "Reward",
+    "HealthyReward",
     "TerminationPenalty",
     "LinearVelocityZPenalty",
     "AngularVelocityXYPenalty",
@@ -55,6 +56,14 @@ class Reward(ABC):
     @functools.cached_property
     def reward_name(self) -> str:
         return self.get_name()
+
+
+@attrs.define(frozen=True, kw_only=True)
+class HealthyReward(Reward):
+    """Reward for healthy states."""
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        return jnp.ones_like(trajectory.done)
 
 
 @attrs.define(frozen=True, kw_only=True)
