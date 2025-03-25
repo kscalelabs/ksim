@@ -298,6 +298,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.CenterOfMassVelocityObservation(),
             ksim.BaseLinearVelocityObservation(),
             ksim.BaseLinearAccelerationObservation(),
+            ksim.ActuatorAccelerationObservation(),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:

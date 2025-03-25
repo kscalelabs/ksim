@@ -52,7 +52,15 @@ from ksim.randomization import Randomization
 from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
-from ksim.types import Histogram, Metrics, PhysicsModel, PhysicsState, Rewards, Trajectory
+from ksim.types import (
+    Histogram,
+    Metrics,
+    PhysicsModel,
+    PhysicsState,
+    Rewards,
+    RolloutVariables,
+    Trajectory,
+)
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata
 
 logger = logging.getLogger(__name__)
@@ -68,17 +76,8 @@ class RolloutConstants:
     randomization_generators: Collection[Randomization]
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class RolloutVariables:
-    carry: PyTree
-    commands: FrozenDict[str, Array]
-    physics_state: PhysicsState
-    rng: PRNGKeyArray
-
-
 def get_observation(
-    physics_state: PhysicsState,
+    rollout_state: RolloutVariables,
     rng: PRNGKeyArray,
     *,
     obs_generators: Collection[Observation],
@@ -87,7 +86,7 @@ def get_observation(
     observations = {}
     for observation in obs_generators:
         rng, obs_rng = jax.random.split(rng)
-        observation_value = observation(physics_state.data, obs_rng)
+        observation_value = observation(rollout_state, obs_rng)
         observations[observation.observation_name] = observation_value
     return FrozenDict(observations)
 
@@ -529,7 +528,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Gets the observations from the physics state.
         observations = get_observation(
-            physics_state=rollout_variables.physics_state,
+            rollout_state=rollout_variables,
             rng=obs_rng,
             obs_generators=rollout_constants.obs_generators,
         )
