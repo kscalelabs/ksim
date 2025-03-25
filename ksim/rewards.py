@@ -14,6 +14,7 @@ __all__ = [
     "ActionSmoothnessPenalty",
     "ActuatorForcePenalty",
     "BaseJerkZPenalty",
+    "ActuatorJerkPenalty",
 ]
 
 import functools
@@ -221,3 +222,19 @@ class BaseJerkZPenalty(Reward):
         # penalty.
         jerk_z = (acc_z - prev_acc_z) * self.ctrl_dt
         return xax.get_norm(jerk_z, self.norm)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ActuatorJerkPenalty(Reward):
+    """Penalty for high actuator jerks."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+    acc_obs_name: str = attrs.field(default="actuator_acceleration_observation")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        if self.acc_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.acc_obs_name} not found; add it as an observation in your task.")
+        acc = trajectory.obs[self.acc_obs_name]
+        # First value will always be 0, because the acceleration is not changing.
+        prev_acc = jnp.concatenate([acc[..., :1], acc[..., :-1]], axis=-1)
+        return xax.get_norm(acc - prev_acc, self.norm).mean(axis=-1)

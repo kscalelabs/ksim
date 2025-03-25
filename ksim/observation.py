@@ -14,6 +14,7 @@ __all__ = [
     "SensorObservation",
     "BaseLinearAccelerationObservation",
     "BaseAngularAccelerationObservation",
+    "ActuatorAccelerationObservation",
 ]
 
 import functools
@@ -252,3 +253,11 @@ class BaseAngularAccelerationObservation(Observation):
 
     def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
         return state.qacc[3:6]
+
+
+@attrs.define(frozen=True)
+class ActuatorAccelerationObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        return state.qacc[6:]
