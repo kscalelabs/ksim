@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 EngineType = Literal["mjx", "mujoco"]
 
+
 class PhysicsEngine(eqx.Module, ABC):
     """The role of an engine is simple: reset and step. Decoupled from data."""
 

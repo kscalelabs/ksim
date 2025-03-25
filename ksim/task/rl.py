@@ -57,6 +57,7 @@ from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata
 
 logger = logging.getLogger(__name__)
 
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class RolloutConstants:
@@ -74,6 +75,7 @@ class RolloutVariables:
     commands: FrozenDict[str, Array]
     physics_state: PhysicsState
     rng: PRNGKeyArray
+
 
 def get_observation(
     physics_state: PhysicsState,
