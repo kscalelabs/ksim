@@ -52,7 +52,15 @@ from ksim.randomization import Randomization
 from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
-from ksim.types import Histogram, Metrics, PhysicsModel, PhysicsState, Rewards, Trajectory
+from ksim.types import (
+    Histogram,
+    Metrics,
+    PhysicsModel,
+    PhysicsState,
+    Rewards,
+    RolloutVariables,
+    Trajectory,
+)
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata
 
 logger = logging.getLogger(__name__)
@@ -66,15 +74,6 @@ class RolloutConstants:
     reward_generators: Collection[Reward]
     termination_generators: Collection[Termination]
     randomization_generators: Collection[Randomization]
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class RolloutVariables:
-    carry: PyTree
-    commands: FrozenDict[str, Array]
-    physics_state: PhysicsState
-    rng: PRNGKeyArray
 
 
 def get_observation(

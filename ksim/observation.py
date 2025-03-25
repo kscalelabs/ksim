@@ -26,8 +26,7 @@ import jax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.task.rl import RolloutVariables
-from ksim.types import PhysicsModel
+from ksim.types import PhysicsModel, RolloutVariables
 from ksim.utils.mujoco import get_sensor_data_idxs_by_name
 
 NoiseType = Literal["gaussian", "uniform"]
