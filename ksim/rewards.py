@@ -7,6 +7,7 @@ __all__ = [
     "AngularVelocityXYPenalty",
     "JointVelocityPenalty",
     "LinearVelocityTrackingReward",
+    "AngularVelocityTrackingReward",
     "BaseHeightReward",
     "ActionSmoothnessPenalty",
     "ActuatorForcePenalty",
@@ -111,6 +112,20 @@ class LinearVelocityTrackingReward(Reward):
         lin_vel_x = trajectory.qvel[..., 0]
         lin_vel_y = trajectory.qvel[..., 1]
         return xax.get_norm(lin_vel_x - lin_vel_x_cmd, self.norm) + xax.get_norm(lin_vel_y - lin_vel_y_cmd, self.norm)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AngularVelocityTrackingReward(Reward):
+    """Reward for tracking the angular velocity command."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+    command_name: str = attrs.field(default="angular_velocity_command")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        ang_vel_cmd = trajectory.command[self.command_name]
+        ang_vel_z_cmd = ang_vel_cmd[..., 0]
+        ang_vel_z = trajectory.qvel[..., 5]
+        return xax.get_norm(ang_vel_z - ang_vel_z_cmd, self.norm)
 
 
 @attrs.define(frozen=True, kw_only=True)
