@@ -72,15 +72,16 @@ class LinearVelocityCommand(Command):
     any command.
     """
 
-    x_scale: float = attrs.field(default=1.0)
-    y_scale: float = attrs.field(default=1.0)
+    x_range: tuple[float, float] = attrs.field(default=(-1.0, 1.0))
+    y_range: tuple[float, float] = attrs.field(default=(-1.0, 1.0))
     switch_prob: float = attrs.field(default=0.0)
     zero_prob: float = attrs.field(default=0.0)
 
     def initial_command(self, rng: PRNGKeyArray) -> Array:
         rng_x, rng_y, rng_zero = jax.random.split(rng, 3)
-        x = jax.random.uniform(rng_x, (), minval=-self.x_scale, maxval=self.x_scale)
-        y = jax.random.uniform(rng_y, (), minval=-self.y_scale, maxval=self.y_scale)
+        (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
+        x = jax.random.uniform(rng_x, (), minval=xmin, maxval=xmax)
+        y = jax.random.uniform(rng_y, (), minval=ymin, maxval=ymax)
         zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
         # TODO this is not consistent with other commands shape
         cmd = jnp.array([x, y])

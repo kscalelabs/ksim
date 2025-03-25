@@ -56,40 +56,6 @@ class DHJointPositionObservation(ksim.Observation):
         return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
-@attrs.define(frozen=True, kw_only=True)
-class DHForwardReward(ksim.Reward):
-    """Incentives forward movement."""
-
-    velocity_clip: float = attrs.field(default=3.0)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        # Just try to maximize the velocity in the X direction.
-        x_delta = jnp.clip(trajectory.qvel[..., 0], -self.velocity_clip, self.velocity_clip)
-        return x_delta
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(ksim.Reward):
-    """Legacy default humanoid control cost that penalizes squared action magnitude."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return jnp.sum(jnp.square(trajectory.action), axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(ksim.Reward):
-    """Legacy default humanoid healthy reward that gives binary reward based on height."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
-
-
 class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
@@ -332,14 +298,20 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
+            ksim.LinearVelocityCommand(
+                x_range=(0.0, 1.0),
+                y_range=(0.0, 0.0),
+                switch_prob=0.02,
+                zero_prob=0.3,
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            DHForwardReward(scale=0.5),
-            DHControlPenalty(scale=-0.01),
-            DHHealthyReward(scale=0.5),
+            ksim.LinearVelocityTrackingReward(scale=0.5),
+            ksim.ActuatorForcePenalty(scale=-0.01),
+            ksim.LinearVelocityZPenalty(scale=-0.01),
+            ksim.AngularVelocityXYPenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
