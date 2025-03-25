@@ -38,7 +38,6 @@ class PhysicsState:
 class Trajectory:
     qpos: Array
     qvel: Array
-    actuator_frc: Array
     obs: FrozenDict[str, Array]
     command: FrozenDict[str, Array]
     action: Array
