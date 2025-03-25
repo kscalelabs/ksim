@@ -298,6 +298,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.CenterOfMassVelocityObservation(),
             ksim.BaseLinearVelocityObservation(),
             ksim.BaseLinearAccelerationObservation(),
+            ksim.ActuatorAccelerationObservation(),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -325,6 +326,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             # robot to walk smoothly without feet slamming into the ground
             # (which can cause physical damage).
             ksim.BaseJerkZPenalty(scale=-0.01, ctrl_dt=self.config.ctrl_dt),
+            # This penalty incentivies the actuators to change acceleration
+            # smoothly - visually, this will look much more natural.
+            ksim.ActuatorJerkPenalty(scale=-0.01, ctrl_dt=self.config.ctrl_dt),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:

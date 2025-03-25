@@ -230,6 +230,7 @@ class ActuatorJerkPenalty(Reward):
 
     norm: xax.NormType = attrs.field(default="l2")
     acc_obs_name: str = attrs.field(default="actuator_acceleration_observation")
+    ctrl_dt: float = attrs.field()
 
     def __call__(self, trajectory: Trajectory) -> Array:
         if self.acc_obs_name not in trajectory.obs:
@@ -237,4 +238,8 @@ class ActuatorJerkPenalty(Reward):
         acc = trajectory.obs[self.acc_obs_name]
         # First value will always be 0, because the acceleration is not changing.
         prev_acc = jnp.concatenate([acc[..., :1], acc[..., :-1]], axis=-1)
-        return xax.get_norm(acc - prev_acc, self.norm).mean(axis=-1)
+        # We multiply by ctrl_dt instead of dividing because we want the scale
+        # for the penalty to be roughly the same magnitude as a velocity
+        # penalty.
+        jerk = (acc - prev_acc) * self.ctrl_dt
+        return xax.get_norm(jerk, self.norm).mean(axis=-1)
