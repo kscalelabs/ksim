@@ -262,5 +262,5 @@ class BaseAngularAccelerationObservation(Observation):
 class ActuatorAccelerationObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.data.qacc[6:]

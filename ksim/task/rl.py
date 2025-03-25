@@ -551,7 +551,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Gets the observations from the physics state.
         observations = get_observation(
-            rollout_state=engine_variables,
+            rollout_state=rollout_variables,
             rng=obs_rng,
             obs_generators=rollout_constants.obs_generators,
         )
