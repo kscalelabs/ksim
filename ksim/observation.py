@@ -184,9 +184,7 @@ class ActuatorForceObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
     def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
-        # Get actuator forces
-        qfrc_actuator = state.qfrc_actuator  # Shape will be (nu,)
-        return qfrc_actuator
+        return state.actuator_force  # Shape will be (nu,)
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
         return observation + jax.random.normal(rng, observation.shape) * self.noise

@@ -8,6 +8,8 @@ __all__ = [
     "JointVelocityPenalty",
     "LinearVelocityTrackingReward",
     "BaseHeightReward",
+    "ActionSmoothnessPenalty",
+    "ActuatorForcePenalty",
 ]
 
 import functools
@@ -15,6 +17,7 @@ import logging
 from abc import ABC, abstractmethod
 
 import attrs
+import jax.numpy as jnp
 import xax
 from jaxtyping import Array
 
@@ -115,8 +118,45 @@ class BaseHeightReward(Reward):
     """Reward for tracking the base height target."""
 
     height_target: float = attrs.field()
-    norm: xax.NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l1")
+    sensitivity: float = attrs.field(default=5.0)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
-        return xax.get_norm(base_height - self.height_target, self.norm)
+        return jnp.exp(-xax.get_norm(base_height - self.height_target, self.norm) * self.sensitivity)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ActionSmoothnessPenalty(Reward):
+    """Penalty for large changes between consecutive actions."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        current_actions = trajectory.action
+
+        # Shift actions to get previous actions (pad with first action)
+        previous_actions = jnp.concatenate(
+            [
+                current_actions[..., :1, :],  # First action
+                current_actions[..., :-1, :],  # Previous actions for remaining timesteps
+            ],
+            axis=-2,
+        )
+
+        action_deltas = current_actions - previous_actions
+
+        return xax.get_norm(action_deltas, self.norm).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ActuatorForcePenalty(Reward):
+    """Penalty for high actuator forces."""
+
+    norm: xax.NormType = attrs.field(default="l1")
+    observation_name: str = attrs.field(default="actuator_force_observation")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        if self.observation_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
+        return xax.get_norm(trajectory.obs[self.observation_name], self.norm).mean(axis=-1)
