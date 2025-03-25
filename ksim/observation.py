@@ -232,7 +232,9 @@ class SensorObservation(Observation):
         return f"{self.sensor_name}_obs"
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
-        sensor_data = rollout_state.physics_state.data.sensordata[self.sensor_idx_range[0] : self.sensor_idx_range[1]].ravel()
+        sensor_data = rollout_state.physics_state.data.sensordata[
+            self.sensor_idx_range[0] : self.sensor_idx_range[1]
+        ].ravel()
         return sensor_data
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
@@ -245,6 +247,7 @@ class HistoryObservation(Observation):
         if not isinstance(rollout_state.carry, Array):
             raise ValueError(f"History observation carry must be an array, got {type(rollout_state.carry)}")
         return rollout_state.carry
+
 
 @attrs.define(frozen=True)
 class BaseLinearAccelerationObservation(Observation):
@@ -260,4 +263,3 @@ class BaseAngularAccelerationObservation(Observation):
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.data.qacc[3:6]
-
