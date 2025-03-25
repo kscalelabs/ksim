@@ -242,14 +242,6 @@ class SensorObservation(Observation):
 
 
 @attrs.define(frozen=True)
-class HistoryObservation(Observation):
-    def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
-        if not isinstance(rollout_state.carry, Array):
-            raise ValueError(f"History observation carry must be an array, got {type(rollout_state.carry)}")
-        return rollout_state.carry
-
-
-@attrs.define(frozen=True)
 class BaseLinearAccelerationObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
