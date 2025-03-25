@@ -216,5 +216,8 @@ class BaseJerkZPenalty(Reward):
         acc_z = acc[..., 2]
         # First value will always be 0, because the acceleration is not changing.
         prev_acc_z = jnp.concatenate([acc_z[..., :1], acc_z[..., :-1]], axis=-1)
-        jerk_z = (acc_z - prev_acc_z) / self.ctrl_dt
+        # We multiply by ctrl_dt instead of dividing because we want the scale
+        # for the penalty to be roughly the same magnitude as a velocity
+        # penalty.
+        jerk_z = (acc_z - prev_acc_z) * self.ctrl_dt
         return xax.get_norm(jerk_z, self.norm)
