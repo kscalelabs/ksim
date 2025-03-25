@@ -12,6 +12,8 @@ __all__ = [
     "CenterOfMassVelocityObservation",
     "ActuatorForceObservation",
     "SensorObservation",
+    "BaseLinearAccelerationObservation",
+    "BaseAngularAccelerationObservation",
 ]
 
 import functools
@@ -234,3 +236,19 @@ class SensorObservation(Observation):
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
         return add_noise(observation, rng, self.noise_type, self.noise)
+
+
+@attrs.define(frozen=True)
+class BaseLinearAccelerationObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        return state.qacc[0:3]
+
+
+@attrs.define(frozen=True)
+class BaseAngularAccelerationObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        return state.qacc[3:6]

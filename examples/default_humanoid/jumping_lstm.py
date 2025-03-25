@@ -12,7 +12,7 @@ from jaxtyping import Array
 
 import ksim
 
-from .walking import DHControlPenalty, DHHealthyReward, HumanoidWalkingTask
+from .walking import HumanoidWalkingTask
 from .walking_lstm import HumanoidWalkingLSTMTaskConfig
 
 
@@ -58,8 +58,9 @@ class HumanoidJumpingLSTMTask(HumanoidWalkingTask[Config], Generic[Config]):
         return [
             UpwardReward(scale=0.5),
             StationaryPenalty(scale=-0.1),
-            DHControlPenalty(scale=-0.01),
-            DHHealthyReward(scale=0.5, healthy_z_upper=5.0),
+            ksim.ActuatorForcePenalty(scale=-0.01),
+            ksim.LinearVelocityZPenalty(scale=-0.01),
+            ksim.AngularVelocityXYPenalty(scale=-0.01),
         ]
 
 
