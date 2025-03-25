@@ -894,7 +894,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             trajectories: The trajectories to get the termination metrics for.
         """
-        num_terms = trajectories.done.sum(-1, dtype=trajectories.action.dtype) + 1
+        last_dones = jax.tree_map(lambda x: x[-1], trajectories.done)
+        num_terms = trajectories.done.sum(-1, dtype=trajectories.action.dtype) + (1 - last_dones)
+        num_terms = jnp.clip(num_terms, min=1)
         traj_lens = (trajectories.done.shape[-1] / num_terms) * self.config.ctrl_dt
 
         return {
