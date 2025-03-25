@@ -10,6 +10,7 @@ __all__ = [
     "LinearVelocityTrackingPenalty",
     "AngularVelocityTrackingPenalty",
     "BaseHeightReward",
+    "BaseHeightRangeReward",
     "ActionSmoothnessPenalty",
     "ActuatorForcePenalty",
     "BaseJerkZPenalty",
@@ -149,6 +150,19 @@ class BaseHeightReward(Reward):
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
         return jnp.exp(-xax.get_norm(base_height - self.height_target, self.norm) * self.sensitivity)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class BaseHeightRangeReward(Reward):
+    """Incentivizes keeping the base height within a certain range."""
+
+    z_lower: float = attrs.field()
+    z_upper: float = attrs.field()
+    norm: xax.NormType = attrs.field(default="l1")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        base_height = trajectory.qpos[..., 2]
+        return ((base_height > self.z_lower) & (base_height < self.z_upper)).astype(base_height.dtype)
 
 
 @attrs.define(frozen=True, kw_only=True)
