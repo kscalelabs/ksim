@@ -67,7 +67,7 @@ class PhysicsEngine(eqx.Module, ABC):
         physics_model: PhysicsModel,
         rng: PRNGKeyArray,
     ) -> PhysicsState:
-        """Reset the engine and return the physics model and data."""
+        """Reset the engine and return the physics data."""
 
     @abstractmethod
     def step(
@@ -149,7 +149,6 @@ class MjxEngine(PhysicsEngine):
             rng, ctrl_rng = jax.random.split(rng)
             torques = self.actuators.get_ctrl(ctrl, data, ctrl_rng)
             data_with_ctrl = data.replace(ctrl=torques)
-            # data_with_ctrl = mjx.forward(physics_model, data_with_ctrl)
             new_data = mjx.step(physics_model, data_with_ctrl)
             return (new_data, step_num + 1.0, FrozenDict(new_event_info)), None
 

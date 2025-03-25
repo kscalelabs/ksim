@@ -8,7 +8,6 @@ __all__ = [
     "get_geom_data_idx_by_name",
     "get_body_data_idx_by_name",
     "get_floor_idx",
-    "is_body_in_contact",
     "get_collision_info",
     "geoms_colliding",
     "get_joint_metadata",
@@ -108,16 +107,6 @@ def get_floor_idx(physics_model: PhysicsModel, floor_name: str = "floor") -> int
     geom_mappings = get_geom_data_idx_by_name(physics_model)
     assert floor_name in geom_mappings, f"Floor name {floor_name} not found in model"
     return geom_mappings[floor_name]
-
-
-def is_body_in_contact(
-    body_name: str,
-    physics_model: PhysicsModel,
-    mjx_data: PhysicsData,
-) -> bool:
-    """Check if a body is in contact."""
-    # TODO: implement this properly...
-    return False
 
 
 def get_collision_info(contact: PyTree, geom1: int, geom2: int) -> tuple[jax.Array, jax.Array]:
