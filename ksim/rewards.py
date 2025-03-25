@@ -175,3 +175,14 @@ class ActuatorForcePenalty(Reward):
         if self.observation_name not in trajectory.obs:
             raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
         return xax.get_norm(trajectory.obs[self.observation_name], self.norm).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ContactForcePenalty(Reward):
+    """Penalty for high contact forces."""
+
+    norm: xax.NormType = attrs.field(default="l1")
+    observation_name: str = attrs.field(default="contact_force_observation")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        return xax.get_norm(trajectory.obs[self.observation_name], self.norm).mean(axis=-1)

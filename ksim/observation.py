@@ -234,3 +234,17 @@ class SensorObservation(Observation):
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
         return add_noise(observation, rng, self.noise_type, self.noise)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ContactForceObservation(Observation):
+    """Observation for contact forces."""
+
+    noise: float = attrs.field(default=0.0)
+    noise_type: NoiseType = attrs.field(default="gaussian")
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        raise NotImplementedError("Contact force observation not implemented")
+
+    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+        return add_noise(observation, rng, self.noise_type, self.noise)
