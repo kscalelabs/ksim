@@ -42,8 +42,6 @@ from PIL import Image, ImageDraw
 from ksim.actuators import Actuators
 from ksim.commands import Command
 from ksim.engine import (
-    EngineConstants,
-    EngineVariables,
     PhysicsEngine,
     engine_type_from_physics_model,
     get_physics_engine,
@@ -58,6 +56,25 @@ from ksim.types import Histogram, Metrics, PhysicsModel, PhysicsState, Rewards, 
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata
 
 logger = logging.getLogger(__name__)
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class RolloutConstants:
+    obs_generators: Collection[Observation]
+    command_generators: Collection[Command]
+    reward_generators: Collection[Reward]
+    termination_generators: Collection[Termination]
+    randomization_generators: Collection[Randomization]
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class RolloutVariables:
+    carry: PyTree
+    commands: FrozenDict[str, Array]
+    physics_state: PhysicsState
+    rng: PRNGKeyArray
 
 
 def get_observation(
@@ -515,9 +532,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         physics_model: PhysicsModel,
         model: PyTree,
         engine: PhysicsEngine,
-        engine_constants: EngineConstants,
-        engine_variables: EngineVariables,
-    ) -> tuple[Trajectory, EngineVariables]:
+        engine_constants: RolloutConstants,
+        engine_variables: RolloutVariables,
+    ) -> tuple[Trajectory, RolloutVariables]:
         """Runs a single step of the physics engine.
 
         Args:
@@ -604,7 +621,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Gets the variables for the next step.
-        next_variables = EngineVariables(
+        next_variables = RolloutVariables(
             carry=next_carry,
             commands=commands,
             physics_state=next_physics_state,
@@ -785,14 +802,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model_arr: PyTree,
         model_static: PyTree,
         engine: PhysicsEngine,
-        engine_constants: EngineConstants,
-        engine_variables: EngineVariables,
+        engine_constants: RolloutConstants,
+        engine_variables: RolloutVariables,
         num_steps: int,
-    ) -> tuple[Trajectory, Rewards, EngineVariables]:
+    ) -> tuple[Trajectory, Rewards, RolloutVariables]:
         # Recombines the mutable and static parts of the model.
         model = eqx.combine(model_arr, model_static)
 
-        def scan_fn(carry: EngineVariables, _: None) -> tuple[EngineVariables, Trajectory]:
+        def scan_fn(carry: RolloutVariables, _: None) -> tuple[RolloutVariables, Trajectory]:
             trajectory, next_engine_variables = self.step_engine(
                 physics_model=physics_model,
                 model=model,
@@ -822,10 +839,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model_arr: PyTree,
         model_static: PyTree,
         engine: PhysicsEngine,
-        engine_constants: EngineConstants,
-        engine_variables: EngineVariables,
+        engine_constants: RolloutConstants,
+        engine_variables: RolloutVariables,
         num_steps: int,
-    ) -> tuple[Trajectory, Rewards, EngineVariables]:
+    ) -> tuple[Trajectory, Rewards, RolloutVariables]:
         vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None, 0, None))
         return vmapped_unroll(
             physics_models,
@@ -926,13 +943,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         engine: PhysicsEngine,
-        engine_constants: EngineConstants,
-        engine_variables: EngineVariables,
-    ) -> tuple[PyTree, optax.OptState, Metrics, EngineVariables]:
+        engine_constants: RolloutConstants,
+        engine_variables: RolloutVariables,
+    ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables]:
         def single_step_fn(
-            carry: tuple[PyTree, optax.OptState, EngineVariables],
+            carry: tuple[PyTree, optax.OptState, RolloutVariables],
             rng: PRNGKeyArray,
-        ) -> tuple[tuple[PyTree, optax.OptState, EngineVariables], Metrics]:
+        ) -> tuple[tuple[PyTree, optax.OptState, RolloutVariables], Metrics]:
             model_arr, opt_state, engine_variables = carry
             rng, update_rng = jax.random.split(rng)
 
@@ -1035,7 +1052,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             physics_state = engine.reset(mj_model, reset_rng)
 
             # These components remain constant across the entire episode.
-            engine_constants = EngineConstants(
+            engine_constants = RolloutConstants(
                 obs_generators=observations,
                 command_generators=commands,
                 reward_generators=rewards,
@@ -1044,7 +1061,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             # These components are updated each step.
-            engine_variables = EngineVariables(
+            engine_variables = RolloutVariables(
                 carry=initial_carry,
                 commands=initial_commands,
                 physics_state=physics_state,
@@ -1186,7 +1203,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             randomizations = self.get_randomization(mjx_model)
 
             # These remain constant across the entire episode.
-            engine_constants = EngineConstants(
+            engine_constants = RolloutConstants(
                 obs_generators=tuple(observations),
                 command_generators=tuple(commands),
                 reward_generators=tuple(rewards_terms),
@@ -1207,7 +1224,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Builds the variables for the training environment.
             train_rngs = jax.random.split(rng, self.config.num_envs)
             mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, train_rngs)
-            engine_variables = EngineVariables(
+            engine_variables = RolloutVariables(
                 carry=carry_fn(train_rngs),
                 commands=command_fn(train_rngs, engine_constants.command_generators),
                 physics_state=state_fn(mjx_models, train_rngs),
@@ -1217,7 +1234,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Builds the variables for the validation environment.
             valid_rngs = jax.random.split(rng, self.config.num_valid_envs)
             valid_mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, valid_rngs)
-            valid_engine_variables = EngineVariables(
+            valid_engine_variables = RolloutVariables(
                 carry=carry_fn(valid_rngs),
                 commands=command_fn(valid_rngs, engine_constants.command_generators),
                 physics_state=state_fn(valid_mjx_models, valid_rngs),

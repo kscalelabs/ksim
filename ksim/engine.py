@@ -5,8 +5,6 @@ model and data.
 """
 
 __all__ = [
-    "EngineConstants",
-    "EngineVariables",
     "PhysicsEngine",
     "MjxEngine",
     "MujocoEngine",
@@ -16,7 +14,6 @@ __all__ = [
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Collection, Literal
 
 import equinox as eqx
@@ -28,37 +25,13 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 
 from ksim.actuators import Actuators
-from ksim.commands import Command
 from ksim.events import Event
-from ksim.observation import Observation
-from ksim.randomization import Randomization
 from ksim.resets import Reset
-from ksim.rewards import Reward
-from ksim.terminations import Termination
 from ksim.types import PhysicsModel, PhysicsState
 
 logger = logging.getLogger(__name__)
 
 EngineType = Literal["mjx", "mujoco"]
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class EngineConstants:
-    obs_generators: Collection[Observation]
-    command_generators: Collection[Command]
-    reward_generators: Collection[Reward]
-    termination_generators: Collection[Termination]
-    randomization_generators: Collection[Randomization]
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class EngineVariables:
-    carry: PyTree
-    commands: FrozenDict[str, Array]
-    physics_state: PhysicsState
-    rng: PRNGKeyArray
 
 
 class PhysicsEngine(eqx.Module, ABC):
