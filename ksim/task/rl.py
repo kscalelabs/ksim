@@ -36,7 +36,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from kmv.viewer import launch_passive
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
-from omegaconf import II, MISSING
+from omegaconf import MISSING
 from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
@@ -1260,7 +1260,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     self.log_train_metrics(metrics)
                     self.log_state_timers(state)
                     self.write_logs(state)
-
 
                     if self.should_checkpoint(state):
                         model = eqx.combine(model_arr, model_static)
