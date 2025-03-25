@@ -16,7 +16,7 @@ import attrs
 import jax
 import jax.numpy as jnp
 import mujoco
-from jaxtyping import PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 
 from ksim.types import PhysicsModel
@@ -38,10 +38,19 @@ class WeightRandomization(Randomization):
 
     scale: float = attrs.field()
 
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> tuple[PhysicsModel, PyTree]:
         """Randomize the model for a single environment."""
-        new_body_mass = model.body_mass * (jax.random.uniform(rng, model.body_mass.shape) * self.scale + 1.0)
-        return update_model_field(model, "body_mass", new_body_mass)
+
+        @jax.vmap
+        def randomize_body_mass(rng: PRNGKeyArray) -> Array:
+            body_mass = model.body_mass
+            new_body_mass = body_mass * (jax.random.uniform(rng, body_mass.shape) * self.scale + 1.0)
+            return new_body_mass
+
+        new_body_mass = randomize_body_mass(rng)
+        in_axes = jax.tree_util.tree_map(lambda x: None, model)
+        in_axes = in_axes.tree_replace({"body_mass": 0})
+        return update_model_field(model, "body_mass", new_body_mass), in_axes
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -51,18 +60,23 @@ class StaticFrictionRandomization(Randomization):
     scale_lower: float = attrs.field(default=0.5)
     scale_upper: float = attrs.field(default=2.0)
 
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> tuple[PhysicsModel, PyTree]:
         """Randomize the static friction of the robot."""
-        rng, key = jax.random.split(rng)
-        frictionloss = model.dof_frictionloss[6:] + jax.random.uniform(
-            key,
-            shape=(model.dof_frictionloss.shape[0] - 6,),
-            minval=self.scale_lower,
-            maxval=self.scale_upper,
-        )
-        # Skip the first 6 DOFs (free joint)
-        new_frictionloss = jnp.concatenate([model.dof_frictionloss[:6], frictionloss])
-        return update_model_field(model, "dof_frictionloss", new_frictionloss)
+
+        @jax.vmap
+        def randomize_frictionloss(rng: PRNGKeyArray) -> Array:
+            frictionloss = model.dof_frictionloss[6:] + jax.random.uniform(
+                rng,
+                shape=(model.dof_frictionloss.shape[0] - 6,),
+                minval=self.scale_lower,
+                maxval=self.scale_upper,
+            )
+            return frictionloss
+
+        new_frictionloss = randomize_frictionloss(rng)
+        in_axes = jax.tree_util.tree_map(lambda x: None, model)
+        in_axes = in_axes.tree_replace({"dof_frictionloss": 0})
+        return update_model_field(model, "dof_frictionloss", new_frictionloss), in_axes
 
 
 @attrs.define(frozen=True, kw_only=True)

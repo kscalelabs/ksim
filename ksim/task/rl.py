@@ -182,12 +182,13 @@ def apply_randomizations(
     physics_model: PhysicsModel,
     randomizations: Collection[Randomization],
     rng: PRNGKeyArray,
-) -> PhysicsModel:
+) -> tuple[PhysicsModel, PyTree]:
     """Apply randomizations to the physics model."""
+    jax.debug.breakpoint()
     for randomization in randomizations:
-        rng, randomization_rng = jax.random.split(rng)
-        physics_model = randomization(physics_model, randomization_rng)
-    return physics_model
+        # rng, randomization_rng = jax.random.split(rng)
+        physics_model, in_axes = randomization(physics_model, rng)
+    return physics_model, in_axes
 
 
 @jax.tree_util.register_dataclass
@@ -815,6 +816,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def _vmapped_unroll(
         self,
         physics_models: PhysicsModel,
+        models_in_axes: PyTree,
         model_arr: PyTree,
         model_static: PyTree,
         engine: PhysicsEngine,
@@ -822,7 +824,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine_variables: EngineVariables,
         num_steps: int,
     ) -> tuple[Trajectory, Rewards, EngineVariables]:
-        vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None, 0, None))
+        vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(models_in_axes, None, None, None, None, 0, None))
         return vmapped_unroll(
             physics_models,
             model_arr,
@@ -917,6 +919,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         rng: PRNGKeyArray,
         physics_models: PhysicsModel,
+        models_in_axes: PyTree,
         model_arr: PyTree,
         model_static: PyTree,
         optimizer: optax.GradientTransformation,
@@ -935,6 +938,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Rolls out a new trajectory.
             trajectories, rewards, engine_variables = self._vmapped_unroll(
                 physics_models=physics_models,
+                models_in_axes=models_in_axes,
                 model_arr=model_arr,
                 model_static=model_static,
                 engine=engine,
@@ -1192,14 +1196,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model_arr, model_static = eqx.partition(model, eqx.is_inexact_array)
 
             # Defines the vectorized initialization functions.
-            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, 0))
+
+            # Builds the variables for the training environment.
+            train_rngs = jax.random.split(rng, self.config.num_envs)
+            mjx_models, models_in_axes = apply_randomizations(
+                mjx_model, engine_constants.randomization_generators, train_rngs
+            )
+
             carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
             command_fn = jax.vmap(get_initial_commands, in_axes=(0, None))
             state_fn = jax.vmap(engine.reset, in_axes=(0, 0))
 
-            # Builds the variables for the training environment.
-            train_rngs = jax.random.split(rng, self.config.num_envs)
-            mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, train_rngs)
             engine_variables = EngineVariables(
                 carry=carry_fn(train_rngs),
                 commands=command_fn(train_rngs, engine_constants.command_generators),
@@ -1209,7 +1216,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Builds the variables for the validation environment.
             valid_rngs = jax.random.split(rng, self.config.num_valid_envs)
-            valid_mjx_models = randomization_fn(mjx_model, engine_constants.randomization_generators, valid_rngs)
+            valid_mjx_models, valid_models_in_axes = apply_randomizations(
+                mjx_model, engine_constants.randomization_generators, valid_rngs
+            )
             valid_engine_variables = EngineVariables(
                 carry=carry_fn(valid_rngs),
                 commands=command_fn(valid_rngs, engine_constants.command_generators),
@@ -1267,6 +1276,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     model_arr, opt_state, metrics, engine_variables = self._rl_train_loop_step(
                         rng=update_rng,
                         physics_models=mjx_models,
+                        models_in_axes=models_in_axes,
                         model_arr=model_arr,
                         model_static=model_static,
                         optimizer=optimizer,
