@@ -1,23 +1,33 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Generic, TypeVar
 
+import attrs
 import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import xax
-from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
 import ksim
 
-from .walking import CMD_SIZE, NUM_INPUTS, NUM_OUTPUTS, OBS_SIZE, HumanoidWalkingTask, HumanoidWalkingTaskConfig
+from .walking import NUM_INPUTS, NUM_OUTPUTS, DHControlPenalty, DHHealthyReward, HumanoidWalkingTask
+from .walking_lstm import HumanoidWalkingLSTMTask, HumanoidWalkingLSTMTaskConfig
 
 HIDDEN_SIZE = 128  # `_s`
 DEPTH = 2
+
+
+@attrs.define(frozen=True, kw_only=True)
+class UpwardReward(ksim.Reward):
+    """Incentives forward movement."""
+
+    velocity_clip: float = attrs.field(default=10.0)
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        # Just try to maximize the velocity in the Z direction.
+        z_delta = jnp.clip(trajectory.qvel[..., 2], 0, self.velocity_clip)
+        return z_delta
 
 
 @jax.tree_util.register_dataclass
@@ -197,152 +207,18 @@ class DefaultHumanoidModel(eqx.Module):
 
 
 @dataclass
-class HumanoidWalkingLSTMTaskConfig(HumanoidWalkingTaskConfig):
+class HumanoidJumpingLSTMTaskConfig(HumanoidWalkingLSTMTaskConfig):
     pass
 
 
-Config = TypeVar("Config", bound=HumanoidWalkingLSTMTaskConfig)
+class HumanoidJumpingLSTMTask(HumanoidWalkingTask[HumanoidJumpingLSTMTaskConfig]):
 
-
-class HumanoidWalkingLSTMTask(HumanoidWalkingTask[Config], Generic[Config]):
-    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
-        return DefaultHumanoidModel(key)
-
-    def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
-        # Initialize the hidden state for LSTM
-        return jnp.zeros((DEPTH, 2, HIDDEN_SIZE))
-
-    def _run_actor(
-        self,
-        model: DefaultHumanoidModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
-        carry: Array,
-    ) -> tuple[distrax.Normal, Array]:
-        dh_joint_pos_n = observations.get("dhjoint_position_observation", jnp.zeros((0,)))
-        dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,))) / 50.0
-        com_inertia_n = observations.get("center_of_mass_inertia_observation", jnp.zeros((0,)))
-        com_vel_n = observations.get("center_of_mass_velocity_observation", jnp.zeros((0,))) / 50.0
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
-        lin_vel_cmd_n = commands["linear_velocity_command"]
-
-        return model.actor(
-            dh_joint_pos_n,
-            dh_joint_vel_n,
-            com_inertia_n,
-            com_vel_n,
-            act_frc_obs_n,
-            lin_vel_cmd_n,
-            carry,
-        )
-
-    def _run_critic(
-        self,
-        model: DefaultHumanoidModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
-    ) -> Array:
-        dh_joint_pos_n = observations.get("dhjoint_position_observation", jnp.zeros((0,)))
-        dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,))) / 50.0
-        com_inertia_n = observations.get("center_of_mass_inertia_observation", jnp.zeros((0,)))
-        com_vel_n = observations.get("center_of_mass_velocity_observation", jnp.zeros((0,))) / 50.0
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
-        lin_vel_cmd_n = commands["linear_velocity_command"]
-
-        # Concatenate all observations
-        obs_n = jnp.concatenate([dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n])
-        return model.critic(obs_n, lin_vel_cmd_n)
-
-    def get_on_policy_log_probs(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
-            raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.log_probs
-
-    def get_on_policy_values(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
-            raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.values
-
-    def get_log_probs(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, Array]:
-        def scan_fn(
-            carry: Array,
-            inputs: ksim.Trajectory,
-        ) -> tuple[Array, tuple[Array, Array]]:
-            action_dist_n, carry = self._run_actor(model, inputs.obs, inputs.command, carry)
-            log_probs_n = action_dist_n.log_prob(inputs.action / model.actor.mean_scale)
-            entropy_n = action_dist_n.entropy()
-            return carry, (log_probs_n, entropy_n)
-
-        initial_hidden_states = self.get_initial_carry(rng)
-        _, (log_probs_tn, entropy_tn) = jax.lax.scan(scan_fn, initial_hidden_states, trajectories)
-
-        return log_probs_tn, entropy_tn
-
-    def get_values(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        # Vectorize over both batch and time dimensions.
-        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_bt1 = par_fn(model, trajectories.obs, trajectories.command)
-
-        # Remove the last dimension.
-        return values_bt1.squeeze(-1)
-
-    def sample_action(
-        self,
-        model: DefaultHumanoidModel,
-        carry: Array,
-        physics_model: ksim.PhysicsModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, AuxOutputs]:
-        action_dist_n, next_carry = self._run_actor(model, observations, commands, carry)
-        action_n = action_dist_n.sample(seed=rng)
-        action_log_prob_n = action_dist_n.log_prob(action_n)
-
-        critic_n = self._run_critic(model, observations, commands)
-        value_n = critic_n.squeeze(-1)
-        return action_n, next_carry, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
-
-    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
-        state = super().on_after_checkpoint_save(ckpt_path, state)
-
-        if not self.config.export_for_inference:
-            return state
-
-        # Load the checkpoint and export it using xax's export function.
-        model: DefaultHumanoidModel = self.load_checkpoint(ckpt_path, part="model")
-
-        def model_fn(obs: Array, cmd: Array, hidden_states: Array) -> tuple[Array, Array]:
-            dist, hidden_states = model.actor.call_flat_obs(obs, cmd, hidden_states)
-            return dist.mode(), hidden_states
-
-        def batched_model_fn(obs: Array, cmd: Array, hidden_states: Array) -> tuple[Array, Array]:
-            return jax.vmap(model_fn)(obs, cmd, hidden_states)
-
-        input_shapes = [(OBS_SIZE,), (CMD_SIZE,), (DEPTH, 2, HIDDEN_SIZE)]
-        xax.export(batched_model_fn, input_shapes, ckpt_path.parent / "tf_model")
-
-        return state
+    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
+        return [
+            UpwardReward(scale=0.5),
+            DHControlPenalty(scale=-0.01),
+            DHHealthyReward(scale=0.5, healthy_z_upper=5.0),
+        ]
 
 
 if __name__ == "__main__":
