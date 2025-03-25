@@ -297,6 +297,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
             ksim.BaseLinearVelocityObservation(),
+            ksim.BaseLinearAccelerationObservation(),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -317,6 +318,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
+            ksim.BaseJerkZPenalty(scale=-0.01, ctrl_dt=self.config.ctrl_dt),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:

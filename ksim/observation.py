@@ -12,6 +12,8 @@ __all__ = [
     "CenterOfMassVelocityObservation",
     "ActuatorForceObservation",
     "SensorObservation",
+    "BaseLinearAccelerationObservation",
+    "BaseAngularAccelerationObservation",
 ]
 
 import functools
@@ -236,15 +238,17 @@ class SensorObservation(Observation):
         return add_noise(observation, rng, self.noise_type, self.noise)
 
 
-@attrs.define(frozen=True, kw_only=True)
-class ContactForceObservation(Observation):
-    """Observation for contact forces."""
-
+@attrs.define(frozen=True)
+class BaseLinearAccelerationObservation(Observation):
     noise: float = attrs.field(default=0.0)
-    noise_type: NoiseType = attrs.field(default="gaussian")
 
     def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
-        raise NotImplementedError("Contact force observation not implemented")
+        return state.qacc[0:3]
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return add_noise(observation, rng, self.noise_type, self.noise)
+
+@attrs.define(frozen=True)
+class BaseAngularAccelerationObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        return state.qacc[3:6]
