@@ -59,9 +59,11 @@ class DHJointPositionObservation(ksim.Observation):
 class DHForwardReward(ksim.Reward):
     """Incentives forward movement."""
 
+    velocity_clip: float = attrs.field(default=1.0)
+
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        # Take just the x velocity component
-        x_delta = -jnp.clip(trajectory.qvel[..., 1], -1.0, 1.0)
+        # Take just the x velocity component.
+        x_delta = -jnp.clip(trajectory.qvel[..., 0], -self.velocity_clip, self.velocity_clip)
         return x_delta
 
 
