@@ -6,8 +6,8 @@ __all__ = [
     "LinearVelocityZPenalty",
     "AngularVelocityXYPenalty",
     "JointVelocityPenalty",
-    "LinearVelocityTrackingReward",
-    "AngularVelocityTrackingReward",
+    "LinearVelocityTrackingPenalty",
+    "AngularVelocityTrackingPenalty",
     "BaseHeightReward",
     "ActionSmoothnessPenalty",
     "ActuatorForcePenalty",
@@ -99,8 +99,8 @@ class JointVelocityPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class LinearVelocityTrackingReward(Reward):
-    """Reward for tracking the linear velocity command."""
+class LinearVelocityTrackingPenalty(Reward):
+    """Penalty for deviating from the linear velocity command."""
 
     norm: xax.NormType = attrs.field(default="l2")
     command_name: str = attrs.field(default="linear_velocity_command")
@@ -115,8 +115,8 @@ class LinearVelocityTrackingReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class AngularVelocityTrackingReward(Reward):
-    """Reward for tracking the angular velocity command."""
+class AngularVelocityTrackingPenalty(Reward):
+    """Penalty for deviating from the angular velocity command."""
 
     norm: xax.NormType = attrs.field(default="l2")
     command_name: str = attrs.field(default="angular_velocity_command")
