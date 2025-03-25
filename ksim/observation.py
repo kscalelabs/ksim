@@ -239,7 +239,6 @@ class SensorObservation(Observation):
 
 @attrs.define(frozen=True)
 class HistoryObservation(Observation):
-
     def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         if not isinstance(carry, Array):
             raise ValueError(f"History observation carry must be an array, got {type(carry)}")
