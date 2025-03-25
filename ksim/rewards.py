@@ -108,8 +108,8 @@ class LinearVelocityTrackingReward(Reward):
         lin_vel_cmd = trajectory.command[self.command_name]
         lin_vel_x_cmd = lin_vel_cmd[..., 0]
         lin_vel_y_cmd = lin_vel_cmd[..., 1]
-        lin_vel_x = trajectory.qvel[..., 1]
-        lin_vel_y = trajectory.qvel[..., 2]
+        lin_vel_x = trajectory.qvel[..., 0]
+        lin_vel_y = trajectory.qvel[..., 1]
         return xax.get_norm(lin_vel_x - lin_vel_x_cmd, self.norm) + xax.get_norm(lin_vel_y - lin_vel_y_cmd, self.norm)
 
 
