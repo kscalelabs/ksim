@@ -42,8 +42,6 @@ from PIL import Image, ImageDraw
 from ksim.actuators import Actuators
 from ksim.commands import Command
 from ksim.engine import (
-    RolloutConstants,
-    RolloutVariables,
     PhysicsEngine,
     engine_type_from_physics_model,
     get_physics_engine,
@@ -59,6 +57,23 @@ from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata
 
 logger = logging.getLogger(__name__)
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class RolloutConstants:
+    obs_generators: Collection[Observation]
+    command_generators: Collection[Command]
+    reward_generators: Collection[Reward]
+    termination_generators: Collection[Termination]
+    randomization_generators: Collection[Randomization]
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class RolloutVariables:
+    carry: PyTree
+    commands: FrozenDict[str, Array]
+    physics_state: PhysicsState
+    rng: PRNGKeyArray
 
 def get_observation(
     physics_state: PhysicsState,

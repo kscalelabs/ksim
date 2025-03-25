@@ -5,8 +5,6 @@ model and data.
 """
 
 __all__ = [
-    "RolloutConstants",
-    "RolloutVariables",
     "PhysicsEngine",
     "MjxEngine",
     "MujocoEngine",
@@ -16,7 +14,6 @@ __all__ = [
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Collection, Literal
 
 import equinox as eqx
@@ -28,19 +25,13 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 
 from ksim.actuators import Actuators
-from ksim.commands import Command
 from ksim.events import Event
-from ksim.observation import Observation
-from ksim.randomization import Randomization
 from ksim.resets import Reset
-from ksim.rewards import Reward
-from ksim.terminations import Termination
 from ksim.types import PhysicsModel, PhysicsState
 
 logger = logging.getLogger(__name__)
 
 EngineType = Literal["mjx", "mujoco"]
-
 
 class PhysicsEngine(eqx.Module, ABC):
     """The role of an engine is simple: reset and step. Decoupled from data."""
