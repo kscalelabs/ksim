@@ -2,6 +2,7 @@
 """Defines simple task for training a walking policy for K-Bot."""
 
 from dataclasses import dataclass
+from typing import Generic, TypeVar
 
 import attrs
 import jax
@@ -11,7 +12,7 @@ from jaxtyping import Array
 import ksim
 
 from .walking import DHControlPenalty, DHHealthyReward, HumanoidWalkingTask
-from .walking_lstm import HumanoidWalkingLSTMTask, HumanoidWalkingLSTMTaskConfig
+from .walking_lstm import HumanoidWalkingLSTMTaskConfig
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -38,7 +39,10 @@ class HumanoidJumpingLSTMTaskConfig(HumanoidWalkingLSTMTaskConfig):
     pass
 
 
-class HumanoidJumpingLSTMTask(HumanoidWalkingTask[HumanoidJumpingLSTMTaskConfig]):
+Config = TypeVar("Config", bound=HumanoidJumpingLSTMTaskConfig)
+
+
+class HumanoidJumpingLSTMTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
@@ -53,8 +57,8 @@ if __name__ == "__main__":
     #   python -m examples.default_humanoid.walking_lstm
     # To visualize the environment, use the following command:
     #   python -m examples.default_humanoid.walking_lstm run_environment=True
-    HumanoidWalkingLSTMTask.launch(
-        HumanoidWalkingLSTMTaskConfig(
+    HumanoidJumpingLSTMTask.launch(
+        HumanoidJumpingLSTMTaskConfig(
             num_envs=2048,
             num_batches=64,
             num_passes=8,
