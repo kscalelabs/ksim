@@ -33,7 +33,6 @@ import xax
 from dpshdl.dataset import Dataset
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from kmv.viewer import launch_passive
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 from omegaconf import MISSING
@@ -1000,6 +999,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         except ImportError:
             raise ImportError("pynput is not installed. Please install it using 'pip install pynput'.")
+
+        try:
+            from kmv.viewer import launch_passive
+
+        except ImportError:
+            raise ImportError("kmv is not installed. Please install it using 'pip install kmv'.")
 
         with self, jax.disable_jit():
             rng = self.prng_key()

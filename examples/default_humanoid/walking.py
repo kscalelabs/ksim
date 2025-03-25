@@ -36,8 +36,8 @@ class AuxOutputs:
 class DHJointVelocityObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
-        qvel = state.qvel  # (N,)
+    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        qvel = state.physics_state.data.qvel  # (N,)
         return qvel
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
@@ -48,8 +48,8 @@ class DHJointVelocityObservation(ksim.Observation):
 class DHJointPositionObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
-        qpos = state.qpos[2:]  # (N,)
+    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        qpos = state.physics_state.data.qpos[2:]  # (N,)
         return qpos
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
