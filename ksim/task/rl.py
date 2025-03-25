@@ -250,10 +250,6 @@ class RLConfig(xax.Config):
         value=MISSING,
         help="The number of seconds to rollout each environment during training.",
     )
-    eval_rollout_length_seconds: float = xax.field(
-        value=II("rollout_length_seconds"),
-        help="The number of seconds to rollout the model for evaluation.",
-    )
 
     # Rendering parameters.
     max_values_per_plot: int = xax.field(
@@ -499,10 +495,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @property
     def rollout_length_steps(self) -> int:
         return round(self.config.rollout_length_seconds / self.config.ctrl_dt)
-
-    @property
-    def eval_rollout_length_steps(self) -> int:
-        return round(self.config.eval_rollout_length_seconds / self.config.ctrl_dt)
 
     def step_engine(
         self,
