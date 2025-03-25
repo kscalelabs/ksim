@@ -5,8 +5,8 @@ model and data.
 """
 
 __all__ = [
-    "EngineConstants",
-    "EngineVariables",
+    "RolloutConstants",
+    "RolloutVariables",
     "PhysicsEngine",
     "MjxEngine",
     "MujocoEngine",
@@ -40,25 +40,6 @@ from ksim.types import PhysicsModel, PhysicsState
 logger = logging.getLogger(__name__)
 
 EngineType = Literal["mjx", "mujoco"]
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class EngineConstants:
-    obs_generators: Collection[Observation]
-    command_generators: Collection[Command]
-    reward_generators: Collection[Reward]
-    termination_generators: Collection[Termination]
-    randomization_generators: Collection[Randomization]
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class EngineVariables:
-    carry: PyTree
-    commands: FrozenDict[str, Array]
-    physics_state: PhysicsState
-    rng: PRNGKeyArray
 
 
 class PhysicsEngine(eqx.Module, ABC):

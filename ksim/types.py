@@ -11,13 +11,19 @@ __all__ = [
 ]
 
 from dataclasses import dataclass
-from typing import Mapping, TypeAlias
+from typing import Collection, Mapping, TypeAlias
 
 import jax
 import mujoco
 from flax.core import FrozenDict
-from jaxtyping import Array, PyTree
+from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
+
+from ksim.commands import Command
+from ksim.observation import Observation
+from ksim.randomization import Randomization
+from ksim.rewards import Reward
+from ksim.terminations import Termination
 
 PhysicsData: TypeAlias = mjx.Data | mujoco.MjData
 PhysicsModel: TypeAlias = mjx.Model | mujoco.MjModel
@@ -31,6 +37,25 @@ class PhysicsState:
     most_recent_action: Array
     data: PhysicsData
     event_info: FrozenDict[str, PyTree]
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class RolloutConstants:
+    obs_generators: Collection[Observation]
+    command_generators: Collection[Command]
+    reward_generators: Collection[Reward]
+    termination_generators: Collection[Termination]
+    randomization_generators: Collection[Randomization]
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class RolloutVariables:
+    carry: PyTree
+    commands: FrozenDict[str, Array]
+    physics_state: PhysicsState
+    rng: PRNGKeyArray
+
 
 
 @jax.tree_util.register_dataclass
