@@ -12,6 +12,8 @@ __all__ = [
     "CenterOfMassVelocityObservation",
     "ActuatorForceObservation",
     "SensorObservation",
+    "BaseLinearAccelerationObservation",
+    "BaseAngularAccelerationObservation",
 ]
 
 import functools
@@ -243,3 +245,19 @@ class HistoryObservation(Observation):
         if not isinstance(carry, Array):
             raise ValueError(f"History observation carry must be an array, got {type(carry)}")
         return carry
+
+@attrs.define(frozen=True)
+class BaseLinearAccelerationObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        return state.qacc[0:3]
+
+
+@attrs.define(frozen=True)
+class BaseAngularAccelerationObservation(Observation):
+    noise: float = attrs.field(default=0.0)
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        return state.qacc[3:6]
+

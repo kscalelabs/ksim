@@ -2,14 +2,18 @@
 
 __all__ = [
     "Reward",
+    "HealthyReward",
     "TerminationPenalty",
     "LinearVelocityZPenalty",
     "AngularVelocityXYPenalty",
     "JointVelocityPenalty",
-    "LinearVelocityTrackingReward",
+    "LinearVelocityTrackingPenalty",
+    "AngularVelocityTrackingPenalty",
     "BaseHeightReward",
+    "BaseHeightRangeReward",
     "ActionSmoothnessPenalty",
     "ActuatorForcePenalty",
+    "BaseJerkZPenalty",
 ]
 
 import functools
@@ -57,6 +61,14 @@ class Reward(ABC):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class HealthyReward(Reward):
+    """Reward for healthy states."""
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        return jnp.ones_like(trajectory.done)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class TerminationPenalty(Reward):
     """Penalty for terminating the episode."""
 
@@ -98,8 +110,8 @@ class JointVelocityPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class LinearVelocityTrackingReward(Reward):
-    """Reward for tracking the linear velocity command."""
+class LinearVelocityTrackingPenalty(Reward):
+    """Penalty for deviating from the linear velocity command."""
 
     norm: xax.NormType = attrs.field(default="l2")
     command_name: str = attrs.field(default="linear_velocity_command")
@@ -108,9 +120,23 @@ class LinearVelocityTrackingReward(Reward):
         lin_vel_cmd = trajectory.command[self.command_name]
         lin_vel_x_cmd = lin_vel_cmd[..., 0]
         lin_vel_y_cmd = lin_vel_cmd[..., 1]
-        lin_vel_x = trajectory.qvel[..., 1]
-        lin_vel_y = trajectory.qvel[..., 2]
+        lin_vel_x = trajectory.qvel[..., 0]
+        lin_vel_y = trajectory.qvel[..., 1]
         return xax.get_norm(lin_vel_x - lin_vel_x_cmd, self.norm) + xax.get_norm(lin_vel_y - lin_vel_y_cmd, self.norm)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AngularVelocityTrackingPenalty(Reward):
+    """Penalty for deviating from the angular velocity command."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+    command_name: str = attrs.field(default="angular_velocity_command")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        ang_vel_cmd = trajectory.command[self.command_name]
+        ang_vel_z_cmd = ang_vel_cmd[..., 0]
+        ang_vel_z = trajectory.qvel[..., 5]
+        return xax.get_norm(ang_vel_z - ang_vel_z_cmd, self.norm)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -124,6 +150,19 @@ class BaseHeightReward(Reward):
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
         return jnp.exp(-xax.get_norm(base_height - self.height_target, self.norm) * self.sensitivity)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class BaseHeightRangeReward(Reward):
+    """Incentivizes keeping the base height within a certain range."""
+
+    z_lower: float = attrs.field()
+    z_upper: float = attrs.field()
+    norm: xax.NormType = attrs.field(default="l1")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        base_height = trajectory.qpos[..., 2]
+        return ((base_height > self.z_lower) & (base_height < self.z_upper)).astype(base_height.dtype)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -160,3 +199,25 @@ class ActuatorForcePenalty(Reward):
         if self.observation_name not in trajectory.obs:
             raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
         return xax.get_norm(trajectory.obs[self.observation_name], self.norm).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class BaseJerkZPenalty(Reward):
+    """Penalty for high base jerk."""
+
+    ctrl_dt: float = attrs.field()
+    norm: xax.NormType = attrs.field(default="l2")
+    acc_obs_name: str = attrs.field(default="base_linear_acceleration_observation")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        if self.acc_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.acc_obs_name} not found; add it as an observation in your task.")
+        acc = trajectory.obs[self.acc_obs_name]
+        acc_z = acc[..., 2]
+        # First value will always be 0, because the acceleration is not changing.
+        prev_acc_z = jnp.concatenate([acc_z[..., :1], acc_z[..., :-1]], axis=-1)
+        # We multiply by ctrl_dt instead of dividing because we want the scale
+        # for the penalty to be roughly the same magnitude as a velocity
+        # penalty.
+        jerk_z = (acc_z - prev_acc_z) * self.ctrl_dt
+        return xax.get_norm(jerk_z, self.norm)

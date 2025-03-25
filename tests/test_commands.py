@@ -44,7 +44,7 @@ class TestLinearVelocityCommand:
     def test_command_bounds(self, rng: jax.Array, time: jnp.ndarray) -> None:
         """Test that the command values are within the expected bounds."""
         x_scale, y_scale = 2.0, 3.0
-        cmd = ksim.LinearVelocityCommand(x_scale=x_scale, y_scale=y_scale)
+        cmd = ksim.LinearVelocityCommand(x_range=(-x_scale, x_scale), y_range=(-y_scale, y_scale))
         command = cmd.initial_command(rng)
 
         # Run multiple times to test bounds probabilistically

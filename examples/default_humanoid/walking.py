@@ -56,40 +56,6 @@ class DHJointPositionObservation(ksim.Observation):
         return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
-@attrs.define(frozen=True, kw_only=True)
-class DHForwardReward(ksim.Reward):
-    """Incentives forward movement."""
-
-    velocity_clip: float = attrs.field(default=3.0)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        # Just try to maximize the velocity in the X direction.
-        x_delta = jnp.clip(trajectory.qvel[..., 0], -self.velocity_clip, self.velocity_clip)
-        return x_delta
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(ksim.Reward):
-    """Legacy default humanoid control cost that penalizes squared action magnitude."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return jnp.sum(jnp.square(trajectory.action), axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(ksim.Reward):
-    """Legacy default humanoid healthy reward that gives binary reward based on height."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
-
-
 class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
@@ -162,7 +128,7 @@ class DefaultHumanoidCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS,
+            in_size=NUM_INPUTS + 3,
             out_size=1,  # Always output a single critic value.
             width_size=64,
             depth=5,
@@ -177,11 +143,13 @@ class DefaultHumanoidCritic(eqx.Module):
         com_inertia_n: Array,
         com_vel_n: Array,
         act_frc_obs_n: Array,
+        lin_vel_obs_3: Array,
         lin_vel_cmd_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
-            [dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n], axis=-1
-        )  # (NUM_INPUTS)
+            [dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_obs_3, lin_vel_cmd_n],
+            axis=-1,
+        )  # (NUM_INPUTS + 3)
         return self.mlp(x_n)
 
 
@@ -328,23 +296,40 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
+            ksim.BaseLinearVelocityObservation(),
+            ksim.BaseLinearAccelerationObservation(),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
+            ksim.LinearVelocityCommand(
+                x_range=(0.0, 3.0),
+                y_range=(0.0, 0.0),
+                switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average
+                zero_prob=0.3,
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            DHForwardReward(scale=0.5),
-            DHControlPenalty(scale=-0.01),
-            DHHealthyReward(scale=0.5),
+            # The reward for staying healthy should have a large scale. It is
+            # better to use this reward than to use the termination penalty,
+            # because the termination penalty seems harshly penalize
+            # exploration, whereas this reward is more gentle.
+            ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, scale=0.5),
+            ksim.LinearVelocityTrackingPenalty(scale=-0.1),
+            ksim.ActuatorForcePenalty(scale=-0.01),
+            ksim.LinearVelocityZPenalty(scale=-0.01),
+            ksim.AngularVelocityXYPenalty(scale=-0.01),
+            # This is more of a gait shaping reward - we want to encourage the
+            # robot to walk smoothly without feet slamming into the ground
+            # (which can cause physical damage).
+            ksim.BaseJerkZPenalty(scale=-0.01, ctrl_dt=self.config.ctrl_dt),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=2.0),
+            ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.5),
             ksim.FastAccelerationTermination(),
         ]
 
@@ -379,8 +364,17 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.critic(dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n)
+        return model.critic(
+            dh_joint_pos_n,
+            dh_joint_vel_n,
+            com_inertia_n,
+            com_vel_n,
+            act_frc_obs_n,
+            lin_vel_obs_3,
+            lin_vel_cmd_n,
+        )
 
     def get_on_policy_log_probs(
         self,
