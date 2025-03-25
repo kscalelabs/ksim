@@ -1089,7 +1089,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     if self.config.make_viz_plots:
                         ctrl_idx_to_name = {v: k for k, v in get_ctrl_data_idx_by_name(mj_model).items()}
-                        viewer.add_plot_group(title="Actions", index_mapping=ctrl_idx_to_name, y_axis_min=-2, y_axis_max=2)
+                        viewer.add_plot_group(
+                            title="Actions", index_mapping=ctrl_idx_to_name, y_axis_min=-2, y_axis_max=2
+                        )
                         # We'll set up reward component plots in the first iteration
                         reward_component_mapping = None
 
