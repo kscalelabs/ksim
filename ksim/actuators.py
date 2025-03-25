@@ -86,6 +86,7 @@ class MITPositionActuators(Actuators):
         action_noise_type: NoiseType = "none",
         torque_noise: float = 0.0,
         torque_noise_type: NoiseType = "none",
+        ctrl_clip: list[float] | None = None,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
@@ -115,6 +116,11 @@ class MITPositionActuators(Actuators):
         self.torque_noise = torque_noise
         self.torque_noise_type = torque_noise_type
 
+        if ctrl_clip is not None:
+            self.ctrl_clip = jnp.array(ctrl_clip)
+        else:
+            self.ctrl_clip = jnp.ones_like(self.kps) * jnp.inf
+
         if any(self.kps < 0) or any(self.kds < 0):
             raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
         if any(self.kps == 0) or any(self.kds == 0):
@@ -134,7 +140,12 @@ class MITPositionActuators(Actuators):
         vel_delta = target_velocities - current_vel
 
         ctrl = self.kps * pos_delta + self.kds * vel_delta
-        return self.add_noise(self.torque_noise, self.torque_noise_type, ctrl, tor_rng)
+
+        return jnp.clip(
+            self.add_noise(self.torque_noise, self.torque_noise_type, ctrl, tor_rng),
+            -self.ctrl_clip,
+            self.ctrl_clip,
+        )
 
 
 class MITPositionVelocityActuators(MITPositionActuators):
@@ -150,6 +161,7 @@ class MITPositionVelocityActuators(MITPositionActuators):
         vel_action_noise_type: NoiseType = "none",
         torque_noise: float = 0.0,
         torque_noise_type: NoiseType = "none",
+        ctrl_clip: list[float] | None = None,
     ) -> None:
         super().__init__(
             physics_model=physics_model,
@@ -158,6 +170,7 @@ class MITPositionVelocityActuators(MITPositionActuators):
             action_noise_type=pos_action_noise_type,
             torque_noise=torque_noise,
             torque_noise_type=torque_noise_type,
+            ctrl_clip=ctrl_clip,
         )
 
         self.vel_action_noise = vel_action_noise
@@ -179,7 +192,11 @@ class MITPositionVelocityActuators(MITPositionActuators):
         vel_delta = target_velocity - current_vel
 
         ctrl = self.kps * pos_delta + self.kds * vel_delta
-        return self.add_noise(self.torque_noise, self.torque_noise_type, ctrl, tor_rng)
+        return jnp.clip(
+            self.add_noise(self.torque_noise, self.torque_noise_type, ctrl, tor_rng),
+            -self.ctrl_clip,
+            self.ctrl_clip,
+        )
 
     def get_default_action(self, physics_data: PhysicsData) -> Array:
         """Get the default action (zeros) with the correct shape."""
