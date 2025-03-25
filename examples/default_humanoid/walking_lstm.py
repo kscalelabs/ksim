@@ -1,3 +1,4 @@
+# mypy: disable-error-code="override"
 """Defines simple task for training a walking policy for K-Bot."""
 
 from dataclasses import dataclass
