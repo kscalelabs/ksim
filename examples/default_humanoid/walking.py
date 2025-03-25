@@ -312,6 +312,10 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
+            # The reward for staying healthy should have a large scale. It is
+            # better to use this reward than to use the termination penalty,
+            # because the termination penalty seems harshly penalize
+            # exploration, whereas this reward is more gentle.
             ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, scale=0.5),
             ksim.LinearVelocityTrackingPenalty(scale=-0.1),
             ksim.ActuatorForcePenalty(scale=-0.01),
