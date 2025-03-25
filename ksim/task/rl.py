@@ -298,7 +298,7 @@ class RLConfig(xax.Config):
         value=[0.0, 0.0, 0.5],
         help="The lookat point of the render camera.",
     )
-    make_viz_plots: bool = xax.field(
+    render_plots: bool = xax.field(
         value=False,
         help="Whether to make plots in the viewer.",
     )
@@ -1078,7 +1078,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     render_width=self.config.render_width,
                     render_height=self.config.render_height,
                     ctrl_dt=self.config.ctrl_dt,
-                    make_plots=self.config.make_viz_plots,
+                    make_plots=self.config.render_plots,
                 ) as viewer:
                     viewer.setup_camera(
                         render_distance=self.config.render_distance,
@@ -1087,7 +1087,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         render_lookat=self.config.render_lookat,
                     )
 
-                    if self.config.make_viz_plots:
+                    if self.config.render_plots:
                         ctrl_idx_to_name = {v: k for k, v in get_ctrl_data_idx_by_name(mj_model).items()}
                         viewer.add_plot_group(
                             title="Actions", index_mapping=ctrl_idx_to_name, y_axis_min=-2, y_axis_max=2
@@ -1139,7 +1139,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         viewer.add_commands(dict(engine_variables.commands))
                         viewer.update_and_sync()
 
-                        if self.config.make_viz_plots:
+                        if self.config.render_plots:
                             # Create rewards group on first step
                             if step_id == 0:
                                 # First element is the total reward
