@@ -36,7 +36,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from kmv.viewer import launch_passive
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
-from omegaconf import II, MISSING
+from omegaconf import MISSING
 from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
@@ -223,28 +223,6 @@ class RLConfig(xax.Config):
         help="If provided, save the rendered video to the given path.",
     )
 
-    # Validation parameters.
-    valid_every_n_steps: int | None = xax.field(
-        None,
-        help="Number of training steps to run per validation step",
-    )
-    valid_first_n_steps: int = xax.field(
-        0,
-        help="Treat the first N steps as validation steps",
-    )
-    valid_every_n_seconds: float | None = xax.field(
-        60.0,
-        help="Run validation every N seconds",
-    )
-    valid_first_n_seconds: float | None = xax.field(
-        60.0,
-        help="Run first validation after N seconds",
-    )
-    log_single_traj_every_n_valid_steps: int = xax.field(
-        value=10,
-        help="The number of valid steps between logging a full trajectory video.",
-    )
-
     # Logging parameters.
     log_train_metrics: bool = xax.field(
         value=True,
@@ -254,15 +232,15 @@ class RLConfig(xax.Config):
         value=1,
         help="The number of epochs between logging steps.",
     )
+    log_single_traj_every_n_steps: int = xax.field(
+        value=10,
+        help="The number of steps between logging a full trajectory video.",
+    )
 
     # Training parameters.
     num_envs: int = xax.field(
         value=MISSING,
         help="The number of training environments to run in parallel.",
-    )
-    num_valid_envs: int = xax.field(
-        value=1,
-        help="The number of validation environments to run in parallel.",
     )
     num_batches: int = xax.field(
         value=1,
@@ -271,10 +249,6 @@ class RLConfig(xax.Config):
     rollout_length_seconds: float = xax.field(
         value=MISSING,
         help="The number of seconds to rollout each environment during training.",
-    )
-    eval_rollout_length_seconds: float = xax.field(
-        value=II("rollout_length_seconds"),
-        help="The number of seconds to rollout the model for evaluation.",
     )
 
     # Rendering parameters.
@@ -521,10 +495,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @property
     def rollout_length_steps(self) -> int:
         return round(self.config.rollout_length_seconds / self.config.ctrl_dt)
-
-    @property
-    def eval_rollout_length_steps(self) -> int:
-        return round(self.config.eval_rollout_length_seconds / self.config.ctrl_dt)
 
     def step_engine(
         self,
@@ -944,11 +914,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
-    ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables]:
+    ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, Trajectory, Rewards]:
         def single_step_fn(
             carry: tuple[PyTree, optax.OptState, RolloutVariables],
             rng: PRNGKeyArray,
-        ) -> tuple[tuple[PyTree, optax.OptState, RolloutVariables], Metrics]:
+        ) -> tuple[tuple[PyTree, optax.OptState, RolloutVariables], tuple[Metrics, Trajectory, Rewards]]:
             model_arr, opt_state, rollout_variables = carry
             rng, update_rng = jax.random.split(rng)
 
@@ -980,9 +950,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 termination=FrozenDict(self.get_termination_metrics(trajectories)),
             )
 
-            return (model_arr, opt_state, rollout_variables), metrics
+            # Saving the last trajectory for visualization.
+            final_trajectory = jax.tree.map(lambda arr: arr[-1], trajectories)
+            final_rewards = jax.tree.map(lambda arr: arr[-1], rewards)
 
-        ((model_arr, opt_state, rollout_variables), metrics) = jax.lax.scan(
+            return (model_arr, opt_state, rollout_variables), (metrics, final_trajectory, final_rewards)
+
+        ((model_arr, opt_state, rollout_variables), (metrics, final_trajectories, final_rewards)) = jax.lax.scan(
             single_step_fn,
             (model_arr, opt_state, rollout_variables),
             jax.random.split(rng, self.config.epochs_per_log_step),
@@ -991,7 +965,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x, metrics)
 
-        return model_arr, opt_state, metrics, rollout_variables
+        # Metrics, final_trajectories, final_rewards batch dim of epochs.
+        # Rollout variables has batch dim of num_envs and are used next rollout.
+        return model_arr, opt_state, metrics, rollout_variables, final_trajectories, final_rewards
 
     def on_context_stop(self, step: str, elapsed_time: float) -> None:
         super().on_context_stop(step, elapsed_time)
@@ -1230,16 +1206,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng=train_rngs,
             )
 
-            # Builds the variables for the validation environment.
-            valid_rngs = jax.random.split(rng, self.config.num_valid_envs)
-            valid_mjx_models = randomization_fn(mjx_model, rollout_constants.randomization_generators, valid_rngs)
-            valid_rollout_variables = RolloutVariables(
-                carry=carry_fn(valid_rngs),
-                commands=command_fn(valid_rngs, rollout_constants.command_generators),
-                physics_state=state_fn(valid_mjx_models, valid_rngs),
-                rng=valid_rngs,
-            )
-
             state = self.on_training_start(state)
             state.num_samples = 1  # prevents from checkpointing at start
 
@@ -1257,37 +1223,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             try:
                 while not self.is_training_over(state):
-                    # Validate by sampling and visualizing a single trajectory.
-                    if self.valid_step_timer.is_valid_step(state):
-                        state.raw_phase = "valid"
-                        state.num_valid_steps += 1
-                        state.num_valid_samples += self.eval_rollout_length_steps
-
-                        # Rolls out a new trajectory.
-                        trajectories, rewards, valid_rollout_variables = self._vmapped_unroll(
-                            physics_models=valid_mjx_models,
-                            model_arr=model_arr,
-                            model_static=model_static,
-                            engine=engine,
-                            rollout_constants=rollout_constants,
-                            num_steps=self.eval_rollout_length_steps,
-                            rollout_variables=valid_rollout_variables,
-                        )
-
-                        # Logs statistics from the trajectory.
-                        trajectory = jax.tree.map(lambda arr: arr[0], trajectories)
-                        reward = jax.tree.map(lambda arr: arr[0], rewards)
-
-                        if state.num_valid_steps % self.config.log_single_traj_every_n_valid_steps == 0:
-                            self.log_single_trajectory(trajectory, commands, reward, mj_model)
-                        self.log_state_timers(state)
-                        self.write_logs(state)
-
                     state = self.on_step_start(state)
+                    state.raw_phase = "train"
 
                     # Optimizes the model on that trajectory.
                     rng, update_rng = jax.random.split(rng)
-                    model_arr, opt_state, metrics, rollout_variables = self._rl_train_loop_step(
+                    (
+                        model_arr,
+                        opt_state,
+                        metrics,
+                        rollout_variables,
+                        final_trajectories,
+                        final_rewards,
+                    ) = self._rl_train_loop_step(
                         rng=update_rng,
                         physics_models=mjx_models,
                         model_arr=model_arr,
@@ -1299,17 +1247,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         rollout_variables=rollout_variables,
                     )
 
-                    state.raw_phase = "train"
                     state.num_steps += self.config.epochs_per_log_step
                     state.num_samples += (
                         self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
                     )
 
+                    if state.num_steps % self.config.log_single_traj_every_n_steps == 0:
+                        final_trajectory = jax.tree.map(lambda arr: arr[-1], final_trajectories)
+                        final_rewards = jax.tree.map(lambda arr: arr[-1], final_rewards)
+                        self.log_single_trajectory(final_trajectory, commands, final_rewards, mj_model)
+
                     self.log_train_metrics(metrics)
                     self.log_state_timers(state)
                     self.write_logs(state)
-
-                    state = self.on_step_end(state)
 
                     if self.should_checkpoint(state):
                         model = eqx.combine(model_arr, model_static)
@@ -1319,6 +1269,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             opt_state=opt_state,
                             state=state,
                         )
+
+                    state = self.on_step_end(state)
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
