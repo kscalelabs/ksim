@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Generic, TypeVar
 
 import attrs
 import distrax
@@ -18,7 +19,7 @@ from mujoco import mjx
 
 import ksim
 
-OBS_SIZE = 336
+OBS_SIZE = 330
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
@@ -252,7 +253,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
 
-class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
+Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
+
+
+class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -467,7 +471,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.default_humanoid.walking run_environment=True
+    #   python -m examples.default_humanoid.walking
     # To visualize the environment, use the following command:
     #   python -m examples.default_humanoid.walking run_environment=True
     # On MacOS or other devices with less memory, you can change the number

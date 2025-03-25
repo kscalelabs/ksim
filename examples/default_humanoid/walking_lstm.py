@@ -3,25 +3,17 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-import attrs
 import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import mujoco
-import optax
 import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
-from kscale.web.gen.api import JointMetadataOutput
-from mujoco import mjx
 
 import ksim
 
-OBS_SIZE = 336
-CMD_SIZE = 2
-NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_OUTPUTS = 21
+from .walking import CMD_SIZE, NUM_INPUTS, NUM_OUTPUTS, OBS_SIZE, HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 HIDDEN_SIZE = 128  # `_s`
 DEPTH = 2
@@ -32,62 +24,6 @@ DEPTH = 2
 class AuxOutputs:
     log_probs: Array
     values: Array
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHForwardReward(ksim.Reward):
-    """Incentives forward movement."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        # Take just the x velocity component
-        x_delta = jnp.clip(trajectory.qvel[..., 0], -1.0, 1.0)
-        return x_delta
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHControlPenalty(ksim.Reward):
-    """Legacy default humanoid control cost that penalizes squared action magnitude."""
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return jnp.sum(jnp.square(trajectory.action), axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DHHealthyReward(ksim.Reward):
-    """Legacy default humanoid healthy reward that gives binary reward based on height."""
-
-    healthy_z_lower: float = attrs.field(default=0.5)
-    healthy_z_upper: float = attrs.field(default=1.5)
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        height = trajectory.qpos[:, 2]
-        is_healthy = jnp.where(height < self.healthy_z_lower, 0.0, 1.0)
-        is_healthy = jnp.where(height > self.healthy_z_upper, 0.0, is_healthy)
-        return is_healthy
-
-
-@attrs.define(frozen=True)
-class DHJointVelocityObservation(ksim.Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
-        qvel = state.qvel  # (N,)
-        return qvel
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
-
-@attrs.define(frozen=True)
-class DHJointPositionObservation(ksim.Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
-        qpos = state.qpos[2:]  # (N,)
-        return qpos
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
 class MultiLayerLSTM(eqx.Module):
@@ -260,153 +196,11 @@ class DefaultHumanoidModel(eqx.Module):
 
 
 @dataclass
-class HumanoidWalkingTaskConfig(ksim.PPOConfig):
-    """Config for the humanoid walking task."""
-
-    # Optimizer parameters.
-    learning_rate: float = xax.field(
-        value=1e-4,
-        help="Learning rate for PPO.",
-    )
-    max_grad_norm: float = xax.field(
-        value=0.5,
-        help="Maximum gradient norm for clipping.",
-    )
-    adam_weight_decay: float = xax.field(
-        value=0.0,
-        help="Weight decay for the Adam optimizer.",
-    )
-
-    # Mujoco parameters.
-    use_mit_actuators: bool = xax.field(
-        value=False,
-        help="Whether to use the MIT actuator model, where the actions are position commands",
-    )
-    kp: float = xax.field(
-        value=1.0,
-        help="The Kp for the actuators",
-    )
-    kd: float = xax.field(
-        value=0.1,
-        help="The Kd for the actuators",
-    )
-    armature: float = xax.field(
-        value=1e-2,
-        help="A value representing the effective inertia of the actuator armature",
-    )
-    friction: float = xax.field(
-        value=1e-6,
-        help="The dynamic friction loss for the actuator",
-    )
-
-    # Rendering parameters.
-    render_track_body_id: int | None = xax.field(
-        value=0,
-        help="The body id to track with the render camera.",
-    )
-
-    # Checkpointing parameters.
-    export_for_inference: bool = xax.field(
-        value=False,
-        help="Whether to export the model for inference.",
-    )
+class HumanoidWalkingLSTMTaskConfig(HumanoidWalkingTaskConfig):
+    pass
 
 
-class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
-    def get_optimizer(self) -> optax.GradientTransformation:
-        """Builds the optimizer.
-
-        This provides a reasonable default optimizer for training PPO models,
-        but can be overridden by subclasses who want to do something different.
-        """
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            (
-                optax.adam(self.config.learning_rate)
-                if self.config.adam_weight_decay == 0.0
-                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
-            ),
-        )
-
-        return optimizer
-
-    def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
-        mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
-
-        mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
-        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
-
-        return mj_model
-
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        return ksim.get_joint_metadata(
-            mj_model,
-            kp=self.config.kp,
-            kd=self.config.kd,
-            armature=self.config.armature,
-            friction=self.config.friction,
-        )
-
-    def get_actuators(
-        self, physics_model: ksim.PhysicsModel, metadata: dict[str, JointMetadataOutput] | None = None
-    ) -> ksim.Actuators:
-        if self.config.use_mit_actuators:
-            if metadata is None:
-                raise ValueError("Metadata is required for MIT actuators")
-            return ksim.MITPositionActuators(physics_model, metadata)
-        else:
-            return ksim.TorqueActuators()
-
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
-        return [
-            ksim.WeightRandomization(scale=0.01),
-        ]
-
-    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return []
-
-    def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
-        return [
-            ksim.RandomJointPositionReset(scale=0.01),
-            ksim.RandomJointVelocityReset(scale=0.01),
-        ]
-
-    def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
-        return [
-            DHJointPositionObservation(),
-            DHJointVelocityObservation(),
-            ksim.ActuatorForceObservation(),
-            ksim.CenterOfMassInertiaObservation(),
-            ksim.CenterOfMassVelocityObservation(),
-        ]
-
-    def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
-        return [
-            ksim.LinearVelocityCommand(x_scale=0.0, y_scale=0.0, switch_prob=0.02, zero_prob=0.3),
-        ]
-
-    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
-            DHForwardReward(scale=0.5),
-            DHControlPenalty(scale=-0.01),
-            DHHealthyReward(scale=0.75),
-            # ksim.TerminationPenalty(scale=-30.0),
-            # ksim.JointVelocityPenalty(scale=-0.01),
-            # These seem necessary to prevent some physics artifacts.
-            # ksim.LinearVelocityZPenalty(scale=-0.001),
-            # ksim.AngularVelocityXYPenalty(scale=-0.001),
-        ]
-
-    def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
-        return [
-            ksim.BadZTermination(unhealthy_z_lower=0.8, unhealthy_z_upper=4.0),
-            ksim.FastAccelerationTermination(),
-        ]
-
+class HumanoidWalkingLSTMTask(HumanoidWalkingTask[HumanoidWalkingLSTMTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
@@ -548,10 +342,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
 
 if __name__ == "__main__":
-    # python -m examples.default_humanoid.walking run_environment=True
-    HumanoidWalkingTask.launch(
-        HumanoidWalkingTaskConfig(
-            num_envs=4096,
+    # To run training, use the following command:
+    #   python -m examples.default_humanoid.walking_lstm
+    # To visualize the environment, use the following command:
+    #   python -m examples.default_humanoid.walking_lstm run_environment=True
+    HumanoidWalkingLSTMTask.launch(
+        HumanoidWalkingLSTMTaskConfig(
+            num_envs=2048,
             num_batches=64,
             num_passes=8,
             # Simulation parameters.
