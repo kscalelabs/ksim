@@ -298,6 +298,10 @@ class RLConfig(xax.Config):
         value=[0.0, 0.0, 0.5],
         help="The lookat point of the render camera.",
     )
+    render_plots: bool = xax.field(
+        value=False,
+        help="Whether to make plots in the viewer.",
+    )
 
     # Engine parameters.
     ctrl_dt: float = xax.field(
@@ -1074,7 +1078,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     render_width=self.config.render_width,
                     render_height=self.config.render_height,
                     ctrl_dt=self.config.ctrl_dt,
-                    make_plots=True,
+                    make_plots=self.config.render_plots,
                 ) as viewer:
                     viewer.setup_camera(
                         render_distance=self.config.render_distance,
@@ -1083,11 +1087,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         render_lookat=self.config.render_lookat,
                     )
 
-                    ctrl_idx_to_name = {v: k for k, v in get_ctrl_data_idx_by_name(mj_model).items()}
-                    viewer.add_plot_group(title="Actions", index_mapping=ctrl_idx_to_name, y_axis_min=-2, y_axis_max=2)
-
-                    # We'll set up reward component plots in the first iteration
-                    reward_component_mapping = None
+                    if self.config.render_plots:
+                        ctrl_idx_to_name = {v: k for k, v in get_ctrl_data_idx_by_name(mj_model).items()}
+                        viewer.add_plot_group(
+                            title="Actions", index_mapping=ctrl_idx_to_name, y_axis_min=-2, y_axis_max=2
+                        )
+                        # We'll set up reward component plots in the first iteration
+                        reward_component_mapping = None
 
                     for step_id in iterator:
                         # We need to manually sync the data back and forth between
@@ -1133,26 +1139,27 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         viewer.add_commands(dict(engine_variables.commands))
                         viewer.update_and_sync()
 
-                        # Create rewards group on first step
-                        if step_id == 0:
-                            # First element is the total reward
-                            # Remaining elements are the individual reward components
-                            component_names = list(step_rewards.components.keys())
-                            reward_component_mapping = {0: "total_reward"}
-                            for i, name in enumerate(component_names):
-                                reward_component_mapping[i + 1] = name
-                            viewer.add_plot_group(title="Reward Components", index_mapping=reward_component_mapping)
+                        if self.config.render_plots:
+                            # Create rewards group on first step
+                            if step_id == 0:
+                                # First element is the total reward
+                                # Remaining elements are the individual reward components
+                                component_names = list(step_rewards.components.keys())
+                                reward_component_mapping = {0: "total_reward"}
+                                for i, name in enumerate(component_names):
+                                    reward_component_mapping[i + 1] = name
+                                viewer.add_plot_group(title="Reward Components", index_mapping=reward_component_mapping)
 
-                        # Update reward components
-                        reward_values = [float(step_rewards.total)]
-                        reward_values.extend([float(val) for val in step_rewards.components.values()])
-                        viewer.update_plot_group("Reward Components", reward_values)
+                            # Update reward components
+                            reward_values = [float(step_rewards.total)]
+                            reward_values.extend([float(val) for val in step_rewards.components.values()])
+                            viewer.update_plot_group("Reward Components", reward_values)
 
-                        # Update actions
-                        # Convert actions to a flat list of floats
-                        action_values = np.array(engine_variables.physics_state.most_recent_action, dtype=float)
-                        action_values_flat = [float(x) for x in action_values.flatten().tolist()]
-                        viewer.update_plot_group("Actions", action_values_flat)
+                            # Update actions
+                            # Convert actions to a flat list of floats
+                            action_values = np.array(engine_variables.physics_state.most_recent_action, dtype=float)
+                            action_values_flat = [float(x) for x in action_values.flatten().tolist()]
+                            viewer.update_plot_group("Actions", action_values_flat)
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
