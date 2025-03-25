@@ -21,7 +21,7 @@ from typing import Literal
 import attrs
 import jax
 import xax
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import get_sensor_data_idxs_by_name
@@ -44,11 +44,12 @@ class Observation(ABC):
     """Base class for observations."""
 
     @abstractmethod
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
-        """Gets the observation from the state.
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
+        """Gets the observation from the state and carry.
 
         Args:
             state: The state of the physics model
+            carry: The carry of the engine
             rng: A PRNGKeyArray to use for the observation
 
         Returns:
@@ -67,9 +68,9 @@ class Observation(ABC):
         """
         return observation
 
-    def __call__(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def __call__(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         obs_rng, noise_rng = jax.random.split(rng)
-        raw_observation = self.observe(state, obs_rng)
+        raw_observation = self.observe(state, carry, obs_rng)
         return self.add_noise(raw_observation, noise_rng)
 
     def get_name(self) -> str:
@@ -85,7 +86,7 @@ class Observation(ABC):
 class BasePositionObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[0:3]  # (3,)
         return qpos
 
@@ -97,7 +98,7 @@ class BasePositionObservation(Observation):
 class BaseOrientationObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[3:7]  # (4,)
         return qpos
 
@@ -109,7 +110,7 @@ class BaseOrientationObservation(Observation):
 class BaseLinearVelocityObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[0:3]  # (3,)
         return qvel
 
@@ -121,7 +122,7 @@ class BaseLinearVelocityObservation(Observation):
 class BaseAngularVelocityObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[3:6]  # (3,)
         return qvel
 
@@ -133,7 +134,7 @@ class BaseAngularVelocityObservation(Observation):
 class JointPositionObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         qpos = state.qpos[7:]  # (N,)
         return qpos
 
@@ -145,7 +146,7 @@ class JointPositionObservation(Observation):
 class JointVelocityObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         qvel = state.qvel[6:]  # (N,)
         return qvel
 
@@ -157,7 +158,7 @@ class JointVelocityObservation(Observation):
 class CenterOfMassInertiaObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         # Skip the first entry (world body) and flatten
         cinert = state.cinert[1:].ravel()  # Shape will be (nbody-1, 10)
         return cinert
@@ -170,7 +171,7 @@ class CenterOfMassInertiaObservation(Observation):
 class CenterOfMassVelocityObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         # Skip the first entry (world body) and flatten
         cvel = state.cvel[1:].ravel()  # Shape will be (nbody-1, 6)
         return cvel
@@ -183,7 +184,7 @@ class CenterOfMassVelocityObservation(Observation):
 class ActuatorForceObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         return state.actuator_force  # Shape will be (nu,)
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
@@ -228,9 +229,18 @@ class SensorObservation(Observation):
     def get_name(self) -> str:
         return f"{self.sensor_name}_obs"
 
-    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
         sensor_data = state.sensordata[self.sensor_idx_range[0] : self.sensor_idx_range[1]].ravel()
         return sensor_data
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
         return add_noise(observation, rng, self.noise_type, self.noise)
+
+
+@attrs.define(frozen=True)
+class HistoryObservation(Observation):
+
+    def observe(self, state: PhysicsData, carry: PyTree, rng: PRNGKeyArray) -> Array:
+        if not isinstance(carry, Array):
+            raise ValueError(f"History observation carry must be an array, got {type(carry)}")
+        return carry
