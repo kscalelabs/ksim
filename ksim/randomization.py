@@ -8,6 +8,7 @@ __all__ = [
     "ArmatureRandomization",
     "TorsoMassRandomization",
     "JointDampingRandomization",
+    "JointZeroPositionRandomization",
 ]
 
 from abc import ABC, abstractmethod
@@ -54,7 +55,7 @@ class StaticFrictionRandomization(Randomization):
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
         """Randomize the static friction of the robot."""
         rng, key = jax.random.split(rng)
-        frictionloss = model.dof_frictionloss[6:] + jax.random.uniform(
+        frictionloss = model.dof_frictionloss[6:] * jax.random.uniform(
             key,
             shape=(model.dof_frictionloss.shape[0] - 6,),
             minval=self.scale_lower,
@@ -134,11 +135,13 @@ class TorsoMassRandomization(Randomization):
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
         """Randomize the torso mass of the robot."""
         rng, key = jax.random.split(rng)
-        dmass = jax.random.uniform(key, minval=self.scale_lower, maxval=self.scale_upper)
+        new_mass = model.body_mass[self.torso_body_id] + jax.random.uniform(
+            key, minval=self.scale_lower, maxval=self.scale_upper
+        )
         new_body_mass = jnp.concatenate(
             [
                 model.body_mass[: self.torso_body_id],
-                jnp.array([dmass]),
+                jnp.array([new_mass]),
                 model.body_mass[self.torso_body_id + 1 :],
             ]
         )
@@ -179,3 +182,23 @@ class JointDampingRandomization(Randomization):
         dof_damping = jnp.concatenate([model.dof_damping[:6], kd])
 
         return update_model_field(model, "dof_damping", dof_damping)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointZeroPositionRandomization(Randomization):
+    """Randomizes the joint zero position."""
+
+    scale_lower: float = attrs.field(default=-0.1)
+    scale_upper: float = attrs.field(default=0.1)
+
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
+        rng, key = jax.random.split(rng)
+        qpos_0 = model.qpos0
+        # Skip the first 7 DOFs (free joint - xyz + quat)
+        qpos_0 = qpos_0.at[7:].set(
+            qpos_0[7:]
+            + jax.random.uniform(
+                key, shape=(model.qpos0.shape[0] - 7,), minval=self.scale_lower, maxval=self.scale_upper
+            )
+        )
+        return update_model_field(model, "qpos0", qpos_0)

@@ -12,8 +12,10 @@ from typing import Self
 import attrs
 import jax
 import jax.numpy as jnp
+import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from mujoco import mjx
 
 from ksim.types import PhysicsData
 from ksim.utils.mujoco import update_data_field
@@ -31,7 +33,9 @@ class Event(ABC):
     probability: float = attrs.field(validator=event_probability_validator)
 
     @abstractmethod
-    def __call__(self, persistent_data: PyTree, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, PyTree]:
+    def __call__(
+        self, persistent_data: PyTree, data: PhysicsData, dt: float, rng: PRNGKeyArray
+    ) -> tuple[PhysicsData, PyTree]:
         """Apply the event to the data."""
 
     def get_name(self) -> str:
@@ -46,20 +50,16 @@ class Event(ABC):
 @attrs.define(frozen=True, kw_only=True)
 class PushEventInfo:
     remaining_interval: Array
-    linear_force: Array
-    angular_force: Array
 
     def tree_flatten(self) -> tuple[tuple, None]:
-        return (self.remaining_interval, self.linear_force, self.angular_force), None
+        return (self.remaining_interval,), None
 
     @classmethod
     def tree_unflatten(cls, aux_data: None, children: tuple) -> Self:
         """Reconstruct the class from flattened representation."""
-        remaining_interval, linear_force, angular_force = children
+        (remaining_interval,) = children
         return cls(
             remaining_interval=remaining_interval,
-            linear_force=linear_force,
-            angular_force=angular_force,
         )
 
 
@@ -75,80 +75,67 @@ class PushEvent(Event):
         self,
         persistent_data: PushEventInfo,
         data: PhysicsData,
+        dt: float,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, PushEventInfo]:
         """Apply the event to the data.
 
         Persistent data has the following structure:
-        (
-            remaining_interval: Array,
-            linear_force: (Array, Array, Array),
-            angular_force: (Array, Array, Array),
-        )
+        remaining_interval: Array  # Remaining time in seconds before next push
         """
         # Split the RNG for different operations
         rng1, rng2 = jax.random.split(rng)
 
-        # Determine whether to reset based on interval and probability
-        needs_reset = persistent_data.remaining_interval[0] <= 0.0
+        needs_reset = persistent_data.remaining_interval <= 0.0
         reset_prob = jax.random.uniform(rng1)
         should_reset = needs_reset & (reset_prob < self.probability)
 
-        # Generate new values
         rng_interval, rng_linear, rng_angular = jax.random.split(rng2, 3)
 
         # Calculate new interval (either new random interval or decremented existing one)
         interval_range = self.interval_range
-        random_interval = jax.random.randint(rng_interval, (1,), minval=interval_range[0], maxval=interval_range[1])
-        continued_interval = persistent_data.remaining_interval - 1
+        # Generate random interval in seconds - ensure it's float32
+        random_interval = jax.random.uniform(
+            rng_interval, (), minval=jnp.float32(interval_range[0]), maxval=jnp.float32(interval_range[1])
+        )
+
+        # Decrement by physics timestep
+        dt_float32 = jnp.float32(dt)
+        continued_interval = persistent_data.remaining_interval - dt_float32
 
         # Select new interval value
         new_interval = jnp.where(
             should_reset,
             random_interval,
-            jnp.where(needs_reset, persistent_data.remaining_interval, continued_interval),
+            jnp.where(needs_reset, jnp.float32(0.0), continued_interval),
         )
 
-        # Generate random forces if needed
-        random_linear_force = jax.random.uniform(
-            rng_linear,
-            (3,),
-            minval=-self.linear_force_scale,
-            maxval=self.linear_force_scale,
-        )
-        random_angular_force = jax.random.uniform(
-            rng_angular,
-            (3,),
-            minval=-self.angular_force_scale,
-            maxval=self.angular_force_scale,
+        # Generate random forces
+        random_linear_force = (
+            jax.random.uniform(
+                rng_linear,
+                (3,),
+                minval=-self.linear_force_scale,
+                maxval=self.linear_force_scale,
+            )
+            + data.qvel[0:3]
         )
 
-        # Select forces based on reset condition
-        new_linear_force = jnp.where(should_reset, random_linear_force, persistent_data.linear_force)
-        new_angular_force = jnp.where(should_reset, random_angular_force, persistent_data.angular_force)
+        # Apply forces conditionally using where instead of lax.cond
+        match type(data):
+            case mujoco.MjData:
+                new_data_qvel = data.qvel.copy()
+                new_data_qvel[0:3] = jnp.where(should_reset, random_linear_force, data.qvel[0:3])
+            case mjx.Data:
+                new_data_qvel = data.qvel.at[0:3].set(jnp.where(should_reset, random_linear_force, data.qvel[0:3]))
 
-        # Apply force when appropriate (either continuing or newly reset)
-        should_apply_force = (~needs_reset) | should_reset
-        should_apply_force_scalar = jnp.bool_(should_apply_force)
-
-        new_data_qvel = data.qvel
-        new_data_qvel = new_data_qvel.at[0:3].set(new_linear_force)
-
-        updated_data = jax.lax.cond(
-            should_apply_force_scalar,
-            lambda: update_data_field(data, "qvel", new_data_qvel),
-            lambda: data,
-        )
+        # Update data with new velocities
+        updated_data = update_data_field(data, "qvel", new_data_qvel)
 
         return updated_data, PushEventInfo(
             remaining_interval=new_interval,
-            linear_force=new_linear_force,
-            angular_force=new_angular_force,
         )
 
     def get_initial_info(self) -> PushEventInfo:
-        return PushEventInfo(
-            remaining_interval=jnp.zeros(1),
-            linear_force=jnp.zeros(3),
-            angular_force=jnp.zeros(3),
-        )
+        """Initialize with a float32 zero value for consistent typing."""
+        return PushEventInfo(remaining_interval=jnp.float32(0.0))
