@@ -143,7 +143,7 @@ class MjxEngine(PhysicsEngine):
             new_event_info = {}
             for event in self.events:
                 rng, event_rng = jax.random.split(rng)
-                data, event_info = event(event_info[event.get_name()], data, event_rng)
+                data, event_info = event(event_info[event.get_name()], data, physics_model.opt.timestep, event_rng)
                 new_event_info[event.get_name()] = event_info
 
             rng, ctrl_rng = jax.random.split(rng)

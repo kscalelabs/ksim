@@ -31,7 +31,7 @@ class Event(ABC):
     probability: float = attrs.field(validator=event_probability_validator)
 
     @abstractmethod
-    def __call__(self, persistent_data: PyTree, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, PyTree]:
+    def __call__(self, persistent_data: PyTree, data: PhysicsData, dt: float, rng: PRNGKeyArray) -> tuple[PhysicsData, PyTree]:
         """Apply the event to the data."""
 
     def get_name(self) -> str:
@@ -71,6 +71,7 @@ class PushEvent(Event):
         self,
         persistent_data: PushEventInfo,
         data: PhysicsData,
+        dt: float,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, PushEventInfo]:
         """Apply the event to the data.
@@ -98,7 +99,7 @@ class PushEvent(Event):
         )
 
         # Decrement by physics timestep (in seconds)
-        continued_interval = persistent_data.remaining_interval - data.dt
+        continued_interval = persistent_data.remaining_interval - dt
 
         # Select new interval value
         new_interval = jnp.where(
