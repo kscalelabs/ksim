@@ -125,7 +125,6 @@ def compute_step_rewards(
     return Rewards(total=total_reward, components=FrozenDict(rewards))
 
 
-@xax.jit(static_argnames=["reward_generators", "ctrl_dt"])
 def get_rewards(
     trajectory: Trajectory,
     reward_generators: Collection[Reward],
@@ -763,65 +762,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         frames, fps = self.render_trajectory_video(trajectories, commands, mj_model)
         self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
 
-    @xax.jit(static_argnames=["self", "model_static", "engine", "rollout_constants", "num_steps"])
-    def _single_unroll(
-        self,
-        physics_model: PhysicsModel,
-        model_arr: PyTree,
-        model_static: PyTree,
-        engine: PhysicsEngine,
-        rollout_constants: RolloutConstants,
-        rollout_variables: RolloutVariables,
-        num_steps: int,
-    ) -> tuple[Trajectory, Rewards, RolloutVariables]:
-        # Recombines the mutable and static parts of the model.
-        model = eqx.combine(model_arr, model_static)
-
-        def scan_fn(carry: RolloutVariables, _: None) -> tuple[RolloutVariables, Trajectory]:
-            trajectory, next_rollout_variables = self.step_engine(
-                physics_model=physics_model,
-                model=model,
-                engine=engine,
-                rollout_constants=rollout_constants,
-                rollout_variables=carry,
-            )
-            return next_rollout_variables, trajectory
-
-        # Scans the engine for the desired number of steps.
-        next_rollout_variables, trajectory = jax.lax.scan(scan_fn, rollout_variables, length=num_steps)
-
-        # Gets the rewards.
-        reward = get_rewards(
-            trajectory=trajectory,
-            reward_generators=rollout_constants.reward_generators,
-            ctrl_dt=self.config.ctrl_dt,
-            clip_max=self.config.reward_clip_max,
-        )
-
-        return trajectory, reward, next_rollout_variables
-
-    @xax.jit(static_argnames=["self", "model_static", "engine", "rollout_constants", "num_steps"])
-    def _vmapped_unroll(
-        self,
-        physics_models: PhysicsModel,
-        model_arr: PyTree,
-        model_static: PyTree,
-        engine: PhysicsEngine,
-        rollout_constants: RolloutConstants,
-        rollout_variables: RolloutVariables,
-        num_steps: int,
-    ) -> tuple[Trajectory, Rewards, RolloutVariables]:
-        vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None, 0, None))
-        return vmapped_unroll(
-            physics_models,
-            model_arr,
-            model_static,
-            engine,
-            rollout_constants,
-            rollout_variables,
-            num_steps,
-        )
-
     @abstractmethod
     def update_model(
         self,
@@ -903,7 +843,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             **{key: (value / num_terms[:, None]).mean() for key, value in trajectories.termination_components.items()},
         }
 
-    @xax.jit(static_argnames=["self", "model_static", "optimizer", "engine", "rollout_constants"])
+    @eqx.filter_jit
     def _rl_train_loop_step(
         self,
         rng: PRNGKeyArray,
@@ -916,6 +856,42 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
     ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, Trajectory, Rewards]:
+
+        def single_unroll(
+            physics_model: PhysicsModel,
+            model_arr: PyTree,
+            model_static: PyTree,
+            engine: PhysicsEngine,
+            rollout_constants: RolloutConstants,
+            rollout_variables: RolloutVariables,
+            num_steps: int,
+        ) -> tuple[Trajectory, Rewards, RolloutVariables]:
+            # Recombines the mutable and static parts of the model.
+            model = eqx.combine(model_arr, model_static)
+
+            def scan_fn(carry: RolloutVariables, _: None) -> tuple[RolloutVariables, Trajectory]:
+                trajectory, next_rollout_variables = self.step_engine(
+                    physics_model=physics_model,
+                    model=model,
+                    engine=engine,
+                    rollout_constants=rollout_constants,
+                    rollout_variables=carry,
+                )
+                return next_rollout_variables, trajectory
+
+            # Scans the engine for the desired number of steps.
+            next_rollout_variables, trajectory = jax.lax.scan(scan_fn, rollout_variables, length=num_steps)
+
+            # Gets the rewards.
+            reward = get_rewards(
+                trajectory=trajectory,
+                reward_generators=rollout_constants.reward_generators,
+                ctrl_dt=self.config.ctrl_dt,
+                clip_max=self.config.reward_clip_max,
+            )
+
+            return trajectory, reward, next_rollout_variables
+
         def single_step_fn(
             carry: tuple[PyTree, optax.OptState, RolloutVariables],
             rng: PRNGKeyArray,
@@ -924,14 +900,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, update_rng = jax.random.split(rng)
 
             # Rolls out a new trajectory.
-            trajectories, rewards, rollout_variables = self._vmapped_unroll(
-                physics_models=physics_models,
-                model_arr=model_arr,
-                model_static=model_static,
-                engine=engine,
-                rollout_constants=rollout_constants,
-                rollout_variables=rollout_variables,
-                num_steps=self.rollout_length_steps,
+            vmapped_unroll = jax.vmap(single_unroll, in_axes=(0, None, None, None, None, 0, None))
+            trajectories, rewards, rollout_variables = vmapped_unroll(
+                physics_models,
+                model_arr,
+                model_static,
+                engine,
+                rollout_constants,
+                rollout_variables,
+                self.rollout_length_steps,
             )
 
             # Runs update on the previous trajectory.
@@ -1162,6 +1139,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
+    def model_partition_fn(self, item: Any) -> bool:  # noqa: ANN401
+        return eqx.is_inexact_array(item)
+
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
         with self:
@@ -1195,7 +1175,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # JAX requires that we partition the model into mutable and static
             # parts in order to use lax.scan, so that `arr` can be a PyTree.`
-            model_arr, model_static = eqx.partition(model, eqx.is_inexact_array)
+            model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
             # Defines the vectorized initialization functions.
             randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, 0))
