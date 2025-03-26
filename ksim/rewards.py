@@ -24,7 +24,6 @@ import logging
 from abc import ABC, abstractmethod
 
 import attrs
-import jax
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array
@@ -252,7 +251,7 @@ class ActuatorJerkPenalty(Reward):
 class FeetSlipPenalty(Reward):
     """Penalty for feet slipping."""
 
-    norm: xax.NormType = attrs.field(default="l1")
+    norm: xax.NormType = attrs.field(default="l2")
     observation_name: str = attrs.field(default="feet_contact_observation")
     command_name: str = attrs.field(default="linear_velocity_command")
     com_vel_obs_name: str = attrs.field(default="center_of_mass_velocity_observation")
@@ -277,16 +276,30 @@ class FeetContactPenalty(Reward):
     command_vel_scale: float = attrs.field(default=0.02)
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        if self.observation_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
-        feet_positions = trajectory.obs[self.observation_name]  # shape: (n_feet, 3)
+        if self.position_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.position_obs_name} not found; add it as an observation in your task.")
+        if self.contact_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.contact_obs_name} not found; add it as an observation in your task.")
+
+        feet_pos_flat = trajectory.obs[self.position_obs_name]
+        contact_mask = trajectory.obs[self.contact_obs_name].astype(bool)
         command = trajectory.command[self.command_name]
-        contact_mask = trajectory.obs[self.contact_obs_name]
 
-        jax.lax.cond(jnp.sum(contact_mask) == 0, lambda: jnp.array([0.0]), lambda: jnp.array([0.0]))
+        num_envs = feet_pos_flat.shape[0]
+        feet_positions = feet_pos_flat.reshape(num_envs, 2, 3)
+        contact_sum = jnp.sum(contact_mask, axis=1)
+        one_contact_env_mask = contact_sum == 1
 
-        contact_positions = feet_positions[contact_mask]
-        non_contact_positions = feet_positions[~contact_mask]
-        pos_diff = xax.get_norm(non_contact_positions - contact_positions, self.norm)
-        reward = jnp.maximum(pos_diff - self.command_vel_scale * jnp.abs(command[..., 0]), 0.0)
-        return reward
+        contact_foot_idx = jnp.argmax(contact_mask, axis=1)
+        non_contact_foot_idx = 1 - contact_foot_idx
+
+        contact_pos = jnp.take_along_axis(feet_positions, contact_foot_idx[:, None, None], axis=1).squeeze(axis=1)
+        non_contact_pos = jnp.take_along_axis(feet_positions, non_contact_foot_idx[:, None, None], axis=1).squeeze(
+            axis=1
+        )
+
+        pos_diff_norm = xax.get_norm(non_contact_pos - contact_pos, self.norm).sum(axis=-1)
+        cmd_term = self.command_vel_scale * jnp.abs(command[..., 0])
+        reward_value = pos_diff_norm - cmd_term
+
+        return jnp.where(one_contact_env_mask, jnp.maximum(reward_value, 0.0), jnp.zeros_like(reward_value))

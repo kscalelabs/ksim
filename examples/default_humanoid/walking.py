@@ -128,7 +128,7 @@ class DefaultHumanoidCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 5,  # 3 for lin vel obs, 2 for feet contact
+            in_size=NUM_INPUTS + 11,  # 3 for lin vel obs, 2 for feet contact, 6 for feet position
             out_size=1,  # Always output a single critic value.
             width_size=64,
             depth=5,
@@ -146,6 +146,7 @@ class DefaultHumanoidCritic(eqx.Module):
         lin_vel_obs_3: Array,
         lin_vel_cmd_n: Array,
         feet_contact_obs_n: Array,
+        feet_pos_obs_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -157,9 +158,10 @@ class DefaultHumanoidCritic(eqx.Module):
                 lin_vel_obs_3,
                 lin_vel_cmd_n,
                 feet_contact_obs_n,
+                feet_pos_obs_n,
             ],
             axis=-1,
-        )  # (NUM_INPUTS + 5)
+        )  # (NUM_INPUTS + 11)
         return self.mlp(x_n)
 
 
@@ -315,12 +317,17 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 foot_right="foot1_right",
                 floor_geom_id="floor",
             ),
+            ksim.FeetPositionObservation.create(
+                physics_model=physics_model,
+                foot_left="foot1_left",
+                foot_right="foot1_right",
+            ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             ksim.LinearVelocityCommand(
-                x_range=(2.0, 3.0),
+                x_range=(0.0, 3.0),
                 y_range=(0.0, 0.0),
                 switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average
                 zero_prob=0.0,
@@ -342,8 +349,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             # robot to walk smoothly without feet slamming into the ground
             # (which can cause physical damage).
             ksim.BaseJerkZPenalty(scale=-0.01, ctrl_dt=self.config.ctrl_dt),
-            # ksim.FeetContactPenalty(scale=-0.2),
-            # ksim.FeetSlipPenalty(scale=-0.01),
+            ksim.FeetContactPenalty(scale=-0.2),
+            ksim.FeetSlipPenalty(scale=-0.25),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -386,6 +393,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         lin_vel_cmd_n = commands["linear_velocity_command"]
         feet_contact_obs_n = observations["feet_contact_observation"]
+        feet_pos_obs_n = observations["feet_position_observation"]
         return model.critic(
             dh_joint_pos_n,
             dh_joint_vel_n,
@@ -395,6 +403,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             lin_vel_obs_3,
             lin_vel_cmd_n,
             feet_contact_obs_n,
+            feet_pos_obs_n,
         )
 
     def get_on_policy_log_probs(
@@ -495,8 +504,8 @@ if __name__ == "__main__":
     #   python -m examples.default_humanoid.walking num_envs=8 num_batches=2
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
-            num_envs=2,
-            num_batches=1,
+            num_envs=2048,
+            num_batches=64,
             num_passes=10,
             # Simulation parameters.
             dt=0.005,
