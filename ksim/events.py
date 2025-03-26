@@ -12,8 +12,10 @@ from typing import Self
 import attrs
 import jax
 import jax.numpy as jnp
+import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from mujoco import mjx
 
 from ksim.types import PhysicsData
 from ksim.utils.mujoco import update_data_field
@@ -120,7 +122,12 @@ class PushEvent(Event):
         )
 
         # Apply forces conditionally using where instead of lax.cond
-        new_data_qvel = data.qvel.at[0:3].set(jnp.where(should_reset, random_linear_force, data.qvel[0:3]))
+        match type(data):
+            case mujoco.MjData:
+                new_data_qvel = data.qvel.copy()
+                new_data_qvel[0:3] = jnp.where(should_reset, random_linear_force, data.qvel[0:3])
+            case mjx.Data:
+                new_data_qvel = data.qvel.at[0:3].set(jnp.where(should_reset, random_linear_force, data.qvel[0:3]))
 
         # Update data with new velocities
         updated_data = update_data_field(data, "qvel", new_data_qvel)

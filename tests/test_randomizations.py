@@ -280,9 +280,8 @@ def test_static_friction_randomization(simple_mjx_model: mjx.Model, rng: jax.Arr
         orig_frictionloss = np.array(original_frictionloss)
 
         assert np.array_equal(rand_frictionloss[:6], orig_frictionloss[:6])
-
-        assert np.all(rand_frictionloss[6:] >= orig_frictionloss[6:] + scale_lower)
-        assert np.all(rand_frictionloss[6:] <= orig_frictionloss[6:] + scale_upper)
+        assert np.all(rand_frictionloss[6:] >= orig_frictionloss[6:] * scale_lower)
+        assert np.all(rand_frictionloss[6:] <= orig_frictionloss[6:] * scale_upper)
 
         for attr_name in ["body_mass", "dof_damping", "dof_armature", "qpos0"]:
             assert np.array_equal(
