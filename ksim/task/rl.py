@@ -1042,8 +1042,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 return engine.reset(mj_model, reset_rng)
 
             # Resets the physics state.
-            rng, rand_rng = jax.random.split(rng)
-            physics_state = apply_randomizations_to_mujoco(rand_rng)
+            rng, reset_rng = jax.random.split(rng)
+            physics_state = apply_randomizations_to_mujoco(reset_rng)
 
             # These components remain constant across the entire episode.
             rollout_constants = RolloutConstants(
@@ -1220,7 +1220,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             try:
                 while not self.is_training_over(state):
                     state = self.on_step_start(state)
-                    state.raw_phase = "train"
+                    state.raw_phase = "valid" if self.valid_step_timer.is_valid_step(state) else "train"
 
                     # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
@@ -1253,8 +1253,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     state.num_steps += self.config.epochs_per_log_step
                     state.num_samples += self.rollout_num_samples
 
-                    # Logging a trajectory is slow, so only log intermittently.
-                    if self.valid_step_timer.is_valid_step(state):
+                    # Only log trajectory information on validation steps.
+                    if state.phase == "valid":
                         self.log_single_trajectory(final_trajectory, commands, final_reward, mj_model)
 
                     self.log_train_metrics(metrics)
