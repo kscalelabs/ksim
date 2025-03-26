@@ -15,6 +15,8 @@ __all__ = [
     "ActuatorForcePenalty",
     "BaseJerkZPenalty",
     "ActuatorJerkPenalty",
+    "FeetSlipPenalty",
+    "FeetContactPenalty",
 ]
 
 import functools
@@ -22,6 +24,7 @@ import logging
 from abc import ABC, abstractmethod
 
 import attrs
+import jax
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array
@@ -243,3 +246,47 @@ class ActuatorJerkPenalty(Reward):
         # penalty.
         jerk = (acc - prev_acc) * self.ctrl_dt
         return xax.get_norm(jerk, self.norm).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetSlipPenalty(Reward):
+    """Penalty for feet slipping."""
+
+    norm: xax.NormType = attrs.field(default="l1")
+    observation_name: str = attrs.field(default="feet_contact_observation")
+    command_name: str = attrs.field(default="linear_velocity_command")
+    com_vel_obs_name: str = attrs.field(default="center_of_mass_velocity_observation")
+    command_vel_scale: float = attrs.field(default=0.02)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        if self.observation_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
+        contact = trajectory.obs[self.observation_name]
+        com_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
+        return (xax.get_norm(com_vel, self.norm) * contact).sum(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetContactPenalty(Reward):
+    """Reward for feet contacting the ground."""
+
+    norm: xax.NormType = attrs.field(default="l1")
+    contact_obs_name: str = attrs.field(default="feet_contact_observation")
+    position_obs_name: str = attrs.field(default="feet_position_observation")
+    command_name: str = attrs.field(default="linear_velocity_command")
+    command_vel_scale: float = attrs.field(default=0.02)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        if self.observation_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
+        feet_positions = trajectory.obs[self.observation_name]  # shape: (n_feet, 3)
+        command = trajectory.command[self.command_name]
+        contact_mask = trajectory.obs[self.contact_obs_name]
+
+        jax.lax.cond(jnp.sum(contact_mask) == 0, lambda: jnp.array([0.0]), lambda: jnp.array([0.0]))
+
+        contact_positions = feet_positions[contact_mask]
+        non_contact_positions = feet_positions[~contact_mask]
+        pos_diff = xax.get_norm(non_contact_positions - contact_positions, self.norm)
+        reward = jnp.maximum(pos_diff - self.command_vel_scale * jnp.abs(command[..., 0]), 0.0)
+        return reward

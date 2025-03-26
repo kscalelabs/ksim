@@ -280,14 +280,7 @@ class FeetContactObservation(Observation):
         foot_right: str,
         floor_geom_id: str,
     ) -> "FeetContactObservation":
-        """Create a sensor observation from a physics model.
-
-        Args:
-            physics_model: MuJoCo physics model
-            foot_left: Name of left foot sensor
-            foot_right: Name of right foot sensor
-            floor_geom_id: Name of floor geometry
-        """
+        """Create a sensor observation from a physics model."""
         foot_left_idx = get_geom_data_idx_by_name(physics_model)[foot_left]
         foot_right_idx = get_geom_data_idx_by_name(physics_model)[foot_right]
         floor_geom_id = get_geom_data_idx_by_name(physics_model)[floor_geom_id]
@@ -301,3 +294,33 @@ class FeetContactObservation(Observation):
         contact_1 = geoms_colliding(state, self.foot_left, self.floor_geom_id)
         contact_2 = geoms_colliding(state, self.foot_right, self.floor_geom_id)
         return jnp.array([contact_1, contact_2])
+
+
+@attrs.define(frozen=True)
+class FeetPositionObservation(Observation):
+    foot_left: int = attrs.field()
+    foot_right: int = attrs.field()
+    floor_geom_id: int = attrs.field()
+    noise: float = attrs.field(default=0.0)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        foot_left: str,
+        foot_right: str,
+        floor_geom_id: str,
+    ) -> "FeetContactObservation":
+        foot_left_idx = get_geom_data_idx_by_name(physics_model)[foot_left]
+        foot_right_idx = get_geom_data_idx_by_name(physics_model)[foot_right]
+        floor_geom_id = get_geom_data_idx_by_name(physics_model)[floor_geom_id]
+        return cls(
+            foot_left=foot_left_idx,
+            foot_right=foot_right_idx,
+            floor_geom_id=floor_geom_id,
+        )
+
+    def observe(self, state: PhysicsData, rng: PRNGKeyArray) -> Array:
+        foot_left_pos = state.geom_xpos[self.foot_left]
+        foot_right_pos = state.geom_xpos[self.foot_right]
+        return jnp.array([foot_left_pos, foot_right_pos])
