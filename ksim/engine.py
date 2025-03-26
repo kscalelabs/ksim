@@ -112,7 +112,6 @@ class MjxEngine(PhysicsEngine):
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         mjx_data = physics_state.data
-        mjx_data = mjx.forward(physics_model, mjx_data)
         phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
 
@@ -149,7 +148,6 @@ class MjxEngine(PhysicsEngine):
             rng, ctrl_rng = jax.random.split(rng)
             torques = self.actuators.get_ctrl(ctrl, data, ctrl_rng)
             data_with_ctrl = data.replace(ctrl=torques)
-            # data_with_ctrl = mjx.forward(physics_model, data_with_ctrl)
             new_data = mjx.step(physics_model, data_with_ctrl)
             return (new_data, step_num + 1.0, FrozenDict(new_event_info)), None
 
