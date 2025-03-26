@@ -16,7 +16,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.utils.visualization import VelocityArrow, Visualization
+from ksim.vis import Marker
 
 
 @attrs.define(frozen=True)
@@ -47,11 +47,11 @@ class Command(ABC):
             The command to perform, with shape (command_dim).
         """
 
-    def update_scene(self, command: Array) -> Collection[Visualization]:
-        """Updates the scene with elements from the command.
+    def get_visualizations(self, command: Array) -> Collection[Marker]:
+        """Get the visualizations for the command.
 
         Args:
-            command: The command to update the scene with.
+            command: The command to get the visualizations for.
 
         Returns:
             The visualizations to add to the scene.
@@ -99,20 +99,18 @@ class LinearVelocityCommand(Command):
         new_commands = self.initial_command(rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
-    def update_scene(self, command: Array) -> Collection[Visualization]:
+    def get_visualizations(self, command: Array) -> Collection[Marker]:
         return [
-            VelocityArrow(
-                velocity=float(command[0]),
-                base_pos=(0.0, 0.0, self.vis_height),
-                scale=0.1,
+            Marker.arrow(
+                scale=float(command[0]) * 0.1,
+                height=self.vis_height,
                 rgba=(1.0, 0.0, 0.0, 0.8),
                 direction=(1.0, 0.0, 0.0),
                 label=f"X: {command[0]:.2f}",
             ),
-            VelocityArrow(
-                velocity=float(command[1]),
-                base_pos=(0.0, 0.0, self.vis_height + 0.2),
-                scale=0.1,
+            Marker.arrow(
+                scale=float(command[1]),
+                height=self.vis_height + 0.2,
                 rgba=(0.0, 1.0, 0.0, 0.8),
                 direction=(0.0, 1.0, 0.0),
                 label=f"Y: {command[1]:.2f}",

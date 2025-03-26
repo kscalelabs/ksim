@@ -63,7 +63,6 @@ from ksim.types import (
     Trajectory,
 )
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata, load_model
-from ksim.utils.visualization import VelocityArrow
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +269,7 @@ class RLConfig(xax.Config):
         value=1,
         help="The number of epochs between logging steps.",
     )
-    log_single_traj_every_n_steps: int = xax.field(
+    log_single_traj_every_n_updates: int = xax.field(
         value=10,
         help="The number of steps between logging a full trajectory video.",
     )
@@ -730,6 +729,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
             renderer.update_scene(mj_data, camera=mj_camera)
+            for command in commands:
+                command_value = trajectory.command[command.command_name]
+                for visualization in command.get_visualizations(command_value):
+                    visualization(mj_model, mj_data, renderer.scene)
             frame = renderer.render()
 
             # Overlays the frame number on the frame.
@@ -996,9 +999,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x, metrics)
 
+        # Only get final trajectory and rewards.
+        final_trajectory = jax.tree.map(lambda arr: arr[-1], final_trajectories)
+        final_reward = jax.tree.map(lambda arr: arr[-1], final_rewards)
+
         # Metrics, final_trajectories, final_rewards batch dim of epochs.
         # Rollout variables has batch dim of num_envs and are used next rollout.
-        return model_arr, opt_state, metrics, rollout_variables, final_trajectories, final_rewards
+        return model_arr, opt_state, metrics, rollout_variables, final_trajectory, final_reward
 
     def on_context_stop(self, step: str, elapsed_time: float) -> None:
         super().on_context_stop(step, elapsed_time)
@@ -1175,22 +1182,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         # Sync data again
                         viewer.copy_data(dst=viewer_data, src=rollout_variables.physics_state.data)
                         mujoco.mj_forward(viewer_model, viewer_data)
-
-                        # Applies the command visualizations to the viewer.
-                        for command in commands:
-                            for visualization in command.update_scene(rollout_variables.commands[command.command_name]):
-                                if isinstance(visualization, VelocityArrow):
-                                    viewer.add_velocity_arrow(
-                                        command_velocity=visualization.velocity,
-                                        base_pos=visualization.base_pos,
-                                        scale=visualization.scale,
-                                        rgba=visualization.rgba,
-                                        direction=visualization.direction,
-                                        label=visualization.label,
-                                    )
-                                else:
-                                    raise NotImplementedError(f"Unknown visualization type: {type(visualization)}")
-
                         viewer.update_and_sync()
 
                         if self.config.render_plots:
@@ -1302,8 +1293,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             opt_state,
                             metrics,
                             rollout_variables,
-                            final_trajectories,
-                            final_rewards,
+                            final_trajectory,
+                            final_reward,
                         ) = self._rl_train_loop_step(
                             rng=update_rng,
                             physics_model=mjx_model,
@@ -1325,10 +1316,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     state.num_steps += self.config.epochs_per_log_step
                     state.num_samples += self.rollout_num_samples
 
-                    if state.num_steps % self.config.log_single_traj_every_n_steps == 0:
-                        final_trajectory = jax.tree.map(lambda arr: arr[-1], final_trajectories)
-                        final_rewards = jax.tree.map(lambda arr: arr[-1], final_rewards)
-                        self.log_single_trajectory(final_trajectory, commands, final_rewards, mj_model)
+                    # Logging a trajectory is slow, so only log intermittently.
+                    if self.valid_step_timer.is_valid_step(state):
+                        self.log_single_trajectory(final_trajectory, commands, final_reward, mj_model)
 
                     self.log_train_metrics(metrics)
                     self.log_state_timers(state)
