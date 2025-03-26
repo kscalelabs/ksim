@@ -112,7 +112,6 @@ class MjxEngine(PhysicsEngine):
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         mjx_data = physics_state.data
-        mjx_data = mjx.forward(physics_model, mjx_data)
         phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
 
@@ -143,7 +142,7 @@ class MjxEngine(PhysicsEngine):
             new_event_info = {}
             for event in self.events:
                 rng, event_rng = jax.random.split(rng)
-                data, event_info = event(event_info[event.get_name()], data, event_rng)
+                data, event_info = event(event_info[event.get_name()], data, physics_model.opt.timestep, event_rng)
                 new_event_info[event.get_name()] = event_info
 
             rng, ctrl_rng = jax.random.split(rng)
@@ -223,7 +222,9 @@ class MujocoEngine(PhysicsEngine):
             # Apply the events.
             new_event_info = {}
             for event in self.events:
-                mujoco_data, event_info = event(event_info[event.get_name()], mujoco_data, rng)
+                mujoco_data, event_info = event(
+                    event_info[event.get_name()], mujoco_data, physics_model.opt.timestep, rng
+                )
                 new_event_info[event.get_name()] = event_info
 
             event_info = FrozenDict(new_event_info)
