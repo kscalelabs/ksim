@@ -46,20 +46,16 @@ class Event(ABC):
 @attrs.define(frozen=True, kw_only=True)
 class PushEventInfo:
     remaining_interval: Array
-    linear_force: Array
-    angular_force: Array
 
     def tree_flatten(self) -> tuple[tuple, None]:
-        return (self.remaining_interval, self.linear_force, self.angular_force), None
+        return (self.remaining_interval,), None
 
     @classmethod
     def tree_unflatten(cls, aux_data: None, children: tuple) -> Self:
         """Reconstruct the class from flattened representation."""
-        remaining_interval, linear_force, angular_force = children
+        remaining_interval, = children
         return cls(
             remaining_interval=remaining_interval,
-            linear_force=linear_force,
-            angular_force=angular_force,
         )
 
 
@@ -80,27 +76,29 @@ class PushEvent(Event):
         """Apply the event to the data.
 
         Persistent data has the following structure:
-        (
-            remaining_interval: Array,
-            linear_force: (Array, Array, Array),
-            angular_force: (Array, Array, Array),
-        )
+        remaining_interval: Array  # Remaining time in seconds before next push
         """
         # Split the RNG for different operations
         rng1, rng2 = jax.random.split(rng)
 
-        # Determine whether to reset based on interval and probability
         needs_reset = persistent_data.remaining_interval[0] <= 0.0
         reset_prob = jax.random.uniform(rng1)
         should_reset = needs_reset & (reset_prob < self.probability)
 
-        # Generate new values
         rng_interval, rng_linear, rng_angular = jax.random.split(rng2, 3)
 
         # Calculate new interval (either new random interval or decremented existing one)
         interval_range = self.interval_range
-        random_interval = jax.random.randint(rng_interval, (1,), minval=interval_range[0], maxval=interval_range[1])
-        continued_interval = persistent_data.remaining_interval - 1
+        # Generate random interval in seconds
+        random_interval = jax.random.uniform(
+            rng_interval, 
+            (1,), 
+            minval=interval_range[0], 
+            maxval=interval_range[1]
+        )
+
+        # Decrement by physics timestep (in seconds)
+        continued_interval = persistent_data.remaining_interval - data.dt
 
         # Select new interval value
         new_interval = jnp.where(
@@ -109,46 +107,38 @@ class PushEvent(Event):
             jnp.where(needs_reset, persistent_data.remaining_interval, continued_interval),
         )
 
-        # Generate random forces if needed
+        updated_data = jax.lax.cond(
+            jnp.bool_(should_reset),
+            lambda: self._apply_push_force(data, rng_linear, rng_angular),
+            lambda: data,
+        )
+
+        return updated_data, PushEventInfo(
+            remaining_interval=new_interval,
+        )
+    
+    def _apply_push_force(self, data: PhysicsData, rng_linear: PRNGKeyArray, rng_angular: PRNGKeyArray) -> PhysicsData:
+        """Generate and apply random forces to the physics data."""
         random_linear_force = jax.random.uniform(
             rng_linear,
             (3,),
             minval=-self.linear_force_scale,
             maxval=self.linear_force_scale,
-        )
+        ) + data.qvel[0:3]
+
         random_angular_force = jax.random.uniform(
             rng_angular,
             (3,),
             minval=-self.angular_force_scale,
             maxval=self.angular_force_scale,
         )
-
-        # Select forces based on reset condition
-        new_linear_force = jnp.where(should_reset, random_linear_force, persistent_data.linear_force)
-        new_angular_force = jnp.where(should_reset, random_angular_force, persistent_data.angular_force)
-
-        # Apply force when appropriate (either continuing or newly reset)
-        should_apply_force = (~needs_reset) | should_reset
-        should_apply_force_scalar = jnp.bool_(should_apply_force)
-
+        
         new_data_qvel = data.qvel
-        new_data_qvel = new_data_qvel.at[0:3].set(new_linear_force)
-
-        updated_data = jax.lax.cond(
-            should_apply_force_scalar,
-            lambda: update_data_field(data, "qvel", new_data_qvel),
-            lambda: data,
-        )
-
-        return updated_data, PushEventInfo(
-            remaining_interval=new_interval,
-            linear_force=new_linear_force,
-            angular_force=new_angular_force,
-        )
+        new_data_qvel = new_data_qvel.at[0:3].set(random_linear_force)
+        
+        return update_data_field(data, "qvel", new_data_qvel)
 
     def get_initial_info(self) -> PushEventInfo:
         return PushEventInfo(
-            remaining_interval=jnp.zeros(1),
-            linear_force=jnp.zeros(3),
-            angular_force=jnp.zeros(3),
+            remaining_interval=jnp.array(self.interval_range[0])
         )
