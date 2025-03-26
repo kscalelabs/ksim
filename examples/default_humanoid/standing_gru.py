@@ -58,7 +58,7 @@ class MultiLayerRNN(eqx.Module):
 
 
 class DefaultHumanoidActor(eqx.Module):
-    """Actor for the walking task."""
+    """Actor for the standing task."""
 
     multi_layer_rnn: MultiLayerRNN
     projector: eqx.nn.MLP
@@ -133,7 +133,7 @@ class DefaultHumanoidActor(eqx.Module):
 
 
 class DefaultHumanoidCritic(eqx.Module):
-    """Critic for the walking task."""
+    """Critic for the standing task."""
 
     mlp: eqx.nn.MLP
 
