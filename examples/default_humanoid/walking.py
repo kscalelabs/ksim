@@ -19,10 +19,10 @@ from mujoco import mjx
 
 import ksim
 
-OBS_SIZE = 270
+OBS_SIZE = 330
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_OUTPUTS = 17
+NUM_OUTPUTS = 21
 
 
 @jax.tree_util.register_dataclass
@@ -313,14 +313,14 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.ActuatorAccelerationObservation(),
             ksim.FeetContactObservation.create(
                 physics_model=physics_model,
-                foot_left="left_foot",
-                foot_right="right_foot",
+                foot_left="foot1_left",
+                foot_right="foot1_right",
                 floor_geom_id="floor",
             ),
             ksim.FeetPositionObservation.create(
                 physics_model=physics_model,
-                foot_left="left_foot",
-                foot_right="right_foot",
+                foot_left="foot1_left",
+                foot_right="foot1_right",
             ),
         ]
 

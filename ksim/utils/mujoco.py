@@ -16,14 +16,12 @@ __all__ = [
     "slice_update",
 ]
 
-import itertools
 import logging
 from typing import Any, Hashable, TypeVar
 
 import jax
 import jax.numpy as jnp
 import mujoco
-import numpy as np
 from jaxtyping import Array, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
@@ -202,79 +200,7 @@ def slice_update(model: mujoco.MjModel | mjx.Model, name: str, slice: Any, value
     raise ValueError(f"Model type {type(model)} not supported")
 
 
-def validate_model(mj: mujoco.MjModel) -> None:
-    """Checks if a MuJoCo model is compatible with brax physics pipelines."""
-    if mj.opt.integrator != 0:
-        raise NotImplementedError("Only euler integration is supported.")
-    if mj.opt.cone != 0:
-        raise NotImplementedError("Only pyramidal cone friction is supported.")
-    if (mj.geom_fluid != 0).any():
-        raise NotImplementedError("Ellipsoid fluid model not implemented.")
-    if mj.opt.wind.any():
-        raise NotImplementedError("option.wind is not implemented.")
-    if mj.opt.impratio != 1:
-        raise NotImplementedError("Only impratio=1 is supported.")
-
-    # actuators
-    if any(i not in [0, 1] for i in mj.actuator_biastype):
-        raise NotImplementedError("Only actuator_biastype in [0, 1] are supported.")
-    if any(i != 0 for i in mj.actuator_gaintype):
-        raise NotImplementedError("Only actuator_gaintype in [0] is supported.")
-    if not (mj.actuator_trntype == 0).all():
-        raise NotImplementedError("Only joint transmission types are supported for actuators.")
-
-    # solver parameters
-    if (mj.geom_solmix[0] != mj.geom_solmix).any():
-        raise NotImplementedError("geom_solmix parameter not supported.")
-    if (mj.geom_priority[0] != mj.geom_priority).any():
-        raise NotImplementedError("geom_priority parameter not supported.")
-
-    # check joints
-    q_width = {0: 7, 1: 4, 2: 1, 3: 1}
-    non_free = np.concatenate([[j != 0] * q_width[j] for j in mj.jnt_type])
-    if mj.qpos0[non_free].any():
-        raise NotImplementedError("The `ref` attribute on joint types is not supported.")
-
-    for _, group in itertools.groupby(zip(mj.jnt_bodyid, mj.jnt_pos), key=lambda x: x[0]):
-        position = np.array([p for _, p in group])
-        if not (position == position[0]).all():
-            raise RuntimeError("invalid joint stack: only one joint position allowed")
-
-    # check dofs
-    jnt_range = mj.jnt_range.copy()
-    jnt_range[~(mj.jnt_limited == 1), :] = np.array([-np.inf, np.inf])
-    for typ, limit, stiffness in zip(mj.jnt_type, jnt_range, mj.jnt_stiffness):
-        if typ == 0:
-            if stiffness > 0:
-                raise RuntimeError("brax does not support stiffness for free joints")
-        elif typ == 1:
-            if np.any(~np.isinf(limit)):
-                raise RuntimeError("brax does not support joint ranges for ball joints")
-        elif typ in (2, 3):
-            continue
-        else:
-            raise RuntimeError(f"invalid joint type: {typ}")
-
-    for _, group in itertools.groupby(zip(mj.jnt_bodyid, mj.jnt_type), key=lambda x: x[0]):
-        typs = [t for _, t in group]
-        if len(typs) == 1 and typs[0] == 0:
-            continue  # free
-        elif 0 in typs:
-            raise RuntimeError("invalid joint stack: cannot stack free joints")
-        elif 1 in typs:
-            raise NotImplementedError("ball joints not supported")
-
-    # check collision geometries
-    for i, typ in enumerate(mj.geom_type):
-        mask = mj.geom_contype[i] | mj.geom_conaffinity[i] << 32
-        if typ == 5:  # Cylinder
-            _, halflength = mj.geom_size[i, 0:2]
-            if halflength > 0.001 and mask > 0:
-                raise NotImplementedError("Cylinders of half-length>0.001 are not supported for collision.")
-
-
 def load_model(model: mujoco.MjModel) -> mjx.Model:
-    validate_model(model)
     mjx_model = mjx.put_model(model)
     mjx_model = jax.tree.map(jnp.array, mjx_model)
     return mjx_model
