@@ -6,6 +6,7 @@ __all__ = [
 ]
 
 import bdb
+import datetime
 import io
 import itertools
 import logging
@@ -15,6 +16,7 @@ import textwrap
 import time
 import traceback
 from abc import ABC, abstractmethod
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
@@ -60,7 +62,7 @@ from ksim.types import (
     RolloutVariables,
     Trajectory,
 )
-from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata
+from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata, load_model
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +74,6 @@ class RolloutConstants:
     command_generators: Collection[Command]
     reward_generators: Collection[Reward]
     termination_generators: Collection[Termination]
-    randomization_generators: Collection[Randomization]
 
 
 def get_observation(
@@ -125,7 +126,6 @@ def compute_step_rewards(
     return Rewards(total=total_reward, components=FrozenDict(rewards))
 
 
-@xax.jit(static_argnames=["reward_generators", "ctrl_dt"])
 def get_rewards(
     trajectory: Trajectory,
     reward_generators: Collection[Reward],
@@ -195,14 +195,24 @@ def get_initial_commands(
 
 def apply_randomizations(
     physics_model: PhysicsModel,
+    engine: PhysicsEngine,
     randomizations: Collection[Randomization],
     rng: PRNGKeyArray,
-) -> PhysicsModel:
+) -> tuple[FrozenDict[str, Array], PhysicsState]:
     """Apply randomizations to the physics model."""
+    all_randomizations: dict[str, dict[str, Array]] = {}
     for randomization in randomizations:
         rng, randomization_rng = jax.random.split(rng)
-        physics_model = randomization(physics_model, randomization_rng)
-    return physics_model
+        all_randomizations[randomization.randomization_name] = randomization(physics_model, randomization_rng)
+    for name, count in Counter([k for d in all_randomizations.values() for k in d.keys()]).items():
+        if count > 1:
+            name_to_keys = {k: set(v.keys()) for k, v in all_randomizations.items()}
+            raise ValueError(f"Found duplicate randomization keys: {name}. Randomizations: {name_to_keys}")
+    randomizations: FrozenDict[str, Array] = FrozenDict(
+        {k: v for d in all_randomizations.values() for k, v in d.items()}
+    )
+    physics_state = engine.reset(physics_model.tree_replace(randomizations), rng)
+    return randomizations, physics_state
 
 
 @jax.tree_util.register_dataclass
@@ -349,9 +359,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Returns:
             The mjx model.
         """
-        # TODO: We should perform some checks on the Mujoco model to ensure
-        # that it is performant in MJX.
-        return mjx.put_model(mj_model)
+        return load_model(mj_model)
 
     def get_engine(
         self,
@@ -494,6 +502,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @property
     def rollout_length_steps(self) -> int:
         return round(self.config.rollout_length_seconds / self.config.ctrl_dt)
+
+    @property
+    def rollout_num_samples(self) -> int:
+        return self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
 
     def step_engine(
         self,
@@ -739,7 +751,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 # Ensures a consistent shape and truncates if necessary.
                 value = value.reshape(value.shape[0], -1)
                 if value.shape[-1] > self.config.max_values_per_plot:
-                    logger.warning("Truncating %s to %d values per plot.", key, self.config.max_values_per_plot)
+                    logger.debug("Truncating %s to %d values per plot.", key, self.config.max_values_per_plot)
                     value = value[..., : self.config.max_values_per_plot]
 
                 for i in range(value.shape[1]):
@@ -762,65 +774,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(trajectories, commands, mj_model)
         self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
-
-    @xax.jit(static_argnames=["self", "model_static", "engine", "rollout_constants", "num_steps"])
-    def _single_unroll(
-        self,
-        physics_model: PhysicsModel,
-        model_arr: PyTree,
-        model_static: PyTree,
-        engine: PhysicsEngine,
-        rollout_constants: RolloutConstants,
-        rollout_variables: RolloutVariables,
-        num_steps: int,
-    ) -> tuple[Trajectory, Rewards, RolloutVariables]:
-        # Recombines the mutable and static parts of the model.
-        model = eqx.combine(model_arr, model_static)
-
-        def scan_fn(carry: RolloutVariables, _: None) -> tuple[RolloutVariables, Trajectory]:
-            trajectory, next_rollout_variables = self.step_engine(
-                physics_model=physics_model,
-                model=model,
-                engine=engine,
-                rollout_constants=rollout_constants,
-                rollout_variables=carry,
-            )
-            return next_rollout_variables, trajectory
-
-        # Scans the engine for the desired number of steps.
-        next_rollout_variables, trajectory = jax.lax.scan(scan_fn, rollout_variables, length=num_steps)
-
-        # Gets the rewards.
-        reward = get_rewards(
-            trajectory=trajectory,
-            reward_generators=rollout_constants.reward_generators,
-            ctrl_dt=self.config.ctrl_dt,
-            clip_max=self.config.reward_clip_max,
-        )
-
-        return trajectory, reward, next_rollout_variables
-
-    @xax.jit(static_argnames=["self", "model_static", "engine", "rollout_constants", "num_steps"])
-    def _vmapped_unroll(
-        self,
-        physics_models: PhysicsModel,
-        model_arr: PyTree,
-        model_static: PyTree,
-        engine: PhysicsEngine,
-        rollout_constants: RolloutConstants,
-        rollout_variables: RolloutVariables,
-        num_steps: int,
-    ) -> tuple[Trajectory, Rewards, RolloutVariables]:
-        vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(0, None, None, None, None, 0, None))
-        return vmapped_unroll(
-            physics_models,
-            model_arr,
-            model_static,
-            engine,
-            rollout_constants,
-            rollout_variables,
-            num_steps,
-        )
 
     @abstractmethod
     def update_model(
@@ -903,11 +856,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             **{key: (value / num_terms[:, None]).mean() for key, value in trajectories.termination_components.items()},
         }
 
-    @xax.jit(static_argnames=["self", "model_static", "optimizer", "engine", "rollout_constants"])
+    @eqx.filter_jit
     def _rl_train_loop_step(
         self,
         rng: PRNGKeyArray,
-        physics_models: PhysicsModel,
+        physics_model: PhysicsModel,
+        randomization_dict: FrozenDict[str, Array],
         model_arr: PyTree,
         model_static: PyTree,
         optimizer: optax.GradientTransformation,
@@ -916,6 +870,45 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
     ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, Trajectory, Rewards]:
+        def single_unroll(
+            physics_model: PhysicsModel,
+            randomization_dict: FrozenDict[str, Array],
+            model_arr: PyTree,
+            model_static: PyTree,
+            engine: PhysicsEngine,
+            rollout_constants: RolloutConstants,
+            rollout_variables: RolloutVariables,
+            num_steps: int,
+        ) -> tuple[Trajectory, Rewards, RolloutVariables]:
+            # Recombines the mutable and static parts of the model.
+            model = eqx.combine(model_arr, model_static)
+
+            # Applies randomizations to the model.
+            physics_model = physics_model.tree_replace(randomization_dict)
+
+            def scan_fn(carry: RolloutVariables, _: None) -> tuple[RolloutVariables, Trajectory]:
+                trajectory, next_rollout_variables = self.step_engine(
+                    physics_model=physics_model,
+                    model=model,
+                    engine=engine,
+                    rollout_constants=rollout_constants,
+                    rollout_variables=carry,
+                )
+                return next_rollout_variables, trajectory
+
+            # Scans the engine for the desired number of steps.
+            next_rollout_variables, trajectory = jax.lax.scan(scan_fn, rollout_variables, length=num_steps)
+
+            # Gets the rewards.
+            reward = get_rewards(
+                trajectory=trajectory,
+                reward_generators=rollout_constants.reward_generators,
+                ctrl_dt=self.config.ctrl_dt,
+                clip_max=self.config.reward_clip_max,
+            )
+
+            return trajectory, reward, next_rollout_variables
+
         def single_step_fn(
             carry: tuple[PyTree, optax.OptState, RolloutVariables],
             rng: PRNGKeyArray,
@@ -924,14 +917,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, update_rng = jax.random.split(rng)
 
             # Rolls out a new trajectory.
-            trajectories, rewards, rollout_variables = self._vmapped_unroll(
-                physics_models=physics_models,
-                model_arr=model_arr,
-                model_static=model_static,
-                engine=engine,
-                rollout_constants=rollout_constants,
-                rollout_variables=rollout_variables,
-                num_steps=self.rollout_length_steps,
+            vmapped_unroll = jax.vmap(
+                single_unroll,
+                in_axes=(
+                    None,
+                    0,
+                    None,
+                    None,
+                    None,
+                    None,
+                    0,
+                    None,
+                ),
+            )
+            trajectories, rewards, rollout_variables = vmapped_unroll(
+                physics_model,
+                randomization_dict,
+                model_arr,
+                model_static,
+                engine,
+                rollout_constants,
+                rollout_variables,
+                self.rollout_length_steps,
             )
 
             # Runs update on the previous trajectory.
@@ -1022,7 +1029,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             commands = self.get_commands(mj_model)
             rewards = self.get_rewards(mj_model)
             terminations = self.get_terminations(mj_model)
-            randomizations = self.get_randomization(mj_model)
 
             # Gets initial variables.
             rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
@@ -1039,7 +1045,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 command_generators=commands,
                 reward_generators=rewards,
                 termination_generators=terminations,
-                randomization_generators=randomizations,
             )
 
             # These components are updated each step.
@@ -1122,16 +1127,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             clip_max=self.config.reward_clip_max,
                         )
 
-                        # We manually trigger randomizations on termination,
-                        # whereas during training the randomization is only applied
-                        # once per rollout for efficiency.
-                        rng, randomization_rng = jax.random.split(rng)
-                        mj_model = jax.lax.cond(
-                            transition.done,
-                            lambda: apply_randomizations(mj_model, randomizations, randomization_rng),
-                            lambda: mj_model,
-                        )
-
                         # Sync data again
                         viewer.copy_data(dst=viewer_data, src=rollout_variables.physics_state.data)
                         mujoco.mj_forward(viewer_model, viewer_data)
@@ -1162,6 +1157,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
+    def model_partition_fn(self, item: Any) -> bool:  # noqa: ANN401
+        return eqx.is_inexact_array(item)
+
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
         with self:
@@ -1190,26 +1188,27 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 command_generators=tuple(commands),
                 reward_generators=tuple(rewards_terms),
                 termination_generators=tuple(terminations),
-                randomization_generators=tuple(randomizations),
             )
 
             # JAX requires that we partition the model into mutable and static
             # parts in order to use lax.scan, so that `arr` can be a PyTree.`
-            model_arr, model_static = eqx.partition(model, eqx.is_inexact_array)
-
-            # Defines the vectorized initialization functions.
-            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, 0))
-            carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
-            command_fn = jax.vmap(get_initial_commands, in_axes=(0, None))
-            state_fn = jax.vmap(engine.reset, in_axes=(0, 0))
+            model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
             # Builds the variables for the training environment.
             train_rngs = jax.random.split(rng, self.config.num_envs)
-            mjx_models = randomization_fn(mjx_model, rollout_constants.randomization_generators, train_rngs)
+
+            # Applies randomizations to the physics model.
+            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, None, 0))
+            randomization_dict, physics_state = randomization_fn(mjx_model, engine, randomizations, train_rngs)
+
+            # Defines the vectorized initialization functions.
+            carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
+            command_fn = jax.vmap(get_initial_commands, in_axes=(0, None))
+
             rollout_variables = RolloutVariables(
                 carry=carry_fn(train_rngs),
                 commands=command_fn(train_rngs, rollout_constants.command_generators),
-                physics_state=state_fn(mjx_models, train_rngs),
+                physics_state=physics_state,
                 rng=train_rngs,
             )
 
@@ -1228,36 +1227,43 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Handle user-defined interrupts during the training loop.
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
 
+            is_first_step = True
+
             try:
                 while not self.is_training_over(state):
                     state = self.on_step_start(state)
                     state.raw_phase = "train"
 
-                    # Optimizes the model on that trajectory.
+                    # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
-                    (
-                        model_arr,
-                        opt_state,
-                        metrics,
-                        rollout_variables,
-                        final_trajectories,
-                        final_rewards,
-                    ) = self._rl_train_loop_step(
-                        rng=update_rng,
-                        physics_models=mjx_models,
-                        model_arr=model_arr,
-                        model_static=model_static,
-                        optimizer=optimizer,
-                        opt_state=opt_state,
-                        engine=engine,
-                        rollout_constants=rollout_constants,
-                        rollout_variables=rollout_variables,
-                    )
+                    with xax.ContextTimer() as timer:
+                        (
+                            model_arr,
+                            opt_state,
+                            metrics,
+                            rollout_variables,
+                            final_trajectories,
+                            final_rewards,
+                        ) = self._rl_train_loop_step(
+                            rng=update_rng,
+                            physics_model=mjx_model,
+                            randomization_dict=randomization_dict,
+                            model_arr=model_arr,
+                            model_static=model_static,
+                            optimizer=optimizer,
+                            opt_state=opt_state,
+                            engine=engine,
+                            rollout_constants=rollout_constants,
+                            rollout_variables=rollout_variables,
+                        )
+
+                    if is_first_step:
+                        is_first_step = False
+                        elapsed_time = xax.format_timedelta(datetime.timedelta(seconds=timer.elapsed_time), short=True)
+                        logger.log(xax.LOG_STATUS, "First step time: %s", elapsed_time)
 
                     state.num_steps += self.config.epochs_per_log_step
-                    state.num_samples += (
-                        self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
-                    )
+                    state.num_samples += self.rollout_num_samples
 
                     if state.num_steps % self.config.log_single_traj_every_n_steps == 0:
                         final_trajectory = jax.tree.map(lambda arr: arr[-1], final_trajectories)

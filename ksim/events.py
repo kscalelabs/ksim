@@ -6,6 +6,7 @@ __all__ = [
     "PushEventInfo",
 ]
 
+import functools
 from abc import ABC, abstractmethod
 from typing import Self
 
@@ -40,6 +41,10 @@ class Event(ABC):
 
     def get_name(self) -> str:
         return xax.camelcase_to_snakecase(self.__class__.__name__)
+
+    @functools.cached_property
+    def event_name(self) -> str:
+        return self.get_name()
 
     @abstractmethod
     def get_initial_info(self) -> PyTree:

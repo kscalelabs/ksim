@@ -62,11 +62,7 @@ class PhysicsEngine(eqx.Module, ABC):
         self.max_action_latency_step = max_action_latency_step
 
     @abstractmethod
-    def reset(
-        self,
-        physics_model: PhysicsModel,
-        rng: PRNGKeyArray,
-    ) -> PhysicsState:
+    def reset(self, physics_model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsState:
         """Reset the engine and return the physics data."""
 
     @abstractmethod
@@ -83,11 +79,7 @@ class PhysicsEngine(eqx.Module, ABC):
 class MjxEngine(PhysicsEngine):
     """Defines an engine for MJX models."""
 
-    def reset(
-        self,
-        physics_model: mjx.Model,
-        rng: PRNGKeyArray,
-    ) -> PhysicsState:
+    def reset(self, physics_model: mjx.Model, rng: PRNGKeyArray) -> PhysicsState:
         mjx_data = mjx.make_data(physics_model)
 
         for reset in self.resets:
@@ -101,7 +93,7 @@ class MjxEngine(PhysicsEngine):
         return PhysicsState(
             data=mjx_data,
             most_recent_action=default_action,
-            event_info=FrozenDict({event.get_name(): event.get_initial_info() for event in self.events}),
+            event_info=FrozenDict({event.event_name: event.get_initial_info() for event in self.events}),
         )
 
     def step(
@@ -115,7 +107,7 @@ class MjxEngine(PhysicsEngine):
         phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
 
-        latency_rng, action_rng = jax.random.split(rng)
+        rng, latency_rng = jax.random.split(rng)
 
         # We wait some random amount before actually applying the action.
         latency_steps = jax.random.randint(
@@ -142,8 +134,13 @@ class MjxEngine(PhysicsEngine):
             new_event_info = {}
             for event in self.events:
                 rng, event_rng = jax.random.split(rng)
-                data, event_info = event(event_info[event.get_name()], data, physics_model.opt.timestep, event_rng)
-                new_event_info[event.get_name()] = event_info
+                data, event_info = event(
+                    event_info[event.event_name],
+                    data,
+                    physics_model.opt.timestep,
+                    event_rng,
+                )
+                new_event_info[event.event_name] = event_info
 
             rng, ctrl_rng = jax.random.split(rng)
             torques = self.actuators.get_ctrl(ctrl, data, ctrl_rng)
@@ -164,11 +161,7 @@ class MjxEngine(PhysicsEngine):
 class MujocoEngine(PhysicsEngine):
     """Defines an engine for MuJoCo models."""
 
-    def reset(
-        self,
-        physics_model: mujoco.MjModel,
-        rng: PRNGKeyArray,
-    ) -> PhysicsState:
+    def reset(self, physics_model: mujoco.MjModel, rng: PRNGKeyArray) -> PhysicsState:
         mujoco_data = mujoco.MjData(physics_model)
 
         for reset in self.resets:
@@ -181,7 +174,7 @@ class MujocoEngine(PhysicsEngine):
         return PhysicsState(
             data=mujoco_data,
             most_recent_action=default_action,
-            event_info=FrozenDict({event.get_name(): event.get_initial_info() for event in self.events}),
+            event_info=FrozenDict({event.event_name: event.get_initial_info() for event in self.events}),
         )
 
     def step(
@@ -223,9 +216,12 @@ class MujocoEngine(PhysicsEngine):
             new_event_info = {}
             for event in self.events:
                 mujoco_data, event_info = event(
-                    event_info[event.get_name()], mujoco_data, physics_model.opt.timestep, rng
+                    event_info[event.event_name],
+                    mujoco_data,
+                    physics_model.opt.timestep,
+                    rng,
                 )
-                new_event_info[event.get_name()] = event_info
+                new_event_info[event.event_name] = event_info
 
             event_info = FrozenDict(new_event_info)
             torques = self.actuators.get_ctrl(ctrl, mujoco_data, action_rng)

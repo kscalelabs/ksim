@@ -11,17 +11,18 @@ __all__ = [
     "JointZeroPositionRandomization",
 ]
 
+import functools
 from abc import ABC, abstractmethod
+from typing import Self
 
 import attrs
 import jax
 import jax.numpy as jnp
-import mujoco
-from jaxtyping import PRNGKeyArray
-from mujoco import mjx
+import xax
+from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsModel
-from ksim.utils.mujoco import get_body_data_idx_by_name, update_model_field
+from ksim.utils.mujoco import get_body_data_idx_by_name, slice_update
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -29,8 +30,16 @@ class Randomization(ABC):
     """Randomize the joint positions of the robot."""
 
     @abstractmethod
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         """Randomize the model for a single environment."""
+
+    def get_name(self) -> str:
+        """Get the name of the observation."""
+        return xax.camelcase_to_snakecase(self.__class__.__name__)
+
+    @functools.cached_property
+    def randomization_name(self) -> str:
+        return self.get_name()
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -39,10 +48,8 @@ class WeightRandomization(Randomization):
 
     scale: float = attrs.field()
 
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
-        """Randomize the model for a single environment."""
-        new_body_mass = model.body_mass * (jax.random.uniform(rng, model.body_mass.shape) * self.scale + 1.0)
-        return update_model_field(model, "body_mass", new_body_mass)
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
+        return {"body_mass": model.body_mass * (jax.random.uniform(rng, model.body_mass.shape) * self.scale + 1.0)}
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -52,18 +59,16 @@ class StaticFrictionRandomization(Randomization):
     scale_lower: float = attrs.field(default=0.5)
     scale_upper: float = attrs.field(default=2.0)
 
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
-        """Randomize the static friction of the robot."""
-        rng, key = jax.random.split(rng)
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         frictionloss = model.dof_frictionloss[6:] * jax.random.uniform(
-            key,
+            rng,
             shape=(model.dof_frictionloss.shape[0] - 6,),
             minval=self.scale_lower,
             maxval=self.scale_upper,
         )
         # Skip the first 6 DOFs (free joint)
         new_frictionloss = jnp.concatenate([model.dof_frictionloss[:6], frictionloss])
-        return update_model_field(model, "dof_frictionloss", new_frictionloss)
+        return {"dof_frictionloss": new_frictionloss}
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -74,19 +79,11 @@ class FloorFrictionRandomization(Randomization):
     scale_lower: float = attrs.field(default=0.4)
     scale_upper: float = attrs.field(default=1.0)
 
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
-        """Randomize the floor friction of the robot."""
-        match type(model):
-            case mujoco.MjModel:
-                new_geom_friction = model.geom_friction.copy()
-                new_geom_friction[self.floor_body_id, 0] = jax.random.uniform(
-                    rng, minval=self.scale_lower, maxval=self.scale_upper
-                )
-            case mjx.Model:
-                new_geom_friction = model.geom_friction.at[self.floor_body_id, 0].set(
-                    jax.random.uniform(rng, minval=self.scale_lower, maxval=self.scale_upper)
-                )
-        return update_model_field(model, "geom_friction", new_geom_friction)
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
+        arr_inds = (self.floor_body_id, 0)
+        rand_vals = jax.random.uniform(rng, minval=self.scale_lower, maxval=self.scale_upper)
+        new_geom_friction = slice_update(model, "geom_friction", arr_inds, rand_vals)
+        return {"geom_friction": new_geom_friction}
 
     @classmethod
     def from_body_name(
@@ -95,7 +92,7 @@ class FloorFrictionRandomization(Randomization):
         floor_body_name: str,
         scale_lower: float = 0.4,
         scale_upper: float = 1.0,
-    ) -> "FloorFrictionRandomization":
+    ) -> Self:
         names_to_idxs = get_body_data_idx_by_name(model)
         if floor_body_name not in names_to_idxs:
             raise ValueError(f"Body name {floor_body_name} not found in model")
@@ -114,14 +111,13 @@ class ArmatureRandomization(Randomization):
     scale_lower: float = attrs.field(default=1.0)
     scale_upper: float = attrs.field(default=1.05)
 
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
-        """Randomize the armature of the robot."""
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         # Skip the first 6 DOFs (free joint)
         armature = model.dof_armature[6:] * jax.random.uniform(
             rng, shape=(model.dof_armature.shape[0] - 6,), minval=self.scale_lower, maxval=self.scale_upper
         )
         new_armature = jnp.concatenate([model.dof_armature[:6], armature])
-        return update_model_field(model, "dof_armature", new_armature)
+        return {"dof_armature": new_armature}
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -132,11 +128,9 @@ class TorsoMassRandomization(Randomization):
     scale_lower: float = attrs.field(default=-1.0)
     scale_upper: float = attrs.field(default=1.0)
 
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
-        """Randomize the torso mass of the robot."""
-        rng, key = jax.random.split(rng)
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         new_mass = model.body_mass[self.torso_body_id] + jax.random.uniform(
-            key, minval=self.scale_lower, maxval=self.scale_upper
+            rng, minval=self.scale_lower, maxval=self.scale_upper
         )
         new_body_mass = jnp.concatenate(
             [
@@ -145,7 +139,7 @@ class TorsoMassRandomization(Randomization):
                 model.body_mass[self.torso_body_id + 1 :],
             ]
         )
-        return update_model_field(model, "body_mass", new_body_mass)
+        return {"body_mass": new_body_mass}
 
     @classmethod
     def from_body_name(
@@ -154,7 +148,7 @@ class TorsoMassRandomization(Randomization):
         torso_body_name: str,
         scale_lower: float = 0.0,
         scale_upper: float = 1.0,
-    ) -> "TorsoMassRandomization":
+    ) -> Self:
         names_to_idxs = get_body_data_idx_by_name(model)
         if torso_body_name not in names_to_idxs:
             raise ValueError(f"Body name {torso_body_name} not found in model")
@@ -173,15 +167,16 @@ class JointDampingRandomization(Randomization):
     scale_lower: float = attrs.field(default=0.9)
     scale_upper: float = attrs.field(default=1.1)
 
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
-        rng, key = jax.random.split(rng)
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         # Skip the first 6 DOFs (free joint)
         kd = model.dof_damping[6:] * jax.random.uniform(
-            key, shape=(model.dof_damping.shape[0] - 6,), minval=self.scale_lower, maxval=self.scale_upper
+            rng,
+            shape=(model.dof_damping.shape[0] - 6,),
+            minval=self.scale_lower,
+            maxval=self.scale_upper,
         )
         dof_damping = jnp.concatenate([model.dof_damping[:6], kd])
-
-        return update_model_field(model, "dof_damping", dof_damping)
+        return {"dof_damping": dof_damping}
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -191,14 +186,14 @@ class JointZeroPositionRandomization(Randomization):
     scale_lower: float = attrs.field(default=-0.1)
     scale_upper: float = attrs.field(default=0.1)
 
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
-        rng, key = jax.random.split(rng)
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         qpos_0 = model.qpos0
-        # Skip the first 7 DOFs (free joint - xyz + quat)
-        qpos_0 = qpos_0.at[7:].set(
-            qpos_0[7:]
-            + jax.random.uniform(
-                key, shape=(model.qpos0.shape[0] - 7,), minval=self.scale_lower, maxval=self.scale_upper
-            )
+        new_qpos = jax.random.uniform(
+            rng,
+            shape=(model.qpos0.shape[0] - 7,),
+            minval=self.scale_lower,
+            maxval=self.scale_upper,
         )
-        return update_model_field(model, "qpos0", qpos_0)
+        # Skip the first 7 DOFs (free joint - xyz + quat)
+        qpos_0 = slice_update(model, "qpos0", slice(7, None), new_qpos)
+        return {"qpos0": qpos_0}

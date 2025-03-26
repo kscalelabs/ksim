@@ -20,7 +20,7 @@ xax[export]
 # Mujoco
 mujoco
 mujoco-mjx
-mujoco-scenes
+# mujoco-scenes
 
 # Deployment
 pykos

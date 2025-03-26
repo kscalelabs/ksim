@@ -13,10 +13,11 @@ __all__ = [
     "get_joint_metadata",
     "update_model_field",
     "update_data_field",
+    "slice_update",
 ]
 
 import logging
-from typing import Hashable, TypeVar
+from typing import Any, Hashable, TypeVar
 
 import jax
 import jax.numpy as jnp
@@ -186,3 +187,20 @@ def update_data_field(data: mujoco.MjData | mjx.Data, name: str, new_value: Arra
     else:
         data = data.replace(**{name: new_value})
     return data
+
+
+def slice_update(model: mujoco.MjModel | mjx.Model, name: str, slice: Any, value: Array) -> Array:  # noqa: ANN401
+    """Update a slice of a model field."""
+    if isinstance(model, mujoco.MjModel):
+        val = getattr(model, name).copy()
+        val[slice] = value
+        return val
+    if isinstance(model, mjx.Model):
+        return getattr(model, name).at[slice].set(value)
+    raise ValueError(f"Model type {type(model)} not supported")
+
+
+def load_model(model: mujoco.MjModel) -> mjx.Model:
+    mjx_model = mjx.put_model(model)
+    mjx_model = jax.tree.map(jnp.array, mjx_model)
+    return mjx_model
