@@ -92,48 +92,51 @@ class PushEvent(Event):
 
         # Calculate new interval (either new random interval or decremented existing one)
         interval_range = self.interval_range
-        # Generate random interval in seconds
-        random_interval = jax.random.uniform(rng_interval, (), minval=interval_range[0], maxval=interval_range[1])
-
-        # Decrement by physics timestep (in seconds)
-        continued_interval = persistent_data.remaining_interval - dt
+        # Generate random interval in seconds - ensure it's float32
+        random_interval = jax.random.uniform(
+            rng_interval, 
+            (), 
+            minval=jnp.float32(interval_range[0]), 
+            maxval=jnp.float32(interval_range[1])
+        )
+        
+        # Decrement by physics timestep
+        dt_float32 = jnp.float32(dt)
+        continued_interval = persistent_data.remaining_interval - dt_float32
 
         # Select new interval value
         new_interval = jnp.where(
             should_reset,
             random_interval,
-            jnp.where(needs_reset, persistent_data.remaining_interval, continued_interval),
+            jnp.where(needs_reset, jnp.float32(0.0), continued_interval),
         )
 
-        random_linear_force = (
-            jax.random.uniform(
-                rng_linear,
-                (3,),
-                minval=-self.linear_force_scale,
-                maxval=self.linear_force_scale,
-            )
-            + data.qvel[0:3]
-        )
-
-        _ = jax.random.uniform(
-            rng_angular,
+        # Generate random forces
+        random_linear_force = jax.random.uniform(
+            rng_linear,
             (3,),
-            minval=-self.angular_force_scale,
-            maxval=self.angular_force_scale,
-        )
+            minval=-self.linear_force_scale,
+            maxval=self.linear_force_scale,
+        ) + data.qvel[0:3]
 
-        new_data_qvel = data.qvel
-        new_data_qvel = new_data_qvel.at[0:3].set(random_linear_force)
-
-        updated_data = jax.lax.cond(
-            jnp.bool_(should_reset),
-            lambda: update_data_field(data, "qvel", new_data_qvel),
-            lambda: data,
+        # Apply forces conditionally using where instead of lax.cond
+        new_data_qvel = data.qvel.at[0:3].set(
+            jnp.where(
+                should_reset,
+                random_linear_force,
+                data.qvel[0:3]
+            )
         )
+        
+        # Update data with new velocities
+        updated_data = update_data_field(data, "qvel", new_data_qvel)
 
         return updated_data, PushEventInfo(
             remaining_interval=new_interval,
         )
 
     def get_initial_info(self) -> PushEventInfo:
-        return PushEventInfo(remaining_interval=jnp.array(self.interval_range[0]))
+        """Initialize with a float32 zero value for consistent typing."""
+        return PushEventInfo(
+            remaining_interval=jnp.float32(0.0)
+        )
