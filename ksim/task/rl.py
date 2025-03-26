@@ -63,6 +63,7 @@ from ksim.types import (
     Trajectory,
 )
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata, load_model
+from ksim.utils.visualization import VelocityArrow
 
 logger = logging.getLogger(__name__)
 
@@ -1123,7 +1124,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     if self.config.render_plots:
                         ctrl_idx_to_name = {v: k for k, v in get_ctrl_data_idx_by_name(mj_model).items()}
                         viewer.add_plot_group(
-                            title="Actions", index_mapping=ctrl_idx_to_name, y_axis_min=-2, y_axis_max=2
+                            title="Actions",
+                            index_mapping=ctrl_idx_to_name,
+                            y_axis_min=-2,
+                            y_axis_max=2,
                         )
                         # We'll set up reward component plots in the first iteration
                         reward_component_mapping = None
@@ -1177,7 +1181,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         # Sync data again
                         viewer.copy_data(dst=viewer_data, src=rollout_variables.physics_state.data)
                         mujoco.mj_forward(viewer_model, viewer_data)
-                        viewer.add_commands(dict(rollout_variables.commands))
+
+                        # Applies the command visualizations to the viewer.
+                        for command in commands:
+                            for visualization in command.update_scene(rollout_variables.commands[command.command_name]):
+                                if isinstance(visualization, VelocityArrow):
+                                    viewer.add_velocity_arrow(
+                                        command_velocity=visualization.velocity,
+                                        base_pos=visualization.base_pos,
+                                        scale=visualization.scale,
+                                        rgba=visualization.rgba,
+                                        direction=visualization.direction,
+                                        label=visualization.label,
+                                    )
+                                else:
+                                    raise NotImplementedError(f"Unknown visualization type: {type(visualization)}")
+
                         viewer.update_and_sync()
 
                         if self.config.render_plots:
