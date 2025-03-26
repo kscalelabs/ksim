@@ -1,18 +1,13 @@
 """Tests for observations in the ksim package."""
 
-from pathlib import Path
-
 import attrs
 import jax
 import jax.numpy as jnp
-import mujoco
 import pytest
 from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
 import ksim
-
-_TOL = 1e-4
 
 
 @attrs.define(frozen=True)
@@ -50,10 +45,3 @@ def default_mjx_data() -> DummyMjxData:
 def rng() -> PRNGKeyArray:
     """Create a default RNG key fixture for testing."""
     return jax.random.PRNGKey(0)
-
-
-@pytest.fixture
-def humanoid_model() -> mujoco.MjModel:
-    """Create a humanoid model fixture for testing."""
-    mjcf_path = (Path(__file__).parent / "fixed_assets" / "default_humanoid_test.mjcf").resolve().as_posix()
-    return mujoco.MjModel.from_xml_path(mjcf_path)

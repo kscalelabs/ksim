@@ -11,12 +11,14 @@ __all__ = [
     "JointZeroPositionRandomization",
 ]
 
+import functools
 from abc import ABC, abstractmethod
 from typing import Self
 
 import attrs
 import jax
 import jax.numpy as jnp
+import xax
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsModel
@@ -30,6 +32,14 @@ class Randomization(ABC):
     @abstractmethod
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         """Randomize the model for a single environment."""
+
+    def get_name(self) -> str:
+        """Get the name of the observation."""
+        return xax.camelcase_to_snakecase(self.__class__.__name__)
+
+    @functools.cached_property
+    def randomization_name(self) -> str:
+        return self.get_name()
 
 
 @attrs.define(frozen=True, kw_only=True)

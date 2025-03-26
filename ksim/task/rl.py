@@ -16,6 +16,7 @@ import textwrap
 import time
 import traceback
 from abc import ABC, abstractmethod
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
@@ -61,7 +62,7 @@ from ksim.types import (
     RolloutVariables,
     Trajectory,
 )
-from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata
+from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata, load_model
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,6 @@ class RolloutConstants:
     command_generators: Collection[Command]
     reward_generators: Collection[Reward]
     termination_generators: Collection[Termination]
-    randomization_generators: Collection[Randomization]
 
 
 def get_observation(
@@ -199,10 +199,15 @@ def apply_randomizations(
     rng: PRNGKeyArray,
 ) -> FrozenDict[str, Array]:
     """Apply randomizations to the physics model."""
+    all_randomizations: dict[str, dict[str, Array]] = {}
     for randomization in randomizations:
         rng, randomization_rng = jax.random.split(rng)
-        physics_model = randomization(physics_model, randomization_rng)
-    return physics_model
+        all_randomizations[randomization.randomization_name] = randomization(physics_model, randomization_rng)
+    for name, count in Counter([k for d in all_randomizations.values() for k in d.keys()]).items():
+        if count > 1:
+            name_to_keys = {k: set(v.keys()) for k, v in all_randomizations.items()}
+            raise ValueError(f"Found duplicate randomization keys: {name}. Randomizations: {name_to_keys}")
+    return FrozenDict({k: v for d in all_randomizations.values() for k, v in d.items()})
 
 
 @jax.tree_util.register_dataclass
@@ -349,9 +354,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Returns:
             The mjx model.
         """
-        # TODO: We should perform some checks on the Mujoco model to ensure
-        # that it is performant in MJX.
-        return mjx.put_model(mj_model)
+        return load_model(mj_model)
 
     def get_engine(
         self,
@@ -853,6 +856,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         rng: PRNGKeyArray,
         physics_model: PhysicsModel,
+        randomization_axes: PyTree,
         model_arr: PyTree,
         model_static: PyTree,
         optimizer: optax.GradientTransformation,
@@ -908,7 +912,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             vmapped_unroll = jax.vmap(
                 single_unroll,
                 in_axes=(
-                    0 if self.config.randomize_environments else None,
+                    randomization_axes,
                     None,
                     None,
                     None,
@@ -1015,7 +1019,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             commands = self.get_commands(mj_model)
             rewards = self.get_rewards(mj_model)
             terminations = self.get_terminations(mj_model)
-            randomizations = self.get_randomization(mj_model)
 
             # Gets initial variables.
             rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
@@ -1032,7 +1035,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 command_generators=commands,
                 reward_generators=rewards,
                 termination_generators=terminations,
-                randomization_generators=randomizations,
             )
 
             # These components are updated each step.
@@ -1115,17 +1117,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             clip_max=self.config.reward_clip_max,
                         )
 
-                        # We manually trigger randomizations on termination,
-                        # whereas during training the randomization is only applied
-                        # once per rollout for efficiency.
-                        rng, randomization_rng = jax.random.split(rng)
-                        breakpoint()
-                        mj_model = jax.lax.cond(
-                            transition.done,
-                            lambda: apply_randomizations(mj_model, randomizations, randomization_rng),
-                            lambda: mj_model,
-                        )
-
                         # Sync data again
                         viewer.copy_data(dst=viewer_data, src=rollout_variables.physics_state.data)
                         mujoco.mj_forward(viewer_model, viewer_data)
@@ -1187,7 +1178,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 command_generators=tuple(commands),
                 reward_generators=tuple(rewards_terms),
                 termination_generators=tuple(terminations),
-                randomization_generators=tuple(randomizations),
             )
 
             # JAX requires that we partition the model into mutable and static
@@ -1197,13 +1187,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Builds the variables for the training environment.
             train_rngs = jax.random.split(rng, self.config.num_envs)
 
+            # Applies randomizations to the physics model.
             randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, 0))
-            randomizations = randomization_fn(mjx_model, rollout_constants.randomization_generators, train_rngs)
+            randomizations = randomization_fn(mjx_model, randomizations, train_rngs)
+            randomization_axes = jax.tree.map(lambda _: None, mjx_model)
+            randomization_axes.tree_replace({k: 0 for k in randomizations.keys()})
+            mjx_model = mjx_model.tree_replace(randomizations)
 
             # Defines the vectorized initialization functions.
             carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
             command_fn = jax.vmap(get_initial_commands, in_axes=(0, None))
-            state_fn = jax.vmap(engine.reset, in_axes=(0 if self.config.randomize_environments else None, 0))
+            state_fn = jax.vmap(engine.reset, in_axes=(randomization_axes, 0))
 
             rollout_variables = RolloutVariables(
                 carry=carry_fn(train_rngs),
@@ -1247,6 +1241,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         ) = self._rl_train_loop_step(
                             rng=update_rng,
                             physics_model=mjx_model,
+                            randomization_axes=randomization_axes,
                             model_arr=model_arr,
                             model_static=model_static,
                             optimizer=optimizer,

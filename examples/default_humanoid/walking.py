@@ -313,14 +313,14 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.ActuatorAccelerationObservation(),
             ksim.FeetContactObservation.create(
                 physics_model=physics_model,
-                foot_left="foot1_left",
-                foot_right="foot1_right",
+                foot_left="left_foot",
+                foot_right="right_foot",
                 floor_geom_id="floor",
             ),
             ksim.FeetPositionObservation.create(
                 physics_model=physics_model,
-                foot_left="foot1_left",
-                foot_right="foot1_right",
+                foot_left="left_foot",
+                foot_right="right_foot",
             ),
         ]
 
@@ -507,7 +507,6 @@ if __name__ == "__main__":
             num_envs=2048,
             num_batches=64,
             num_passes=10,
-            randomize_environments=False,
             epochs_per_log_step=1,
             log_single_traj_every_n_steps=10,
             # Simulation parameters.
