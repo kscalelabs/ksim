@@ -1103,7 +1103,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             if len(trajectory_list) == 0:
                 raise ValueError("No trajectory was collected.")
 
-            trajectory: Trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *trajectory_list)
+            trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *trajectory_list)
             frames, fps = self.render_trajectory_video(trajectory, commands, mj_model)
 
             match save_path.suffix.lower():
@@ -1122,7 +1122,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     try:
                         with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
                             for frame in frames:
-                                writer.append_data(frame)
+                                writer.append_data(frame)  # type: ignore[attr-defined]
 
                     except Exception as e:
                         raise RuntimeError(
