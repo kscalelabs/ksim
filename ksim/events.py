@@ -31,7 +31,9 @@ class Event(ABC):
     probability: float = attrs.field(validator=event_probability_validator)
 
     @abstractmethod
-    def __call__(self, persistent_data: PyTree, data: PhysicsData, dt: float, rng: PRNGKeyArray) -> tuple[PhysicsData, PyTree]:
+    def __call__(
+        self, persistent_data: PyTree, data: PhysicsData, dt: float, rng: PRNGKeyArray
+    ) -> tuple[PhysicsData, PyTree]:
         """Apply the event to the data."""
 
     def get_name(self) -> str:
@@ -53,7 +55,7 @@ class PushEventInfo:
     @classmethod
     def tree_unflatten(cls, aux_data: None, children: tuple) -> Self:
         """Reconstruct the class from flattened representation."""
-        remaining_interval, = children
+        (remaining_interval,) = children
         return cls(
             remaining_interval=remaining_interval,
         )
@@ -91,12 +93,7 @@ class PushEvent(Event):
         # Calculate new interval (either new random interval or decremented existing one)
         interval_range = self.interval_range
         # Generate random interval in seconds
-        random_interval = jax.random.uniform(
-            rng_interval, 
-            (), 
-            minval=interval_range[0], 
-            maxval=interval_range[1]
-        )
+        random_interval = jax.random.uniform(rng_interval, (), minval=interval_range[0], maxval=interval_range[1])
 
         # Decrement by physics timestep (in seconds)
         continued_interval = persistent_data.remaining_interval - dt
@@ -108,20 +105,23 @@ class PushEvent(Event):
             jnp.where(needs_reset, persistent_data.remaining_interval, continued_interval),
         )
 
-        random_linear_force = jax.random.uniform(
-            rng_linear,
-            (3,),
-            minval=-self.linear_force_scale,
-            maxval=self.linear_force_scale,
-        ) + data.qvel[0:3]
+        random_linear_force = (
+            jax.random.uniform(
+                rng_linear,
+                (3,),
+                minval=-self.linear_force_scale,
+                maxval=self.linear_force_scale,
+            )
+            + data.qvel[0:3]
+        )
 
-        random_angular_force = jax.random.uniform(
+        _ = jax.random.uniform(
             rng_angular,
             (3,),
             minval=-self.angular_force_scale,
             maxval=self.angular_force_scale,
         )
-        
+
         new_data_qvel = data.qvel
         new_data_qvel = new_data_qvel.at[0:3].set(random_linear_force)
 
@@ -136,6 +136,4 @@ class PushEvent(Event):
         )
 
     def get_initial_info(self) -> PushEventInfo:
-        return PushEventInfo(
-            remaining_interval=jnp.array(self.interval_range[0])
-        )
+        return PushEventInfo(remaining_interval=jnp.array(self.interval_range[0]))

@@ -224,7 +224,9 @@ class MujocoEngine(PhysicsEngine):
             # Apply the events.
             new_event_info = {}
             for event in self.events:
-                mujoco_data, event_info = event(event_info[event.get_name()], mujoco_data, rng)
+                mujoco_data, event_info = event(
+                    event_info[event.get_name()], mujoco_data, physics_model.opt.timestep, rng
+                )
                 new_event_info[event.get_name()] = event_info
 
             event_info = FrozenDict(new_event_info)
