@@ -108,18 +108,6 @@ class PushEvent(Event):
             jnp.where(needs_reset, persistent_data.remaining_interval, continued_interval),
         )
 
-        updated_data = jax.lax.cond(
-            jnp.bool_(should_reset),
-            lambda: self._apply_push_force(data, rng_linear, rng_angular),
-            lambda: data,
-        )
-
-        return updated_data, PushEventInfo(
-            remaining_interval=new_interval,
-        )
-    
-    def _apply_push_force(self, data: PhysicsData, rng_linear: PRNGKeyArray, rng_angular: PRNGKeyArray) -> PhysicsData:
-        """Generate and apply random forces to the physics data."""
         random_linear_force = jax.random.uniform(
             rng_linear,
             (3,),
@@ -136,8 +124,16 @@ class PushEvent(Event):
         
         new_data_qvel = data.qvel
         new_data_qvel = new_data_qvel.at[0:3].set(random_linear_force)
-        
-        return update_data_field(data, "qvel", new_data_qvel)
+
+        updated_data = jax.lax.cond(
+            jnp.bool_(should_reset),
+            lambda: update_data_field(data, "qvel", new_data_qvel),
+            lambda: data,
+        )
+
+        return updated_data, PushEventInfo(
+            remaining_interval=new_interval,
+        )
 
     def get_initial_info(self) -> PushEventInfo:
         return PushEventInfo(
