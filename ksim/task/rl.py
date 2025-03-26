@@ -855,10 +855,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             **{key: (value / num_terms[:, None]).mean() for key, value in trajectories.termination_components.items()},
         }
 
-    @eqx.filter_jit
+    @xax.jit(
+        static_argnames=[
+            "self",
+            "model_static",
+            "optimizer",
+            "engine",
+            "rollout_constants",
+        ]
+    )
     def _rl_train_loop_step(
         self,
-        rng: PRNGKeyArray,
         physics_model: PhysicsModel,
         randomization_dict: FrozenDict[str, Array],
         model_arr: PyTree,
@@ -868,6 +875,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
+        rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, Trajectory, Rewards]:
         def single_unroll(
             physics_model: PhysicsModel,
@@ -913,7 +921,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng: PRNGKeyArray,
         ) -> tuple[tuple[PyTree, optax.OptState, RolloutVariables], tuple[Metrics, Trajectory, Rewards]]:
             model_arr, opt_state, rollout_variables = carry
-            rng, update_rng = jax.random.split(rng)
 
             # Rolls out a new trajectory.
             vmapped_unroll = jax.vmap(
@@ -948,7 +955,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 opt_state=opt_state,
                 trajectories=trajectories,
                 rewards=rewards,
-                rng=update_rng,
+                rng=rng,
             )
 
             metrics = Metrics(
@@ -1226,7 +1233,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             final_trajectory,
                             final_reward,
                         ) = self._rl_train_loop_step(
-                            rng=update_rng,
                             physics_model=mjx_model,
                             randomization_dict=randomization_dict,
                             model_arr=model_arr,
@@ -1236,6 +1242,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             engine=engine,
                             rollout_constants=rollout_constants,
                             rollout_variables=rollout_variables,
+                            rng=update_rng,
                         )
 
                     if is_first_step:
