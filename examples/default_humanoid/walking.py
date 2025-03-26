@@ -19,10 +19,10 @@ from mujoco import mjx
 
 import ksim
 
-OBS_SIZE = 330
+OBS_SIZE = 270
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_OUTPUTS = 21
+NUM_OUTPUTS = 17
 
 
 @jax.tree_util.register_dataclass

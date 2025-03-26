@@ -62,11 +62,7 @@ class PhysicsEngine(eqx.Module, ABC):
         self.max_action_latency_step = max_action_latency_step
 
     @abstractmethod
-    def reset(
-        self,
-        physics_model: PhysicsModel,
-        rng: PRNGKeyArray,
-    ) -> PhysicsState:
+    def reset(self, physics_model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsState:
         """Reset the engine and return the physics data."""
 
     @abstractmethod
