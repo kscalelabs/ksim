@@ -507,6 +507,7 @@ if __name__ == "__main__":
             num_envs=2048,
             num_batches=64,
             num_passes=10,
+            randomize_environments=False,
             epochs_per_log_step=1,
             log_single_traj_every_n_steps=10,
             # Simulation parameters.
