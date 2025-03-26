@@ -55,7 +55,7 @@ class StaticFrictionRandomization(Randomization):
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
         """Randomize the static friction of the robot."""
         rng, key = jax.random.split(rng)
-        frictionloss = model.dof_frictionloss[6:] + jax.random.uniform(
+        frictionloss = model.dof_frictionloss[6:] * jax.random.uniform(
             key,
             shape=(model.dof_frictionloss.shape[0] - 6,),
             minval=self.scale_lower,
@@ -135,11 +135,13 @@ class TorsoMassRandomization(Randomization):
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
         """Randomize the torso mass of the robot."""
         rng, key = jax.random.split(rng)
-        dmass = jax.random.uniform(key, minval=self.scale_lower, maxval=self.scale_upper)
+        new_mass = model.body_mass[self.torso_body_id] + jax.random.uniform(
+            key, minval=self.scale_lower, maxval=self.scale_upper
+        )
         new_body_mass = jnp.concatenate(
             [
                 model.body_mass[: self.torso_body_id],
-                jnp.array([dmass]),
+                jnp.array([new_mass]),
                 model.body_mass[self.torso_body_id + 1 :],
             ]
         )
@@ -192,11 +194,11 @@ class JointZeroPositionRandomization(Randomization):
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsModel:
         rng, key = jax.random.split(rng)
         qpos_0 = model.qpos0
-        # Skip the first 6 DOFs (free joint)
-        qpos_0 = qpos_0.at[6:].set(
-            qpos_0[6:]
+        # Skip the first 7 DOFs (free joint - xyz + quat)
+        qpos_0 = qpos_0.at[7:].set(
+            qpos_0[7:]
             + jax.random.uniform(
-                key, shape=(model.qpos0.shape[0] - 6,), minval=self.scale_lower, maxval=self.scale_upper
+                key, shape=(model.qpos0.shape[0] - 7,), minval=self.scale_lower, maxval=self.scale_upper
             )
         )
         return update_model_field(model, "qpos0", qpos_0)
