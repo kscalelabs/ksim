@@ -3,7 +3,6 @@
 # Utilities
 numpy
 matplotlib
-kmv
 tqdm
 
 # K-Scale CLI

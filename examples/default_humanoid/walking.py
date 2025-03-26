@@ -19,7 +19,7 @@ from mujoco import mjx
 
 import ksim
 
-OBS_SIZE = 332
+OBS_SIZE = 330
 CMD_SIZE = 2
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
@@ -36,8 +36,8 @@ class AuxOutputs:
 class DHJointVelocityObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.PhysicsState, rng: PRNGKeyArray) -> Array:
-        qvel = state.qvel  # (N,)
+    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        qvel = state.physics_state.data.qvel  # (N,)
         return qvel
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
@@ -48,8 +48,8 @@ class DHJointVelocityObservation(ksim.Observation):
 class DHJointPositionObservation(ksim.Observation):
     noise: float = attrs.field(default=0.0)
 
-    def observe(self, state: ksim.PhysicsState, rng: PRNGKeyArray) -> Array:
-        qpos = state.qpos  # (N,)
+    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
+        qpos = state.physics_state.data.qpos[2:]  # (N,)
         return qpos
 
     def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
@@ -327,7 +327,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             ksim.LinearVelocityCommand(
-                x_range=(0.0, 3.0),
+                x_range=(0.0, 2.0),
                 y_range=(0.0, 0.0),
                 switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average
                 zero_prob=0.0,
