@@ -730,12 +730,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
             renderer.update_scene(mj_data, camera=mj_camera)
-
-            # Adds command elements to the scene.
-            for command in commands:
-                command.update_scene(renderer.scene, trajectory.command[command.command_name])
-
-            # Renders the frame to a Numpy array.
             frame = renderer.render()
 
             # Overlays the frame number on the frame.
