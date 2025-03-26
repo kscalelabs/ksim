@@ -10,6 +10,7 @@ import datetime
 import io
 import itertools
 import logging
+import random
 import signal
 import sys
 import textwrap
@@ -21,7 +22,6 @@ from pathlib import Path
 from threading import Thread
 from typing import Any, Collection, Generic, TypeVar
 
-import random
 import chex
 import equinox as eqx
 import jax
@@ -286,6 +286,10 @@ class RLConfig(xax.Config):
     render_length_seconds: float | None = xax.field(
         value=5.0,
         help="The number of seconds to rollout each environment during evaluation.",
+    )
+    render_downsample: int = xax.field(
+        value=5,
+        help="The downsample factor for the rendered video.",
     )
     render_track_body_id: int | None = xax.field(
         value=None,
@@ -785,7 +789,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.logger.log_image(key=key, value=img, namespace=namespace)
 
         # Logs the video of the trajectory.
+        trajectories = jax.tree.map(lambda arr: arr[:: self.config.render_downsample], trajectories)
         frames, fps = self.render_trajectory_video(trajectories, commands, mj_model)
+        fps = round(fps / self.config.render_downsample)
         self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
 
     @abstractmethod
