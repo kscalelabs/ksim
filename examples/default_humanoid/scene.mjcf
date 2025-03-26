@@ -125,6 +125,7 @@
           <geom name="left_hand" pos=".18 -.18 .18" size="0.04" type="sphere" />
         </body>
       </body>
+      <site name="imu_site" />
     </body>
   </worldbody>
 
