@@ -15,19 +15,22 @@ __all__ = [
     "BaseLinearAccelerationObservation",
     "BaseAngularAccelerationObservation",
     "ActuatorAccelerationObservation",
+    "FeetContactObservation",
+    "FeetPositionObservation",
 ]
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Literal
+from typing import Literal, Self
 
 import attrs
 import jax
 import xax
+from jax import numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsModel, RolloutVariables
-from ksim.utils.mujoco import get_sensor_data_idxs_by_name
+from ksim.utils.mujoco import geoms_colliding, get_geom_data_idx_by_name, get_sensor_data_idxs_by_name
 
 NoiseType = Literal["gaussian", "uniform"]
 
@@ -207,7 +210,7 @@ class SensorObservation(Observation):
         sensor_name: str,
         noise: float = 0.0,
         noise_type: NoiseType = "gaussian",
-    ) -> "SensorObservation":
+    ) -> Self:
         """Create a sensor observation from a physics model.
 
         Args:
@@ -263,3 +266,52 @@ class ActuatorAccelerationObservation(Observation):
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.data.qacc[6:]
+
+
+@attrs.define(frozen=True)
+class FeetContactObservation(Observation):
+    foot_left: int = attrs.field()
+    foot_right: int = attrs.field()
+    floor_geom_id: int = attrs.field()
+    noise: float = attrs.field(default=0.0)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        foot_left: str,
+        foot_right: str,
+        floor_geom_id: str,
+    ) -> Self:
+        """Create a sensor observation from a physics model."""
+        foot_left_idx = get_geom_data_idx_by_name(physics_model)[foot_left]
+        foot_right_idx = get_geom_data_idx_by_name(physics_model)[foot_right]
+        floor_geom_id = get_geom_data_idx_by_name(physics_model)[floor_geom_id]
+        return cls(
+            foot_left=foot_left_idx,
+            foot_right=foot_right_idx,
+            floor_geom_id=floor_geom_id,
+        )
+
+    def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
+        contact_1 = geoms_colliding(rollout_state.physics_state.data, self.foot_left, self.floor_geom_id)
+        contact_2 = geoms_colliding(rollout_state.physics_state.data, self.foot_right, self.floor_geom_id)
+        return jnp.array([contact_1, contact_2])
+
+
+@attrs.define(frozen=True)
+class FeetPositionObservation(Observation):
+    foot_left: int = attrs.field()
+    foot_right: int = attrs.field()
+    noise: float = attrs.field(default=0.0)
+
+    @classmethod
+    def create(cls, physics_model: PhysicsModel, foot_left: str, foot_right: str) -> Self:
+        foot_left_idx = get_geom_data_idx_by_name(physics_model)[foot_left]
+        foot_right_idx = get_geom_data_idx_by_name(physics_model)[foot_right]
+        return cls(foot_left=foot_left_idx, foot_right=foot_right_idx)
+
+    def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
+        foot_left_pos = rollout_state.physics_state.data.geom_xpos[self.foot_left]
+        foot_right_pos = rollout_state.physics_state.data.geom_xpos[self.foot_right]
+        return jnp.concatenate([foot_left_pos, foot_right_pos], axis=-1)

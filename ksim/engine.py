@@ -67,7 +67,7 @@ class PhysicsEngine(eqx.Module, ABC):
         physics_model: PhysicsModel,
         rng: PRNGKeyArray,
     ) -> PhysicsState:
-        """Reset the engine and return the physics model and data."""
+        """Reset the engine and return the physics data."""
 
     @abstractmethod
     def step(
