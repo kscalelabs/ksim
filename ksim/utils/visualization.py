@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
+import attrs
 import matplotlib.pyplot as plt
 import numpy as np
 from flax.core import FrozenDict
@@ -96,3 +97,16 @@ def save_trajectory_visualization(
         save_video_with_rewards(frames, rewards, fps, output_dir / "trajectory.mp4")
         end_time = time.time()
         logger.info("Time taken for video creation: %.2f seconds", end_time - start_time)
+
+
+@attrs.define(frozen=True)
+class VelocityArrow:
+    velocity: float = attrs.field()
+    base_pos: tuple[float, float, float] = attrs.field()
+    scale: float = attrs.field(default=0.1)
+    rgba: tuple[float, float, float, float] = attrs.field(default=(0.0, 0.0, 1.0, 1.0))
+    direction: tuple[float, float, float] = attrs.field(default=(1.0, 0.0, 0.0))
+    label: str | None = attrs.field(default=None)
+
+
+Visualization = VelocityArrow

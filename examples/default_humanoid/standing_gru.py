@@ -1,21 +1,19 @@
 # mypy: disable-error-code="override"
-"""Defines simple task for training a walking policy for the default humanoid using an LSTM actor."""
+"""Defines simple task for training a standing policy for K-Bot."""
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Generic, TypeVar
 
 import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
 
 import ksim
 
-from .walking import CMD_SIZE, NUM_INPUTS, NUM_OUTPUTS, OBS_SIZE, HumanoidWalkingTask, HumanoidWalkingTaskConfig
+from .walking import NUM_INPUTS, NUM_OUTPUTS, HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 HIDDEN_SIZE = 128  # `_s`
 DEPTH = 2
@@ -28,8 +26,8 @@ class AuxOutputs:
     values: Array
 
 
-class MultiLayerLSTM(eqx.Module):
-    layers: tuple[eqx.nn.LSTMCell, ...]
+class MultiLayerRNN(eqx.Module):
+    layers: tuple[eqx.nn.GRUCell, ...]
     depth: int = eqx.field(static=True)
     input_size: int = eqx.field(static=True)
     hidden_size: int = eqx.field(static=True)
@@ -37,10 +35,10 @@ class MultiLayerLSTM(eqx.Module):
     def __init__(self, key: PRNGKeyArray, *, input_size: int, hidden_size: int, depth: int) -> None:
         if depth < 1:
             raise ValueError("Depth must be at least 1")
-        first_layer = eqx.nn.LSTMCell(input_size=input_size, hidden_size=hidden_size, use_bias=True, key=key)
+        first_layer = eqx.nn.GRUCell(input_size=input_size, hidden_size=hidden_size, use_bias=True, key=key)
 
         other_layers = tuple(
-            eqx.nn.LSTMCell(input_size=hidden_size, hidden_size=hidden_size, use_bias=True, key=key)
+            eqx.nn.GRUCell(input_size=hidden_size, hidden_size=hidden_size, use_bias=True, key=key)
             for _ in range(depth - 1)
         )
 
@@ -49,37 +47,20 @@ class MultiLayerLSTM(eqx.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
 
-    def __call__(
-        self,
-        x_n: Array,
-        hidden_states: Array,  # (depth, 2, hidden_size)
-    ) -> tuple[Array, Array, Array]:  # (output_h, output_c, new_hidden_states)
-        h_states = hidden_states[:, 0]  # All h states
-        c_states = hidden_states[:, 1]  # All c states
-
+    def __call__(self, x_n: Array, hidden_states: Array) -> tuple[Array, Array]:
         new_h_states = []
-        new_c_states = []
+        for layer, hidden_state in zip(self.layers, hidden_states):
+            x_n = layer(x_n, hidden_state)
+            new_h_states.append(x_n)
 
-        h, c = self.layers[0](x_n, (h_states[0], c_states[0]))
-        new_h_states.append(h)
-        new_c_states.append(c)
-
-        if self.depth > 1:
-            for layer, h_state, c_state in zip(self.layers[1:], h_states[1:], c_states[1:]):
-                h, c = layer(h, (h_state, c_state))
-                new_h_states.append(h)
-                new_c_states.append(c)
-
-        stacked_h = jnp.stack(new_h_states, axis=0)  # (depth, hidden_size)
-        stacked_c = jnp.stack(new_c_states, axis=0)  # (depth, hidden_size)
-
-        return h, c, jnp.stack([stacked_h, stacked_c], axis=1)  # h_last, c_last, (depth, 2, hidden_size)
+        stacked_h = jnp.stack(new_h_states, axis=0)
+        return x_n, jnp.stack([stacked_h], axis=1)
 
 
 class DefaultHumanoidActor(eqx.Module):
-    """Actor for the walking task."""
+    """Actor for the standing task."""
 
-    multi_layer_lstm: MultiLayerLSTM
+    multi_layer_rnn: MultiLayerRNN
     projector: eqx.nn.MLP
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
@@ -97,7 +78,7 @@ class DefaultHumanoidActor(eqx.Module):
         mean_scale: float,
         hidden_size: int,
     ) -> None:
-        self.multi_layer_lstm = MultiLayerLSTM(
+        self.multi_layer_rnn = MultiLayerRNN(
             key,
             input_size=NUM_INPUTS,
             hidden_size=hidden_size,
@@ -131,20 +112,14 @@ class DefaultHumanoidActor(eqx.Module):
     ) -> tuple[distrax.Normal, Array]:
         obs_n = jnp.concatenate([dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n])
 
-        return self.call_flat_obs(obs_n, lin_vel_cmd_n, hidden_states)
+        # Concatenate observations with commands.
+        x_n = jnp.concatenate([obs_n, lin_vel_cmd_n], axis=-1)
 
-    def call_flat_obs(
-        self,
-        flat_obs_n: Array,
-        lin_vel_cmd_n: Array,
-        hidden_states: Array,
-    ) -> tuple[distrax.Normal, Array]:
-        x_n = jnp.concatenate([flat_obs_n, lin_vel_cmd_n], axis=-1)  # (NUM_INPUTS)
-
-        # Process through LSTM cell
-        last_h, _, new_hidden_states = self.multi_layer_lstm(x_n, hidden_states)
+        # Process through RNN cell
+        last_h, new_hidden_states = self.multi_layer_rnn(x_n, hidden_states)
         out_n = self.projector(last_h)
 
+        # Split into mean and std.
         mean_n = out_n[..., :NUM_OUTPUTS]
         std_n = out_n[..., NUM_OUTPUTS:]
 
@@ -158,7 +133,7 @@ class DefaultHumanoidActor(eqx.Module):
 
 
 class DefaultHumanoidCritic(eqx.Module):
-    """Critic for the walking task."""
+    """Critic for the standing task."""
 
     mlp: eqx.nn.MLP
 
@@ -198,20 +173,20 @@ class DefaultHumanoidModel(eqx.Module):
 
 
 @dataclass
-class HumanoidWalkingLSTMTaskConfig(HumanoidWalkingTaskConfig):
+class HumanoidStandingGRUTaskConfig(HumanoidWalkingTaskConfig):
     pass
 
 
-Config = TypeVar("Config", bound=HumanoidWalkingLSTMTaskConfig)
+Config = TypeVar("Config", bound=HumanoidStandingGRUTaskConfig)
 
 
-class HumanoidWalkingLSTMTask(HumanoidWalkingTask[Config], Generic[Config]):
+class HumanoidStandingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
-        # Initialize the hidden state for LSTM
-        return jnp.zeros((DEPTH, 2, HIDDEN_SIZE))
+        # Initialize the hidden state for RNN
+        return jnp.zeros((DEPTH, HIDDEN_SIZE))
 
     def _run_actor(
         self,
@@ -253,6 +228,11 @@ class HumanoidWalkingLSTMTask(HumanoidWalkingTask[Config], Generic[Config]):
         # Concatenate all observations
         obs_n = jnp.concatenate([dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n])
         return model.critic(obs_n, lin_vel_cmd_n)
+
+    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
+        return [
+            ksim.PushEvent(probability=0.1),
+        ]
 
     def get_on_policy_log_probs(
         self,
@@ -324,35 +304,14 @@ class HumanoidWalkingLSTMTask(HumanoidWalkingTask[Config], Generic[Config]):
         value_n = critic_n.squeeze(-1)
         return action_n, next_carry, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
-    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
-        state = super().on_after_checkpoint_save(ckpt_path, state)
-
-        if not self.config.export_for_inference:
-            return state
-
-        # Load the checkpoint and export it using xax's export function.
-        model: DefaultHumanoidModel = self.load_checkpoint(ckpt_path, part="model")
-
-        def model_fn(obs: Array, cmd: Array, hidden_states: Array) -> tuple[Array, Array]:
-            dist, hidden_states = model.actor.call_flat_obs(obs, cmd, hidden_states)
-            return dist.mode(), hidden_states
-
-        def batched_model_fn(obs: Array, cmd: Array, hidden_states: Array) -> tuple[Array, Array]:
-            return jax.vmap(model_fn)(obs, cmd, hidden_states)
-
-        input_shapes = [(OBS_SIZE,), (CMD_SIZE,), (DEPTH, 2, HIDDEN_SIZE)]
-        xax.export(batched_model_fn, input_shapes, ckpt_path.parent / "tf_model")
-
-        return state
-
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.default_humanoid.walking_lstm
+    #   python -m examples.default_humanoid.standing_gru
     # To visualize the environment, use the following command:
-    #   python -m examples.default_humanoid.walking_lstm run_environment=True
-    HumanoidWalkingLSTMTask.launch(
-        HumanoidWalkingLSTMTaskConfig(
+    #   python -m examples.default_humanoid.standing_gru run_environment=True
+    HumanoidStandingGRUTask.launch(
+        HumanoidStandingGRUTaskConfig(
             num_envs=2048,
             num_batches=64,
             num_passes=8,

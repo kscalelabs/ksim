@@ -72,8 +72,8 @@ class PushEventInfo:
 class PushEvent(Event):
     """Event for pushing the robot."""
 
-    linear_force_scale: float = attrs.field(default=1.0)
-    angular_force_scale: float = attrs.field(default=1.0)
+    linear_force_scale: float = attrs.field(default=0.0)
+    angular_force_scale: float = attrs.field(default=0.0)
     interval_range: tuple[float, float] = attrs.field(default=(0.0, 0.0))
 
     def __call__(
@@ -101,7 +101,10 @@ class PushEvent(Event):
         interval_range = self.interval_range
         # Generate random interval in seconds - ensure it's float32
         random_interval = jax.random.uniform(
-            rng_interval, (), minval=jnp.float32(interval_range[0]), maxval=jnp.float32(interval_range[1])
+            rng_interval,
+            (),
+            minval=jnp.float32(interval_range[0]),
+            maxval=jnp.float32(interval_range[1]),
         )
 
         # Decrement by physics timestep

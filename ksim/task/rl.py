@@ -63,6 +63,7 @@ from ksim.types import (
     Trajectory,
 )
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata, load_model
+from ksim.utils.visualization import VelocityArrow
 
 logger = logging.getLogger(__name__)
 
@@ -193,13 +194,11 @@ def get_initial_commands(
     return FrozenDict(commands)
 
 
-def apply_randomizations(
+def get_randomizations(
     physics_model: PhysicsModel,
-    engine: PhysicsEngine,
     randomizations: Collection[Randomization],
     rng: PRNGKeyArray,
-) -> tuple[FrozenDict[str, Array], PhysicsState]:
-    """Apply randomizations to the physics model."""
+) -> FrozenDict[str, Array]:
     all_randomizations: dict[str, dict[str, Array]] = {}
     for randomization in randomizations:
         rng, randomization_rng = jax.random.split(rng)
@@ -208,11 +207,41 @@ def apply_randomizations(
         if count > 1:
             name_to_keys = {k: set(v.keys()) for k, v in all_randomizations.items()}
             raise ValueError(f"Found duplicate randomization keys: {name}. Randomizations: {name_to_keys}")
-    randomizations: FrozenDict[str, Array] = FrozenDict(
-        {k: v for d in all_randomizations.values() for k, v in d.items()}
-    )
-    physics_state = engine.reset(physics_model.tree_replace(randomizations), rng)
+    return FrozenDict({k: v for d in all_randomizations.values() for k, v in d.items()})
+
+
+def apply_randomizations(
+    physics_model: mjx.Model,
+    engine: PhysicsEngine,
+    randomizations: Collection[Randomization],
+    rng: PRNGKeyArray,
+) -> tuple[FrozenDict[str, Array], PhysicsState]:
+    rand_rng, reset_rng = jax.random.split(rng)
+    randomizations = get_randomizations(physics_model, randomizations, rand_rng)
+    physics_state = engine.reset(physics_model.tree_replace(randomizations), reset_rng)
     return randomizations, physics_state
+
+
+def reset_mujoco_model(
+    physics_model: mujoco.MjModel,
+    engine: PhysicsEngine,
+    rollout_variables: RolloutVariables,
+    new_carry: PyTree,
+    randomizations: Collection[Randomization],
+    rng: PRNGKeyArray,
+) -> tuple[mujoco.MjModel, RolloutVariables]:
+    rng, rand_rng, reset_rng = jax.random.split(rng, 3)
+    randomizations = get_randomizations(physics_model, randomizations, rand_rng)
+    for k, v in randomizations.items():
+        setattr(physics_model, k, v)
+    physics_state = engine.reset(physics_model, reset_rng)
+    rollout_variables = RolloutVariables(
+        carry=new_carry,
+        commands=rollout_variables.commands,
+        physics_state=physics_state,
+        rng=rng,
+    )
+    return physics_model, rollout_variables
 
 
 @jax.tree_util.register_dataclass
@@ -701,12 +730,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
             renderer.update_scene(mj_data, camera=mj_camera)
-
-            # Adds command elements to the scene.
-            for command in commands:
-                command.update_scene(renderer.scene, trajectory.command[command.command_name])
-
-            # Renders the frame to a Numpy array.
             frame = renderer.render()
 
             # Overlays the frame number on the frame.
@@ -1029,6 +1052,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             commands = self.get_commands(mj_model)
             rewards = self.get_rewards(mj_model)
             terminations = self.get_terminations(mj_model)
+            randomizations = self.get_randomization(mj_model)
 
             # Gets initial variables.
             rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
@@ -1094,7 +1118,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     if self.config.render_plots:
                         ctrl_idx_to_name = {v: k for k, v in get_ctrl_data_idx_by_name(mj_model).items()}
                         viewer.add_plot_group(
-                            title="Actions", index_mapping=ctrl_idx_to_name, y_axis_min=-2, y_axis_max=2
+                            title="Actions",
+                            index_mapping=ctrl_idx_to_name,
+                            y_axis_min=-2,
+                            y_axis_max=2,
                         )
                         # We'll set up reward component plots in the first iteration
                         reward_component_mapping = None
@@ -1127,10 +1154,43 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             clip_max=self.config.reward_clip_max,
                         )
 
+                        # We manually trigger randomizations on termination,
+                        # whereas during training the randomization is only applied
+                        # once per rollout for efficiency. This is done so that
+                        # we can debug randomizations.
+                        rng, carry_rng, randomization_rng = jax.random.split(rng, 3)
+                        mj_model, rollout_variables = jax.lax.cond(
+                            transition.done,
+                            lambda: reset_mujoco_model(
+                                mj_model,
+                                engine,
+                                rollout_variables,
+                                self.get_initial_carry(carry_rng),
+                                randomizations,
+                                randomization_rng,
+                            ),
+                            lambda: (mj_model, rollout_variables),
+                        )
+
                         # Sync data again
                         viewer.copy_data(dst=viewer_data, src=rollout_variables.physics_state.data)
                         mujoco.mj_forward(viewer_model, viewer_data)
-                        viewer.add_commands(dict(rollout_variables.commands))
+
+                        # Applies the command visualizations to the viewer.
+                        for command in commands:
+                            for visualization in command.update_scene(rollout_variables.commands[command.command_name]):
+                                if isinstance(visualization, VelocityArrow):
+                                    viewer.add_velocity_arrow(
+                                        command_velocity=visualization.velocity,
+                                        base_pos=visualization.base_pos,
+                                        scale=visualization.scale,
+                                        rgba=visualization.rgba,
+                                        direction=visualization.direction,
+                                        label=visualization.label,
+                                    )
+                                else:
+                                    raise NotImplementedError(f"Unknown visualization type: {type(visualization)}")
+
                         viewer.update_and_sync()
 
                         if self.config.render_plots:
