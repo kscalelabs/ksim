@@ -1158,7 +1158,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         # We manually trigger randomizations on termination,
                         # whereas during training the randomization is only applied
-                        # once per rollout for efficiency.
+                        # once per rollout for efficiency. This is done so that
+                        # we can debug randomizations.
                         rng, carry_rng, randomization_rng = jax.random.split(rng, 3)
                         mj_model, rollout_variables = jax.lax.cond(
                             transition.done,
