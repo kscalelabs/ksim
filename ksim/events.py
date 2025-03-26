@@ -94,12 +94,9 @@ class PushEvent(Event):
         interval_range = self.interval_range
         # Generate random interval in seconds - ensure it's float32
         random_interval = jax.random.uniform(
-            rng_interval, 
-            (), 
-            minval=jnp.float32(interval_range[0]), 
-            maxval=jnp.float32(interval_range[1])
+            rng_interval, (), minval=jnp.float32(interval_range[0]), maxval=jnp.float32(interval_range[1])
         )
-        
+
         # Decrement by physics timestep
         dt_float32 = jnp.float32(dt)
         continued_interval = persistent_data.remaining_interval - dt_float32
@@ -112,22 +109,19 @@ class PushEvent(Event):
         )
 
         # Generate random forces
-        random_linear_force = jax.random.uniform(
-            rng_linear,
-            (3,),
-            minval=-self.linear_force_scale,
-            maxval=self.linear_force_scale,
-        ) + data.qvel[0:3]
+        random_linear_force = (
+            jax.random.uniform(
+                rng_linear,
+                (3,),
+                minval=-self.linear_force_scale,
+                maxval=self.linear_force_scale,
+            )
+            + data.qvel[0:3]
+        )
 
         # Apply forces conditionally using where instead of lax.cond
-        new_data_qvel = data.qvel.at[0:3].set(
-            jnp.where(
-                should_reset,
-                random_linear_force,
-                data.qvel[0:3]
-            )
-        )
-        
+        new_data_qvel = data.qvel.at[0:3].set(jnp.where(should_reset, random_linear_force, data.qvel[0:3]))
+
         # Update data with new velocities
         updated_data = update_data_field(data, "qvel", new_data_qvel)
 
@@ -137,6 +131,4 @@ class PushEvent(Event):
 
     def get_initial_info(self) -> PushEventInfo:
         """Initialize with a float32 zero value for consistent typing."""
-        return PushEventInfo(
-            remaining_interval=jnp.float32(0.0)
-        )
+        return PushEventInfo(remaining_interval=jnp.float32(0.0))
