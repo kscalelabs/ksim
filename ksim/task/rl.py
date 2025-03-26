@@ -870,7 +870,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
     ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, Trajectory, Rewards]:
-
         def single_unroll(
             physics_model: PhysicsModel,
             randomization_dict: FrozenDict[str, Array],
