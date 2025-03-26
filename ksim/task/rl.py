@@ -21,6 +21,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Any, Collection, Generic, TypeVar
 
+import random
 import chex
 import equinox as eqx
 import jax
@@ -281,6 +282,10 @@ class RLConfig(xax.Config):
     render_width: int = xax.field(
         value=320,
         help="The width of the rendered images.",
+    )
+    render_length_seconds: float | None = xax.field(
+        value=5.0,
+        help="The number of seconds to rollout each environment during evaluation.",
     )
     render_track_body_id: int | None = xax.field(
         value=None,
@@ -721,8 +726,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def log_single_trajectory(
         self,
         trajectories: Trajectory,
-        commands: Collection[Command],
         rewards: Rewards,
+        commands: Collection[Command],
         mj_model: mujoco.MjModel,
     ) -> None:
         """Visualizes a single trajectory.
@@ -734,6 +739,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model: The Mujoco model to render the scene with.
             name: The name of the trajectory being logged.
         """
+        # Clips the trajectory to the desired length.
+        if self.config.render_length_seconds is not None:
+            render_frames = round(self.config.render_length_seconds / self.config.ctrl_dt)
+            total_frames = trajectories.done.shape[0]
+            start = random.randint(0, max(total_frames - render_frames, 0))
+            end = min(start + render_frames, total_frames)
+            trajectories = jax.tree.map(lambda arr: arr[start:end], trajectories)
+
+        # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Emojis are used in order to prevent conflicts with user-specified namespaces.
         for namespace, arr_dict in (
@@ -1255,7 +1269,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # Only log trajectory information on validation steps.
                     if state.phase == "valid":
-                        self.log_single_trajectory(final_trajectory, commands, final_reward, mj_model)
+                        self.log_single_trajectory(final_trajectory, final_reward, commands, mj_model)
 
                     self.log_train_metrics(metrics)
                     self.log_state_timers(state)
