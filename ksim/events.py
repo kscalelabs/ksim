@@ -81,7 +81,7 @@ class PushEvent(Event):
         # Split the RNG for different operations
         rng1, rng2 = jax.random.split(rng)
 
-        needs_reset = persistent_data.remaining_interval[0] <= 0.0
+        needs_reset = persistent_data.remaining_interval <= 0.0
         reset_prob = jax.random.uniform(rng1)
         should_reset = needs_reset & (reset_prob < self.probability)
 
@@ -92,7 +92,7 @@ class PushEvent(Event):
         # Generate random interval in seconds
         random_interval = jax.random.uniform(
             rng_interval, 
-            (1,), 
+            (), 
             minval=interval_range[0], 
             maxval=interval_range[1]
         )
