@@ -21,7 +21,7 @@ __all__ = [
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Literal
+from typing import Literal, Self
 
 import attrs
 import jax
@@ -210,7 +210,7 @@ class SensorObservation(Observation):
         sensor_name: str,
         noise: float = 0.0,
         noise_type: NoiseType = "gaussian",
-    ) -> "SensorObservation":
+    ) -> Self:
         """Create a sensor observation from a physics model.
 
         Args:
@@ -282,7 +282,7 @@ class FeetContactObservation(Observation):
         foot_left: str,
         foot_right: str,
         floor_geom_id: str,
-    ) -> "FeetContactObservation":
+    ) -> Self:
         """Create a sensor observation from a physics model."""
         foot_left_idx = get_geom_data_idx_by_name(physics_model)[foot_left]
         foot_right_idx = get_geom_data_idx_by_name(physics_model)[foot_right]
@@ -306,7 +306,7 @@ class FeetPositionObservation(Observation):
     noise: float = attrs.field(default=0.0)
 
     @classmethod
-    def create(cls, physics_model: PhysicsModel, foot_left: str, foot_right: str) -> "FeetContactObservation":
+    def create(cls, physics_model: PhysicsModel, foot_left: str, foot_right: str) -> Self:
         foot_left_idx = get_geom_data_idx_by_name(physics_model)[foot_left]
         foot_right_idx = get_geom_data_idx_by_name(physics_model)[foot_right]
         return cls(foot_left=foot_left_idx, foot_right=foot_right_idx)
