@@ -861,7 +861,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         rng: PRNGKeyArray,
         physics_model: PhysicsModel,
-        randomizations: FrozenDict[str, Array],
+        randomization_dict: FrozenDict[str, Array],
         model_arr: PyTree,
         model_static: PyTree,
         optimizer: optax.GradientTransformation,
@@ -873,7 +873,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         def single_unroll(
             physics_model: PhysicsModel,
-            randomizations: FrozenDict[str, Array],
+            randomization_dict: FrozenDict[str, Array],
             model_arr: PyTree,
             model_static: PyTree,
             engine: PhysicsEngine,
@@ -885,7 +885,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model = eqx.combine(model_arr, model_static)
 
             # Applies randomizations to the model.
-            physics_model = physics_model.tree_replace(randomizations)
+            physics_model = physics_model.tree_replace(randomization_dict)
 
             def scan_fn(carry: RolloutVariables, _: None) -> tuple[RolloutVariables, Trajectory]:
                 trajectory, next_rollout_variables = self.step_engine(
@@ -933,7 +933,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
             trajectories, rewards, rollout_variables = vmapped_unroll(
                 physics_model,
-                randomizations,
+                randomization_dict,
                 model_arr,
                 model_static,
                 engine,
@@ -1200,7 +1200,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Applies randomizations to the physics model.
             randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, None, 0))
-            randomizations, physics_state = randomization_fn(mjx_model, engine, randomizations, train_rngs)
+            randomization_dict, physics_state = randomization_fn(mjx_model, engine, randomizations, train_rngs)
 
             # Defines the vectorized initialization functions.
             carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
@@ -1248,7 +1248,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         ) = self._rl_train_loop_step(
                             rng=update_rng,
                             physics_model=mjx_model,
-                            randomizations=randomizations,
+                            randomization_dict=randomization_dict,
                             model_arr=model_arr,
                             model_static=model_static,
                             optimizer=optimizer,
