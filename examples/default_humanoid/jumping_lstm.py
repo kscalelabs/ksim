@@ -1,5 +1,5 @@
 # mypy: disable-error-code="override"
-"""Defines simple task for training a walking policy for K-Bot."""
+"""Defines simple task for training a jumping policy for the default humanoid using an LSTM actor."""
 
 from dataclasses import dataclass
 from typing import Generic, TypeVar

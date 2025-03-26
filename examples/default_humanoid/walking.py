@@ -1,4 +1,4 @@
-"""Defines simple task for training a walking policy for K-Bot."""
+"""Defines simple task for training a walking policy for the default humanoid."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -474,23 +474,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         value_n = critic_n.squeeze(-1)
 
         return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
-
-    def on_after_checkpoint_save(self, ckpt_path: Path, state: xax.State) -> xax.State:
-        state = super().on_after_checkpoint_save(ckpt_path, state)
-
-        if not self.config.export_for_inference:
-            return state
-
-        # Load the checkpoint and export it using xax's export function.
-        model: DefaultHumanoidModel = self.load_checkpoint(ckpt_path, part="model")
-
-        def model_fn(obs: Array, cmd: Array) -> Array:
-            return model.actor.call_flat_obs(obs, cmd).mode()
-
-        input_shapes: list[tuple[int, ...]] = [(OBS_SIZE,), (CMD_SIZE,)]
-        xax.export(model_fn, input_shapes, ckpt_path.parent / "tf_model")
-
-        return state
 
 
 if __name__ == "__main__":

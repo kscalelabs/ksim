@@ -72,8 +72,8 @@ class PushEventInfo:
 class PushEvent(Event):
     """Event for pushing the robot."""
 
-    linear_force_scale: float = attrs.field(default=1.0)
-    angular_force_scale: float = attrs.field(default=1.0)
+    linear_force_scale: float = attrs.field(default=0.0)
+    angular_force_scale: float = attrs.field(default=0.0)
     interval_range: tuple[float, float] = attrs.field(default=(0.0, 0.0))
 
     def __call__(
