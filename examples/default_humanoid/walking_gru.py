@@ -17,7 +17,7 @@ import ksim
 
 from .walking import CMD_SIZE, NUM_INPUTS, NUM_OUTPUTS, OBS_SIZE, HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
-HIDDEN_SIZE = 128  # `_s`
+HIDDEN_SIZE = 64  # `_s`
 DEPTH = 2
 
 
