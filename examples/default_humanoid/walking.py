@@ -271,6 +271,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
             ksim.WeightRandomization(scale=0.01),
+            ksim.StaticFrictionRandomization(),
+            ksim.FloorFrictionRandomization.from_body_name(physics_model, "floor"),
+            ksim.ArmatureRandomization(),
+            ksim.TorsoMassMultiplicationRandomization.from_body_name(physics_model, "torso"),
+            ksim.JointDampingRandomization(),
+            ksim.JointZeroPositionRandomization(),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
@@ -319,7 +325,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
+        rewards = [
             # The reward for staying healthy should have a large scale. It is
             # better to use this reward than to use the termination penalty,
             # because the termination penalty seems harshly penalize
@@ -330,11 +336,21 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
+            # The robot should avoid outputting commands that cause it to hit
+            # the joint limits.
+            ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01),
             # This is more of a gait shaping reward - we want to encourage the
             # robot to walk smoothly without feet slamming into the ground
             # (which can cause physical damage).
             ksim.BaseJerkZPenalty(scale=-0.01, ctrl_dt=self.config.ctrl_dt),
         ]
+
+        if self.config.use_mit_actuators:
+            rewards += [
+                ksim.ActionNearPositionPenalty.create(physics_model, scale=-0.01),
+            ]
+
+        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
@@ -496,7 +512,7 @@ if __name__ == "__main__":
             learning_rate=3e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
-            use_mit_actuators=False,
+            use_mit_actuators=True,
             valid_every_n_steps=50,
         ),
     )

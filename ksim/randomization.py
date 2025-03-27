@@ -6,7 +6,8 @@ __all__ = [
     "StaticFrictionRandomization",
     "FloorFrictionRandomization",
     "ArmatureRandomization",
-    "TorsoMassRandomization",
+    "TorsoMassAdditionRandomization",
+    "TorsoMassMultiplicationRandomization",
     "JointDampingRandomization",
     "JointZeroPositionRandomization",
 ]
@@ -112,20 +113,23 @@ class FloorFrictionRandomization(Randomization):
 class ArmatureRandomization(Randomization):
     """Randomizes the armature."""
 
-    scale_lower: float = attrs.field(default=1.0)
+    scale_lower: float = attrs.field(default=0.95)
     scale_upper: float = attrs.field(default=1.05)
 
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         # Skip the first 6 DOFs (free joint)
         armature = model.dof_armature[6:] * jax.random.uniform(
-            rng, shape=(model.dof_armature.shape[0] - 6,), minval=self.scale_lower, maxval=self.scale_upper
+            rng,
+            shape=(model.dof_armature.shape[0] - 6,),
+            minval=self.scale_lower,
+            maxval=self.scale_upper,
         )
         new_armature = jnp.concatenate([model.dof_armature[:6], armature])
         return {"dof_armature": new_armature}
 
 
 @attrs.define(frozen=True, kw_only=True)
-class TorsoMassRandomization(Randomization):
+class TorsoMassAdditionRandomization(Randomization):
     """Randomizes the torso mass."""
 
     torso_body_id: int = attrs.field()
@@ -135,6 +139,48 @@ class TorsoMassRandomization(Randomization):
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         new_mass = model.body_mass[self.torso_body_id] + jax.random.uniform(
             rng, minval=self.scale_lower, maxval=self.scale_upper
+        )
+        new_body_mass = jnp.concatenate(
+            [
+                model.body_mass[: self.torso_body_id],
+                jnp.array([new_mass]),
+                model.body_mass[self.torso_body_id + 1 :],
+            ]
+        )
+        return {"body_mass": new_body_mass}
+
+    @classmethod
+    def from_body_name(
+        cls,
+        model: PhysicsModel,
+        torso_body_name: str,
+        scale_lower: float = 0.0,
+        scale_upper: float = 1.0,
+    ) -> Self:
+        names_to_idxs = get_body_data_idx_by_name(model)
+        if torso_body_name not in names_to_idxs:
+            raise ValueError(f"Body name {torso_body_name} not found in model")
+        torso_body_id = names_to_idxs[torso_body_name]
+        return cls(
+            torso_body_id=torso_body_id,
+            scale_lower=scale_lower,
+            scale_upper=scale_upper,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TorsoMassMultiplicationRandomization(Randomization):
+    """Randomizes the torso mass."""
+
+    torso_body_id: int = attrs.field()
+    scale_lower: float = attrs.field(default=0.95)
+    scale_upper: float = attrs.field(default=1.05)
+
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
+        new_mass = model.body_mass[self.torso_body_id] * jax.random.uniform(
+            rng,
+            minval=self.scale_lower,
+            maxval=self.scale_upper,
         )
         new_body_mass = jnp.concatenate(
             [
@@ -187,8 +233,8 @@ class JointDampingRandomization(Randomization):
 class JointZeroPositionRandomization(Randomization):
     """Randomizes the joint zero position."""
 
-    scale_lower: float = attrs.field(default=-0.1)
-    scale_upper: float = attrs.field(default=0.1)
+    scale_lower: float = attrs.field(default=-0.01)
+    scale_upper: float = attrs.field(default=0.01)
 
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         qpos_0 = model.qpos0

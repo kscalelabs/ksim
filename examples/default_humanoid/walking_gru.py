@@ -353,9 +353,10 @@ if __name__ == "__main__":
     #   python -m examples.default_humanoid.walking_gru run_environment=True
     HumanoidWalkingGRUTask.launch(
         HumanoidWalkingGRUTaskConfig(
-            num_envs=8192,
+            num_envs=2048,
             batch_size=256,
-            num_passes=4,
+            num_passes=2,
+            epochs_per_log_step=10,
             # Simulation parameters.
             dt=0.0025,
             ctrl_dt=1 / 50,
@@ -369,6 +370,6 @@ if __name__ == "__main__":
             learning_rate=3e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
-            use_mit_actuators=False,
+            use_mit_actuators=True,
         ),
     )
