@@ -17,7 +17,7 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.types import Trajectory
+from ksim.types import Rewards, Trajectory
 from ksim.vis import Marker
 
 
@@ -83,7 +83,7 @@ class LinearVelocityArrow(Marker):
     def command_id(self) -> int:
         return {"x": 0, "y": 1}[self.axis]
 
-    def update(self, trajectory: Trajectory) -> None:
+    def update(self, trajectory: Trajectory, reward: Rewards) -> None:
         value = float(trajectory.command[self.command_name][self.command_id])
         self.scale = (self.vis_scale, self.vis_scale, value * 5.0 * self.vis_scale)
         match self.axis:

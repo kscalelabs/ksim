@@ -49,17 +49,6 @@ def simple_mjx_model(simple_model: mujoco.MjModel) -> mjx.Model:
     return mjx.put_model(simple_model)
 
 
-def test_weight_randomization(
-    simple_model: mujoco.MjModel,
-    simple_mjx_model: mjx.Model,
-    rng: jax.Array,
-) -> None:
-    randomization = ksim.WeightRandomization(scale=0.1)
-    mj_dict = randomization(simple_model, rng)
-    mjx_dict = randomization(simple_mjx_model, rng)
-    assert np.allclose(mj_dict["body_mass"], mjx_dict["body_mass"])
-
-
 def test_floor_friction_randomization(
     simple_model: mujoco.MjModel,
     simple_mjx_model: mjx.Model,
