@@ -143,11 +143,16 @@ class LinearVelocityCommand(Command):
     def initial_command(self, rng: PRNGKeyArray) -> Array:
         rng_x, rng_y, rng_zero = jax.random.split(rng, 3)
         (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
-        x = jax.random.uniform(rng_x, (), minval=xmin, maxval=xmax)
-        y = jax.random.uniform(rng_y, (), minval=ymin, maxval=ymax)
-        zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
-        cmd = jnp.array([x, y])
-        return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
+        x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
+        y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
+        x_zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
+        y_zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
+        return jnp.concatenate(
+            [
+                jnp.where(x_zero_mask, 0.0, x),
+                jnp.where(y_zero_mask, 0.0, y),
+            ]
+        )
 
     def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
         rng_a, rng_b = jax.random.split(rng)
