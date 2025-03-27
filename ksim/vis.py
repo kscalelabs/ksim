@@ -149,9 +149,6 @@ class Marker:
 
         target_pos, target_rot = get_target_pose(mj_model, mj_data, self.target_name, self.target_type)
 
-        print("target_pos", target_pos)
-        print("target_rot", target_rot)
-
         if self.track_x:
             pos[0] += target_pos[0]
         if self.track_y:
@@ -239,6 +236,7 @@ class Marker:
             geom=mujoco.mjtGeom.mjGEOM_SPHERE,
             scale=(radius, radius, radius),
             pos=pos,
+            orientation=(0, 0, 0, 1),
             rgba=rgba,
             label=label,
             target_name=target_name,
