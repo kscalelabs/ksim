@@ -190,18 +190,19 @@ class Marker:
     @classmethod
     def arrow(
         cls,
-        scale: float,
-        height: float,
+        magnitude: float,
+        pos: tuple[float, float, float],
         direction: tuple[float, float, float],
         rgba: tuple[float, float, float, float],
         label: str | None = None,
+        size: float = 0.025,
     ) -> Self:
         quat = mat_to_quat(rotation_matrix_from_direction(direction))
 
         return cls(
             geom=mujoco.mjtGeom.mjGEOM_ARROW,
-            scale=(scale, scale, scale),
-            pos=(0.0, 0.0, height),
+            scale=(size, size, magnitude * size),
+            pos=pos,
             orientation=tuple(quat),
             rgba=rgba,
             label=label,

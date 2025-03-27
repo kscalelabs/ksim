@@ -100,20 +100,25 @@ class LinearVelocityCommand(Command):
         return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_visualizations(self, command: Array) -> Collection[Marker]:
+        x, y = float(command[0]), float(command[1])
+        scale = 0.025
+
         return [
             Marker.arrow(
-                scale=float(command[0]) * 0.1,
-                height=self.vis_height,
+                magnitude=x * 5.0,
+                pos=((scale if x > 0 else -scale) * 2.0, 0.0, self.vis_height),
                 rgba=(1.0, 0.0, 0.0, 0.8),
                 direction=(1.0, 0.0, 0.0),
-                label=f"X: {command[0]:.2f}",
+                label=f"X: {x:.2f}",
+                size=scale,
             ),
             Marker.arrow(
-                scale=float(command[1]),
-                height=self.vis_height + 0.2,
+                magnitude=y * 5.0,
+                pos=(0.0, (scale if y > 0 else -scale) * 2.0, self.vis_height),
                 rgba=(0.0, 1.0, 0.0, 0.8),
                 direction=(0.0, 1.0, 0.0),
-                label=f"Y: {command[1]:.2f}",
+                label=f"Y: {y:.2f}",
+                size=scale,
             ),
         ]
 
