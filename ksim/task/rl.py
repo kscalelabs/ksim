@@ -262,6 +262,16 @@ class RLConfig(xax.Config):
         help="The number of seconds to rollout each environment during training.",
     )
 
+    # Override validation parameters.
+    log_full_trajectory_every_n_steps: int | None = xax.field(
+        10,
+        help="Log the full trajectory every N steps.",
+    )
+    log_full_trajectory_on_first_step: bool = xax.field(
+        value=False,
+        help="If true, log the full trajectory on the first step.",
+    )
+
     # Rendering parameters.
     max_values_per_plot: int = xax.field(
         value=8,
@@ -1263,6 +1273,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def model_partition_fn(self, item: Any) -> bool:  # noqa: ANN401
         return eqx.is_inexact_array(item)
 
+    def log_full_trajectory(self, state: xax.State, is_first_step: bool) -> bool:
+        if is_first_step and self.config.log_full_trajectory_on_first_step:
+            return True
+        if (
+            self.config.log_full_trajectory_every_n_steps is not None
+            and state.num_steps % self.config.log_full_trajectory_every_n_steps == 0
+        ):
+            return True
+        return False
+
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
         with self:
@@ -1358,7 +1378,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             try:
                 while not self.is_training_over(state):
                     state = self.on_step_start(state)
-                    state.raw_phase = "valid" if self.valid_step_timer.is_valid_step(state) else "train"
+
+                    # Using validation phase to log full trajectories.
+                    state.raw_phase = "valid" if self.log_full_trajectory(state, is_first_step) else "train"
 
                     # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
