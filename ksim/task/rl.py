@@ -283,7 +283,7 @@ class RLConfig(xax.Config):
         value=5.0,
         help="The number of seconds to rollout each environment during evaluation.",
     )
-    render_fps: int = xax.field(
+    render_fps: int | None = xax.field(
         value=24,
         help="The target FPS for the renderered video.",
     )
@@ -677,11 +677,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """Render trajectory as video frames with computed FPS."""
         fps = round(1 / self.config.ctrl_dt)
 
+        # Rerenders the trajectory at the desired FPS.
+        num_frames = len(trajectories.done)
         if target_fps is not None:
-            num_frames = len(trajectories.done)
-            fps = target_fps
             indices = jnp.arange(0, num_frames, fps / target_fps, dtype=jnp.int32).clip(max=num_frames - 1)
             trajectories = jax.tree.map(lambda arr: arr[indices], trajectories)
+            fps = target_fps
         else:
             indices = jnp.arange(0, num_frames, dtype=jnp.int32)
 
