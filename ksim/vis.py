@@ -11,23 +11,30 @@ import attrs
 import mujoco
 import numpy as np
 
-from ksim.utils.mujoco import get_body_pose_by_name, get_geom_pose_by_name, mat_to_quat, quat_to_mat
+from ksim.utils.mujoco import get_body_pose, get_body_pose_by_name, get_geom_pose_by_name, mat_to_quat, quat_to_mat
 
-TargetType = Literal["body", "geom"]
+TargetType = Literal["body", "geom", "root"]
 
 
 def get_target_pose(
     mj_model: mujoco.MjModel,
     mj_data: mujoco.MjData,
-    target_name: str,
+    target_name: str | None,
     target_type: TargetType,
 ) -> tuple[np.ndarray, np.ndarray]:
-    if target_type == "body":
-        target_pos, target_rot = get_body_pose_by_name(mj_model, mj_data, target_name)
-    elif target_type == "geom":
-        target_pos, target_rot = get_geom_pose_by_name(mj_model, mj_data, target_name)
-    else:
-        raise ValueError(f"Unsupported target type '{target_type}'.")
+    match target_type:
+        case "body":
+            if target_name is None:
+                raise ValueError("Target name must be provided for body target type.")
+            target_pos, target_rot = get_body_pose_by_name(mj_model, mj_data, target_name)
+        case "geom":
+            if target_name is None:
+                raise ValueError("Target name must be provided for geom target type.")
+            target_pos, target_rot = get_geom_pose_by_name(mj_model, mj_data, target_name)
+        case "root":
+            target_pos, target_rot = get_body_pose(mj_data, 1)
+        case _:
+            raise ValueError(f"Unsupported target type '{target_type}'.")
 
     if target_pos.shape != (3,):
         raise ValueError(f"Target position has shape {target_pos.shape}, expected (3,)")
@@ -131,16 +138,19 @@ class Marker:
     track_x: bool = attrs.field(default=True)
     track_y: bool = attrs.field(default=True)
     track_z: bool = attrs.field(default=True)
-    track_rotation: bool = attrs.field(default=True)
+    track_rotation: bool = attrs.field(default=False)
 
     def get_pos_and_rot(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData) -> tuple[np.ndarray, np.ndarray]:
         pos, quat = np.array(self.pos), np.array(self.orientation)
         rot = quat_to_mat(quat)
 
-        if self.target_name is None:
+        if self.target_type != "root" and self.target_name is None:
             return pos, rot
 
         target_pos, target_rot = get_target_pose(mj_model, mj_data, self.target_name, self.target_type)
+
+        print("target_pos", target_pos)
+        print("target_rot", target_rot)
 
         if self.track_x:
             pos[0] += target_pos[0]
@@ -209,6 +219,26 @@ class Marker:
             scale=(size, size, magnitude * size),
             pos=pos,
             orientation=tuple(quat),
+            rgba=rgba,
+            label=label,
+            target_name=target_name,
+            target_type=target_type,
+        )
+
+    @classmethod
+    def sphere(
+        cls,
+        pos: tuple[float, float, float],
+        radius: float,
+        rgba: tuple[float, float, float, float],
+        label: str | None = None,
+        target_name: str | None = None,
+        target_type: TargetType = "body",
+    ) -> Self:
+        return cls(
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,
+            scale=(radius, radius, radius),
+            pos=pos,
             rgba=rgba,
             label=label,
             target_name=target_name,

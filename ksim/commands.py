@@ -81,7 +81,7 @@ class LinearVelocityCommand(Command):
     y_range: tuple[float, float] = attrs.field(default=(-1.0, 1.0))
     switch_prob: float = attrs.field(default=0.0)
     zero_prob: float = attrs.field(default=0.0)
-    vis_height: float = attrs.field(default=2.0)
+    vis_height: float = attrs.field(default=0.0)
     vis_scale: float = attrs.field(default=0.05)
 
     def initial_command(self, rng: PRNGKeyArray) -> Array:
@@ -110,6 +110,7 @@ class LinearVelocityCommand(Command):
                 rgba=(1.0, 0.0, 0.0, 0.8),
                 direction=(1.0, 0.0, 0.0),
                 size=scale,
+                target_type="root",
             ),
             Marker.arrow(
                 magnitude=y * 5.0,
@@ -117,6 +118,7 @@ class LinearVelocityCommand(Command):
                 rgba=(0.0, 1.0, 0.0, 0.8),
                 direction=(0.0, 1.0, 0.0),
                 size=scale,
+                target_type="root",
             ),
         ]
 

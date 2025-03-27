@@ -929,10 +929,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rewards: Collection[Reward],
     ) -> Collection[Marker]:
         markers = []
+
+        # Adds the command markers.
         for command in commands:
             command_value = trajectory.command[command.command_name]
             for marker in command.get_markers(command_value):
                 markers.append(marker)
+
         return markers
 
     @xax.jit(
