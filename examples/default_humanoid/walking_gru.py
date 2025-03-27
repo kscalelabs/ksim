@@ -16,7 +16,7 @@ import ksim
 from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 NUM_JOINTS = 21
-HIDDEN_SIZE = 64  # `_s`
+HIDDEN_SIZE = 512  # `_s`
 DEPTH = 2
 
 
@@ -155,7 +155,7 @@ class DefaultHumanoidCritic(eqx.Module):
         self.mlp = eqx.nn.MLP(
             in_size=num_inputs,
             out_size=num_outputs,
-            width_size=64,
+            width_size=256,
             depth=5,
             key=key,
             activation=jax.nn.relu,
