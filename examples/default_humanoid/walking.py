@@ -20,7 +20,7 @@ from mujoco import mjx
 import ksim
 
 OBS_SIZE = 330
-CMD_SIZE = 2
+CMD_SIZE = 3
 NUM_INPUTS = OBS_SIZE + CMD_SIZE
 NUM_OUTPUTS = 21
 
@@ -94,20 +94,31 @@ class DefaultHumanoidActor(eqx.Module):
         com_inertia_n: Array,
         com_vel_n: Array,
         act_frc_obs_n: Array,
-        lin_vel_cmd_n: Array,
+        lin_vel_cmd_2: Array,
+        ang_vel_cmd_1: Array,
     ) -> distrax.Normal:
         obs_n = jnp.concatenate(
-            [dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n], axis=-1
+            [
+                dh_joint_pos_n,
+                dh_joint_vel_n,
+                com_inertia_n,
+                com_vel_n,
+                act_frc_obs_n,
+                lin_vel_cmd_2,
+                ang_vel_cmd_1,
+            ],
+            axis=-1,
         )  # (NUM_INPUTS)
 
-        return self.call_flat_obs(obs_n, lin_vel_cmd_n)
+        return self.call_flat_obs(obs_n, lin_vel_cmd_2, ang_vel_cmd_1)
 
     def call_flat_obs(
         self,
         flat_obs_n: Array,
-        cmd_n: Array,
+        lin_vel_cmd_2: Array,
+        ang_vel_cmd_1: Array,
     ) -> distrax.Normal:
-        prediction_n = self.mlp(jnp.concatenate([flat_obs_n, cmd_n], axis=-1))  # (NUM_INPUTS,)
+        prediction_n = self.mlp(jnp.concatenate([flat_obs_n, lin_vel_cmd_2, ang_vel_cmd_1], axis=-1))  # (NUM_INPUTS,)
         mean_n = prediction_n[..., :NUM_OUTPUTS]
         std_n = prediction_n[..., NUM_OUTPUTS:]
 
@@ -128,7 +139,7 @@ class DefaultHumanoidCritic(eqx.Module):
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 3,  # 3 for lin vel obs
+            in_size=NUM_INPUTS + 3 + 3,  # 3 for lin vel obs, 3 for ang vel obs
             out_size=1,  # Always output a single critic value.
             width_size=64,
             depth=5,
@@ -144,7 +155,9 @@ class DefaultHumanoidCritic(eqx.Module):
         com_vel_n: Array,
         act_frc_obs_n: Array,
         lin_vel_obs_3: Array,
-        lin_vel_cmd_n: Array,
+        ang_vel_obs_3: Array,
+        lin_vel_cmd_2: Array,
+        ang_vel_cmd_1: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -154,7 +167,9 @@ class DefaultHumanoidCritic(eqx.Module):
                 com_vel_n,
                 act_frc_obs_n,
                 lin_vel_obs_3,
-                lin_vel_cmd_n,
+                ang_vel_obs_3,
+                lin_vel_cmd_2,
+                ang_vel_cmd_1,
             ],
             axis=-1,
         )  # (NUM_INPUTS + 11)
@@ -374,8 +389,17 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
-        lin_vel_cmd_n = commands["linear_velocity_command"]
-        return model.actor(dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n, lin_vel_cmd_n)
+        lin_vel_cmd_2 = commands["linear_velocity_command"]
+        ang_vel_cmd_1 = commands["angular_velocity_command"]
+        return model.actor(
+            dh_joint_pos_n,
+            dh_joint_vel_n,
+            com_inertia_n,
+            com_vel_n,
+            act_frc_obs_n,
+            lin_vel_cmd_2,
+            ang_vel_cmd_1,
+        )
 
     def _run_critic(
         self,
@@ -389,7 +413,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         com_vel_n = observations["center_of_mass_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
-        lin_vel_cmd_n = commands["linear_velocity_command"]
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        lin_vel_cmd_2 = commands["linear_velocity_command"]
+        ang_vel_cmd_1 = commands["angular_velocity_command"]
         return model.critic(
             dh_joint_pos_n,
             dh_joint_vel_n,
@@ -397,7 +423,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             com_vel_n,
             act_frc_obs_n,
             lin_vel_obs_3,
-            lin_vel_cmd_n,
+            ang_vel_obs_3,
+            lin_vel_cmd_2,
+            ang_vel_cmd_1,
         )
 
     def get_on_policy_log_probs(
