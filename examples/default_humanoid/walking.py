@@ -491,7 +491,6 @@ if __name__ == "__main__":
             num_batches=64,
             num_passes=10,
             epochs_per_log_step=1,
-            log_single_traj_every_n_updates=10,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,

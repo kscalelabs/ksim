@@ -247,10 +247,6 @@ class RLConfig(xax.Config):
         value=1,
         help="The number of epochs between logging steps.",
     )
-    log_single_traj_every_n_updates: int = xax.field(
-        value=10,
-        help="The number of steps between logging a full trajectory video.",
-    )
 
     # Training parameters.
     num_envs: int = xax.field(
@@ -287,9 +283,9 @@ class RLConfig(xax.Config):
         value=5.0,
         help="The number of seconds to rollout each environment during evaluation.",
     )
-    render_downsample: int = xax.field(
-        value=5,
-        help="The downsample factor for the rendered video.",
+    render_fps: int = xax.field(
+        value=24,
+        help="The target FPS for the renderered video.",
     )
     render_track_body_id: int | None = xax.field(
         value=None,
@@ -676,9 +672,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         commands: Collection[Command],
         mj_model: mujoco.MjModel,
+        target_fps: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
         fps = round(1 / self.config.ctrl_dt)
+
+        if target_fps is not None:
+            num_frames = len(trajectories.done)
+            fps = target_fps
+            indices = jnp.arange(0, num_frames, fps / target_fps, dtype=jnp.int32).clip(max=num_frames - 1)
+            trajectories = jax.tree.map(lambda arr: arr[indices], trajectories)
+        else:
+            indices = jnp.arange(0, num_frames, dtype=jnp.int32)
 
         chex.assert_shape(trajectories.done, (None,))
         num_steps = trajectories.done.shape[0]
@@ -720,7 +725,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Overlays the frame number on the frame.
             frame_img = Image.fromarray(frame)
             draw = ImageDraw.Draw(frame_img)
-            draw.text((10, 10), f"Frame {frame_id}", fill=(255, 255, 255))
+            draw.text((10, 10), f"Frame {indices[frame_id]}", fill=(255, 255, 255))
             frame = np.array(frame_img)
 
             frame_list.append(frame)
@@ -789,9 +794,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.logger.log_image(key=key, value=img, namespace=namespace)
 
         # Logs the video of the trajectory.
-        trajectories = jax.tree.map(lambda arr: arr[:: self.config.render_downsample], trajectories)
-        frames, fps = self.render_trajectory_video(trajectories, commands, mj_model)
-        fps = round(fps / self.config.render_downsample)
+        frames, fps = self.render_trajectory_video(
+            trajectories,
+            commands,
+            mj_model,
+            target_fps=self.config.render_fps,
+        )
         self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
 
     @abstractmethod
@@ -1160,6 +1168,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
             if save_path is not None:
+                fps = round(1 / self.config.ctrl_dt)
+
                 match save_path.suffix.lower():
                     case ".mp4":
                         try:
