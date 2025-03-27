@@ -1227,6 +1227,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         rollout_variables=rollout_variables,
                     )
 
+                    # Gets the rewards.
+                    reward = get_rewards(
+                        trajectory=trajectory,
+                        reward_generators=rollout_constants.reward_generators,
+                        ctrl_dt=self.config.ctrl_dt,
+                        clip_max=self.config.reward_clip_max,
+                    )
+
                     rng, rand_rng = jax.random.split(rng)
                     mj_model, rollout_variables = jax.lax.cond(
                         trajectory.done,
@@ -1236,7 +1244,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                         for marker in markers:
-                            marker(model, data, scene, trajectory)
+                            marker(model, data, scene, trajectory, reward)
 
                     # Logs the frames to render.
                     viewer.data = rollout_variables.physics_state.data

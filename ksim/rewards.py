@@ -282,8 +282,7 @@ class AvoidLimitsPenalty(Reward):
         joint_limits = self.joint_limits.array
         joint_limited = self.joint_limited.array
         out_of_bounds = (joint_pos < joint_limits[..., 0]) | (joint_pos > joint_limits[..., 1])
-        penalty = jnp.where(joint_limited, 0, out_of_bounds)
-        breakpoint()
+        penalty = jnp.where(joint_limited, out_of_bounds, 0)
         return penalty.astype(trajectory.qpos.dtype).mean(axis=-1)
 
     @classmethod
