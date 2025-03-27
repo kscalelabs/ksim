@@ -8,7 +8,7 @@ import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from flax.core import FrozenDict
+import xax
 from jaxtyping import Array, PRNGKeyArray
 
 import ksim
@@ -225,8 +225,8 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
     def _run_actor(
         self,
         model: DefaultHumanoidModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> tuple[distrax.Normal, Array]:
         dh_joint_pos_n = observations["joint_position_observation"]
@@ -251,8 +251,8 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
     def _run_critic(
         self,
         model: DefaultHumanoidModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
     ) -> Array:
         dh_joint_pos_n = observations["joint_position_observation"]  # 26
         dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
@@ -333,8 +333,8 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         model: DefaultHumanoidModel,
         carry: Array,
         physics_model: ksim.PhysicsModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array, AuxOutputs]:
         action_dist_n, next_carry = self._run_actor(model, observations, commands, carry)
