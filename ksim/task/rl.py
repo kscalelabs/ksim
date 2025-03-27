@@ -93,41 +93,6 @@ def get_observation(
     return FrozenDict(observations)
 
 
-def compute_step_rewards(
-    trajectory: Trajectory,
-    reward_generators: Collection[Reward],
-    ctrl_dt: float,
-    clip_max: float | None = None,
-) -> Rewards:
-    """Get the rewards for a single step/transition.
-
-    Similar to get_rewards but designed for a single step rather than a full trajectory.
-
-    Args:
-        trajectory: A single-step trajectory
-        reward_generators: Collection of reward generator functions
-        ctrl_dt: Control timestep
-        clip_max: Optional maximum value to clip rewards
-
-    Returns:
-        Rewards object with total reward and components
-    """
-    # Add batch dimension to the transition - reward functions expect this
-    batched_trajectory = jax.tree.map(lambda x: jnp.expand_dims(x, axis=0), trajectory)
-
-    rewards = {}
-    for reward_generator in reward_generators:
-        # Compute reward with batch dimension
-        reward_val = reward_generator(batched_trajectory) * reward_generator.scale * ctrl_dt
-        # Remove batch dimension for the result
-        reward_val = jnp.squeeze(reward_val, axis=0)
-        if clip_max is not None:
-            reward_val = jnp.clip(reward_val, -clip_max, clip_max)
-        rewards[reward_generator.reward_name] = reward_val
-    total_reward = jax.tree.reduce(jnp.add, list(rewards.values()))
-    return Rewards(total=total_reward, components=FrozenDict(rewards))
-
-
 def get_rewards(
     trajectory: Trajectory,
     reward_generators: Collection[Reward],

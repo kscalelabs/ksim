@@ -133,8 +133,8 @@ class LinearVelocityCommand(Command):
     any command.
     """
 
-    x_range: tuple[float, float] = attrs.field(default=(-1.0, 1.0))
-    y_range: tuple[float, float] = attrs.field(default=(-1.0, 1.0))
+    x_range: tuple[float, float] = attrs.field()
+    y_range: tuple[float, float] = attrs.field()
     zero_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
@@ -167,7 +167,7 @@ class LinearVelocityCommand(Command):
 class AngularVelocityCommand(Command):
     """Command to turn the robot."""
 
-    scale: float = attrs.field(default=1.0)
+    scale: float = attrs.field()
     zero_prob: float = attrs.field(default=0.0)
 
     def initial_command(self, rng: PRNGKeyArray) -> Array:

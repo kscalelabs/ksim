@@ -326,7 +326,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 zero_prob=0.5,
             ),
             ksim.AngularVelocityCommand(
-                scale=1.0,
+                scale=0.2,
                 zero_prob=0.5,
             ),
         ]
@@ -359,7 +359,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         else:
             rewards += [
                 ksim.LinearVelocityTrackingPenalty(scale=-0.1),
-                ksim.AngularVelocityTrackingPenalty(scale=-0.1),
+                ksim.AngularVelocityTrackingPenalty(scale=-0.01),
             ]
 
         if self.config.use_mit_actuators:
