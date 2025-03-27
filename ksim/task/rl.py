@@ -731,12 +731,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             frame = np.array(frame_img)
 
             # Draws an RGB patch in the bottom right corner of the frame.
-            rgb = np.zeros((10, 50, 3), dtype=np.uint8)
-            rgb[:, 10:20, 0] = 255
-            rgb[:, 20:30, 1] = 255
-            rgb[:, 30:40, 2] = 255
-            rgb[:, 40:, :] = 255
-            frame[-10:, -50:] = rgb
+            rgb = np.zeros((5, 25, 3), dtype=np.uint8)
+            rgb[:, 5:10, 0] = 255
+            rgb[:, 10:15, 1] = 255
+            rgb[:, 15:20, 2] = 255
+            rgb[:, 20:, :] = 255
+            frame[-5:, -25:] = rgb
 
             frame_list.append(frame)
 
