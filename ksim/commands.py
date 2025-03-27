@@ -137,7 +137,8 @@ class LinearVelocityCommand(Command):
 
     x_range: tuple[float, float] = attrs.field()
     y_range: tuple[float, float] = attrs.field()
-    zero_prob: float = attrs.field(default=0.0)
+    x_zero_prob: float = attrs.field(default=0.0)
+    y_zero_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
 
@@ -146,8 +147,8 @@ class LinearVelocityCommand(Command):
         (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
         x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
         y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
-        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.zero_prob)
-        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.zero_prob)
+        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
+        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
         return jnp.concatenate(
             [
                 jnp.where(x_zero_mask, 0.0, x),
@@ -191,7 +192,8 @@ class LinearVelocityStepCommand(Command):
     y_range: tuple[float, float] = attrs.field()
     x_fwd_prob: float = attrs.field()
     y_fwd_prob: float = attrs.field()
-    zero_prob: float = attrs.field(default=0.0)
+    x_zero_prob: float = attrs.field(default=0.0)
+    y_zero_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
 
@@ -200,8 +202,8 @@ class LinearVelocityStepCommand(Command):
         (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
         x = jax.random.bernoulli(rng_x, self.x_fwd_prob, (1,)) * (xmax - xmin) + xmin
         y = jax.random.bernoulli(rng_y, self.y_fwd_prob, (1,)) * (ymax - ymin) + ymin
-        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.zero_prob)
-        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.zero_prob)
+        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
+        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
         return jnp.concatenate(
             [
                 jnp.where(x_zero_mask, 0.0, x),

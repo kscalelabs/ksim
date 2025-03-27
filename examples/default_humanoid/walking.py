@@ -325,7 +325,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 y_range=(-0.5, 0.5),
                 x_fwd_prob=0.8,
                 y_fwd_prob=0.5,
-                zero_prob=0.2,
+                x_zero_prob=0.2,
+                y_zero_prob=0.8,
             ),
             ksim.AngularVelocityStepCommand(
                 scale=0.2,
