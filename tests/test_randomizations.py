@@ -54,7 +54,9 @@ def test_floor_friction_randomization(
     simple_mjx_model: mjx.Model,
     rng: jax.Array,
 ) -> None:
-    randomization = ksim.FloorFrictionRandomization(floor_body_id=0, scale_lower=0.4, scale_upper=1.0)
+    randomization = ksim.FloorFrictionRandomization.from_geom_name(
+        simple_model, "floor", scale_lower=0.4, scale_upper=1.0
+    )
     mj_dict = randomization(simple_model, rng)
     mjx_dict = randomization(simple_mjx_model, rng)
     assert np.allclose(mj_dict["geom_friction"], mjx_dict["geom_friction"])
