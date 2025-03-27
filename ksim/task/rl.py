@@ -929,17 +929,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             trajectories: The trajectories to get the termination metrics for.
         """
-        last_dones = trajectories.done[..., -1]
-        num_terms = trajectories.done.sum(-1, dtype=trajectories.action.dtype) + (1 - last_dones)
-        num_terms = jnp.clip(num_terms, min=1)
-        traj_lens = (trajectories.done.shape[-1] / num_terms) * self.config.ctrl_dt
+        kvs = list(trajectories.termination_components.items())
+        all_terminations = jnp.stack([v for _, v in kvs], axis=-1)
+        has_termination = (all_terminations.sum(axis=-1) > 0).sum(axis=-1)
+        num_terminations = has_termination.sum().clip(min=1)
+        num_timesteps = trajectories.done.shape[-1]
 
         return {
-            "episode_length": traj_lens.mean(),
-            **{
-                key: (value / num_terms[:, None]).sum(axis=-1).mean()
-                for key, value in trajectories.termination_components.items()
-            },
+            "episode_length": (num_timesteps / (has_termination + 1).sum()) * self.config.ctrl_dt,
+            **{key: (value.sum() / num_terminations).sum(axis=-1).mean() for key, value in kvs},
         }
 
     def get_markers(
