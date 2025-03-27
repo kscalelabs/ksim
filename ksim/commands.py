@@ -224,7 +224,7 @@ class AngularVelocityStepCommand(Command):
     """This is the same as AngularVelocityCommand, but it is discrete."""
 
     scale: float = attrs.field()
-    prob: float = attrs.field()
+    prob: float = attrs.field(default=0.5)
     zero_prob: float = attrs.field(default=0.0)
 
     def initial_command(self, rng: PRNGKeyArray) -> Array:
