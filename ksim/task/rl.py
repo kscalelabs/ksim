@@ -937,7 +937,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return {
             "episode_length": (num_timesteps / (has_termination + 1).sum()) * self.config.ctrl_dt,
-            **{key: (value.sum() / num_terminations).sum(axis=-1).mean() for key, value in kvs},
+            **{key: (value.sum() / num_terminations) for key, value in kvs},
         }
 
     def get_markers(
