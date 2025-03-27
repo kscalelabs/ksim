@@ -13,6 +13,7 @@ import logging
 import signal
 import sys
 import textwrap
+import time
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -264,12 +265,16 @@ class RLConfig(xax.Config):
 
     # Override validation parameters.
     log_full_trajectory_every_n_steps: int | None = xax.field(
-        10,
+        None,
         help="Log the full trajectory every N steps.",
     )
     log_full_trajectory_on_first_step: bool = xax.field(
         value=False,
         help="If true, log the full trajectory on the first step.",
+    )
+    log_full_trajectory_every_n_seconds: float | None = xax.field(
+        60.0 * 10.0,
+        help="Log the full trajectory every N seconds.",
     )
 
     # Rendering parameters.
@@ -1273,14 +1278,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def model_partition_fn(self, item: Any) -> bool:  # noqa: ANN401
         return eqx.is_inexact_array(item)
 
-    def log_full_trajectory(self, state: xax.State, is_first_step: bool) -> bool:
+    def log_full_trajectory(self, state: xax.State, is_first_step: bool, last_log_time: float) -> bool:
         if is_first_step and self.config.log_full_trajectory_on_first_step:
             return True
-        if (
-            self.config.log_full_trajectory_every_n_steps is not None
-            and state.num_steps % self.config.log_full_trajectory_every_n_steps == 0
-        ):
+
+        if (n_steps := self.config.log_full_trajectory_every_n_steps) is not None and state.num_steps % n_steps == 0:
             return True
+
+        if (n_secs := self.config.log_full_trajectory_every_n_seconds) is not None:
+            elapsed = time.time() - last_log_time
+            if elapsed > n_secs:
+                return True
+
         return False
 
     def run_training(self) -> None:
@@ -1374,13 +1383,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
 
             is_first_step = True
+            last_log_time = time.time()
 
             try:
                 while not self.is_training_over(state):
                     state = self.on_step_start(state)
 
                     # Using validation phase to log full trajectories.
-                    state.raw_phase = "valid" if self.log_full_trajectory(state, is_first_step) else "train"
+                    if self.log_full_trajectory(state, is_first_step, last_log_time):
+                        state.raw_phase = "valid"
+                        last_log_time = time.time()
+                    else:
+                        state.raw_phase = "train"
 
                     # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
