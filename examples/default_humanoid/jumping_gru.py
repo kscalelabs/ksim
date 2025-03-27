@@ -1,5 +1,5 @@
 # mypy: disable-error-code="override"
-"""Defines simple task for training a jumping policy for the default humanoid using an LSTM actor."""
+"""Defines simple task for training a jumping policy for the default humanoid using an GRU actor."""
 
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -13,7 +13,7 @@ from jaxtyping import Array
 import ksim
 
 from .walking import HumanoidWalkingTask
-from .walking_gru import HumanoidWalkingLSTMTaskConfig
+from .walking_gru import HumanoidWalkingGRUTaskConfig
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -46,14 +46,14 @@ class AuxOutputs:
 
 
 @dataclass
-class HumanoidJumpingLSTMTaskConfig(HumanoidWalkingLSTMTaskConfig):
+class HumanoidJumpingGRUTaskConfig(HumanoidWalkingGRUTaskConfig):
     pass
 
 
-Config = TypeVar("Config", bound=HumanoidJumpingLSTMTaskConfig)
+Config = TypeVar("Config", bound=HumanoidJumpingGRUTaskConfig)
 
 
-class HumanoidJumpingLSTMTask(HumanoidWalkingTask[Config], Generic[Config]):
+class HumanoidJumpingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             UpwardReward(scale=0.5),
@@ -66,11 +66,11 @@ class HumanoidJumpingLSTMTask(HumanoidWalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.default_humanoid.walking_lstm
+    #   python -m examples.default_humanoid.walking_gru
     # To visualize the environment, use the following command:
-    #   python -m examples.default_humanoid.walking_lstm run_environment=True
-    HumanoidJumpingLSTMTask.launch(
-        HumanoidJumpingLSTMTaskConfig(
+    #   python -m examples.default_humanoid.walking_gru run_environment=True
+    HumanoidJumpingGRUTask.launch(
+        HumanoidJumpingGRUTaskConfig(
             num_envs=2048,
             num_batches=64,
             num_passes=8,
