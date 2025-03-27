@@ -265,13 +265,13 @@ class RLConfig(xax.Config):
     )
 
     # Override validation parameters.
-    log_full_trajectory_every_n_steps: int | None = xax.field(
-        None,
-        help="Log the full trajectory every N steps.",
-    )
     log_full_trajectory_on_first_step: bool = xax.field(
         value=False,
         help="If true, log the full trajectory on the first step.",
+    )
+    log_full_trajectory_every_n_steps: int | None = xax.field(
+        None,
+        help="Log the full trajectory every N steps.",
     )
     log_full_trajectory_every_n_seconds: float | None = xax.field(
         60.0 * 10.0,
