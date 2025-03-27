@@ -926,7 +926,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         commands: Collection[Command],
         observations: Collection[Observation],
         randomizations: Collection[Randomization],
-        rewards: Rewards,
+        rewards: Collection[Reward],
     ) -> Collection[Marker]:
         markers = []
         for command in commands:

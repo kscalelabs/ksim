@@ -199,6 +199,8 @@ class Marker:
         rgba: tuple[float, float, float, float],
         label: str | None = None,
         size: float = 0.025,
+        target_name: str | None = None,
+        target_type: TargetType = "body",
     ) -> Self:
         quat = mat_to_quat(rotation_matrix_from_direction(direction))
 
@@ -209,6 +211,8 @@ class Marker:
             orientation=tuple(quat),
             rgba=rgba,
             label=label,
+            target_name=target_name,
+            target_type=target_type,
         )
 
 
