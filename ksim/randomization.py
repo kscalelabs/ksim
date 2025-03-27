@@ -22,7 +22,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsModel
-from ksim.utils.mujoco import get_body_data_idx_by_name, slice_update
+from ksim.utils.mujoco import get_body_data_idx_by_name, get_geom_data_idx_by_name, slice_update
 from ksim.vis import Marker
 
 
@@ -69,30 +69,30 @@ class StaticFrictionRandomization(Randomization):
 class FloorFrictionRandomization(Randomization):
     """Randomizes the floor friction."""
 
-    floor_body_id: int = attrs.field()
+    floor_geom_id: int = attrs.field()
     scale_lower: float = attrs.field(default=0.4)
     scale_upper: float = attrs.field(default=1.0)
 
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
-        arr_inds = (self.floor_body_id, 0)
+        arr_inds = (self.floor_geom_id, 0)
         rand_vals = jax.random.uniform(rng, minval=self.scale_lower, maxval=self.scale_upper)
         new_geom_friction = slice_update(model, "geom_friction", arr_inds, rand_vals)
         return {"geom_friction": new_geom_friction}
 
     @classmethod
-    def from_body_name(
+    def from_geom_name(
         cls,
         model: PhysicsModel,
-        floor_body_name: str,
+        floor_geom_name: str,
         scale_lower: float = 0.4,
         scale_upper: float = 1.0,
     ) -> Self:
-        names_to_idxs = get_body_data_idx_by_name(model)
-        if floor_body_name not in names_to_idxs:
-            raise ValueError(f"Body name {floor_body_name} not found in model. Choices are {names_to_idxs.keys()}")
-        floor_body_id = names_to_idxs[floor_body_name]
+        names_to_idxs = get_geom_data_idx_by_name(model)
+        if floor_geom_name not in names_to_idxs:
+            raise ValueError(f"Geom name {floor_geom_name} not found in model. Choices are {names_to_idxs.keys()}")
+        floor_geom_id = names_to_idxs[floor_geom_name]
         return cls(
-            floor_body_id=floor_body_id,
+            floor_geom_id=floor_geom_id,
             scale_lower=scale_lower,
             scale_upper=scale_upper,
         )
