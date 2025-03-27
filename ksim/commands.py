@@ -4,6 +4,8 @@ __all__ = [
     "Command",
     "LinearVelocityCommand",
     "AngularVelocityCommand",
+    "LinearVelocityStepCommand",
+    "AngularVelocityStepCommand",
 ]
 
 import functools
@@ -135,17 +137,18 @@ class LinearVelocityCommand(Command):
 
     x_range: tuple[float, float] = attrs.field()
     y_range: tuple[float, float] = attrs.field()
-    zero_prob: float = attrs.field(default=0.0)
+    x_zero_prob: float = attrs.field(default=0.0)
+    y_zero_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
 
     def initial_command(self, rng: PRNGKeyArray) -> Array:
-        rng_x, rng_y, rng_zero = jax.random.split(rng, 3)
+        rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
         (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
         x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
         y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
-        x_zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
-        y_zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
+        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
+        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
         return jnp.concatenate(
             [
                 jnp.where(x_zero_mask, 0.0, x),
@@ -175,6 +178,61 @@ class AngularVelocityCommand(Command):
         rng_a, rng_b = jax.random.split(rng)
         zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
         cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
+        return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
+
+    def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
+        return prev_command
+
+
+@attrs.define(frozen=True)
+class LinearVelocityStepCommand(Command):
+    """This is the same as LinearVelocityCommand, but it is discrete."""
+
+    x_range: tuple[float, float] = attrs.field()
+    y_range: tuple[float, float] = attrs.field()
+    x_fwd_prob: float = attrs.field()
+    y_fwd_prob: float = attrs.field()
+    x_zero_prob: float = attrs.field(default=0.0)
+    y_zero_prob: float = attrs.field(default=0.0)
+    vis_height: float = attrs.field(default=1.0)
+    vis_scale: float = attrs.field(default=0.05)
+
+    def initial_command(self, rng: PRNGKeyArray) -> Array:
+        rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
+        (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
+        x = jax.random.bernoulli(rng_x, self.x_fwd_prob, (1,)) * (xmax - xmin) + xmin
+        y = jax.random.bernoulli(rng_y, self.y_fwd_prob, (1,)) * (ymax - ymin) + ymin
+        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
+        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
+        return jnp.concatenate(
+            [
+                jnp.where(x_zero_mask, 0.0, x),
+                jnp.where(y_zero_mask, 0.0, y),
+            ]
+        )
+
+    def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
+        return prev_command
+
+    def get_markers(self) -> Collection[Marker]:
+        return [
+            LinearVelocityArrow.get(self.command_name, "x", self.vis_height, self.vis_scale),
+            LinearVelocityArrow.get(self.command_name, "y", self.vis_height, self.vis_scale),
+        ]
+
+
+@attrs.define(frozen=True)
+class AngularVelocityStepCommand(Command):
+    """This is the same as AngularVelocityCommand, but it is discrete."""
+
+    scale: float = attrs.field()
+    prob: float = attrs.field(default=0.5)
+    zero_prob: float = attrs.field(default=0.0)
+
+    def initial_command(self, rng: PRNGKeyArray) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        cmd = (jax.random.bernoulli(rng_a, self.prob, (1,)) * 2 - 1) * self.scale
+        zero_mask = jax.random.bernoulli(rng_b, self.zero_prob)
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
     def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
