@@ -254,7 +254,7 @@ class RLConfig(xax.Config):
         value=MISSING,
         help="The number of training environments to run in parallel.",
     )
-    num_batches: int = xax.field(
+    batch_size: int = xax.field(
         value=1,
         help="The number of model update batches per trajectory batch. ",
     )
@@ -379,15 +379,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def __init__(self, config: Config) -> None:
         super().__init__(config)
 
-        if self.config.num_envs % self.config.num_batches != 0:
+        if self.config.num_envs % self.config.batch_size != 0:
             raise ValueError(
                 f"The number of environments ({self.config.num_envs}) must be divisible by "
-                f"the number of model update batches ({self.config.num_batches})"
+                f"the batch size ({self.config.batch_size})"
             )
 
     @property
-    def batch_size(self) -> int:
-        return self.config.num_envs // self.config.num_batches
+    def num_batches(self) -> int:
+        return self.config.num_envs // self.config.batch_size
 
     @abstractmethod
     def get_mujoco_model(self) -> mujoco.MjModel: ...
