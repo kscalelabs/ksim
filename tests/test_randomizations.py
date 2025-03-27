@@ -87,7 +87,7 @@ def test_torso_mass_randomization(
     simple_mjx_model: mjx.Model,
     rng: jax.Array,
 ) -> None:
-    randomization = ksim.TorsoMassRandomization(torso_body_id=0, scale_lower=-1.0, scale_upper=1.0)
+    randomization = ksim.TorsoMassAdditionRandomization(torso_body_id=0, scale_lower=-1.0, scale_upper=1.0)
     mj_dict = randomization(simple_model, rng)
     mjx_dict = randomization(simple_mjx_model, rng)
     assert np.allclose(mj_dict["body_mass"], mjx_dict["body_mass"])

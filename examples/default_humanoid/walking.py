@@ -271,6 +271,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
             ksim.WeightRandomization(scale=0.01),
+            ksim.StaticFrictionRandomization(),
+            ksim.FloorFrictionRandomization.from_body_name(physics_model, "floor"),
+            ksim.ArmatureRandomization(),
+            ksim.TorsoMassMultiplicationRandomization.from_body_name(physics_model, "torso"),
+            ksim.JointDampingRandomization(),
+            ksim.JointZeroPositionRandomization(),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
