@@ -108,15 +108,13 @@ class LinearVelocityCommand(Command):
                 pos=((scale if x > 0 else -scale) * 2.0, 0.0, self.vis_height),
                 rgba=(1.0, 0.0, 0.0, 0.8),
                 direction=(1.0, 0.0, 0.0),
-                label=f"X: {x:.2f}",
                 size=scale,
             ),
             Marker.arrow(
                 magnitude=y * 5.0,
-                pos=(0.0, (scale if y > 0 else -scale) * 2.0, self.vis_height + 0.2),
+                pos=(0.0, (scale if y > 0 else -scale) * 2.0, self.vis_height),
                 rgba=(0.0, 1.0, 0.0, 0.8),
                 direction=(0.0, 1.0, 0.0),
-                label=f"Y: {y:.2f}",
                 size=scale,
             ),
         ]
