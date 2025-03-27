@@ -99,6 +99,7 @@ class PushEvent(Event):
 
         # Calculate new interval (either new random interval or decremented existing one)
         interval_range = self.interval_range
+
         # Generate random interval in seconds - ensure it's float32
         random_interval = jax.random.uniform(
             rng_interval,

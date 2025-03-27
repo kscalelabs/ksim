@@ -294,7 +294,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            ksim.PushEvent(),
+            ksim.PushEvent(
+                probability=0.2,
+                linear_force_scale=1.0,
+                interval_range=(1.0, 2.0),
+            ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
