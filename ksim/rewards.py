@@ -340,7 +340,7 @@ class ActionNearPositionPenalty(Reward):
         cls,
         model: PhysicsModel,
         scale: float,
-        threshold: float = 0.05,
+        threshold: float = 0.25,
         norm: xax.NormType = "l2",
     ) -> Self:
         joint_range = model.jnt_range[1:].astype(jnp.float32)
