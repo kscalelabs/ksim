@@ -35,13 +35,13 @@ exclude = "run_\\d"
 [[tool.mypy.overrides]]
 
 module = [
-    "brax.*",
+    "_pytest.*",
     "distrax.*",
     "equinox.*",
+    "glfw.*",
     "mujoco.*",
     "optax.*",
     "scipy.*",
-    "_pytest.*",
 ]
 ignore_missing_imports = true
 

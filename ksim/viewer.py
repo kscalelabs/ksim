@@ -3,13 +3,15 @@
 import time
 from dataclasses import dataclass
 from threading import Lock
-from typing import Any, Literal, get_args, overload
+from typing import Callable, Literal, get_args, overload
 
 import glfw
 import mujoco
 import numpy as np
 
 RenderMode = Literal["window", "offscreen"]
+
+Callback = Callable[[mujoco.MjModel, mujoco.MjData, mujoco.MjvScene], None]
 
 
 @dataclass
@@ -63,84 +65,6 @@ class OverlayManager:
             Dictionary mapping grid positions to text pairs
         """
         return self._overlay
-
-
-class MarkerManager:
-    """Manages visualization markers in the scene."""
-
-    def __init__(self, scene: mujoco.MjvScene) -> None:
-        """Initialize the marker manager.
-
-        Args:
-            scene: MuJoCo scene object
-        """
-        self._scene = scene
-        self._markers: list[dict[str, Any]] = []  # noqa: ANN401
-
-    def add_marker(self, **marker_params: Any) -> None:  # noqa: ANN401
-        """Add a marker to the scene.
-
-        Args:
-            **marker_params: Parameters for the marker
-        """
-        self._markers.append(marker_params)
-
-    def clear(self) -> None:
-        """Clear all markers."""
-        self._markers[:] = []
-
-    def render(self) -> None:
-        """Render all markers in the scene."""
-        for marker in self._markers:
-            self._add_marker_to_scene(marker)
-
-    def _add_marker_to_scene(self, marker: dict[str, Any]) -> None:  # noqa: ANN401
-        """Add a marker to the current scene.
-
-        Args:
-            marker: Marker parameters
-        """
-        if self._scene.ngeom >= self._scene.maxgeom:
-            raise RuntimeError(f"Ran out of geoms. maxgeom: {self._scene.maxgeom}")
-
-        g = self._scene.geoms[self._scene.ngeom]
-        # Set default values
-        g.dataid = -1
-        g.objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
-        g.objid = -1
-        g.category = mujoco.mjtCatBit.mjCAT_DECOR
-        g.texid = -1
-        g.texuniform = 0
-        g.texrepeat[0] = 1
-        g.texrepeat[1] = 1
-        g.emission = 0
-        g.specular = 0.5
-        g.shininess = 0.5
-        g.reflectance = 0
-        g.type = mujoco.mjtGeom.mjGEOM_BOX
-        g.size[:] = np.ones(3) * 0.1
-        g.mat[:] = np.eye(3)
-        g.rgba[:] = np.ones(4)
-
-        # Apply marker parameters
-        for key, value in marker.items():
-            if isinstance(value, (int, float, mujoco._enums.mjtGeom)):
-                setattr(g, key, value)
-            elif isinstance(value, (tuple, list, np.ndarray)):
-                attr = getattr(g, key)
-                attr[:] = np.asarray(value).reshape(attr.shape)
-            elif isinstance(value, str):
-                assert key == "label", "Only label is a string in mjtGeom."
-                if value is None:
-                    g.label[0] = 0
-                else:
-                    g.label = value
-            elif hasattr(g, key):
-                raise ValueError(f"mjtGeom has attr {key} but type {type(value)} is invalid")
-            else:
-                raise ValueError(f"mjtGeom doesn't have field {key}")
-
-        self._scene.ngeom += 1
 
 
 class PlotManager:
@@ -233,18 +157,37 @@ class PlotManager:
                 mujoco.mjr_figure(viewport, fig, ctx)
 
 
-class Callbacks:
-    """Handles user input callbacks for the MuJoCo viewer.
-    This class manages keyboard, mouse, and scroll input events and their effects
-    on the visualization, such as camera movement, simulation control, and display options.
+class MujocoViewer:
+    """Main viewer class for MuJoCo environments.
+
+    This class provides a complete visualization interface for MuJoCo environments,
+    including interactive camera control, real-time physics visualization, and
+    various display options.
     """
 
-    def __init__(self, hide_menus: bool = False) -> None:
-        """Initialize the callbacks handler.
+    def __init__(
+        self,
+        model: mujoco.MjModel,
+        data: mujoco.MjData,
+        mode: RenderMode = "window",
+        title: str = "mujoco-python-viewer",
+        width: int | None = None,
+        height: int | None = None,
+        hide_menus: bool = False,
+    ) -> None:
+        """Initialize the MuJoCo viewer.
 
         Args:
+            model: MuJoCo model
+            data: MuJoCo data
+            mode: Rendering mode ("window" or "offscreen")
+            title: Window title for window mode
+            width: Window width (optional)
+            height: Window height (optional)
             hide_menus: Whether to hide overlay menus by default
         """
+        super().__init__()
+
         self._gui_lock = Lock()
         self._button_left_pressed = False
         self._button_right_pressed = False
@@ -271,6 +214,61 @@ class Callbacks:
         self._loop_count = 0
         self._advance_by_one_step = False
         self._hide_menus = hide_menus
+
+        self.model = model
+        self.data = data
+        self.render_mode = mode
+        if self.render_mode not in get_args(RenderMode):
+            raise NotImplementedError(f"Invalid mode: {self.render_mode}")
+
+        self.is_alive = True
+
+        # Initialize GLFW
+        glfw.init()
+
+        # Get window dimensions if not provided.
+        if width is None:
+            width, _ = glfw.get_video_mode(glfw.get_primary_monitor()).size
+        if height is None:
+            _, height = glfw.get_video_mode(glfw.get_primary_monitor()).size
+        assert width is not None and height is not None
+
+        # Create window
+        if self.render_mode == "offscreen":
+            glfw.window_hint(glfw.VISIBLE, 0)
+        self.window = glfw.create_window(width, height, title, None, None)
+        glfw.make_context_current(self.window)
+        glfw.swap_interval(1)
+
+        # Get framebuffer dimensions
+        framebuffer_width, framebuffer_height = glfw.get_framebuffer_size(self.window)
+
+        # Set up callbacks for window mode
+        if self.render_mode == "window":
+            window_width, _ = glfw.get_window_size(self.window)
+            self._scale = framebuffer_width * 1.0 / window_width
+
+            glfw.set_cursor_pos_callback(self.window, self._cursor_pos_callback)
+            glfw.set_mouse_button_callback(self.window, self._mouse_button_callback)
+            glfw.set_scroll_callback(self.window, self._scroll_callback)
+            glfw.set_key_callback(self.window, self._key_callback)
+
+        # Initialize MuJoCo visualization objects
+        self.vopt = mujoco.MjvOption()
+        self.cam = mujoco.MjvCamera()
+        self.scn = mujoco.MjvScene(self.model, maxgeom=10000)
+        self.pert = mujoco.MjvPerturb()
+        self.ctx = mujoco.MjrContext(self.model, mujoco.mjtFontScale.mjFONTSCALE_150.value)
+
+        # Set up viewport
+        self.viewport = mujoco.MjrRect(0, 0, framebuffer_width, framebuffer_height)
+
+        # Initialize managers
+        self.overlay_manager = OverlayManager()
+        self.plot_manager = PlotManager(width, height)
+
+    def _handle_quit(self) -> None:
+        glfw.set_window_should_close(self.window, True)
 
     def _key_callback(
         self,
@@ -482,90 +480,6 @@ class Callbacks:
 
         self.pert.active = 0
 
-
-class MujocoViewer(Callbacks):
-    """Main viewer class for MuJoCo environments.
-
-    This class provides a complete visualization interface for MuJoCo environments,
-    including interactive camera control, real-time physics visualization, and
-    various display options.
-    """
-
-    def __init__(
-        self,
-        model: mujoco.MjModel,
-        data: mujoco.MjData,
-        mode: RenderMode = "window",
-        title: str = "mujoco-python-viewer",
-        width: int | None = None,
-        height: int | None = None,
-        hide_menus: bool = False,
-    ) -> None:
-        """Initialize the MuJoCo viewer.
-
-        Args:
-            model: MuJoCo model
-            data: MuJoCo data
-            mode: Rendering mode ("window" or "offscreen")
-            title: Window title for window mode
-            width: Window width (optional)
-            height: Window height (optional)
-            hide_menus: Whether to hide overlay menus by default
-        """
-        super().__init__(hide_menus)
-
-        self.model = model
-        self.data = data
-        self.render_mode = mode
-        if self.render_mode not in get_args(RenderMode):
-            raise NotImplementedError(f"Invalid mode: {self.render_mode}")
-
-        self.is_alive = True
-
-        # Initialize GLFW
-        glfw.init()
-
-        # Set window dimensions
-        if not width:
-            width, _ = glfw.get_video_mode(glfw.get_primary_monitor()).size
-        if not height:
-            _, height = glfw.get_video_mode(glfw.get_primary_monitor()).size
-
-        # Create window
-        if self.render_mode == "offscreen":
-            glfw.window_hint(glfw.VISIBLE, 0)
-        self.window = glfw.create_window(width, height, title, None, None)
-        glfw.make_context_current(self.window)
-        glfw.swap_interval(1)
-
-        # Get framebuffer dimensions
-        framebuffer_width, framebuffer_height = glfw.get_framebuffer_size(self.window)
-
-        # Set up callbacks for window mode
-        if self.render_mode == "window":
-            window_width, _ = glfw.get_window_size(self.window)
-            self._scale = framebuffer_width * 1.0 / window_width
-
-            glfw.set_cursor_pos_callback(self.window, self._cursor_pos_callback)
-            glfw.set_mouse_button_callback(self.window, self._mouse_button_callback)
-            glfw.set_scroll_callback(self.window, self._scroll_callback)
-            glfw.set_key_callback(self.window, self._key_callback)
-
-        # Initialize MuJoCo visualization objects
-        self.vopt = mujoco.MjvOption()
-        self.cam = mujoco.MjvCamera()
-        self.scn = mujoco.MjvScene(self.model, maxgeom=10000)
-        self.pert = mujoco.MjvPerturb()
-        self.ctx = mujoco.MjrContext(self.model, mujoco.mjtFontScale.mjFONTSCALE_150.value)
-
-        # Set up viewport
-        self.viewport = mujoco.MjrRect(0, 0, framebuffer_width, framebuffer_height)
-
-        # Initialize managers
-        self.overlay_manager = OverlayManager()
-        self.marker_manager = MarkerManager(self.scn)
-        self.plot_manager = PlotManager(width, height)
-
     def add_line_to_fig(self, line_name: str, fig_idx: int = 0) -> None:
         """Add a new line to a figure.
 
@@ -584,14 +498,6 @@ class MujocoViewer(Callbacks):
             fig_idx: Index of the figure containing the line
         """
         self.plot_manager.add_data(line_name, line_data, fig_idx)
-
-    def add_marker(self, **marker_params: Any) -> None:  # noqa: ANN401
-        """Add a marker to the scene.
-
-        Args:
-            **marker_params: Parameters for the marker
-        """
-        self.marker_manager.add_marker(**marker_params)
 
     def _create_overlay(self) -> None:
         """Create overlay text for the current frame."""
@@ -613,17 +519,20 @@ class MujocoViewer(Callbacks):
         mujoco.mjv_applyPerturbForce(self.model, self.data, self.pert)
 
     @overload
-    def read_pixels(self, depth: Literal[True]) -> tuple[np.ndarray, np.ndarray]: ...
+    def read_pixels(self, depth: Literal[True], callback: Callback | None = None) -> tuple[np.ndarray, np.ndarray]: ...
 
     @overload
-    def read_pixels(self, depth: Literal[False] = False) -> np.ndarray: ...
+    def read_pixels(self, depth: Literal[False] = False, callback: Callback | None = None) -> np.ndarray: ...
 
-    def read_pixels(self, depth: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    def read_pixels(
+        self, depth: bool = False, callback: Callback | None = None
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """Read pixel data from the scene.
 
         Args:
-            camid: Camera ID to use (-1 for free camera)
             depth: Whether to also return depth buffer
+            callback: Callback to call after rendering
+
         Returns:
             RGB image array, or tuple of (RGB, depth) arrays if depth=True
         """
@@ -632,8 +541,16 @@ class MujocoViewer(Callbacks):
 
         self.viewport.width, self.viewport.height = glfw.get_framebuffer_size(self.window)
         mujoco.mjv_updateScene(
-            self.model, self.data, self.vopt, self.pert, self.cam, mujoco.mjtCatBit.mjCAT_ALL.value, self.scn
+            self.model,
+            self.data,
+            self.vopt,
+            self.pert,
+            self.cam,
+            mujoco.mjtCatBit.mjCAT_ALL.value,
+            self.scn,
         )
+        if callback is not None:
+            callback(self.model, self.data, self.scn)
         mujoco.mjr_render(self.viewport, self.scn, self.ctx)
         shape = glfw.get_framebuffer_size(self.window)
 
@@ -647,7 +564,7 @@ class MujocoViewer(Callbacks):
             mujoco.mjr_readPixels(img, None, self.viewport, self.ctx)
             return np.flipud(img)
 
-    def render(self) -> None:
+    def render(self, callback: Callback | None = None) -> None:
         """Render a frame of the simulation."""
         if self.render_mode == "offscreen":
             raise NotImplementedError("Use 'read_pixels()' for 'offscreen' mode.")
@@ -675,7 +592,10 @@ class MujocoViewer(Callbacks):
                     mujoco.mjtCatBit.mjCAT_ALL.value,
                     self.scn,
                 )
-                self.marker_manager.render()
+
+                if callback is not None:
+                    callback(self.model, self.data, self.scn)
+
                 mujoco.mjr_render(self.viewport, self.scn, self.ctx)
 
                 # Render overlay
@@ -704,7 +624,6 @@ class MujocoViewer(Callbacks):
             self._loop_count -= 1
 
         # Clear markers and apply perturbations
-        self.marker_manager.clear()
         self.apply_perturbations()
 
     def close(self) -> None:

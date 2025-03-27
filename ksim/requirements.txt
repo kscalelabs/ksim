@@ -9,7 +9,6 @@ tqdm
 kscale
 
 # Jax
-brax
 distrax
 jax
 mediapy

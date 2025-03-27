@@ -233,8 +233,8 @@ class RLConfig(xax.Config):
         value=None,
         help="If provided, run the environment loop for the given number of seconds.",
     )
-    run_environment_save_path: str = xax.field(
-        value="environment.mp4",
+    run_environment_save_path: str | None = xax.field(
+        value=None,
         help="If provided, save the rendered video to the given path.",
     )
 
@@ -710,10 +710,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
-            # for command in commands:
-            #     command_value = trajectory.command[command.command_name]
-            #     for visualization in command.get_visualizations(command_value):
-            #         visualization(mj_model, mj_data, renderer.scene)
+            for command in commands:
+                command_value = trajectory.command[command.command_name]
+                for visualization in command.get_visualizations(command_value):
+                    visualization(mj_model, mj_data, renderer.scene)
             renderer.update_scene(mj_data, camera=mj_camera)
             frame = renderer.render()
 
@@ -1015,7 +1015,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run_environment(
         self,
         num_steps: int | None = None,
-        save_path: str | Path = "environment.mp4",
+        save_path: str | Path | None = None,
     ) -> None:
         """Provides an easy-to-use interface for debugging environments.
 
@@ -1065,6 +1065,29 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, reset_rng = jax.random.split(rng)
             physics_state = apply_randomizations_to_mujoco(reset_rng)
 
+            try:
+                from ksim.viewer import MujocoViewer
+
+            except ImportError:
+                raise ImportError("glfw not installed!")
+
+            viewer = MujocoViewer(
+                mj_model,
+                physics_state.data,
+                mode="window" if save_path is None else "offscreen",
+                height=self.config.render_height,
+                width=self.config.render_width,
+            )
+
+            # Sets the viewer camera.
+            viewer.cam.distance = self.config.render_distance
+            viewer.cam.azimuth = self.config.render_azimuth
+            viewer.cam.elevation = self.config.render_elevation
+            viewer.cam.lookat[:] = self.config.render_lookat
+            if self.config.render_track_body_id is not None:
+                viewer.cam.trackbodyid = self.config.render_track_body_id
+                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+
             # These components remain constant across the entire episode.
             rollout_constants = RolloutConstants(
                 obs_generators=observations,
@@ -1082,7 +1105,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
-            trajectory_list: list[Trajectory] = []
+            frames: list[np.ndarray] = []
 
             def reset_mujoco_model(
                 physics_model: mujoco.MjModel,
@@ -1108,7 +1131,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         rollout_constants=rollout_constants,
                         rollout_variables=rollout_variables,
                     )
-                    trajectory_list.append(trajectory)
 
                     rng, rand_rng = jax.random.split(rng)
                     mj_model, rollout_variables = jax.lax.cond(
@@ -1117,53 +1139,65 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         lambda: (mj_model, rollout_variables),
                     )
 
+                    # We need to manually update the viewer data field, because
+                    # resetting the environment creates a new data object rather
+                    # than happening in-place, as Mujoco expects.
+                    viewer.data = rollout_variables.physics_state.data
+
+                    def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
+                        for command in commands:
+                            command_value = trajectory.command[command.command_name]
+                            for visualization in command.get_visualizations(command_value):
+                                visualization(model, data, scene)
+
+                    # Logs the frames to render.
+                    if save_path is None:
+                        viewer.render(callback=render_callback)
+                    else:
+                        frames.append(viewer.read_pixels(depth=False, callback=render_callback))
+
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
-            if len(trajectory_list) == 0:
-                raise ValueError("No trajectory was collected.")
+            if save_path is not None:
+                match save_path.suffix.lower():
+                    case ".mp4":
+                        try:
+                            import imageio.v2 as imageio
 
-            trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *trajectory_list)
-            frames, fps = self.render_trajectory_video(trajectory, commands, mj_model)
+                        except ImportError:
+                            raise RuntimeError(
+                                "Failed to save video - note that saving .mp4 videos with imageio usually "
+                                "requires the FFMPEG backend, which can be installed using `pip install "
+                                "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
+                                "your system."
+                            )
 
-            match save_path.suffix.lower():
-                case ".mp4":
-                    try:
-                        import imageio.v2 as imageio
+                        try:
+                            with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
+                                for frame in frames:
+                                    writer.append_data(frame)  # type: ignore[attr-defined]
 
-                    except ImportError:
-                        raise RuntimeError(
-                            "Failed to save video - note that saving .mp4 videos with imageio usually "
-                            "requires the FFMPEG backend, which can be installed using `pip install "
-                            "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
-                            "your system."
+                        except Exception as e:
+                            raise RuntimeError(
+                                "Failed to save video - note that saving .mp4 videos with imageio usually "
+                                "requires the FFMPEG backend, which can be installed using `pip install "
+                                "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
+                                "your system."
+                            ) from e
+
+                    case ".gif":
+                        images = [Image.fromarray(frame) for frame in frames]
+                        images[0].save(
+                            save_path,
+                            save_all=True,
+                            append_images=images[1:],
+                            duration=int(1000 / fps),
+                            loop=0,
                         )
 
-                    try:
-                        with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
-                            for frame in frames:
-                                writer.append_data(frame)  # type: ignore[attr-defined]
-
-                    except Exception as e:
-                        raise RuntimeError(
-                            "Failed to save video - note that saving .mp4 videos with imageio usually "
-                            "requires the FFMPEG backend, which can be installed using `pip install "
-                            "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
-                            "your system."
-                        ) from e
-
-                case ".gif":
-                    images = [Image.fromarray(frame) for frame in frames]
-                    images[0].save(
-                        save_path,
-                        save_all=True,
-                        append_images=images[1:],
-                        duration=int(1000 / fps),
-                        loop=0,
-                    )
-
-                case _:
-                    raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
+                    case _:
+                        raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
 
     def model_partition_fn(self, item: Any) -> bool:  # noqa: ANN401
         return eqx.is_inexact_array(item)

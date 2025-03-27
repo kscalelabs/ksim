@@ -18,12 +18,6 @@ with open("ksim/requirements-dev.txt", "r", encoding="utf-8") as f:
     requirements_dev: list[str] = f.read().splitlines()
 
 
-requirements_vis = [
-    "kmv",
-    "pynput",
-]
-
-
 with open("ksim/__init__.py", "r", encoding="utf-8") as fh:
     version_re = re.search(r"^__version__ = \"([^\"]*)\"", fh.read(), re.MULTILINE)
 assert version_re is not None, "Could not find version in ksim/__init__.py"
@@ -40,11 +34,7 @@ setup(
     long_description_content_type="text/markdown",
     python_requires=">=3.11",
     install_requires=requirements,
-    extras_require={
-        "dev": requirements_dev,
-        "vis": requirements_vis,
-        "all": requirements_dev + requirements_vis,
-    },
+    extras_require={"dev": requirements_dev},
     packages=find_packages(),
     # entry_points={
     #     "console_scripts": [
