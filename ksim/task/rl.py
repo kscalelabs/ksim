@@ -695,6 +695,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectories: Trajectory,
         commands: Collection[Command],
+        observations: Collection[Observation],
+        randomizations: Collection[Randomization],
+        rewards: Collection[Reward],
         mj_model: mujoco.MjModel,
         mj_renderer: mujoco.Renderer,
         target_fps: int | None = None,
@@ -729,10 +732,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
         def add_visualizations(mj_data: mujoco.MjData) -> None:
-            for command in commands:
-                command_value = trajectory.command[command.command_name]
-                for visualization in command.get_markers(command_value):
-                    visualization(mj_renderer.model, mj_data, mj_renderer.scene)
+            for marker in self.get_markers(
+                trajectory=trajectory,
+                commands=commands,
+                observations=observations,
+                randomizations=randomizations,
+                rewards=rewards,
+            ):
+                marker(mj_renderer.model, mj_data, mj_renderer.scene)
 
         frame_list: list[np.ndarray] = []
         for frame_id, trajectory in enumerate(trajectory_list):
@@ -766,8 +773,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def log_single_trajectory(
         self,
         trajectories: Trajectory,
-        rewards: Rewards,
+        reward_values: Rewards,
         commands: Collection[Command],
+        observations: Collection[Observation],
+        randomizations: Collection[Randomization],
+        rewards: Collection[Reward],
         mj_model: mujoco.MjModel,
         mj_renderer: mujoco.Renderer,
     ) -> None:
@@ -776,7 +786,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             trajectories: The trajectories to visualize.
             commands: The commands to visualize.
-            rewards: The rewards to visualize.
+            reward_values: The collected rewards to visualize.
             mj_model: The Mujoco model to render the scene with.
             mj_renderer: The Mujoco renderer to render the scene with.
             name: The name of the trajectory being logged.
@@ -785,7 +795,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if self.config.render_length_seconds is not None:
             render_frames = round(self.config.render_length_seconds / self.config.ctrl_dt)
             trajectories = jax.tree.map(lambda arr: arr[:render_frames], trajectories)
-            rewards = jax.tree.map(lambda arr: arr[:render_frames], rewards)
+            reward_values = jax.tree.map(lambda arr: arr[:render_frames], reward_values)
 
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Logs plots of the observations, commands, actions, rewards, and terminations.
@@ -795,8 +805,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ("🕹️ command images", trajectories.command),
             ("🏃 action images", {"action": trajectories.action}),
             ("💀 termination images", trajectories.termination_components),
-            ("🎁 reward images", rewards.components),
-            ("🎁 reward images", {"total": rewards.total}),
+            ("🎁 reward images", reward_values.components),
+            ("🎁 reward images", {"total": reward_values.total}),
         ):
             for key, value in arr_dict.items():
                 plt.figure(figsize=self.config.plot_figsize)
@@ -826,10 +836,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(
-            trajectories,
-            commands,
-            mj_model,
-            mj_renderer,
+            trajectories=trajectories,
+            commands=commands,
+            observations=observations,
+            randomizations=randomizations,
+            rewards=rewards,
+            mj_model=mj_model,
+            mj_renderer=mj_renderer,
             target_fps=self.config.render_fps,
         )
         self.logger.log_video(
@@ -1394,7 +1407,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # Only log trajectory information on validation steps.
                     if state.phase == "valid":
-                        self.log_single_trajectory(final_trajectory, final_reward, commands, mj_model, mj_renderer)
+                        self.log_single_trajectory(
+                            trajectories=final_trajectory,
+                            reward_values=final_reward,
+                            commands=commands,
+                            observations=observations,
+                            randomizations=randomizations,
+                            rewards=rewards_terms,
+                            mj_model=mj_model,
+                            mj_renderer=mj_renderer,
+                        )
 
                     self.log_train_metrics(metrics)
                     self.log_state_timers(state)
