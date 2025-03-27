@@ -13,7 +13,6 @@ import logging
 import signal
 import sys
 import textwrap
-import time
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -62,8 +61,8 @@ from ksim.types import (
     RolloutVariables,
     Trajectory,
 )
-from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_joint_metadata, load_model
-from ksim.utils.visualization import VelocityArrow
+from ksim.utils.mujoco import get_joint_metadata, load_model
+from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +92,7 @@ def get_observation(
 
 
 def compute_step_rewards(
-    transition: Trajectory,
+    trajectory: Trajectory,
     reward_generators: Collection[Reward],
     ctrl_dt: float,
     clip_max: float | None = None,
@@ -103,7 +102,7 @@ def compute_step_rewards(
     Similar to get_rewards but designed for a single step rather than a full trajectory.
 
     Args:
-        transition: A single-step trajectory
+        trajectory: A single-step trajectory
         reward_generators: Collection of reward generator functions
         ctrl_dt: Control timestep
         clip_max: Optional maximum value to clip rewards
@@ -112,12 +111,12 @@ def compute_step_rewards(
         Rewards object with total reward and components
     """
     # Add batch dimension to the transition - reward functions expect this
-    batched_transition = jax.tree.map(lambda x: jnp.expand_dims(x, axis=0), transition)
+    batched_trajectory = jax.tree.map(lambda x: jnp.expand_dims(x, axis=0), trajectory)
 
     rewards = {}
     for reward_generator in reward_generators:
         # Compute reward with batch dimension
-        reward_val = reward_generator(batched_transition) * reward_generator.scale * ctrl_dt
+        reward_val = reward_generator(batched_trajectory) * reward_generator.scale * ctrl_dt
         # Remove batch dimension for the result
         reward_val = jnp.squeeze(reward_val, axis=0)
         if clip_max is not None:
@@ -222,28 +221,6 @@ def apply_randomizations(
     return randomizations, physics_state
 
 
-def reset_mujoco_model(
-    physics_model: mujoco.MjModel,
-    engine: PhysicsEngine,
-    rollout_variables: RolloutVariables,
-    new_carry: PyTree,
-    randomizations: Collection[Randomization],
-    rng: PRNGKeyArray,
-) -> tuple[mujoco.MjModel, RolloutVariables]:
-    rng, rand_rng, reset_rng = jax.random.split(rng, 3)
-    randomizations = get_randomizations(physics_model, randomizations, rand_rng)
-    for k, v in randomizations.items():
-        setattr(physics_model, k, v)
-    physics_state = engine.reset(physics_model, reset_rng)
-    rollout_variables = RolloutVariables(
-        carry=new_carry,
-        commands=rollout_variables.commands,
-        physics_state=physics_state,
-        rng=rng,
-    )
-    return physics_model, rollout_variables
-
-
 @jax.tree_util.register_dataclass
 @dataclass
 class RLConfig(xax.Config):
@@ -270,10 +247,6 @@ class RLConfig(xax.Config):
         value=1,
         help="The number of epochs between logging steps.",
     )
-    log_single_traj_every_n_steps: int = xax.field(
-        value=10,
-        help="The number of steps between logging a full trajectory video.",
-    )
 
     # Training parameters.
     num_envs: int = xax.field(
@@ -298,13 +271,45 @@ class RLConfig(xax.Config):
         value=(8, 4),
         help="The size of the figure for each plot.",
     )
+    render_shadow: bool = xax.field(
+        value=False,
+        help="If true, render shadows.",
+    )
+    render_reflection: bool = xax.field(
+        value=False,
+        help="If true, render reflections.",
+    )
+    render_contact_force: bool = xax.field(
+        value=False,
+        help="If true, render contact forces.",
+    )
+    render_contact_point: bool = xax.field(
+        value=False,
+        help="If true, render contact points.",
+    )
+    render_inertia: bool = xax.field(
+        value=False,
+        help="If true, render inertia.",
+    )
     render_height: int = xax.field(
-        value=240,
+        value=360,
         help="The height of the rendered images.",
     )
     render_width: int = xax.field(
-        value=320,
+        value=480,
         help="The width of the rendered images.",
+    )
+    render_length_seconds: float | None = xax.field(
+        value=5.0,
+        help="The number of seconds to rollout each environment during evaluation.",
+    )
+    render_fps: int | None = xax.field(
+        value=24,
+        help="The target FPS for the renderered video.",
+    )
+    render_slowdown: float = xax.field(
+        value=2.0,
+        help="The slowdown factor for the rendered video.",
     )
     render_track_body_id: int | None = xax.field(
         value=None,
@@ -325,10 +330,6 @@ class RLConfig(xax.Config):
     render_lookat: list[float] = xax.field(
         value=[0.0, 0.0, 0.5],
         help="The lookat point of the render camera.",
-    )
-    render_plots: bool = xax.field(
-        value=False,
-        help="Whether to make plots in the viewer.",
     )
 
     # Engine parameters.
@@ -695,9 +696,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         commands: Collection[Command],
         mj_model: mujoco.MjModel,
+        mj_renderer: mujoco.Renderer,
+        target_fps: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
         fps = round(1 / self.config.ctrl_dt)
+
+        # Rerenders the trajectory at the desired FPS.
+        num_frames = len(trajectories.done)
+        if target_fps is not None:
+            indices = jnp.arange(0, num_frames, fps / target_fps, dtype=jnp.int32).clip(max=num_frames - 1)
+            trajectories = jax.tree.map(lambda arr: arr[indices], trajectories)
+            fps = target_fps
+        else:
+            indices = jnp.arange(0, num_frames, dtype=jnp.int32)
 
         chex.assert_shape(trajectories.done, (None,))
         num_steps = trajectories.done.shape[0]
@@ -716,11 +728,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_camera.trackbodyid = self.config.render_track_body_id
             mj_camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
-        renderer = mujoco.Renderer(
-            mj_model,
-            height=self.config.render_height,
-            width=self.config.render_width,
-        )
+        def add_visualizations(mj_data: mujoco.MjData) -> None:
+            for command in commands:
+                command_value = trajectory.command[command.command_name]
+                for visualization in command.get_markers(command_value):
+                    visualization(mj_renderer.model, mj_data, mj_renderer.scene)
 
         frame_list: list[np.ndarray] = []
         for frame_id, trajectory in enumerate(trajectory_list):
@@ -729,14 +741,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
-            renderer.update_scene(mj_data, camera=mj_camera)
-            frame = renderer.render()
+            mj_renderer.update_scene(mj_data, camera=mj_camera)
+            add_visualizations(mj_data)
+            frame = mj_renderer.render()
 
             # Overlays the frame number on the frame.
             frame_img = Image.fromarray(frame)
             draw = ImageDraw.Draw(frame_img)
-            draw.text((10, 10), f"Frame {frame_id}", fill=(255, 255, 255))
+            draw.text((10, 10), f"Frame {indices[frame_id]}", fill=(255, 255, 255))
             frame = np.array(frame_img)
+
+            # Draws an RGB patch in the bottom right corner of the frame.
+            rgb = np.zeros((5, 25, 3), dtype=np.uint8)
+            rgb[:, 5:10, 0] = 255
+            rgb[:, 10:15, 1] = 255
+            rgb[:, 15:20, 2] = 255
+            rgb[:, 20:, :] = 255
+            frame[-5:, -25:] = rgb
 
             frame_list.append(frame)
 
@@ -745,9 +766,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def log_single_trajectory(
         self,
         trajectories: Trajectory,
-        commands: Collection[Command],
         rewards: Rewards,
+        commands: Collection[Command],
         mj_model: mujoco.MjModel,
+        mj_renderer: mujoco.Renderer,
     ) -> None:
         """Visualizes a single trajectory.
 
@@ -756,8 +778,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             commands: The commands to visualize.
             rewards: The rewards to visualize.
             mj_model: The Mujoco model to render the scene with.
+            mj_renderer: The Mujoco renderer to render the scene with.
             name: The name of the trajectory being logged.
         """
+        # Clips the trajectory to the desired length.
+        if self.config.render_length_seconds is not None:
+            render_frames = round(self.config.render_length_seconds / self.config.ctrl_dt)
+            trajectories = jax.tree.map(lambda arr: arr[:render_frames], trajectories)
+            rewards = jax.tree.map(lambda arr: arr[:render_frames], rewards)
+
+        # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Emojis are used in order to prevent conflicts with user-specified namespaces.
         for namespace, arr_dict in (
@@ -795,8 +825,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 self.logger.log_image(key=key, value=img, namespace=namespace)
 
         # Logs the video of the trajectory.
-        frames, fps = self.render_trajectory_video(trajectories, commands, mj_model)
-        self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
+        frames, fps = self.render_trajectory_video(
+            trajectories,
+            commands,
+            mj_model,
+            mj_renderer,
+            target_fps=self.config.render_fps,
+        )
+        self.logger.log_video(
+            key="trajectory",
+            value=frames,
+            fps=round(fps / self.config.render_slowdown),
+            namespace="➡️ trajectory images",
+        )
 
     @abstractmethod
     def update_model(
@@ -879,10 +920,32 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             **{key: (value / num_terms[:, None]).mean() for key, value in trajectories.termination_components.items()},
         }
 
-    @eqx.filter_jit
+    def get_markers(
+        self,
+        trajectory: Trajectory,
+        commands: Collection[Command],
+        observations: Collection[Observation],
+        randomizations: Collection[Randomization],
+        rewards: Collection[Reward],
+    ) -> Collection[Marker]:
+        markers = []
+        for command in commands:
+            command_value = trajectory.command[command.command_name]
+            for marker in command.get_markers(command_value):
+                markers.append(marker)
+        return markers
+
+    @xax.jit(
+        static_argnames=[
+            "self",
+            "model_static",
+            "optimizer",
+            "engine",
+            "rollout_constants",
+        ]
+    )
     def _rl_train_loop_step(
         self,
-        rng: PRNGKeyArray,
         physics_model: PhysicsModel,
         randomization_dict: FrozenDict[str, Array],
         model_arr: PyTree,
@@ -892,6 +955,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
+        rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, Trajectory, Rewards]:
         def single_unroll(
             physics_model: PhysicsModel,
@@ -937,7 +1001,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng: PRNGKeyArray,
         ) -> tuple[tuple[PyTree, optax.OptState, RolloutVariables], tuple[Metrics, Trajectory, Rewards]]:
             model_arr, opt_state, rollout_variables = carry
-            rng, update_rng = jax.random.split(rng)
 
             # Rolls out a new trajectory.
             vmapped_unroll = jax.vmap(
@@ -972,7 +1035,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 opt_state=opt_state,
                 trajectories=trajectories,
                 rewards=rewards,
-                rng=update_rng,
+                rng=rng,
             )
 
             metrics = Metrics(
@@ -996,9 +1059,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x, metrics)
 
+        # Only get final trajectory and rewards.
+        final_trajectory = jax.tree.map(lambda arr: arr[-1], final_trajectories)
+        final_reward = jax.tree.map(lambda arr: arr[-1], final_rewards)
+
         # Metrics, final_trajectories, final_rewards batch dim of epochs.
         # Rollout variables has batch dim of num_envs and are used next rollout.
-        return model_arr, opt_state, metrics, rollout_variables, final_trajectories, final_rewards
+        return model_arr, opt_state, metrics, rollout_variables, final_trajectory, final_reward
 
     def on_context_stop(self, step: str, elapsed_time: float) -> None:
         super().on_context_stop(step, elapsed_time)
@@ -1026,18 +1093,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             save_path = Path(save_path)
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
-        try:
-            from pynput import keyboard
-
-        except ImportError:
-            raise ImportError("pynput is not installed. Please install it using 'pip install pynput'.")
-
-        try:
-            from kmv.viewer import launch_passive
-
-        except ImportError:
-            raise ImportError("kmv is not installed. Please install it using 'pip install kmv'.")
-
         with self, jax.disable_jit():
             rng = self.prng_key()
             self.set_loggers()
@@ -1059,9 +1114,44 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             initial_carry = self.get_initial_carry(carry_rng)
             initial_commands = get_initial_commands(cmd_rng, command_generators=commands)
 
+            def apply_randomizations_to_mujoco(rng: PRNGKeyArray) -> PhysicsState:
+                rand_rng, reset_rng = jax.random.split(rng)
+                rand_dict = get_randomizations(mj_model, randomizations, rand_rng)
+                for k, v in rand_dict.items():
+                    setattr(mj_model, k, v)
+                return engine.reset(mj_model, reset_rng)
+
             # Resets the physics state.
             rng, reset_rng = jax.random.split(rng)
-            physics_state = engine.reset(mj_model, reset_rng)
+            physics_state = apply_randomizations_to_mujoco(reset_rng)
+
+            try:
+                from ksim.viewer import MujocoViewer
+
+            except ModuleNotFoundError:
+                raise ModuleNotFoundError("glfw not installed - install with `pip install glfw`")
+
+            viewer = MujocoViewer(
+                mj_model,
+                physics_state.data,
+                mode="window" if save_path is None else "offscreen",
+                height=self.config.render_height,
+                width=self.config.render_width,
+                shadow=self.config.render_shadow,
+                reflection=self.config.render_reflection,
+                contact_force=self.config.render_contact_force,
+                contact_point=self.config.render_contact_point,
+                inertia=self.config.render_inertia,
+            )
+
+            # Sets the viewer camera.
+            viewer.cam.distance = self.config.render_distance
+            viewer.cam.azimuth = self.config.render_azimuth
+            viewer.cam.elevation = self.config.render_elevation
+            viewer.cam.lookat[:] = self.config.render_lookat
+            if self.config.render_track_body_id is not None:
+                viewer.cam.trackbodyid = self.config.render_track_body_id
+                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
             # These components remain constant across the entire episode.
             rollout_constants = RolloutConstants(
@@ -1080,142 +1170,101 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
+            frames: list[np.ndarray] = []
 
-            paused = False
-
-            def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> None:
-                nonlocal paused
-                if key == keyboard.Key.space:
-                    paused = not paused
-                    print("Paused" if paused else "Resumed")
-                elif key == keyboard.Key.esc:
-                    # Stop listener using a different approach
-                    listener.stop()
-
-            # Start the listener in a separate thread.
-            listener = keyboard.Listener(on_press=on_press)
-            listener.start()
+            def reset_mujoco_model(
+                physics_model: mujoco.MjModel,
+                rollout_variables: RolloutVariables,
+                rng: PRNGKeyArray,
+            ) -> tuple[mujoco.MjModel, RolloutVariables]:
+                rng, rand_rng, carry_rng = jax.random.split(rng, 3)
+                physics_state = apply_randomizations_to_mujoco(rand_rng)
+                rollout_variables = RolloutVariables(
+                    carry=self.get_initial_carry(carry_rng),
+                    commands=rollout_variables.commands,
+                    physics_state=physics_state,
+                    rng=rng,
+                )
+                return physics_model, rollout_variables
 
             try:
-                viewer_model = mj_model
-                viewer_data = physics_state.data
-                with launch_passive(
-                    viewer_model,
-                    viewer_data,
-                    save_path=save_path,
-                    render_width=self.config.render_width,
-                    render_height=self.config.render_height,
-                    ctrl_dt=self.config.ctrl_dt,
-                    make_plots=self.config.render_plots,
-                ) as viewer:
-                    viewer.setup_camera(
-                        render_distance=self.config.render_distance,
-                        render_azimuth=self.config.render_azimuth,
-                        render_elevation=self.config.render_elevation,
-                        render_lookat=self.config.render_lookat,
+                for _ in iterator:
+                    trajectory, rollout_variables = self.step_engine(
+                        physics_model=mj_model,
+                        model=model,
+                        engine=engine,
+                        rollout_constants=rollout_constants,
+                        rollout_variables=rollout_variables,
                     )
 
-                    if self.config.render_plots:
-                        ctrl_idx_to_name = {v: k for k, v in get_ctrl_data_idx_by_name(mj_model).items()}
-                        viewer.add_plot_group(
-                            title="Actions",
-                            index_mapping=ctrl_idx_to_name,
-                            y_axis_min=-2,
-                            y_axis_max=2,
-                        )
-                        # We'll set up reward component plots in the first iteration
-                        reward_component_mapping = None
+                    rng, rand_rng = jax.random.split(rng)
+                    mj_model, rollout_variables = jax.lax.cond(
+                        trajectory.done,
+                        lambda: reset_mujoco_model(mj_model, rollout_variables, rand_rng),
+                        lambda: (mj_model, rollout_variables),
+                    )
 
-                    for step_id in iterator:
-                        # We need to manually sync the data back and forth between
-                        # the viewer and the engine, because the resetting the
-                        # environment creates a new data object rather than
-                        # happening in-place, as Mujoco expects.
-                        viewer.copy_data(dst=rollout_variables.physics_state.data, src=viewer_data)
+                    def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
+                        for marker in self.get_markers(
+                            trajectory=trajectory,
+                            commands=commands,
+                            observations=observations,
+                            randomizations=randomizations,
+                            rewards=rewards,
+                        ):
+                            marker(model, data, scene)
 
-                        # If paused, only update the viewer
-                        if paused:
-                            viewer.update_and_sync()
-                            time.sleep(0.005)
-                            continue
+                    # Logs the frames to render.
+                    viewer.data = rollout_variables.physics_state.data
+                    if save_path is None:
+                        viewer.render(callback=render_callback)
+                    else:
+                        frames.append(viewer.read_pixels(depth=False, callback=render_callback))
 
-                        transition, rollout_variables = self.step_engine(
-                            physics_model=mj_model,
-                            model=model,
-                            engine=engine,
-                            rollout_constants=rollout_constants,
-                            rollout_variables=rollout_variables,
-                        )
-
-                        step_rewards = compute_step_rewards(
-                            transition=transition,
-                            reward_generators=rewards,
-                            ctrl_dt=self.config.ctrl_dt,
-                            clip_max=self.config.reward_clip_max,
-                        )
-
-                        # We manually trigger randomizations on termination,
-                        # whereas during training the randomization is only applied
-                        # once per rollout for efficiency. This is done so that
-                        # we can debug randomizations.
-                        rng, carry_rng, randomization_rng = jax.random.split(rng, 3)
-                        mj_model, rollout_variables = jax.lax.cond(
-                            transition.done,
-                            lambda: reset_mujoco_model(
-                                mj_model,
-                                engine,
-                                rollout_variables,
-                                self.get_initial_carry(carry_rng),
-                                randomizations,
-                                randomization_rng,
-                            ),
-                            lambda: (mj_model, rollout_variables),
-                        )
-
-                        # Sync data again
-                        viewer.copy_data(dst=viewer_data, src=rollout_variables.physics_state.data)
-                        mujoco.mj_forward(viewer_model, viewer_data)
-
-                        # Applies the command visualizations to the viewer.
-                        for command in commands:
-                            for visualization in command.update_scene(rollout_variables.commands[command.command_name]):
-                                if isinstance(visualization, VelocityArrow):
-                                    viewer.add_velocity_arrow(
-                                        command_velocity=visualization.velocity,
-                                        base_pos=visualization.base_pos,
-                                        scale=visualization.scale,
-                                        rgba=visualization.rgba,
-                                        direction=visualization.direction,
-                                        label=visualization.label,
-                                    )
-                                else:
-                                    raise NotImplementedError(f"Unknown visualization type: {type(visualization)}")
-
-                        viewer.update_and_sync()
-
-                        if self.config.render_plots:
-                            # Create rewards group on first step
-                            if step_id == 0:
-                                # First element is the total reward
-                                # Remaining elements are the individual reward components
-                                component_names = list(step_rewards.components.keys())
-                                reward_component_mapping = {0: "total_reward"}
-                                for i, name in enumerate(component_names):
-                                    reward_component_mapping[i + 1] = name
-                                viewer.add_plot_group(title="Reward Components", index_mapping=reward_component_mapping)
-
-                            # Update reward components
-                            reward_values = [float(step_rewards.total)]
-                            reward_values.extend([float(val) for val in step_rewards.components.values()])
-                            viewer.update_plot_group("Reward Components", reward_values)
-
-                            # Update actions
-                            # Convert actions to a flat list of floats
-                            action_values = np.array(rollout_variables.physics_state.most_recent_action, dtype=float)
-                            action_values_flat = [float(x) for x in action_values.flatten().tolist()]
-                            viewer.update_plot_group("Actions", action_values_flat)
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
+
+            if save_path is not None:
+                fps = round(1 / self.config.ctrl_dt)
+
+                match save_path.suffix.lower():
+                    case ".mp4":
+                        try:
+                            import imageio.v2 as imageio
+
+                        except ImportError:
+                            raise RuntimeError(
+                                "Failed to save video - note that saving .mp4 videos with imageio usually "
+                                "requires the FFMPEG backend, which can be installed using `pip install "
+                                "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
+                                "your system."
+                            )
+
+                        try:
+                            with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
+                                for frame in frames:
+                                    writer.append_data(frame)  # type: ignore[attr-defined]
+
+                        except Exception as e:
+                            raise RuntimeError(
+                                "Failed to save video - note that saving .mp4 videos with imageio usually "
+                                "requires the FFMPEG backend, which can be installed using `pip install "
+                                "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
+                                "your system."
+                            ) from e
+
+                    case ".gif":
+                        images = [Image.fromarray(frame) for frame in frames]
+                        images[0].save(
+                            save_path,
+                            save_all=True,
+                            append_images=images[1:],
+                            duration=int(1000 / fps),
+                            loop=0,
+                        )
+
+                    case _:
+                        raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
 
     def model_partition_fn(self, item: Any) -> bool:  # noqa: ANN401
         return eqx.is_inexact_array(item)
@@ -1241,6 +1290,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rewards_terms = self.get_rewards(mjx_model)
             terminations = self.get_terminations(mjx_model)
             randomizations = self.get_randomization(mjx_model)
+
+            # Creates the renderer.
+            mj_renderer = mujoco.Renderer(
+                mj_model,
+                height=self.config.render_height,
+                width=self.config.render_width,
+            )
+            configure_scene(
+                mj_renderer._scene,
+                mj_renderer._scene_option,
+                shadow=self.config.render_shadow,
+                contact_force=self.config.render_contact_force,
+                contact_point=self.config.render_contact_point,
+                inertia=self.config.render_inertia,
+            )
 
             # These remain constant across the entire episode.
             rollout_constants = RolloutConstants(
@@ -1292,7 +1356,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             try:
                 while not self.is_training_over(state):
                     state = self.on_step_start(state)
-                    state.raw_phase = "train"
+                    state.raw_phase = "valid" if self.valid_step_timer.is_valid_step(state) else "train"
 
                     # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
@@ -1302,10 +1366,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             opt_state,
                             metrics,
                             rollout_variables,
-                            final_trajectories,
-                            final_rewards,
+                            final_trajectory,
+                            final_reward,
                         ) = self._rl_train_loop_step(
-                            rng=update_rng,
                             physics_model=mjx_model,
                             randomization_dict=randomization_dict,
                             model_arr=model_arr,
@@ -1315,6 +1378,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             engine=engine,
                             rollout_constants=rollout_constants,
                             rollout_variables=rollout_variables,
+                            rng=update_rng,
                         )
 
                     if is_first_step:
@@ -1325,10 +1389,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     state.num_steps += self.config.epochs_per_log_step
                     state.num_samples += self.rollout_num_samples
 
-                    if state.num_steps % self.config.log_single_traj_every_n_steps == 0:
-                        final_trajectory = jax.tree.map(lambda arr: arr[-1], final_trajectories)
-                        final_rewards = jax.tree.map(lambda arr: arr[-1], final_rewards)
-                        self.log_single_trajectory(final_trajectory, commands, final_rewards, mj_model)
+                    # Only log trajectory information on validation steps.
+                    if state.phase == "valid":
+                        self.log_single_trajectory(final_trajectory, final_reward, commands, mj_model, mj_renderer)
 
                     self.log_train_metrics(metrics)
                     self.log_state_timers(state)

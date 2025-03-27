@@ -14,6 +14,12 @@ __all__ = [
     "update_model_field",
     "update_data_field",
     "slice_update",
+    "quat_to_mat",
+    "mat_to_quat",
+    "get_body_pose",
+    "get_geom_pose",
+    "get_body_pose_by_name",
+    "get_geom_pose_by_name",
 ]
 
 import logging
@@ -22,6 +28,7 @@ from typing import Any, Hashable, TypeVar
 import jax
 import jax.numpy as jnp
 import mujoco
+import numpy as np
 from jaxtyping import Array, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
@@ -93,6 +100,15 @@ def get_geom_data_idx_by_name(physics_model: PhysicsModel) -> dict[str, int]:
     return geom_mappings
 
 
+def get_geom_data_idx_from_name(physics_model: PhysicsModel, geom_name: str) -> int:
+    for i in range(physics_model.ngeom):
+        name_start = physics_model.name_geomadr[i]
+        name = bytes(physics_model.names[name_start:]).decode("utf-8").split("\x00")[0]
+        if name == geom_name:
+            return i
+    raise KeyError(f"Geometry '{geom_name}' not found in model")
+
+
 def get_body_data_idx_by_name(physics_model: PhysicsModel) -> dict[str, int]:
     """Get mappings from body names to their indices."""
     body_mappings = {}
@@ -101,6 +117,15 @@ def get_body_data_idx_by_name(physics_model: PhysicsModel) -> dict[str, int]:
         name = bytes(physics_model.names[name_start:]).decode("utf-8").split("\x00")[0]
         body_mappings[name] = i
     return body_mappings
+
+
+def get_body_data_idx_from_name(physics_model: PhysicsModel, body_name: str) -> int:
+    for i in range(physics_model.nbody):
+        name_start = physics_model.name_bodyadr[i]
+        name = bytes(physics_model.names[name_start:]).decode("utf-8").split("\x00")[0]
+        if name == body_name:
+            return i
+    raise KeyError(f"Body '{body_name}' not found in model")
 
 
 def get_floor_idx(physics_model: PhysicsModel, floor_name: str = "floor") -> int | None:
@@ -204,3 +229,47 @@ def load_model(model: mujoco.MjModel) -> mjx.Model:
     mjx_model = mjx.put_model(model)
     mjx_model = jax.tree.map(jnp.array, mjx_model)
     return mjx_model
+
+
+def quat_to_mat(quat: np.ndarray) -> np.ndarray:
+    rot_mat = np.zeros(9, dtype=np.float64)
+    mujoco.mju_quat2Mat(rot_mat, np.array(quat, dtype=np.float64))
+    rot_mat = rot_mat.reshape(3, 3)
+    return rot_mat
+
+
+def mat_to_quat(mat: np.ndarray) -> np.ndarray:
+    quat = np.zeros(4, dtype=np.float64)
+    mujoco.mju_mat2Quat(quat, np.array(mat, np.float64).flatten())
+    return quat
+
+
+def get_body_pose(data: PhysicsData, body_idx: int) -> tuple[np.ndarray, np.ndarray]:
+    position = data.xpos[body_idx].copy()
+    quat = data.xquat[body_idx].copy()
+    rot_mat = quat_to_mat(quat)
+    return position, rot_mat
+
+
+def get_geom_pose(data: PhysicsData, geom_idx: int) -> tuple[np.ndarray, np.ndarray]:
+    position = data.geom_xpos[geom_idx].copy()
+    rot_mat = data.geom_xmat[geom_idx].reshape(3, 3).copy()
+    return position, rot_mat
+
+
+def get_body_pose_by_name(
+    model: PhysicsModel,
+    data: PhysicsData,
+    body_name: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    body_idx = get_body_data_idx_from_name(model, body_name)
+    return get_body_pose(data, body_idx)
+
+
+def get_geom_pose_by_name(
+    model: PhysicsModel,
+    data: PhysicsData,
+    geom_name: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    geom_idx = get_geom_data_idx_from_name(model, geom_name)
+    return get_geom_pose(data, geom_idx)

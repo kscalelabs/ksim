@@ -16,7 +16,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.utils.visualization import VelocityArrow, Visualization
+from ksim.vis import Marker
 
 
 @attrs.define(frozen=True)
@@ -47,11 +47,11 @@ class Command(ABC):
             The command to perform, with shape (command_dim).
         """
 
-    def update_scene(self, command: Array) -> Collection[Visualization]:
-        """Updates the scene with elements from the command.
+    def get_markers(self, command: Array) -> Collection[Marker]:
+        """Get the visualizations for the command.
 
         Args:
-            command: The command to update the scene with.
+            command: The command to get the visualizations for.
 
         Returns:
             The visualizations to add to the scene.
@@ -82,6 +82,7 @@ class LinearVelocityCommand(Command):
     switch_prob: float = attrs.field(default=0.0)
     zero_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=2.0)
+    vis_scale: float = attrs.field(default=0.05)
 
     def initial_command(self, rng: PRNGKeyArray) -> Array:
         rng_x, rng_y, rng_zero = jax.random.split(rng, 3)
@@ -89,7 +90,6 @@ class LinearVelocityCommand(Command):
         x = jax.random.uniform(rng_x, (), minval=xmin, maxval=xmax)
         y = jax.random.uniform(rng_y, (), minval=ymin, maxval=ymax)
         zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
-        # TODO this is not consistent with other commands shape
         cmd = jnp.array([x, y])
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
@@ -99,23 +99,24 @@ class LinearVelocityCommand(Command):
         new_commands = self.initial_command(rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
-    def update_scene(self, command: Array) -> Collection[Visualization]:
+    def get_markers(self, command: Array) -> Collection[Marker]:
+        x, y = float(command[0]), float(command[1])
+        scale = self.vis_scale
+
         return [
-            VelocityArrow(
-                velocity=float(command[0]),
-                base_pos=(0.0, 0.0, self.vis_height),
-                scale=0.1,
+            Marker.arrow(
+                magnitude=x * 5.0,
+                pos=((scale if x > 0 else -scale) * 2.0, 0.0, self.vis_height),
                 rgba=(1.0, 0.0, 0.0, 0.8),
                 direction=(1.0, 0.0, 0.0),
-                label=f"X: {command[0]:.2f}",
+                size=scale,
             ),
-            VelocityArrow(
-                velocity=float(command[1]),
-                base_pos=(0.0, 0.0, self.vis_height + 0.2),
-                scale=0.1,
+            Marker.arrow(
+                magnitude=y * 5.0,
+                pos=(0.0, (scale if y > 0 else -scale) * 2.0, self.vis_height),
                 rgba=(0.0, 1.0, 0.0, 0.8),
                 direction=(0.0, 1.0, 0.0),
-                label=f"Y: {command[1]:.2f}",
+                size=scale,
             ),
         ]
 
