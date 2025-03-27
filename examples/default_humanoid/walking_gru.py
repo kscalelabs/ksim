@@ -353,7 +353,7 @@ if __name__ == "__main__":
     #   python -m examples.default_humanoid.walking_gru run_environment=True
     HumanoidWalkingGRUTask.launch(
         HumanoidWalkingGRUTaskConfig(
-            num_envs=8192,
+            num_envs=2048,
             batch_size=256,
             num_passes=4,
             # Simulation parameters.
