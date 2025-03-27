@@ -180,8 +180,7 @@ class Marker:
         g.rgba[:] = np.array(self.rgba, dtype=np.float32)
 
         # Handle label conversion if needed
-        if self.label is not None:
-            g.label = self.label.encode("utf-8")
+        g.label = ("" if self.label is None else self.label).encode("utf-8")
 
         # Set other rendering properties
         g.dataid = -1
