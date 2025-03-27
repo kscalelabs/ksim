@@ -134,17 +134,6 @@ class LinearVelocityCommand(Command):
             ),
         ]
 
-    def update_markers(self, command: Array, markers: Collection[Marker]) -> None:
-        x, y = float(command[0]), float(command[1])
-        scale = self.vis_scale
-        xmarker, ymarker = markers[0], markers[1]
-
-        xmarker.magnitude = x * 5.0
-        xmarker.pos = ((scale if x > 0 else -scale) * 2.0, 0.0, self.vis_height)
-
-        ymarker.magnitude = y * 5.0
-        ymarker.pos = (0.0, (scale if y > 0 else -scale) * 2.0, self.vis_height)
-
 
 @attrs.define(frozen=True)
 class AngularVelocityCommand(Command):
