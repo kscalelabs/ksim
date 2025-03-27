@@ -217,9 +217,9 @@ def update_data_field(data: mujoco.MjData | mjx.Data, name: str, new_value: Arra
 def slice_update(
     model: mujoco.MjModel | mjx.Model | mujoco.MjData | mjx.Data,
     name: str,
-    slice: Any,
+    slice: Any,  # noqa: ANN401
     value: Array,
-) -> Array:  # noqa: ANN401
+) -> Array:
     """Update a slice of a model field."""
     if isinstance(model, (mujoco.MjModel, mujoco.MjData)):
         val = getattr(model, name).copy()
