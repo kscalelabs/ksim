@@ -10,7 +10,6 @@ import datetime
 import io
 import itertools
 import logging
-import random
 import signal
 import sys
 import textwrap
@@ -752,11 +751,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Clips the trajectory to the desired length.
         if self.config.render_length_seconds is not None:
             render_frames = round(self.config.render_length_seconds / self.config.ctrl_dt)
-            total_frames = trajectories.done.shape[0]
-            start = random.randint(0, max(total_frames - render_frames, 0))
-            end = min(start + render_frames, total_frames)
-            trajectories = jax.tree.map(lambda arr: arr[start:end], trajectories)
-            rewards = jax.tree.map(lambda arr: arr[start:end], rewards)
+            trajectories = jax.tree.map(lambda arr: arr[:render_frames], trajectories)
+            rewards = jax.tree.map(lambda arr: arr[:render_frames], rewards)
 
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Logs plots of the observations, commands, actions, rewards, and terminations.
