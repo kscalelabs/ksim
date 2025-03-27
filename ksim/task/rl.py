@@ -286,6 +286,10 @@ class RLConfig(xax.Config):
         value=24,
         help="The target FPS for the renderered video.",
     )
+    render_slowdown: float = xax.field(
+        value=3,
+        help="The slowdown factor for the rendered video.",
+    )
     render_track_body_id: int | None = xax.field(
         value=None,
         help="If set, the render camera will track the body with this ID.",
@@ -798,7 +802,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model,
             target_fps=self.config.render_fps,
         )
-        self.logger.log_video(key="trajectory", value=frames, fps=fps, namespace="➡️ trajectory images")
+        self.logger.log_video(
+            key="trajectory",
+            value=frames,
+            fps=round(fps * self.config.render_slowdown),
+            namespace="➡️ trajectory images",
+        )
 
     @abstractmethod
     def update_model(
