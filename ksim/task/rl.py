@@ -712,6 +712,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             width=self.config.render_width,
         )
 
+        def add_visualizations(mj_data: mujoco.MjData) -> None:
+            for command in commands:
+                command_value = trajectory.command[command.command_name]
+                for visualization in command.get_visualizations(command_value):
+                    visualization(renderer.model, mj_data, renderer.scene)
+
         frame_list: list[np.ndarray] = []
         for frame_id, trajectory in enumerate(trajectory_list):
             mj_data.qpos = np.array(trajectory.qpos)
@@ -720,10 +726,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
             renderer.update_scene(mj_data, camera=mj_camera)
-            for command in commands:
-                command_value = trajectory.command[command.command_name]
-                for visualization in command.get_visualizations(command_value):
-                    visualization(mj_model, mj_data, renderer.scene)
+            add_visualizations(mj_data)
             frame = renderer.render()
 
             # Overlays the frame number on the frame.

@@ -175,6 +175,7 @@ class Marker:
         scene.geoms[scene.ngeom].objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
         scene.geoms[scene.ngeom].objid = -1
         scene.geoms[scene.ngeom].category = mujoco.mjtCatBit.mjCAT_DECOR
+
         scene.geoms[scene.ngeom].emission = 0
         scene.geoms[scene.ngeom].specular = 0.5
         scene.geoms[scene.ngeom].shininess = 0.5

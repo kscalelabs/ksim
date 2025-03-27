@@ -512,12 +512,6 @@ class MujocoViewer:
         add_overlay(bottomleft, "Step", str(round(self.data.time / self.model.opt.timestep)))
         add_overlay(bottomleft, "timestep", f"{self.model.opt.timestep:.5f}", newline=False)
 
-    def apply_perturbations(self) -> None:
-        """Apply accumulated perturbations to the model."""
-        self.data.xfrc_applied = np.zeros_like(self.data.xfrc_applied)
-        mujoco.mjv_applyPerturbPose(self.model, self.data, self.pert, 0)
-        mujoco.mjv_applyPerturbForce(self.model, self.data, self.pert)
-
     @overload
     def read_pixels(self, depth: Literal[True], callback: Callback | None = None) -> tuple[np.ndarray, np.ndarray]: ...
 
@@ -622,9 +616,6 @@ class MujocoViewer:
         while self._loop_count > 0:
             update()
             self._loop_count -= 1
-
-        # Clear markers and apply perturbations
-        self.apply_perturbations()
 
     def close(self) -> None:
         """Close the viewer and clean up resources."""
