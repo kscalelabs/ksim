@@ -72,12 +72,16 @@ class Command(ABC):
 VelocityAxis = Literal["x", "y"]
 
 
-@attrs.define()
+@attrs.define(kw_only=True)
 class LinearVelocityArrow(Marker):
     command_name: str = attrs.field()
     axis: VelocityAxis = attrs.field()
     vis_height: float = attrs.field()
     vis_scale: float = attrs.field()
+
+    @property
+    def command_id(self) -> int:
+        return {"x": 0, "y": 1}[self.axis]
 
     def update(self, trajectory: Trajectory) -> None:
         value = float(trajectory.command[self.command_name][self.command_id])
@@ -89,22 +93,30 @@ class LinearVelocityArrow(Marker):
                 self.pos = (0.0, (self.vis_scale if value > 0 else -self.vis_scale) * 2.0, self.vis_height)
 
     @classmethod
-    def get(cls, axis: VelocityAxis) -> Self:
+    def get(cls, command_name: str, axis: VelocityAxis, vis_height: float, vis_scale: float) -> Self:
         match axis:
             case "x":
                 return cls(
+                    command_name=command_name,
+                    axis=axis,
                     geom=mujoco.mjtGeom.mjGEOM_ARROW,
                     orientation=cls.quat_from_direction((1.0, 0.0, 0.0)),
                     rgba=(1.0, 0.0, 0.0, 0.8),
                     target_type="root",
+                    vis_height=vis_height,
+                    vis_scale=vis_scale,
                 )
 
             case "y":
                 return cls(
+                    command_name=command_name,
+                    axis=axis,
                     geom=mujoco.mjtGeom.mjGEOM_ARROW,
                     orientation=cls.quat_from_direction((0.0, 1.0, 0.0)),
                     rgba=(0.0, 1.0, 0.0, 0.8),
                     target_type="root",
+                    vis_height=vis_height,
+                    vis_scale=vis_scale,
                 )
 
             case _:
@@ -145,8 +157,8 @@ class LinearVelocityCommand(Command):
 
     def get_markers(self) -> Collection[Marker]:
         return [
-            LinearVelocityArrow.get("x"),
-            LinearVelocityArrow.get("y"),
+            LinearVelocityArrow.get(self.command_name, "x", self.vis_height, self.vis_scale),
+            LinearVelocityArrow.get(self.command_name, "y", self.vis_height, self.vis_scale),
         ]
 
 

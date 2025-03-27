@@ -124,7 +124,7 @@ def rotation_matrix_from_direction(
     )
 
 
-@attrs.define()
+@attrs.define(kw_only=True)
 class Marker:
     # Geometry parameters.
     geom: mujoco.MjsGeom = attrs.field()
