@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
 
-import attrs
 import distrax
 import equinox as eqx
 import jax
@@ -19,10 +18,7 @@ from mujoco import mjx
 
 import ksim
 
-OBS_SIZE = 330
-CMD_SIZE = 3
-NUM_INPUTS = OBS_SIZE + CMD_SIZE
-NUM_OUTPUTS = 21
+NUM_JOINTS = 21
 
 
 @jax.tree_util.register_dataclass
@@ -30,30 +26,6 @@ NUM_OUTPUTS = 21
 class AuxOutputs:
     log_probs: Array
     values: Array
-
-
-@attrs.define(frozen=True)
-class DHJointVelocityObservation(ksim.Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        qvel = state.physics_state.data.qvel  # (N,)
-        return qvel
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
-
-@attrs.define(frozen=True)
-class DHJointPositionObservation(ksim.Observation):
-    noise: float = attrs.field(default=0.0)
-
-    def observe(self, state: ksim.RolloutVariables, rng: PRNGKeyArray) -> Array:
-        qpos = state.physics_state.data.qpos[2:]  # (N,)
-        return qpos
-
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -74,9 +46,12 @@ class DefaultHumanoidActor(eqx.Module):
         var_scale: float,
         mean_scale: float,
     ) -> None:
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + NUM_JOINTS + 2 + 1
+        num_outputs = NUM_JOINTS
+
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS,
-            out_size=NUM_OUTPUTS * 2,
+            in_size=num_inputs,
+            out_size=num_outputs * 2,
             width_size=64,
             depth=5,
             key=key,
@@ -99,28 +74,20 @@ class DefaultHumanoidActor(eqx.Module):
     ) -> distrax.Normal:
         obs_n = jnp.concatenate(
             [
-                dh_joint_pos_n,
-                dh_joint_vel_n,
-                com_inertia_n,
-                com_vel_n,
-                act_frc_obs_n,
-                lin_vel_cmd_2,
-                ang_vel_cmd_1,
+                dh_joint_pos_n,  # NUM_JOINTS
+                dh_joint_vel_n,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                act_frc_obs_n,  # 21
+                lin_vel_cmd_2,  # 2
+                ang_vel_cmd_1,  # 1
             ],
             axis=-1,
-        )  # (NUM_INPUTS)
+        )
 
-        return self.call_flat_obs(obs_n, lin_vel_cmd_2, ang_vel_cmd_1)
-
-    def call_flat_obs(
-        self,
-        flat_obs_n: Array,
-        lin_vel_cmd_2: Array,
-        ang_vel_cmd_1: Array,
-    ) -> distrax.Normal:
-        prediction_n = self.mlp(jnp.concatenate([flat_obs_n, lin_vel_cmd_2, ang_vel_cmd_1], axis=-1))  # (NUM_INPUTS,)
-        mean_n = prediction_n[..., :NUM_OUTPUTS]
-        std_n = prediction_n[..., NUM_OUTPUTS:]
+        prediction_n = self.mlp(obs_n)
+        mean_n = prediction_n[..., :NUM_JOINTS]
+        std_n = prediction_n[..., NUM_JOINTS:]
 
         # Scale the mean.
         mean_n = jnp.tanh(mean_n) * self.mean_scale
@@ -138,9 +105,12 @@ class DefaultHumanoidCritic(eqx.Module):
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray) -> None:
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + NUM_JOINTS + 3 + 3 + 2 + 1
+        num_outputs = 1
+
         self.mlp = eqx.nn.MLP(
-            in_size=NUM_INPUTS + 3 + 3,  # 3 for lin vel obs, 3 for ang vel obs
-            out_size=1,  # Always output a single critic value.
+            in_size=num_inputs,
+            out_size=num_outputs,
             width_size=64,
             depth=5,
             key=key,
@@ -161,18 +131,18 @@ class DefaultHumanoidCritic(eqx.Module):
     ) -> Array:
         x_n = jnp.concatenate(
             [
-                dh_joint_pos_n,
-                dh_joint_vel_n,
-                com_inertia_n,
-                com_vel_n,
-                act_frc_obs_n,
-                lin_vel_obs_3,
-                ang_vel_obs_3,
-                lin_vel_cmd_2,
-                ang_vel_cmd_1,
+                dh_joint_pos_n,  # NUM_JOINTS
+                dh_joint_vel_n,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                act_frc_obs_n,  # 21
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                lin_vel_cmd_2,  # 2
+                ang_vel_cmd_1,  # 1
             ],
             axis=-1,
-        )  # (NUM_INPUTS + 11)
+        )
         return self.mlp(x_n)
 
 
@@ -321,8 +291,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            DHJointPositionObservation(),
-            DHJointVelocityObservation(),
+            ksim.JointPositionObservation(),
+            ksim.JointVelocityObservation(),
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
@@ -384,8 +354,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> distrax.Normal:
-        dh_joint_pos_n = observations["dhjoint_position_observation"]
-        dh_joint_vel_n = observations["dhjoint_velocity_observation"]
+        dh_joint_pos_n = observations["joint_position_observation"]
+        dh_joint_vel_n = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
@@ -407,15 +377,15 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> Array:
-        dh_joint_pos_n = observations["dhjoint_position_observation"]
-        dh_joint_vel_n = observations["dhjoint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd_1 = commands["angular_velocity_command"]
+        dh_joint_pos_n = observations["joint_position_observation"]  # 26
+        dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
+        com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
+        com_vel_n = observations["center_of_mass_velocity_observation"]  # 96
+        act_frc_obs_n = observations["actuator_force_observation"] / 100.0  # 21
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]  # 3
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
+        lin_vel_cmd_2 = commands["linear_velocity_command"]  # 2
+        ang_vel_cmd_1 = commands["angular_velocity_command"]  # 1
         return model.critic(
             dh_joint_pos_n,
             dh_joint_vel_n,
