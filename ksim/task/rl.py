@@ -936,7 +936,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return {
             "episode_length": traj_lens.mean(),
-            **{key: (value / num_terms[:, None]).mean() for key, value in trajectories.termination_components.items()},
+            **{key: (value / num_terms[:, None]).sum(axis=-1).mean() for key, value in trajectories.termination_components.items()},
         }
 
     def get_markers(
