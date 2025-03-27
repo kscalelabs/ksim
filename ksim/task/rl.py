@@ -93,41 +93,6 @@ def get_observation(
     return FrozenDict(observations)
 
 
-def compute_step_rewards(
-    trajectory: Trajectory,
-    reward_generators: Collection[Reward],
-    ctrl_dt: float,
-    clip_max: float | None = None,
-) -> Rewards:
-    """Get the rewards for a single step/transition.
-
-    Similar to get_rewards but designed for a single step rather than a full trajectory.
-
-    Args:
-        trajectory: A single-step trajectory
-        reward_generators: Collection of reward generator functions
-        ctrl_dt: Control timestep
-        clip_max: Optional maximum value to clip rewards
-
-    Returns:
-        Rewards object with total reward and components
-    """
-    # Add batch dimension to the transition - reward functions expect this
-    batched_trajectory = jax.tree.map(lambda x: jnp.expand_dims(x, axis=0), trajectory)
-
-    rewards = {}
-    for reward_generator in reward_generators:
-        # Compute reward with batch dimension
-        reward_val = reward_generator(batched_trajectory) * reward_generator.scale * ctrl_dt
-        # Remove batch dimension for the result
-        reward_val = jnp.squeeze(reward_val, axis=0)
-        if clip_max is not None:
-            reward_val = jnp.clip(reward_val, -clip_max, clip_max)
-        rewards[reward_generator.reward_name] = reward_val
-    total_reward = jax.tree.reduce(jnp.add, list(rewards.values()))
-    return Rewards(total=total_reward, components=FrozenDict(rewards))
-
-
 def get_rewards(
     trajectory: Trajectory,
     reward_generators: Collection[Reward],
@@ -265,13 +230,13 @@ class RLConfig(xax.Config):
     )
 
     # Override validation parameters.
-    log_full_trajectory_every_n_steps: int | None = xax.field(
-        None,
-        help="Log the full trajectory every N steps.",
-    )
     log_full_trajectory_on_first_step: bool = xax.field(
         value=False,
         help="If true, log the full trajectory on the first step.",
+    )
+    log_full_trajectory_every_n_steps: int | None = xax.field(
+        None,
+        help="Log the full trajectory every N steps.",
     )
     log_full_trajectory_every_n_seconds: float | None = xax.field(
         60.0 * 10.0,
@@ -929,14 +894,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             trajectories: The trajectories to get the termination metrics for.
         """
-        last_dones = trajectories.done[..., -1]
-        num_terms = trajectories.done.sum(-1, dtype=trajectories.action.dtype) + (1 - last_dones)
-        num_terms = jnp.clip(num_terms, min=1)
-        traj_lens = (trajectories.done.shape[-1] / num_terms) * self.config.ctrl_dt
+        kvs = list(trajectories.termination_components.items())
+        all_terminations = jnp.stack([v for _, v in kvs], axis=-1)
+        has_termination = (all_terminations.sum(axis=-1) > 0).sum(axis=-1)
+        num_terminations = has_termination.sum().clip(min=1)
+        num_timesteps = trajectories.done.shape[-1]
 
         return {
-            "episode_length": traj_lens.mean(),
-            **{key: (value / num_terms[:, None]).mean() for key, value in trajectories.termination_components.items()},
+            "episode_length": (num_timesteps / (has_termination + 1).sum()) * self.config.ctrl_dt,
+            **{key: (value.sum() / num_terminations) for key, value in kvs},
         }
 
     def get_markers(
@@ -1227,6 +1193,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         rollout_variables=rollout_variables,
                     )
 
+                    # Gets the rewards.
+                    reward = get_rewards(
+                        trajectory=trajectory,
+                        reward_generators=rollout_constants.reward_generators,
+                        ctrl_dt=self.config.ctrl_dt,
+                        clip_max=self.config.reward_clip_max,
+                    )
+
                     rng, rand_rng = jax.random.split(rng)
                     mj_model, rollout_variables = jax.lax.cond(
                         trajectory.done,
@@ -1236,7 +1210,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                         for marker in markers:
-                            marker(model, data, scene, trajectory)
+                            marker(model, data, scene, trajectory, reward)
 
                     # Logs the frames to render.
                     viewer.data = rollout_variables.physics_state.data

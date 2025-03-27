@@ -28,6 +28,11 @@ class AuxOutputs:
     values: Array
 
 
+class NaiveVelocityReward(ksim.Reward):
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        return trajectory.qvel[..., 0].clip(max=5.0)
+
+
 class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
@@ -165,6 +170,12 @@ class DefaultHumanoidModel(eqx.Module):
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
+    # Reward parameters.
+    use_naive_reward: bool = xax.field(
+        value=False,
+        help="Whether to use the naive velocity reward.",
+    )
+
     # Optimizer parameters.
     learning_rate: float = xax.field(
         value=1e-4,
@@ -270,11 +281,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
-            ksim.WeightRandomization(scale=0.01),
             ksim.StaticFrictionRandomization(),
-            ksim.FloorFrictionRandomization.from_body_name(physics_model, "floor"),
             ksim.ArmatureRandomization(),
-            ksim.TorsoMassMultiplicationRandomization.from_body_name(physics_model, "torso"),
+            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "torso"),
             ksim.JointDampingRandomization(),
             ksim.JointZeroPositionRandomization(),
         ]
@@ -314,12 +323,10 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.LinearVelocityCommand(
                 x_range=(-1.0, 3.0),
                 y_range=(-0.5, 0.5),
-                switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average
                 zero_prob=0.5,
             ),
             ksim.AngularVelocityCommand(
-                scale=1.0,
-                switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average
+                scale=0.2,
                 zero_prob=0.5,
             ),
         ]
@@ -331,8 +338,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             # because the termination penalty seems harshly penalize
             # exploration, whereas this reward is more gentle.
             ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, scale=0.5),
-            ksim.LinearVelocityTrackingPenalty(scale=-0.1),
-            ksim.AngularVelocityTrackingPenalty(scale=-0.1),
             ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
@@ -344,6 +349,18 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             # (which can cause physical damage).
             ksim.BaseJerkZPenalty(scale=-0.01, ctrl_dt=self.config.ctrl_dt),
         ]
+
+        # Use this to toggle the "naive" mode, where the model just learns to
+        # move forward as quickly as possible.
+        if self.config.use_naive_reward:
+            rewards += [
+                NaiveVelocityReward(scale=0.1),
+            ]
+        else:
+            rewards += [
+                ksim.LinearVelocityTrackingPenalty(scale=-0.1),
+                ksim.AngularVelocityTrackingPenalty(scale=-0.01),
+            ]
 
         if self.config.use_mit_actuators:
             rewards += [

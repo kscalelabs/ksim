@@ -36,7 +36,7 @@ class TestLinearVelocityCommand:
 
     def test_command_shape(self, rng: jax.Array, time: jnp.ndarray) -> None:
         """Test that the command returns the correct shape."""
-        cmd = ksim.LinearVelocityCommand()
+        cmd = ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-2.0, 2.0))
         initial_command = cmd.initial_command(rng)
         result = cmd(initial_command, time, rng)
         chex.assert_shape(result, (2,))
@@ -59,7 +59,7 @@ class TestLinearVelocityCommand:
 
     def test_zero_probability(self, rng: jax.Array, time: jnp.ndarray) -> None:
         """Test that the command returns zeros when zero_prob is 1.0."""
-        cmd = ksim.LinearVelocityCommand(zero_prob=1.0)
+        cmd = ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-2.0, 2.0), zero_prob=1.0)
         command = cmd.initial_command(rng)
         result = cmd(command, time, rng)
         chex.assert_trees_all_close(
@@ -70,12 +70,12 @@ class TestLinearVelocityCommand:
 
     def test_update_mechanism(self, rng: jax.Array) -> None:
         """Test that the command update mechanism works correctly."""
-        cmd = ksim.LinearVelocityCommand(switch_prob=1.0)
+        cmd = ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-2.0, 2.0))
         command = cmd.initial_command(rng)
         time = jnp.array(0.0)
 
         next_command = cmd(command, time, rng)
-        assert not jnp.array_equal(next_command, command)
+        assert jnp.array_equal(next_command, command)
 
 
 class TestAngularVelocityCommand:
@@ -93,7 +93,7 @@ class TestAngularVelocityCommand:
 
     def test_command_shape(self, rng: jax.Array, time: jnp.ndarray) -> None:
         """Test that the command returns the correct shape."""
-        cmd = ksim.AngularVelocityCommand()
+        cmd = ksim.AngularVelocityCommand(scale=1.0)
         initial_command = cmd.initial_command(rng)
         result = cmd(initial_command, time, rng)
         chex.assert_shape(result, (1,))
@@ -114,7 +114,7 @@ class TestAngularVelocityCommand:
 
     def test_zero_probability(self, rng: jax.Array, time: jnp.ndarray) -> None:
         """Test that the command returns zeros when zero_prob is 1.0."""
-        cmd = ksim.AngularVelocityCommand(zero_prob=1.0)
+        cmd = ksim.AngularVelocityCommand(scale=1.0, zero_prob=1.0)
         command = cmd.initial_command(rng)
         result = cmd(command, time, rng)
         chex.assert_trees_all_close(
@@ -125,9 +125,9 @@ class TestAngularVelocityCommand:
 
     def test_update_mechanism(self, rng: jax.Array) -> None:
         """Test that the command update mechanism works correctly."""
-        cmd = ksim.AngularVelocityCommand(switch_prob=1.0)
+        cmd = ksim.AngularVelocityCommand(scale=1.0)
         command = cmd.initial_command(rng)
         time = jnp.array(0.0)
 
         next_command = cmd(command, time, rng)
-        assert not jnp.array_equal(next_command, command)
+        assert jnp.array_equal(next_command, command)

@@ -2,12 +2,11 @@
 
 __all__ = [
     "Randomization",
-    "WeightRandomization",
     "StaticFrictionRandomization",
     "FloorFrictionRandomization",
     "ArmatureRandomization",
-    "TorsoMassAdditionRandomization",
-    "TorsoMassMultiplicationRandomization",
+    "MassAdditionRandomization",
+    "MassMultiplicationRandomization",
     "JointDampingRandomization",
     "JointZeroPositionRandomization",
 ]
@@ -45,16 +44,6 @@ class Randomization(ABC):
     @functools.cached_property
     def randomization_name(self) -> str:
         return self.get_name()
-
-
-@attrs.define(frozen=True, kw_only=True)
-class WeightRandomization(Randomization):
-    """Randomize the body masses of the robot."""
-
-    scale: float = attrs.field()
-
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
-        return {"body_mass": model.body_mass * (jax.random.uniform(rng, model.body_mass.shape) * self.scale + 1.0)}
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -100,7 +89,7 @@ class FloorFrictionRandomization(Randomization):
     ) -> Self:
         names_to_idxs = get_body_data_idx_by_name(model)
         if floor_body_name not in names_to_idxs:
-            raise ValueError(f"Body name {floor_body_name} not found in model")
+            raise ValueError(f"Body name {floor_body_name} not found in model. Choices are {names_to_idxs.keys()}")
         floor_body_id = names_to_idxs[floor_body_name]
         return cls(
             floor_body_id=floor_body_id,
@@ -129,22 +118,22 @@ class ArmatureRandomization(Randomization):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class TorsoMassAdditionRandomization(Randomization):
-    """Randomizes the torso mass."""
+class MassAdditionRandomization(Randomization):
+    """Randomizes the mass of some body."""
 
-    torso_body_id: int = attrs.field()
+    body_id: int = attrs.field()
     scale_lower: float = attrs.field(default=-1.0)
     scale_upper: float = attrs.field(default=1.0)
 
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
-        new_mass = model.body_mass[self.torso_body_id] + jax.random.uniform(
+        new_mass = model.body_mass[self.body_id] + jax.random.uniform(
             rng, minval=self.scale_lower, maxval=self.scale_upper
         )
         new_body_mass = jnp.concatenate(
             [
-                model.body_mass[: self.torso_body_id],
+                model.body_mass[: self.body_id],
                 jnp.array([new_mass]),
-                model.body_mass[self.torso_body_id + 1 :],
+                model.body_mass[self.body_id + 1 :],
             ]
         )
         return {"body_mass": new_body_mass}
@@ -153,40 +142,40 @@ class TorsoMassAdditionRandomization(Randomization):
     def from_body_name(
         cls,
         model: PhysicsModel,
-        torso_body_name: str,
+        body_name: str,
         scale_lower: float = 0.0,
         scale_upper: float = 1.0,
     ) -> Self:
         names_to_idxs = get_body_data_idx_by_name(model)
-        if torso_body_name not in names_to_idxs:
-            raise ValueError(f"Body name {torso_body_name} not found in model")
-        torso_body_id = names_to_idxs[torso_body_name]
+        if body_name not in names_to_idxs:
+            raise ValueError(f"Body name {body_name} not found in model")
+        body_id = names_to_idxs[body_name]
         return cls(
-            torso_body_id=torso_body_id,
+            body_id=body_id,
             scale_lower=scale_lower,
             scale_upper=scale_upper,
         )
 
 
 @attrs.define(frozen=True, kw_only=True)
-class TorsoMassMultiplicationRandomization(Randomization):
-    """Randomizes the torso mass."""
+class MassMultiplicationRandomization(Randomization):
+    """Randomizes the mass of some body."""
 
-    torso_body_id: int = attrs.field()
+    body_id: int = attrs.field()
     scale_lower: float = attrs.field(default=0.95)
     scale_upper: float = attrs.field(default=1.05)
 
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
-        new_mass = model.body_mass[self.torso_body_id] * jax.random.uniform(
+        new_mass = model.body_mass[self.body_id] * jax.random.uniform(
             rng,
             minval=self.scale_lower,
             maxval=self.scale_upper,
         )
         new_body_mass = jnp.concatenate(
             [
-                model.body_mass[: self.torso_body_id],
+                model.body_mass[: self.body_id],
                 jnp.array([new_mass]),
-                model.body_mass[self.torso_body_id + 1 :],
+                model.body_mass[self.body_id + 1 :],
             ]
         )
         return {"body_mass": new_body_mass}
@@ -195,16 +184,16 @@ class TorsoMassMultiplicationRandomization(Randomization):
     def from_body_name(
         cls,
         model: PhysicsModel,
-        torso_body_name: str,
+        body_name: str,
         scale_lower: float = 0.0,
         scale_upper: float = 1.0,
     ) -> Self:
         names_to_idxs = get_body_data_idx_by_name(model)
-        if torso_body_name not in names_to_idxs:
-            raise ValueError(f"Body name {torso_body_name} not found in model")
-        torso_body_id = names_to_idxs[torso_body_name]
+        if body_name not in names_to_idxs:
+            raise ValueError(f"Body name {body_name} not found in model")
+        body_id = names_to_idxs[body_name]
         return cls(
-            torso_body_id=torso_body_id,
+            body_id=body_id,
             scale_lower=scale_lower,
             scale_upper=scale_upper,
         )
