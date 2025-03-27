@@ -59,7 +59,7 @@ class TestLinearVelocityCommand:
 
     def test_zero_probability(self, rng: jax.Array, time: jnp.ndarray) -> None:
         """Test that the command returns zeros when zero_prob is 1.0."""
-        cmd = ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-2.0, 2.0), zero_prob=1.0)
+        cmd = ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-2.0, 2.0), x_zero_prob=1.0, y_zero_prob=1.0)
         command = cmd.initial_command(rng)
         result = cmd(command, time, rng)
         chex.assert_trees_all_close(
