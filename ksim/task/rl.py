@@ -694,7 +694,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def render_trajectory_video(
         self,
         trajectories: Trajectory,
-        markers: FrozenDict[str, Collection[Marker]],
+        markers: Collection[Marker],
         mj_model: mujoco.MjModel,
         mj_renderer: mujoco.Renderer,
         target_fps: int | None = None,
@@ -736,8 +736,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
             mj_renderer.update_scene(mj_data, camera=mj_camera)
-            for marker in markers.values():
-                marker(mj_renderer.model, mj_data, mj_renderer.scene)
+            for marker in markers:
+                marker(mj_renderer.model, mj_data, mj_renderer.scene, trajectory)
             frame = mj_renderer.render()
 
             # Overlays the frame number on the frame.
@@ -762,7 +762,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectories: Trajectory,
         reward_values: Rewards,
-        markers: FrozenDict[str, Collection[Marker]],
+        markers: Collection[Marker],
         mj_model: mujoco.MjModel,
         mj_renderer: mujoco.Renderer,
     ) -> None:
@@ -921,11 +921,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         observations: Collection[Observation],
         randomizations: Collection[Randomization],
         rewards: Collection[Reward],
-    ) -> FrozenDict[str, Collection[Marker]]:
-        markers = {}
+    ) -> Collection[Marker]:
+        markers = []
         for command in commands:
-            markers[command.command_name] = command.get_markers()
-        return FrozenDict(markers)
+            markers.extend(command.get_markers())
+        return markers
 
     @xax.jit(
         static_argnames=[
@@ -1101,6 +1101,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             terminations = self.get_terminations(mj_model)
             randomizations = self.get_randomization(mj_model)
 
+            # Creates the markers.
+            markers = self.get_markers(
+                commands=commands,
+                observations=observations,
+                randomizations=randomizations,
+                rewards=rewards,
+            )
+
             # Gets initial variables.
             rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
             initial_carry = self.get_initial_carry(carry_rng)
@@ -1197,8 +1205,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     )
 
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
-                        for marker in maerk
-                            marker(model, data, scene)
+                        for marker in markers:
+                            marker(model, data, scene, trajectory)
 
                     # Logs the frames to render.
                     viewer.data = rollout_variables.physics_state.data

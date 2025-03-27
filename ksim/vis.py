@@ -5,15 +5,21 @@ __all__ = [
     "Marker",
 ]
 
-from typing import Literal, Self
+from typing import Callable, Literal, Self
 
 import attrs
 import mujoco
 import numpy as np
 
+from ksim.types import Trajectory
 from ksim.utils.mujoco import get_body_pose, get_body_pose_by_name, get_geom_pose_by_name, mat_to_quat, quat_to_mat
 
 TargetType = Literal["body", "geom", "root"]
+UpdateFn = Callable[["Marker", Trajectory], None]
+
+
+def default_update_fn(marker: "Marker", trajectory: Trajectory) -> None:
+    pass
 
 
 def get_target_pose(
@@ -122,7 +128,7 @@ def rotation_matrix_from_direction(
     )
 
 
-@attrs.define(frozen=True)
+@attrs.define()
 class Marker:
 
     # Geometry parameters.
@@ -143,6 +149,7 @@ class Marker:
 
     # Data parameters.
     geom_idx: int | None = attrs.field(default=None)
+    update_fn: UpdateFn = attrs.field(default=default_update_fn)
 
     def get_pos_and_rot(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData) -> tuple[np.ndarray, np.ndarray]:
         pos, quat = np.array(self.pos), np.array(self.orientation)
@@ -199,9 +206,18 @@ class Marker:
         # Handle label conversion if needed
         g.label = ("" if self.label is None else self.label).encode("utf-8")
 
-    def __call__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
+        scene.ngeom = max(scene.ngeom, geom_idx + 1)
+
+    def __call__(
+        self,
+        mj_model: mujoco.MjModel,
+        mj_data: mujoco.MjData,
+        scene: mujoco.MjvScene,
+        trajectory: Trajectory,
+    ) -> None:
         if self.geom_idx is None:
             self.geom_idx = self.initialize(mj_model, mj_data, scene)
+        self.update_fn(self, trajectory)
         self.update(mj_model, mj_data, scene, self.geom_idx)
 
     @classmethod
@@ -211,6 +227,7 @@ class Marker:
         pos: tuple[float, float, float],
         direction: tuple[float, float, float],
         rgba: tuple[float, float, float, float],
+        update_fn: UpdateFn = default_update_fn,
         label: str | None = None,
         size: float = 0.025,
         target_name: str | None = None,
@@ -227,6 +244,7 @@ class Marker:
             label=label,
             target_name=target_name,
             target_type=target_type,
+            update_fn=update_fn,
         )
 
     @classmethod
@@ -235,6 +253,7 @@ class Marker:
         pos: tuple[float, float, float],
         radius: float,
         rgba: tuple[float, float, float, float],
+        update_fn: UpdateFn = default_update_fn,
         label: str | None = None,
         target_name: str | None = None,
         target_type: TargetType = "body",
@@ -248,6 +267,7 @@ class Marker:
             label=label,
             target_name=target_name,
             target_type=target_type,
+            update_fn=update_fn,
         )
 
 

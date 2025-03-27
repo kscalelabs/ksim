@@ -16,6 +16,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
+from ksim.types import Trajectory
 from ksim.vis import Marker
 
 
@@ -58,14 +59,6 @@ class Command(ABC):
         """
         return []
 
-    def update_markers(self, command: Array, markers: Collection[Marker]) -> None:
-        """Update the visualizations for the command.
-
-        Args:
-            command: The command to update the visualizations for.
-            markers: The visualizations to update.
-        """
-
     def get_name(self) -> str:
         """Get the name of the command."""
         return xax.camelcase_to_snakecase(self.__class__.__name__)
@@ -107,7 +100,19 @@ class LinearVelocityCommand(Command):
         new_commands = self.initial_command(rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
-    def get_markers(self, command: Array) -> Collection[Marker]:
+    def get_markers(self) -> Collection[Marker]:
+        scale = self.vis_scale
+
+        def update_x_fn(marker: Marker, trajectory: Trajectory) -> None:
+            x = float(trajectory.command[self.command_name][0])
+            marker.scale = (scale, scale, x * 5.0 * scale)
+            marker.pos = ((scale if x > 0 else -scale) * 2.0, 0.0, self.vis_height)
+
+        def update_y_fn(marker: Marker, trajectory: Trajectory) -> None:
+            y = float(trajectory.command[self.command_name][1])
+            marker.scale = (scale, scale, y * 5.0 * scale)
+            marker.pos = (0.0, (scale if y > 0 else -scale) * 2.0, self.vis_height)
+
         return [
             Marker.arrow(
                 magnitude=0.0,
@@ -116,6 +121,7 @@ class LinearVelocityCommand(Command):
                 direction=(1.0, 0.0, 0.0),
                 size=self.vis_scale,
                 target_type="root",
+                update_fn=update_x_fn,
             ),
             Marker.arrow(
                 magnitude=0.0,
@@ -124,6 +130,7 @@ class LinearVelocityCommand(Command):
                 direction=(0.0, 1.0, 0.0),
                 size=self.vis_scale,
                 target_type="root",
+                update_fn=update_y_fn,
             ),
         ]
 
