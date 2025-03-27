@@ -609,7 +609,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             # indices = jax.random.permutation(indices_rng, trajectories.done.shape[0])
             indices = jnp.arange(trajectories.done.shape[0])
 
-            indices = indices.reshape(self.num_batches, self.config.batch_size)
+            indices = indices.reshape(self.num_batches, self.batch_size)
             carry = (arr, opt_state, rng)
 
             carry, metrics = jax.lax.scan(scan_fn, carry, indices)

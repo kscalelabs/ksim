@@ -3,41 +3,49 @@
 __all__ = [
     "Event",
     "PushEvent",
-    "PushEventInfo",
+    "PushEventState",
 ]
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Self
+from dataclasses import dataclass
 
 import attrs
 import jax
 import jax.numpy as jnp
-import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from mujoco import mjx
 
-from ksim.types import PhysicsData
-from ksim.utils.mujoco import update_data_field
-
-
-def event_probability_validator(inst: "Event", attr: attrs.Attribute, value: float) -> None:
-    if value < 0.0 or value > 1.0:
-        raise ValueError(f"Event probability must be between 0.0 and 1.0, got {value}")
+from ksim.types import PhysicsData, PhysicsModel
+from ksim.utils.mujoco import slice_update, update_data_field
 
 
 @attrs.define(frozen=True, kw_only=True)
 class Event(ABC):
     """Base class for all events."""
 
-    probability: float = attrs.field(validator=event_probability_validator)
-
     @abstractmethod
     def __call__(
-        self, persistent_data: PyTree, data: PhysicsData, dt: float, rng: PRNGKeyArray
+        self,
+        model: PhysicsModel,
+        data: PhysicsData,
+        event_state: PyTree,
+        rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, PyTree]:
-        """Apply the event to the data."""
+        """Apply the event to the data.
+
+        Note that this function is called on every physics timestep, not
+        control timestep - it is called by the engine directly.
+
+        Args:
+            model: The physics model.
+            data: The physics data.
+            event_state: The state of the event.
+            rng: The random number generator.
+
+        Returns:
+            The updated data and event state.
+        """
 
     def get_name(self) -> str:
         return xax.camelcase_to_snakecase(self.__class__.__name__)
@@ -47,104 +55,60 @@ class Event(ABC):
         return self.get_name()
 
     @abstractmethod
-    def get_initial_info(self) -> PyTree:
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> PyTree:
         """Get the initial info for the event."""
 
 
-@jax.tree_util.register_pytree_node_class
-@attrs.define(frozen=True, kw_only=True)
-class PushEventInfo:
-    remaining_interval: Array
-
-    def tree_flatten(self) -> tuple[tuple, None]:
-        return (self.remaining_interval,), None
-
-    @classmethod
-    def tree_unflatten(cls, aux_data: None, children: tuple) -> Self:
-        """Reconstruct the class from flattened representation."""
-        (remaining_interval,) = children
-        return cls(
-            remaining_interval=remaining_interval,
-        )
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class PushEventState:
+    time_remaining: Array
 
 
 @attrs.define(frozen=True, kw_only=True)
 class PushEvent(Event):
-    """Event for pushing the robot."""
+    """Randomly push the robot after some interval."""
 
-    linear_force_scale: float = attrs.field(default=0.0)
-    angular_force_scale: float = attrs.field(default=0.0)
-    interval_range: tuple[float, float] = attrs.field(default=(0.0, 0.0))
+    x_force: float = attrs.field()
+    y_force: float = attrs.field()
+    z_force: float = attrs.field(default=0.0)
+    interval_range: tuple[float, float] = attrs.field()
 
     def __call__(
         self,
-        persistent_data: PushEventInfo,
+        model: PhysicsModel,
         data: PhysicsData,
-        dt: float,
+        event_state: PushEventState,
         rng: PRNGKeyArray,
-    ) -> tuple[PhysicsData, PushEventInfo]:
-        """Apply the event to the data.
+    ) -> tuple[PhysicsData, PushEventState]:
+        # Decrement by physics timestep.
+        dt = jnp.float32(model.opt.timestep)
+        time_remaining = event_state.time_remaining - dt
 
-        Persistent data has the following structure:
-        remaining_interval: Array  # Remaining time in seconds before next push
-        """
-        # Split the RNG for different operations
-        rng1, rng2 = jax.random.split(rng)
-
-        needs_reset = persistent_data.remaining_interval <= 0.0
-        reset_prob = jax.random.uniform(rng1)
-        should_reset = needs_reset & (reset_prob < self.probability)
-
-        rng_interval, rng_linear, rng_angular = jax.random.split(rng2, 3)
-
-        # Calculate new interval (either new random interval or decremented existing one)
-        interval_range = self.interval_range
-
-        # Generate random interval in seconds - ensure it's float32
-        random_interval = jax.random.uniform(
-            rng_interval,
-            (),
-            minval=jnp.float32(interval_range[0]),
-            maxval=jnp.float32(interval_range[1]),
+        # Update the data if the time remaining is less than 0.
+        updated_data, time_remaining = jax.lax.cond(
+            time_remaining <= 0.0,
+            lambda: self._apply_random_force(data, rng),
+            lambda: (data, time_remaining),
         )
 
-        # Decrement by physics timestep
-        dt_float32 = jnp.float32(dt)
-        continued_interval = persistent_data.remaining_interval - dt_float32
+        return updated_data, PushEventState(time_remaining=time_remaining)
 
-        # Select new interval value
-        new_interval = jnp.where(
-            should_reset,
-            random_interval,
-            jnp.where(needs_reset, jnp.float32(0.0), continued_interval),
-        )
+    def _apply_random_force(self, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
+        # Randomly applies a force.
+        linear_force_scale = jnp.array([self.x_force, self.y_force, self.z_force])
+        random_forces = jax.random.uniform(rng, (3,), minval=-1.0, maxval=1.0)
+        random_forces = random_forces * linear_force_scale
+        new_qvel = slice_update(data, "qvel", slice(0, 3), random_forces)
+        updated_data = update_data_field(data, "qvel", new_qvel)
 
-        # Generate random forces
-        random_linear_force = (
-            jax.random.uniform(
-                rng_linear,
-                (3,),
-                minval=-self.linear_force_scale,
-                maxval=self.linear_force_scale,
-            )
-            + data.qvel[0:3]
-        )
+        # Chooses a new remaining interval.
+        minval, maxval = self.interval_range
+        time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
 
-        # Apply forces conditionally using where instead of lax.cond
-        match type(data):
-            case mujoco.MjData:
-                new_data_qvel = data.qvel.copy()
-                new_data_qvel[0:3] = jnp.where(should_reset, random_linear_force, data.qvel[0:3])
-            case mjx.Data:
-                new_data_qvel = data.qvel.at[0:3].set(jnp.where(should_reset, random_linear_force, data.qvel[0:3]))
+        return updated_data, time_remaining
 
-        # Update data with new velocities
-        updated_data = update_data_field(data, "qvel", new_data_qvel)
-
-        return updated_data, PushEventInfo(
-            remaining_interval=new_interval,
-        )
-
-    def get_initial_info(self) -> PushEventInfo:
-        """Initialize with a float32 zero value for consistent typing."""
-        return PushEventInfo(remaining_interval=jnp.float32(0.0))
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> PushEventState:
+        minval, maxval = self.interval_range
+        time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+        return PushEventState(time_remaining=time_remaining)

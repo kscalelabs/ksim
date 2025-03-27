@@ -7,6 +7,7 @@ __all__ = [
 
 import bdb
 import datetime
+import functools
 import io
 import itertools
 import logging
@@ -385,9 +386,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 f"the batch size ({self.config.batch_size})"
             )
 
-    @property
+    @functools.cached_property
+    def batch_size(self) -> int:
+        return self.config.batch_size
+
+    @functools.cached_property
     def num_batches(self) -> int:
-        return self.config.num_envs // self.config.batch_size
+        return self.config.num_envs // self.batch_size
 
     @abstractmethod
     def get_mujoco_model(self) -> mujoco.MjModel: ...
