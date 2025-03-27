@@ -730,6 +730,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             draw.text((10, 10), f"Frame {indices[frame_id]}", fill=(255, 255, 255))
             frame = np.array(frame_img)
 
+            # Draws an RGB patch in the bottom right corner of the frame.
+            rgb = np.zeros((10, 50, 3), dtype=np.uint8)
+            rgb[:, 10:20, 0] = 255
+            rgb[:, 20:30, 1] = 255
+            rgb[:, 30:40, 2] = 255
+            frame[-10:, -50:] = rgb
+
             frame_list.append(frame)
 
         return np.stack(frame_list, axis=0), fps

@@ -100,7 +100,7 @@ class LinearVelocityCommand(Command):
 
     def get_visualizations(self, command: Array) -> Collection[Marker]:
         x, y = float(command[0]), float(command[1])
-        scale = 0.025
+        scale = 0.05
 
         return [
             Marker.arrow(
