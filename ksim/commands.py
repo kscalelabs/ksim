@@ -89,7 +89,6 @@ class LinearVelocityCommand(Command):
         x = jax.random.uniform(rng_x, (), minval=xmin, maxval=xmax)
         y = jax.random.uniform(rng_y, (), minval=ymin, maxval=ymax)
         zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
-        # TODO this is not consistent with other commands shape
         cmd = jnp.array([x, y])
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
@@ -114,7 +113,7 @@ class LinearVelocityCommand(Command):
             ),
             Marker.arrow(
                 magnitude=y * 5.0,
-                pos=(0.0, (scale if y > 0 else -scale) * 2.0, self.vis_height),
+                pos=(0.0, (scale if y > 0 else -scale) * 2.0, self.vis_height + 0.2),
                 rgba=(0.0, 1.0, 0.0, 0.8),
                 direction=(0.0, 1.0, 0.0),
                 label=f"Y: {y:.2f}",

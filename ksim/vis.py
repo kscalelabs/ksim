@@ -159,28 +159,25 @@ class Marker:
 
         pos, rot = self.get_pos_and_rot(mj_model, mj_data)
 
-        # Get the next available geom in the scene
-        g = scene.geoms[scene.ngeom]
-
         # Set basic properties
-        g.type = self.geom
-        g.size[:] = self.scale
-        g.pos[:] = pos
-        g.mat[:] = rot
-        g.rgba[:] = self.rgba
+        scene.geoms[scene.ngeom].type = self.geom
+        scene.geoms[scene.ngeom].size[:] = self.scale
+        scene.geoms[scene.ngeom].pos[:] = pos
+        scene.geoms[scene.ngeom].mat[:] = rot
+        scene.geoms[scene.ngeom].rgba[:] = self.rgba
 
         # Handle label conversion if needed
         if self.label is not None:
-            g.label = str(self.label).encode("utf-8")
+            scene.geoms[scene.ngeom].label = str(self.label).encode("utf-8")
 
         # Set other rendering properties
-        g.dataid = -1
-        g.objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
-        g.objid = -1
-        g.category = mujoco.mjtCatBit.mjCAT_DECOR
-        g.emission = 0
-        g.specular = 0.5
-        g.shininess = 0.5
+        scene.geoms[scene.ngeom].dataid = -1
+        scene.geoms[scene.ngeom].objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
+        scene.geoms[scene.ngeom].objid = -1
+        scene.geoms[scene.ngeom].category = mujoco.mjtCatBit.mjCAT_DECOR
+        scene.geoms[scene.ngeom].emission = 0
+        scene.geoms[scene.ngeom].specular = 0.5
+        scene.geoms[scene.ngeom].shininess = 0.5
 
         # Increment the geom count
         scene.ngeom += 1
