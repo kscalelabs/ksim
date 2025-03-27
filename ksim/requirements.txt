@@ -14,7 +14,7 @@ jax
 mediapy
 optax
 scipy
-xax[export]
+xax
 
 # Mujoco
 mujoco
