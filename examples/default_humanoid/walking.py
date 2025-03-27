@@ -343,7 +343,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             # The robot should avoid outputting commands that cause it to hit
             # the joint limits.
-            ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01),
+            ksim.AvoidLimitsReward.create(physics_model, scale=0.01),
             # This is more of a gait shaping reward - we want to encourage the
             # robot to walk smoothly without feet slamming into the ground
             # (which can cause physical damage).
