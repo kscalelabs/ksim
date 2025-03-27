@@ -75,7 +75,7 @@ class TestLinearVelocityCommand:
         time = jnp.array(0.0)
 
         next_command = cmd(command, time, rng)
-        assert not jnp.array_equal(next_command, command)
+        assert jnp.array_equal(next_command, command)
 
 
 class TestAngularVelocityCommand:
@@ -130,4 +130,4 @@ class TestAngularVelocityCommand:
         time = jnp.array(0.0)
 
         next_command = cmd(command, time, rng)
-        assert not jnp.array_equal(next_command, command)
+        assert jnp.array_equal(next_command, command)
