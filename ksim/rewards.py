@@ -20,14 +20,14 @@ __all__ = [
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection
+from typing import Collection, Self
 
 import attrs
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array
 
-from ksim.types import Trajectory
+from ksim.types import Trajectory, PhysicsModel
 from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
@@ -248,3 +248,20 @@ class ActuatorJerkPenalty(Reward):
         # penalty.
         jerk = (acc - prev_acc) * self.ctrl_dt
         return xax.get_norm(jerk, self.norm).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AvoidLimitsPenalty(Reward):
+    """Penalty for being too close to the joint limits."""
+
+    padding: float = attrs.field(default=0.05)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        joint_pos = trajectory.qpos[..., 6:]
+        joint_pos_lower = trajectory.joint_pos_lower
+        joint_pos_upper = trajectory.joint_pos_upper
+        return jnp.maximum(0.0, joint_pos_lower - joint_pos) + jnp.maximum(0.0, joint_pos - joint_pos_upper)
+
+    @classmethod
+    def create(cls, model: PhysicsModel)_ -> Self:
+        model.jnt_limited
