@@ -214,13 +214,18 @@ def update_data_field(data: mujoco.MjData | mjx.Data, name: str, new_value: Arra
     return data
 
 
-def slice_update(model: mujoco.MjModel | mjx.Model, name: str, slice: Any, value: Array) -> Array:  # noqa: ANN401
+def slice_update(
+    model: mujoco.MjModel | mjx.Model | mujoco.MjData | mjx.Data,
+    name: str,
+    slice: Any,  # noqa: ANN401
+    value: Array,
+) -> Array:
     """Update a slice of a model field."""
-    if isinstance(model, mujoco.MjModel):
+    if isinstance(model, (mujoco.MjModel, mujoco.MjData)):
         val = getattr(model, name).copy()
         val[slice] = value
         return val
-    if isinstance(model, mjx.Model):
+    if isinstance(model, (mjx.Model, mjx.Data)):
         return getattr(model, name).at[slice].set(value)
     raise ValueError(f"Model type {type(model)} not supported")
 

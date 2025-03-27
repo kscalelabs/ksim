@@ -337,10 +337,10 @@ if __name__ == "__main__":
         HumanoidWalkingGRUTaskConfig(
             num_envs=8192,
             batch_size=256,
-            num_passes=8,
+            num_passes=4,
             # Simulation parameters.
-            dt=0.005,
-            ctrl_dt=0.02,
+            dt=0.0025,
+            ctrl_dt=1 / 50,
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=5.0,
