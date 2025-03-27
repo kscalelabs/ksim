@@ -8,11 +8,12 @@ __all__ = [
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Collection
+from typing import Collection, Literal, Self
 
 import attrs
 import jax
 import jax.numpy as jnp
+import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
@@ -68,6 +69,48 @@ class Command(ABC):
         return self.get_name()
 
 
+VelocityAxis = Literal["x", "y"]
+
+
+@attrs.define()
+class LinearVelocityArrow(Marker):
+    command_name: str = attrs.field()
+    axis: VelocityAxis = attrs.field()
+    vis_height: float = attrs.field()
+    vis_scale: float = attrs.field()
+
+    def update(self, trajectory: Trajectory) -> None:
+        value = float(trajectory.command[self.command_name][self.command_id])
+        self.scale = (self.vis_scale, self.vis_scale, value * 5.0 * self.vis_scale)
+        match self.axis:
+            case "x":
+                self.pos = ((self.vis_scale if value > 0 else -self.vis_scale) * 2.0, 0.0, self.vis_height)
+            case "y":
+                self.pos = (0.0, (self.vis_scale if value > 0 else -self.vis_scale) * 2.0, self.vis_height)
+
+    @classmethod
+    def get(cls, axis: VelocityAxis) -> Self:
+        match axis:
+            case "x":
+                return cls(
+                    geom=mujoco.mjtGeom.mjGEOM_ARROW,
+                    orientation=cls.quat_from_direction((1.0, 0.0, 0.0)),
+                    rgba=(1.0, 0.0, 0.0, 0.8),
+                    target_type="root",
+                )
+
+            case "y":
+                return cls(
+                    geom=mujoco.mjtGeom.mjGEOM_ARROW,
+                    orientation=cls.quat_from_direction((0.0, 1.0, 0.0)),
+                    rgba=(0.0, 1.0, 0.0, 0.8),
+                    target_type="root",
+                )
+
+            case _:
+                raise ValueError(f"Invalid axis: {axis}")
+
+
 @attrs.define(frozen=True)
 class LinearVelocityCommand(Command):
     """Command to move the robot in a straight line.
@@ -101,37 +144,9 @@ class LinearVelocityCommand(Command):
         return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
-        scale = self.vis_scale
-
-        def update_x_fn(marker: Marker, trajectory: Trajectory) -> None:
-            x = float(trajectory.command[self.command_name][0])
-            marker.scale = (scale, scale, x * 5.0 * scale)
-            marker.pos = ((scale if x > 0 else -scale) * 2.0, 0.0, self.vis_height)
-
-        def update_y_fn(marker: Marker, trajectory: Trajectory) -> None:
-            y = float(trajectory.command[self.command_name][1])
-            marker.scale = (scale, scale, y * 5.0 * scale)
-            marker.pos = (0.0, (scale if y > 0 else -scale) * 2.0, self.vis_height)
-
         return [
-            Marker.arrow(
-                magnitude=0.0,
-                pos=(0.0, 0.0, self.vis_height),
-                rgba=(1.0, 0.0, 0.0, 0.8),
-                direction=(1.0, 0.0, 0.0),
-                size=self.vis_scale,
-                target_type="root",
-                update_fn=update_x_fn,
-            ),
-            Marker.arrow(
-                magnitude=0.0,
-                pos=(0.0, 0.0, self.vis_height),
-                rgba=(0.0, 1.0, 0.0, 0.8),
-                direction=(0.0, 1.0, 0.0),
-                size=self.vis_scale,
-                target_type="root",
-                update_fn=update_y_fn,
-            ),
+            LinearVelocityArrow.get("x"),
+            LinearVelocityArrow.get("y"),
         ]
 
 
