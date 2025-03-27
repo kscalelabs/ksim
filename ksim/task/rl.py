@@ -719,11 +719,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
+            renderer.update_scene(mj_data, camera=mj_camera)
             for command in commands:
                 command_value = trajectory.command[command.command_name]
                 for visualization in command.get_visualizations(command_value):
                     visualization(mj_model, mj_data, renderer.scene)
-            renderer.update_scene(mj_data, camera=mj_camera)
             frame = renderer.render()
 
             # Overlays the frame number on the frame.
@@ -805,7 +805,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self.logger.log_video(
             key="trajectory",
             value=frames,
-            fps=round(fps * self.config.render_slowdown),
+            fps=round(fps / self.config.render_slowdown),
             namespace="➡️ trajectory images",
         )
 
