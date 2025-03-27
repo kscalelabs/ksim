@@ -896,12 +896,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
         kvs = list(trajectories.termination_components.items())
         all_terminations = jnp.stack([v for _, v in kvs], axis=-1)
-        has_termination = (all_terminations.sum(axis=-1) > 0).sum(axis=-1)
+        has_termination = (all_terminations.any(axis=-1)).sum(axis=-1)
         num_terminations = has_termination.sum().clip(min=1)
         num_timesteps = trajectories.done.shape[-1]
 
         return {
-            "episode_length": (num_timesteps / (has_termination + 1).sum()) * self.config.ctrl_dt,
+            "episode_length": (num_timesteps / (has_termination + 1).mean()) * self.config.ctrl_dt,
             **{key: (value.sum() / num_terminations) for key, value in kvs},
         }
 
