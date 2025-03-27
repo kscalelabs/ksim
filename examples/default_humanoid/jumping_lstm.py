@@ -13,7 +13,7 @@ from jaxtyping import Array
 import ksim
 
 from .walking import HumanoidWalkingTask
-from .walking_lstm import HumanoidWalkingLSTMTaskConfig
+from .walking_gru import HumanoidWalkingLSTMTaskConfig
 
 
 @attrs.define(frozen=True, kw_only=True)
