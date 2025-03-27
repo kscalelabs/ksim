@@ -135,7 +135,6 @@ class LinearVelocityCommand(Command):
 
     x_range: tuple[float, float] = attrs.field(default=(-1.0, 1.0))
     y_range: tuple[float, float] = attrs.field(default=(-1.0, 1.0))
-    switch_prob: float = attrs.field(default=0.0)
     zero_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
@@ -155,10 +154,7 @@ class LinearVelocityCommand(Command):
         )
 
     def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
+        return prev_command
 
     def get_markers(self) -> Collection[Marker]:
         return [
@@ -172,7 +168,6 @@ class AngularVelocityCommand(Command):
     """Command to turn the robot."""
 
     scale: float = attrs.field(default=1.0)
-    switch_prob: float = attrs.field(default=0.0)
     zero_prob: float = attrs.field(default=0.0)
 
     def initial_command(self, rng: PRNGKeyArray) -> Array:
@@ -183,8 +178,4 @@ class AngularVelocityCommand(Command):
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
     def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
-        """Get the command to perform: returns (command_dim,) array."""
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
+        return prev_command

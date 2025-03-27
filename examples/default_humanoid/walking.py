@@ -323,12 +323,10 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.LinearVelocityCommand(
                 x_range=(-1.0, 3.0),
                 y_range=(-0.5, 0.5),
-                switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average
                 zero_prob=0.5,
             ),
             ksim.AngularVelocityCommand(
                 scale=1.0,
-                switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average
                 zero_prob=0.5,
             ),
         ]

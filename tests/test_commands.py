@@ -70,7 +70,7 @@ class TestLinearVelocityCommand:
 
     def test_update_mechanism(self, rng: jax.Array) -> None:
         """Test that the command update mechanism works correctly."""
-        cmd = ksim.LinearVelocityCommand(switch_prob=1.0)
+        cmd = ksim.LinearVelocityCommand()
         command = cmd.initial_command(rng)
         time = jnp.array(0.0)
 
@@ -125,7 +125,7 @@ class TestAngularVelocityCommand:
 
     def test_update_mechanism(self, rng: jax.Array) -> None:
         """Test that the command update mechanism works correctly."""
-        cmd = ksim.AngularVelocityCommand(switch_prob=1.0)
+        cmd = ksim.AngularVelocityCommand()
         command = cmd.initial_command(rng)
         time = jnp.array(0.0)
 
