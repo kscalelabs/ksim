@@ -229,12 +229,13 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         commands: FrozenDict[str, Array],
         carry: Array,
     ) -> tuple[distrax.Normal, Array]:
-        dh_joint_pos_n = observations.get("dhjoint_position_observation", jnp.zeros((0,)))
-        dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,))) / 50.0
-        com_inertia_n = observations.get("center_of_mass_inertia_observation", jnp.zeros((0,)))
-        com_vel_n = observations.get("center_of_mass_velocity_observation", jnp.zeros((0,))) / 50.0
+        dh_joint_pos_n = observations["joint_position_observation"]
+        dh_joint_vel_n = observations["joint_velocity_observation"] / 50.0
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"] / 50.0
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
-        lin_vel_cmd_n = commands["linear_velocity_command"]
+        lin_vel_cmd_2 = commands["linear_velocity_command"]
+        ang_vel_cmd_1 = commands["angular_velocity_command"]
 
         return model.actor(
             dh_joint_pos_n,
@@ -242,7 +243,8 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
             com_inertia_n,
             com_vel_n,
             act_frc_obs_n,
-            lin_vel_cmd_n,
+            lin_vel_cmd_2,
+            ang_vel_cmd_1,
             carry,
         )
 
@@ -252,16 +254,26 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
     ) -> Array:
-        dh_joint_pos_n = observations.get("dhjoint_position_observation", jnp.zeros((0,)))
-        dh_joint_vel_n = observations.get("dhjoint_velocity_observation", jnp.zeros((0,))) / 50.0
-        com_inertia_n = observations.get("center_of_mass_inertia_observation", jnp.zeros((0,)))
-        com_vel_n = observations.get("center_of_mass_velocity_observation", jnp.zeros((0,))) / 50.0
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
-        lin_vel_cmd_n = commands["linear_velocity_command"]
-
-        # Concatenate all observations
-        obs_n = jnp.concatenate([dh_joint_pos_n, dh_joint_vel_n, com_inertia_n, com_vel_n, act_frc_obs_n])
-        return model.critic(obs_n, lin_vel_cmd_n)
+        dh_joint_pos_n = observations["joint_position_observation"]  # 26
+        dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
+        com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
+        com_vel_n = observations["center_of_mass_velocity_observation"]  # 96
+        act_frc_obs_n = observations["actuator_force_observation"] / 100.0  # 21
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]  # 3
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
+        lin_vel_cmd_2 = commands["linear_velocity_command"]  # 2
+        ang_vel_cmd_1 = commands["angular_velocity_command"]  # 1
+        return model.critic(
+            dh_joint_pos_n,
+            dh_joint_vel_n,
+            com_inertia_n,
+            com_vel_n,
+            act_frc_obs_n,
+            lin_vel_obs_3,
+            ang_vel_obs_3,
+            lin_vel_cmd_2,
+            ang_vel_cmd_1,
+        )
 
     def get_on_policy_log_probs(
         self,

@@ -355,9 +355,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: FrozenDict[str, Array],
     ) -> distrax.Normal:
         dh_joint_pos_n = observations["joint_position_observation"]
-        dh_joint_vel_n = observations["joint_velocity_observation"]
+        dh_joint_vel_n = observations["joint_velocity_observation"] / 50.0
         com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"] / 50.0
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd_1 = commands["angular_velocity_command"]
