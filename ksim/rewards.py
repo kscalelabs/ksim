@@ -15,7 +15,7 @@ __all__ = [
     "ActuatorForcePenalty",
     "BaseJerkZPenalty",
     "ActuatorJerkPenalty",
-    "AvoidLimitsPenalty",
+    "AvoidLimitsReward",
     "ActionNearPositionPenalty",
 ]
 
@@ -254,7 +254,7 @@ class ActuatorJerkPenalty(Reward):
         return xax.get_norm(jerk, self.norm).mean(axis=-1).squeeze(0)
 
 
-def joint_limits_validator(inst: "AvoidLimitsPenalty", attr: attrs.Attribute, value: xax.HashableArray) -> None:
+def joint_limits_validator(inst: "AvoidLimitsReward", attr: attrs.Attribute, value: xax.HashableArray) -> None:
     arr = value.array
     if arr.ndim != 2 or arr.shape[1] != 2:
         raise ValueError(f"Joint range must have shape (n_joints, 2), got {arr.shape}")
@@ -264,7 +264,7 @@ def joint_limits_validator(inst: "AvoidLimitsPenalty", attr: attrs.Attribute, va
         raise ValueError(f"Joint range must be a float array, got {arr.dtype}")
 
 
-def joint_limited_validator(inst: "AvoidLimitsPenalty", attr: attrs.Attribute, value: xax.HashableArray) -> None:
+def joint_limited_validator(inst: "AvoidLimitsReward", attr: attrs.Attribute, value: xax.HashableArray) -> None:
     arr = value.array
     if arr.ndim != 1:
         raise ValueError(f"Joint limited must have shape (n_joints,), got {arr.shape}")
@@ -273,8 +273,8 @@ def joint_limited_validator(inst: "AvoidLimitsPenalty", attr: attrs.Attribute, v
 
 
 @attrs.define(frozen=True, kw_only=True)
-class AvoidLimitsPenalty(Reward):
-    """Penalty for being too close to the joint limits."""
+class AvoidLimitsReward(Reward):
+    """Reward for being too close to the joint limits."""
 
     joint_limits: xax.HashableArray = attrs.field(validator=joint_limits_validator)
     joint_limited: xax.HashableArray = attrs.field(validator=joint_limited_validator)
@@ -283,9 +283,9 @@ class AvoidLimitsPenalty(Reward):
         joint_pos = trajectory.qpos[..., 7:]
         joint_limits = self.joint_limits.array
         joint_limited = self.joint_limited.array
-        out_of_bounds = (joint_pos < joint_limits[..., 0]) | (joint_pos > joint_limits[..., 1])
-        penalty = jnp.where(joint_limited, out_of_bounds, 0)
-        return penalty.any(axis=-1).astype(trajectory.qpos.dtype)
+        in_bounds = (joint_pos > joint_limits[..., 0]) & (joint_pos < joint_limits[..., 1])
+        reward = jnp.where(joint_limited, in_bounds, 0)
+        return reward.all(axis=-1).astype(trajectory.qpos.dtype)
 
     @classmethod
     def create(

@@ -333,21 +333,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
-            # The reward for staying healthy should have a large scale. It is
-            # better to use this reward than to use the termination penalty,
-            # because the termination penalty seems harshly penalize
-            # exploration, whereas this reward is more gentle.
             ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, scale=0.5),
-            ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
-            # The robot should avoid outputting commands that cause it to hit
-            # the joint limits.
-            ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01),
-            # This is more of a gait shaping reward - we want to encourage the
-            # robot to walk smoothly without feet slamming into the ground
-            # (which can cause physical damage).
-            ksim.BaseJerkZPenalty(scale=-0.01, ctrl_dt=self.config.ctrl_dt),
         ]
 
         # Use this to toggle the "naive" mode, where the model just learns to
@@ -360,11 +348,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             rewards += [
                 ksim.LinearVelocityTrackingPenalty(scale=-0.1),
                 ksim.AngularVelocityTrackingPenalty(scale=-0.01),
-            ]
-
-        if self.config.use_mit_actuators:
-            rewards += [
-                ksim.ActionNearPositionPenalty.create(physics_model, scale=-0.01),
             ]
 
         return rewards
