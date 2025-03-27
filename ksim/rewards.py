@@ -22,6 +22,7 @@ __all__ = [
 import functools
 import logging
 from abc import ABC, abstractmethod
+from typing import Collection
 
 import attrs
 import jax.numpy as jnp
@@ -29,6 +30,7 @@ import xax
 from jaxtyping import Array
 
 from ksim.types import Trajectory
+from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,9 @@ class Reward(ABC):
 
     @abstractmethod
     def __call__(self, trajectory: Trajectory) -> Array: ...
+
+    def get_markers(self) -> Collection[Marker]:
+        return []
 
     def get_name(self) -> str:
         return xax.camelcase_to_snakecase(self.__class__.__name__)

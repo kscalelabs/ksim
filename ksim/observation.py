@@ -21,7 +21,7 @@ __all__ = [
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Literal, Self
+from typing import Collection, Literal, Self
 
 import attrs
 import jax
@@ -31,6 +31,7 @@ from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsModel, RolloutVariables
 from ksim.utils.mujoco import geoms_colliding, get_geom_data_idx_by_name, get_sensor_data_idxs_by_name
+from ksim.vis import Marker
 
 NoiseType = Literal["gaussian", "uniform"]
 
@@ -72,6 +73,9 @@ class Observation(ABC):
             The observation with noise added
         """
         return observation
+
+    def get_markers(self) -> Collection[Marker]:
+        return []
 
     def __call__(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         obs_rng, noise_rng = jax.random.split(rng)

@@ -13,6 +13,7 @@ import logging
 import signal
 import sys
 import textwrap
+import time
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -260,6 +261,20 @@ class RLConfig(xax.Config):
     rollout_length_seconds: float = xax.field(
         value=MISSING,
         help="The number of seconds to rollout each environment during training.",
+    )
+
+    # Override validation parameters.
+    log_full_trajectory_every_n_steps: int | None = xax.field(
+        None,
+        help="Log the full trajectory every N steps.",
+    )
+    log_full_trajectory_on_first_step: bool = xax.field(
+        value=False,
+        help="If true, log the full trajectory on the first step.",
+    )
+    log_full_trajectory_every_n_seconds: float | None = xax.field(
+        60.0 * 10.0,
+        help="Log the full trajectory every N seconds.",
     )
 
     # Rendering parameters.
@@ -694,10 +709,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def render_trajectory_video(
         self,
         trajectories: Trajectory,
-        commands: Collection[Command],
-        observations: Collection[Observation],
-        randomizations: Collection[Randomization],
-        rewards: Collection[Reward],
+        markers: Collection[Marker],
         mj_model: mujoco.MjModel,
         mj_renderer: mujoco.Renderer,
         target_fps: int | None = None,
@@ -731,16 +743,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_camera.trackbodyid = self.config.render_track_body_id
             mj_camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
-        def add_visualizations(mj_data: mujoco.MjData) -> None:
-            for marker in self.get_markers(
-                trajectory=trajectory,
-                commands=commands,
-                observations=observations,
-                randomizations=randomizations,
-                rewards=rewards,
-            ):
-                marker(mj_renderer.model, mj_data, mj_renderer.scene)
-
         frame_list: list[np.ndarray] = []
         for frame_id, trajectory in enumerate(trajectory_list):
             mj_data.qpos = np.array(trajectory.qpos)
@@ -749,7 +751,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
             mj_renderer.update_scene(mj_data, camera=mj_camera)
-            add_visualizations(mj_data)
+            for marker in markers:
+                marker(mj_renderer.model, mj_data, mj_renderer.scene, trajectory)
             frame = mj_renderer.render()
 
             # Overlays the frame number on the frame.
@@ -774,10 +777,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectories: Trajectory,
         reward_values: Rewards,
-        commands: Collection[Command],
-        observations: Collection[Observation],
-        randomizations: Collection[Randomization],
-        rewards: Collection[Reward],
+        markers: Collection[Marker],
         mj_model: mujoco.MjModel,
         mj_renderer: mujoco.Renderer,
     ) -> None:
@@ -785,8 +785,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         Args:
             trajectories: The trajectories to visualize.
-            commands: The commands to visualize.
             reward_values: The collected rewards to visualize.
+            markers: The markers to visualize.
             mj_model: The Mujoco model to render the scene with.
             mj_renderer: The Mujoco renderer to render the scene with.
             name: The name of the trajectory being logged.
@@ -837,10 +837,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(
             trajectories=trajectories,
-            commands=commands,
-            observations=observations,
-            randomizations=randomizations,
-            rewards=rewards,
+            markers=markers,
             mj_model=mj_model,
             mj_renderer=mj_renderer,
             target_fps=self.config.render_fps,
@@ -935,20 +932,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def get_markers(
         self,
-        trajectory: Trajectory,
         commands: Collection[Command],
         observations: Collection[Observation],
         randomizations: Collection[Randomization],
         rewards: Collection[Reward],
     ) -> Collection[Marker]:
-        markers = []
-
-        # Adds the command markers.
+        markers: list[Marker] = []
         for command in commands:
-            command_value = trajectory.command[command.command_name]
-            for marker in command.get_markers(command_value):
-                markers.append(marker)
-
+            markers.extend(command.get_markers())
+        for observation in observations:
+            markers.extend(observation.get_markers())
+        for randomization in randomizations:
+            markers.extend(randomization.get_markers())
+        for reward in rewards:
+            markers.extend(reward.get_markers())
         return markers
 
     @xax.jit(
@@ -1125,6 +1122,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             terminations = self.get_terminations(mj_model)
             randomizations = self.get_randomization(mj_model)
 
+            # Creates the markers.
+            markers = self.get_markers(
+                commands=commands,
+                observations=observations,
+                randomizations=randomizations,
+                rewards=rewards,
+            )
+
             # Gets initial variables.
             rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
             initial_carry = self.get_initial_carry(carry_rng)
@@ -1221,14 +1226,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     )
 
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
-                        for marker in self.get_markers(
-                            trajectory=trajectory,
-                            commands=commands,
-                            observations=observations,
-                            randomizations=randomizations,
-                            rewards=rewards,
-                        ):
-                            marker(model, data, scene)
+                        for marker in markers:
+                            marker(model, data, scene, trajectory)
 
                     # Logs the frames to render.
                     viewer.data = rollout_variables.physics_state.data
@@ -1285,6 +1284,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def model_partition_fn(self, item: Any) -> bool:  # noqa: ANN401
         return eqx.is_inexact_array(item)
 
+    def log_full_trajectory(self, state: xax.State, is_first_step: bool, last_log_time: float) -> bool:
+        if is_first_step and self.config.log_full_trajectory_on_first_step:
+            return True
+
+        if (n_steps := self.config.log_full_trajectory_every_n_steps) is not None and state.num_steps % n_steps == 0:
+            return True
+
+        if (n_secs := self.config.log_full_trajectory_every_n_seconds) is not None:
+            elapsed = time.time() - last_log_time
+            if elapsed > n_secs:
+                return True
+
+        return False
+
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
         with self:
@@ -1320,6 +1333,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 contact_force=self.config.render_contact_force,
                 contact_point=self.config.render_contact_point,
                 inertia=self.config.render_inertia,
+            )
+
+            # Creates the markers.
+            markers = self.get_markers(
+                commands=commands,
+                observations=observations,
+                randomizations=randomizations,
+                rewards=rewards_terms,
             )
 
             # These remain constant across the entire episode.
@@ -1368,11 +1389,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
 
             is_first_step = True
+            last_log_time = time.time()
 
             try:
                 while not self.is_training_over(state):
                     state = self.on_step_start(state)
-                    state.raw_phase = "valid" if self.valid_step_timer.is_valid_step(state) else "train"
+
+                    # Using validation phase to log full trajectories.
+                    if self.log_full_trajectory(state, is_first_step, last_log_time):
+                        state.raw_phase = "valid"
+                        last_log_time = time.time()
+                    else:
+                        state.raw_phase = "train"
 
                     # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
@@ -1410,10 +1438,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         self.log_single_trajectory(
                             trajectories=final_trajectory,
                             reward_values=final_reward,
-                            commands=commands,
-                            observations=observations,
-                            randomizations=randomizations,
-                            rewards=rewards_terms,
+                            markers=markers,
                             mj_model=mj_model,
                             mj_renderer=mj_renderer,
                         )

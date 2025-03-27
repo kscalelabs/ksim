@@ -5,15 +5,17 @@ __all__ = [
     "Marker",
 ]
 
-from typing import Literal, Self
+from typing import Callable, Literal, Self
 
 import attrs
 import mujoco
 import numpy as np
 
+from ksim.types import Trajectory
 from ksim.utils.mujoco import get_body_pose, get_body_pose_by_name, get_geom_pose_by_name, mat_to_quat, quat_to_mat
 
 TargetType = Literal["body", "geom", "root"]
+UpdateFn = Callable[["Marker", Trajectory], None]
 
 
 def get_target_pose(
@@ -122,14 +124,14 @@ def rotation_matrix_from_direction(
     )
 
 
-@attrs.define(frozen=True)
+@attrs.define(kw_only=True)
 class Marker:
     # Geometry parameters.
     geom: mujoco.MjsGeom = attrs.field()
-    scale: tuple[float, float, float] = attrs.field()
-    pos: tuple[float, float, float] = attrs.field()
-    orientation: tuple[float, float, float, float] = attrs.field()
-    rgba: tuple[float, float, float, float] = attrs.field()
+    scale: tuple[float, float, float] = attrs.field(default=(0.0, 0.0, 0.0))
+    pos: tuple[float, float, float] = attrs.field(default=(0.0, 0.0, 0.0))
+    orientation: tuple[float, float, float, float] = attrs.field(default=(0.0, 0.0, 0.0, 1.0))
+    rgba: tuple[float, float, float, float] = attrs.field(default=(1.0, 1.0, 1.0, 1.0))
     label: str | None = attrs.field(default=None)
 
     # Tracking parameters.
@@ -139,6 +141,10 @@ class Marker:
     track_y: bool = attrs.field(default=True)
     track_z: bool = attrs.field(default=True)
     track_rotation: bool = attrs.field(default=False)
+
+    # Data parameters.
+    geom_idx: int | None = attrs.field(default=None)
+    update_fn: UpdateFn | None = attrs.field(default=None)
 
     def get_pos_and_rot(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData) -> tuple[np.ndarray, np.ndarray]:
         pos, quat = np.array(self.pos), np.array(self.orientation)
@@ -160,27 +166,12 @@ class Marker:
 
         return pos, rot
 
-    def __call__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, scene: mujoco.MjvScene) -> bool:
+    def _initialize_scene(self, scene: mujoco.MjvScene) -> int:
         if scene.ngeom >= scene.maxgeom:
-            return False
+            raise ValueError("Max number of geoms reached.")
 
-        pos, rot = self.get_pos_and_rot(mj_model, mj_data)
-
-        g = scene.geoms[scene.ngeom]
-        assert g.size.shape == (3,)
-        assert g.pos.shape == (3,)
-        assert g.mat.shape == (3, 3)
-        assert g.rgba.shape == (4,)
-
-        # Set basic properties
-        g.type = self.geom
-        g.size[:] = np.array(self.scale, dtype=np.float32)
-        g.pos[:] = np.array(pos, dtype=np.float32)
-        g.mat[:] = np.array(rot, dtype=np.float32)
-        g.rgba[:] = np.array(self.rgba, dtype=np.float32)
-
-        # Handle label conversion if needed
-        g.label = ("" if self.label is None else self.label).encode("utf-8")
+        geom_idx = scene.ngeom
+        g = scene.geoms[geom_idx]
 
         # Set other rendering properties
         g.dataid = -1
@@ -194,7 +185,44 @@ class Marker:
         # Increment the geom count
         scene.ngeom += 1
 
-        return True
+        return geom_idx
+
+    def _update_scene(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
+        if self.geom_idx is None:
+            self.geom_idx = self._initialize_scene(scene)
+
+        pos, rot = self.get_pos_and_rot(mj_model, mj_data)
+        g = scene.geoms[self.geom_idx]
+
+        # Set basic properties
+        g.type = self.geom
+        g.size[:] = np.array(self.scale, dtype=np.float32)
+        g.pos[:] = np.array(pos, dtype=np.float32)
+        g.mat[:] = np.array(rot, dtype=np.float32)
+        g.rgba[:] = np.array(self.rgba, dtype=np.float32)
+
+        # Handle label conversion if needed
+        g.label = ("" if self.label is None else self.label).encode("utf-8")
+
+        scene.ngeom = max(scene.ngeom, self.geom_idx + 1)
+
+    def update(self, trajectory: Trajectory) -> None:
+        if self.update_fn is not None:
+            self.update_fn(self, trajectory)
+
+    def __call__(
+        self,
+        mj_model: mujoco.MjModel,
+        mj_data: mujoco.MjData,
+        scene: mujoco.MjvScene,
+        trajectory: Trajectory,
+    ) -> None:
+        self.update(trajectory)
+        self._update_scene(mj_model, mj_data, scene)
+
+    @classmethod
+    def quat_from_direction(cls, direction: tuple[float, float, float]) -> tuple[float, float, float, float]:
+        return tuple(mat_to_quat(rotation_matrix_from_direction(direction)))
 
     @classmethod
     def arrow(
@@ -208,13 +236,11 @@ class Marker:
         target_name: str | None = None,
         target_type: TargetType = "body",
     ) -> Self:
-        quat = mat_to_quat(rotation_matrix_from_direction(direction))
-
         return cls(
             geom=mujoco.mjtGeom.mjGEOM_ARROW,
             scale=(size, size, magnitude * size),
             pos=pos,
-            orientation=tuple(quat),
+            orientation=cls.quat_from_direction(direction),
             rgba=rgba,
             label=label,
             target_name=target_name,
@@ -235,7 +261,7 @@ class Marker:
             geom=mujoco.mjtGeom.mjGEOM_SPHERE,
             scale=(radius, radius, radius),
             pos=pos,
-            orientation=(0, 0, 0, 1),
+            orientation=cls.quat_from_direction((1.0, 0.0, 0.0)),
             rgba=rgba,
             label=label,
             target_name=target_name,
