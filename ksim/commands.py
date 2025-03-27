@@ -47,7 +47,7 @@ class Command(ABC):
             The command to perform, with shape (command_dim).
         """
 
-    def get_visualizations(self, command: Array) -> Collection[Marker]:
+    def get_markers(self, command: Array) -> Collection[Marker]:
         """Get the visualizations for the command.
 
         Args:
@@ -82,6 +82,7 @@ class LinearVelocityCommand(Command):
     switch_prob: float = attrs.field(default=0.0)
     zero_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=2.0)
+    vis_scale: float = attrs.field(default=0.05)
 
     def initial_command(self, rng: PRNGKeyArray) -> Array:
         rng_x, rng_y, rng_zero = jax.random.split(rng, 3)
@@ -98,9 +99,9 @@ class LinearVelocityCommand(Command):
         new_commands = self.initial_command(rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
-    def get_visualizations(self, command: Array) -> Collection[Marker]:
+    def get_markers(self, command: Array) -> Collection[Marker]:
         x, y = float(command[0]), float(command[1])
-        scale = 0.05
+        scale = self.vis_scale
 
         return [
             Marker.arrow(

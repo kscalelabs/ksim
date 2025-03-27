@@ -62,6 +62,7 @@ from ksim.types import (
     Trajectory,
 )
 from ksim.utils.mujoco import get_joint_metadata, load_model
+from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
 
@@ -270,12 +271,32 @@ class RLConfig(xax.Config):
         value=(8, 4),
         help="The size of the figure for each plot.",
     )
+    render_shadow: bool = xax.field(
+        value=False,
+        help="If true, render shadows.",
+    )
+    render_reflection: bool = xax.field(
+        value=False,
+        help="If true, render reflections.",
+    )
+    render_contact_force: bool = xax.field(
+        value=False,
+        help="If true, render contact forces.",
+    )
+    render_contact_point: bool = xax.field(
+        value=False,
+        help="If true, render contact points.",
+    )
+    render_inertia: bool = xax.field(
+        value=False,
+        help="If true, render inertia.",
+    )
     render_height: int = xax.field(
-        value=240,
+        value=360,
         help="The height of the rendered images.",
     )
     render_width: int = xax.field(
-        value=320,
+        value=480,
         help="The width of the rendered images.",
     )
     render_length_seconds: float | None = xax.field(
@@ -710,7 +731,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         def add_visualizations(mj_data: mujoco.MjData) -> None:
             for command in commands:
                 command_value = trajectory.command[command.command_name]
-                for visualization in command.get_visualizations(command_value):
+                for visualization in command.get_markers(command_value):
                     visualization(mj_renderer.model, mj_data, mj_renderer.scene)
 
         frame_list: list[np.ndarray] = []
@@ -898,6 +919,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             "episode_length": traj_lens.mean(),
             **{key: (value / num_terms[:, None]).mean() for key, value in trajectories.termination_components.items()},
         }
+
+    def get_markers(
+        self,
+        trajectory: Trajectory,
+        commands: Collection[Command],
+        observations: Collection[Observation],
+        randomizations: Collection[Randomization],
+        rewards: Rewards,
+    ) -> Collection[Marker]:
+        markers = []
+        for command in commands:
+            command_value = trajectory.command[command.command_name]
+            for marker in command.get_markers(command_value):
+                markers.append(marker)
+        return markers
 
     @xax.jit(
         static_argnames=[
@@ -1092,8 +1128,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             try:
                 from ksim.viewer import MujocoViewer
 
-            except ImportError:
-                raise ImportError("glfw not installed!")
+            except ModuleNotFoundError:
+                raise ModuleNotFoundError("glfw not installed - install with `pip install glfw`")
 
             viewer = MujocoViewer(
                 mj_model,
@@ -1101,6 +1137,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 mode="window" if save_path is None else "offscreen",
                 height=self.config.render_height,
                 width=self.config.render_width,
+                shadow=self.config.render_shadow,
+                reflection=self.config.render_reflection,
+                contact_force=self.config.render_contact_force,
+                contact_point=self.config.render_contact_point,
+                inertia=self.config.render_inertia,
             )
 
             # Sets the viewer camera.
@@ -1163,18 +1204,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         lambda: (mj_model, rollout_variables),
                     )
 
-                    # We need to manually update the viewer data field, because
-                    # resetting the environment creates a new data object rather
-                    # than happening in-place, as Mujoco expects.
-                    viewer.data = rollout_variables.physics_state.data
-
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
-                        for command in commands:
-                            command_value = trajectory.command[command.command_name]
-                            for visualization in command.get_visualizations(command_value):
-                                visualization(model, data, scene)
+                        for marker in self.get_markers(
+                            trajectory=trajectory,
+                            commands=commands,
+                            observations=observations,
+                            randomizations=randomizations,
+                            rewards=rewards,
+                        ):
+                            marker(model, data, scene)
 
                     # Logs the frames to render.
+                    viewer.data = rollout_variables.physics_state.data
                     if save_path is None:
                         viewer.render(callback=render_callback)
                     else:
@@ -1241,11 +1282,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model, optimizer, opt_state, state = self.load_initial_state(model_rng, load_optimizer=True)
 
             mj_model: PhysicsModel = self.get_mujoco_model()
-            mj_renderer = mujoco.Renderer(
-                mj_model,
-                height=self.config.render_height,
-                width=self.config.render_width,
-            )
             mjx_model = self.get_mjx_model(mj_model)
             metadata = self.get_mujoco_model_metadata(mjx_model)
             engine = self.get_engine(mjx_model, metadata)
@@ -1254,6 +1290,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rewards_terms = self.get_rewards(mjx_model)
             terminations = self.get_terminations(mjx_model)
             randomizations = self.get_randomization(mjx_model)
+
+            # Creates the renderer.
+            mj_renderer = mujoco.Renderer(
+                mj_model,
+                height=self.config.render_height,
+                width=self.config.render_width,
+            )
+            configure_scene(
+                mj_renderer._scene,
+                mj_renderer._scene_option,
+                shadow=self.config.render_shadow,
+                contact_force=self.config.render_contact_force,
+                contact_point=self.config.render_contact_point,
+                inertia=self.config.render_inertia,
+            )
 
             # These remain constant across the entire episode.
             rollout_constants = RolloutConstants(

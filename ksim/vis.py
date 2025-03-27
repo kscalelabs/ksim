@@ -210,3 +210,20 @@ class Marker:
             rgba=rgba,
             label=label,
         )
+
+
+def configure_scene(
+    scene: mujoco.MjvScene,
+    vopt: mujoco.MjvOption,
+    shadow: bool = False,
+    reflection: bool = False,
+    contact_force: bool = False,
+    contact_point: bool = False,
+    inertia: bool = False,
+) -> mujoco.MjvScene:
+    scene.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = shadow
+    scene.flags[mujoco.mjtRndFlag.mjRND_REFLECTION] = reflection
+    vopt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTFORCE] = contact_force
+    vopt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = contact_point
+    vopt.flags[mujoco.mjtVisFlag.mjVIS_INERTIA] = inertia
+    return scene
