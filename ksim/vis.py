@@ -124,6 +124,7 @@ def rotation_matrix_from_direction(
 
 @attrs.define(frozen=True)
 class Marker:
+
     # Geometry parameters.
     geom: mujoco.MjsGeom = attrs.field()
     scale: tuple[float, float, float] = attrs.field()
@@ -139,6 +140,9 @@ class Marker:
     track_y: bool = attrs.field(default=True)
     track_z: bool = attrs.field(default=True)
     track_rotation: bool = attrs.field(default=False)
+
+    # Data parameters.
+    geom_idx: int | None = attrs.field(default=None)
 
     def get_pos_and_rot(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData) -> tuple[np.ndarray, np.ndarray]:
         pos, quat = np.array(self.pos), np.array(self.orientation)
@@ -160,27 +164,12 @@ class Marker:
 
         return pos, rot
 
-    def __call__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, scene: mujoco.MjvScene) -> bool:
+    def initialize(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, scene: mujoco.MjvScene) -> int:
         if scene.ngeom >= scene.maxgeom:
-            return False
+            raise ValueError("Max number of geoms reached.")
 
-        pos, rot = self.get_pos_and_rot(mj_model, mj_data)
-
-        g = scene.geoms[scene.ngeom]
-        assert g.size.shape == (3,)
-        assert g.pos.shape == (3,)
-        assert g.mat.shape == (3, 3)
-        assert g.rgba.shape == (4,)
-
-        # Set basic properties
-        g.type = self.geom
-        g.size[:] = np.array(self.scale, dtype=np.float32)
-        g.pos[:] = np.array(pos, dtype=np.float32)
-        g.mat[:] = np.array(rot, dtype=np.float32)
-        g.rgba[:] = np.array(self.rgba, dtype=np.float32)
-
-        # Handle label conversion if needed
-        g.label = ("" if self.label is None else self.label).encode("utf-8")
+        geom_idx = scene.ngeom
+        g = scene.geoms[geom_idx]
 
         # Set other rendering properties
         g.dataid = -1
@@ -194,7 +183,26 @@ class Marker:
         # Increment the geom count
         scene.ngeom += 1
 
-        return True
+        return geom_idx
+
+    def update(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, scene: mujoco.MjvScene, geom_idx: int) -> None:
+        pos, rot = self.get_pos_and_rot(mj_model, mj_data)
+        g = scene.geoms[geom_idx]
+
+        # Set basic properties
+        g.type = self.geom
+        g.size[:] = np.array(self.scale, dtype=np.float32)
+        g.pos[:] = np.array(pos, dtype=np.float32)
+        g.mat[:] = np.array(rot, dtype=np.float32)
+        g.rgba[:] = np.array(self.rgba, dtype=np.float32)
+
+        # Handle label conversion if needed
+        g.label = ("" if self.label is None else self.label).encode("utf-8")
+
+    def __call__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
+        if self.geom_idx is None:
+            self.geom_idx = self.initialize(mj_model, mj_data, scene)
+        self.update(mj_model, mj_data, scene, self.geom_idx)
 
     @classmethod
     def arrow(

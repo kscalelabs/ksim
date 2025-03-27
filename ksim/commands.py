@@ -47,7 +47,7 @@ class Command(ABC):
             The command to perform, with shape (command_dim).
         """
 
-    def get_markers(self, command: Array) -> Collection[Marker]:
+    def get_markers(self) -> Collection[Marker]:
         """Get the visualizations for the command.
 
         Args:
@@ -57,6 +57,14 @@ class Command(ABC):
             The visualizations to add to the scene.
         """
         return []
+
+    def update_markers(self, command: Array, markers: Collection[Marker]) -> None:
+        """Update the visualizations for the command.
+
+        Args:
+            command: The command to update the visualizations for.
+            markers: The visualizations to update.
+        """
 
     def get_name(self) -> str:
         """Get the name of the command."""
@@ -100,27 +108,35 @@ class LinearVelocityCommand(Command):
         return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self, command: Array) -> Collection[Marker]:
-        x, y = float(command[0]), float(command[1])
-        scale = self.vis_scale
-
         return [
             Marker.arrow(
-                magnitude=x * 5.0,
-                pos=((scale if x > 0 else -scale) * 2.0, 0.0, self.vis_height),
+                magnitude=0.0,
+                pos=(0.0, 0.0, self.vis_height),
                 rgba=(1.0, 0.0, 0.0, 0.8),
                 direction=(1.0, 0.0, 0.0),
-                size=scale,
+                size=self.vis_scale,
                 target_type="root",
             ),
             Marker.arrow(
-                magnitude=y * 5.0,
-                pos=(0.0, (scale if y > 0 else -scale) * 2.0, self.vis_height),
+                magnitude=0.0,
+                pos=(0.0, 0.0, self.vis_height),
                 rgba=(0.0, 1.0, 0.0, 0.8),
                 direction=(0.0, 1.0, 0.0),
-                size=scale,
+                size=self.vis_scale,
                 target_type="root",
             ),
         ]
+
+    def update_markers(self, command: Array, markers: Collection[Marker]) -> None:
+        x, y = float(command[0]), float(command[1])
+        scale = self.vis_scale
+        xmarker, ymarker = markers[0], markers[1]
+
+        xmarker.magnitude = x * 5.0
+        xmarker.pos = ((scale if x > 0 else -scale) * 2.0, 0.0, self.vis_height)
+
+        ymarker.magnitude = y * 5.0
+        ymarker.pos = (0.0, (scale if y > 0 else -scale) * 2.0, self.vis_height)
 
 
 @attrs.define(frozen=True)
