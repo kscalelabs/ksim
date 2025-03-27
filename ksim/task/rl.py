@@ -756,6 +756,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             start = random.randint(0, max(total_frames - render_frames, 0))
             end = min(start + render_frames, total_frames)
             trajectories = jax.tree.map(lambda arr: arr[start:end], trajectories)
+            rewards = jax.tree.map(lambda arr: arr[start:end], rewards)
 
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Logs plots of the observations, commands, actions, rewards, and terminations.
