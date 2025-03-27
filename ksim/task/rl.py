@@ -937,9 +937,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         randomizations: Collection[Randomization],
         rewards: Collection[Reward],
     ) -> Collection[Marker]:
-        markers = []
+        markers: list[Marker] = []
         for command in commands:
             markers.extend(command.get_markers())
+        for observation in observations:
+            markers.extend(observation.get_markers())
+        for randomization in randomizations:
+            markers.extend(randomization.get_markers())
+        for reward in rewards:
+            markers.extend(reward.get_markers())
         return markers
 
     @xax.jit(
