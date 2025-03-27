@@ -2,8 +2,10 @@
 
 __all__ = [
     "Event",
-    "PushEvent",
     "PushEventState",
+    "PushEvent",
+    "JumpEventState",
+    "JumpEvent",
 ]
 
 import functools
@@ -112,3 +114,51 @@ class PushEvent(Event):
         minval, maxval = self.interval_range
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
         return PushEventState(time_remaining=time_remaining)
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class JumpEventState:
+    time_remaining: Array
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JumpEvent(Event):
+    """Randomly jump the robot into the air."""
+
+    jump_height_range: tuple[float, float] = attrs.field()
+    interval_range: tuple[float, float] = attrs.field()
+
+    def __call__(
+        self,
+        model: PhysicsModel,
+        data: PhysicsData,
+        event_state: JumpEventState,
+        rng: PRNGKeyArray,
+    ) -> tuple[PhysicsData, JumpEventState]:
+        # Decrement by physics timestep.
+        dt = jnp.float32(model.opt.timestep)
+        time_remaining = event_state.time_remaining - dt
+
+        # Update the data if the time remaining is less than 0.
+        updated_data, time_remaining = jax.lax.cond(
+            time_remaining <= 0.0,
+            lambda: self._apply_jump(model, data, rng),
+            lambda: (data, time_remaining),
+        )
+
+        return updated_data, JumpEventState(time_remaining=time_remaining)
+
+    def _apply_jump(self, model: PhysicsModel, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
+        # Implements a jump as a vertical velocity impulse. We compute the
+        # required vertical velocity impulse to reach the desired jump height.
+        minval, maxval = self.jump_height_range
+        jump_height = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+        new_qvel = slice_update(data, "qvel", 2, jnp.sqrt(2 * model.opt.gravity * jump_height))
+        updated_data = update_data_field(data, "qvel", new_qvel)
+
+        # Chooses a new remaining interval.
+        minval, maxval = self.interval_range
+        time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+
+        return updated_data, time_remaining
