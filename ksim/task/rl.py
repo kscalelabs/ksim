@@ -675,6 +675,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         commands: Collection[Command],
         mj_model: mujoco.MjModel,
+        mj_renderer: mujoco.Renderer,
         target_fps: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
@@ -706,17 +707,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_camera.trackbodyid = self.config.render_track_body_id
             mj_camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
-        renderer = mujoco.Renderer(
-            mj_model,
-            height=self.config.render_height,
-            width=self.config.render_width,
-        )
-
         def add_visualizations(mj_data: mujoco.MjData) -> None:
             for command in commands:
                 command_value = trajectory.command[command.command_name]
                 for visualization in command.get_visualizations(command_value):
-                    visualization(renderer.model, mj_data, renderer.scene)
+                    visualization(mj_renderer.model, mj_data, mj_renderer.scene)
 
         frame_list: list[np.ndarray] = []
         for frame_id, trajectory in enumerate(trajectory_list):
@@ -725,9 +720,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
-            renderer.update_scene(mj_data, camera=mj_camera)
+            mj_renderer.update_scene(mj_data, camera=mj_camera)
             add_visualizations(mj_data)
-            frame = renderer.render()
+            frame = mj_renderer.render()
 
             # Overlays the frame number on the frame.
             frame_img = Image.fromarray(frame)
@@ -745,6 +740,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rewards: Rewards,
         commands: Collection[Command],
         mj_model: mujoco.MjModel,
+        mj_renderer: mujoco.Renderer,
     ) -> None:
         """Visualizes a single trajectory.
 
@@ -753,6 +749,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             commands: The commands to visualize.
             rewards: The rewards to visualize.
             mj_model: The Mujoco model to render the scene with.
+            mj_renderer: The Mujoco renderer to render the scene with.
             name: The name of the trajectory being logged.
         """
         # Clips the trajectory to the desired length.
@@ -803,6 +800,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             trajectories,
             commands,
             mj_model,
+            mj_renderer,
             target_fps=self.config.render_fps,
         )
         self.logger.log_video(
@@ -1235,6 +1233,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model, optimizer, opt_state, state = self.load_initial_state(model_rng, load_optimizer=True)
 
             mj_model: PhysicsModel = self.get_mujoco_model()
+            mj_renderer = mujoco.Renderer(
+                mj_model,
+                height=self.config.render_height,
+                width=self.config.render_width,
+            )
             mjx_model = self.get_mjx_model(mj_model)
             metadata = self.get_mujoco_model_metadata(mjx_model)
             engine = self.get_engine(mjx_model, metadata)
@@ -1329,7 +1332,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # Only log trajectory information on validation steps.
                     if state.phase == "valid":
-                        self.log_single_trajectory(final_trajectory, final_reward, commands, mj_model)
+                        self.log_single_trajectory(final_trajectory, final_reward, commands, mj_model, mj_renderer)
 
                     self.log_train_metrics(metrics)
                     self.log_state_timers(state)

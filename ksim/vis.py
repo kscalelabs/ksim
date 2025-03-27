@@ -159,26 +159,31 @@ class Marker:
 
         pos, rot = self.get_pos_and_rot(mj_model, mj_data)
 
+        g = scene.geoms[scene.ngeom]
+        assert g.size.shape == (3,)
+        assert g.pos.shape == (3,)
+        assert g.mat.shape == (3, 3)
+        assert g.rgba.shape == (4,)
+
         # Set basic properties
-        scene.geoms[scene.ngeom].type = self.geom
-        scene.geoms[scene.ngeom].size[:] = self.scale
-        scene.geoms[scene.ngeom].pos[:] = pos
-        scene.geoms[scene.ngeom].mat[:] = rot
-        scene.geoms[scene.ngeom].rgba[:] = self.rgba
+        g.type = self.geom
+        g.size[:] = np.array(self.scale, dtype=np.float32)
+        g.pos[:] = np.array(pos, dtype=np.float32)
+        g.mat[:] = np.array(rot, dtype=np.float32)
+        g.rgba[:] = np.array(self.rgba, dtype=np.float32)
 
         # Handle label conversion if needed
         if self.label is not None:
-            scene.geoms[scene.ngeom].label = str(self.label).encode("utf-8")
+            g.label = self.label.encode("utf-8")
 
         # Set other rendering properties
-        scene.geoms[scene.ngeom].dataid = -1
-        scene.geoms[scene.ngeom].objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
-        scene.geoms[scene.ngeom].objid = -1
-        scene.geoms[scene.ngeom].category = mujoco.mjtCatBit.mjCAT_DECOR
-
-        scene.geoms[scene.ngeom].emission = 0
-        scene.geoms[scene.ngeom].specular = 0.5
-        scene.geoms[scene.ngeom].shininess = 0.5
+        g.dataid = -1
+        g.objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
+        g.objid = -1
+        g.category = mujoco.mjtCatBit.mjCAT_DECOR
+        g.emission = 0
+        g.specular = 0.5
+        g.shininess = 0.5
 
         # Increment the geom count
         scene.ngeom += 1
