@@ -356,8 +356,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             # robot to walk smoothly without feet slamming into the ground
             # (which can cause physical damage).
             ksim.BaseJerkZPenalty(scale=-0.01, ctrl_dt=self.config.ctrl_dt),
-            ksim.FeetContactPenalty(scale=-0.2),
-            ksim.FeetSlipPenalty(scale=-0.25),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
