@@ -756,8 +756,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
             mj_renderer.update_scene(mj_data, camera=mj_camera)
-            for marker in markers:
-                marker(mj_renderer.model, mj_data, mj_renderer.scene, trajectory)
+
+            # For some reason, using markers here will sometimes cause weird
+            # segfaults. Disabling for now because I can't debug this.
+            # for marker in markers:
+            #     marker(mj_renderer.model, mj_data, mj_renderer.scene, trajectory)
+
             frame = mj_renderer.render()
 
             # Overlays the frame number on the frame.
