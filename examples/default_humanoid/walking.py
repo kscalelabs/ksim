@@ -321,8 +321,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             ksim.LinearVelocityStepCommand(
-                x_range=(-1.0, 3.0),
-                y_range=(-0.5, 0.5),
+                x_range=(0.0, 3.0),
+                y_range=(0.0, 0.0),
                 x_fwd_prob=0.8,
                 y_fwd_prob=0.5,
                 x_zero_prob=0.2,
