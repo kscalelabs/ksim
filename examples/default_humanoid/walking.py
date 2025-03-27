@@ -383,8 +383,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"] / 50.0
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd_1 = commands["angular_velocity_command"]
+        lin_vel_cmd_2 = commands["linear_velocity_step_command"]
+        ang_vel_cmd_1 = commands["angular_velocity_step_command"]
         return model.actor(
             dh_joint_pos_n,
             dh_joint_vel_n,
@@ -408,8 +408,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0  # 21
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]  # 3
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
-        lin_vel_cmd_2 = commands["linear_velocity_command"]  # 2
-        ang_vel_cmd_1 = commands["angular_velocity_command"]  # 1
+        lin_vel_cmd_2 = commands["linear_velocity_step_command"]  # 2
+        ang_vel_cmd_1 = commands["angular_velocity_step_command"]  # 1
         return model.critic(
             dh_joint_pos_n,
             dh_joint_vel_n,
