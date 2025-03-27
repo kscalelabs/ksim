@@ -735,6 +735,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rgb[:, 10:20, 0] = 255
             rgb[:, 20:30, 1] = 255
             rgb[:, 30:40, 2] = 255
+            rgb[:, 40:, :] = 255
             frame[-10:, -50:] = rgb
 
             frame_list.append(frame)
