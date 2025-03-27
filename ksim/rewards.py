@@ -327,13 +327,12 @@ class ActionNearPositionPenalty(Reward):
     """
 
     joint_threshold: xax.HashableArray = attrs.field(validator=joint_threshold_validator)
-    norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(self, trajectory: Trajectory) -> Array:
         current_position = trajectory.qpos[..., 7:]
         action = trajectory.action
-        diff = jnp.maximum(jnp.abs(current_position - action), self.joint_threshold.array)
-        return xax.get_norm(diff, self.norm).mean(axis=-1)
+        out_of_bounds = jnp.abs(current_position - action) > self.joint_threshold.array
+        return out_of_bounds.astype(trajectory.qpos.dtype).mean(axis=-1)
 
     @classmethod
     def create(
@@ -341,7 +340,6 @@ class ActionNearPositionPenalty(Reward):
         model: PhysicsModel,
         scale: float,
         threshold: float = 0.25,
-        norm: xax.NormType = "l2",
     ) -> Self:
         joint_range = model.jnt_range[1:].astype(jnp.float32)
         joint_min = joint_range[..., 0]
@@ -350,6 +348,5 @@ class ActionNearPositionPenalty(Reward):
 
         return cls(
             joint_threshold=xax.hashable_array(joint_threshold),
-            norm=norm,
             scale=scale,
         )
