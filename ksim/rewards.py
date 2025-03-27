@@ -15,6 +15,8 @@ __all__ = [
     "ActuatorForcePenalty",
     "BaseJerkZPenalty",
     "ActuatorJerkPenalty",
+    "AvoidLimitsPenalty",
+    "ActionNearPositionPenalty",
 ]
 
 import functools
@@ -27,7 +29,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array
 
-from ksim.types import Trajectory, PhysicsModel
+from ksim.types import PhysicsModel, Trajectory
 from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
@@ -250,18 +252,104 @@ class ActuatorJerkPenalty(Reward):
         return xax.get_norm(jerk, self.norm).mean(axis=-1)
 
 
+def joint_limits_validator(inst: "AvoidLimitsPenalty", attr: attrs.Attribute, value: xax.HashableArray) -> None:
+    arr = value.array
+    if arr.ndim != 2 or arr.shape[1] != 2:
+        raise ValueError(f"Joint range must have shape (n_joints, 2), got {arr.shape}")
+    if not jnp.all(arr[..., 0] <= arr[..., 1]):
+        raise ValueError(f"Joint range must be sorted, got {arr}")
+    if not arr.dtype == jnp.float32:
+        raise ValueError(f"Joint range must be a float array, got {arr.dtype}")
+
+
+def joint_limited_validator(inst: "AvoidLimitsPenalty", attr: attrs.Attribute, value: xax.HashableArray) -> None:
+    arr = value.array
+    if arr.ndim != 1:
+        raise ValueError(f"Joint limited must have shape (n_joints,), got {arr.shape}")
+    if arr.dtype != jnp.bool_:
+        raise ValueError(f"Joint limited must be a boolean array, got {arr.dtype}")
+
+
 @attrs.define(frozen=True, kw_only=True)
 class AvoidLimitsPenalty(Reward):
     """Penalty for being too close to the joint limits."""
 
-    padding: float = attrs.field(default=0.05)
+    joint_limits: xax.HashableArray = attrs.field(validator=joint_limits_validator)
+    joint_limited: xax.HashableArray = attrs.field(validator=joint_limited_validator)
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        joint_pos = trajectory.qpos[..., 6:]
-        joint_pos_lower = trajectory.joint_pos_lower
-        joint_pos_upper = trajectory.joint_pos_upper
-        return jnp.maximum(0.0, joint_pos_lower - joint_pos) + jnp.maximum(0.0, joint_pos - joint_pos_upper)
+        joint_pos = trajectory.qpos[..., 7:]
+        joint_limits = self.joint_limits.array
+        joint_limited = self.joint_limited.array
+        out_of_bounds = (joint_pos < joint_limits[..., 0]) | (joint_pos > joint_limits[..., 1])
+        penalty = jnp.where(joint_limited, 0, out_of_bounds)
+        return penalty.astype(trajectory.qpos.dtype).mean(axis=-1)
 
     @classmethod
-    def create(cls, model: PhysicsModel)_ -> Self:
-        model.jnt_limited
+    def create(
+        cls,
+        model: PhysicsModel,
+        scale: float,
+        padding: float = 0.05,
+    ) -> Self:
+        joint_range = model.jnt_range[1:].astype(jnp.float32)
+        joint_min = joint_range[..., 0]
+        joint_max = joint_range[..., 1]
+        joint_padding = (joint_max - joint_min) * padding
+        joint_min = joint_min + joint_padding
+        joint_max = joint_max - joint_padding
+
+        return cls(
+            joint_limits=xax.hashable_array(jnp.stack([joint_min, joint_max], axis=-1)),
+            joint_limited=xax.hashable_array(model.jnt_limited[1:].astype(jnp.bool_)),
+            scale=scale,
+        )
+
+
+def joint_threshold_validator(
+    inst: "ActionNearPositionPenalty",
+    attr: attrs.Attribute,
+    value: xax.HashableArray,
+) -> None:
+    arr = value.array
+    if arr.ndim != 1:
+        raise ValueError(f"Joint threshold must have shape (n_joints,), got {arr.shape}")
+    if arr.dtype != jnp.float32:
+        raise ValueError(f"Joint threshold must be a float array, got {arr.dtype}")
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ActionNearPositionPenalty(Reward):
+    """Penalizes the action for being too far from the target position.
+
+    Note that this penalty only makes sense if you are using a position
+    controller model, where actions correspond to positions.
+    """
+
+    joint_threshold: xax.HashableArray = attrs.field(validator=joint_threshold_validator)
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        current_position = trajectory.qpos[..., 7:]
+        action = trajectory.action
+        diff = jnp.maximum(jnp.abs(current_position - action), self.joint_threshold.array)
+        return xax.get_norm(diff, self.norm).mean(axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        scale: float,
+        threshold: float = 0.05,
+        norm: xax.NormType = "l2",
+    ) -> Self:
+        joint_range = model.jnt_range[1:].astype(jnp.float32)
+        joint_min = joint_range[..., 0]
+        joint_max = joint_range[..., 1]
+        joint_threshold = (joint_max - joint_min) * threshold
+
+        return cls(
+            joint_threshold=xax.hashable_array(joint_threshold),
+            norm=norm,
+            scale=scale,
+        )
