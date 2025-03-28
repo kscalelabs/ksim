@@ -163,7 +163,6 @@ class LinearVelocityCommand(Command):
         new_commands = self.initial_command(rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
-
     def get_markers(self) -> Collection[Marker]:
         return [
             LinearVelocityArrow.get(self.command_name, "x", self.vis_height, self.vis_scale),
