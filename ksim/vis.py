@@ -11,11 +11,11 @@ import attrs
 import mujoco
 import numpy as np
 
-from ksim.types import Rewards, Trajectory
+from ksim.types import Trajectory
 from ksim.utils.mujoco import get_body_pose, get_body_pose_by_name, get_geom_pose_by_name, mat_to_quat, quat_to_mat
 
 TargetType = Literal["body", "geom", "root"]
-UpdateFn = Callable[["Marker", Trajectory, Rewards], None]
+UpdateFn = Callable[["Marker", Trajectory], None]
 
 
 def get_target_pose(
@@ -206,19 +206,18 @@ class Marker:
 
         scene.ngeom = max(scene.ngeom, self.geom_idx + 1)
 
-    def update(self, trajectory: Trajectory, reward: Rewards) -> None:
+    def update(self, transition: Trajectory) -> None:
         if self.update_fn is not None:
-            self.update_fn(self, trajectory, reward)
+            self.update_fn(self, transition)
 
     def __call__(
         self,
         mj_model: mujoco.MjModel,
         mj_data: mujoco.MjData,
         scene: mujoco.MjvScene,
-        trajectory: Trajectory,
-        reward: Rewards,
+        transition: Trajectory,
     ) -> None:
-        self.update(trajectory, reward)
+        self.update(transition)
         self._update_scene(mj_model, mj_data, scene)
 
     @classmethod
