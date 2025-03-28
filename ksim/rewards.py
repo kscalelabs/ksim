@@ -54,7 +54,6 @@ class Reward(ABC):
 
     scale: float = attrs.field(validator=reward_scale_validator)
 
-    @abstractmethod
     def __call__(self, trajectory: Trajectory) -> Array: ...
 
     def get_markers(self) -> Collection[Marker]:

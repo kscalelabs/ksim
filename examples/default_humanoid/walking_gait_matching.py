@@ -90,27 +90,23 @@ Config = TypeVar("Config", bound=HumanoidWalkingGaitMatchingTaskConfig)
 @attrs.define(frozen=True, kw_only=True)
 class GaitMatchingPenalty(ksim.Reward):
     reference_gait: xax.FrozenDict[int, xax.HashableArray]
+    ctrl_dt: float
+
+    @property
+    def num_frames(self) -> int:
+        return list(self.reference_gait.values())[0].array.shape[0]
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         assert isinstance(trajectory.aux_transition_outputs, AuxTransitionOutputs)
-        num_frames = list(self.reference_gait.values())[0].array.shape[0]
         reference_gait: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_gait)
 
         # Computes MSE error between the tracked and target positions per transition.
-        def compute_error(num_steps: Array, transition: ksim.Trajectory) -> tuple[Array, Array]:
-            assert isinstance(transition.aux_transition_outputs, AuxTransitionOutputs)
-            frame_idx = num_steps % num_frames
-            target_pos = jax.tree.map(lambda x: x[frame_idx], reference_gait)  # 3
-            tracked_pos = transition.aux_transition_outputs.tracked_pos  # 3
-            error = jax.tree.map(lambda target, tracked: jnp.mean((target - tracked) ** 2), target_pos, tracked_pos)
-            mean_error = jnp.mean(jnp.array(list(error.values())))
-            next_num_steps = jax.lax.select(transition.done, 0, num_steps + 1)
+        step_number = trajectory.timestep // self.ctrl_dt % self.num_frames
+        target_pos = jax.tree.map(lambda x: x[step_number], reference_gait)
+        tracked_pos = trajectory.aux_transition_outputs.tracked_pos
+        error = jax.tree.map(lambda target, tracked: jnp.mean((target - tracked) ** 2), target_pos, tracked_pos)
 
-            return next_num_steps, mean_error
-
-        _, errors = jax.lax.scan(compute_error, jnp.array(0), trajectory)
-        jax.debug.breakpoint()
-        return errors
+        return error
 
 
 class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Config]):
@@ -121,7 +117,7 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             NaiveVelocityReward(scale=0.1),
-            GaitMatchingPenalty(reference_gait=self.reference_gait, scale=-0.5),
+            GaitMatchingPenalty(reference_gait=self.reference_gait, ctrl_dt=self.config.ctrl_dt, scale=-0.5),
         ]
 
         return rewards
