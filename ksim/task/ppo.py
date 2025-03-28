@@ -15,7 +15,6 @@ import jax
 import jax.numpy as jnp
 import optax
 import xax
-from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.task.rl import RLConfig, RLTask
@@ -390,7 +389,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, FrozenDict[str, Array]]:
+    ) -> tuple[Array, xax.FrozenDict[str, Array]]:
         """Computes the PPO loss and additional metrics.
 
         Args:
@@ -411,7 +410,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             trajectories: Trajectory,
             rewards: Rewards,
             rng: PRNGKeyArray,
-        ) -> tuple[Array, FrozenDict[str, Array]]:
+        ) -> tuple[Array, xax.FrozenDict[str, Array]]:
             rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 5)
 
             on_policy_log_probs_tn = jax.lax.stop_gradient(self.get_on_policy_log_probs(model, trajectories, rng1))
@@ -464,7 +463,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             num_valid = jnp.sum(~trajectories.done)
             loss = loss_t.sum() / (num_valid + 1e-6)
 
-            return loss, FrozenDict(metrics)
+            return loss, xax.FrozenDict(metrics)
 
         # Gets the loss and metrics for each trajectory in the batch.
         rngs = jax.random.split(rng, rewards.total.shape[0])
@@ -529,7 +528,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array]]:
         ppo_metrics, grads = self._get_loss_metrics_and_grads(
             model_arr=model_arr,
             model_static=model_static,
@@ -545,7 +544,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             opt_state=opt_state,
         )
 
-        return new_model_arr, new_opt_state, FrozenDict(dict(ppo_metrics) | dict(grad_metrics))
+        return new_model_arr, new_opt_state, xax.FrozenDict(dict(ppo_metrics) | dict(grad_metrics))
 
     @xax.jit(static_argnames=["self", "model_static", "optimizer"])
     def update_model(
@@ -557,7 +556,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array]]:
         """Runs PPO updates on a given set of trajectory batches.
 
         Args:
@@ -577,7 +576,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         def scan_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             xt: Array,
-        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], xax.FrozenDict[str, Array]]:
             model_arr, opt_state, rng = carry
             rng, batch_rng = jax.random.split(rng)
 
@@ -601,7 +600,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         def batch_scan_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
-        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], FrozenDict[str, Array]]:
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], xax.FrozenDict[str, Array]]:
             arr, opt_state, rng = carry
 
             # Shuffling causes a strange kernel caching issue on GPUs.

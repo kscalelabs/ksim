@@ -20,7 +20,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mujoco
-from flax.core import FrozenDict
+import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 
@@ -75,12 +75,12 @@ class PhysicsEngine(eqx.Module, ABC):
     ) -> PhysicsState:
         """Step the engine and return the updated physics data."""
 
-    def _reset_events(self, rng: PRNGKeyArray) -> FrozenDict[str, PyTree]:
+    def _reset_events(self, rng: PRNGKeyArray) -> xax.FrozenDict[str, PyTree]:
         event_states: dict[str, PyTree] = {}
         for event in self.events:
             rng, event_rng = jax.random.split(rng)
             event_states[event.event_name] = event.get_initial_event_state(event_rng)
-        return FrozenDict(event_states)
+        return xax.FrozenDict(event_states)
 
 
 class MjxEngine(PhysicsEngine):
@@ -125,9 +125,9 @@ class MjxEngine(PhysicsEngine):
         )
 
         def move_physics(
-            carry: tuple[mjx.Data, Array, FrozenDict[str, PyTree]],
+            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree]],
             rng: PRNGKeyArray,
-        ) -> tuple[tuple[mjx.Data, Array, FrozenDict[str, PyTree]], None]:
+        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree]], None]:
             data, step_num, event_states = carry
 
             # Randomly apply the action with some latency.
@@ -149,7 +149,7 @@ class MjxEngine(PhysicsEngine):
             torques = self.actuators.get_ctrl(ctrl, data, ctrl_rng)
             data_with_ctrl = data.replace(ctrl=torques)
             new_data = mjx.step(physics_model, data_with_ctrl)
-            return (new_data, step_num + 1.0, FrozenDict(new_event_states)), None
+            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states)), None
 
         # Runs the model for N steps.
         (mjx_data, *_, event_info), _ = jax.lax.scan(
@@ -158,7 +158,7 @@ class MjxEngine(PhysicsEngine):
             jax.random.split(rng, phys_steps_per_ctrl_steps),
         )
 
-        return PhysicsState(data=mjx_data, most_recent_action=action, event_states=FrozenDict(event_info))
+        return PhysicsState(data=mjx_data, most_recent_action=action, event_states=xax.FrozenDict(event_info))
 
 
 class MujocoEngine(PhysicsEngine):
@@ -223,7 +223,7 @@ class MujocoEngine(PhysicsEngine):
                 )
                 new_event_states[event.event_name] = new_event_state
 
-            event_states = FrozenDict(new_event_states)
+            event_states = xax.FrozenDict(new_event_states)
             torques = self.actuators.get_ctrl(ctrl, mujoco_data, action_rng)
             mujoco_data.ctrl[:] = torques
             # mujoco.mj_forward(physics_model, mujoco_data)
