@@ -1219,13 +1219,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             try:
                 for _ in iterator:
-                    trajectory, rollout_variables = self.step_engine(
+                    transition, rollout_variables = self.step_engine(
                         physics_model=mj_model,
                         model=model,
                         engine=engine,
                         rollout_constants=rollout_constants,
                         rollout_variables=rollout_variables,
                     )
+                    transition = jax.tree.map(lambda x: jnp.array(x), transition)
 
                     # Gets the rewards.
                     reward = get_rewards(

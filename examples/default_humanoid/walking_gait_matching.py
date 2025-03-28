@@ -61,7 +61,7 @@ class HumanoidWalkingGaitMatchingTaskConfig(HumanoidWalkingTaskConfig):
         value=False,
         help="Whether to visualize the reference gait.",
     )
-    # REMOVE?
+    # TODO: remove
     device: str = xax.field(
         value="cpu",
         help="The device to run the task on.",
@@ -99,12 +99,13 @@ class GaitMatchingPenalty(ksim.Reward):
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         assert isinstance(trajectory.aux_transition_outputs, AuxTransitionOutputs)
         reference_gait: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_gait)
-
-        # Computes MSE error between the tracked and target positions per transition.
-        step_number = trajectory.timestep // self.ctrl_dt % self.num_frames
-        target_pos = jax.tree.map(lambda x: x[step_number], reference_gait)
+        step_number = (trajectory.timestep / self.ctrl_dt) % self.num_frames
+        breakpoint()
+        target_pos = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_gait)
         tracked_pos = trajectory.aux_transition_outputs.tracked_pos
-        error = jax.tree.map(lambda target, tracked: jnp.mean((target - tracked) ** 2), target_pos, tracked_pos)
+        error = jax.tree.map(
+            lambda target, tracked: jnp.mean((target - tracked) ** 2, axis=-1), target_pos, tracked_pos
+        )
 
         return error
 
@@ -134,8 +135,7 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
         tracked_positions: dict[int, Array] = {}
         for body_id in self.tracked_body_ids:
             body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
-            assert isinstance(body_pos, Array)
-            tracked_positions[body_id] = body_pos
+            tracked_positions[body_id] = jnp.array(body_pos)
 
         return AuxTransitionOutputs(tracked_pos=xax.FrozenDict(tracked_positions))
 
