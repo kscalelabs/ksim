@@ -5,40 +5,31 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
 
-import distrax
 import jax
 import jax.numpy as jnp
+import numpy as np
+from ksim.types import PhysicsModel
+from ksim.utils.reference_gait import ReferenceMapping, generate_reference_gait, visualize_reference_gait
 import xax
-from flax.core import FrozenDict
-from jaxtyping import Array, PRNGKeyArray
-from mujoco import mjx
+from jaxtyping import Array
+from scipy.spatial.transform import Rotation as R
+import glm
 
 import ksim
-from ksim.utils import mujoco
 
 from .reference_gait import (
     HUMANOID_MAPPING_SPEC,
     ReferenceMarker,
-    generate_reference_gait,
     get_local_point_pos,
-    get_reference_joint_id,
 )
 from .walking import (
-    DefaultHumanoidModel,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
     NaiveVelocityReward,
 )
 
-NUM_JOINTS = 21
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxModelOutputs:
-    log_probs: Array
-    values: Array
-
+import bvhio
+from bvhio.lib.hierarchy import Joint as BvhioJoint
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
@@ -48,27 +39,49 @@ class AuxTransitionOutputs:
 
 @dataclass
 class HumanoidWalkingGaitMatchingTaskConfig(HumanoidWalkingTaskConfig):
-    reference_gait_path: Path = xax.field(
-        value=Path(__file__).parent / "data" / "reference_gait.npz",
-        help="The path to the reference gait.",
+    bvh_path: str = xax.field(
+        value=str(Path(__file__).parent / "data" / "walk-relaxed_actorcore.bvh"),
+        help="The path to the BVH file.",
     )
-    gait_matching_mappings: list[ReferenceMarker] = xax.field(
-        value=HUMANOID_MAPPING_SPEC,
-        help="The mappings of BVH joints to Mujoco bodies",
+    rotate_bvh_euler: np.ndarray = xax.field(
+        value=np.array([0, 0, 0]),
+        help="Optional rotation to ensure the BVH tree matches the Mujoco model.",
+    )
+    bvh_scaling_factor: float = xax.field(
+        value=1.0,
+        help="Scaling factor to ensure the BVH tree matches the Mujoco model.",
     )
     base_id: int = xax.field(
         value=1,
         help="The Mujoco body id of the base of the humanoid",
     )
+    visualize_reference_gait: bool = xax.field(
+        value=False,
+        help="Whether to visualize the reference gait.",
+    )
+
+HUMANOID_REFERENCE_MAPPINGS = (
+    ReferenceMapping("CC_Base_L_ThighTwist01", "thigh_left"),  # hip
+    ReferenceMapping("CC_Base_L_CalfTwist01", "shin_left"),  # knee
+    ReferenceMapping("CC_Base_L_Foot", "foot_left"),  # foot
+    ReferenceMapping("CC_Base_L_UpperarmTwist01", "upper_arm_left"),  # shoulder
+    ReferenceMapping("CC_Base_L_ForearmTwist01", "lower_arm_left"),  # elbow
+    ReferenceMapping("CC_Base_L_Hand", "hand_left"),  # hand
+    ReferenceMapping("CC_Base_R_ThighTwist01", "thigh_right"),  # hip
+    ReferenceMapping("CC_Base_R_CalfTwist01", "shin_right"),  # knee
+    ReferenceMapping("CC_Base_R_Foot", "foot_right"),  # foot
+    ReferenceMapping("CC_Base_R_UpperarmTwist01", "upper_arm_right"),  # shoulder
+    ReferenceMapping("CC_Base_R_ForearmTwist01", "lower_arm_right"),  # elbow
+    ReferenceMapping("CC_Base_R_Hand", "hand_right"),  # hand
+)
 
 
 Config = TypeVar("Config", bound=HumanoidWalkingGaitMatchingTaskConfig)
 
 
 class GaitMatchingReward(ksim.Reward):
-    def __init__(self, reference_gait: dict[int, Array], mappings: list[ReferenceMarker]) -> None:
+    def __init__(self, reference_gait: dict[int, Array]) -> None:
         self.reference_gait = reference_gait  # T, 3
-        self.mappings = mappings
         self.num_frames = list(reference_gait.values())[0].shape[0]
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
@@ -95,128 +108,25 @@ class GaitMatchingReward(ksim.Reward):
 class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        with open(self.config.reference_gait_path, "rb") as f:
-            reference_gait = pickle.load(f)
-            reference_gait = jax.tree.map(lambda x: jnp.array(x), reference_gait)
-            self.reference_gait = reference_gait
         rewards = [
             ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, scale=0.5),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             NaiveVelocityReward(scale=0.1),
-            GaitMatchingReward(self.reference_gait, self.config.gait_matching_mappings),
+            GaitMatchingReward(self.reference_gait),
         ]
 
         return rewards
 
-    def _run_actor(
-        self,
-        model: DefaultHumanoidModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
-    ) -> distrax.Normal:
-        dh_joint_pos_n = observations["joint_position_observation"]
-        dh_joint_vel_n = observations["joint_velocity_observation"] / 50.0
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"] / 50.0
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
-        lin_vel_cmd_2 = commands["linear_velocity_step_command"]
-        ang_vel_cmd_1 = commands["angular_velocity_step_command"]
-        return model.actor(
-            dh_joint_pos_n,
-            dh_joint_vel_n,
-            com_inertia_n,
-            com_vel_n,
-            act_frc_obs_n,
-            lin_vel_cmd_2,
-            ang_vel_cmd_1,
-        )
-
-    def _run_critic(
-        self,
-        model: DefaultHumanoidModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
-    ) -> Array:
-        dh_joint_pos_n = observations["joint_position_observation"]  # 26
-        dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
-        com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
-        com_vel_n = observations["center_of_mass_velocity_observation"]  # 96
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0  # 21
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]  # 3
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
-        lin_vel_cmd_2 = commands["linear_velocity_step_command"]  # 2
-        ang_vel_cmd_1 = commands["angular_velocity_step_command"]  # 1
-        return model.critic(
-            dh_joint_pos_n,
-            dh_joint_vel_n,
-            com_inertia_n,
-            com_vel_n,
-            act_frc_obs_n,
-            lin_vel_obs_3,
-            ang_vel_obs_3,
-            lin_vel_cmd_2,
-            ang_vel_cmd_1,
-        )
-
-    def get_log_probs(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, Array]:
-        # Vectorize over both batch and time dimensions.
-        par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_btn = par_fn(model, trajectories.obs, trajectories.command)
-
-        # Compute the log probabilities of the trajectory's actions according
-        # to the current policy, along with the entropy of the distribution.
-        action_btn = trajectories.action / model.actor.mean_scale
-        log_probs_btn = action_dist_btn.log_prob(action_btn)
-        entropy_btn = action_dist_btn.entropy()
-
-        return log_probs_btn, entropy_btn
-
-    def get_values(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        # Vectorize over both batch and time dimensions.
-        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_bt1 = par_fn(model, trajectories.obs, trajectories.command)
-
-        # Remove the last dimension.
-        return values_bt1.squeeze(-1)
-
-    def sample_action(
-        self,
-        model: DefaultHumanoidModel,
-        carry: None,
-        physics_model: ksim.PhysicsModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, None, AuxModelOutputs]:
-        action_dist_n = self._run_actor(model, observations, commands)
-        action_n = action_dist_n.sample(seed=rng)
-        action_log_prob_n = jnp.array(action_dist_n.log_prob(action_n))
-
-        critic_n = self._run_critic(model, observations, commands)
-        value_n = critic_n.squeeze(-1)
-
-        return action_n, None, AuxModelOutputs(log_probs=action_log_prob_n, values=value_n)
-
-    def _get_tracked_pos(self, mappings: list[ReferenceMarker], xpos: Array, base_id: int) -> dict[int, Array]:
+    def _get_tracked_pos(self, body_ids: tuple[int, ...], xpos: Array, base_id: int) -> xax.FrozenDict[int, Array]:
         tracked_positions: dict[int, Array] = {}
 
-        for mapping in mappings:
-            body_pos = get_local_point_pos(xpos, mapping.mj_body_id, base_id)
+        for body_id in body_ids:
+            body_pos = get_local_point_pos(xpos, body_id, base_id)
             assert isinstance(body_pos, Array)
-            tracked_positions[mapping.mj_body_id] = body_pos
+            tracked_positions[body_id] = body_pos
 
-        return tracked_positions
+        return xax.FrozenDict(tracked_positions)
 
     def get_transition_aux_outputs(
         self,
@@ -226,10 +136,39 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
         action: Array,
         terminated: Array,
     ) -> AuxTransitionOutputs:
+        # Getting the local cartesian positions for all tracked bodies.
         tracked_pos = self._get_tracked_pos(
-            self.config.gait_matching_mappings, next_physics_state.data.xpos, self.config.base_id
+            self.tracked_body_ids, next_physics_state.data.xpos, self.config.base_id
         )
         return AuxTransitionOutputs(tracked_pos=tracked_pos)
+
+    def run(self) -> None:
+        mj_model: PhysicsModel = self.get_mujoco_model()
+        root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
+
+        def rotation_callback(root: BvhioJoint) -> None:
+            euler_rotation = self.config.rotate_bvh_euler
+            quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
+            root.applyRotation(glm.quat(*quat), bake=True)
+
+        np_reference_gait = generate_reference_gait(
+            mappings=HUMANOID_REFERENCE_MAPPINGS,
+            root=root,
+            reference_base_id=self.config.base_id,
+            root_callback=rotation_callback,
+            scaling_factor=self.config.bvh_scaling_factor,
+        )
+        self.reference_gait: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: jnp.array(x), np_reference_gait)
+        self.tracked_body_ids = tuple(self.reference_gait.keys())
+
+        if self.config.visualize_reference_gait:
+            visualize_reference_gait(
+                mj_model,
+                base_id=self.config.base_id,
+                reference_gait=np_reference_gait,
+            )
+        else:
+            super().run()
 
 
 if __name__ == "__main__":
@@ -242,7 +181,7 @@ if __name__ == "__main__":
     # from the command line:
     #   python -m examples.default_humanoid.walking num_envs=8 num_batches=2
     HumanoidWalkingGaitMatchingTask.launch(
-        HumanoidWalkingTaskConfig(
+        HumanoidWalkingGaitMatchingTaskConfig(
             num_envs=2048,
             batch_size=256,
             num_passes=10,
@@ -262,5 +201,11 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             use_mit_actuators=True,
             valid_every_n_steps=50,
+            # Gait matching parameters.
+            bvh_path=str(Path(__file__).parent / "data" / "walk-relaxed_actorcore.bvh"),
+            rotate_bvh_euler=np.array([0, np.pi / 2, 0]),
+            bvh_scaling_factor=1 / 100,
+            base_id=1,
+            visualize_reference_gait=True,
         ),
     )
