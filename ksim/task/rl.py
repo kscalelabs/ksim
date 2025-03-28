@@ -909,7 +909,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         commands: Collection[Command],
         observations: Collection[Observation],
         randomizations: Collection[Randomization],
-        rewards: Collection[Reward],
     ) -> Collection[Marker]:
         markers: list[Marker] = []
         for command in commands:
@@ -918,8 +917,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers.extend(observation.get_markers())
         for randomization in randomizations:
             markers.extend(randomization.get_markers())
-        for reward in rewards:
-            markers.extend(reward.get_markers())
         return markers
 
     @xax.jit(
@@ -1092,8 +1089,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             engine = self.get_engine(mj_model, metadata)
             observations = self.get_observations(mj_model)
             commands = self.get_commands(mj_model)
-            rewards = self.get_rewards(mj_model)
             terminations = self.get_terminations(mj_model)
+            rewards = self.get_rewards(mj_model)
             randomizations = self.get_randomization(mj_model)
 
             # Creates the markers.
@@ -1101,7 +1098,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 commands=commands,
                 observations=observations,
                 randomizations=randomizations,
-                rewards=rewards,
             )
 
             # Gets initial variables.
@@ -1192,14 +1188,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         rollout_variables=rollout_variables,
                     )
 
-                    # Gets the rewards.
-                    reward = get_rewards(
-                        trajectory=trajectory,
-                        reward_generators=rollout_constants.reward_generators,
-                        ctrl_dt=self.config.ctrl_dt,
-                        clip_max=self.config.reward_clip_max,
-                    )
-
                     rng, rand_rng = jax.random.split(rng)
                     mj_model, rollout_variables = jax.lax.cond(
                         trajectory.done,
@@ -1209,7 +1197,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                         for marker in markers:
-                            marker(model, data, scene, trajectory, reward)
+                            marker(model, data, scene, trajectory)
 
                     # Logs the frames to render.
                     viewer.data = rollout_variables.physics_state.data
@@ -1322,7 +1310,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 commands=commands,
                 observations=observations,
                 randomizations=randomizations,
-                rewards=rewards_terms,
             )
 
             # These remain constant across the entire episode.
