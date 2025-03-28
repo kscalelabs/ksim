@@ -32,15 +32,18 @@ from .walking import (
 
 NUM_JOINTS = 21
 
-Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class AuxModelOutputs:
+    log_probs: Array
+    values: Array
 
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-    values: Array
-    tracked_pos: Array
+class AuxTransitionOutputs:
+    tracked_pos: dict[int, Array]
 
 
 @dataclass
@@ -49,34 +52,59 @@ class HumanoidWalkingGaitMatchingTaskConfig(HumanoidWalkingTaskConfig):
         value=Path(__file__).parent / "data" / "reference_gait.npz",
         help="The path to the reference gait.",
     )
+    gait_matching_mappings: list[ReferenceMarker] = xax.field(
+        value=HUMANOID_MAPPING_SPEC,
+        help="The mappings of BVH joints to Mujoco bodies",
+    )
+    base_id: int = xax.field(
+        value=1,
+        help="The Mujoco body id of the base of the humanoid",
+    )
+
+
+Config = TypeVar("Config", bound=HumanoidWalkingGaitMatchingTaskConfig)
 
 
 class GaitMatchingReward(ksim.Reward):
-    def __init__(self, reference_gait: dict[int, Array]) -> None:
-        self.reference_gait = reference_gait
+    def __init__(self, reference_gait: dict[int, Array], mappings: list[ReferenceMarker]) -> None:
+        self.reference_gait = reference_gait  # T, 3
+        self.mappings = mappings
+        self.num_frames = list(reference_gait.values())[0].shape[0]
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        # Constructing target trajectory using reference, resetting on time.
-        def scan_fn(carry: Array, steps_since_reset: Array) -> tuple[Array, Array]:
-            reference
-            return carry, carry
+        assert isinstance(trajectory.aux_transition_outputs, AuxTransitionOutputs)
 
-        target_action = jax.lax.scan(scan_fn, None, jnp.arange(trajectory.action.shape[0]))[1]
+        # Computes MSE error between the tracked and target positions per transition.
+        def compute_error(num_steps: Array, transition: ksim.Trajectory) -> tuple[Array, Array]:
+            assert isinstance(transition.aux_transition_outputs, AuxTransitionOutputs)
+            frame_idx = num_steps % self.num_frames
+            target_pos = jax.tree.map(lambda x: x[frame_idx], self.reference_gait)  # 3
+            tracked_pos = transition.aux_transition_outputs.tracked_pos  # 3
+            error = jax.tree.map(lambda target, tracked: jnp.mean((target - tracked) ** 2), target_pos, tracked_pos)
+            mean_error = jnp.mean(jnp.array(list(error.values())))
+            next_num_steps = jax.lax.select(transition.done, 0, num_steps + 1)
+
+            return next_num_steps, mean_error
+
+        _, errors = jax.lax.scan(compute_error, jnp.array(0), trajectory)
+        mse = jnp.mean(errors)
+        jax.debug.breakpoint()
+        return mse
 
 
-class HumanoidWalkingGaitMatchingTask(HumanoidWalkingGaitMatchingTaskConfig[Config], Generic[Config]):
+class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        with open(self.reference_gait_path, "rb") as f:
+        with open(self.config.reference_gait_path, "rb") as f:
             reference_gait = pickle.load(f)
             reference_gait = jax.tree.map(lambda x: jnp.array(x), reference_gait)
-
+            self.reference_gait = reference_gait
         rewards = [
             ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, scale=0.5),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             NaiveVelocityReward(scale=0.1),
-            GaitMatchingReward(reference_gait),
+            GaitMatchingReward(self.reference_gait, self.config.gait_matching_mappings),
         ]
 
         return rewards
@@ -149,16 +177,6 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingGaitMatchingTaskConfig[Conf
 
         return log_probs_btn, entropy_btn
 
-    def _get_tracked_pos(self, mappings: list[ReferenceMarker], xpos: Array, base_id: int) -> dict[int, Array]:
-        tracked_positions: dict[int, Array] = {}
-
-        for mapping in mappings:
-            body_pos = get_local_point_pos(xpos, mapping.mj_body_id, base_id)
-            assert isinstance(body_pos, Array)
-            tracked_positions[mapping.mj_body_id] = body_pos
-
-        return tracked_positions
-
     def get_values(
         self,
         model: DefaultHumanoidModel,
@@ -180,15 +198,38 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingGaitMatchingTaskConfig[Conf
         observations: FrozenDict[str, Array],
         commands: FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, AuxOutputs]:
+    ) -> tuple[Array, None, AuxModelOutputs]:
         action_dist_n = self._run_actor(model, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
-        action_log_prob_n = action_dist_n.log_prob(action_n)
+        action_log_prob_n = jnp.array(action_dist_n.log_prob(action_n))
 
         critic_n = self._run_critic(model, observations, commands)
         value_n = critic_n.squeeze(-1)
 
-        return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
+        return action_n, None, AuxModelOutputs(log_probs=action_log_prob_n, values=value_n)
+
+    def _get_tracked_pos(self, mappings: list[ReferenceMarker], xpos: Array, base_id: int) -> dict[int, Array]:
+        tracked_positions: dict[int, Array] = {}
+
+        for mapping in mappings:
+            body_pos = get_local_point_pos(xpos, mapping.mj_body_id, base_id)
+            assert isinstance(body_pos, Array)
+            tracked_positions[mapping.mj_body_id] = body_pos
+
+        return tracked_positions
+
+    def get_transition_aux_outputs(
+        self,
+        physics_model: ksim.PhysicsModel,
+        physics_state: ksim.PhysicsState,
+        next_physics_state: ksim.PhysicsState,
+        action: Array,
+        terminated: Array,
+    ) -> AuxTransitionOutputs:
+        tracked_pos = self._get_tracked_pos(
+            self.config.gait_matching_mappings, next_physics_state.data.xpos, self.config.base_id
+        )
+        return AuxTransitionOutputs(tracked_pos=tracked_pos)
 
 
 if __name__ == "__main__":

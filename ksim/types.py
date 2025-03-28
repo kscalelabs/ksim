@@ -45,7 +45,8 @@ class Trajectory:
     done: Array
     timestep: Array
     termination_components: FrozenDict[str, Array]
-    aux_outputs: PyTree
+    aux_model_outputs: PyTree
+    aux_transition_outputs: PyTree | None
 
 
 @jax.tree_util.register_dataclass

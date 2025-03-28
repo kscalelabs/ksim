@@ -514,6 +514,31 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             The action to take, the next carry, and any auxiliary outputs.
         """
 
+    def get_transition_aux_outputs(
+        self,
+        physics_model: PhysicsModel,
+        physics_state: PhysicsState,
+        next_physics_state: PhysicsState,
+        action: Array,
+        terminated: Array,
+    ) -> PyTree | None:
+        """Optional auxiliary outputs for the transition.
+
+        This function is called after the transition has been applied, and
+        can be used to compute any auxiliary outputs for the transition.
+
+        Args:
+            physics_model: The physics model.
+            physics_state: The physics state.
+            next_physics_state: The next physics state.
+            action: The action.
+            terminated: Whether the episode is terminated.
+
+        Returns:
+            An arbitrary PyTree, representing any auxiliary outputs for the transition.
+        """
+        return None
+
     @property
     def rollout_length_steps(self) -> int:
         return round(self.config.rollout_length_seconds / self.config.ctrl_dt)
@@ -560,7 +585,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Samples an action from the model.
-        action, next_carry, aux_outputs = self.sample_action(
+        action, next_carry, aux_model_outputs = self.sample_action(
             model=model,
             carry=rollout_variables.carry,
             physics_model=physics_model,
@@ -602,6 +627,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             lambda: commands,
         )
 
+        aux_transition_outputs = self.get_transition_aux_outputs(
+            physics_model=physics_model,
+            physics_state=rollout_variables.physics_state,
+            next_physics_state=next_physics_state,
+            action=action,
+            terminated=terminated,
+        )
+
         # Combines all the relevant data into a single object.
         trajectory = Trajectory(
             qpos=next_physics_state.data.qpos,
@@ -612,7 +645,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             done=terminated,
             timestep=next_physics_state.data.time,
             termination_components=terminations,
-            aux_outputs=aux_outputs,
+            aux_model_outputs=aux_model_outputs,
+            aux_transition_outputs=aux_transition_outputs,
         )
 
         # Gets the variables for the next step.
