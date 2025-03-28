@@ -139,6 +139,7 @@ class LinearVelocityCommand(Command):
     y_range: tuple[float, float] = attrs.field()
     x_zero_prob: float = attrs.field(default=0.0)
     y_zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
 
@@ -157,7 +158,11 @@ class LinearVelocityCommand(Command):
         )
 
     def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
-        return prev_command
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
 
     def get_markers(self) -> Collection[Marker]:
         return [
