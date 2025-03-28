@@ -202,3 +202,48 @@ class MITPositionVelocityActuators(MITPositionActuators):
         """Get the default action (zeros) with the correct shape."""
         qpos_dim = len(physics_data.qpos[7:])
         return jnp.zeros(qpos_dim * 2)
+
+class FeetechActuators(Actuators):
+    """Feetech actuator controller for feetech motors (3215 and 3250)."""
+
+    def __init__(
+        self,
+        max_torque: float,
+        kp: float,
+        error_gain: float,
+        action_noise: float = 0.0,
+        action_noise_type: NoiseType = "none",
+        torque_noise: float = 0.0,
+        torque_noise_type: NoiseType = "none",
+    ) -> None:
+        self.max_torque = max_torque
+        self.kp = kp
+        self.error_gain = error_gain
+        self.action_noise = action_noise
+        self.action_noise_type = action_noise_type
+        self.torque_noise = torque_noise
+        self.torque_noise_type = torque_noise_type
+
+    def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+        """
+        Compute torque control using feetech parameters.
+        Assumes `action` is the target position.
+        """
+        pos_rng, tor_rng = jax.random.split(rng)
+        # Extract current joint positions (ignoring root if necessary)
+        current_pos = physics_data.qpos[7:]  # Adjust slicing as needed
+        # Compute error between desired and current positions
+        error = action - current_pos
+        # Calculate duty using kp and error_gain
+        duty = self.kp * self.error_gain * error
+        # Compute torque command and clip by max_torque
+        torque = jnp.clip(
+            self.add_noise(self.torque_noise, self.torque_noise_type, duty * self.max_torque, tor_rng),
+            -self.max_torque,
+            self.max_torque,
+        )
+        return torque
+
+    def get_default_action(self, physics_data: PhysicsData) -> Array:
+        # Default action can be the current positions
+        return physics_data.qpos[7:]
