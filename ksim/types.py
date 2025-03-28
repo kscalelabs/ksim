@@ -45,7 +45,7 @@ class Trajectory:
     done: Array
     timestep: Array
     termination_components: FrozenDict[str, Array]
-    aux_model_outputs: PyTree
+    aux_sample_outputs: PyTree
     aux_transition_outputs: PyTree | None
 
 

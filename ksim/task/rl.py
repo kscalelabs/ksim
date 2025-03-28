@@ -585,7 +585,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Samples an action from the model.
-        action, next_carry, aux_model_outputs = self.sample_action(
+        action, next_carry, aux_sample_outputs = self.sample_action(
             model=model,
             carry=rollout_variables.carry,
             physics_model=physics_model,
@@ -645,7 +645,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             done=terminated,
             timestep=next_physics_state.data.time,
             termination_components=terminations,
-            aux_model_outputs=aux_model_outputs,
+            aux_sample_outputs=aux_sample_outputs,
             aux_transition_outputs=aux_transition_outputs,
         )
 

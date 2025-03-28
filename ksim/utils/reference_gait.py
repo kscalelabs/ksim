@@ -1,20 +1,14 @@
 """Reference gait utilities."""
 
-import argparse
-import pickle
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable
 
-import bvhio
-import glm
 import jax
 import mujoco
 import numpy as np
 import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
-from scipy.spatial.transform import Rotation as R
 
 
 @dataclass
@@ -69,12 +63,12 @@ def _add_reference_marker_to_scene(
     scene.ngeom += 1
 
 
-def _get_local_xpos(xpos: np.ndarray | jax.Array, body_id: int, base_id: int) -> np.ndarray | jax.Array:
+def get_local_xpos(xpos: np.ndarray | jax.Array, body_id: int, base_id: int) -> np.ndarray | jax.Array:
     """Gets the cartesian pos of a point w.r.t. the base (e.g. pelvis)."""
     return xpos[body_id] - xpos[base_id]
 
 
-def _get_local_reference_pos(
+def get_local_reference_pos(
     root: BvhioJoint, reference_id: int, reference_base_id: int, scaling_factor: float = 1.0
 ) -> np.ndarray | jax.Array:
     """Gets the cartesian pos of a reference joint w.r.t. the base (e.g. pelvis)."""
@@ -85,7 +79,7 @@ def _get_local_reference_pos(
     return ref_pos * scaling_factor
 
 
-def _local_to_absolute(
+def local_to_absolute(
     xpos: np.ndarray | jax.Array, local_pos: np.ndarray | jax.Array, base_id: int
 ) -> np.ndarray | jax.Array:
     """Gets the absolute xpos from a local position (for visualization)."""
@@ -124,7 +118,6 @@ def visualize_reference_gait(
         base_id: The ID of the Mujoco base
         reference_gait: The reference gait (if root and reference_base_id are None)
     """
-
     total_frames = list(reference_gait.values())[0].shape[0]
     data = mujoco.MjData(model)
 
@@ -138,8 +131,8 @@ def visualize_reference_gait(
 
             # Showing default humanoid geoms for reference
             for body_id, reference_poses in reference_gait.items():
-                agent_local_pos = _get_local_xpos(data.xpos, body_id, base_id)
-                agent_xpos = _local_to_absolute(data.xpos, agent_local_pos, base_id)
+                agent_local_pos = get_local_xpos(data.xpos, body_id, base_id)
+                agent_xpos = local_to_absolute(data.xpos, agent_local_pos, base_id)
                 assert isinstance(agent_xpos, np.ndarray)
                 _add_reference_marker_to_scene(
                     scene,
@@ -149,7 +142,7 @@ def visualize_reference_gait(
                 )
 
                 reference_local_pos = reference_poses[frame]
-                reference_xpos = _local_to_absolute(data.xpos, reference_local_pos, base_id)
+                reference_xpos = local_to_absolute(data.xpos, reference_local_pos, base_id)
                 assert isinstance(reference_xpos, np.ndarray)
                 _add_reference_marker_to_scene(
                     scene,
@@ -175,6 +168,7 @@ def generate_reference_gait(
 
     Args:
         mappings: The mappings of BVH joints to Mujoco bodies
+        model: The Mujoco model
         root: The root of the BVH tree
         reference_base_id: The ID of the reference base (of the BVH file)
         root_callback: A callback to modify the root of the BVH tree
@@ -188,8 +182,9 @@ def generate_reference_gait(
     body_ids = get_body_ids(model, mappings)
 
     total_frames = len(root.layout()[0][0].Keyframes)
-    reference_gait = {body_id: np.zeros((total_frames, 3)) for body_id in body_ids}
-    reference_gait = xax.FrozenDict(reference_gait)
+    reference_gait: xax.FrozenDict[int, np.ndarray] = xax.FrozenDict(
+        {body_id: np.zeros((total_frames, 3)) for body_id in body_ids}
+    )
 
     for frame in range(total_frames):
         root.loadPose(frame)
@@ -198,75 +193,7 @@ def generate_reference_gait(
             root_callback(root)
 
         for body_id, reference_joint_id in zip(body_ids, reference_joint_ids):
-            ref_pos = _get_local_reference_pos(root, reference_joint_id, reference_base_id, scaling_factor)
+            ref_pos = get_local_reference_pos(root, reference_joint_id, reference_base_id, scaling_factor)
             reference_gait[body_id][frame] = ref_pos
 
     return reference_gait
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--overlay", action="store_true", default=False)
-    parser.add_argument("--generate", action="store_true", default=False)
-    parser.add_argument("--reference_gait_path", type=str, default=None)
-    parser.add_argument("--bvh_path", type=str, default=None)
-    parser.add_argument("--scene_path", type=str, default=None)
-    parser.add_argument("--scaling_factor", type=float, default=1 / 100)
-    args = parser.parse_args()
-
-    local_path = Path(__file__).parent / "data"
-    scene_path = str(local_path / "scene.mjcf") if args.scene_path is None else args.scene_path
-    bvh_path = str(local_path / "walk-relaxed_actorcore.bvh") if args.bvh_path is None else args.bvh_path
-
-    model = mujoco.MjModel.from_xml_path(scene_path)
-    data = mujoco.MjData(model)
-    root = bvhio.readAsHierarchy(bvh_path)
-
-    # Mapping the most relevant joints to the Mujoco model.
-    mappings = [builder.build(model, root) for builder in HUMANOID_MAPPING_SPEC]
-    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "pelvis")
-    reference_base_id = get_reference_joint_id(root, "CC_Base_Pelvis")
-
-    # Rotates the BVH tree 90 degrees to match the Mujoco model.
-    def rotation_callback(root: BvhioJoint) -> None:
-        euler_rotation = np.array([0, np.pi / 2, 0])
-        quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
-        root.applyRotation(glm.quat(*quat), bake=True)
-
-    if args.overlay:
-        if args.reference_gait_path is not None:
-            with open(args.reference_gait_path, "rb") as f:
-                reference_gait = pickle.load(f)
-        else:
-            reference_gait = generate_reference_gait(
-                mappings=mappings,
-                root=root,
-                reference_base_id=reference_base_id,
-                root_callback=rotation_callback,
-                scaling_factor=args.scaling_factor,
-            )
-
-        overlay(
-            model,
-            data,
-            mappings=mappings,
-            base_id=base_id,
-            reference_gait=reference_gait,
-        )
-    elif args.generate:
-        if args.reference_gait_path is not None:
-            save_path = args.reference_gait_path
-        else:
-            save_path = local_path / "reference_gait.pkl"
-        print(f"Generating reference gait and saving to {save_path}")
-        reference_gait = generate_reference_gait(
-            mappings=mappings,
-            root=root,
-            reference_base_id=reference_base_id,
-            root_callback=rotation_callback,
-            scaling_factor=args.scaling_factor,
-        )
-        with open(save_path, "wb") as f:
-            pickle.dump(reference_gait, f)
-    else:
-        raise ValueError("No action specified.")

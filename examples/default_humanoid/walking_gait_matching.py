@@ -1,6 +1,5 @@
 """Walking default humanoid task with reference gait tracking."""
 
-import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
@@ -22,18 +21,18 @@ from ksim.types import PhysicsModel
 from ksim.utils.reference_gait import (
     ReferenceMapping,
     generate_reference_gait,
+    get_local_xpos,
     get_reference_joint_id,
     visualize_reference_gait,
 )
 
-from .reference_gait import HUMANOID_MAPPING_SPEC, ReferenceMarker, get_local_point_pos
 from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig, NaiveVelocityReward
 
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class AuxTransitionOutputs:
-    tracked_pos: dict[int, Array]
+    tracked_pos: xax.FrozenDict[int, Array]
 
 
 @dataclass
@@ -110,9 +109,8 @@ class GaitMatchingPenalty(ksim.Reward):
             return next_num_steps, mean_error
 
         _, errors = jax.lax.scan(compute_error, jnp.array(0), trajectory)
-        mse = jnp.mean(errors)
         jax.debug.breakpoint()
-        return mse
+        return errors
 
 
 class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Config]):
@@ -123,7 +121,7 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             NaiveVelocityReward(scale=0.1),
-            GaitMatchingPenalty(reference_gait=self.reference_gait, scale=-0.02),
+            GaitMatchingPenalty(reference_gait=self.reference_gait, scale=-0.5),
         ]
 
         return rewards
@@ -139,7 +137,7 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
         # Getting the local cartesian positions for all tracked bodies.
         tracked_positions: dict[int, Array] = {}
         for body_id in self.tracked_body_ids:
-            body_pos = get_local_point_pos(physics_state.data.xpos, body_id, self.mj_base_id)
+            body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
             assert isinstance(body_pos, Array)
             tracked_positions[body_id] = body_pos
 
@@ -193,7 +191,7 @@ if __name__ == "__main__":
             num_envs=2048,
             batch_size=256,
             num_passes=10,
-            epochs_per_log_step=10,
+            epochs_per_log_step=1,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
