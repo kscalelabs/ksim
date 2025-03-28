@@ -91,6 +91,7 @@ Config = TypeVar("Config", bound=HumanoidWalkingGaitMatchingTaskConfig)
 class GaitMatchingPenalty(ksim.Reward):
     reference_gait: xax.FrozenDict[int, xax.HashableArray]
     ctrl_dt: float
+    norm: xax.NormType = attrs.field(default="l2")
 
     @property
     def num_frames(self) -> int:
@@ -99,15 +100,16 @@ class GaitMatchingPenalty(ksim.Reward):
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         assert isinstance(trajectory.aux_transition_outputs, AuxTransitionOutputs)
         reference_gait: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_gait)
-        step_number = (trajectory.timestep / self.ctrl_dt) % self.num_frames
-        breakpoint()
+        step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         target_pos = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_gait)
         tracked_pos = trajectory.aux_transition_outputs.tracked_pos
         error = jax.tree.map(
-            lambda target, tracked: jnp.mean((target - tracked) ** 2, axis=-1), target_pos, tracked_pos
+            lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos, tracked_pos
         )
+        error = jax.tree.reduce(jnp.add, error) / len(error)
+        mean_error = error.mean(axis=-1)
 
-        return error
+        return mean_error
 
 
 class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Config]):
