@@ -1,16 +1,28 @@
 """Walking default humanoid task with reference gait tracking."""
 
+import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
 
 import distrax
 import jax
+import jax.numpy as jnp
+import xax
 from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray
+from mujoco import mjx
 
 import ksim
+from ksim.utils import mujoco
 
+from .reference_gait import (
+    HUMANOID_MAPPING_SPEC,
+    ReferenceMarker,
+    generate_reference_gait,
+    get_local_point_pos,
+    get_reference_joint_id,
+)
 from .walking import (
     DefaultHumanoidModel,
     HumanoidWalkingTask,
@@ -28,17 +40,43 @@ Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 class AuxOutputs:
     log_probs: Array
     values: Array
-    local_xpos: Array
+    tracked_pos: Array
 
 
-class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Config]):
+@dataclass
+class HumanoidWalkingGaitMatchingTaskConfig(HumanoidWalkingTaskConfig):
+    reference_gait_path: Path = xax.field(
+        value=Path(__file__).parent / "data" / "reference_gait.npz",
+        help="The path to the reference gait.",
+    )
+
+
+class GaitMatchingReward(ksim.Reward):
+    def __init__(self, reference_gait: dict[int, Array]) -> None:
+        self.reference_gait = reference_gait
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        # Constructing target trajectory using reference, resetting on time.
+        def scan_fn(carry: Array, steps_since_reset: Array) -> tuple[Array, Array]:
+            reference
+            return carry, carry
+
+        target_action = jax.lax.scan(scan_fn, None, jnp.arange(trajectory.action.shape[0]))[1]
+
+
+class HumanoidWalkingGaitMatchingTask(HumanoidWalkingGaitMatchingTaskConfig[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
+        with open(self.reference_gait_path, "rb") as f:
+            reference_gait = pickle.load(f)
+            reference_gait = jax.tree.map(lambda x: jnp.array(x), reference_gait)
+
         rewards = [
             ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, scale=0.5),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             NaiveVelocityReward(scale=0.1),
+            GaitMatchingReward(reference_gait),
         ]
 
         return rewards
@@ -110,6 +148,16 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
         entropy_btn = action_dist_btn.entropy()
 
         return log_probs_btn, entropy_btn
+
+    def _get_tracked_pos(self, mappings: list[ReferenceMarker], xpos: Array, base_id: int) -> dict[int, Array]:
+        tracked_positions: dict[int, Array] = {}
+
+        for mapping in mappings:
+            body_pos = get_local_point_pos(xpos, mapping.mj_body_id, base_id)
+            assert isinstance(body_pos, Array)
+            tracked_positions[mapping.mj_body_id] = body_pos
+
+        return tracked_positions
 
     def get_values(
         self,
