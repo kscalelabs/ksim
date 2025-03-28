@@ -247,7 +247,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return optimizer
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
-        mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
+        mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
@@ -281,21 +281,21 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
-            ksim.StaticFrictionRandomization(),
-            ksim.ArmatureRandomization(),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "torso"),
-            ksim.JointDampingRandomization(),
-            ksim.JointZeroPositionRandomization(),
+            # ksim.StaticFrictionRandomization(),
+            # ksim.ArmatureRandomization(),
+            # ksim.MassMultiplicationRandomization.from_body_name(physics_model, "torso"),
+            # ksim.JointDampingRandomization(),
+            # ksim.JointZeroPositionRandomization(),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            ksim.PushEvent(
-                x_force=1.0,
-                y_force=1.0,
-                z_force=0.0,
-                interval_range=(1.0, 2.0),
-            ),
+            # ksim.PushEvent(
+            #     x_force=1.0,
+            #     y_force=1.0,
+            #     z_force=0.0,
+            #     interval_range=(1.0, 2.0),
+            # ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
@@ -523,5 +523,6 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             use_mit_actuators=True,
             valid_every_n_steps=50,
+            use_naive_reward=True,
         ),
     )
