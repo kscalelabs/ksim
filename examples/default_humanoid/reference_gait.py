@@ -171,7 +171,7 @@ def generate_reference_gait(
     scaling_factor: float = 1.0,
 ) -> dict[int, np.ndarray]:
     """Generates the reference gait for the given model and data.
-    
+
     Args:
         mappings: The mappings of BVH joints to Mujoco bodies
         root: The root of the BVH tree
@@ -197,6 +197,7 @@ def generate_reference_gait(
             reference_gait[mapping.mj_body_id][frame] = ref_pos
 
     return reference_gait
+
 
 def get_ordered_body_ids(model: mujoco.MjModel, mapping_spec: list[ReferenceMarkerBuilder]) -> tuple[int, ...]:
     body_ids = []
