@@ -19,7 +19,7 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.types import Rewards, Trajectory
+from ksim.types import Trajectory
 from ksim.vis import Marker
 
 

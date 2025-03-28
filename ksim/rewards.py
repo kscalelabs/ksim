@@ -69,7 +69,6 @@ class Reward(ABC):
             timestep.
         """
 
-
     def get_markers(self) -> Collection[Marker]:
         return []
 
