@@ -5,6 +5,7 @@ __all__ = [
     "TorqueActuators",
     "MITPositionActuators",
     "MITPositionVelocityActuators",
+    "FeetechActuators",
 ]
 
 import logging
