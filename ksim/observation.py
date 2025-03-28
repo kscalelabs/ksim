@@ -101,6 +101,7 @@ class BasePositionObservation(Observation):
         qpos = rollout_state.physics_state.data.qpos[0:3]  # (3,)
         return qpos
 
+
 @attrs.define(frozen=True)
 class BaseOrientationObservation(Observation):
 
@@ -108,12 +109,14 @@ class BaseOrientationObservation(Observation):
         qpos = rollout_state.physics_state.data.qpos[3:7]  # (4,)
         return qpos
 
+
 @attrs.define(frozen=True)
 class BaseLinearVelocityObservation(Observation):
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         qvel = rollout_state.physics_state.data.qvel[0:3]  # (3,)
         return qvel
+
 
 @attrs.define(frozen=True)
 class BaseAngularVelocityObservation(Observation):
@@ -155,7 +158,6 @@ class CenterOfMassVelocityObservation(Observation):
         # Skip the first entry (world body) and flatten
         cvel = rollout_state.physics_state.data.cvel[1:].ravel()  # Shape will be (nbody-1, 6)
         return cvel
-
 
 
 @attrs.define(frozen=True)
