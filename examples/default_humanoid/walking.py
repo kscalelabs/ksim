@@ -175,6 +175,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=False,
         help="Whether to use the naive velocity reward.",
     )
+    domain_randomize: bool = xax.field(
+        value=True,
+        help="Whether to domain randomize the model.",
+    )
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
@@ -280,42 +284,50 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             return ksim.TorqueActuators()
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
-        return [
-            ksim.StaticFrictionRandomization(),
-            ksim.ArmatureRandomization(),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "torso"),
-            ksim.JointDampingRandomization(),
-            ksim.JointZeroPositionRandomization(),
-        ]
+        if self.config.domain_randomize:
+            return [
+                ksim.StaticFrictionRandomization(),
+                ksim.ArmatureRandomization(),
+                ksim.MassMultiplicationRandomization.from_body_name(physics_model, "torso"),
+                ksim.JointDampingRandomization(),
+                ksim.JointZeroPositionRandomization(),
+            ]
+        else:
+            return []
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.PushEvent(
-                x_force=1.0,
-                y_force=1.0,
-                z_force=0.0,
-                interval_range=(1.0, 2.0),
-            ),
-        ]
+        if self.config.domain_randomize:
+            return [
+                ksim.PushEvent(
+                    x_force=1.0,
+                    y_force=1.0,
+                    z_force=0.0,
+                    interval_range=(1.0, 2.0),
+                ),
+            ]
+        else:
+            return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
+        scale = 0.0 if self.config.domain_randomize else 0.01
         return [
-            ksim.RandomJointPositionReset(scale=0.01),
-            ksim.RandomJointVelocityReset(scale=0.01),
+            ksim.RandomJointPositionReset(scale=scale),
+            ksim.RandomJointVelocityReset(scale=scale),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
+        noise = 0.0 if self.config.domain_randomize else 0.01
         return [
-            ksim.JointPositionObservation(),
-            ksim.JointVelocityObservation(),
-            ksim.ActuatorForceObservation(),
-            ksim.CenterOfMassInertiaObservation(),
-            ksim.CenterOfMassVelocityObservation(),
-            ksim.BaseLinearVelocityObservation(),
-            ksim.BaseAngularVelocityObservation(),
-            ksim.BaseLinearAccelerationObservation(),
-            ksim.BaseAngularAccelerationObservation(),
-            ksim.ActuatorAccelerationObservation(),
+            ksim.JointPositionObservation(noise=noise),
+            ksim.JointVelocityObservation(noise=noise),
+            ksim.ActuatorForceObservation(noise=noise),
+            ksim.CenterOfMassInertiaObservation(noise=noise),
+            ksim.CenterOfMassVelocityObservation(noise=noise),
+            ksim.BaseLinearVelocityObservation(noise=noise),
+            ksim.BaseAngularVelocityObservation(noise=noise),
+            ksim.BaseLinearAccelerationObservation(noise=noise),
+            ksim.BaseAngularAccelerationObservation(noise=noise),
+            ksim.ActuatorAccelerationObservation(noise=noise),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -523,5 +535,6 @@ if __name__ == "__main__":
             max_grad_norm=1.0,
             use_mit_actuators=True,
             valid_every_n_steps=50,
+            domain_randomize=False,
         ),
     )
