@@ -1207,9 +1207,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     else:
                         frames.append(viewer.read_pixels(depth=False, callback=render_callback))
 
-                trajectory = jax.tree.map(lambda x: jnp.array(x), transitions)
+                trajectory = jax.tree_map(lambda *xs: jnp.stack(xs), *transitions)
 
-                rewards = get_rewards(
+                get_rewards(
                     trajectory=trajectory,
                     reward_generators=rollout_constants.reward_generators,
                     ctrl_dt=self.config.ctrl_dt,
