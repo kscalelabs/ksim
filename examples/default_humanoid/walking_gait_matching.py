@@ -91,7 +91,7 @@ Config = TypeVar("Config", bound=HumanoidWalkingGaitMatchingTaskConfig)
 class GaitMatchingPenalty(ksim.Reward):
     reference_gait: xax.FrozenDict[int, xax.HashableArray]
     ctrl_dt: float
-    norm: xax.NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l1")
 
     @property
     def num_frames(self) -> int:
@@ -103,11 +103,9 @@ class GaitMatchingPenalty(ksim.Reward):
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         target_pos = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_gait)
         tracked_pos = trajectory.aux_transition_outputs.tracked_pos
-        error = jax.tree.map(
-            lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos, tracked_pos
-        )
-        error = jax.tree.reduce(jnp.add, error) / len(error)
-        mean_error = error.mean(axis=-1)
+        error = jax.tree.map(lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos, tracked_pos)
+        mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
+        mean_error = mean_error_over_bodies.mean(axis=-1)
 
         return mean_error
 
@@ -120,7 +118,7 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             NaiveVelocityReward(scale=0.1),
-            GaitMatchingPenalty(reference_gait=self.reference_gait, ctrl_dt=self.config.ctrl_dt, scale=-0.5),
+            GaitMatchingPenalty(reference_gait=self.reference_gait, ctrl_dt=self.config.ctrl_dt, scale=-0.1),
         ]
 
         return rewards
