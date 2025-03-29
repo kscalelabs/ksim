@@ -189,12 +189,14 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
+            valid_every_n_steps=10,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=21.0,
+            domain_randomize=False,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
