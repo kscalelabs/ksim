@@ -208,4 +208,10 @@
     <motor name="shoulder2_left_ctrl"  gear="20"  joint="shoulder2_left"/>
     <motor name="elbow_left_ctrl"      gear="40"  joint="elbow_left"/>
   </actuator>
+
+  <keyframe>
+    <key name="boxer" qpos='0 0 1.4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'/>
+    <key name="relaxed" qpos='0 0 1.4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.71797 -0.52222 -1.54867 0.71797 -0.52222 -1.54867'/>
+    <key name="tpose" qpos='0 0 1.4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.813285 -0.49691 -1.745 -0.813285 -0.49691 -1.745'/>
+  </keyframe>
 </mujoco>

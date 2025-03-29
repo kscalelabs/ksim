@@ -250,7 +250,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return optimizer
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
-        mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
+        mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
@@ -447,9 +447,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+        if not isinstance(trajectories.aux_sample_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.log_probs
+        return trajectories.aux_sample_outputs.log_probs
 
     def get_on_policy_values(
         self,
@@ -457,9 +457,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+        if not isinstance(trajectories.aux_sample_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.values
+        return trajectories.aux_sample_outputs.values
 
     def get_log_probs(
         self,
