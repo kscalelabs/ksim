@@ -5,6 +5,7 @@ __all__ = [
     "TorqueActuators",
     "MITPositionActuators",
     "MITPositionVelocityActuators",
+    "FeetechActuators",
 ]
 
 import logging
@@ -202,3 +203,56 @@ class MITPositionVelocityActuators(MITPositionActuators):
         """Get the default action (zeros) with the correct shape."""
         qpos_dim = len(physics_data.qpos[7:])
         return jnp.zeros(qpos_dim * 2)
+
+class FeetechActuators(Actuators):
+    """Feetech actuator controller for feetech motors (3215 and 3250) with derivative (kd) term."""
+
+    def __init__(
+        self,
+        max_torque: float,
+        kp: float,
+        kd: float,
+        error_gain: float,
+        action_noise: float = 0.0,
+        action_noise_type: NoiseType = "none",
+        torque_noise: float = 0.0,
+        torque_noise_type: NoiseType = "none",
+    ) -> None:
+        self.max_torque = max_torque
+        self.kp = kp
+        self.kd = kd
+        self.error_gain = error_gain
+        self.action_noise = action_noise
+        self.action_noise_type = action_noise_type
+        self.torque_noise = torque_noise
+        self.torque_noise_type = torque_noise_type
+
+    def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+        """
+        Compute torque control using Feetech parameters.
+        Assumes `action` is the target position.
+        """
+        pos_rng, tor_rng = jax.random.split(rng)
+        # Extract current joint positions and velocities (ignoring root if necessary)
+        current_pos = physics_data.qpos[7:]
+        current_vel = physics_data.qvel[6:]
+
+        # Compute position error (target position minus current position)
+        pos_error = action - current_pos
+        # Assume target velocity is zero; compute velocity error
+        vel_error = - current_vel
+
+        # Compute the combined control (PD control law)
+        duty = self.kp * self.error_gain * pos_error + self.kd * vel_error
+
+        # Multiply by max torque, add torque noise, and clip to limits
+        torque = jnp.clip(
+            self.add_noise(self.torque_noise, self.torque_noise_type, duty * self.max_torque, tor_rng),
+            -self.max_torque,
+            self.max_torque,
+        )
+        return torque
+
+    def get_default_action(self, physics_data: PhysicsData) -> Array:
+        # Default action: current joint positions.
+        return physics_data.qpos[7:]
