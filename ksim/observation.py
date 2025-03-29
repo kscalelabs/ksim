@@ -50,6 +50,9 @@ def add_noise(observation: Array, rng: PRNGKeyArray, noise_type: NoiseType, nois
 class Observation(ABC):
     """Base class for observations."""
 
+    noise: float = attrs.field(default=0.0)
+    noise_type: NoiseType = attrs.field(default="gaussian")
+
     @abstractmethod
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         """Gets the observation from the state and carry.
@@ -72,7 +75,7 @@ class Observation(ABC):
         Returns:
             The observation with noise added
         """
-        return observation
+        return add_noise(observation, rng, self.noise_type, self.noise)
 
     def get_markers(self) -> Collection[Marker]:
         return []
@@ -93,117 +96,79 @@ class Observation(ABC):
 
 @attrs.define(frozen=True)
 class BasePositionObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         qpos = rollout_state.physics_state.data.qpos[0:3]  # (3,)
         return qpos
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
 
 @attrs.define(frozen=True)
 class BaseOrientationObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         qpos = rollout_state.physics_state.data.qpos[3:7]  # (4,)
         return qpos
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
 
 @attrs.define(frozen=True)
 class BaseLinearVelocityObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         qvel = rollout_state.physics_state.data.qvel[0:3]  # (3,)
         return qvel
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
 
 @attrs.define(frozen=True)
 class BaseAngularVelocityObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         qvel = rollout_state.physics_state.data.qvel[3:6]  # (3,)
         return qvel
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
 
 @attrs.define(frozen=True)
 class JointPositionObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         qpos = rollout_state.physics_state.data.qpos[7:]  # (N,)
         return qpos
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
 
 @attrs.define(frozen=True)
 class JointVelocityObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         qvel = rollout_state.physics_state.data.qvel[6:]  # (N,)
         return qvel
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
 
 @attrs.define(frozen=True)
 class CenterOfMassInertiaObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         # Skip the first entry (world body) and flatten
         cinert = rollout_state.physics_state.data.cinert[1:].ravel()  # Shape will be (nbody-1, 10)
         return cinert
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
 
 @attrs.define(frozen=True)
 class CenterOfMassVelocityObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         # Skip the first entry (world body) and flatten
         cvel = rollout_state.physics_state.data.cvel[1:].ravel()  # Shape will be (nbody-1, 6)
         return cvel
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
 
 @attrs.define(frozen=True)
 class ActuatorForceObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.data.actuator_force  # Shape will be (nu,)
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.noise
-
 
 @attrs.define(frozen=True, kw_only=True)
 class SensorObservation(Observation):
-    noise: float = attrs.field(default=0.0)
-    noise_type: NoiseType = attrs.field(default="gaussian")
     sensor_name: str = attrs.field()
     sensor_idx_range: tuple[int, int | None] = attrs.field()
 
@@ -244,13 +209,9 @@ class SensorObservation(Observation):
         ].ravel()
         return sensor_data
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        return add_noise(observation, rng, self.noise_type, self.noise)
-
 
 @attrs.define(frozen=True)
 class BaseLinearAccelerationObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.data.qacc[0:3]
@@ -258,7 +219,6 @@ class BaseLinearAccelerationObservation(Observation):
 
 @attrs.define(frozen=True)
 class BaseAngularAccelerationObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.data.qacc[3:6]
@@ -266,7 +226,6 @@ class BaseAngularAccelerationObservation(Observation):
 
 @attrs.define(frozen=True)
 class ActuatorAccelerationObservation(Observation):
-    noise: float = attrs.field(default=0.0)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.data.qacc[6:]
@@ -277,7 +236,6 @@ class FeetContactObservation(Observation):
     foot_left: int = attrs.field()
     foot_right: int = attrs.field()
     floor_geom_id: int = attrs.field()
-    noise: float = attrs.field(default=0.0)
 
     @classmethod
     def create(
@@ -307,7 +265,6 @@ class FeetContactObservation(Observation):
 class FeetPositionObservation(Observation):
     foot_left: int = attrs.field()
     foot_right: int = attrs.field()
-    noise: float = attrs.field(default=0.0)
 
     @classmethod
     def create(cls, physics_model: PhysicsModel, foot_left: str, foot_right: str) -> Self:

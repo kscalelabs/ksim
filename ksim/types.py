@@ -16,7 +16,7 @@ from typing import Mapping, TypeAlias
 
 import jax
 import mujoco
-from flax.core import FrozenDict
+import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 
@@ -31,7 +31,7 @@ class PhysicsState:
 
     most_recent_action: Array
     data: PhysicsData
-    event_states: FrozenDict[str, PyTree]
+    event_states: xax.FrozenDict[str, PyTree]
 
 
 @jax.tree_util.register_dataclass
@@ -39,12 +39,12 @@ class PhysicsState:
 class Trajectory:
     qpos: Array
     qvel: Array
-    obs: FrozenDict[str, Array]
-    command: FrozenDict[str, Array]
+    obs: xax.FrozenDict[str, Array]
+    command: xax.FrozenDict[str, Array]
     action: Array
     done: Array
     timestep: Array
-    termination_components: FrozenDict[str, Array]
+    termination_components: xax.FrozenDict[str, Array]
     aux_sample_outputs: PyTree
     aux_transition_outputs: PyTree | None
 
@@ -53,7 +53,7 @@ class Trajectory:
 @dataclass(frozen=True)
 class Rewards:
     total: Array
-    components: FrozenDict[str, Array]
+    components: xax.FrozenDict[str, Array]
 
 
 @jax.tree_util.register_dataclass
@@ -80,6 +80,6 @@ class Metrics:
 @dataclass(frozen=True)
 class RolloutVariables:
     carry: PyTree
-    commands: FrozenDict[str, Array]
+    commands: xax.FrozenDict[str, Array]
     physics_state: PhysicsState
     rng: PRNGKeyArray

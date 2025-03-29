@@ -34,7 +34,6 @@ import optax
 import tqdm
 import xax
 from dpshdl.dataset import Dataset
-from flax.core import FrozenDict
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
@@ -83,14 +82,14 @@ def get_observation(
     rng: PRNGKeyArray,
     *,
     obs_generators: Collection[Observation],
-) -> FrozenDict[str, Array]:
+) -> xax.FrozenDict[str, Array]:
     """Get the observation from the physics state."""
     observations = {}
     for observation in obs_generators:
         rng, obs_rng = jax.random.split(rng)
         observation_value = observation(rollout_state, obs_rng)
         observations[observation.observation_name] = observation_value
-    return FrozenDict(observations)
+    return xax.FrozenDict(observations)
 
 
 def get_rewards(
@@ -111,13 +110,13 @@ def get_rewards(
             reward_val = jnp.clip(reward_val, -clip_max, clip_max)
         rewards[reward_generator.reward_name] = reward_val
     total_reward = jax.tree.reduce(jnp.add, list(rewards.values()))
-    return Rewards(total=total_reward, components=FrozenDict(rewards))
+    return Rewards(total=total_reward, components=xax.FrozenDict(rewards))
 
 
 def get_terminations(
     physics_state: PhysicsState,
     termination_generators: Collection[Termination],
-) -> FrozenDict[str, Array]:
+) -> xax.FrozenDict[str, Array]:
     """Get the terminations from the physics state."""
     terminations = {}
     for termination in termination_generators:
@@ -125,15 +124,15 @@ def get_terminations(
         chex.assert_type(termination_val, bool)
         name = termination.termination_name
         terminations[name] = termination_val
-    return FrozenDict(terminations)
+    return xax.FrozenDict(terminations)
 
 
 def get_commands(
-    prev_commands: FrozenDict[str, Array],
+    prev_commands: xax.FrozenDict[str, Array],
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
     command_generators: Collection[Command],
-) -> FrozenDict[str, Array]:
+) -> xax.FrozenDict[str, Array]:
     """Get the commands from the physics state."""
     commands = {}
     for command_generator in command_generators:
@@ -143,13 +142,13 @@ def get_commands(
         assert isinstance(prev_command, Array)
         command_val = command_generator(prev_command, physics_state.data.time, cmd_rng)
         commands[command_name] = command_val
-    return FrozenDict(commands)
+    return xax.FrozenDict(commands)
 
 
 def get_initial_commands(
     rng: PRNGKeyArray,
     command_generators: Collection[Command],
-) -> FrozenDict[str, Array]:
+) -> xax.FrozenDict[str, Array]:
     """Get the initial commands from the physics state."""
     commands = {}
     for command_generator in command_generators:
@@ -157,14 +156,14 @@ def get_initial_commands(
         command_name = command_generator.command_name
         command_val = command_generator.initial_command(cmd_rng)
         commands[command_name] = command_val
-    return FrozenDict(commands)
+    return xax.FrozenDict(commands)
 
 
 def get_randomizations(
     physics_model: PhysicsModel,
     randomizations: Collection[Randomization],
     rng: PRNGKeyArray,
-) -> FrozenDict[str, Array]:
+) -> xax.FrozenDict[str, Array]:
     all_randomizations: dict[str, dict[str, Array]] = {}
     for randomization in randomizations:
         rng, randomization_rng = jax.random.split(rng)
@@ -173,7 +172,7 @@ def get_randomizations(
         if count > 1:
             name_to_keys = {k: set(v.keys()) for k, v in all_randomizations.items()}
             raise ValueError(f"Found duplicate randomization keys: {name}. Randomizations: {name_to_keys}")
-    return FrozenDict({k: v for d in all_randomizations.values() for k, v in d.items()})
+    return xax.FrozenDict({k: v for d in all_randomizations.values() for k, v in d.items()})
 
 
 def apply_randomizations(
@@ -181,7 +180,7 @@ def apply_randomizations(
     engine: PhysicsEngine,
     randomizations: Collection[Randomization],
     rng: PRNGKeyArray,
-) -> tuple[FrozenDict[str, Array], PhysicsState]:
+) -> tuple[xax.FrozenDict[str, Array], PhysicsState]:
     rand_rng, reset_rng = jax.random.split(rng)
     randomizations = get_randomizations(physics_model, randomizations, rand_rng)
     physics_state = engine.reset(physics_model.tree_replace(randomizations), reset_rng)
@@ -491,8 +490,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model: PyTree,
         carry: PyTree,
         physics_model: PhysicsModel,
-        observations: FrozenDict[str, Array],
-        commands: FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, PyTree | None, PyTree | None]:
         """Gets an action for the current observation.
@@ -867,7 +866,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array]]:
         """Updates the model on the given trajectory.
 
         This function should be implemented according to the specific RL method
@@ -944,7 +943,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         commands: Collection[Command],
         observations: Collection[Observation],
         randomizations: Collection[Randomization],
-        rewards: Collection[Reward],
     ) -> Collection[Marker]:
         markers: list[Marker] = []
         for command in commands:
@@ -953,8 +951,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers.extend(observation.get_markers())
         for randomization in randomizations:
             markers.extend(randomization.get_markers())
-        for reward in rewards:
-            markers.extend(reward.get_markers())
         return markers
 
     @xax.jit(
@@ -969,7 +965,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def _rl_train_loop_step(
         self,
         physics_model: PhysicsModel,
-        randomization_dict: FrozenDict[str, Array],
+        randomization_dict: xax.FrozenDict[str, Array],
         model_arr: PyTree,
         model_static: PyTree,
         optimizer: optax.GradientTransformation,
@@ -981,7 +977,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, Trajectory, Rewards]:
         def single_unroll(
             physics_model: PhysicsModel,
-            randomization_dict: FrozenDict[str, Array],
+            randomization_dict: xax.FrozenDict[str, Array],
             model_arr: PyTree,
             model_static: PyTree,
             engine: PhysicsEngine,
@@ -1062,8 +1058,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             metrics = Metrics(
                 train=train_metrics,
-                reward=FrozenDict(self.get_reward_metrics(trajectories, rewards)),
-                termination=FrozenDict(self.get_termination_metrics(trajectories)),
+                reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
+                termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
             )
 
             # Saving the last trajectory for visualization.
@@ -1127,8 +1123,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             engine = self.get_engine(mj_model, metadata)
             observations = self.get_observations(mj_model)
             commands = self.get_commands(mj_model)
-            rewards = self.get_rewards(mj_model)
             terminations = self.get_terminations(mj_model)
+            rewards = self.get_rewards(mj_model)
             randomizations = self.get_randomization(mj_model)
 
             # Creates the markers.
@@ -1136,7 +1132,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 commands=commands,
                 observations=observations,
                 randomizations=randomizations,
-                rewards=rewards,
             )
 
             # Gets initial variables.
@@ -1218,6 +1213,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 return physics_model, rollout_variables
 
             try:
+                transitions = []
                 for _ in iterator:
                     transition, rollout_variables = self.step_engine(
                         physics_model=mj_model,
@@ -1226,26 +1222,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         rollout_constants=rollout_constants,
                         rollout_variables=rollout_variables,
                     )
-                    transition = jax.tree.map(lambda x: jnp.array(x), transition)
-
-                    # Gets the rewards.
-                    reward = get_rewards(
-                        trajectory=trajectory,
-                        reward_generators=rollout_constants.reward_generators,
-                        ctrl_dt=self.config.ctrl_dt,
-                        clip_max=self.config.reward_clip_max,
-                    )
-
+                    transitions.append(transition)
                     rng, rand_rng = jax.random.split(rng)
                     mj_model, rollout_variables = jax.lax.cond(
-                        trajectory.done,
+                        transition.done,
                         lambda: reset_mujoco_model(mj_model, rollout_variables, rand_rng),
                         lambda: (mj_model, rollout_variables),
                     )
 
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                         for marker in markers:
-                            marker(model, data, scene, trajectory, reward)
+                            marker(model, data, scene, transition)
 
                     # Logs the frames to render.
                     viewer.data = rollout_variables.physics_state.data
@@ -1253,6 +1240,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         viewer.render(callback=render_callback)
                     else:
                         frames.append(viewer.read_pixels(depth=False, callback=render_callback))
+
+                trajectory = jax.tree_map(lambda *xs: jnp.stack(xs), *transitions)
+
+                get_rewards(
+                    trajectory=trajectory,
+                    reward_generators=rollout_constants.reward_generators,
+                    ctrl_dt=self.config.ctrl_dt,
+                    clip_max=self.config.reward_clip_max,
+                )
+
+                # TODO: some nice visualizer of rewards...
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
@@ -1358,7 +1356,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 commands=commands,
                 observations=observations,
                 randomizations=randomizations,
-                rewards=rewards_terms,
             )
 
             # These remain constant across the entire episode.

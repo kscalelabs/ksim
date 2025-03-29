@@ -19,7 +19,7 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.types import Rewards, Trajectory
+from ksim.types import Trajectory
 from ksim.vis import Marker
 
 
@@ -85,7 +85,7 @@ class LinearVelocityArrow(Marker):
     def command_id(self) -> int:
         return {"x": 0, "y": 1}[self.axis]
 
-    def update(self, trajectory: Trajectory, reward: Rewards) -> None:
+    def update(self, trajectory: Trajectory) -> None:
         value = float(trajectory.command[self.command_name][self.command_id])
         self.scale = (self.vis_scale, self.vis_scale, value * 5.0 * self.vis_scale)
         match self.axis:
@@ -139,6 +139,7 @@ class LinearVelocityCommand(Command):
     y_range: tuple[float, float] = attrs.field()
     x_zero_prob: float = attrs.field(default=0.0)
     y_zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
 
@@ -157,7 +158,10 @@ class LinearVelocityCommand(Command):
         )
 
     def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
-        return prev_command
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
         return [

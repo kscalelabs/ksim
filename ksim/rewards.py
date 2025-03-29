@@ -54,7 +54,20 @@ class Reward(ABC):
 
     scale: float = attrs.field(validator=reward_scale_validator)
 
-    def __call__(self, trajectory: Trajectory) -> Array: ...
+    @abstractmethod
+    def __call__(self, trajectory: Trajectory) -> Array:
+        """Get the reward for a single trajectory.
+
+        You may assume that the dimensionality is (time, *leaf_dims) accross all
+        leaves of the trajectory.
+
+        Args:
+            trajectory: The trajectory to get the reward for.
+
+        Returns:
+            An array of shape (time, *leaf_dims) containing the reward for each
+            timestep.
+        """
 
     def get_markers(self) -> Collection[Marker]:
         return []
