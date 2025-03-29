@@ -1179,25 +1179,26 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 return physics_model, rollout_variables
 
             try:
+                transitions = []
                 for _ in iterator:
-                    trajectory, rollout_variables = self.step_engine(
+                    transition, rollout_variables = self.step_engine(
                         physics_model=mj_model,
                         model=model,
                         engine=engine,
                         rollout_constants=rollout_constants,
                         rollout_variables=rollout_variables,
                     )
-
+                    transitions.append(transition)
                     rng, rand_rng = jax.random.split(rng)
                     mj_model, rollout_variables = jax.lax.cond(
-                        trajectory.done,
+                        transition.done,
                         lambda: reset_mujoco_model(mj_model, rollout_variables, rand_rng),
                         lambda: (mj_model, rollout_variables),
                     )
 
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                         for marker in markers:
-                            marker(model, data, scene, trajectory)
+                            marker(model, data, scene, transition)
 
                     # Logs the frames to render.
                     viewer.data = rollout_variables.physics_state.data
@@ -1205,6 +1206,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         viewer.render(callback=render_callback)
                     else:
                         frames.append(viewer.read_pixels(depth=False, callback=render_callback))
+
+                trajectory = jax.tree.map(lambda x: jnp.array(x), transitions)
+
+                rewards = get_rewards(
+                    trajectory=trajectory,
+                    reward_generators=rollout_constants.reward_generators,
+                    ctrl_dt=self.config.ctrl_dt,
+                    clip_max=self.config.reward_clip_max,
+                )
+
+                # TODO: some nice visualizer of rewards...
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
