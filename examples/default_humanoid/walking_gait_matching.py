@@ -209,7 +209,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            rollout_length_seconds=21.0,
+            rollout_length_seconds=5.0,
             domain_randomize=False,
             # PPO parameters
             gamma=0.97,
@@ -219,7 +219,6 @@ if __name__ == "__main__":
             clip_param=0.3,
             max_grad_norm=1.0,
             use_mit_actuators=True,
-            valid_every_n_steps=50,
             # Gait matching parameters.
             bvh_path=str(Path(__file__).parent / "data" / "walk-relaxed_actorcore.bvh"),
             rotate_bvh_euler=(0, np.pi / 2, 0),
