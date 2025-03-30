@@ -1263,9 +1263,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     case _:
                         raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
 
-    def model_partition_fn(self, item: Any) -> bool:  # noqa: ANN401
-        return eqx.is_inexact_array(item)
-
     def log_full_trajectory(self, state: xax.State, is_first_step: bool, last_log_time: float) -> bool:
         if is_first_step and self.config.log_full_trajectory_on_first_step:
             return True
