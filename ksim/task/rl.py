@@ -627,7 +627,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_dataset(self, phase: xax.Phase) -> Dataset:
         raise NotImplementedError("RL tasks do not require datasets, since trajectory histories are stored in-memory.")
 
-    def compute_loss(self, model: PyTree, batch: Any, output: Any) -> Array:  # noqa: ANN401
+    def compute_loss(self, model: PyTree, batch: Any, output: Any, state: xax.State) -> Array:  # noqa: ANN401
         raise NotImplementedError(
             "Direct compute_loss from TrainMixin is not expected to be called in RL tasks. "
             "PPO tasks use model_update and loss_metrics_grads instead."
