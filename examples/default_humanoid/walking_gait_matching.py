@@ -13,7 +13,7 @@ import mujoco
 import numpy as np
 import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
-from jaxtyping import Array
+from jaxtyping import Array, PRNGKeyArray
 from scipy.spatial.transform import Rotation as R
 
 import ksim
@@ -26,12 +26,14 @@ from ksim.utils.reference_gait import (
     visualize_reference_gait,
 )
 
-from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig, NaiveVelocityReward
+from .walking import DefaultHumanoidModel, HumanoidWalkingTask, HumanoidWalkingTaskConfig, NaiveVelocityReward
 
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class AuxTransitionOutputs:
+class AuxOutputs:
+    log_probs: Array
+    values: Array
     tracked_pos: xax.FrozenDict[int, Array]
 
 
@@ -99,11 +101,11 @@ class GaitMatchingReward(ksim.Reward):
         return list(self.reference_gait.values())[0].array.shape[0]
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        assert isinstance(trajectory.aux_transition_outputs, AuxTransitionOutputs)
+        assert isinstance(trajectory.aux_outputs, AuxOutputs)
         reference_gait: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_gait)
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         target_pos = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_gait)
-        tracked_pos = trajectory.aux_transition_outputs.tracked_pos
+        tracked_pos = trajectory.aux_outputs.tracked_pos
         error = jax.tree.map(lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos, tracked_pos)
         mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
         mean_error = mean_error_over_bodies.mean(axis=-1)
@@ -124,21 +126,33 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
 
         return rewards
 
-    def get_transition_aux_outputs(
+    def sample_action(
         self,
+        model: DefaultHumanoidModel,
+        carry: None,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
-        next_physics_state: ksim.PhysicsState,
-        action: Array,
-        terminated: Array,
-    ) -> AuxTransitionOutputs:
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, None, AuxOutputs]:
+        action_n, _, super_aux_outputs = super().sample_action(
+            model, carry, physics_model, physics_state, observations, commands, rng
+        )
+
         # Getting the local cartesian positions for all tracked bodies.
         tracked_positions: dict[int, Array] = {}
         for body_id in self.tracked_body_ids:
             body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
             tracked_positions[body_id] = jnp.array(body_pos)
 
-        return AuxTransitionOutputs(tracked_pos=xax.FrozenDict(tracked_positions))
+        aux_outputs = AuxOutputs(
+            log_probs=super_aux_outputs.log_probs,
+            values=super_aux_outputs.values,
+            tracked_pos=xax.FrozenDict(tracked_positions),
+        )
+        return action_n, None, aux_outputs
+
 
     def run(self) -> None:
         mj_model: PhysicsModel = self.get_mujoco_model()

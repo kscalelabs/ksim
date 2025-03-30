@@ -447,9 +447,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        if not isinstance(trajectories.aux_sample_outputs, AuxOutputs):
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_sample_outputs.log_probs
+        return trajectories.aux_outputs.log_probs
 
     def get_on_policy_values(
         self,
@@ -457,9 +457,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        if not isinstance(trajectories.aux_sample_outputs, AuxOutputs):
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_sample_outputs.values
+        return trajectories.aux_outputs.values
 
     def get_log_probs(
         self,
@@ -497,6 +497,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         model: DefaultHumanoidModel,
         carry: None,
         physics_model: ksim.PhysicsModel,
+        physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
