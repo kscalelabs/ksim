@@ -519,7 +519,7 @@ if __name__ == "__main__":
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.default_humanoid.walking num_envs=8 num_batches=2
+    #   python -m examples.default_humanoid.walking num_envs=8 batch_size=4
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             num_envs=2048,

@@ -1352,7 +1352,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             state = self.on_training_start(state)
-            state.num_samples = 1  # prevents from checkpointing at start
 
             def on_exit() -> None:
                 model = eqx.combine(model_arr, model_static)
@@ -1375,10 +1374,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # Using validation phase to log full trajectories.
                     if self.log_full_trajectory(state, is_first_step, last_log_time):
-                        state.raw_phase = "valid"
+                        state = state.replace(phase="valid")
                         last_log_time = time.time()
                     else:
-                        state.raw_phase = "train"
+                        state = state.replace(phase="train")
 
                     # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
@@ -1408,8 +1407,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         elapsed_time = xax.format_timedelta(datetime.timedelta(seconds=timer.elapsed_time), short=True)
                         logger.log(xax.LOG_STATUS, "First step time: %s", elapsed_time)
 
-                    state.num_steps += self.config.epochs_per_log_step
-                    state.num_samples += self.rollout_num_samples
+                    state = state.replace(
+                        num_steps=state.num_steps + self.config.epochs_per_log_step,
+                        num_samples=state.num_samples + self.rollout_num_samples,
+                    )
 
                     # Only log trajectory information on validation steps.
                     if state.phase == "valid":
