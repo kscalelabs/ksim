@@ -20,10 +20,8 @@ Config = TypeVar("Config", bound=HumanoidStandingTaskConfig)
 class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.HealthyReward(scale=1.0),
             ksim.BaseHeightRangeReward(z_lower=1.3, z_upper=1.5, scale=1.0),
-            # ksim.BaseHeightReward(height_target=1.4, scale=1.0),
-            ksim.TerminationPenalty(scale=-1.0),
+            ksim.StayAliveReward(scale=1.0),
         ]
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
@@ -38,9 +36,9 @@ if __name__ == "__main__":
     HumanoidStandingTask.launch(
         HumanoidStandingTaskConfig(
             # Training parameters.
-            num_envs=256,
-            batch_size=32,
-            num_passes=4,
+            num_envs=2048,
+            batch_size=256,
+            num_passes=32,
             epochs_per_log_step=10,
             rollout_length_seconds=10.0,
             # Logging parameters.

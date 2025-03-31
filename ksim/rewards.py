@@ -4,8 +4,7 @@ __all__ = [
     "MonotonicFn",
     "norm_to_reward",
     "Reward",
-    "HealthyReward",
-    "TerminationPenalty",
+    "StayAliveReward",
     "LinearVelocityZPenalty",
     "AngularVelocityXYPenalty",
     "JointVelocityPenalty",
@@ -111,19 +110,18 @@ class Reward(ABC):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class HealthyReward(Reward):
-    """Reward for healthy states."""
+class StayAliveReward(Reward):
+    """Reward for staying alive.
+
+    This provides a reward for staying alive, with a negative penalty on
+    termination. These values are balanced by the balance parameter - a larger
+    value will increase the relative penalty for termination.
+    """
+
+    balance: float = attrs.field(default=10.0)
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        return jnp.ones_like(trajectory.done)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class TerminationPenalty(Reward):
-    """Penalty for terminating the episode."""
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        return trajectory.done
+        return jnp.where(trajectory.done, -1.0, 1.0 / self.balance)
 
 
 @attrs.define(frozen=True, kw_only=True)
