@@ -209,21 +209,18 @@ class SensorObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class BaseLinearAccelerationObservation(Observation):
-
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.data.qacc[0:3]
 
 
 @attrs.define(frozen=True, kw_only=True)
 class BaseAngularAccelerationObservation(Observation):
-
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.data.qacc[3:6]
 
 
 @attrs.define(frozen=True, kw_only=True)
 class ActuatorAccelerationObservation(Observation):
-
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
         return rollout_state.physics_state.data.qacc[6:]
 

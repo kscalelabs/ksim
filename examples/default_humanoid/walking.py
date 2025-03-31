@@ -107,7 +107,7 @@ class DefaultHumanoidCritic(eqx.Module):
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 3 + 2 + 1
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 2 + 1
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -128,6 +128,8 @@ class DefaultHumanoidCritic(eqx.Module):
         imu_acc_3: Array,
         imu_gyro_3: Array,
         act_frc_obs_n: Array,
+        base_pos_3: Array,
+        base_quat_4: Array,
         lin_vel_obs_3: Array,
         ang_vel_obs_3: Array,
         lin_vel_cmd_2: Array,
@@ -142,6 +144,8 @@ class DefaultHumanoidCritic(eqx.Module):
                 imu_acc_3,  # 3
                 imu_gyro_3,  # 3
                 act_frc_obs_n,  # 21
+                base_pos_3,  # 3
+                base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
                 lin_vel_cmd_2,  # 2
@@ -306,6 +310,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
+            ksim.BasePositionObservation(),
+            ksim.BaseOrientationObservation(),
             ksim.BaseLinearVelocityObservation(),
             ksim.BaseAngularVelocityObservation(),
             ksim.BaseLinearAccelerationObservation(),
@@ -358,10 +364,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
-            # ksim.LinearVelocityTrackingPenalty(scale=-0.1),
-            ksim.FeetLinearVelocityTrackingPenalty(ctrl_dt=self.config.ctrl_dt, scale=-0.1),
-            ksim.FeetFlatReward(scale=0.01),
-            # ksim.AngularVelocityTrackingPenalty(scale=-0.01),
+            ksim.LinearVelocityTrackingPenalty(scale=-0.1),
+            ksim.AngularVelocityTrackingPenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -410,6 +414,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]  # 3
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0  # 21
+        base_pos_3 = observations["base_position_observation"]  # 3
+        base_quat_4 = observations["base_orientation_observation"]  # 4
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]  # 3
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
         lin_vel_cmd_2 = commands["linear_velocity_command"]  # 2
@@ -422,6 +428,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             imu_acc_3=imu_acc_3,
             imu_gyro_3=imu_gyro_3,
             act_frc_obs_n=act_frc_obs_n,
+            base_pos_3=base_pos_3,
+            base_quat_4=base_quat_4,
             lin_vel_obs_3=lin_vel_obs_3,
             ang_vel_obs_3=ang_vel_obs_3,
             lin_vel_cmd_2=lin_vel_cmd_2,

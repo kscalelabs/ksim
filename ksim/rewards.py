@@ -181,11 +181,15 @@ class BaseHeightRangeReward(Reward):
 
     z_lower: float = attrs.field()
     z_upper: float = attrs.field()
-    norm: xax.NormType = attrs.field(default="l1")
+    taper: float = attrs.field(default=1.0)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
-        return ((base_height > self.z_lower) & (base_height < self.z_upper)).astype(base_height.dtype)
+        too_low = self.z_lower - base_height
+        too_high = base_height - self.z_upper
+        penalty = jnp.maximum(too_low, too_high).clip(min=0.0) * self.taper
+        reward = (1.0 - penalty).clip(min=0.0)
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
