@@ -32,7 +32,15 @@ def get_deltas(
     return rewards + decay_gamma * values_shifted * termination_mask - values
 
 
-@xax.jit(static_argnames=["decay_gamma", "gae_lambda", "normalize_advantages", "use_two_step_td_target"])
+@xax.jit(
+    static_argnames=[
+        "decay_gamma",
+        "gae_lambda",
+        "normalize_advantages",
+        "use_two_step_td_target",
+        "monte_carlo_returns",
+    ]
+)
 def compute_advantages_and_value_targets(
     values_t: Array,
     rewards_t: Array,
