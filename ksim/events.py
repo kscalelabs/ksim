@@ -123,20 +123,24 @@ class PushEvent(Event):
     def update_curriculum_step(self, event_state: BaseEventState) -> PushEventState:
         assert isinstance(event_state, PushEventState)
 
-        new_state = jax.lax.cond(
-            event_state.episode_length_percentage < self.episode_length_threshold
-            and self.use_curriculum
-            and event_state.curriculum_step < self.max_curriculum_steps,
-            lambda: PushEventState(
-                time_remaining=event_state.time_remaining,
-                curriculum_step=event_state.curriculum_step + 1,
-                episode_length_percentage=event_state.episode_length_percentage,
-            ),
-            lambda: event_state,
-        )
-        return new_state
+        if not self.use_curriculum:
+            return event_state
 
-    def _apply_random_force(self, data: PhysicsData, rng: PRNGKeyArray, event_state: PushEventState) -> tuple[PhysicsData, Array]:
+        should_step = (event_state.episode_length_percentage < self.episode_length_threshold) * (
+            event_state.curriculum_step < self.max_curriculum_steps
+        )
+
+        new_curriculum_step = jnp.where(should_step, event_state.curriculum_step + 1, event_state.curriculum_step)
+
+        return PushEventState(
+            time_remaining=event_state.time_remaining,
+            curriculum_step=new_curriculum_step,
+            episode_length_percentage=event_state.episode_length_percentage,
+        )
+
+    def _apply_random_force(
+        self, data: PhysicsData, rng: PRNGKeyArray, event_state: PushEventState
+    ) -> tuple[PhysicsData, Array]:
         # Randomly applies a force.
 
         curriculum_scale = 1.0 + self.force_scale_per_step * event_state.curriculum_step
