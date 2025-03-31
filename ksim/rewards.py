@@ -437,4 +437,4 @@ class FeetFlatReward(Reward):
             xax.get_norm(unit_vec_z, self.norm)
             - xax.get_norm(unit_vec_x, self.norm)
             - xax.get_norm(unit_vec_y, self.norm)
-        )
+        ).min(axis=-1)
