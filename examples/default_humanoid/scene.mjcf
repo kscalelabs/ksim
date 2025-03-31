@@ -14,10 +14,6 @@
 -->
 
 <mujoco model="Humanoid">
-  <option timestep="0.005" iterations="1" ls_iterations="4">
-    <flag eulerdamp="disable"/>
-  </option>
-
   <asset>
     <texture name="body" type="cube" builtin="flat" mark="cross" width="512" height="512" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" markrgb="1 1 1" random="0.01"/>
     <material name="body" texture="body" texuniform="true" rgba="0.8 0.6 .4 1"/>
