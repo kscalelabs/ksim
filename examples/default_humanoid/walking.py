@@ -355,12 +355,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=3.0),
+            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             # ksim.LinearVelocityTrackingPenalty(scale=-0.1),
             ksim.FeetLinearVelocityTrackingPenalty(ctrl_dt=self.config.ctrl_dt, scale=-0.1),
-            ksim.FeetFlatReward(scale=1.0),
+            ksim.FeetFlatReward(scale=0.01),
             # ksim.AngularVelocityTrackingPenalty(scale=-0.01),
         ]
 
@@ -515,7 +515,7 @@ if __name__ == "__main__":
             num_passes=10,
             epochs_per_log_step=10,
             # Logging parameters.
-            log_full_trajectory_every_n_seconds=60,
+            # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
