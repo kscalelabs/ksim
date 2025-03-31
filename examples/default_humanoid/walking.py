@@ -358,10 +358,10 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
-            # ksim.LinearVelocityTrackingPenalty(scale=-0.1),
+            ksim.LinearVelocityTrackingPenalty(scale=-0.1),
             ksim.FeetLinearVelocityTrackingPenalty(ctrl_dt=self.config.ctrl_dt, scale=-0.1),
             ksim.FeetFlatReward(scale=0.01),
-            # ksim.AngularVelocityTrackingPenalty(scale=-0.01),
+            ksim.AngularVelocityTrackingPenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
