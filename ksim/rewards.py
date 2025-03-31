@@ -430,4 +430,11 @@ class FeetFlatReward(Reward):
         chex.assert_shape(feet_quat, (..., 2, 4))
         unit_vec = jnp.array(self.plane, dtype=feet_quat.dtype)
         unit_vec = xax.rotate_vector_by_quat(unit_vec, feet_quat)
-        return xax.get_norm(unit_vec[..., 2] - 1.0, self.norm).max(axis=-1)
+        unit_vec_x, unit_vec_y, unit_vec_z = unit_vec[..., 0], unit_vec[..., 1], unit_vec[..., 2]
+
+        # Z should be 1, and X and Y should be 0.
+        return (
+            xax.get_norm(unit_vec_z, self.norm)
+            - xax.get_norm(unit_vec_x, self.norm)
+            - xax.get_norm(unit_vec_y, self.norm)
+        )
