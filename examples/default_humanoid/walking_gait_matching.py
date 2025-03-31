@@ -213,7 +213,6 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=5.0,
-            domain_randomize=False,
             # PPO parameters
             gamma=0.97,
             lam=0.95,
