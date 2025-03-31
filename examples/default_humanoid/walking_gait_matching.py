@@ -26,14 +26,18 @@ from ksim.utils.reference_gait import (
     visualize_reference_gait,
 )
 
-from .walking import DefaultHumanoidModel, HumanoidWalkingTask, HumanoidWalkingTaskConfig, NaiveVelocityReward
+from .walking import (
+    AuxOutputs,
+    DefaultHumanoidModel,
+    HumanoidWalkingTask,
+    HumanoidWalkingTaskConfig,
+    NaiveVelocityReward,
+)
 
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-    values: Array
+class GaitMatchingAuxOutputs(AuxOutputs):
     tracked_pos: xax.FrozenDict[int, Array]
 
 
@@ -101,7 +105,7 @@ class GaitMatchingReward(ksim.Reward):
         return list(self.reference_gait.values())[0].array.shape[0]
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        assert isinstance(trajectory.aux_outputs, AuxOutputs)
+        assert isinstance(trajectory.aux_outputs, GaitMatchingAuxOutputs)
         reference_gait: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_gait)
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         target_pos = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_gait)
@@ -135,7 +139,7 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, AuxOutputs]:
+    ) -> tuple[Array, None, GaitMatchingAuxOutputs]:
         action_n, _, super_aux_outputs = super().sample_action(
             model, carry, physics_model, physics_state, observations, commands, rng
         )
@@ -146,7 +150,7 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
             body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
             tracked_positions[body_id] = jnp.array(body_pos)
 
-        aux_outputs = AuxOutputs(
+        aux_outputs = GaitMatchingAuxOutputs(
             log_probs=super_aux_outputs.log_probs,
             values=super_aux_outputs.values,
             tracked_pos=xax.FrozenDict(tracked_positions),
