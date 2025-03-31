@@ -333,6 +333,7 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         model: DefaultHumanoidModel,
         carry: Array,
         physics_model: ksim.PhysicsModel,
+        physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
