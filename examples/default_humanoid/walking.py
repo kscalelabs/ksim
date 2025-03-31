@@ -370,7 +370,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.5),
+            ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
             ksim.FastAccelerationTermination(),
         ]
 

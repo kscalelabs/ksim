@@ -209,11 +209,6 @@
   <sensor>
     <accelerometer name="imu_acc" site="imu_site" noise="0.01" />
     <gyro name="imu_gyro" site="imu_site" noise="0.01" />
-    <magnetometer name="imu_mag" site="imu_site" noise="0.05" />
-    <framepos name="base_link_pos" objtype="site" objname="imu_site" />
-    <framequat name="base_link_quat" objtype="site" objname="imu_site" />
-    <framelinvel name="base_link_vel" objtype="site" objname="imu_site" />
-    <frameangvel name="base_link_ang_vel" objtype="site" objname="imu_site" />
   </sensor>
   
   <keyframe>

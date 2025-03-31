@@ -6,7 +6,6 @@ from typing import Generic, TypeVar
 
 import attrs
 import jax.numpy as jnp
-import xax
 from jaxtyping import Array
 
 import ksim
@@ -26,16 +25,6 @@ class UpwardReward(ksim.Reward):
         return z_delta
 
 
-@attrs.define(frozen=True, kw_only=True)
-class StationaryPenalty(ksim.Reward):
-    """Incentives staying in place laterally."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return xax.get_norm(trajectory.qvel[..., :2], self.norm).sum(axis=-1)
-
-
 @dataclass
 class HumanoidJumpingTaskConfig(HumanoidWalkingTaskConfig):
     pass
@@ -48,8 +37,7 @@ class HumanoidJumpingTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             UpwardReward(scale=0.5),
-            StationaryPenalty(scale=-0.1),
-            ksim.ActuatorForcePenalty(scale=-0.01),
+            ksim.StationaryPenalty(scale=-0.1),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
         ]

@@ -19,6 +19,7 @@ __all__ = [
     "ActionNearPositionPenalty",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
+    "StationaryPenalty",
 ]
 
 import functools
@@ -441,3 +442,14 @@ class FeetFlatReward(Reward):
             - xax.get_norm(unit_vec_x, self.norm)
             - xax.get_norm(unit_vec_y, self.norm)
         ).min(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class StationaryPenalty(Reward):
+    """Incentives staying in place laterally."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        vels = jnp.concatenate([trajectory.qvel[..., 0:2], trajectory.qvel[..., 3:5]], axis=-1)
+        return xax.get_norm(vels, self.norm).sum(axis=-1)

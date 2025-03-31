@@ -4,41 +4,25 @@
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
-import attrs
-import xax
-from jaxtyping import Array
-
 import ksim
 
 from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 
-@attrs.define(frozen=True, kw_only=True)
-class StationaryPenalty(ksim.Reward):
-    """Incentives staying in place laterally."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return xax.get_norm(trajectory.qvel[..., :2], self.norm).sum(axis=-1)
-
-
 @dataclass
-class HumanoidJumpingTaskConfig(HumanoidWalkingTaskConfig):
+class HumanoidStandingTaskConfig(HumanoidWalkingTaskConfig):
     pass
 
 
-Config = TypeVar("Config", bound=HumanoidJumpingTaskConfig)
+Config = TypeVar("Config", bound=HumanoidStandingTaskConfig)
 
 
-class HumanoidJumpingTask(HumanoidWalkingTask[Config], Generic[Config]):
+class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            StationaryPenalty(scale=-0.1),
-            ksim.BaseHeightRangePenalty(z_lower=1.1, z_upper=1.5, scale=-1.0),
-            ksim.ActuatorForcePenalty(scale=-0.01),
-            ksim.LinearVelocityZPenalty(scale=-0.01),
-            ksim.AngularVelocityXYPenalty(scale=-0.01),
+            ksim.StationaryPenalty(scale=-0.1),
+            ksim.BaseHeightRangePenalty(z_lower=1.3, z_upper=1.5, scale=-1.0),
+            ksim.TerminationPenalty(scale=-1.0),
         ]
 
 
@@ -47,8 +31,8 @@ if __name__ == "__main__":
     #   python -m examples.default_humanoid.standing
     # To visualize the environment, use the following command:
     #   python -m examples.default_humanoid.standing run_environment=True
-    HumanoidJumpingTask.launch(
-        HumanoidJumpingTaskConfig(
+    HumanoidStandingTask.launch(
+        HumanoidStandingTaskConfig(
             # Training parameters.
             num_envs=2048,
             batch_size=256,
