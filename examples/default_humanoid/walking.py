@@ -173,11 +173,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=1e-4,
+        value=3e-4,
         help="Learning rate for PPO.",
     )
     max_grad_norm: float = xax.field(
-        value=0.5,
+        value=2.0,
         help="Maximum gradient norm for clipping.",
     )
     adam_weight_decay: float = xax.field(
@@ -358,10 +358,10 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
-            ksim.LinearVelocityTrackingPenalty(scale=-0.1),
+            # ksim.LinearVelocityTrackingPenalty(scale=-0.1),
             ksim.FeetLinearVelocityTrackingPenalty(ctrl_dt=self.config.ctrl_dt, scale=-0.1),
             ksim.FeetFlatReward(scale=0.01),
-            ksim.AngularVelocityTrackingPenalty(scale=-0.01),
+            # ksim.AngularVelocityTrackingPenalty(scale=-0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -522,12 +522,5 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=4.0,
-            # PPO parameters
-            gamma=0.97,
-            lam=0.95,
-            entropy_coef=0.001,
-            learning_rate=3e-4,
-            clip_param=0.3,
-            max_grad_norm=1.0,
         ),
     )
