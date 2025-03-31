@@ -229,7 +229,7 @@ class PPOConfig(RLConfig):
     )
     entropy_coef: float = xax.field(
         value=0.008,
-        help="Entropy coefficient for PPO.",
+        help="Entropy coefficient for PPO: high = more exploration.",
     )
     log_clip_value: float = xax.field(
         value=10.0,
