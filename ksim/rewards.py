@@ -8,7 +8,6 @@ __all__ = [
     "AngularVelocityXYPenalty",
     "JointVelocityPenalty",
     "LinearVelocityTrackingPenalty",
-    "FeetLinearVelocityTrackingPenalty",
     "AngularVelocityTrackingPenalty",
     "BaseHeightReward",
     "BaseHeightRangeReward",
@@ -18,6 +17,8 @@ __all__ = [
     "ActuatorJerkPenalty",
     "AvoidLimitsReward",
     "ActionNearPositionPenalty",
+    "FeetLinearVelocityTrackingPenalty",
+    "FeetFlatReward",
 ]
 
 import functools
@@ -145,54 +146,6 @@ class LinearVelocityTrackingPenalty(Reward):
         lin_vel_x = trajectory.qvel[..., 0]
         lin_vel_y = trajectory.qvel[..., 1]
         return xax.get_norm(lin_vel_x - lin_vel_x_cmd, self.norm) + xax.get_norm(lin_vel_y - lin_vel_y_cmd, self.norm)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class FeetLinearVelocityTrackingPenalty(Reward):
-    """Explicit penalty for tracking the linear velocity of the feet.
-
-    This reward provides an explicit penalty to incentivize the robot to move
-    it's feet in the direction of the velocity command.
-
-    This penalty expects a reference linear velocity command, as well as the
-    feet velocity observations.
-    """
-
-    ctrl_dt: float = attrs.field()
-    norm: xax.NormType = attrs.field(default="l2")
-    command_name: str = attrs.field(default="linear_velocity_command")
-    obs_name: str = attrs.field(default="feet_position_observation")
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        cmd = trajectory.command[self.command_name]
-        chex.assert_shape(cmd, (..., 2))
-        lin_vel_x_cmd = cmd[..., 0]
-        lin_vel_y_cmd = cmd[..., 1]
-
-        obs = trajectory.obs[self.obs_name]
-        chex.assert_shape(obs, (..., 2, 3))
-
-        def get_vel_from_pos(pos: Array) -> Array:
-            prev_pos = jnp.concatenate([pos[..., :1], pos[..., :-1]], axis=-1)
-            return (pos - prev_pos) / self.ctrl_dt
-
-        left_vel_x = get_vel_from_pos(obs[..., 0, 0])
-        left_vel_y = get_vel_from_pos(obs[..., 0, 1])
-        right_vel_x = get_vel_from_pos(obs[..., 1, 0])
-        right_vel_y = get_vel_from_pos(obs[..., 1, 1])
-
-        # Mean of the two foot velocities should be close to the command.
-        lin_vel_x_mean = (left_vel_x + right_vel_x) / 2
-        lin_vel_y_mean = (left_vel_y + right_vel_y) / 2
-
-        lin_vel_x_penalty = xax.get_norm(lin_vel_x_mean - lin_vel_x_cmd, self.norm)
-        lin_vel_y_penalty = xax.get_norm(lin_vel_y_mean - lin_vel_y_cmd, self.norm)
-        penalty = lin_vel_x_penalty + lin_vel_y_penalty
-
-        # Don't penalize after falling over.
-        penalty = jnp.where(trajectory.done, 0.0, penalty)
-
-        return penalty
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -414,3 +367,67 @@ class ActionNearPositionPenalty(Reward):
             joint_threshold=xax.hashable_array(joint_threshold),
             scale=scale,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetLinearVelocityTrackingPenalty(Reward):
+    """Explicit penalty for tracking the linear velocity of the feet.
+
+    This reward provides an explicit penalty to incentivize the robot to move
+    it's feet in the direction of the velocity command.
+
+    This penalty expects a reference linear velocity command, as well as the
+    feet velocity observations.
+    """
+
+    ctrl_dt: float = attrs.field()
+    command_name: str = attrs.field(default="linear_velocity_command")
+    obs_name: str = attrs.field(default="feet_position_observation")
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        cmd = trajectory.command[self.command_name]
+        chex.assert_shape(cmd, (..., 2))
+        lin_vel_x_cmd = cmd[..., 0]
+        lin_vel_y_cmd = cmd[..., 1]
+
+        obs = trajectory.obs[self.obs_name]
+        chex.assert_shape(obs, (..., 2, 3))
+
+        def get_vel_from_pos(pos: Array) -> Array:
+            next_pos = jnp.concatenate([pos[..., 1:], pos[..., -1:]], axis=-1)
+            return (next_pos - pos) / self.ctrl_dt
+
+        left_vel_x = get_vel_from_pos(obs[..., 0, 0])
+        left_vel_y = get_vel_from_pos(obs[..., 0, 1])
+        right_vel_x = get_vel_from_pos(obs[..., 1, 0])
+        right_vel_y = get_vel_from_pos(obs[..., 1, 1])
+
+        # Mean of the two foot velocities should be close to the command.
+        lin_vel_x_mean = (left_vel_x + right_vel_x) / 2
+        lin_vel_y_mean = (left_vel_y + right_vel_y) / 2
+
+        lin_vel_x_penalty = xax.get_norm(lin_vel_x_mean - lin_vel_x_cmd, self.norm)
+        lin_vel_y_penalty = xax.get_norm(lin_vel_y_mean - lin_vel_y_cmd, self.norm)
+        penalty = lin_vel_x_penalty + lin_vel_y_penalty
+
+        # Don't penalize after falling over.
+        penalty = jnp.where(trajectory.done, 0.0, penalty)
+
+        return penalty
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetFlatReward(Reward):
+    """Reward for keeping the feet parallel to the relevant plane."""
+
+    obs_name: str = attrs.field(default="feet_orientation_observation")
+    plane: tuple[float, float, float] = attrs.field(default=(0.0, 0.0, 1.0))
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        feet_quat = trajectory.obs[self.obs_name]
+        chex.assert_shape(feet_quat, (..., 2, 4))
+        unit_vec = jnp.array(self.plane, dtype=feet_quat.dtype)
+        unit_vec = xax.rotate_vector_by_quat(unit_vec, feet_quat)
+        return xax.get_norm(unit_vec[..., 2] - 1.0, self.norm).max(axis=-1)

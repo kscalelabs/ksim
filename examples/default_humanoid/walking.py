@@ -318,6 +318,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 foot_left_body_name="foot_left",
                 foot_right_body_name="foot_right",
             ),
+            ksim.FeetOrientationObservation.create(
+                physics_model=physics_model,
+                foot_left_body_name="foot_left",
+                foot_right_body_name="foot_right",
+            ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -350,11 +355,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=0.5),
+            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=3.0),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             # ksim.LinearVelocityTrackingPenalty(scale=-0.1),
-            ksim.FeetLinearVelocityTrackingPenalty(ctrl_dt=self.config.ctrl_dt, scale=-0.5),
+            ksim.FeetLinearVelocityTrackingPenalty(ctrl_dt=self.config.ctrl_dt, scale=-0.1),
+            ksim.FeetFlatReward(scale=1.0),
             # ksim.AngularVelocityTrackingPenalty(scale=-0.01),
         ]
 

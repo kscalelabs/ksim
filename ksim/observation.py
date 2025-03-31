@@ -17,7 +17,7 @@ __all__ = [
     "ActuatorAccelerationObservation",
     "FeetContactObservation",
     "FeetPositionObservation",
-    "FeetPositionObservation",
+    "FeetOrientationObservation",
 ]
 
 import functools
@@ -284,6 +284,34 @@ class FeetPositionObservation(Observation):
         )
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
-        foot_left_pos = rollout_state.physics_state.data.xipos[self.foot_left]
-        foot_right_pos = rollout_state.physics_state.data.xipos[self.foot_right]
+        foot_left_pos = rollout_state.physics_state.data.xpos[self.foot_left]
+        foot_right_pos = rollout_state.physics_state.data.xpos[self.foot_right]
         return jnp.stack([foot_left_pos, foot_right_pos], axis=-2)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetOrientationObservation(Observation):
+    foot_left: int = attrs.field()
+    foot_right: int = attrs.field()
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        foot_left_body_name: str,
+        foot_right_body_name: str,
+        noise: float = 0.0,
+    ) -> Self:
+        foot_left_idx = get_body_data_idx_from_name(physics_model, foot_left_body_name)
+        foot_right_idx = get_body_data_idx_from_name(physics_model, foot_right_body_name)
+        return cls(
+            foot_left=foot_left_idx,
+            foot_right=foot_right_idx,
+            noise=noise,
+        )
+
+    def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
+        foot_left_quat = rollout_state.physics_state.data.xquat[self.foot_left]
+        foot_right_quat = rollout_state.physics_state.data.xquat[self.foot_right]
+        return jnp.stack([foot_left_quat, foot_right_quat], axis=-2)
