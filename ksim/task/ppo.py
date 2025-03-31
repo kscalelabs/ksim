@@ -39,12 +39,19 @@ def compute_advantages_and_value_targets(
     dones_t: Array,
     decay_gamma: float,
     gae_lambda: float,
-    normalize_advantages: bool = True,
+    normalize_advantages: bool = False,
     use_two_step_td_target: bool = False,
-) -> tuple[Array, Array]:
+    monte_carlo_returns: bool = False,
+) -> tuple[Array, Array, Array, Array]:
     """Computes the advantages using Generalized Advantage Estimation (GAE)."""
 
-    def scan_fn(adv_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+    def returns_scan_fn(returns_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+        """Scanning this computes the returns in reverse order."""
+        reward, mask = x
+        return_t = reward + decay_gamma * mask * returns_t_plus_1
+        return return_t, return_t
+
+    def gae_scan_fn(adv_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
         """Scanning this computes the advantages in reverse order."""
         delta, mask = x
         adv_t = delta + decay_gamma * gae_lambda * mask * adv_t_plus_1
@@ -54,28 +61,33 @@ def compute_advantages_and_value_targets(
         # Use the last value as the bootstrap value.
         values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
         mask_t = jnp.where(dones_t, 0.0, 1.0)
-        deltas_t = get_deltas(rewards_t, values_t, values_shifted_t, mask_t, decay_gamma)
+
+        # Compute returns.
+        _, returns_t = jax.lax.scan(returns_scan_fn, jnp.zeros_like(rewards_t[-1]), (rewards_t, mask_t), reverse=True)
 
         # Compute the GAE.
-        _, gae_t = jax.lax.scan(scan_fn, jnp.zeros_like(deltas_t[-1]), (deltas_t, mask_t), reverse=True)
-        value_targets_t = gae_t + values_t
+        deltas_t = get_deltas(rewards_t, values_t, values_shifted_t, mask_t, decay_gamma)
+        _, gae_t = jax.lax.scan(gae_scan_fn, jnp.zeros_like(deltas_t[-1]), (deltas_t, mask_t), reverse=True)
+
+        # Get the value targets.
+        value_targets_t = returns_t if monte_carlo_returns else gae_t + values_t
 
         if not use_two_step_td_target:
-            return gae_t, value_targets_t
+            return gae_t, value_targets_t, gae_t, returns_t
 
         # Apply another TD step to get the value targets.
         value_targets_shifted_t = jnp.concatenate([value_targets_t[1:], value_targets_t[-1:]], axis=0)
         advantages_t = rewards_t + decay_gamma * value_targets_shifted_t * mask_t - values_t
 
-        return advantages_t, value_targets_t
+        return advantages_t, value_targets_t, gae_t, returns_t
 
     # Compute the advantages and value targets for each sample in the batch.
-    advantages_t, value_targets_t = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t)
+    advantages_t, value_targets_t, gae_t, returns_t = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t)
 
     if normalize_advantages:
         advantages_t = advantages_t / (advantages_t.std(axis=-1, keepdims=True) + 1e-6)
 
-    return advantages_t, value_targets_t
+    return advantages_t, value_targets_t, gae_t, returns_t
 
 
 @xax.jit(static_argnames=["clip_param"])
@@ -232,8 +244,8 @@ class PPOConfig(RLConfig):
         help="Entropy coefficient for PPO: high = more exploration.",
     )
     log_clip_value: float = xax.field(
-        value=10.0,
-        help="The log clip value for PPO, for numerical stability.",
+        value=20.0,
+        help="The log clip value for PPO, for numerical stability. For FP16, this should be 10 instead.",
     )
     gamma: float = xax.field(
         value=0.99,
@@ -250,6 +262,10 @@ class PPOConfig(RLConfig):
     use_two_step_td_target: bool = xax.field(
         value=False,
         help="Whether to use two-step TD targets.",
+    )
+    monte_carlo_returns: bool = xax.field(
+        value=False,
+        help="Whether to use Monte Carlo returns.",
     )
 
 
@@ -386,6 +402,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         values_t: Array,
         value_targets_t: Array,
         advantages_t: Array,
+        gae_t: Array,
+        returns_t: Array,
     ) -> dict[str, Array]:
         """Gets the metrics to log for a single trajectory.
 
@@ -403,6 +421,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             values_t: The state-value estimates, with shape (T,).
             value_targets_t: The value targets, with shape (T,).
             advantages_t: The advantages, with shape (T,).
+            gae_t: The GAE values, with shape (T,).
 
         Returns:
             A dictionary of metrics to be logged. Each metric should be a tensor
@@ -414,6 +433,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "advantages": advantages_t,
             "entropy": entropy_tn,
             "loss": loss_t,
+            "gae": gae_t,
+            "returns": returns_t,
         }
 
     @xax.jit(static_argnames=["self", "model_static"])
@@ -453,7 +474,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             log_probs_tn, entropy_tn = self.get_log_probs(model, trajectories, rng3)
             values_t = self.get_values(model, trajectories, rng4)
 
-            advantages_t, value_targets_t = compute_advantages_and_value_targets(
+            advantages_t, value_targets_t, gae_t, returns_t = compute_advantages_and_value_targets(
                 values_t=jax.lax.stop_gradient(values_t),
                 rewards_t=rewards.total,
                 dones_t=trajectories.done,
@@ -461,6 +482,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 gae_lambda=self.config.lam,
                 normalize_advantages=self.config.normalize_advantages,
                 use_two_step_td_target=self.config.use_two_step_td_target,
+                monte_carlo_returns=self.config.monte_carlo_returns,
             )
 
             loss_t = compute_ppo_loss(
@@ -504,6 +526,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 values_t=values_t,
                 value_targets_t=value_targets_t,
                 advantages_t=advantages_t,
+                gae_t=gae_t,
+                returns_t=returns_t,
             )
 
             single_traj = SingleTrajectory(

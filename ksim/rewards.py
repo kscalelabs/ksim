@@ -9,7 +9,7 @@ __all__ = [
     "JointVelocityPenalty",
     "LinearVelocityTrackingPenalty",
     "AngularVelocityTrackingPenalty",
-    "BaseHeightReward",
+    "BaseHeightPenalty",
     "BaseHeightRangePenalty",
     "ActionSmoothnessPenalty",
     "ActuatorForcePenalty",
@@ -164,16 +164,15 @@ class AngularVelocityTrackingPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class BaseHeightReward(Reward):
-    """Reward for tracking the base height target."""
+class BaseHeightPenalty(Reward):
+    """Penalty for deviating from the base height target."""
 
     height_target: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l1")
-    sensitivity: float = attrs.field(default=5.0)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
-        return jnp.exp(-xax.get_norm(base_height - self.height_target, self.norm) * self.sensitivity)
+        return xax.get_norm(base_height - self.height_target, self.norm)
 
 
 @attrs.define(frozen=True, kw_only=True)
