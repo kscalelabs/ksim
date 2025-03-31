@@ -21,17 +21,6 @@ from ksim.task.rl import RLConfig, RLTask
 from ksim.types import Rewards, SingleTrajectory, Trajectory
 
 
-def get_deltas(
-    rewards: Array,
-    values: Array,
-    values_shifted: Array,
-    termination_mask: Array,
-    decay_gamma: float,
-) -> Array:
-    """Computes the TD residuals for a rollout."""
-    return rewards + decay_gamma * values_shifted * termination_mask - values
-
-
 @xax.jit(
     static_argnames=[
         "decay_gamma",
@@ -74,7 +63,7 @@ def compute_advantages_and_value_targets(
         _, returns_t = jax.lax.scan(returns_scan_fn, jnp.zeros_like(rewards_t[-1]), (rewards_t, mask_t), reverse=True)
 
         # Compute the GAE.
-        deltas_t = get_deltas(rewards_t, values_t, values_shifted_t, mask_t, decay_gamma)
+        deltas_t = rewards_t + decay_gamma * values_shifted_t * mask_t - values_t
         _, gae_t = jax.lax.scan(gae_scan_fn, jnp.zeros_like(deltas_t[-1]), (deltas_t, mask_t), reverse=True)
 
         # Get the value targets.

@@ -21,9 +21,8 @@ class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             ksim.HealthyReward(scale=1.0),
-            ksim.StationaryPenalty(ctrl_dt=self.config.ctrl_dt, scale=-0.1),
-            # ksim.BaseHeightRangePenalty(z_lower=1.3, z_upper=1.5, scale=-1.0),
-            ksim.BaseHeightPenalty(height_target=1.4, scale=-1.0),
+            ksim.BaseHeightRangeReward(z_lower=1.3, z_upper=1.5, scale=1.0),
+            # ksim.BaseHeightReward(height_target=1.4, scale=1.0),
             ksim.TerminationPenalty(scale=-1.0),
         ]
 
@@ -43,7 +42,7 @@ if __name__ == "__main__":
             batch_size=32,
             num_passes=4,
             epochs_per_log_step=10,
-            rollout_length_seconds=3.0,
+            rollout_length_seconds=10.0,
             # Logging parameters.
             log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.

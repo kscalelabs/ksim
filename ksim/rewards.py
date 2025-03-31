@@ -9,8 +9,8 @@ __all__ = [
     "JointVelocityPenalty",
     "LinearVelocityTrackingPenalty",
     "AngularVelocityTrackingPenalty",
-    "BaseHeightPenalty",
-    "BaseHeightRangePenalty",
+    "BaseHeightReward",
+    "BaseHeightRangeReward",
     "ActionSmoothnessPenalty",
     "ActuatorForcePenalty",
     "BaseJerkZPenalty",
@@ -164,31 +164,32 @@ class AngularVelocityTrackingPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class BaseHeightPenalty(Reward):
+class BaseHeightReward(Reward):
     """Penalty for deviating from the base height target."""
 
     height_target: float = attrs.field()
+    bias: float = attrs.field(default=1.0)
     norm: xax.NormType = attrs.field(default="l1")
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
-        return xax.get_norm(base_height - self.height_target, self.norm)
+        return self.bias - xax.get_norm(base_height - self.height_target, self.norm)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class BaseHeightRangePenalty(Reward):
+class BaseHeightRangeReward(Reward):
     """Incentivizes keeping the base height within a certain range."""
 
     z_lower: float = attrs.field()
     z_upper: float = attrs.field()
+    bias: float = attrs.field(default=1.0)
     taper: float = attrs.field(default=1.0)
-    norm: xax.NormType = attrs.field(default="l1")
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
         too_low = self.z_lower - base_height
         too_high = base_height - self.z_upper
-        return xax.get_norm(jnp.maximum(too_low, too_high).clip(min=0.0) * self.taper, self.norm)
+        return self.bias - jnp.maximum(too_low, too_high).clip(min=0.0) * self.taper
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -441,15 +442,3 @@ class FeetFlatReward(Reward):
             - xax.get_norm(unit_vec_x, self.norm)
             - xax.get_norm(unit_vec_y, self.norm)
         ).min(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class StationaryPenalty(Reward):
-    """Incentives staying in place laterally."""
-
-    ctrl_dt: float = attrs.field()
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        vels = jnp.concatenate([trajectory.qvel[..., 0:2], trajectory.qvel[..., 3:5]], axis=-1) * self.ctrl_dt
-        return xax.get_norm(vels, self.norm).sum(axis=-1)

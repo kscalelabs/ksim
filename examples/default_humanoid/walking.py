@@ -361,7 +361,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.BaseHeightRangePenalty(z_lower=1.1, z_upper=1.5, scale=-1.0),
+            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=-1.0),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             ksim.LinearVelocityTrackingPenalty(scale=-0.1),
@@ -387,16 +387,16 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Normal:
         dh_joint_pos_n = observations["joint_position_observation"]
-        dh_joint_vel_n = observations["joint_velocity_observation"] / 50.0
+        dh_joint_vel_n = observations["joint_velocity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd_1 = commands["angular_velocity_command"]
         return model.actor(
             dh_joint_pos_n=dh_joint_pos_n,
-            dh_joint_vel_n=dh_joint_vel_n,
-            imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
+            dh_joint_vel_n=dh_joint_vel_n / 10.0,
+            imu_acc_3=imu_acc_3 / 50.0,
+            imu_gyro_3=imu_gyro_3 / 3.0,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd_1=ang_vel_cmd_1,
         )
@@ -422,11 +422,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ang_vel_cmd_1 = commands["angular_velocity_command"]  # 1
         return model.critic(
             dh_joint_pos_n=dh_joint_pos_n,
-            dh_joint_vel_n=dh_joint_vel_n,
+            dh_joint_vel_n=dh_joint_vel_n / 10.0,
             com_inertia_n=com_inertia_n,
             com_vel_n=com_vel_n,
-            imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
+            imu_acc_3=imu_acc_3 / 50.0,
+            imu_gyro_3=imu_gyro_3 / 3.0,
             act_frc_obs_n=act_frc_obs_n,
             base_pos_3=base_pos_3,
             base_quat_4=base_quat_4,
