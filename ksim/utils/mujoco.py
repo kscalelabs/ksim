@@ -22,10 +22,12 @@ __all__ = [
     "get_body_pose_by_name",
     "get_geom_pose_by_name",
     "get_site_pose_by_name",
+    "remove_joints",
 ]
 
 import logging
 from typing import Any, Hashable, TypeVar
+from xml.etree import ElementTree as ET
 
 import jax
 import jax.numpy as jnp
@@ -318,3 +320,19 @@ def get_site_pose_by_name(
 ) -> tuple[np.ndarray, np.ndarray]:
     site_idx = get_site_data_idx_from_name(model, site_name)
     return get_site_pose(data, site_idx)
+
+
+def remove_joints(file_path: str, joint_names: list[str]) -> str:
+    """Remove all specified joints from the model and return as string."""
+    tree = ET.parse(file_path)
+    root = tree.getroot()
+
+    def dfs_remove_joints(element: ET.Element) -> None:
+        for child in element:
+            if child.tag == "joint" or child.tag == "freejoint" and child.get("name") in joint_names:
+                element.remove(child)
+            else:
+                dfs_remove_joints(child)
+
+    dfs_remove_joints(root)
+    return ET.tostring(root, encoding="utf-8").decode("utf-8")
