@@ -27,6 +27,8 @@ from ksim.utils.mujoco import slice_update, update_data_field
 class BaseEventState:
     curriculum_step: Array
     episode_length_percentage: Array
+    time_remaining: Array
+
 
 @attrs.define(frozen=True, kw_only=True)
 class Event(ABC):
@@ -63,13 +65,18 @@ class Event(ABC):
         return self.get_name()
 
     @abstractmethod
+    def update_curriculum_step(self, event_state: BaseEventState) -> BaseEventState:
+        """Update the curriculum step."""
+
+    @abstractmethod
     def get_initial_event_state(self, rng: PRNGKeyArray) -> BaseEventState:
         """Get the initial info for the event."""
+
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class PushEventState(BaseEventState):
-    time_remaining: Array
+    pass
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -81,6 +88,12 @@ class PushEvent(Event):
     z_force: float = attrs.field(default=0.0)
     interval_range: tuple[float, float] = attrs.field()
 
+    use_curriculum: bool = attrs.field(default=False)
+
+    max_curriculum_steps: int = attrs.field(default=10)
+    force_scale_per_step: float = attrs.field(default=0.1)
+    episode_length_threshold: float = attrs.field(default=0.8)
+
     def __call__(
         self,
         model: PhysicsModel,
@@ -88,6 +101,8 @@ class PushEvent(Event):
         event_state: PushEventState,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, PushEventState]:
+        event_state = self.update_curriculum_step(event_state)
+
         # Decrement by physics timestep.
         dt = jnp.float32(model.opt.timestep)
         time_remaining = event_state.time_remaining - dt
@@ -95,15 +110,38 @@ class PushEvent(Event):
         # Update the data if the time remaining is less than 0.
         updated_data, time_remaining = jax.lax.cond(
             time_remaining <= 0.0,
-            lambda: self._apply_random_force(data, rng),
+            lambda: self._apply_random_force(data, rng, event_state),
             lambda: (data, time_remaining),
         )
 
-        return updated_data, PushEventState(time_remaining=time_remaining, curriculum_step=event_state.curriculum_step)
+        return updated_data, PushEventState(
+            time_remaining=time_remaining,
+            curriculum_step=event_state.curriculum_step,
+            episode_length_percentage=event_state.episode_length_percentage,
+        )
 
-    def _apply_random_force(self, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
+    def update_curriculum_step(self, event_state: BaseEventState) -> PushEventState:
+        assert isinstance(event_state, PushEventState)
+
+        new_state = jax.lax.cond(
+            event_state.episode_length_percentage < self.episode_length_threshold
+            and self.use_curriculum
+            and event_state.curriculum_step < self.max_curriculum_steps,
+            lambda: PushEventState(
+                time_remaining=event_state.time_remaining,
+                curriculum_step=event_state.curriculum_step + 1,
+                episode_length_percentage=event_state.episode_length_percentage,
+            ),
+            lambda: event_state,
+        )
+        return new_state
+
+    def _apply_random_force(self, data: PhysicsData, rng: PRNGKeyArray, event_state: PushEventState) -> tuple[PhysicsData, Array]:
         # Randomly applies a force.
-        linear_force_scale = jnp.array([self.x_force, self.y_force, self.z_force])
+
+        curriculum_scale = 1.0 + self.force_scale_per_step * event_state.curriculum_step
+
+        linear_force_scale = jnp.array([self.x_force, self.y_force, self.z_force]) * curriculum_scale
         random_forces = jax.random.uniform(rng, (3,), minval=-1.0, maxval=1.0)
         random_forces = random_forces * linear_force_scale
         new_qvel = slice_update(data, "qvel", slice(0, 3), random_forces)
@@ -118,13 +156,15 @@ class PushEvent(Event):
     def get_initial_event_state(self, rng: PRNGKeyArray) -> PushEventState:
         minval, maxval = self.interval_range
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
-        return PushEventState(time_remaining=time_remaining, curriculum_step=jnp.array(0))
+        return PushEventState(
+            time_remaining=time_remaining, curriculum_step=jnp.array(0), episode_length_percentage=jnp.array(0)
+        )
 
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class JumpEventState(BaseEventState):
-    time_remaining: Array
+    pass
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -141,6 +181,8 @@ class JumpEvent(Event):
         event_state: JumpEventState,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, JumpEventState]:
+        event_state = self.update_curriculum_step(event_state)
+
         # Decrement by physics timestep.
         dt = jnp.float32(model.opt.timestep)
         time_remaining = event_state.time_remaining - dt
@@ -152,7 +194,11 @@ class JumpEvent(Event):
             lambda: (data, time_remaining),
         )
 
-        return updated_data, JumpEventState(time_remaining=time_remaining, curriculum_step=event_state.curriculum_step)
+        return updated_data, JumpEventState(
+            time_remaining=time_remaining,
+            curriculum_step=event_state.curriculum_step,
+            episode_length_percentage=event_state.episode_length_percentage,
+        )
 
     def _apply_jump(self, model: PhysicsModel, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
         # Implements a jump as a vertical velocity impulse. We compute the
