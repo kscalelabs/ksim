@@ -56,6 +56,7 @@ from ksim.terminations import Termination
 from ksim.types import (
     Histogram,
     Metrics,
+    PhysicsData,
     PhysicsModel,
     PhysicsState,
     Rewards,
@@ -147,6 +148,7 @@ def get_commands(
 
 def get_initial_commands(
     rng: PRNGKeyArray,
+    physics_data: PhysicsData,
     command_generators: Collection[Command],
 ) -> xax.FrozenDict[str, Array]:
     """Get the initial commands from the physics state."""
@@ -154,7 +156,7 @@ def get_initial_commands(
     for command_generator in command_generators:
         rng, cmd_rng = jax.random.split(rng)
         command_name = command_generator.command_name
-        command_val = command_generator.initial_command(cmd_rng)
+        command_val = command_generator.initial_command(physics_data, cmd_rng)
         commands[command_name] = command_val
     return xax.FrozenDict(commands)
 
@@ -597,7 +599,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         commands = jax.lax.cond(
             terminated,
-            lambda: get_initial_commands(cmd_rng, command_generators=rollout_constants.command_generators),
+            lambda: get_initial_commands(
+                cmd_rng,
+                physics_data=next_physics_state.data,
+                command_generators=rollout_constants.command_generators,
+            ),
             lambda: commands,
         )
 
@@ -1100,11 +1106,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 randomizations=randomizations,
             )
 
-            # Gets initial variables.
-            rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
-            initial_carry = self.get_initial_carry(carry_rng)
-            initial_commands = get_initial_commands(cmd_rng, command_generators=commands)
-
             def apply_randomizations_to_mujoco(rng: PRNGKeyArray) -> PhysicsState:
                 rand_rng, reset_rng = jax.random.split(rng)
                 rand_dict = get_randomizations(mj_model, randomizations, rand_rng)
@@ -1115,6 +1116,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Resets the physics state.
             rng, reset_rng = jax.random.split(rng)
             physics_state = apply_randomizations_to_mujoco(reset_rng)
+
+            # Gets initial variables.
+            rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
+            initial_carry = self.get_initial_carry(carry_rng)
+            initial_commands = get_initial_commands(cmd_rng, command_generators=commands)
 
             try:
                 from ksim.viewer import MujocoViewer
