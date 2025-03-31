@@ -5,15 +5,13 @@ from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 import attrs
-import jax
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array
 
 import ksim
 
-from .walking import HumanoidWalkingTask
-from .walking_gru import HumanoidWalkingGRUTaskConfig
+from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -38,22 +36,15 @@ class StationaryPenalty(ksim.Reward):
         return xax.get_norm(trajectory.qvel[..., :2], self.norm).sum(axis=-1)
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-    values: Array
-
-
 @dataclass
-class HumanoidJumpingGRUTaskConfig(HumanoidWalkingGRUTaskConfig):
+class HumanoidJumpingTaskConfig(HumanoidWalkingTaskConfig):
     pass
 
 
-Config = TypeVar("Config", bound=HumanoidJumpingGRUTaskConfig)
+Config = TypeVar("Config", bound=HumanoidJumpingTaskConfig)
 
 
-class HumanoidJumpingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
+class HumanoidJumpingTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             UpwardReward(scale=0.5),
@@ -69,8 +60,8 @@ if __name__ == "__main__":
     #   python -m examples.default_humanoid.walking_gru
     # To visualize the environment, use the following command:
     #   python -m examples.default_humanoid.walking_gru run_environment=True
-    HumanoidJumpingGRUTask.launch(
-        HumanoidJumpingGRUTaskConfig(
+    HumanoidJumpingTask.launch(
+        HumanoidJumpingTaskConfig(
             num_envs=2048,
             batch_size=256,
             num_passes=8,

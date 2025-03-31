@@ -176,6 +176,7 @@ class AngularVelocityCommand(Command):
 
     scale: float = attrs.field()
     zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
 
     def initial_command(self, rng: PRNGKeyArray) -> Array:
         """Returns (1,) array with angular velocity."""
@@ -185,7 +186,10 @@ class AngularVelocityCommand(Command):
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
     def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
-        return prev_command
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
 
 
 @attrs.define(frozen=True)
@@ -198,6 +202,7 @@ class LinearVelocityStepCommand(Command):
     y_fwd_prob: float = attrs.field()
     x_zero_prob: float = attrs.field(default=0.0)
     y_zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
 
@@ -216,7 +221,10 @@ class LinearVelocityStepCommand(Command):
         )
 
     def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
-        return prev_command
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
         return [
@@ -232,6 +240,7 @@ class AngularVelocityStepCommand(Command):
     scale: float = attrs.field()
     prob: float = attrs.field(default=0.5)
     zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
 
     def initial_command(self, rng: PRNGKeyArray) -> Array:
         rng_a, rng_b = jax.random.split(rng)
@@ -240,4 +249,7 @@ class AngularVelocityStepCommand(Command):
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
     def __call__(self, prev_command: Array, time: Array, rng: PRNGKeyArray) -> Array:
-        return prev_command
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)

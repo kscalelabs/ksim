@@ -1181,8 +1181,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
                 return physics_model, rollout_variables
 
+            transitions = []
+
             try:
-                transitions = []
                 for _ in iterator:
                     transition, rollout_variables = self.step_engine(
                         physics_model=mj_model,
@@ -1210,6 +1211,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     else:
                         frames.append(viewer.read_pixels(depth=False, callback=render_callback))
 
+            except (KeyboardInterrupt, bdb.BdbQuit):
+                logger.info("Keyboard interrupt, exiting environment loop")
+
+            if len(transitions) > 0:
                 trajectory = jax.tree_map(lambda *xs: jnp.stack(xs), *transitions)
 
                 get_rewards(
@@ -1220,9 +1225,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
 
                 # TODO: some nice visualizer of rewards...
-
-            except (KeyboardInterrupt, bdb.BdbQuit):
-                logger.info("Keyboard interrupt, exiting environment loop")
 
             if save_path is not None:
                 fps = round(1 / self.config.ctrl_dt)
