@@ -6,6 +6,7 @@ __all__ = [
     "PushEvent",
     "JumpEventState",
     "JumpEvent",
+    "BaseEventState",
 ]
 
 import functools

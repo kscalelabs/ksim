@@ -48,7 +48,7 @@ from ksim.engine import (
     engine_type_from_physics_model,
     get_physics_engine,
 )
-from ksim.events import Event
+from ksim.events import BaseEventState, Event
 from ksim.observation import Observation
 from ksim.randomization import Randomization
 from ksim.resets import Reset
@@ -1432,12 +1432,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         metrics.termination["episode_length"] / self.config.rollout_length_seconds
                     )
 
-                    updated_event_states = jax.tree_map(
-                        lambda event_state: dataclasses.replace(
-                            event_state, episode_length_percentage=episode_length_percentage
-                        ),
-                        rollout_variables.physics_state.event_states,
-                    )
+                    updated_event_states: xax.FrozenDict[str, BaseEventState] = xax.FrozenDict({
+                        key: dataclasses.replace(event_state, episode_length_percentage=episode_length_percentage)
+                        for key, event_state in rollout_variables.physics_state.event_states.items()
+                    })
 
                     updated_physics_state = dataclasses.replace(
                         rollout_variables.physics_state, event_states=updated_event_states
