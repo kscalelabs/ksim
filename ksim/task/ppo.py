@@ -214,12 +214,6 @@ class PPOConfig(RLConfig):
         help="The number of update passes over the set of trajectories",
     )
 
-    # Gradient parameters.
-    global_grad_clip: float = xax.field(
-        value=10.0,
-        help="The maximum gradient norm to clip to.",
-    )
-
     # PPO parameters.
     clip_param: float = xax.field(
         value=0.2,
@@ -235,7 +229,7 @@ class PPOConfig(RLConfig):
     )
     entropy_coef: float = xax.field(
         value=0.008,
-        help="Entropy coefficient for PPO.",
+        help="Entropy coefficient for PPO: high = more exploration.",
     )
     log_clip_value: float = xax.field(
         value=10.0,
@@ -243,7 +237,7 @@ class PPOConfig(RLConfig):
     )
     gamma: float = xax.field(
         value=0.99,
-        help="Discount factor for PPO",
+        help="Discount factor for PPO. Higher values mean more weight on future rewards.",
     )
     lam: float = xax.field(
         value=0.95,
@@ -486,38 +480,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         grads, metrics = loss_fn(model_arr, model_static, trajectories, rewards, rng)
         return metrics, grads
 
-    @xax.jit(static_argnames=["self", "optimizer"])
-    def _update_model(
-        self,
-        model_arr: PyTree,
-        grads: PyTree,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
-    ) -> tuple[PyTree, optax.OptState, dict[str, Array]]:
-        grad_norm = optax.global_norm(grads)
-        grad_metrics = {"grad_norm": grad_norm}
-
-        def apply(grads: PyTree, grad_norm: Array) -> tuple[PyTree, optax.OptState]:
-            # Clip the global gradient norm to some desired range.
-            grad_factor = self.config.global_grad_clip / jnp.maximum(grad_norm, 1e-6)
-            grads = jax.tree.map(lambda x: x * grad_factor, grads)
-
-            # Apply the gradient updates.
-            updates, new_opt_state = optimizer.update(grads, opt_state, model_arr)
-            new_model_arr = eqx.apply_updates(model_arr, updates)
-            return new_model_arr, new_opt_state
-
-        # Don't apply updates if the gradient is NaN or Inf.
-        new_model_arr, new_opt_state = jax.lax.cond(
-            jnp.isnan(grad_norm) | jnp.isinf(grad_norm),
-            lambda *_: (model_arr, opt_state),
-            apply,
-            grads,
-            grad_norm,
-        )
-
-        return new_model_arr, new_opt_state, grad_metrics
-
     @xax.jit(static_argnames=["self", "model_static", "optimizer"])
     def _single_step(
         self,
@@ -537,7 +499,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-        new_model_arr, new_opt_state, grad_metrics = self._update_model(
+        new_model_arr, new_opt_state, grad_metrics = self.apply_gradients_with_clipping(
             model_arr=model_arr,
             grads=grads,
             optimizer=optimizer,

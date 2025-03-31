@@ -50,7 +50,7 @@ class DefaultHumanoidActor(eqx.Module):
         var_scale: float,
         mean_scale: float,
     ) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + NUM_JOINTS + 2 + 1
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 2 + 1
         num_outputs = NUM_JOINTS
 
         self.mlp = eqx.nn.MLP(
@@ -70,9 +70,8 @@ class DefaultHumanoidActor(eqx.Module):
         self,
         dh_joint_pos_n: Array,
         dh_joint_vel_n: Array,
-        com_inertia_n: Array,
-        com_vel_n: Array,
-        act_frc_obs_n: Array,
+        imu_acc_3: Array,
+        imu_gyro_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd_1: Array,
     ) -> distrax.Normal:
@@ -80,9 +79,8 @@ class DefaultHumanoidActor(eqx.Module):
             [
                 dh_joint_pos_n,  # NUM_JOINTS
                 dh_joint_vel_n,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
-                act_frc_obs_n,  # 21
+                imu_acc_3,  # 3
+                imu_gyro_3,  # 3
                 lin_vel_cmd_2,  # 2
                 ang_vel_cmd_1,  # 1
             ],
@@ -109,7 +107,7 @@ class DefaultHumanoidCritic(eqx.Module):
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + NUM_JOINTS + 3 + 3 + 2 + 1
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 2 + 1
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -127,7 +125,11 @@ class DefaultHumanoidCritic(eqx.Module):
         dh_joint_vel_n: Array,
         com_inertia_n: Array,
         com_vel_n: Array,
+        imu_acc_3: Array,
+        imu_gyro_3: Array,
         act_frc_obs_n: Array,
+        base_pos_3: Array,
+        base_quat_4: Array,
         lin_vel_obs_3: Array,
         ang_vel_obs_3: Array,
         lin_vel_cmd_2: Array,
@@ -139,7 +141,11 @@ class DefaultHumanoidCritic(eqx.Module):
                 dh_joint_vel_n,  # NUM_JOINTS
                 com_inertia_n,  # 160
                 com_vel_n,  # 96
+                imu_acc_3,  # 3
+                imu_gyro_3,  # 3
                 act_frc_obs_n,  # 21
+                base_pos_3,  # 3
+                base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
                 lin_vel_cmd_2,  # 2
@@ -169,23 +175,13 @@ class DefaultHumanoidModel(eqx.Module):
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
-    # Reward parameters.
-    use_naive_reward: bool = xax.field(
-        value=False,
-        help="Whether to use the naive velocity reward.",
-    )
-    domain_randomize: bool = xax.field(
-        value=True,
-        help="Whether to domain randomize the model.",
-    )
-
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=1e-4,
+        value=3e-4,
         help="Learning rate for PPO.",
     )
     max_grad_norm: float = xax.field(
-        value=0.5,
+        value=2.0,
         help="Maximum gradient norm for clipping.",
     )
     adam_weight_decay: float = xax.field(
@@ -283,101 +279,94 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             return ksim.TorqueActuators()
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
-        if self.config.domain_randomize:
-            return [
-                ksim.StaticFrictionRandomization(),
-                ksim.ArmatureRandomization(),
-                ksim.MassMultiplicationRandomization.from_body_name(physics_model, "torso"),
-                ksim.JointDampingRandomization(),
-                ksim.JointZeroPositionRandomization(),
-            ]
-        else:
-            return []
+        return [
+            ksim.StaticFrictionRandomization(),
+            ksim.ArmatureRandomization(),
+            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "torso"),
+            ksim.JointDampingRandomization(),
+            ksim.JointZeroPositionRandomization(),
+        ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        if self.config.domain_randomize:
-            return [
-                ksim.PushEvent(
-                    x_force=1.0,
-                    y_force=1.0,
-                    z_force=0.0,
-                    interval_range=(1.0, 2.0),
-                ),
-            ]
-        else:
-            return []
+        return [
+            ksim.PushEvent(
+                x_force=1.0,
+                y_force=1.0,
+                z_force=0.0,
+                interval_range=(3.0, 5.0),
+            ),
+        ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
-        scale = 0.0 if self.config.domain_randomize else 0.01
         return [
-            ksim.RandomJointPositionReset(scale=scale),
-            ksim.RandomJointVelocityReset(scale=scale),
+            ksim.RandomJointPositionReset(),
+            ksim.RandomJointVelocityReset(),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
-        noise = 0.0 if self.config.domain_randomize else 0.01
         return [
-            ksim.JointPositionObservation(noise=noise),
-            ksim.JointVelocityObservation(noise=noise),
-            ksim.ActuatorForceObservation(noise=noise),
-            ksim.CenterOfMassInertiaObservation(noise=noise),
-            ksim.CenterOfMassVelocityObservation(noise=noise),
-            ksim.BaseLinearVelocityObservation(noise=noise),
-            ksim.BaseAngularVelocityObservation(noise=noise),
-            ksim.BaseLinearAccelerationObservation(noise=noise),
-            ksim.BaseAngularAccelerationObservation(noise=noise),
-            ksim.ActuatorAccelerationObservation(noise=noise),
+            ksim.JointPositionObservation(),
+            ksim.JointVelocityObservation(),
+            ksim.ActuatorForceObservation(),
+            ksim.CenterOfMassInertiaObservation(),
+            ksim.CenterOfMassVelocityObservation(),
+            ksim.BasePositionObservation(),
+            ksim.BaseOrientationObservation(),
+            ksim.BaseLinearVelocityObservation(),
+            ksim.BaseAngularVelocityObservation(),
+            ksim.BaseLinearAccelerationObservation(),
+            ksim.BaseAngularAccelerationObservation(),
+            ksim.ActuatorAccelerationObservation(),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
+            ksim.FeetPositionObservation.create(
+                physics_model=physics_model,
+                foot_left_body_name="foot_left",
+                foot_right_body_name="foot_right",
+            ),
+            ksim.FeetOrientationObservation.create(
+                physics_model=physics_model,
+                foot_left_body_name="foot_left",
+                foot_right_body_name="foot_right",
+            ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            # ksim.LinearVelocityStepCommand(
-            #     x_range=(0.0, 3.0),
-            #     y_range=(0.0, 0.0),
-            #     x_fwd_prob=0.8,
-            #     y_fwd_prob=0.5,
-            #     x_zero_prob=0.2,
-            #     y_zero_prob=0.8,
-            # ),
             ksim.LinearVelocityCommand(
                 x_range=(0.0, 2.5),
                 y_range=(0.0, 0.0),
-                x_zero_prob=0.1,
-                y_zero_prob=1.0,
+                x_zero_prob=0.2,
+                y_zero_prob=0.8,
                 switch_prob=self.config.ctrl_dt / 5,
             ),
-            ksim.AngularVelocityStepCommand(
+            ksim.AngularVelocityCommand(
                 scale=0.2,
                 zero_prob=0.2,
             ),
+            # ksim.LinearVelocityStepCommand(
+            #     x_range=(0.0, 2.5),
+            #     y_range=(0.0, 0.0),
+            #     x_fwd_prob=0.9,
+            #     y_fwd_prob=0.5,
+            #     x_zero_prob=0.1,
+            #     y_zero_prob=1.0,
+            #     switch_prob=self.config.ctrl_dt / 5,
+            # ),
+            # ksim.AngularVelocityStepCommand(
+            #     scale=0.2,
+            #     zero_prob=0.2,
+            # ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        rewards = [
-            ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, scale=0.5),
+        return [
+            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
+            ksim.LinearVelocityTrackingPenalty(scale=-0.1),
+            ksim.AngularVelocityTrackingPenalty(scale=-0.01),
         ]
-
-        # Use this to toggle the "naive" mode, where the model just learns to
-        # move forward as quickly as possible.
-        if self.config.use_naive_reward:
-            rewards += [
-                NaiveVelocityReward(scale=0.1),
-            ]
-        else:
-            rewards += [
-                ksim.LinearVelocityTrackingPenalty(
-                    command_name="linear_velocity_command",
-                    scale=-0.1,
-                ),
-                ksim.AngularVelocityTrackingPenalty(
-                    command_name="angular_velocity_step_command",
-                    scale=-0.01,
-                ),
-            ]
-
-        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
@@ -399,19 +388,17 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     ) -> distrax.Normal:
         dh_joint_pos_n = observations["joint_position_observation"]
         dh_joint_vel_n = observations["joint_velocity_observation"] / 50.0
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"] / 50.0
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd_1 = commands["angular_velocity_step_command"]
+        ang_vel_cmd_1 = commands["angular_velocity_command"]
         return model.actor(
-            dh_joint_pos_n,
-            dh_joint_vel_n,
-            com_inertia_n,
-            com_vel_n,
-            act_frc_obs_n,
-            lin_vel_cmd_2,
-            ang_vel_cmd_1,
+            dh_joint_pos_n=dh_joint_pos_n,
+            dh_joint_vel_n=dh_joint_vel_n,
+            imu_acc_3=imu_acc_3,
+            imu_gyro_3=imu_gyro_3,
+            lin_vel_cmd_2=lin_vel_cmd_2,
+            ang_vel_cmd_1=ang_vel_cmd_1,
         )
 
     def _run_critic(
@@ -424,21 +411,29 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
         com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
         com_vel_n = observations["center_of_mass_velocity_observation"]  # 96
+        imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]  # 3
         act_frc_obs_n = observations["actuator_force_observation"] / 100.0  # 21
+        base_pos_3 = observations["base_position_observation"]  # 3
+        base_quat_4 = observations["base_orientation_observation"]  # 4
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]  # 3
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
         lin_vel_cmd_2 = commands["linear_velocity_command"]  # 2
-        ang_vel_cmd_1 = commands["angular_velocity_step_command"]  # 1
+        ang_vel_cmd_1 = commands["angular_velocity_command"]  # 1
         return model.critic(
-            dh_joint_pos_n,
-            dh_joint_vel_n,
-            com_inertia_n,
-            com_vel_n,
-            act_frc_obs_n,
-            lin_vel_obs_3,
-            ang_vel_obs_3,
-            lin_vel_cmd_2,
-            ang_vel_cmd_1,
+            dh_joint_pos_n=dh_joint_pos_n,
+            dh_joint_vel_n=dh_joint_vel_n,
+            com_inertia_n=com_inertia_n,
+            com_vel_n=com_vel_n,
+            imu_acc_3=imu_acc_3,
+            imu_gyro_3=imu_gyro_3,
+            act_frc_obs_n=act_frc_obs_n,
+            base_pos_3=base_pos_3,
+            base_quat_4=base_quat_4,
+            lin_vel_obs_3=lin_vel_obs_3,
+            ang_vel_obs_3=ang_vel_obs_3,
+            lin_vel_cmd_2=lin_vel_cmd_2,
+            ang_vel_cmd_1=ang_vel_cmd_1,
         )
 
     def get_on_policy_log_probs(
@@ -522,26 +517,18 @@ if __name__ == "__main__":
     #   python -m examples.default_humanoid.walking num_envs=8 batch_size=4
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
+            # Training parameters.
             num_envs=2048,
             batch_size=256,
             num_passes=10,
-            epochs_per_log_step=1,
+            epochs_per_log_step=10,
+            # Logging parameters.
+            # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=4.0,
-            # PPO parameters
-            gamma=0.97,
-            lam=0.95,
-            entropy_coef=0.001,
-            learning_rate=3e-4,
-            clip_param=0.3,
-            max_grad_norm=1.0,
-            use_mit_actuators=True,
-            valid_every_n_steps=50,
-            domain_randomize=False,
-            use_naive_reward=True,
         ),
     )

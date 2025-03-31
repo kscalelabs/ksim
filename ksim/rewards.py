@@ -17,6 +17,8 @@ __all__ = [
     "ActuatorJerkPenalty",
     "AvoidLimitsReward",
     "ActionNearPositionPenalty",
+    "FeetLinearVelocityTrackingPenalty",
+    "FeetFlatReward",
 ]
 
 import functools
@@ -25,6 +27,7 @@ from abc import ABC, abstractmethod
 from typing import Collection, Self
 
 import attrs
+import chex
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array
@@ -178,11 +181,15 @@ class BaseHeightRangeReward(Reward):
 
     z_lower: float = attrs.field()
     z_upper: float = attrs.field()
-    norm: xax.NormType = attrs.field(default="l1")
+    taper: float = attrs.field(default=1.0)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
-        return ((base_height > self.z_lower) & (base_height < self.z_upper)).astype(base_height.dtype)
+        too_low = self.z_lower - base_height
+        too_high = base_height - self.z_upper
+        penalty = jnp.maximum(too_low, too_high).clip(min=0.0) * self.taper
+        reward = (1.0 - penalty).clip(min=0.0)
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -364,3 +371,74 @@ class ActionNearPositionPenalty(Reward):
             joint_threshold=xax.hashable_array(joint_threshold),
             scale=scale,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetLinearVelocityTrackingPenalty(Reward):
+    """Explicit penalty for tracking the linear velocity of the feet.
+
+    This reward provides an explicit penalty to incentivize the robot to move
+    it's feet in the direction of the velocity command.
+
+    This penalty expects a reference linear velocity command, as well as the
+    feet velocity observations.
+    """
+
+    ctrl_dt: float = attrs.field()
+    command_name: str = attrs.field(default="linear_velocity_command")
+    obs_name: str = attrs.field(default="feet_position_observation")
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        cmd = trajectory.command[self.command_name]
+        chex.assert_shape(cmd, (..., 2))
+        lin_vel_x_cmd = cmd[..., 0]
+        lin_vel_y_cmd = cmd[..., 1]
+
+        obs = trajectory.obs[self.obs_name]
+        chex.assert_shape(obs, (..., 2, 3))
+
+        def get_vel_from_pos(pos: Array) -> Array:
+            next_pos = jnp.concatenate([pos[..., 1:], pos[..., -1:]], axis=-1)
+            return (next_pos - pos) / self.ctrl_dt
+
+        left_vel_x = get_vel_from_pos(obs[..., 0, 0])
+        left_vel_y = get_vel_from_pos(obs[..., 0, 1])
+        right_vel_x = get_vel_from_pos(obs[..., 1, 0])
+        right_vel_y = get_vel_from_pos(obs[..., 1, 1])
+
+        # Mean of the two foot velocities should be close to the command.
+        lin_vel_x_mean = (left_vel_x + right_vel_x) / 2
+        lin_vel_y_mean = (left_vel_y + right_vel_y) / 2
+
+        lin_vel_x_penalty = xax.get_norm(lin_vel_x_mean - lin_vel_x_cmd, self.norm)
+        lin_vel_y_penalty = xax.get_norm(lin_vel_y_mean - lin_vel_y_cmd, self.norm)
+        penalty = lin_vel_x_penalty + lin_vel_y_penalty
+
+        # Don't penalize after falling over.
+        penalty = jnp.where(trajectory.done, 0.0, penalty)
+
+        return penalty
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetFlatReward(Reward):
+    """Reward for keeping the feet parallel to the relevant plane."""
+
+    obs_name: str = attrs.field(default="feet_orientation_observation")
+    plane: tuple[float, float, float] = attrs.field(default=(0.0, 0.0, 1.0))
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        feet_quat = trajectory.obs[self.obs_name]
+        chex.assert_shape(feet_quat, (..., 2, 4))
+        unit_vec = jnp.array(self.plane, dtype=feet_quat.dtype)
+        unit_vec = xax.rotate_vector_by_quat(unit_vec, feet_quat)
+        unit_vec_x, unit_vec_y, unit_vec_z = unit_vec[..., 0], unit_vec[..., 1], unit_vec[..., 2]
+
+        # Z should be 1, and X and Y should be 0.
+        return (
+            xax.get_norm(unit_vec_z, self.norm)
+            - xax.get_norm(unit_vec_x, self.norm)
+            - xax.get_norm(unit_vec_y, self.norm)
+        ).min(axis=-1)
