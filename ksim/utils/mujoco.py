@@ -108,7 +108,18 @@ def get_geom_data_idx_from_name(physics_model: PhysicsModel, geom_name: str) -> 
         name = bytes(physics_model.names[name_start:]).decode("utf-8").split("\x00")[0]
         if name == geom_name:
             return i
-    raise KeyError(f"Geometry '{geom_name}' not found in model")
+    choices = ", ".join(sorted(get_geom_data_idx_by_name(physics_model).keys()))
+    raise KeyError(f"Geometry '{geom_name}' not found in model. Choices: {choices}")
+
+
+def get_site_data_idx_by_name(physics_model: PhysicsModel) -> dict[str, int]:
+    """Get mappings from site names to their indices."""
+    site_mappings = {}
+    for i in range(physics_model.nsite):
+        name_start = physics_model.name_siteadr[i]
+        name = bytes(physics_model.names[name_start:]).decode("utf-8").split("\x00")[0]
+        site_mappings[name] = i
+    return site_mappings
 
 
 def get_site_data_idx_from_name(physics_model: PhysicsModel, site_name: str) -> int:
@@ -118,7 +129,8 @@ def get_site_data_idx_from_name(physics_model: PhysicsModel, site_name: str) -> 
         name = bytes(physics_model.names[name_start:]).decode("utf-8").split("\x00")[0]
         if name == site_name:
             return i
-    raise KeyError(f"Site '{site_name}' not found in model")
+    choices = ", ".join(sorted(get_site_data_idx_by_name(physics_model).keys()))
+    raise KeyError(f"Site '{site_name}' not found in model. Choices: {choices}")
 
 
 def get_body_data_idx_by_name(physics_model: PhysicsModel) -> dict[str, int]:
@@ -137,7 +149,8 @@ def get_body_data_idx_from_name(physics_model: PhysicsModel, body_name: str) -> 
         name = bytes(physics_model.names[name_start:]).decode("utf-8").split("\x00")[0]
         if name == body_name:
             return i
-    raise KeyError(f"Body '{body_name}' not found in model")
+    choices = ", ".join(sorted(get_body_data_idx_by_name(physics_model).keys()))
+    raise KeyError(f"Body '{body_name}' not found in model. Choices: {choices}")
 
 
 def get_floor_idx(physics_model: PhysicsModel, floor_name: str = "floor") -> int | None:
