@@ -18,8 +18,10 @@ __all__ = [
     "mat_to_quat",
     "get_body_pose",
     "get_geom_pose",
+    "get_site_pose",
     "get_body_pose_by_name",
     "get_geom_pose_by_name",
+    "get_site_pose_by_name",
 ]
 
 import logging
@@ -107,6 +109,16 @@ def get_geom_data_idx_from_name(physics_model: PhysicsModel, geom_name: str) -> 
         if name == geom_name:
             return i
     raise KeyError(f"Geometry '{geom_name}' not found in model")
+
+
+def get_site_data_idx_from_name(physics_model: PhysicsModel, site_name: str) -> int:
+    """Get mappings from site names to their indices."""
+    for i in range(physics_model.nsite):
+        name_start = physics_model.name_siteadr[i]
+        name = bytes(physics_model.names[name_start:]).decode("utf-8").split("\x00")[0]
+        if name == site_name:
+            return i
+    raise KeyError(f"Site '{site_name}' not found in model")
 
 
 def get_body_data_idx_by_name(physics_model: PhysicsModel) -> dict[str, int]:
@@ -262,6 +274,12 @@ def get_geom_pose(data: PhysicsData, geom_idx: int) -> tuple[np.ndarray, np.ndar
     return position, rot_mat
 
 
+def get_site_pose(data: PhysicsData, site_idx: int) -> tuple[np.ndarray, np.ndarray]:
+    position = data.site_xpos[site_idx].copy()
+    rot_mat = data.site_xmat[site_idx].reshape(3, 3).copy()
+    return position, rot_mat
+
+
 def get_body_pose_by_name(
     model: PhysicsModel,
     data: PhysicsData,
@@ -278,3 +296,12 @@ def get_geom_pose_by_name(
 ) -> tuple[np.ndarray, np.ndarray]:
     geom_idx = get_geom_data_idx_from_name(model, geom_name)
     return get_geom_pose(data, geom_idx)
+
+
+def get_site_pose_by_name(
+    model: PhysicsModel,
+    data: PhysicsData,
+    site_name: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    site_idx = get_site_data_idx_from_name(model, site_name)
+    return get_site_pose(data, site_idx)
