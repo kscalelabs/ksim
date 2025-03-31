@@ -783,6 +783,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ("🗓️ event images", single_traj.trajectory.event_state),
             ("🎁 reward images", single_traj.rewards.components),
             ("🎁 reward images", {"total": single_traj.rewards.total}),
+            ("📈 metrics images", single_traj.metrics),
         ):
             for key, value in arr_dict.items():
                 plt.figure(figsize=self.config.plot_figsize)
