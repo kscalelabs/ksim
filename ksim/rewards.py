@@ -1,6 +1,8 @@
 """Defines a base interface for defining reward functions."""
 
 __all__ = [
+    "MonotonicFn",
+    "norm_to_reward",
     "Reward",
     "HealthyReward",
     "TerminationPenalty",
@@ -19,13 +21,12 @@ __all__ = [
     "ActionNearPositionPenalty",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
-    "StationaryPenalty",
 ]
 
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Self
+from typing import Collection, Literal, Self
 
 import attrs
 import chex
@@ -37,6 +38,31 @@ from ksim.types import PhysicsModel, Trajectory
 from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
+
+MonotonicFn = Literal["exp", "inv"]
+
+
+def norm_to_reward(value: Array, temp: float, monotonic_fn: MonotonicFn) -> Array:
+    """Helper function for converting from a norm to a reward.
+
+    Args:
+        value: The value (usually a norm) to convert to a reward.
+        temp: The temperature to use for the conversion. Higher temperatures
+            will make the reward drop off less steeply.
+        monotonic_fn: The monotonic function to use for the conversion.
+
+    Returns:
+        The reward.
+    """
+    match monotonic_fn:
+        case "exp":
+            return jnp.exp(-value / temp)
+        case "inv":
+            return 1.0 / (value / temp + 1.0)
+        case "sigmoid":
+            return 1.0 / (1.0 + jnp.exp(-value / temp))
+        case _:
+            raise ValueError(f"Invalid monotonic function: {monotonic_fn}")
 
 
 def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) -> None:
@@ -168,12 +194,13 @@ class BaseHeightReward(Reward):
     """Penalty for deviating from the base height target."""
 
     height_target: float = attrs.field()
-    bias: float = attrs.field(default=1.0)
     norm: xax.NormType = attrs.field(default="l1")
+    temp: float = attrs.field(default=1.0)
+    monotonic_fn: MonotonicFn = attrs.field(default="exp")
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
-        return self.bias - xax.get_norm(base_height - self.height_target, self.norm)
+        return norm_to_reward(xax.get_norm(base_height - self.height_target, self.norm), self.temp, self.monotonic_fn)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -182,14 +209,14 @@ class BaseHeightRangeReward(Reward):
 
     z_lower: float = attrs.field()
     z_upper: float = attrs.field()
-    bias: float = attrs.field(default=1.0)
-    taper: float = attrs.field(default=1.0)
+    temp: float = attrs.field(default=1.0)
+    monotonic_fn: MonotonicFn = attrs.field(default="exp")
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
         too_low = self.z_lower - base_height
         too_high = base_height - self.z_upper
-        return self.bias - jnp.maximum(too_low, too_high).clip(min=0.0) * self.taper
+        return norm_to_reward(jnp.maximum(too_low, too_high).clip(min=0.0), self.temp, self.monotonic_fn)
 
 
 @attrs.define(frozen=True, kw_only=True)

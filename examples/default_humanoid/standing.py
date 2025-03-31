@@ -44,7 +44,8 @@ if __name__ == "__main__":
             epochs_per_log_step=10,
             rollout_length_seconds=10.0,
             # Logging parameters.
-            log_full_trajectory_every_n_seconds=60,
+            # log_full_trajectory_every_n_seconds=60,
+            log_full_trajectory_on_first_step=True,
             # Simulation parameters.
             dt=0.0025,
             ctrl_dt=0.01,
