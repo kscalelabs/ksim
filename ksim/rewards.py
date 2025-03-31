@@ -448,8 +448,9 @@ class FeetFlatReward(Reward):
 class StationaryPenalty(Reward):
     """Incentives staying in place laterally."""
 
+    ctrl_dt: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l2")
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        vels = jnp.concatenate([trajectory.qvel[..., 0:2], trajectory.qvel[..., 3:5]], axis=-1)
+        vels = jnp.concatenate([trajectory.qvel[..., 0:2], trajectory.qvel[..., 3:5]], axis=-1) * self.ctrl_dt
         return xax.get_norm(vels, self.norm).sum(axis=-1)

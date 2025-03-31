@@ -2,15 +2,12 @@
 
 __all__ = [
     "Event",
-    "PushEventState",
     "PushEvent",
-    "JumpEventState",
     "JumpEvent",
 ]
 
 import functools
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 
 import attrs
 import jax
@@ -33,7 +30,7 @@ class Event(ABC):
         data: PhysicsData,
         event_state: PyTree,
         rng: PRNGKeyArray,
-    ) -> tuple[PhysicsData, PyTree]:
+    ) -> tuple[PhysicsData, Array]:
         """Apply the event to the data.
 
         Note that this function is called on every physics timestep, not
@@ -57,14 +54,8 @@ class Event(ABC):
         return self.get_name()
 
     @abstractmethod
-    def get_initial_event_state(self, rng: PRNGKeyArray) -> PyTree:
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
         """Get the initial info for the event."""
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class PushEventState:
-    time_remaining: Array
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -80,12 +71,12 @@ class PushEvent(Event):
         self,
         model: PhysicsModel,
         data: PhysicsData,
-        event_state: PushEventState,
+        event_state: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[PhysicsData, PushEventState]:
+    ) -> tuple[PhysicsData, Array]:
         # Decrement by physics timestep.
         dt = jnp.float32(model.opt.timestep)
-        time_remaining = event_state.time_remaining - dt
+        time_remaining = event_state - dt
 
         # Update the data if the time remaining is less than 0.
         updated_data, time_remaining = jax.lax.cond(
@@ -94,7 +85,7 @@ class PushEvent(Event):
             lambda: (data, time_remaining),
         )
 
-        return updated_data, PushEventState(time_remaining=time_remaining)
+        return updated_data, time_remaining
 
     def _apply_random_force(self, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
         # Randomly applies a force.
@@ -110,16 +101,9 @@ class PushEvent(Event):
 
         return updated_data, time_remaining
 
-    def get_initial_event_state(self, rng: PRNGKeyArray) -> PushEventState:
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
         minval, maxval = self.interval_range
-        time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
-        return PushEventState(time_remaining=time_remaining)
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class JumpEventState:
-    time_remaining: Array
+        return jax.random.uniform(rng, (), minval=minval, maxval=maxval)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -133,12 +117,12 @@ class JumpEvent(Event):
         self,
         model: PhysicsModel,
         data: PhysicsData,
-        event_state: JumpEventState,
+        event_state: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[PhysicsData, JumpEventState]:
+    ) -> tuple[PhysicsData, Array]:
         # Decrement by physics timestep.
         dt = jnp.float32(model.opt.timestep)
-        time_remaining = event_state.time_remaining - dt
+        time_remaining = event_state - dt
 
         # Update the data if the time remaining is less than 0.
         updated_data, time_remaining = jax.lax.cond(
@@ -147,7 +131,7 @@ class JumpEvent(Event):
             lambda: (data, time_remaining),
         )
 
-        return updated_data, JumpEventState(time_remaining=time_remaining)
+        return updated_data, time_remaining
 
     def _apply_jump(self, model: PhysicsModel, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
         # Implements a jump as a vertical velocity impulse. We compute the
