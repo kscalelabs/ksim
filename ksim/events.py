@@ -22,6 +22,12 @@ from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import slice_update, update_data_field
 
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class BaseEventState:
+    curriculum_step: Array
+    episode_length_percentage: Array
+
 @attrs.define(frozen=True, kw_only=True)
 class Event(ABC):
     """Base class for all events."""
@@ -57,13 +63,12 @@ class Event(ABC):
         return self.get_name()
 
     @abstractmethod
-    def get_initial_event_state(self, rng: PRNGKeyArray) -> PyTree:
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> BaseEventState:
         """Get the initial info for the event."""
-
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class PushEventState:
+class PushEventState(BaseEventState):
     time_remaining: Array
 
 
@@ -94,7 +99,7 @@ class PushEvent(Event):
             lambda: (data, time_remaining),
         )
 
-        return updated_data, PushEventState(time_remaining=time_remaining)
+        return updated_data, PushEventState(time_remaining=time_remaining, curriculum_step=event_state.curriculum_step)
 
     def _apply_random_force(self, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
         # Randomly applies a force.
@@ -113,12 +118,12 @@ class PushEvent(Event):
     def get_initial_event_state(self, rng: PRNGKeyArray) -> PushEventState:
         minval, maxval = self.interval_range
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
-        return PushEventState(time_remaining=time_remaining)
+        return PushEventState(time_remaining=time_remaining, curriculum_step=jnp.array(0))
 
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class JumpEventState:
+class JumpEventState(BaseEventState):
     time_remaining: Array
 
 
@@ -147,7 +152,7 @@ class JumpEvent(Event):
             lambda: (data, time_remaining),
         )
 
-        return updated_data, JumpEventState(time_remaining=time_remaining)
+        return updated_data, JumpEventState(time_remaining=time_remaining, curriculum_step=event_state.curriculum_step)
 
     def _apply_jump(self, model: PhysicsModel, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
         # Implements a jump as a vertical velocity impulse. We compute the

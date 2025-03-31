@@ -73,6 +73,7 @@ class Metrics:
     train: Mapping[str, Array | Histogram]
     reward: Mapping[str, Array | Histogram]
     termination: Mapping[str, Array | Histogram]
+    curriculum: Mapping[str, Array]
 
 
 @jax.tree_util.register_dataclass

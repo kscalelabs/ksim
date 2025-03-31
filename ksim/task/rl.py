@@ -6,6 +6,7 @@ __all__ = [
 ]
 
 import bdb
+import dataclasses
 import datetime
 import functools
 import io
@@ -907,6 +908,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             **{key: (value.sum() / num_terminations) for key, value in kvs},
         }
 
+    def get_curriculum_metrics(self, event_states: xax.FrozenDict[str, PyTree]) -> dict[str, Array]:
+        """Gets the curriculum metrics.
+
+        Args:
+            event_states: The event states to get the curriculum metrics for.
+        """
+        return {event_name: event_state.curriculum_step for event_name, event_state in event_states.items()}
+
     def get_markers(
         self,
         commands: Collection[Command],
@@ -1029,6 +1038,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 train=train_metrics,
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
+                curriculum=xax.FrozenDict(self.get_curriculum_metrics(rollout_variables.physics_state.event_states)),
             )
 
             # Saving the last trajectory for visualization.
@@ -1416,6 +1426,24 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         num_steps=state.num_steps + self.config.epochs_per_log_step,
                         num_samples=state.num_samples + self.rollout_num_samples,
                     )
+
+                    # Update the curriculum step.
+                    episode_length_percentage = (
+                        metrics.termination["episode_length"] / self.config.rollout_length_seconds
+                    )
+
+                    updated_event_states = jax.tree_map(
+                        lambda event_state: dataclasses.replace(
+                            event_state, episode_length_percentage=episode_length_percentage
+                        ),
+                        rollout_variables.physics_state.event_states,
+                    )
+
+                    updated_physics_state = dataclasses.replace(
+                        rollout_variables.physics_state, event_states=updated_event_states
+                    )
+
+                    rollout_variables = dataclasses.replace(rollout_variables, physics_state=updated_physics_state)
 
                     # Only log trajectory information on validation steps.
                     if state.phase == "valid":
