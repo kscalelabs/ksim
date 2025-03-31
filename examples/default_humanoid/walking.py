@@ -529,7 +529,5 @@ if __name__ == "__main__":
             learning_rate=3e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
-            use_mit_actuators=True,
-            valid_every_n_steps=50,
         ),
     )
