@@ -511,6 +511,7 @@ class CartesianBodyTargetReward(Reward):
         )
 
 
+@attrs.define(frozen=True, kw_only=True)
 class FeetNoContactReward(Reward):
     """Reward for keeping the feet off the ground.
 
