@@ -1358,7 +1358,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             rollout_variables = RolloutVariables(
                 carry=carry_fn(train_rngs),
-                commands=command_fn(train_rngs, rollout_constants.command_generators),
+                commands=command_fn(train_rngs, physics_state.data, rollout_constants.command_generators),
                 physics_state=physics_state,
                 rng=train_rngs,
             )
