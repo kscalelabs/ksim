@@ -155,10 +155,15 @@ class JointVelocityPenalty(Reward):
     """Penalty for how fast the joint angular velocities are changing."""
 
     norm: xax.NormType = attrs.field(default="l2")
+    freejoint_first: bool = attrs.field(default=True)
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        joint_vel = trajectory.qvel[..., 6:]
-        return xax.get_norm(joint_vel, self.norm).mean(axis=-1)
+        if self.freejoint_first:
+            joint_vel = trajectory.qvel[..., 6:]
+            return xax.get_norm(joint_vel, self.norm).mean(axis=-1)
+        else:
+            return xax.get_norm(trajectory.qvel, self.norm).mean(axis=-1)
+
 
 
 @attrs.define(frozen=True, kw_only=True)

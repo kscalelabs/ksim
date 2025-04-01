@@ -336,6 +336,10 @@ class RLConfig(xax.Config):
         value=None,
         help="The maximum value of the reward.",
     )
+    render_markers: bool = xax.field(
+        value=False,
+        help="If true, render markers.",
+    )
 
 
 Config = TypeVar("Config", bound=RLConfig)
@@ -741,9 +745,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_renderer.update_scene(mj_data, camera=mj_camera)
 
             # For some reason, using markers here will sometimes cause weird
-            # segfaults. Disabling for now because I can't debug this.
-            # for marker in markers:
-            #     marker(mj_renderer.model, mj_data, mj_renderer.scene, trajectory)
+            # segfaults
+            if self.config.render_markers:
+                for marker in markers:
+                    marker(mj_renderer.model, mj_data, mj_renderer.scene, trajectory)
 
             frame = mj_renderer.render()
 
