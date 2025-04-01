@@ -22,7 +22,7 @@ __all__ = [
     "get_body_pose_by_name",
     "get_geom_pose_by_name",
     "get_site_pose_by_name",
-    "remove_joints",
+    "remove_joints_except",
 ]
 
 import logging
@@ -322,17 +322,28 @@ def get_site_pose_by_name(
     return get_site_pose(data, site_idx)
 
 
-def remove_joints(file_path: str, joint_names: list[str]) -> str:
-    """Remove all specified joints from the model and return as string."""
+def remove_joints_except(file_path: str, joint_names: list[str]) -> str:
+    """Remove all joints and references unless listed."""
     tree = ET.parse(file_path)
     root = tree.getroot()
 
     def dfs_remove_joints(element: ET.Element) -> None:
-        for child in element:
-            if child.tag == "joint" or child.tag == "freejoint" and child.get("name") in joint_names:
+        for child in list(element):  # Use list to avoid modifying while iterating
+            if (child.tag == "joint" or child.tag == "freejoint") and child.get("name") not in joint_names:
                 element.remove(child)
             else:
                 dfs_remove_joints(child)
 
+    def dfs_remove_references(element: ET.Element) -> None:
+        for child in list(element):
+            # Check if the child references a joint not in joint_names
+            joint_attr = child.get("joint")
+            if joint_attr and joint_attr not in joint_names:
+                element.remove(child)
+            else:
+                dfs_remove_references(child)
+
     dfs_remove_joints(root)
+    dfs_remove_references(root)
+
     return ET.tostring(root, encoding="utf-8").decode("utf-8")

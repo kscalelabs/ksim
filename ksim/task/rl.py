@@ -141,7 +141,7 @@ def get_commands(
         command_name = command_generator.command_name
         prev_command = prev_commands[command_name]
         assert isinstance(prev_command, Array)
-        command_val = command_generator(prev_command, physics_state.data.time, cmd_rng)
+        command_val = command_generator(prev_command, physics_state.data, cmd_rng)
         commands[command_name] = command_val
     return xax.FrozenDict(commands)
 
@@ -614,6 +614,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         trajectory = Trajectory(
             qpos=next_physics_state.data.qpos,
             qvel=next_physics_state.data.qvel,
+            xpos=next_physics_state.data.xpos,
             obs=observations,
             command=commands,
             action=action,
@@ -1123,7 +1124,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Gets initial variables.
             rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
             initial_carry = self.get_initial_carry(carry_rng)
-            initial_commands = get_initial_commands(cmd_rng, command_generators=commands)
+            initial_commands = get_initial_commands(cmd_rng, physics_state.data, command_generators=commands)
 
             try:
                 from ksim.viewer import MujocoViewer

@@ -16,6 +16,7 @@ from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
 import ksim
+from ksim.utils.mujoco import remove_joints_except
 
 NUM_JOINTS = 3  # disabling all DoFs except for the right arm.
 
@@ -227,7 +228,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+        mj_model_joint_removed = remove_joints_except(mjcf_path, ["shoulder1_right", "shoulder2_right", "elbow_right"])
+        mj_model = mujoco.MjModel.from_xml_string(mj_model_joint_removed)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
         mj_model.opt.iterations = 6
@@ -260,10 +262,10 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
-            ksim.StaticFrictionRandomization(),
-            ksim.ArmatureRandomization(),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "upper_arm_right"),
-            ksim.JointDampingRandomization(),
+            # ksim.StaticFrictionRandomization(),
+            # ksim.ArmatureRandomization(),
+            # ksim.MassMultiplicationRandomization.from_body_name(physics_model, "upper_arm_right"),
+            # ksim.JointDampingRandomization(),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
@@ -277,39 +279,41 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            ksim.JointPositionObservation(ignore_freejoint=True),
-            ksim.JointVelocityObservation(ignore_freejoint=True),
+            ksim.JointPositionObservation(freejoint_first=False),
+            ksim.JointVelocityObservation(freejoint_first=False),
             ksim.ActuatorForceObservation(),
-            ksim.ActuatorAccelerationObservation(),
+            ksim.ActuatorAccelerationObservation(freejoint_first=False),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.XYZBodyTargetCommand.create(
+            ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
                 pivot_name="upper_arm_right",
                 base_name="pelvis",
-                sample_sphere_radius=0.1,
+                sample_sphere_radius=0.5,
                 positive_x=True,  # only sample in the positive x direction
                 positive_y=False,
                 positive_z=False,
                 switch_prob=self.config.ctrl_dt / 5,  # will last 5 seconds in expectation
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
+                command_name="cartesian_body_target_command_upper_arm_right",
             ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.XYZBodyTargetReward.create(
+            ksim.CartesianBodyTargetReward.create(
                 model=physics_model,
                 tracked_body_name="hand_right",
                 base_body_name="pelvis",
                 norm="l2",
                 scale=0.1,
                 sensitivity=1.0,
+                command_name="cartesian_body_target_command_upper_arm_right",
             ),
         ]
 
@@ -335,7 +339,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_n = observations["joint_velocity_observation"] / 50.0
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        xyz_target_3 = commands["xyz_body_target_command"]
+        xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
         return model.actor(
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n,
@@ -356,7 +360,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         actuator_acc_n = observations["actuator_acceleration_observation"]  # 27
         imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]  # 3
-        xyz_target_3 = commands["xyz_body_target_command"]  # 3
+        xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]  # 3
         return model.critic(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,

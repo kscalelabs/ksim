@@ -19,7 +19,7 @@ __all__ = [
     "ActionNearPositionPenalty",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
-    "XYZBodyTargetReward",
+    "CartesianBodyTargetReward",
 ]
 
 import functools
@@ -447,14 +447,14 @@ class FeetFlatReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class XYZBodyTargetReward(Reward):
+class CartesianBodyTargetReward(Reward):
     """Rewards the closeness of the body to the target position."""
 
     tracked_body_idx: int = attrs.field()
     base_body_idx: int = attrs.field()
-    command_name: str = attrs.field(default="xyz_body_target_command")
-    norm: xax.NormType = attrs.field(default="l2")
-    sensitivity: float = attrs.field(default=1.0)
+    command_name: str = attrs.field()
+    norm: xax.NormType = attrs.field()
+    sensitivity: float = attrs.field()
 
     def __call__(self, trajectory: Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx] - trajectory.xpos[..., self.base_body_idx]
@@ -467,9 +467,10 @@ class XYZBodyTargetReward(Reward):
         model: PhysicsModel,
         tracked_body_name: str,
         base_body_name: str,
-        norm: xax.NormType,
-        scale: float,
-        sensitivity: float,
+        norm: xax.NormType = "l2",
+        scale: float = 1.0,
+        sensitivity: float = 1.0,
+        command_name: str | None = None,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
         base_idx = get_body_data_idx_from_name(model, base_body_name)
@@ -479,4 +480,5 @@ class XYZBodyTargetReward(Reward):
             norm=norm,
             scale=scale,
             sensitivity=sensitivity,
+            command_name=command_name,
         )

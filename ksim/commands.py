@@ -6,7 +6,7 @@ __all__ = [
     "AngularVelocityCommand",
     "LinearVelocityStepCommand",
     "AngularVelocityStepCommand",
-    "XYZBodyTargetCommand",
+    "CartesianBodyTargetCommand",
 ]
 
 import functools
@@ -25,9 +25,11 @@ from ksim.utils.mujoco import get_body_data_idx_from_name
 from ksim.vis import Marker
 
 
-@attrs.define(frozen=True)
+@attrs.define(frozen=True, kw_only=True)
 class Command(ABC):
     """Base class for commands."""
+
+    custom_name: str | None = attrs.field(default=None)
 
     @abstractmethod
     def initial_command(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
@@ -66,6 +68,8 @@ class Command(ABC):
 
     def get_name(self) -> str:
         """Get the name of the command."""
+        if self.custom_name is not None:
+            return self.custom_name
         return xax.camelcase_to_snakecase(self.__class__.__name__)
 
     @functools.cached_property
@@ -258,7 +262,7 @@ class AngularVelocityStepCommand(Command):
 
 
 @attrs.define(kw_only=True)
-class XYZBodyTargetMarker(Marker):
+class CartesianBodyTargetMarker(Marker):
     command_name: str = attrs.field()
 
     def __attrs_post_init__(self) -> None:
@@ -284,12 +288,12 @@ class XYZBodyTargetMarker(Marker):
 
 
 @attrs.define(frozen=True)
-class XYZBodyTargetCommand(Command):
+class CartesianBodyTargetCommand(Command):
     """Samples a target xyz position along a sphere from a pivot point.
 
     E.g. sample a sphere centered around the shoulder, where the sampled point
-    is the relative xpos with respect to the pelvis. Only sample points that are
-    positive in the x direction.
+    is the relative xpos with respect to the pelvis. This point will move along
+    with the base but only the base.
     """
 
     pivot_body_name: str = attrs.field()
@@ -333,7 +337,7 @@ class XYZBodyTargetCommand(Command):
         return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
-        return [XYZBodyTargetMarker.get(self.command_name, self.base_body_name, self.vis_radius, self.vis_color)]
+        return [CartesianBodyTargetMarker.get(self.command_name, self.base_body_name, self.vis_radius, self.vis_color)]
 
     def get_name(self) -> str:
         return xax.camelcase_to_snakecase(self.__class__.__name__) + "_" + self.pivot_body_name
@@ -351,6 +355,7 @@ class XYZBodyTargetCommand(Command):
         switch_prob: float = 0.1,
         vis_radius: float = 0.05,
         vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
+        command_name: str | None = None,
     ) -> Self:
         pivot_id = get_body_data_idx_from_name(model, pivot_name)
         base_id = get_body_data_idx_from_name(model, base_name)
@@ -366,4 +371,5 @@ class XYZBodyTargetCommand(Command):
             switch_prob=switch_prob,
             vis_radius=vis_radius,
             vis_color=vis_color,
+            custom_name=command_name,
         )
