@@ -24,7 +24,7 @@ class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
         return [
             ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
             ksim.StayAliveReward(scale=1.0),
-            ksim.FeetNoContactReward(window_size=round(self.config.step_phase / self.config.ctrl_dt), scale=0.1),
+            ksim.FeetNoContactReward(window_size=round(self.config.step_phase / self.config.ctrl_dt), scale=0.01),
         ]
 
 
