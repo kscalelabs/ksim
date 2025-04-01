@@ -1,19 +1,4 @@
-<!-- Copyright 2021 DeepMind Technologies Limited
-
-     Licensed under the Apache License, Version 2.0 (the "License");
-     you may not use this file except in compliance with the License.
-     You may obtain a copy of the License at
-
-         http://www.apache.org/licenses/LICENSE-2.0
-
-     Unless required by applicable law or agreed to in writing, software
-     distributed under the License is distributed on an "AS IS" BASIS,
-     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-     See the License for the specific language governing permissions and
-     limitations under the License.
--->
-
-<mujoco model="Humanoid">
+<mujoco model="humanoid">
   <asset>
     <texture name="body" type="cube" builtin="flat" mark="cross" width="512" height="512" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" markrgb="1 1 1" random="0.01"/>
     <material name="body" texture="body" texuniform="true" rgba="0.8 0.6 .4 1"/>
@@ -21,12 +6,21 @@
     <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance=".2"/>
   </asset>
 
+  <option timestep="0.005" solver="Newton" iterations="4" ls_iterations="8">
+    <flag eulerdamp="disable"/>
+  </option>
+
+  <custom>
+    <numeric data="8" name="max_contact_points"/>
+    <numeric data="8" name="max_geom_pairs"/>
+  </custom>
+
   <default>
     <motor ctrlrange="-1 1" ctrllimited="true"/>
     <default class="body">
 
       <!-- geoms -->
-      <geom type="capsule" condim="3" friction=".7" solimp="0.9 0.95 0.001" solref="0.002 1" material="body" contype="0" conaffinity="0"/>
+      <geom type="capsule" condim="1" friction=".7" solimp=".9 .99 .003" solref=".015 1" material="body" contype="0" conaffinity="0"/>
       <default class="thigh">
         <geom size=".06"/>
       </default>
@@ -91,7 +85,7 @@
   </default>
 
   <worldbody>
-    <geom name="floor" size="0 0 .05" type="plane" material="grid" condim="3"/>
+    <geom name="floor" size="0 0 .05" type="plane" material="grid" condim="1"/>
     <light name="spotlight" mode="targetbodycom" target="torso" diffuse=".8 .8 .8" specular="0.3 0.3 0.3" pos="0 -6 4" cutoff="30"/>
     <body name="torso" pos="0 0 1.4" childclass="body">
       <light name="top" pos="0 0 2" mode="trackcom"/>
@@ -209,13 +203,8 @@
   <sensor>
     <accelerometer name="imu_acc" site="imu_site" noise="0.01" />
     <gyro name="imu_gyro" site="imu_site" noise="0.01" />
-    <magnetometer name="imu_mag" site="imu_site" noise="0.05" />
-    <framepos name="base_link_pos" objtype="site" objname="imu_site" />
-    <framequat name="base_link_quat" objtype="site" objname="imu_site" />
-    <framelinvel name="base_link_vel" objtype="site" objname="imu_site" />
-    <frameangvel name="base_link_ang_vel" objtype="site" objname="imu_site" />
   </sensor>
-  
+
   <keyframe>
     <key name="boxer" qpos='0 0 1.4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'/>
     <key name="relaxed" qpos='0 0 1.4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.71797 -0.52222 -1.54867 0.71797 -0.52222 -1.54867'/>

@@ -18,64 +18,77 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.task.rl import RLConfig, RLTask
-from ksim.types import Rewards, Trajectory
+from ksim.types import Rewards, SingleTrajectory, Trajectory
 
 
-def get_deltas(
-    rewards: Array,
-    values: Array,
-    values_shifted: Array,
-    termination_mask: Array,
-    decay_gamma: float,
-) -> Array:
-    """Computes the TD residuals for a rollout."""
-    return rewards + decay_gamma * values_shifted * termination_mask - values
-
-
-@xax.jit(static_argnames=["decay_gamma", "gae_lambda", "normalize_advantages", "use_two_step_td_target"])
+@xax.jit(
+    static_argnames=[
+        "decay_gamma",
+        "gae_lambda",
+        "normalize_advantages",
+        "use_two_step_td_target",
+        "monte_carlo_returns",
+    ]
+)
 def compute_advantages_and_value_targets(
     values_t: Array,
     rewards_t: Array,
     dones_t: Array,
     decay_gamma: float,
     gae_lambda: float,
-    normalize_advantages: bool = True,
+    normalize_advantages: bool = False,
     use_two_step_td_target: bool = False,
-) -> tuple[Array, Array]:
+    monte_carlo_returns: bool = False,
+) -> tuple[Array, Array, Array, Array]:
     """Computes the advantages using Generalized Advantage Estimation (GAE)."""
 
-    def scan_fn(adv_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+    def returns_scan_fn(returns_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+        """Scanning this computes the returns in reverse order."""
+        reward, mask = x
+        return_t = reward + decay_gamma * mask * returns_t_plus_1
+        return return_t, return_t
+
+    def gae_scan_fn(adv_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
         """Scanning this computes the advantages in reverse order."""
         delta, mask = x
         adv_t = delta + decay_gamma * gae_lambda * mask * adv_t_plus_1
         return adv_t, adv_t
 
-    def compute_gae_and_targets_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> tuple[Array, Array]:
+    def compute_gae_and_targets_for_sample(
+        values_t: Array,
+        rewards_t: Array,
+        dones_t: Array,
+    ) -> tuple[Array, Array, Array, Array]:
         # Use the last value as the bootstrap value.
         values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
         mask_t = jnp.where(dones_t, 0.0, 1.0)
-        deltas_t = get_deltas(rewards_t, values_t, values_shifted_t, mask_t, decay_gamma)
+
+        # Compute returns.
+        _, returns_t = jax.lax.scan(returns_scan_fn, jnp.zeros_like(rewards_t[-1]), (rewards_t, mask_t), reverse=True)
 
         # Compute the GAE.
-        _, gae_t = jax.lax.scan(scan_fn, jnp.zeros_like(deltas_t[-1]), (deltas_t, mask_t), reverse=True)
-        value_targets_t = gae_t + values_t
+        deltas_t = rewards_t + decay_gamma * values_shifted_t * mask_t - values_t
+        _, gae_t = jax.lax.scan(gae_scan_fn, jnp.zeros_like(deltas_t[-1]), (deltas_t, mask_t), reverse=True)
+
+        # Get the value targets.
+        value_targets_t = returns_t if monte_carlo_returns else gae_t + values_t
 
         if not use_two_step_td_target:
-            return gae_t, value_targets_t
+            return gae_t, value_targets_t, gae_t, returns_t
 
         # Apply another TD step to get the value targets.
         value_targets_shifted_t = jnp.concatenate([value_targets_t[1:], value_targets_t[-1:]], axis=0)
         advantages_t = rewards_t + decay_gamma * value_targets_shifted_t * mask_t - values_t
 
-        return advantages_t, value_targets_t
+        return advantages_t, value_targets_t, gae_t, returns_t
 
     # Compute the advantages and value targets for each sample in the batch.
-    advantages_t, value_targets_t = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t)
+    advantages_t, value_targets_t, gae_t, returns_t = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t)
 
     if normalize_advantages:
         advantages_t = advantages_t / (advantages_t.std(axis=-1, keepdims=True) + 1e-6)
 
-    return advantages_t, value_targets_t
+    return advantages_t, value_targets_t, gae_t, returns_t
 
 
 @xax.jit(static_argnames=["clip_param"])
@@ -232,8 +245,8 @@ class PPOConfig(RLConfig):
         help="Entropy coefficient for PPO: high = more exploration.",
     )
     log_clip_value: float = xax.field(
-        value=10.0,
-        help="The log clip value for PPO, for numerical stability.",
+        value=20.0,
+        help="The log clip value for PPO, for numerical stability. For FP16, this should be 10 instead.",
     )
     gamma: float = xax.field(
         value=0.99,
@@ -250,6 +263,10 @@ class PPOConfig(RLConfig):
     use_two_step_td_target: bool = xax.field(
         value=False,
         help="Whether to use two-step TD targets.",
+    )
+    monte_carlo_returns: bool = xax.field(
+        value=False,
+        help="Whether to use Monte Carlo returns.",
     )
 
 
@@ -379,6 +396,53 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "advantages": advantages_t.mean(),
         }
 
+    def get_single_trajectory_metrics(
+        self,
+        trajectories: Trajectory,
+        rewards: Rewards,
+        loss_t: Array,
+        on_policy_log_probs_tn: Array,
+        log_probs_tn: Array,
+        entropy_tn: Array,
+        values_t: Array,
+        value_targets_t: Array,
+        advantages_t: Array,
+        gae_t: Array,
+        returns_t: Array,
+    ) -> dict[str, Array]:
+        """Gets the metrics to log for a single trajectory.
+
+        If the metric is a scalar, it will be logged as a scalar. If the
+        metric is a tuple, it is assumed to be a distribution in (mean, std)
+        format and will be logged as a distribution.
+
+        Args:
+            trajectories: The batch of trajectories to get metrics for.
+            rewards: The rewards for the trajectories.
+            loss_t: The PPO loss value.
+            on_policy_log_probs_tn: The log probabilities of the actions, with shape (T, *A).
+            log_probs_tn: The log probabilities of the actions, with shape (T, *A).
+            entropy_tn: The entropy of the action distribution, with shape (T, *A).
+            values_t: The state-value estimates, with shape (T,).
+            value_targets_t: The value targets, with shape (T,).
+            advantages_t: The advantages, with shape (T,).
+            gae_t: The GAE values, with shape (T,).
+            returns_t: The returns, with shape (T,).
+
+        Returns:
+            A dictionary of metrics to be logged. Each metric should be a tensor
+            with shape (T, *).
+        """
+        return {
+            "values": values_t,
+            "value_targets": value_targets_t,
+            "advantages": advantages_t,
+            "entropy": entropy_tn,
+            "loss": loss_t,
+            "gae": gae_t,
+            "returns": returns_t,
+        }
+
     @xax.jit(static_argnames=["self", "model_static"])
     def get_loss_and_metrics(
         self,
@@ -387,7 +451,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, xax.FrozenDict[str, Array]]:
+    ) -> tuple[Array, tuple[xax.FrozenDict[str, Array], SingleTrajectory]]:
         """Computes the PPO loss and additional metrics.
 
         Args:
@@ -398,8 +462,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rng: A random seed.
 
         Returns:
-            A tuple containing the loss value as a scalar, and a dictionary of
-            metrics to log.
+            A tuple containing the loss value as a scalar, a dictionary of
+            metrics to log, and the single trajectory to log.
         """
         model = eqx.combine(model_arr, model_static)
 
@@ -408,7 +472,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             trajectories: Trajectory,
             rewards: Rewards,
             rng: PRNGKeyArray,
-        ) -> tuple[Array, xax.FrozenDict[str, Array]]:
+        ) -> tuple[Array, xax.FrozenDict[str, Array], SingleTrajectory]:
             rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 5)
 
             on_policy_log_probs_tn = jax.lax.stop_gradient(self.get_on_policy_log_probs(model, trajectories, rng1))
@@ -416,7 +480,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             log_probs_tn, entropy_tn = self.get_log_probs(model, trajectories, rng3)
             values_t = self.get_values(model, trajectories, rng4)
 
-            advantages_t, value_targets_t = compute_advantages_and_value_targets(
+            advantages_t, value_targets_t, gae_t, returns_t = compute_advantages_and_value_targets(
                 values_t=jax.lax.stop_gradient(values_t),
                 rewards_t=rewards.total,
                 dones_t=trajectories.done,
@@ -424,6 +488,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 gae_lambda=self.config.lam,
                 normalize_advantages=self.config.normalize_advantages,
                 use_two_step_td_target=self.config.use_two_step_td_target,
+                monte_carlo_returns=self.config.monte_carlo_returns,
             )
 
             loss_t = compute_ppo_loss(
@@ -458,18 +523,41 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 advantages_t=advantages_t,
             )
 
+            single_traj_metrics = self.get_single_trajectory_metrics(
+                trajectories=trajectories,
+                rewards=rewards,
+                loss_t=loss_t,
+                on_policy_log_probs_tn=on_policy_log_probs_tn,
+                log_probs_tn=log_probs_tn,
+                entropy_tn=entropy_tn,
+                values_t=values_t,
+                value_targets_t=value_targets_t,
+                advantages_t=advantages_t,
+                gae_t=gae_t,
+                returns_t=returns_t,
+            )
+
+            single_traj = SingleTrajectory(
+                trajectory=trajectories,
+                rewards=rewards,
+                metrics=xax.FrozenDict(single_traj_metrics),
+            )
+
             # Mean over all non-masked trajectories.
             num_valid = jnp.sum(~trajectories.done)
             loss = loss_t.sum() / (num_valid + 1e-6)
 
-            return loss, xax.FrozenDict(metrics)
+            return loss, xax.FrozenDict(metrics), single_traj
 
         # Gets the loss and metrics for each trajectory in the batch.
         rngs = jax.random.split(rng, rewards.total.shape[0])
         par_fn = jax.vmap(loss_and_metrics_fn, in_axes=(None, 0, 0, 0))
-        loss, metrics = par_fn(model, trajectories, rewards, rngs)
+        loss, metrics, single_traj = par_fn(model, trajectories, rewards, rngs)
 
-        return loss.mean(), metrics
+        # Only take the last trajectory.
+        single_traj = jax.tree.map(lambda x: x[-1], single_traj)
+
+        return loss.mean(), (metrics, single_traj)
 
     @xax.jit(static_argnames=["self", "model_static"])
     def _get_loss_metrics_and_grads(
@@ -479,11 +567,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[dict[str, Array], PyTree]:
+    ) -> tuple[dict[str, Array], SingleTrajectory, PyTree]:
         loss_fn = jax.grad(self.get_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1])(loss_fn)
-        grads, metrics = loss_fn(model_arr, model_static, trajectories, rewards, rng)
-        return metrics, grads
+        grads, (metrics, single_traj) = loss_fn(model_arr, model_static, trajectories, rewards, rng)
+        return metrics, single_traj, grads
 
     @xax.jit(static_argnames=["self", "model_static", "optimizer"])
     def _single_step(
@@ -495,8 +583,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array]]:
-        ppo_metrics, grads = self._get_loss_metrics_and_grads(
+    ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array], SingleTrajectory]:
+        ppo_metrics, single_traj, grads = self._get_loss_metrics_and_grads(
             model_arr=model_arr,
             model_static=model_static,
             trajectories=trajectories,
@@ -511,7 +599,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             opt_state=opt_state,
         )
 
-        return new_model_arr, new_opt_state, xax.FrozenDict(dict(ppo_metrics) | dict(grad_metrics))
+        return new_model_arr, new_opt_state, xax.FrozenDict(dict(ppo_metrics) | dict(grad_metrics)), single_traj
 
     def update_model(
         self,
@@ -522,7 +610,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array]]:
+    ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array], SingleTrajectory]:
         """Runs PPO updates on a given set of trajectory batches.
 
         Args:
@@ -535,14 +623,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rng: A random seed.
 
         Returns:
-            A tuple containing the updated parameters, optimizer state, and metrics.
+            A tuple containing the updated parameters, optimizer state, metrics,
+            and the single trajectory to log.
         """
 
         # Loops over the trajectory batches and applies gradient updates.
         def scan_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             xt: Array,
-        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], xax.FrozenDict[str, Array]]:
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], tuple[xax.FrozenDict[str, Array], SingleTrajectory]]:
             model_arr, opt_state, rng = carry
             rng, batch_rng = jax.random.split(rng)
 
@@ -550,7 +639,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
             reward_batch = jax.tree.map(lambda x: x[xt], rewards)
 
-            model_arr, opt_state, metrics = self._single_step(
+            model_arr, opt_state, metrics, single_traj = self._single_step(
                 model_arr=model_arr,
                 model_static=model_static,
                 optimizer=optimizer,
@@ -560,38 +649,35 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 rng=batch_rng,
             )
 
-            return (model_arr, opt_state, rng), metrics
+            return (model_arr, opt_state, rng), (metrics, single_traj)
 
         # Applines N steps of gradient updates.
         def batch_scan_fn(
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
-        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], xax.FrozenDict[str, Array]]:
-            arr, opt_state, rng = carry
-
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], tuple[xax.FrozenDict[str, Array], SingleTrajectory]]:
             # Shuffling causes a strange kernel caching issue on GPUs.
             # rng, indices_rng = jax.random.split(rng)
             # indices = jax.random.permutation(indices_rng, trajectories.done.shape[0])
             indices = jnp.arange(trajectories.done.shape[0])
-
             indices = indices.reshape(self.num_batches, self.batch_size)
+
+            arr, opt_state, rng = carry
             carry = (arr, opt_state, rng)
+            carry, (metrics, single_traj) = jax.lax.scan(scan_fn, carry, indices)
 
-            carry, metrics = jax.lax.scan(scan_fn, carry, indices)
+            # Get the last trajectory.
+            single_traj = jax.tree.map(lambda x: x[-1], single_traj)
 
-            # Manual version, instead of using scan.
-            # metrics = []
-            # for i in indices:
-            #     carry, metric = scan_fn(carry, i)
-            #     metrics.append(metric)
-            # metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
-
-            return carry, metrics
+            return carry, (metrics, single_traj)
 
         carry = (model_arr, opt_state, rng)
 
         # Applies gradient updates.
-        carry, metrics = jax.lax.scan(batch_scan_fn, carry, length=self.config.num_passes)
+        carry, (metrics, single_traj) = jax.lax.scan(batch_scan_fn, carry, length=self.config.num_passes)
+
+        # Get the last trajectory.
+        single_traj = jax.tree.map(lambda x: x[-1], single_traj)
 
         # Manual version, instead of using scan.
         # metrics = []
@@ -601,4 +687,4 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
 
         model_arr, opt_state, _ = carry
-        return model_arr, opt_state, metrics
+        return model_arr, opt_state, metrics, single_traj

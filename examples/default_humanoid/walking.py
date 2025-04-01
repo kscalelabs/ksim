@@ -27,11 +27,6 @@ class AuxOutputs:
     values: Array
 
 
-class NaiveVelocityReward(ksim.Reward):
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qvel[..., 0].clip(max=5.0)
-
-
 class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
@@ -97,7 +92,6 @@ class DefaultHumanoidActor(eqx.Module):
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
-        # return distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
         return distrax.Normal(mean_n, std_n)
 
 
@@ -177,7 +171,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=3e-4,
+        value=1e-3,
         help="Learning rate for PPO.",
     )
     max_grad_norm: float = xax.field(
@@ -190,10 +184,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
     # Mujoco parameters.
-    use_mit_actuators: bool = xax.field(
-        value=False,
-        help="Whether to use the MIT actuator model, where the actions are position commands",
-    )
     kp: float = xax.field(
         value=1.0,
         help="The Kp for the actuators",
@@ -250,10 +240,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
+        mj_model.opt.iterations = 4
+        mj_model.opt.ls_iterations = 8
         mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
+        # mj_model.opt.solver = mjx.SolverType.CG
+        mj_model.opt.solver = mjx.SolverType.NEWTON
 
         return mj_model
 
@@ -271,12 +262,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         physics_model: ksim.PhysicsModel,
         metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> ksim.Actuators:
-        if self.config.use_mit_actuators:
-            if metadata is None:
-                raise ValueError("Metadata is required for MIT actuators")
-            return ksim.MITPositionActuators(physics_model, metadata)
-        else:
-            return ksim.TorqueActuators()
+        return ksim.TorqueActuators()
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
@@ -293,7 +279,10 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 x_force=1.0,
                 y_force=1.0,
                 z_force=0.0,
-                interval_range=(3.0, 5.0),
+                x_angular_force=0.1,
+                y_angular_force=0.1,
+                z_angular_force=0.3,
+                interval_range=(0.5, 2.5),
             ),
         ]
 
@@ -319,6 +308,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.ActuatorAccelerationObservation(),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
+            ksim.FeetContactObservation.create(
+                physics_model=physics_model,
+                foot_left_geom_names=["foot1_left", "foot2_left"],
+                foot_right_geom_names=["foot1_right", "foot2_right"],
+                floor_geom_names=["floor"],
+            ),
             ksim.FeetPositionObservation.create(
                 physics_model=physics_model,
                 foot_left_body_name="foot_left",
@@ -361,7 +356,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
+            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=-1.0),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             ksim.LinearVelocityTrackingPenalty(scale=-0.1),
@@ -370,7 +365,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.5),
+            ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
             ksim.FastAccelerationTermination(),
         ]
 
@@ -387,16 +382,16 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Normal:
         dh_joint_pos_n = observations["joint_position_observation"]
-        dh_joint_vel_n = observations["joint_velocity_observation"] / 50.0
+        dh_joint_vel_n = observations["joint_velocity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd_1 = commands["angular_velocity_command"]
         return model.actor(
             dh_joint_pos_n=dh_joint_pos_n,
-            dh_joint_vel_n=dh_joint_vel_n,
-            imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
+            dh_joint_vel_n=dh_joint_vel_n / 10.0,
+            imu_acc_3=imu_acc_3 / 50.0,
+            imu_gyro_3=imu_gyro_3 / 3.0,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd_1=ang_vel_cmd_1,
         )
@@ -422,11 +417,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ang_vel_cmd_1 = commands["angular_velocity_command"]  # 1
         return model.critic(
             dh_joint_pos_n=dh_joint_pos_n,
-            dh_joint_vel_n=dh_joint_vel_n,
+            dh_joint_vel_n=dh_joint_vel_n / 10.0,
             com_inertia_n=com_inertia_n,
             com_vel_n=com_vel_n,
-            imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
+            imu_acc_3=imu_acc_3 / 50.0,
+            imu_gyro_3=imu_gyro_3 / 3.0,
             act_frc_obs_n=act_frc_obs_n,
             base_pos_3=base_pos_3,
             base_quat_4=base_quat_4,
@@ -461,11 +456,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         # Vectorize over both batch and time dimensions.
         par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
         action_dist_btn = par_fn(model, trajectories.obs, trajectories.command)
+        action_dist_tanh_btn = distrax.Transformed(action_dist_btn, distrax.Tanh())
 
         # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
         action_btn = trajectories.action / model.actor.mean_scale
-        log_probs_btn = action_dist_btn.log_prob(action_btn)
+        log_probs_btn = action_dist_tanh_btn.log_prob(action_btn)
         entropy_btn = action_dist_btn.entropy()
 
         return log_probs_btn, entropy_btn
@@ -493,7 +489,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, None, AuxOutputs]:
-        action_dist_n = self._run_actor(model, observations, commands)
+        action_dist_n = distrax.Transformed(self._run_actor(model, observations, commands), distrax.Tanh())
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
 
@@ -519,13 +515,13 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=10,
             epochs_per_log_step=10,
+            rollout_length_seconds=10.0,
             # Logging parameters.
-            # log_full_trajectory_every_n_seconds=60,
+            log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            rollout_length_seconds=4.0,
         ),
     )

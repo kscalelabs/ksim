@@ -240,35 +240,45 @@ class ActuatorAccelerationObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetContactObservation(Observation):
-    foot_left: int = attrs.field()
-    foot_right: int = attrs.field()
-    floor_geom: int = attrs.field()
+    foot_left: tuple[int, ...] = attrs.field()
+    foot_right: tuple[int, ...] = attrs.field()
+    floor_geom: tuple[int, ...] = attrs.field()
 
     @classmethod
     def create(
         cls,
         *,
         physics_model: PhysicsModel,
-        foot_left_geom_name: str,
-        foot_right_geom_name: str,
-        floor_geom_name: str,
+        foot_left_geom_names: str | Collection[str],
+        foot_right_geom_names: str | Collection[str],
+        floor_geom_names: str | Collection[str],
         noise: float = 0.0,
     ) -> Self:
         """Create a sensor observation from a physics model."""
-        foot_left_idx = get_geom_data_idx_from_name(physics_model, foot_left_geom_name)
-        foot_right_idx = get_geom_data_idx_from_name(physics_model, foot_right_geom_name)
-        floor_geom_idx = get_geom_data_idx_from_name(physics_model, floor_geom_name)
+        if isinstance(foot_left_geom_names, str):
+            foot_left_geom_names = [foot_left_geom_names]
+        if isinstance(foot_right_geom_names, str):
+            foot_right_geom_names = [foot_right_geom_names]
+        if isinstance(floor_geom_names, str):
+            floor_geom_names = [floor_geom_names]
+
+        foot_left_idxs = [get_geom_data_idx_from_name(physics_model, name) for name in foot_left_geom_names]
+        foot_right_idxs = [get_geom_data_idx_from_name(physics_model, name) for name in foot_right_geom_names]
+        floor_geom_idxs = [get_geom_data_idx_from_name(physics_model, name) for name in floor_geom_names]
         return cls(
-            foot_left=foot_left_idx,
-            foot_right=foot_right_idx,
-            floor_geom=floor_geom_idx,
+            foot_left=tuple(foot_left_idxs),
+            foot_right=tuple(foot_right_idxs),
+            floor_geom=tuple(floor_geom_idxs),
             noise=noise,
         )
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
-        contact_1 = geoms_colliding(rollout_state.physics_state.data, self.foot_left, self.floor_geom)
-        contact_2 = geoms_colliding(rollout_state.physics_state.data, self.foot_right, self.floor_geom)
-        return jnp.array([contact_1, contact_2])
+        foot_left = jnp.array(self.foot_left)
+        foot_right = jnp.array(self.foot_right)
+        floor = jnp.array(self.floor_geom)
+        contact_1 = geoms_colliding(rollout_state.physics_state.data, foot_left, floor).any(axis=-1)
+        contact_2 = geoms_colliding(rollout_state.physics_state.data, foot_right, floor).any(axis=-1)
+        return jnp.stack([contact_1, contact_2], axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)

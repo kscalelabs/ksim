@@ -8,7 +8,6 @@ __all__ = [
     "get_geom_data_idx_by_name",
     "get_body_data_idx_by_name",
     "get_floor_idx",
-    "get_collision_info",
     "geoms_colliding",
     "get_joint_metadata",
     "update_model_field",
@@ -29,11 +28,12 @@ import logging
 from typing import Any, Hashable, TypeVar
 from xml.etree import ElementTree as ET
 
+import chex
 import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
-from jaxtyping import Array, PyTree
+from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
@@ -162,23 +162,23 @@ def get_floor_idx(physics_model: PhysicsModel, floor_name: str = "floor") -> int
     return geom_mappings[floor_name]
 
 
-def get_collision_info(contact: PyTree, geom1: int, geom2: int) -> tuple[jax.Array, jax.Array]:
-    """Get the distance and normal of the collision between two geoms."""
-    mask = (jnp.array([geom1, geom2]) == contact.geom).all(axis=1)
-    mask |= (jnp.array([geom2, geom1]) == contact.geom).all(axis=1)
-    idx = jnp.where(mask, contact.dist, 1e4).argmin()
-    dist = contact.dist[idx] * mask[idx]
-    # This reshape is nedded because contact.frame's shape depends on how many envs there are.
-    normal = (dist < 0) * jnp.reshape(contact.frame[idx], (-1,))[:3]
-    return dist, normal
-
-
-def geoms_colliding(state: PhysicsData, geom1: int, geom2: int) -> jax.Array:
+def geoms_colliding(state: PhysicsData, geom1: Array, geom2: Array) -> Array:
     """Return True if the two geoms are colliding."""
+    chex.assert_shape(geom1, (None,))
+    chex.assert_shape(geom2, (None,))
+
+    def get_colliding_inner(geom: Array, dist: Array, geom1: Array, geom2: Array) -> Array:
+        x, y = jnp.meshgrid(geom1, geom2, indexing="ij")
+        xy = jnp.concatenate([x, y], axis=-1)
+        yx = jnp.concatenate([y, x], axis=-1)
+        mask = (xy[:, None] == geom[None, :]).all(axis=-1) | (yx[:, None] == geom[None, :]).all(axis=-1)
+        dist = jnp.where(mask, dist[None, :], 1e4).min(axis=-1)
+        return dist < 0
+
     return jax.lax.cond(
-        jnp.equal(state.contact.geom.shape[0], 0),  # if no contacts, return False
-        lambda _: jnp.array(False),
-        lambda _: get_collision_info(state.contact, geom1, geom2)[0] < 0,
+        jnp.equal(state.contact.geom.shape[0], 0),
+        lambda _: jnp.zeros(geom1.shape[0] * geom2.shape[0], dtype=jnp.bool_),
+        lambda _: get_colliding_inner(state.contact.geom, state.contact.dist, geom1, geom2),
         operand=None,
     )
 
