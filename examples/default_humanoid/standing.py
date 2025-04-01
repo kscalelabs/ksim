@@ -22,7 +22,7 @@ Config = TypeVar("Config", bound=HumanoidStandingTaskConfig)
 class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
+            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, dropoff=10.0, scale=1.0),
             ksim.StayAliveReward(scale=1.0),
             ksim.FeetNoContactReward(window_size=round(self.config.step_phase / self.config.ctrl_dt), scale=0.01),
         ]
@@ -50,7 +50,6 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             # PPO parameters.
-            entropy_coef=0.001,
             value_loss_coef=0.5,
             gamma=0.97,
             lam=0.98,
