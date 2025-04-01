@@ -214,5 +214,8 @@ class MITPositionVelocityActuators(MITPositionActuators):
 
     def get_default_action(self, physics_data: PhysicsData) -> Array:
         """Get the default action (zeros) with the correct shape."""
-        qpos_dim = len(physics_data.qpos[7:])
+        if self.freejoint_first:
+            qpos_dim = len(physics_data.qpos[7:])
+        else:
+            qpos_dim = len(physics_data.qpos)
         return jnp.zeros(qpos_dim * 2)

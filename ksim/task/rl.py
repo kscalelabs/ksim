@@ -340,6 +340,10 @@ class RLConfig(xax.Config):
         value=False,
         help="If true, render markers.",
     )
+    render_camera_name: str | int | None = xax.field(
+        value=None,
+        help="The name or id of the camera to use in rendering.",
+    )
 
 
 Config = TypeVar("Config", bound=RLConfig)
@@ -737,6 +741,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if self.config.render_track_body_id is not None:
             mj_camera.trackbodyid = self.config.render_track_body_id
             mj_camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+
+        if self.config.render_camera_name is not None:
+            mj_camera = self.config.render_camera_name
 
         frame_list: list[np.ndarray] = []
         for frame_id, trajectory in enumerate(trajectory_list):
