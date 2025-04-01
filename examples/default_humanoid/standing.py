@@ -40,8 +40,8 @@ if __name__ == "__main__":
             num_envs=2048,
             batch_size=256,
             num_passes=32,
-            epochs_per_log_step=10,
-            rollout_length_seconds=10.0,
+            epochs_per_log_step=1,
+            rollout_length_seconds=4.0,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
             log_full_trajectory_on_first_step=True,
