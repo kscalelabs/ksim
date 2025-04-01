@@ -118,7 +118,6 @@ class GaitMatchingReward(ksim.Reward):
 
 
 class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Config]):
-
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
             ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, scale=0.5),

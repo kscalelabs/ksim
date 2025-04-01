@@ -1427,36 +1427,32 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         num_samples=state.num_samples + self.rollout_num_samples,
                     )
 
+                    assert isinstance(metrics.termination["episode_length"], Array)
+
                     # Update the curriculum step.
                     episode_length_percentage = (
                         metrics.termination["episode_length"] / self.config.rollout_length_seconds
                     )
-                                        
+
                     # Broadcast the scalar to match the batch dimension and ensure dtype matches
                     broadcast_episode_length = jnp.broadcast_to(
-                        jnp.asarray(episode_length_percentage, dtype=jnp.float32), 
-                        (self.config.num_envs,)
+                        jnp.asarray(episode_length_percentage, dtype=jnp.float32), (self.config.num_envs,)
                     )
-                    
+
                     # Create a new FrozenDict with properly broadcasted values
-                    updated_event_states = xax.FrozenDict({
-                        key: dataclasses.replace(
-                            event_state,
-                            episode_length_percentage=broadcast_episode_length
-                        )
-                        for key, event_state in rollout_variables.physics_state.event_states.items()
-                    })
-                    
+                    updated_event_states: xax.FrozenDict[str, BaseEventState] = xax.FrozenDict(
+                        {
+                            key: dataclasses.replace(event_state, episode_length_percentage=broadcast_episode_length)
+                            for key, event_state in rollout_variables.physics_state.event_states.items()
+                        }
+                    )
+
                     # Update the physics state with the new event states
                     updated_physics_state = dataclasses.replace(
-                        rollout_variables.physics_state,
-                        event_states=updated_event_states
+                        rollout_variables.physics_state, event_states=updated_event_states
                     )
-                    
-                    rollout_variables = dataclasses.replace(
-                        rollout_variables,
-                        physics_state=updated_physics_state
-                    )
+
+                    rollout_variables = dataclasses.replace(rollout_variables, physics_state=updated_physics_state)
 
                     # Only log trajectory information on validation steps.
                     if state.phase == "valid":
