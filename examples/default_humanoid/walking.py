@@ -240,10 +240,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
+        mj_model.opt.iterations = 4
+        mj_model.opt.ls_iterations = 8
         mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
+        # mj_model.opt.solver = mjx.SolverType.CG
+        mj_model.opt.solver = mjx.SolverType.NEWTON
 
         return mj_model
 
@@ -275,9 +276,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                x_force=3.0,
-                y_force=3.0,
+                x_force=1.0,
+                y_force=1.0,
                 z_force=0.0,
+                x_angular_force=0.1,
+                y_angular_force=0.1,
+                z_angular_force=0.3,
                 interval_range=(0.5, 2.5),
             ),
         ]
