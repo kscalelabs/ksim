@@ -552,14 +552,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             obs_generators=rollout_constants.obs_generators,
         )
 
-        # Gets the commmands from the previous commands and the physics state.
-        commands = get_commands(
-            prev_commands=rollout_variables.commands,
-            physics_state=rollout_variables.physics_state,
-            rng=cmd_rng,
-            command_generators=rollout_constants.command_generators,
-        )
-
         # Samples an action from the model.
         action, next_carry, aux_outputs = self.sample_action(
             model=model,
@@ -567,7 +559,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             physics_model=physics_model,
             physics_state=rollout_variables.physics_state,
             observations=observations,
-            commands=commands,
+            commands=rollout_variables.commands,
             rng=act_rng,
         )
 
@@ -581,12 +573,34 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Gets termination components and a single termination boolean.
         terminations = get_terminations(
-            physics_state=rollout_variables.physics_state,
+            physics_state=next_physics_state,
             termination_generators=rollout_constants.termination_generators,
         )
         terminated = jax.tree.reduce(jnp.logical_or, list(terminations.values()))
 
+        # Combines all the relevant data into a single object. Lives up here to
+        # avoid accidentally incorporating information it shouldn't access.
+        transition = Trajectory(
+            qpos=rollout_variables.physics_state.data.qpos,
+            qvel=rollout_variables.physics_state.data.qvel,
+            obs=observations,
+            command=rollout_variables.commands,
+            action=action,
+            done=terminated,
+            timestep=rollout_variables.physics_state.data.time,
+            termination_components=terminations,
+            aux_outputs=aux_outputs,
+        )
+
         # Conditionally reset on termination.
+        next_commands = jax.lax.cond(
+            terminated,
+            lambda: get_initial_commands(cmd_rng, rollout_constants.command_generators),
+            lambda: get_commands(
+                rollout_variables.commands, next_physics_state, cmd_rng, rollout_constants.command_generators
+            ),
+        )
+
         next_physics_state = jax.lax.cond(
             terminated,
             lambda: engine.reset(physics_model, reset_rng),
@@ -598,34 +612,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             lambda: self.get_initial_carry(carry_rng),
             lambda: next_carry,
         )
-        commands = jax.lax.cond(
-            terminated,
-            lambda: get_initial_commands(cmd_rng, command_generators=rollout_constants.command_generators),
-            lambda: commands,
-        )
-
-        # Combines all the relevant data into a single object.
-        trajectory = Trajectory(
-            qpos=next_physics_state.data.qpos,
-            qvel=next_physics_state.data.qvel,
-            obs=observations,
-            command=commands,
-            action=action,
-            done=terminated,
-            timestep=next_physics_state.data.time,
-            termination_components=terminations,
-            aux_outputs=aux_outputs,
-        )
 
         # Gets the variables for the next step.
         next_variables = RolloutVariables(
             carry=next_carry,
-            commands=commands,
+            commands=next_commands,
             physics_state=next_physics_state,
             rng=rng,
         )
 
-        return trajectory, next_variables
+        return transition, next_variables
 
     def get_dataset(self, phase: xax.Phase) -> Dataset:
         raise NotImplementedError("RL tasks do not require datasets, since trajectory histories are stored in-memory.")
