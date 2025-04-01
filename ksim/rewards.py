@@ -211,14 +211,12 @@ class BaseHeightRangeReward(Reward):
 
     z_lower: float = attrs.field()
     z_upper: float = attrs.field()
-    temp: float = attrs.field(default=3.0)
-    monotonic_fn: MonotonicFn = attrs.field(default="exp")
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
         too_low = self.z_lower - base_height
         too_high = base_height - self.z_upper
-        return norm_to_reward(jnp.maximum(too_low, too_high).clip(min=0.0), self.temp, self.monotonic_fn)
+        return (1.0 - jnp.maximum(too_low, too_high).clip(min=0.0, max=1.0))
 
 
 @attrs.define(frozen=True, kw_only=True)
