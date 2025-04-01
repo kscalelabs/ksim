@@ -333,7 +333,11 @@ def remove_joints_except(file_path: str, joint_names: list[str]) -> str:
             if child.tag == "default":
                 continue
 
+<<<<<<< HEAD
             if child.tag in {"joint", "freejoint"} and child.get("name") not in joint_names:
+=======
+            if (child.tag == "joint" or child.tag == "freejoint") and child.get("name") not in joint_names:
+>>>>>>> e8db7bf064084f0d633781725775bbe93edcae92
                 element.remove(child)
             else:
                 dfs_remove_joints(child)
