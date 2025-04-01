@@ -937,15 +937,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers.extend(randomization.get_markers())
         return markers
 
-    # @xax.jit(
-    #     static_argnames=[
-    #         "self",
-    #         "model_static",
-    #         "optimizer",
-    #         "engine",
-    #         "rollout_constants",
-    #     ]
-    # )
+    @xax.jit(
+        static_argnames=[
+            "self",
+            "model_static",
+            "optimizer",
+            "engine",
+            "rollout_constants",
+        ]
+    )
     def _rl_train_loop_step(
         self,
         physics_model: PhysicsModel,

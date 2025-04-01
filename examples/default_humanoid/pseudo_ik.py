@@ -290,7 +290,7 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 positive_x=True,  # only sample in the positive x direction
                 positive_y=False,
                 positive_z=False,
-                switch_prob=self.config.ctrl_dt / 5,  # will last 5 seconds in expectation
+                switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
                 command_name="cartesian_body_target_command_upper_arm_right",
@@ -446,7 +446,7 @@ if __name__ == "__main__":
             num_passes=10,
             epochs_per_log_step=1,
             # Logging parameters.
-            # log_full_trajectory_every_n_seconds=60,
+            log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
