@@ -419,6 +419,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             value_targets_t: The value targets, with shape (T,).
             advantages_t: The advantages, with shape (T,).
             gae_t: The GAE values, with shape (T,).
+            returns_t: The returns, with shape (T,).
 
         Returns:
             A dictionary of metrics to be logged. Each metric should be a tensor

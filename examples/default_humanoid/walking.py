@@ -107,7 +107,7 @@ class DefaultHumanoidCritic(eqx.Module):
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 2 + 1 + NUM_JOINTS
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 2 + 1
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -134,7 +134,6 @@ class DefaultHumanoidCritic(eqx.Module):
         ang_vel_obs_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd_1: Array,
-        action_n: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -151,7 +150,6 @@ class DefaultHumanoidCritic(eqx.Module):
                 ang_vel_obs_3,  # 3
                 lin_vel_cmd_2,  # 2
                 ang_vel_cmd_1,  # 1
-                action_n,  # NUM_JOINTS
             ],
             axis=-1,
         )
@@ -408,7 +406,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         model: DefaultHumanoidModel,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        action: Array,
     ) -> Array:
         dh_joint_pos_n = observations["joint_position_observation"]  # 26
         dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
@@ -437,7 +434,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ang_vel_obs_3=ang_vel_obs_3,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd_1=ang_vel_cmd_1,
-            action_n=action,
         )
 
     def get_on_policy_log_probs(
@@ -481,8 +477,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> Array:
         # Vectorize over both batch and time dimensions.
-        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0, 0))
-        values_bt1 = par_fn(model, trajectories.obs, trajectories.command, trajectories.action)
+        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
+        values_bt1 = par_fn(model, trajectories.obs, trajectories.command)
 
         # Remove the last dimension.
         return values_bt1.squeeze(-1)
@@ -501,7 +497,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
 
-        critic_n = self._run_critic(model, observations, commands, action_n)
+        critic_n = self._run_critic(model, observations, commands)
         value_n = critic_n.squeeze(-1)
 
         return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
