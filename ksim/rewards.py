@@ -20,6 +20,7 @@ __all__ = [
     "ActionNearPositionPenalty",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
+    "CartesianBodyTargetReward",
     "FeetNoContactReward",
 ]
 
@@ -36,6 +37,7 @@ import xax
 from jaxtyping import Array
 
 from ksim.types import PhysicsModel, Trajectory
+from ksim.utils.mujoco import get_body_data_idx_from_name
 from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
@@ -469,6 +471,44 @@ class FeetFlatReward(Reward):
             - xax.get_norm(unit_vec_x, self.norm)
             - xax.get_norm(unit_vec_y, self.norm)
         ).min(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class CartesianBodyTargetReward(Reward):
+    """Rewards the closeness of the body to the target position."""
+
+    tracked_body_idx: int = attrs.field()
+    base_body_idx: int = attrs.field()
+    command_name: str = attrs.field()
+    norm: xax.NormType = attrs.field()
+    sensitivity: float = attrs.field()
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+        target_pos = trajectory.command[self.command_name]
+        return jnp.exp(-xax.get_norm(body_pos - target_pos, self.norm) * self.sensitivity).mean(axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        command_name: str,
+        tracked_body_name: str,
+        base_body_name: str,
+        norm: xax.NormType = "l2",
+        scale: float = 1.0,
+        sensitivity: float = 1.0,
+    ) -> Self:
+        body_idx = get_body_data_idx_from_name(model, tracked_body_name)
+        base_idx = get_body_data_idx_from_name(model, base_body_name)
+        return cls(
+            tracked_body_idx=body_idx,
+            base_body_idx=base_idx,
+            norm=norm,
+            scale=scale,
+            sensitivity=sensitivity,
+            command_name=command_name,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)

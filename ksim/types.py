@@ -39,8 +39,9 @@ class PhysicsState:
 class Trajectory:
     qpos: Array
     qvel: Array
-    obs: xax.FrozenDict[str, Array]
-    command: xax.FrozenDict[str, Array]
+    xpos: Array
+    obs: xax.FrozenDict[str, PyTree]
+    command: xax.FrozenDict[str, PyTree]
     event_state: xax.FrozenDict[str, Array]
     action: Array
     done: Array

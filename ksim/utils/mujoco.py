@@ -21,10 +21,12 @@ __all__ = [
     "get_body_pose_by_name",
     "get_geom_pose_by_name",
     "get_site_pose_by_name",
+    "remove_joints_except",
 ]
 
 import logging
 from typing import Any, Hashable, TypeVar
+from xml.etree import ElementTree as ET
 
 import chex
 import jax
@@ -318,3 +320,38 @@ def get_site_pose_by_name(
 ) -> tuple[np.ndarray, np.ndarray]:
     site_idx = get_site_data_idx_from_name(model, site_name)
     return get_site_pose(data, site_idx)
+
+
+def remove_joints_except(file_path: str, joint_names: list[str]) -> str:
+    """Remove all joints and references unless listed."""
+    tree = ET.parse(file_path)
+    root = tree.getroot()
+
+    def dfs_remove_joints(element: ET.Element) -> None:
+        for child in list(element):  # Use list to avoid modifying while iterating
+            # Skip defaults as they are needed for armatures, etc.
+            if child.tag == "default":
+                continue
+
+            if child.tag in {"joint", "freejoint"} and child.get("name") not in joint_names:
+                element.remove(child)
+            else:
+                dfs_remove_joints(child)
+
+    def dfs_remove_references(element: ET.Element) -> None:
+        for child in list(element):
+            # Check if the child references a joint not in joint_names
+            joint_attr = child.get("joint")
+            if joint_attr and joint_attr not in joint_names:
+                element.remove(child)
+            # Keyframes are difficult to reorder, so we remove them for now.
+            elif child.tag == "keyframe":
+                element.remove(child)
+            else:
+                dfs_remove_references(child)
+
+    dfs_remove_joints(root)
+    dfs_remove_references(root)
+
+    # write it to a file
+    return ET.tostring(root, encoding="utf-8").decode("utf-8")

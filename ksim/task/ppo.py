@@ -360,6 +360,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         log_probs_tn: Array,
         entropy_tn: Array,
         values_t: Array,
+        on_policy_values_t: Array,
         value_targets_t: Array,
         advantages_t: Array,
     ) -> dict[str, Array]:
@@ -377,6 +378,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             log_probs_tn: The log probabilities of the actions, with shape (T, *A).
             entropy_tn: The entropy of the action distribution, with shape (T, *A).
             values_t: The state-value estimates, with shape (T,).
+            on_policy_values_t: The original policy's values of the actions, with shape (T,).
             value_targets_t: The value targets, with shape (T,).
             advantages_t: The advantages, with shape (T,).
 
@@ -386,8 +388,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         return {
             "loss": loss_t.mean(),
             "log_probs": log_probs_tn.mean(0).flatten(),
+            "on_policy_log_probs": on_policy_log_probs_tn.mean(0).flatten(),
             "entropy": entropy_tn.mean(0).flatten(),
             "value": values_t.mean(),
+            "on_policy_value": on_policy_values_t.mean(),
             "value_targets": value_targets_t.mean(),
             "advantages": advantages_t.mean(),
         }
@@ -514,6 +518,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 log_probs_tn=log_probs_tn,
                 entropy_tn=entropy_tn,
                 values_t=values_t,
+                on_policy_values_t=on_policy_values_t,
                 value_targets_t=value_targets_t,
                 advantages_t=advantages_t,
             )
@@ -596,7 +601,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return new_model_arr, new_opt_state, xax.FrozenDict(dict(ppo_metrics) | dict(grad_metrics)), single_traj
 
-    @xax.jit(static_argnames=["self", "model_static", "optimizer"])
     def update_model(
         self,
         model_arr: PyTree,
