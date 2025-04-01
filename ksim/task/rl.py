@@ -1064,7 +1064,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Only get final trajectory and rewards.
         final_trajectory = jax.tree.map(lambda arr: arr[-1], final_trajectories)
         final_reward = jax.tree.map(lambda arr: arr[-1], final_rewards)
-        breakpoint()
 
         # Metrics, final_trajectories, final_rewards batch dim of epochs.
         # Rollout variables has batch dim of num_envs and are used next rollout.

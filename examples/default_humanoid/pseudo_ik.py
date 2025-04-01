@@ -46,7 +46,7 @@ class DefaultHumanoidActor(eqx.Module):
         var_scale: float,
         mean_scale: float,
     ) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 3
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3
         num_outputs = NUM_JOINTS
 
         self.mlp = eqx.nn.MLP(
@@ -67,7 +67,6 @@ class DefaultHumanoidActor(eqx.Module):
         dh_joint_pos_n: Array,
         dh_joint_vel_n: Array,
         imu_acc_3: Array,
-        imu_gyro_3: Array,
         xyz_target_3: Array,
     ) -> distrax.Normal:
         obs_n = jnp.concatenate(
@@ -75,7 +74,6 @@ class DefaultHumanoidActor(eqx.Module):
                 dh_joint_pos_n,  # NUM_JOINTS
                 dh_joint_vel_n,  # NUM_JOINTS
                 imu_acc_3,  # 3
-                imu_gyro_3,  # 3
                 xyz_target_3,  # 3
             ],
             axis=-1,
@@ -100,7 +98,7 @@ class DefaultHumanoidCritic(eqx.Module):
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + NUM_JOINTS + NUM_JOINTS + 3 + 3 + 3
+        num_inputs = NUM_JOINTS + NUM_JOINTS + NUM_JOINTS + 3 + 3
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -117,9 +115,7 @@ class DefaultHumanoidCritic(eqx.Module):
         joint_pos_n: Array,
         joint_vel_n: Array,
         actuator_force_n: Array,
-        actuator_acc_n: Array,
         imu_acc_3: Array,
-        imu_gyro_3: Array,
         xyz_target_3: Array,
     ) -> Array:
         x_n = jnp.concatenate(
@@ -127,9 +123,7 @@ class DefaultHumanoidCritic(eqx.Module):
                 joint_pos_n,  # NUM_JOINTS
                 joint_vel_n,  # NUM_JOINTS
                 actuator_force_n,  # NUM_JOINTS
-                actuator_acc_n,  # NUM_JOINTS
                 imu_acc_3,  # 3
-                imu_gyro_3,  # 3
                 xyz_target_3,  # 3
             ],
             axis=-1,
@@ -153,7 +147,7 @@ class DefaultHumanoidModel(eqx.Module):
 
 
 @dataclass
-class HumanoidWalkingTaskConfig(ksim.PPOConfig):
+class HumanoidPseudoIKTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
     # Optimizer parameters.
@@ -205,10 +199,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
 
-Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
+Config = TypeVar("Config", bound=HumanoidPseudoIKTaskConfig)
 
 
-class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
+class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -227,7 +221,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return optimizer
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
-        mjcf_path = (Path(__file__).parent / "scene.mjcf").resolve().as_posix()
+        mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         mj_model_joint_removed = remove_joints_except(mjcf_path, ["shoulder1_right", "shoulder2_right", "elbow_right"])
         mj_model = mujoco.MjModel.from_xml_string(mj_model_joint_removed)
 
@@ -282,9 +276,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.JointPositionObservation(freejoint_first=False),
             ksim.JointVelocityObservation(freejoint_first=False),
             ksim.ActuatorForceObservation(),
-            ksim.ActuatorAccelerationObservation(freejoint_first=False),
+            # ksim.ActuatorAccelerationObservation(freejoint_first=False),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -338,13 +331,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_pos_n = observations["joint_position_observation"]
         dh_joint_vel_n = observations["joint_velocity_observation"] / 50.0
         imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
         return model.actor(
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n,
             imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
             xyz_target_3=xyz_target_3,
         )
 
@@ -355,19 +346,15 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
         joint_pos_n = observations["joint_position_observation"]  # 26
-        joint_vel_n = observations["joint_velocity_observation"]  # 27
+        joint_vel_n = observations["joint_velocity_observation"] / 100.0  # 27
         actuator_force_n = observations["actuator_force_observation"]  # 27
-        actuator_acc_n = observations["actuator_acceleration_observation"]  # 27
         imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]  # 3
         xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]  # 3
         return model.critic(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             actuator_force_n=actuator_force_n,
-            actuator_acc_n=actuator_acc_n,
             imu_acc_3=imu_acc_3,
-            imu_gyro_3=imu_gyro_3,
             xyz_target_3=xyz_target_3,
         )
 
@@ -427,6 +414,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         model: DefaultHumanoidModel,
         carry: None,
         physics_model: ksim.PhysicsModel,
+        physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
@@ -450,13 +438,13 @@ if __name__ == "__main__":
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
     #   python -m examples.default_humanoid.walking num_envs=8 batch_size=4
-    HumanoidWalkingTask.launch(
-        HumanoidWalkingTaskConfig(
+    HumanoidPseudoIKTask.launch(
+        HumanoidPseudoIKTaskConfig(
             # Training parameters.
             num_envs=2048,
             batch_size=256,
             num_passes=10,
-            epochs_per_log_step=10,
+            epochs_per_log_step=1,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.

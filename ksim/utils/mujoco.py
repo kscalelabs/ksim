@@ -340,6 +340,9 @@ def remove_joints_except(file_path: str, joint_names: list[str]) -> str:
             joint_attr = child.get("joint")
             if joint_attr and joint_attr not in joint_names:
                 element.remove(child)
+            # Keyframes are difficult to reorder, so we remove them for now.
+            elif child.tag == "keyframe":
+                element.remove(child)
             else:
                 dfs_remove_references(child)
 
