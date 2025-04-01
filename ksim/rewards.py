@@ -215,12 +215,13 @@ class BaseHeightRangeReward(Reward):
 
     z_lower: float = attrs.field()
     z_upper: float = attrs.field()
+    dropoff: float = attrs.field()
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
         too_low = self.z_lower - base_height
         too_high = base_height - self.z_upper
-        return 1.0 - jnp.maximum(too_low, too_high).clip(min=0.0, max=1.0)
+        return (1.0 - jnp.maximum(too_low, too_high).clip(min=0.0) * self.dropoff).clip(min=0.0)
 
 
 @attrs.define(frozen=True, kw_only=True)

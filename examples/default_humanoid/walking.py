@@ -356,7 +356,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=-1.0),
+            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, dropoff=10.0, scale=-1.0),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             ksim.LinearVelocityTrackingPenalty(scale=-0.1),
@@ -452,7 +452,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         model: DefaultHumanoidModel,
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array]:
+    ) -> tuple[Array, None]:
         # Vectorize over both batch and time dimensions.
         par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
         action_dist_btn = par_fn(model, trajectories.obs, trajectories.command)
