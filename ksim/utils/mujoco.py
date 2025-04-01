@@ -160,18 +160,18 @@ def get_floor_idx(physics_model: PhysicsModel, floor_name: str = "floor") -> int
     return geom_mappings[floor_name]
 
 
-def get_collision_info(contact: PyTree, geom1: int, geom2: int) -> tuple[jax.Array, jax.Array]:
+def get_collision_info(contact: PyTree, geom1: tuple[int, ...], geom2: tuple[int, ...]) -> tuple[Array, Array]:
     """Get the distance and normal of the collision between two geoms."""
     mask = (jnp.array([geom1, geom2]) == contact.geom).all(axis=1)
     mask |= (jnp.array([geom2, geom1]) == contact.geom).all(axis=1)
     idx = jnp.where(mask, contact.dist, 1e4).argmin()
     dist = contact.dist[idx] * mask[idx]
-    # This reshape is nedded because contact.frame's shape depends on how many envs there are.
+    # This reshape is needed because contact.frame's shape depends on how many envs there are.
     normal = (dist < 0) * jnp.reshape(contact.frame[idx], (-1,))[:3]
     return dist, normal
 
 
-def geoms_colliding(state: PhysicsData, geom1: int, geom2: int) -> jax.Array:
+def geoms_colliding(state: PhysicsData, geom1: tuple[int, ...], geom2: tuple[int, ...]) -> Array:
     """Return True if the two geoms are colliding."""
     return jax.lax.cond(
         jnp.equal(state.contact.geom.shape[0], 0),  # if no contacts, return False

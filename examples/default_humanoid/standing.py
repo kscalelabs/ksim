@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 import ksim
+import attrs
+import jax.numpy as jnp
+from jaxtyping import Array
 
 from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
@@ -22,11 +25,8 @@ class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
         return [
             ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
             ksim.StayAliveReward(scale=1.0),
-            ksim.ActionSmoothnessPenalty(scale=-0.001),
+            ksim.FeetNoContactReward(scale=1.0),
         ]
-
-    # def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
-    #     return []  # Turn off randomization.
 
 
 if __name__ == "__main__":

@@ -304,6 +304,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.ActuatorAccelerationObservation(),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
+            ksim.FeetContactObservation.create(
+                physics_model=physics_model,
+                foot_left_geom_names=["foot1_left", "foot2_left"],
+                foot_right_geom_names=["foot1_right", "foot2_right"],
+                floor_geom_name="floor",
+            ),
             ksim.FeetPositionObservation.create(
                 physics_model=physics_model,
                 foot_left_body_name="foot_left",

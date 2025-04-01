@@ -20,6 +20,7 @@ __all__ = [
     "ActionNearPositionPenalty",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
+    "FeetNoContactReward",
 ]
 
 import functools
@@ -27,6 +28,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Collection, Literal, Self
 
+import jax
 import attrs
 import chex
 import jax.numpy as jnp
@@ -467,3 +469,28 @@ class FeetFlatReward(Reward):
             - xax.get_norm(unit_vec_x, self.norm)
             - xax.get_norm(unit_vec_y, self.norm)
         ).min(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetNoContactReward(Reward):
+    """Reward for keeping the feet off the ground.
+
+    This reward incentivizes the robot to keep at least one foot off the ground
+    for at least `window_size` steps at a time.
+    """
+
+    obs_name: str = attrs.field(default="feet_contact_observation")
+    window_size: int = attrs.field(default=20)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        feet_contact = trajectory.obs[self.obs_name]
+
+        def count_scan_fn(carry: Array, contact: Array) -> tuple[Array, Array]:
+            carry = jnp.where(contact, 0, carry + 1)
+            return carry, carry
+
+        _, counts = jax.lax.scan(count_scan_fn, jnp.zeros_like(feet_contact[0]), feet_contact, reverse=True)
+
+        breakpoint()
+
+        return jnp.where(feet_contact.any(axis=-1), 0.0, self.scale)
