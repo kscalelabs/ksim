@@ -12,7 +12,7 @@ from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 @dataclass
 class HumanoidStandingTaskConfig(HumanoidWalkingTaskConfig):
-    step_phase: float = xax.field(default=0.25)
+    step_phase: float = xax.field(value=0.25)
 
 
 Config = TypeVar("Config", bound=HumanoidStandingTaskConfig)
