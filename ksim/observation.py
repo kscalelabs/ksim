@@ -130,10 +130,10 @@ class BaseAngularVelocityObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class JointPositionObservation(Observation):
-    ignore_freejoint: bool = attrs.field(default=True)
+    freejoint_first: bool = attrs.field(default=True)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
-        if self.ignore_freejoint:
+        if self.freejoint_first:
             return rollout_state.physics_state.data.qpos[7:]  # (N,)
         else:
             return rollout_state.physics_state.data.qpos  # (N,)
@@ -141,10 +141,10 @@ class JointPositionObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class JointVelocityObservation(Observation):
-    ignore_freejoint: bool = attrs.field(default=True)
+    freejoint_first: bool = attrs.field(default=True)
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
-        if self.ignore_freejoint:
+        if self.freejoint_first:
             return rollout_state.physics_state.data.qvel[6:]  # (N,)
         else:
             return rollout_state.physics_state.data.qvel  # (N,)
@@ -229,8 +229,13 @@ class BaseAngularAccelerationObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class ActuatorAccelerationObservation(Observation):
+    freejoint_first: bool = attrs.field(default=True)
+
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
-        return rollout_state.physics_state.data.qacc[6:]
+        if self.freejoint_first:
+            return rollout_state.physics_state.data.qacc[6:]
+        else:
+            return rollout_state.physics_state.data.qacc
 
 
 @attrs.define(frozen=True, kw_only=True)
