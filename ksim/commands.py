@@ -393,7 +393,12 @@ class GlobalBodyQuaternionMarker(Marker):
 
     @classmethod
     def get(
-        cls, command_name: str, base_body_name: str, size: float, magnitude: float, rgba: tuple[float, float, float, float]
+        cls,
+        command_name: str,
+        base_body_name: str,
+        size: float,
+        magnitude: float,
+        rgba: tuple[float, float, float, float],
     ) -> Self:
         return cls(
             command_name=command_name,
@@ -408,7 +413,7 @@ class GlobalBodyQuaternionMarker(Marker):
 @attrs.define(frozen=True)
 class GlobalBodyQuaternionCommand(Command):
     """Samples a target quaternion orientation for a body.
-    
+
     This command samples random quaternions to specify target orientations
     for a body in global coordinates.
     """
@@ -432,7 +437,11 @@ class GlobalBodyQuaternionCommand(Command):
         return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
-        return [GlobalBodyQuaternionMarker.get(self.command_name, self.base_body_name, self.vis_size, self.vis_magnitude, self.vis_color)]
+        return [
+            GlobalBodyQuaternionMarker.get(
+                self.command_name, self.base_body_name, self.vis_size, self.vis_magnitude, self.vis_color
+            )
+        ]
 
     def get_name(self) -> str:
         if self.custom_name is not None:

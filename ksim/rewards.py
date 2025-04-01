@@ -512,7 +512,8 @@ class CartesianBodyTargetReward(Reward):
             sensitivity=sensitivity,
             command_name=command_name,
         )
-    
+
+
 @attrs.define(frozen=True, kw_only=True)
 class GlobalBodyQuaternionReward(Reward):
     """Rewards the closeness of the body orientation to the target quaternion."""

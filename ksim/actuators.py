@@ -157,7 +157,7 @@ class MITPositionActuators(Actuators):
 
 class MITPositionVelocityActuators(MITPositionActuators):
     """MIT-mode actuator controller operating on both position and velocity."""
-    
+
     def __init__(
         self,
         physics_model: PhysicsModel,
