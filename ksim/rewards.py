@@ -492,12 +492,12 @@ class CartesianBodyTargetReward(Reward):
     def create(
         cls,
         model: PhysicsModel,
+        command_name: str,
         tracked_body_name: str,
         base_body_name: str,
         norm: xax.NormType = "l2",
         scale: float = 1.0,
         sensitivity: float = 1.0,
-        command_name: str | None = None,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
         base_idx = get_body_data_idx_from_name(model, base_body_name)
@@ -509,6 +509,8 @@ class CartesianBodyTargetReward(Reward):
             sensitivity=sensitivity,
             command_name=command_name,
         )
+
+
 class FeetNoContactReward(Reward):
     """Reward for keeping the feet off the ground.
 

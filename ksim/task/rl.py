@@ -587,11 +587,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         terminated = jax.tree.reduce(jnp.logical_or, list(terminations.values()))
 
+        # Combines all the relevant data into a single object.
+        qpos = rollout_variables.physics_state.data.qpos
+        qvel = rollout_variables.physics_state.data.qvel
+        xpos = rollout_variables.physics_state.data.xpos
+        if isinstance(qpos, np.ndarray) and isinstance(qvel, np.ndarray) and isinstance(xpos, np.ndarray):
+            qpos = jnp.array(qpos)
+            qvel = jnp.array(qvel)
+            xpos = jnp.array(xpos)
+
         # Combines all the relevant data into a single object. Lives up here to
-        # avoid accidentally incorporating information it shouldn't access.
+        # avoid accidentally incorporating information it shouldn't access to.
         transition = Trajectory(
-            qpos=rollout_variables.physics_state.data.qpos,
-            qvel=rollout_variables.physics_state.data.qvel,
+            qpos=qpos,
+            qvel=qvel,
+            xpos=xpos,
             obs=observations,
             command=rollout_variables.commands,
             event_state=rollout_variables.physics_state.event_states,
@@ -605,7 +615,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Conditionally reset on termination.
         next_commands = jax.lax.cond(
             terminated,
-            lambda: get_initial_commands(cmd_rng, rollout_constants.command_generators),
+            lambda: get_initial_commands(cmd_rng, next_physics_state.data, rollout_constants.command_generators),
             lambda: get_commands(
                 rollout_variables.commands, next_physics_state, cmd_rng, rollout_constants.command_generators
             ),
@@ -622,40 +632,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             lambda: self.get_initial_carry(carry_rng),
             lambda: next_carry,
         )
-<<<<<<< HEAD
-        commands = jax.lax.cond(
-            terminated,
-            lambda: get_initial_commands(
-                cmd_rng,
-                physics_data=next_physics_state.data,
-                command_generators=rollout_constants.command_generators,
-            ),
-            lambda: commands,
-        )
-
-        # Combines all the relevant data into a single object.
-        qpos = next_physics_state.data.qpos
-        qvel = next_physics_state.data.qvel
-        xpos = next_physics_state.data.xpos
-        if isinstance(qpos, np.ndarray) and isinstance(qvel, np.ndarray) and isinstance(xpos, np.ndarray):
-            qpos = jnp.array(qpos)
-            qvel = jnp.array(qvel)
-            xpos = jnp.array(xpos)
-
-        trajectory = Trajectory(
-            qpos=qpos,
-            qvel=qvel,
-            xpos=xpos,
-            obs=observations,
-            command=commands,
-            action=action,
-            done=terminated,
-            timestep=next_physics_state.data.time,
-            termination_components=terminations,
-            aux_outputs=aux_outputs,
-        )
-=======
->>>>>>> origin/master
 
         # Gets the variables for the next step.
         next_variables = RolloutVariables(

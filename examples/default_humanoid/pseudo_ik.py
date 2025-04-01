@@ -284,6 +284,7 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
+                command_name="cartesian_body_target_command_upper_arm_right",
                 pivot_name="upper_arm_right",
                 base_name="pelvis",
                 sample_sphere_radius=0.5,
@@ -293,7 +294,6 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
-                command_name="cartesian_body_target_command_upper_arm_right",
             ),
         ]
 
