@@ -69,7 +69,7 @@ class DefaultHumanoidActor(eqx.Module):
         imu_gyro_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd_1: Array,
-    ) -> distrax.Distribution:
+    ) -> distrax.Normal:
         obs_n = jnp.concatenate(
             [
                 dh_joint_pos_n,  # NUM_JOINTS
@@ -92,7 +92,7 @@ class DefaultHumanoidActor(eqx.Module):
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
-        return distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
+        return distrax.Normal(mean_n, std_n)
 
 
 class DefaultHumanoidCritic(eqx.Module):
@@ -370,7 +370,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         model: DefaultHumanoidModel,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-    ) -> distrax.Distribution:
+    ) -> distrax.Normal:
         dh_joint_pos_n = observations["joint_position_observation"]
         dh_joint_vel_n = observations["joint_velocity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
@@ -446,11 +446,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         # Vectorize over both batch and time dimensions.
         par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
         action_dist_btn = par_fn(model, trajectories.obs, trajectories.command)
+        action_dist_tanh_btn = distrax.Transformed(action_dist_btn, distrax.Tanh())
 
         # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
         action_btn = trajectories.action / model.actor.mean_scale
-        log_probs_btn = action_dist_btn.log_prob(action_btn)
+        log_probs_btn = action_dist_tanh_btn.log_prob(action_btn)
         entropy_btn = action_dist_btn.entropy()
 
         return log_probs_btn, entropy_btn
@@ -478,7 +479,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, None, AuxOutputs]:
-        action_dist_n = self._run_actor(model, observations, commands)
+        action_dist_n = distrax.Transformed(self._run_actor(model, observations, commands), distrax.Tanh())
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
 
