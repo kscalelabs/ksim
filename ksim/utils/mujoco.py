@@ -329,6 +329,10 @@ def remove_joints_except(file_path: str, joint_names: list[str]) -> str:
 
     def dfs_remove_joints(element: ET.Element) -> None:
         for child in list(element):  # Use list to avoid modifying while iterating
+            # Skip defaults as they are needed for armatures, etc.
+            if child.tag == "default":
+                continue
+
             if (child.tag == "joint" or child.tag == "freejoint") and child.get("name") not in joint_names:
                 element.remove(child)
             else:
@@ -349,4 +353,5 @@ def remove_joints_except(file_path: str, joint_names: list[str]) -> str:
     dfs_remove_joints(root)
     dfs_remove_references(root)
 
+    # write it to a file
     return ET.tostring(root, encoding="utf-8").decode("utf-8")
