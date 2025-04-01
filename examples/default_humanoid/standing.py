@@ -22,7 +22,7 @@ class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
         return [
             ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
             ksim.StayAliveReward(scale=1.0),
-            ksim.FeetNoContactReward(scale=1.0),
+            ksim.FeetNoContactReward(scale=0.1),
         ]
 
 

@@ -482,7 +482,7 @@ class FeetNoContactReward(Reward):
     """
 
     obs_name: str = attrs.field(default="feet_contact_observation")
-    window_size: int = attrs.field(default=20)
+    window_size: int = attrs.field(default=10)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         feet_contact = trajectory.obs[self.obs_name]
