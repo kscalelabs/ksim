@@ -611,10 +611,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Combines all the relevant data into a single object.
+        qpos = next_physics_state.data.qpos
+        qvel = next_physics_state.data.qvel
+        xpos = next_physics_state.data.xpos
+        if isinstance(qpos, np.ndarray) and isinstance(qvel, np.ndarray) and isinstance(xpos, np.ndarray):
+            qpos = jnp.array(qpos)
+            qvel = jnp.array(qvel)
+            xpos = jnp.array(xpos)
+
         trajectory = Trajectory(
-            qpos=next_physics_state.data.qpos,
-            qvel=next_physics_state.data.qvel,
-            xpos=next_physics_state.data.xpos,
+            qpos=qpos,
+            qvel=qvel,
+            xpos=xpos,
             obs=observations,
             command=commands,
             action=action,

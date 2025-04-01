@@ -457,7 +457,7 @@ class CartesianBodyTargetReward(Reward):
     sensitivity: float = attrs.field()
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        body_pos = trajectory.xpos[..., self.tracked_body_idx] - trajectory.xpos[..., self.base_body_idx]
+        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
         target_pos = trajectory.command[self.command_name]
         return jnp.exp(-xax.get_norm(body_pos - target_pos, self.norm) * self.sensitivity).mean(axis=-1)
 
