@@ -40,6 +40,7 @@ class Trajectory:
     qpos: Array
     qvel: Array
     xpos: Array
+    xquat: Array
     obs: xax.FrozenDict[str, PyTree]
     command: xax.FrozenDict[str, PyTree]
     event_state: xax.FrozenDict[str, Array]

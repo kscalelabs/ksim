@@ -7,6 +7,7 @@ __all__ = [
     "LinearVelocityStepCommand",
     "AngularVelocityStepCommand",
     "CartesianBodyTargetCommand",
+    "GlobalBodyQuaternionCommand",
 ]
 
 import functools
@@ -341,6 +342,8 @@ class CartesianBodyTargetCommand(Command):
         return [CartesianBodyTargetMarker.get(self.command_name, self.base_body_name, self.vis_radius, self.vis_color)]
 
     def get_name(self) -> str:
+        if self.custom_name is not None:
+            return self.custom_name
         return xax.camelcase_to_snakecase(self.__class__.__name__) + "_" + self.pivot_body_name
 
     @classmethod
@@ -371,6 +374,86 @@ class CartesianBodyTargetCommand(Command):
             positive_z=positive_z,
             switch_prob=switch_prob,
             vis_radius=vis_radius,
+            vis_color=vis_color,
+            custom_name=command_name,
+        )
+
+
+@attrs.define(kw_only=True)
+class GlobalBodyQuaternionMarker(Marker):
+    command_name: str = attrs.field()
+
+    def __attrs_post_init__(self) -> None:
+        if self.target_name is None or self.target_type != "body":
+            raise ValueError("Base body name must be provided. Make sure to create with `get`.")
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Update the marker rotation."""
+        self.orientation = trajectory.command[self.command_name]
+
+    @classmethod
+    def get(
+        cls, command_name: str, base_body_name: str, scale: float, rgba: tuple[float, float, float, float]
+    ) -> Self:
+        return cls(
+            command_name=command_name,
+            target_name=base_body_name,
+            target_type="body",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,
+            scale=(scale, scale, scale),
+            rgba=rgba,
+        )
+
+
+@attrs.define(frozen=True)
+class GlobalBodyQuaternionCommand(Command):
+    """Samples a target quaternion orientation for a body.
+    
+    This command samples random quaternions to specify target orientations
+    for a body in global coordinates.
+    """
+
+    base_body_name: str = attrs.field()
+    base_id: int = attrs.field()
+    switch_prob: float = attrs.field()
+    vis_scale: float = attrs.field()
+    vis_color: tuple[float, float, float, float] = attrs.field()
+
+    def initial_command(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+        # Sample a random unit quaternion
+        quat = jax.random.normal(rng, (4,))
+        return quat / jnp.linalg.norm(quat)
+
+    def __call__(self, prev_command: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
+    def get_markers(self) -> Collection[Marker]:
+        return [GlobalBodyQuaternionMarker.get(self.command_name, self.base_body_name, self.vis_scale, self.vis_color)]
+
+    def get_name(self) -> str:
+        if self.custom_name is not None:
+            return self.custom_name
+        return xax.camelcase_to_snakecase(self.__class__.__name__) + "_" + self.base_body_name
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        base_name: str,
+        switch_prob: float = 0.1,
+        vis_scale: float = 0.05,
+        vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
+        command_name: str | None = None,
+    ) -> Self:
+        base_id = get_body_data_idx_from_name(model, base_name)
+        return cls(
+            base_body_name=base_name,
+            base_id=base_id,
+            switch_prob=switch_prob,
+            vis_scale=vis_scale,
             vis_color=vis_color,
             custom_name=command_name,
         )

@@ -595,10 +595,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         qpos = rollout_variables.physics_state.data.qpos
         qvel = rollout_variables.physics_state.data.qvel
         xpos = rollout_variables.physics_state.data.xpos
+        xquat = rollout_variables.physics_state.data.xquat
         if isinstance(qpos, np.ndarray) and isinstance(qvel, np.ndarray) and isinstance(xpos, np.ndarray):
             qpos = jnp.array(qpos)
             qvel = jnp.array(qvel)
             xpos = jnp.array(xpos)
+            xquat = jnp.array(xquat)
 
         # Combines all the relevant data into a single object. Lives up here to
         # avoid accidentally incorporating information it shouldn't access to.
@@ -606,6 +608,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             qpos=qpos,
             qvel=qvel,
             xpos=xpos,
+            xquat=xquat,
             obs=observations,
             command=rollout_variables.commands,
             event_state=rollout_variables.physics_state.event_states,
