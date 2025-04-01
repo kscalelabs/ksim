@@ -426,7 +426,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
         lin_vel_cmd_2 = commands["linear_velocity_command"]  # 2
         ang_vel_cmd_1 = commands["angular_velocity_command"]  # 1
-        return model.critic(
+        return model(
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n / 10.0,
             com_inertia_n=com_inertia_n,

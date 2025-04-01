@@ -201,7 +201,7 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         def scan_fn(
             carry: Array,
             inputs: ksim.Trajectory,
-        ) -> tuple[Array, tuple[Array, Array]]:
+        ) -> tuple[Array, Array]:
             action_dist_n, carry = self._run_actor(model, inputs.obs, inputs.command, carry)
             log_probs_n = action_dist_n.log_prob(inputs.action / model.actor.mean_scale)
             return carry, log_probs_n
