@@ -4,7 +4,6 @@ __all__ = [
     "Event",
     "PushEvent",
     "JumpEvent",
-    "BaseEventState",
 ]
 
 import functools
@@ -20,12 +19,6 @@ from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import slice_update, update_data_field
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class BaseEventState:
-    time_remaining: Array
-
-
 @attrs.define(frozen=True, kw_only=True)
 class Event(ABC):
     """Base class for all events."""
@@ -36,7 +29,7 @@ class Event(ABC):
         model: PhysicsModel,
         data: PhysicsData,
         event_state: PyTree,
-        curriculum_step: Array,
+        curriculum_step: int,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
         """Apply the event to the data.
@@ -48,6 +41,7 @@ class Event(ABC):
             model: The physics model.
             data: The physics data.
             event_state: The state of the event.
+            curriculum_step: The current curriculum step.
             rng: The random number generator.
 
         Returns:
@@ -61,9 +55,22 @@ class Event(ABC):
     def event_name(self) -> str:
         return self.get_name()
 
+    def should_step_curriculum(self, ep_len_pct: Array, curr_step: int) -> Array:
+        """Determine if the curriculum should step based on episode length percentage.
+
+        Args:
+            ep_len_pct: The percentage of the episode length that was completed.
+            curr_step: The current curriculum step.
+
+        Returns:
+            A boolean array indicating whether to step the curriculum.
+        """
+        return jnp.array(False)
+
     @abstractmethod
     def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
         """Get the initial info for the event."""
+
 
 @attrs.define(frozen=True, kw_only=True)
 class PushEvent(Event):
@@ -88,7 +95,7 @@ class PushEvent(Event):
         model: PhysicsModel,
         data: PhysicsData,
         event_state: Array,
-        curriculum_step: Array,
+        curriculum_step: int,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
         # Decrement by physics timestep.
@@ -103,29 +110,28 @@ class PushEvent(Event):
         )
 
         return updated_data, time_remaining
-    
-    def should_step_curriculum(self, ep_len_pct: Array, curr_step: Array) -> Array:
+
+    def should_step_curriculum(self, ep_len_pct: Array, curr_step: int) -> Array:
         """Determine if the curriculum should step based on episode length percentage.
-        
+
         Args:
             ep_len_pct: The percentage of the episode length that was completed.
             curr_step: The current curriculum step.
-            
+
         Returns:
             A boolean array indicating whether to step the curriculum.
         """
         if not self.use_curriculum:
             return jnp.array(False)
-        
+
         should_step = jnp.logical_and(
-            ep_len_pct >= self.episode_length_threshold,
-            curr_step < self.max_curriculum_steps
+            ep_len_pct >= self.episode_length_threshold, curr_step < self.max_curriculum_steps
         )
-        
+
         return should_step
 
     def _apply_random_force(
-        self, data: PhysicsData, rng: PRNGKeyArray, curriculum_step: Array
+        self, data: PhysicsData, rng: PRNGKeyArray, curriculum_step: int
     ) -> tuple[PhysicsData, Array]:
         # Randomly applies a force.
         curriculum_scale = 1.0 + self.force_scale_per_step * curriculum_step
@@ -168,7 +174,7 @@ class JumpEvent(Event):
         model: PhysicsModel,
         data: PhysicsData,
         event_state: Array,
-        curriculum_step: Array,
+        curriculum_step: int,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
         # Decrement by physics timestep.
@@ -181,7 +187,7 @@ class JumpEvent(Event):
             lambda: self._apply_jump(model, data, rng),
             lambda: (data, time_remaining),
         )
-  
+
         return updated_data, time_remaining
 
     def _apply_jump(self, model: PhysicsModel, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
@@ -198,20 +204,16 @@ class JumpEvent(Event):
 
         return updated_data, time_remaining
 
-
-    def get_initial_event_state(self, rng: PRNGKeyArray) -> JumpEventState:
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
         minval, maxval = self.interval_range
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
-        return JumpEventState(
-            time_remaining=time_remaining,
-        )
+        return time_remaining
 
-    def should_step_curriculum(self, ep_len_pct: Array, curr_step: Array) -> Array:
+    def should_step_curriculum(self, ep_len_pct: Array, curr_step: int) -> Array:
         """Determine if the curriculum should step based on episode length percentage.
-        
+
         Args:
             ep_len_pct: The percentage of the episode length that was completed.
             curr_step: The current curriculum step.
         """
-
         return jnp.array(False)

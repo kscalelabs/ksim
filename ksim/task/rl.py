@@ -6,7 +6,6 @@ __all__ = [
 ]
 
 import bdb
-import dataclasses
 import datetime
 import functools
 import io
@@ -22,7 +21,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Collection, Generic, Self, TypeVar
+from typing import Any, Collection, Generic, TypeVar
 
 import chex
 import equinox as eqx
@@ -48,7 +47,7 @@ from ksim.engine import (
     engine_type_from_physics_model,
     get_physics_engine,
 )
-from ksim.events import BaseEventState, Event
+from ksim.events import Event
 from ksim.observation import Observation
 from ksim.randomization import Randomization
 from ksim.resets import Reset
@@ -70,6 +69,7 @@ from ksim.utils.mujoco import get_joint_metadata, load_model
 from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
+
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
@@ -529,18 +529,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
 
     def update_curriculum(
-        self, 
-        curriculum_state: CurriculumState,
-        episode_length_percentage: Array,
-        events: Collection[Event]
+        self, curriculum_state: CurriculumState, episode_length_percentage: Array, events: Collection[Event]
     ) -> CurriculumState:
         """Update curriculum state based on trajectory performance."""
-        
         updated_curriculum = curriculum_state
         for event in events:
-            should_step = event.should_step_curriculum(episode_length_percentage, curriculum_state.curriculum_steps[event.event_name])
+            should_step = event.should_step_curriculum(
+                episode_length_percentage, curriculum_state.curriculum_steps[event.event_name]
+            )
             updated_curriculum = updated_curriculum.update(event.event_name, should_step)
-        
+
         return updated_curriculum
 
     @xax.jit(static_argnames=["self", "model_static", "engine", "rollout_constants"])
@@ -711,7 +709,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         )
                         self.logger.log_scalar(key, value.mean, namespace=namespace)
                     else:
-                        self.logger.log_scalar(key, value.mean(), namespace=namespace)
+                        self.logger.log_scalar(
+                            key, value.mean() if isinstance(value, Array) else value, namespace=namespace
+                        )
 
     def render_trajectory_video(
         self,
@@ -1180,10 +1180,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             events = self.get_events(mj_model)
             event_names = [event.event_name for event in events]
-            self.curriculum_state = CurriculumState.initialize(
-                event_names=event_names,
-                num_envs=self.config.num_envs
-            )
+            self.curriculum_state = CurriculumState.initialize(event_names=event_names, num_envs=self.config.num_envs)
 
             # These components remain constant across the entire episode.
             rollout_constants = RolloutConstants(
@@ -1371,10 +1368,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             events = self.get_events(mjx_model)
             event_names = [event.event_name for event in events]
 
-            self.curriculum_state = CurriculumState.initialize(
-                event_names=event_names,
-                num_envs=self.config.num_envs
-            )
+            self.curriculum_state = CurriculumState.initialize(event_names=event_names, num_envs=self.config.num_envs)
 
             # These remain constant across the entire episode.
             rollout_constants = RolloutConstants(
@@ -1478,7 +1472,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     self.curriculum_state = self.update_curriculum(
                         curriculum_state=self.curriculum_state,
                         episode_length_percentage=episode_length_percentage,
-                        events=events
+                        events=events,
                     )
 
                     rollout_constants = RolloutConstants(
