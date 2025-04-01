@@ -92,7 +92,16 @@ class PushEvent(Event):
 
     def _apply_random_force(self, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
         # Randomly applies a force.
-        force_scales = jnp.array([self.x_force, self.y_force, self.z_force, self.x_angular_force, self.y_angular_force, self.z_angular_force,])
+        force_scales = jnp.array(
+            [
+                self.x_force,
+                self.y_force,
+                self.z_force,
+                self.x_angular_force,
+                self.y_angular_force,
+                self.z_angular_force,
+            ]
+        )
         random_forces = jax.random.uniform(rng, (6,), minval=-1.0, maxval=1.0)
         random_forces = random_forces * force_scales
         new_qvel = slice_update(data, "qvel", slice(0, 6), random_forces)

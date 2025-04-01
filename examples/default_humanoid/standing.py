@@ -4,8 +4,9 @@
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
-import ksim
 import xax
+
+import ksim
 
 from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
