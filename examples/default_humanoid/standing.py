@@ -25,8 +25,8 @@ class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
             ksim.ActionSmoothnessPenalty(scale=-0.001),
         ]
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
-        return []  # Turn off randomization.
+    # def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    #     return []  # Turn off randomization.
 
 
 if __name__ == "__main__":
@@ -50,5 +50,10 @@ if __name__ == "__main__":
             ctrl_dt=0.01,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            # PPO parameters.
+            entropy_coef=0.001,
+            value_loss_coef=0.5,
+            gamma=0.97,
+            lam=0.98,
         ),
     )
