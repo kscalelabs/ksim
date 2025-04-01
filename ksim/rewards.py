@@ -1,9 +1,10 @@
 """Defines a base interface for defining reward functions."""
 
 __all__ = [
+    "MonotonicFn",
+    "norm_to_reward",
     "Reward",
-    "HealthyReward",
-    "TerminationPenalty",
+    "StayAliveReward",
     "LinearVelocityZPenalty",
     "AngularVelocityXYPenalty",
     "JointVelocityPenalty",
@@ -19,15 +20,17 @@ __all__ = [
     "ActionNearPositionPenalty",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
+    "FeetNoContactReward",
 ]
 
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Self
+from typing import Collection, Literal, Self
 
 import attrs
 import chex
+import jax
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array
@@ -36,6 +39,31 @@ from ksim.types import PhysicsModel, Trajectory
 from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
+
+MonotonicFn = Literal["exp", "inv"]
+
+
+def norm_to_reward(value: Array, temp: float, monotonic_fn: MonotonicFn) -> Array:
+    """Helper function for converting from a norm to a reward.
+
+    Args:
+        value: The value (usually a norm) to convert to a reward.
+        temp: The temperature to use for the conversion. Higher temperatures
+            will make the reward drop off less steeply.
+        monotonic_fn: The monotonic function to use for the conversion.
+
+    Returns:
+        The reward.
+    """
+    match monotonic_fn:
+        case "exp":
+            return jnp.exp(-value / temp)
+        case "inv":
+            return 1.0 / (value / temp + 1.0)
+        case "sigmoid":
+            return 1.0 / (1.0 + jnp.exp(-value / temp))
+        case _:
+            raise ValueError(f"Invalid monotonic function: {monotonic_fn}")
 
 
 def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) -> None:
@@ -84,19 +112,18 @@ class Reward(ABC):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class HealthyReward(Reward):
-    """Reward for healthy states."""
+class StayAliveReward(Reward):
+    """Reward for staying alive.
+
+    This provides a reward for staying alive, with a negative penalty on
+    termination. These values are balanced by the balance parameter - a larger
+    value will increase the relative penalty for termination.
+    """
+
+    balance: float = attrs.field(default=10.0)
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        return jnp.ones_like(trajectory.done)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class TerminationPenalty(Reward):
-    """Penalty for terminating the episode."""
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        return trajectory.done
+        return jnp.where(trajectory.done, -1.0, 1.0 / self.balance)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -164,15 +191,16 @@ class AngularVelocityTrackingPenalty(Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class BaseHeightReward(Reward):
-    """Reward for tracking the base height target."""
+    """Penalty for deviating from the base height target."""
 
     height_target: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l1")
-    sensitivity: float = attrs.field(default=5.0)
+    temp: float = attrs.field(default=1.0)
+    monotonic_fn: MonotonicFn = attrs.field(default="exp")
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
-        return jnp.exp(-xax.get_norm(base_height - self.height_target, self.norm) * self.sensitivity)
+        return norm_to_reward(xax.get_norm(base_height - self.height_target, self.norm), self.temp, self.monotonic_fn)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -181,15 +209,14 @@ class BaseHeightRangeReward(Reward):
 
     z_lower: float = attrs.field()
     z_upper: float = attrs.field()
-    taper: float = attrs.field(default=1.0)
+    temp: float = attrs.field(default=3.0)
+    monotonic_fn: MonotonicFn = attrs.field(default="exp")
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
         too_low = self.z_lower - base_height
         too_high = base_height - self.z_upper
-        penalty = jnp.maximum(too_low, too_high).clip(min=0.0) * self.taper
-        reward = (1.0 - penalty).clip(min=0.0)
-        return reward
+        return norm_to_reward(jnp.maximum(too_low, too_high).clip(min=0.0), self.temp, self.monotonic_fn)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -442,3 +469,36 @@ class FeetFlatReward(Reward):
             - xax.get_norm(unit_vec_x, self.norm)
             - xax.get_norm(unit_vec_y, self.norm)
         ).min(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetNoContactReward(Reward):
+    """Reward for keeping the feet off the ground.
+
+    This reward incentivizes the robot to keep at least one foot off the ground
+    for at least `window_size` steps at a time. If the foot touches the ground
+    again within `window_size` steps, the reward for the entire "off the ground"
+    period is reset to 0.
+    """
+
+    window_size: int = attrs.field()
+    obs_name: str = attrs.field(default="feet_contact_observation")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        feet_contact = trajectory.obs[self.obs_name]
+        chex.assert_shape(feet_contact, (..., 2))
+
+        def count_scan_fn(carry: Array, contact: Array) -> tuple[Array, Array]:
+            carry = jnp.where(contact, 0, carry + 1)
+            return carry, carry
+
+        _, counts = jax.lax.scan(count_scan_fn, jnp.zeros_like(feet_contact[0]), feet_contact, reverse=True)
+
+        def reward_scan_fn(carry: Array, counts: Array) -> tuple[Array, Array]:
+            carry = jnp.where(counts == 0, 0, jnp.where(carry == 0, counts, carry))
+            return carry, carry
+
+        _, counts = jax.lax.scan(reward_scan_fn, counts[0], counts)
+
+        no_contact = counts >= self.window_size
+        return no_contact.any(axis=-1)

@@ -6,7 +6,6 @@ from typing import Generic, TypeVar
 
 import attrs
 import jax.numpy as jnp
-import xax
 from jaxtyping import Array
 
 import ksim
@@ -26,16 +25,6 @@ class UpwardReward(ksim.Reward):
         return z_delta
 
 
-@attrs.define(frozen=True, kw_only=True)
-class StationaryPenalty(ksim.Reward):
-    """Incentives staying in place laterally."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return xax.get_norm(trajectory.qvel[..., :2], self.norm).sum(axis=-1)
-
-
 @dataclass
 class HumanoidJumpingTaskConfig(HumanoidWalkingTaskConfig):
     pass
@@ -48,8 +37,6 @@ class HumanoidJumpingTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             UpwardReward(scale=0.5),
-            StationaryPenalty(scale=-0.1),
-            ksim.ActuatorForcePenalty(scale=-0.01),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
         ]
@@ -65,19 +52,13 @@ if __name__ == "__main__":
             num_envs=2048,
             batch_size=256,
             num_passes=8,
+            # Logging parameters.
+            log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            rollout_length_seconds=10.0,  # This needs to be shorter because of memory constraints.
-            # PPO parameters
-            gamma=0.97,
-            lam=0.95,
-            entropy_coef=0.001,
-            learning_rate=3e-4,
-            clip_param=0.3,
-            max_grad_norm=1.0,
-            use_mit_actuators=False,
+            rollout_length_seconds=4.0,
         ),
     )
