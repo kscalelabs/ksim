@@ -361,6 +361,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             log_probs_tn: The log probabilities of the actions, with shape (T, *A).
             entropy_tn: The entropy of the action distribution, with shape (T, *A).
             values_t: The state-value estimates, with shape (T,).
+            on_policy_values_t: The original policy's values of the actions, with shape (T,).
             value_targets_t: The value targets, with shape (T,).
             advantages_t: The advantages, with shape (T,).
 

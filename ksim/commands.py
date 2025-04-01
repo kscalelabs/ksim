@@ -36,6 +36,7 @@ class Command(ABC):
         """Returns the initial command.
 
         Args:
+            physics_data: The current physics data.
             rng: The random number generator.
 
         Returns:
