@@ -22,7 +22,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Collection, Generic, TypeVar
+from typing import Any, Collection, Generic, Self, TypeVar
 
 import chex
 import equinox as eqx
@@ -55,6 +55,7 @@ from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
 from ksim.types import (
+    CurriculumState,
     Histogram,
     Metrics,
     PhysicsModel,
@@ -68,7 +69,6 @@ from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
 
-
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class RolloutConstants:
@@ -76,6 +76,7 @@ class RolloutConstants:
     command_generators: Collection[Command]
     reward_generators: Collection[Reward]
     termination_generators: Collection[Termination]
+    curriculum_state: CurriculumState
 
 
 def get_observation(
@@ -524,6 +525,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def rollout_num_samples(self) -> int:
         return self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
 
+    def update_curriculum(
+        self, 
+        curriculum_state: CurriculumState,
+        episode_length_percentage: Array,
+        events: Collection[Event]
+    ) -> CurriculumState:
+        """Update curriculum state based on trajectory performance."""
+        
+        updated_curriculum = curriculum_state
+        for event in events:
+            should_step = event.should_step_curriculum(episode_length_percentage, curriculum_state.curriculum_steps[event.event_name])
+            updated_curriculum = updated_curriculum.update(event.event_name, should_step)
+        
+        return updated_curriculum
+
     def step_engine(
         self,
         physics_model: PhysicsModel,
@@ -577,6 +593,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             action=action,
             physics_model=physics_model,
             physics_state=rollout_variables.physics_state,
+            curriculum_state=rollout_constants.curriculum_state,
             rng=physics_rng,
         )
 
@@ -1038,7 +1055,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 train=train_metrics,
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
-                curriculum=xax.FrozenDict(self.get_curriculum_metrics(rollout_variables.physics_state.event_states)),
+                curriculum=rollout_constants.curriculum_state.curriculum_steps,
             )
 
             # Saving the last trajectory for visualization.
@@ -1157,12 +1174,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 viewer.cam.trackbodyid = self.config.render_track_body_id
                 viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
+            events = self.get_events(mj_model)
+            event_names = [event.event_name for event in events]
+            self.curriculum_state = CurriculumState.initialize(
+                event_names=event_names,
+                num_envs=self.config.num_envs
+            )
+
             # These components remain constant across the entire episode.
             rollout_constants = RolloutConstants(
                 obs_generators=observations,
                 command_generators=commands,
                 reward_generators=rewards,
                 termination_generators=terminations,
+                curriculum_state=self.curriculum_state,
             )
 
             # These components are updated each step.
@@ -1336,12 +1361,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 randomizations=randomizations,
             )
 
+            events = self.get_events(mjx_model)
+            event_names = [event.event_name for event in events]
+
+            self.curriculum_state = CurriculumState.initialize(
+                event_names=event_names,
+                num_envs=self.config.num_envs
+            )
+
             # These remain constant across the entire episode.
             rollout_constants = RolloutConstants(
                 obs_generators=tuple(observations),
                 command_generators=tuple(commands),
                 reward_generators=tuple(rewards_terms),
                 termination_generators=tuple(terminations),
+                curriculum_state=self.curriculum_state,
             )
 
             # JAX requires that we partition the model into mutable and static
@@ -1434,25 +1468,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         metrics.termination["episode_length"] / self.config.rollout_length_seconds
                     )
 
-                    # Broadcast the scalar to match the batch dimension and ensure dtype matches
-                    broadcast_episode_length = jnp.broadcast_to(
-                        jnp.asarray(episode_length_percentage, dtype=jnp.float32), (self.config.num_envs,)
+                    # Update curriculum state based on performance
+                    self.curriculum_state = self.update_curriculum(
+                        curriculum_state=self.curriculum_state,
+                        episode_length_percentage=episode_length_percentage,
+                        events=events
                     )
 
-                    # Create a new FrozenDict with properly broadcasted values
-                    updated_event_states: xax.FrozenDict[str, BaseEventState] = xax.FrozenDict(
-                        {
-                            key: dataclasses.replace(event_state, episode_length_percentage=broadcast_episode_length)
-                            for key, event_state in rollout_variables.physics_state.event_states.items()
-                        }
+                    rollout_constants = RolloutConstants(
+                        obs_generators=rollout_constants.obs_generators,
+                        command_generators=rollout_constants.command_generators,
+                        reward_generators=rollout_constants.reward_generators,
+                        termination_generators=rollout_constants.termination_generators,
+                        curriculum_state=self.curriculum_state,
                     )
-
-                    # Update the physics state with the new event states
-                    updated_physics_state = dataclasses.replace(
-                        rollout_variables.physics_state, event_states=updated_event_states
-                    )
-
-                    rollout_variables = dataclasses.replace(rollout_variables, physics_state=updated_physics_state)
 
                     # Only log trajectory information on validation steps.
                     if state.phase == "valid":

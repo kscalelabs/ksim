@@ -26,8 +26,6 @@ from ksim.utils.mujoco import slice_update, update_data_field
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class BaseEventState:
-    curriculum_step: Array
-    episode_length_percentage: Array
     time_remaining: Array
 
 
@@ -41,6 +39,7 @@ class Event(ABC):
         model: PhysicsModel,
         data: PhysicsData,
         event_state: PyTree,
+        curriculum_step: Array,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, PyTree]:
         """Apply the event to the data.
@@ -64,10 +63,6 @@ class Event(ABC):
     @functools.cached_property
     def event_name(self) -> str:
         return self.get_name()
-
-    @abstractmethod
-    def update_curriculum_step(self, event_state: BaseEventState) -> BaseEventState:
-        """Update the curriculum step."""
 
     @abstractmethod
     def get_initial_event_state(self, rng: PRNGKeyArray) -> BaseEventState:
@@ -100,10 +95,9 @@ class PushEvent(Event):
         model: PhysicsModel,
         data: PhysicsData,
         event_state: PushEventState,
+        curriculum_step: Array,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, PushEventState]:
-        event_state = self.update_curriculum_step(event_state)
-
         # Decrement by physics timestep.
         dt = jnp.float32(model.opt.timestep)
         time_remaining = event_state.time_remaining - dt
@@ -111,40 +105,40 @@ class PushEvent(Event):
         # Update the data if the time remaining is less than 0.
         updated_data, time_remaining = jax.lax.cond(
             time_remaining <= 0.0,
-            lambda: self._apply_random_force(data, rng, event_state),
+            lambda: self._apply_random_force(data, rng, curriculum_step),
             lambda: (data, time_remaining),
         )
 
         return updated_data, PushEventState(
             time_remaining=time_remaining,
-            curriculum_step=event_state.curriculum_step,
-            episode_length_percentage=event_state.episode_length_percentage,
         )
-
-    def update_curriculum_step(self, event_state: BaseEventState) -> PushEventState:
-        assert isinstance(event_state, PushEventState)
-
+    
+    def should_step_curriculum(self, ep_len_pct: Array, curr_step: Array) -> Array:
+        """Determine if the curriculum should step based on episode length percentage.
+        
+        Args:
+            ep_len_pct: The percentage of the episode length that was completed.
+            curr_step: The current curriculum step.
+            
+        Returns:
+            A boolean array indicating whether to step the curriculum.
+        """
         if not self.use_curriculum:
-            return event_state
-
-        should_step = (event_state.episode_length_percentage > self.episode_length_threshold) * (
-            event_state.curriculum_step < self.max_curriculum_steps
+            return jnp.array(False)
+        
+        should_step = jnp.logical_and(
+            ep_len_pct >= self.episode_length_threshold,
+            curr_step < self.max_curriculum_steps
         )
-
-        new_curriculum_step = jnp.where(should_step, event_state.curriculum_step + 1, event_state.curriculum_step)
-
-        return PushEventState(
-            time_remaining=event_state.time_remaining,
-            curriculum_step=new_curriculum_step,
-            episode_length_percentage=event_state.episode_length_percentage,
-        )
+        
+        return should_step
 
     def _apply_random_force(
-        self, data: PhysicsData, rng: PRNGKeyArray, event_state: PushEventState
+        self, data: PhysicsData, rng: PRNGKeyArray, curriculum_step: Array
     ) -> tuple[PhysicsData, Array]:
         # Randomly applies a force.
 
-        curriculum_scale = 1.0 + self.force_scale_per_step * event_state.curriculum_step
+        curriculum_scale = 1.0 + self.force_scale_per_step * curriculum_step
 
         linear_force_scale = jnp.array([self.x_force, self.y_force, self.z_force]) * curriculum_scale
         random_forces = jax.random.uniform(rng, (3,), minval=-1.0, maxval=1.0)
@@ -162,7 +156,7 @@ class PushEvent(Event):
         minval, maxval = self.interval_range
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
         return PushEventState(
-            time_remaining=time_remaining, curriculum_step=jnp.array(0), episode_length_percentage=jnp.array(0.0)
+            time_remaining=time_remaining
         )
 
 
@@ -184,9 +178,9 @@ class JumpEvent(Event):
         model: PhysicsModel,
         data: PhysicsData,
         event_state: JumpEventState,
+        curriculum_step: Array,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, JumpEventState]:
-        event_state = self.update_curriculum_step(event_state)
 
         # Decrement by physics timestep.
         dt = jnp.float32(model.opt.timestep)
@@ -201,8 +195,6 @@ class JumpEvent(Event):
 
         return updated_data, JumpEventState(
             time_remaining=time_remaining,
-            curriculum_step=event_state.curriculum_step,
-            episode_length_percentage=event_state.episode_length_percentage,
         )
 
     def _apply_jump(self, model: PhysicsModel, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
@@ -219,13 +211,20 @@ class JumpEvent(Event):
 
         return updated_data, time_remaining
 
-    def update_curriculum_step(self, event_state: BaseEventState) -> JumpEventState:
-        assert isinstance(event_state, JumpEventState)
-        return event_state
 
     def get_initial_event_state(self, rng: PRNGKeyArray) -> JumpEventState:
         minval, maxval = self.interval_range
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
         return JumpEventState(
-            time_remaining=time_remaining, curriculum_step=jnp.array(0), episode_length_percentage=jnp.array(0.0)
+            time_remaining=time_remaining,
         )
+
+    def should_step_curriculum(self, ep_len_pct: Array, curr_step: Array) -> Array:
+        """Determine if the curriculum should step based on episode length percentage.
+        
+        Args:
+            ep_len_pct: The percentage of the episode length that was completed.
+            curr_step: The current curriculum step.
+        """
+
+        return jnp.array(False)

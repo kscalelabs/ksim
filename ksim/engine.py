@@ -27,7 +27,7 @@ from mujoco import mjx
 from ksim.actuators import Actuators
 from ksim.events import Event
 from ksim.resets import Reset
-from ksim.types import PhysicsModel, PhysicsState
+from ksim.types import PhysicsModel, PhysicsState, CurriculumState
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,7 @@ class PhysicsEngine(eqx.Module, ABC):
         action: Array,
         physics_model: PhysicsModel,
         physics_state: PhysicsState,
+        curriculum_state: CurriculumState,
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         """Step the engine and return the updated physics data."""
@@ -108,6 +109,7 @@ class MjxEngine(PhysicsEngine):
         action: Array,
         physics_model: mjx.Model,
         physics_state: PhysicsState,
+        curriculum_state: CurriculumState,
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         mjx_data = physics_state.data
@@ -141,6 +143,7 @@ class MjxEngine(PhysicsEngine):
                     physics_model,
                     data,
                     event_states[event.event_name],
+                    curriculum_state.curriculum_steps[event.event_name],
                     event_rng,
                 )
                 new_event_states[event.event_name] = new_event_state
@@ -185,6 +188,7 @@ class MujocoEngine(PhysicsEngine):
         action: Array,
         physics_model: mujoco.MjModel,
         physics_state: PhysicsState,
+        curriculum_state: CurriculumState,
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         mujoco_data = physics_state.data
@@ -219,6 +223,7 @@ class MujocoEngine(PhysicsEngine):
                     physics_model,
                     mujoco_data,
                     event_states[event.event_name],
+                    curriculum_state.curriculum_steps[event.event_name],
                     rng,
                 )
                 new_event_states[event.event_name] = new_event_state
