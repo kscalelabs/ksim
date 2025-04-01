@@ -1175,11 +1175,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             transitions = []
 
+            model_arr, model_static = eqx.partition(model, self.model_partition_fn)
+
             try:
                 for _ in iterator:
                     transition, rollout_variables = self.step_engine(
                         physics_model=mj_model,
-                        model=model,
+                        model_arr=model_arr,
+                        model_static=model_static,
                         engine=engine,
                         rollout_constants=rollout_constants,
                         rollout_variables=rollout_variables,
