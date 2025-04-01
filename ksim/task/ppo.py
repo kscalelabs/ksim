@@ -435,7 +435,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A dictionary of metrics to be logged. Each metric should be a tensor
             with shape (T, *).
         """
-        metrics= {
+        metrics = {
             "values": values_t,
             "value_targets": value_targets_t,
             "advantages": advantages_t,
