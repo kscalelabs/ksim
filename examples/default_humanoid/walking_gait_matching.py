@@ -31,8 +31,12 @@ from .walking import (
     DefaultHumanoidModel,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
-    NaiveVelocityReward,
 )
+
+
+class NaiveVelocityReward(ksim.Reward):
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        return trajectory.qvel[..., 0].clip(max=5.0)
 
 
 @jax.tree_util.register_dataclass
@@ -219,7 +223,6 @@ if __name__ == "__main__":
             learning_rate=3e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
-            use_mit_actuators=True,
             # Gait matching parameters.
             bvh_path=str(Path(__file__).parent / "data" / "walk-relaxed_actorcore.bvh"),
             rotate_bvh_euler=(0, np.pi / 2, 0),

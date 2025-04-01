@@ -66,8 +66,10 @@ class PhysicsState:
 class Trajectory:
     qpos: Array
     qvel: Array
+    xpos: Array
     obs: xax.FrozenDict[str, PyTree]
     command: xax.FrozenDict[str, PyTree]
+    event_state: xax.FrozenDict[str, Array]
     action: Array
     done: Array
     timestep: Array
@@ -110,3 +112,11 @@ class RolloutVariables:
     commands: xax.FrozenDict[str, Array]
     physics_state: PhysicsState
     rng: PRNGKeyArray
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class SingleTrajectory:
+    trajectory: Trajectory
+    rewards: Rewards
+    metrics: xax.FrozenDict[str, Array]

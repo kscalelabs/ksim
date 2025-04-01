@@ -1,4 +1,4 @@
-"""Defines simple task for training a walking policy for the default humanoid."""
+"""Pseudo-Inverse Kinematics task for the default humanoid."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,8 +16,9 @@ from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
 import ksim
+from ksim.utils.mujoco import remove_joints_except
 
-NUM_JOINTS = 21
+NUM_JOINTS = 3  # disabling all DoFs except for the right arm.
 
 
 @jax.tree_util.register_dataclass
@@ -45,7 +46,7 @@ class DefaultHumanoidActor(eqx.Module):
         var_scale: float,
         mean_scale: float,
     ) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 2 + 1
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3
         num_outputs = NUM_JOINTS
 
         self.mlp = eqx.nn.MLP(
@@ -66,18 +67,14 @@ class DefaultHumanoidActor(eqx.Module):
         dh_joint_pos_n: Array,
         dh_joint_vel_n: Array,
         imu_acc_3: Array,
-        imu_gyro_3: Array,
-        lin_vel_cmd_2: Array,
-        ang_vel_cmd_1: Array,
+        xyz_target_3: Array,
     ) -> distrax.Normal:
         obs_n = jnp.concatenate(
             [
                 dh_joint_pos_n,  # NUM_JOINTS
                 dh_joint_vel_n,  # NUM_JOINTS
                 imu_acc_3,  # 3
-                imu_gyro_3,  # 3
-                lin_vel_cmd_2,  # 2
-                ang_vel_cmd_1,  # 1
+                xyz_target_3,  # 3
             ],
             axis=-1,
         )
@@ -101,7 +98,7 @@ class DefaultHumanoidCritic(eqx.Module):
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 2 + 1
+        num_inputs = NUM_JOINTS + NUM_JOINTS + NUM_JOINTS + 3 + 3
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -115,35 +112,19 @@ class DefaultHumanoidCritic(eqx.Module):
 
     def __call__(
         self,
-        dh_joint_pos_n: Array,
-        dh_joint_vel_n: Array,
-        com_inertia_n: Array,
-        com_vel_n: Array,
+        joint_pos_n: Array,
+        joint_vel_n: Array,
+        actuator_force_n: Array,
         imu_acc_3: Array,
-        imu_gyro_3: Array,
-        act_frc_obs_n: Array,
-        base_pos_3: Array,
-        base_quat_4: Array,
-        lin_vel_obs_3: Array,
-        ang_vel_obs_3: Array,
-        lin_vel_cmd_2: Array,
-        ang_vel_cmd_1: Array,
+        xyz_target_3: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
-                dh_joint_pos_n,  # NUM_JOINTS
-                dh_joint_vel_n,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
+                joint_pos_n,  # NUM_JOINTS
+                joint_vel_n,  # NUM_JOINTS
+                actuator_force_n,  # NUM_JOINTS
                 imu_acc_3,  # 3
-                imu_gyro_3,  # 3
-                act_frc_obs_n,  # 21
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
-                lin_vel_cmd_2,  # 2
-                ang_vel_cmd_1,  # 1
+                xyz_target_3,  # 3
             ],
             axis=-1,
         )
@@ -166,12 +147,12 @@ class DefaultHumanoidModel(eqx.Module):
 
 
 @dataclass
-class HumanoidWalkingTaskConfig(ksim.PPOConfig):
+class HumanoidPseudoIKTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=1e-3,
+        value=3e-4,
         help="Learning rate for PPO.",
     )
     max_grad_norm: float = xax.field(
@@ -184,6 +165,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
     # Mujoco parameters.
+    use_mit_actuators: bool = xax.field(
+        value=False,
+        help="Whether to use the MIT actuator model, where the actions are position commands",
+    )
     kp: float = xax.field(
         value=1.0,
         help="The Kp for the actuators",
@@ -214,10 +199,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
 
-Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
+Config = TypeVar("Config", bound=HumanoidPseudoIKTaskConfig)
 
 
-class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
+class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         """Builds the optimizer.
 
@@ -237,14 +222,14 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+        mj_model_joint_removed = remove_joints_except(mjcf_path, ["shoulder1_right", "shoulder2_right", "elbow_right"])
+        mj_model = mujoco.MjModel.from_xml_string(mj_model_joint_removed)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 4
-        mj_model.opt.ls_iterations = 8
+        mj_model.opt.iterations = 6
+        mj_model.opt.ls_iterations = 6
         mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        # mj_model.opt.solver = mjx.SolverType.CG
-        mj_model.opt.solver = mjx.SolverType.NEWTON
+        mj_model.opt.solver = mjx.SolverType.CG
 
         return mj_model
 
@@ -262,29 +247,23 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         physics_model: ksim.PhysicsModel,
         metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> ksim.Actuators:
-        return ksim.TorqueActuators()
+        if self.config.use_mit_actuators:
+            if metadata is None:
+                raise ValueError("Metadata is required for MIT actuators")
+            return ksim.MITPositionActuators(physics_model, metadata)
+        else:
+            return ksim.TorqueActuators()
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
-            ksim.StaticFrictionRandomization(),
-            ksim.ArmatureRandomization(),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "torso"),
-            ksim.JointDampingRandomization(),
-            ksim.JointZeroPositionRandomization(),
+            # ksim.StaticFrictionRandomization(),
+            # ksim.ArmatureRandomization(),
+            # ksim.MassMultiplicationRandomization.from_body_name(physics_model, "upper_arm_right"),
+            # ksim.JointDampingRandomization(),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.PushEvent(
-                x_force=1.0,
-                y_force=1.0,
-                z_force=0.0,
-                x_angular_force=0.1,
-                y_angular_force=0.1,
-                z_angular_force=0.3,
-                interval_range=(0.5, 2.5),
-            ),
-        ]
+        return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
@@ -294,79 +273,47 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            ksim.JointPositionObservation(),
-            ksim.JointVelocityObservation(),
+            ksim.JointPositionObservation(freejoint_first=False),
+            ksim.JointVelocityObservation(freejoint_first=False),
             ksim.ActuatorForceObservation(),
-            ksim.CenterOfMassInertiaObservation(),
-            ksim.CenterOfMassVelocityObservation(),
-            ksim.BasePositionObservation(),
-            ksim.BaseOrientationObservation(),
-            ksim.BaseLinearVelocityObservation(),
-            ksim.BaseAngularVelocityObservation(),
-            ksim.BaseLinearAccelerationObservation(),
-            ksim.BaseAngularAccelerationObservation(),
-            ksim.ActuatorAccelerationObservation(),
+            # ksim.ActuatorAccelerationObservation(freejoint_first=False),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
-            ksim.FeetContactObservation.create(
-                physics_model=physics_model,
-                foot_left_geom_names=["foot1_left", "foot2_left"],
-                foot_right_geom_names=["foot1_right", "foot2_right"],
-                floor_geom_names=["floor"],
-            ),
-            ksim.FeetPositionObservation.create(
-                physics_model=physics_model,
-                foot_left_body_name="foot_left",
-                foot_right_body_name="foot_right",
-            ),
-            ksim.FeetOrientationObservation.create(
-                physics_model=physics_model,
-                foot_left_body_name="foot_left",
-                foot_right_body_name="foot_right",
-            ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.LinearVelocityCommand(
-                x_range=(0.0, 2.5),
-                y_range=(0.0, 0.0),
-                x_zero_prob=0.2,
-                y_zero_prob=0.8,
-                switch_prob=self.config.ctrl_dt / 5,
+            ksim.CartesianBodyTargetCommand.create(
+                model=physics_model,
+                command_name="cartesian_body_target_command_upper_arm_right",
+                pivot_name="upper_arm_right",
+                base_name="pelvis",
+                sample_sphere_radius=0.5,
+                positive_x=True,  # only sample in the positive x direction
+                positive_y=False,
+                positive_z=False,
+                switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
+                vis_radius=0.05,
+                vis_color=(1.0, 0.0, 0.0, 0.8),
             ),
-            ksim.AngularVelocityCommand(
-                scale=0.2,
-                zero_prob=0.2,
-            ),
-            # ksim.LinearVelocityStepCommand(
-            #     x_range=(0.0, 2.5),
-            #     y_range=(0.0, 0.0),
-            #     x_fwd_prob=0.9,
-            #     y_fwd_prob=0.5,
-            #     x_zero_prob=0.1,
-            #     y_zero_prob=1.0,
-            #     switch_prob=self.config.ctrl_dt / 5,
-            # ),
-            # ksim.AngularVelocityStepCommand(
-            #     scale=0.2,
-            #     zero_prob=0.2,
-            # ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=-1.0),
-            ksim.LinearVelocityZPenalty(scale=-0.01),
-            ksim.AngularVelocityXYPenalty(scale=-0.01),
-            ksim.LinearVelocityTrackingPenalty(scale=-0.1),
-            ksim.AngularVelocityTrackingPenalty(scale=-0.01),
+            ksim.CartesianBodyTargetReward.create(
+                model=physics_model,
+                tracked_body_name="hand_right",
+                base_body_name="pelvis",
+                norm="l2",
+                scale=0.1,
+                sensitivity=1.0,
+                command_name="cartesian_body_target_command_upper_arm_right",
+            ),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
             ksim.FastAccelerationTermination(),
+            # TODO: add for collisions
         ]
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
@@ -382,18 +329,14 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Normal:
         dh_joint_pos_n = observations["joint_position_observation"]
-        dh_joint_vel_n = observations["joint_velocity_observation"]
+        dh_joint_vel_n = observations["joint_velocity_observation"] / 50.0
         imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd_1 = commands["angular_velocity_command"]
+        xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
         return model.actor(
             dh_joint_pos_n=dh_joint_pos_n,
-            dh_joint_vel_n=dh_joint_vel_n / 10.0,
-            imu_acc_3=imu_acc_3 / 50.0,
-            imu_gyro_3=imu_gyro_3 / 3.0,
-            lin_vel_cmd_2=lin_vel_cmd_2,
-            ang_vel_cmd_1=ang_vel_cmd_1,
+            dh_joint_vel_n=dh_joint_vel_n,
+            imu_acc_3=imu_acc_3,
+            xyz_target_3=xyz_target_3,
         )
 
     def _run_critic(
@@ -402,33 +345,17 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
-        dh_joint_pos_n = observations["joint_position_observation"]  # 26
-        dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
-        com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
-        com_vel_n = observations["center_of_mass_velocity_observation"]  # 96
+        joint_pos_n = observations["joint_position_observation"]  # 26
+        joint_vel_n = observations["joint_velocity_observation"] / 100.0  # 27
+        actuator_force_n = observations["actuator_force_observation"]  # 27
         imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]  # 3
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0  # 21
-        base_pos_3 = observations["base_position_observation"]  # 3
-        base_quat_4 = observations["base_orientation_observation"]  # 4
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]  # 3
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
-        lin_vel_cmd_2 = commands["linear_velocity_command"]  # 2
-        ang_vel_cmd_1 = commands["angular_velocity_command"]  # 1
+        xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]  # 3
         return model.critic(
-            dh_joint_pos_n=dh_joint_pos_n,
-            dh_joint_vel_n=dh_joint_vel_n / 10.0,
-            com_inertia_n=com_inertia_n,
-            com_vel_n=com_vel_n,
-            imu_acc_3=imu_acc_3 / 50.0,
-            imu_gyro_3=imu_gyro_3 / 3.0,
-            act_frc_obs_n=act_frc_obs_n,
-            base_pos_3=base_pos_3,
-            base_quat_4=base_quat_4,
-            lin_vel_obs_3=lin_vel_obs_3,
-            ang_vel_obs_3=ang_vel_obs_3,
-            lin_vel_cmd_2=lin_vel_cmd_2,
-            ang_vel_cmd_1=ang_vel_cmd_1,
+            joint_pos_n=joint_pos_n,
+            joint_vel_n=joint_vel_n,
+            actuator_force_n=actuator_force_n,
+            imu_acc_3=imu_acc_3,
+            xyz_target_3=xyz_target_3,
         )
 
     def get_on_policy_log_probs(
@@ -437,6 +364,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+            raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.log_probs
 
     def get_on_policy_values(
@@ -445,6 +374,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+            raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.values
 
     def get_log_probs(
@@ -456,12 +387,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         # Vectorize over both batch and time dimensions.
         par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
         action_dist_btn = par_fn(model, trajectories.obs, trajectories.command)
-        action_dist_tanh_btn = distrax.Transformed(action_dist_btn, distrax.Tanh())
 
         # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
         action_btn = trajectories.action / model.actor.mean_scale
-        log_probs_btn = action_dist_tanh_btn.log_prob(action_btn)
+        log_probs_btn = action_dist_btn.log_prob(action_btn)
         entropy_btn = action_dist_btn.entropy()
 
         return log_probs_btn, entropy_btn
@@ -489,7 +419,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, None, AuxOutputs]:
-        action_dist_n = distrax.Transformed(self._run_actor(model, observations, commands), distrax.Tanh())
+        action_dist_n = self._run_actor(model, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
 
@@ -508,14 +438,13 @@ if __name__ == "__main__":
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
     #   python -m examples.default_humanoid.walking num_envs=8 batch_size=4
-    HumanoidWalkingTask.launch(
-        HumanoidWalkingTaskConfig(
+    HumanoidPseudoIKTask.launch(
+        HumanoidPseudoIKTaskConfig(
             # Training parameters.
             num_envs=2048,
             batch_size=256,
             num_passes=10,
-            epochs_per_log_step=10,
-            rollout_length_seconds=10.0,
+            epochs_per_log_step=1,
             # Logging parameters.
             log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
@@ -523,5 +452,6 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            rollout_length_seconds=4.0,
         ),
     )

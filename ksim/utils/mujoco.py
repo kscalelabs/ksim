@@ -8,7 +8,6 @@ __all__ = [
     "get_geom_data_idx_by_name",
     "get_body_data_idx_by_name",
     "get_floor_idx",
-    "get_collision_info",
     "geoms_colliding",
     "get_joint_metadata",
     "update_model_field",
@@ -22,16 +21,19 @@ __all__ = [
     "get_body_pose_by_name",
     "get_geom_pose_by_name",
     "get_site_pose_by_name",
+    "remove_joints_except",
 ]
 
 import logging
 from typing import Any, Hashable, TypeVar
+from xml.etree import ElementTree as ET
 
+import chex
 import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
-from jaxtyping import Array, PyTree
+from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
@@ -160,23 +162,23 @@ def get_floor_idx(physics_model: PhysicsModel, floor_name: str = "floor") -> int
     return geom_mappings[floor_name]
 
 
-def get_collision_info(contact: PyTree, geom1: int, geom2: int) -> tuple[jax.Array, jax.Array]:
-    """Get the distance and normal of the collision between two geoms."""
-    mask = (jnp.array([geom1, geom2]) == contact.geom).all(axis=1)
-    mask |= (jnp.array([geom2, geom1]) == contact.geom).all(axis=1)
-    idx = jnp.where(mask, contact.dist, 1e4).argmin()
-    dist = contact.dist[idx] * mask[idx]
-    # This reshape is nedded because contact.frame's shape depends on how many envs there are.
-    normal = (dist < 0) * jnp.reshape(contact.frame[idx], (-1,))[:3]
-    return dist, normal
-
-
-def geoms_colliding(state: PhysicsData, geom1: int, geom2: int) -> jax.Array:
+def geoms_colliding(state: PhysicsData, geom1: Array, geom2: Array) -> Array:
     """Return True if the two geoms are colliding."""
+    chex.assert_shape(geom1, (None,))
+    chex.assert_shape(geom2, (None,))
+
+    def get_colliding_inner(geom: Array, dist: Array, geom1: Array, geom2: Array) -> Array:
+        x, y = jnp.meshgrid(geom1, geom2, indexing="ij")
+        xy = jnp.concatenate([x, y], axis=-1)
+        yx = jnp.concatenate([y, x], axis=-1)
+        mask = (xy[:, None] == geom[None, :]).all(axis=-1) | (yx[:, None] == geom[None, :]).all(axis=-1)
+        dist = jnp.where(mask, dist[None, :], 1e4).min(axis=-1)
+        return dist < 0
+
     return jax.lax.cond(
-        jnp.equal(state.contact.geom.shape[0], 0),  # if no contacts, return False
-        lambda _: jnp.array(False),
-        lambda _: get_collision_info(state.contact, geom1, geom2)[0] < 0,
+        jnp.equal(state.contact.geom.shape[0], 0),
+        lambda _: jnp.zeros(geom1.shape[0] * geom2.shape[0], dtype=jnp.bool_),
+        lambda _: get_colliding_inner(state.contact.geom, state.contact.dist, geom1, geom2),
         operand=None,
     )
 
@@ -318,3 +320,38 @@ def get_site_pose_by_name(
 ) -> tuple[np.ndarray, np.ndarray]:
     site_idx = get_site_data_idx_from_name(model, site_name)
     return get_site_pose(data, site_idx)
+
+
+def remove_joints_except(file_path: str, joint_names: list[str]) -> str:
+    """Remove all joints and references unless listed."""
+    tree = ET.parse(file_path)
+    root = tree.getroot()
+
+    def dfs_remove_joints(element: ET.Element) -> None:
+        for child in list(element):  # Use list to avoid modifying while iterating
+            # Skip defaults as they are needed for armatures, etc.
+            if child.tag == "default":
+                continue
+
+            if child.tag in {"joint", "freejoint"} and child.get("name") not in joint_names:
+                element.remove(child)
+            else:
+                dfs_remove_joints(child)
+
+    def dfs_remove_references(element: ET.Element) -> None:
+        for child in list(element):
+            # Check if the child references a joint not in joint_names
+            joint_attr = child.get("joint")
+            if joint_attr and joint_attr not in joint_names:
+                element.remove(child)
+            # Keyframes are difficult to reorder, so we remove them for now.
+            elif child.tag == "keyframe":
+                element.remove(child)
+            else:
+                dfs_remove_references(child)
+
+    dfs_remove_joints(root)
+    dfs_remove_references(root)
+
+    # write it to a file
+    return ET.tostring(root, encoding="utf-8").decode("utf-8")
