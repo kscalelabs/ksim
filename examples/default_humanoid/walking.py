@@ -171,7 +171,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=1e-3,
+        value=3e-4,
         help="Learning rate for PPO.",
     )
     max_grad_norm: float = xax.field(
@@ -199,6 +199,12 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     friction: float = xax.field(
         value=1e-6,
         help="The dynamic friction loss for the actuator",
+    )
+
+    # Loss parameters.
+    step_phase: float = xax.field(
+        value=0.25,
+        help="The minimum phase for feet to be off the ground",
     )
 
     # Rendering parameters.
@@ -358,11 +364,13 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, dropoff=10.0, scale=-1.0),
+            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, dropoff=10.0, scale=1.0),
             ksim.LinearVelocityZPenalty(scale=-0.01),
             ksim.AngularVelocityXYPenalty(scale=-0.01),
             ksim.LinearVelocityTrackingPenalty(scale=-0.1),
             ksim.AngularVelocityTrackingPenalty(scale=-0.01),
+            ksim.StayAliveReward(scale=1.0),
+            ksim.FeetNoContactReward(window_size=round(self.config.step_phase / self.config.ctrl_dt), scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -389,6 +397,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd_1 = commands["angular_velocity_command"]
+
         return model.actor(
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n / 10.0,
@@ -439,6 +448,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+            raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.log_probs
 
     def get_on_policy_values(
@@ -447,6 +458,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+            raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.values
 
     def get_log_probs(
@@ -513,11 +526,11 @@ if __name__ == "__main__":
             # Training parameters.
             num_envs=2048,
             batch_size=256,
-            num_passes=10,
-            epochs_per_log_step=10,
-            rollout_length_seconds=10.0,
+            num_passes=32,
+            epochs_per_log_step=1,
+            rollout_length_seconds=4.0,
             # Logging parameters.
-            log_full_trajectory_every_n_seconds=60,
+            # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
