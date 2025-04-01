@@ -31,8 +31,12 @@ from .walking import (
     DefaultHumanoidModel,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
-    NaiveVelocityReward,
 )
+
+
+class NaiveVelocityReward(ksim.Reward):
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        return trajectory.qvel[..., 0].clip(max=5.0)
 
 
 @jax.tree_util.register_dataclass
