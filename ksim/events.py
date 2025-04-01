@@ -127,7 +127,7 @@ class PushEvent(Event):
         if not self.use_curriculum:
             return event_state
 
-        should_step = (event_state.episode_length_percentage < self.episode_length_threshold) * (
+        should_step = (event_state.episode_length_percentage > self.episode_length_threshold) * (
             event_state.curriculum_step < self.max_curriculum_steps
         )
 
@@ -162,7 +162,7 @@ class PushEvent(Event):
         minval, maxval = self.interval_range
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
         return PushEventState(
-            time_remaining=time_remaining, curriculum_step=jnp.array(0), episode_length_percentage=jnp.array(0)
+            time_remaining=time_remaining, curriculum_step=jnp.array(0), episode_length_percentage=jnp.array(0.0)
         )
 
 
@@ -218,3 +218,14 @@ class JumpEvent(Event):
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
 
         return updated_data, time_remaining
+
+    def update_curriculum_step(self, event_state: BaseEventState) -> JumpEventState:
+        assert isinstance(event_state, JumpEventState)
+        return event_state
+
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> JumpEventState:
+        minval, maxval = self.interval_range
+        time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+        return JumpEventState(
+            time_remaining=time_remaining, curriculum_step=jnp.array(0), episode_length_percentage=jnp.array(0.0)
+        )
