@@ -22,6 +22,7 @@ class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
         return [
             ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
             ksim.StayAliveReward(scale=1.0),
+            ksim.ActionSmoothnessPenalty(scale=-0.001),
         ]
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:

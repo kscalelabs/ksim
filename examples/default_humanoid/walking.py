@@ -294,7 +294,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.PushEvent(
                 x_force=3.0,
                 y_force=3.0,
-                z_force=1.0,
+                z_force=0.0,
                 interval_range=(0.5, 2.5),
             ),
         ]
