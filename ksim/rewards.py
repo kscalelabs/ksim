@@ -207,7 +207,7 @@ class BaseHeightRangeReward(Reward):
 
     z_lower: float = attrs.field()
     z_upper: float = attrs.field()
-    temp: float = attrs.field(default=1.0)
+    temp: float = attrs.field(default=3.0)
     monotonic_fn: MonotonicFn = attrs.field(default="exp")
 
     def __call__(self, trajectory: Trajectory) -> Array:

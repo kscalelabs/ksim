@@ -592,6 +592,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             qvel=rollout_variables.physics_state.data.qvel,
             obs=observations,
             command=rollout_variables.commands,
+            event_state=rollout_variables.physics_state.event_states,
             action=action,
             done=terminated,
             timestep=rollout_variables.physics_state.data.time,

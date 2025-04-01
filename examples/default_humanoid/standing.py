@@ -20,7 +20,7 @@ Config = TypeVar("Config", bound=HumanoidStandingTaskConfig)
 class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.BaseHeightRangeReward(z_lower=1.3, z_upper=1.5, scale=1.0),
+            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
             ksim.StayAliveReward(scale=1.0),
         ]
 
