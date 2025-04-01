@@ -308,7 +308,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 physics_model=physics_model,
                 foot_left_geom_names=["foot1_left", "foot2_left"],
                 foot_right_geom_names=["foot1_right", "foot2_right"],
-                floor_geom_name="floor",
+                floor_geom_names=["floor"],
             ),
             ksim.FeetPositionObservation.create(
                 physics_model=physics_model,

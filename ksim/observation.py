@@ -260,22 +260,12 @@ class FeetContactObservation(Observation):
         )
 
     def observe(self, rollout_state: RolloutVariables, rng: PRNGKeyArray) -> Array:
-        breakpoint()
-
-        geom = rollout_state.physics_state.data.contact.geom
-        dist = rollout_state.physics_state.data.contact.dist
-
         foot_left = jnp.array(self.foot_left)
         foot_right = jnp.array(self.foot_right)
         floor = jnp.array(self.floor_geom)
-
-        # Get all pairs.
-        foot_left_floor = jnp.stack(jnp.meshgrid(foot_left, floor, indexing="ij"), axis=-1)
-        foot_right_floor = jnp.stack(jnp.meshgrid(foot_right, floor, indexing="ij"), axis=-1)
-
-        contact_1 = geoms_colliding(rollout_state.physics_state.data, self.foot_left, self.floor_geom)
-        contact_2 = geoms_colliding(rollout_state.physics_state.data, self.foot_right, self.floor_geom)
-        return jnp.array([contact_1, contact_2])
+        contact_1 = geoms_colliding(rollout_state.physics_state.data, foot_left, floor).any(axis=-1)
+        contact_2 = geoms_colliding(rollout_state.physics_state.data, foot_right, floor).any(axis=-1)
+        return jnp.stack([contact_1, contact_2], axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)

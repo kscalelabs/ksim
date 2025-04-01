@@ -5,9 +5,6 @@ from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 import ksim
-import attrs
-import jax.numpy as jnp
-from jaxtyping import Array
 
 from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
