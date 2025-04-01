@@ -393,14 +393,14 @@ class GlobalBodyQuaternionMarker(Marker):
 
     @classmethod
     def get(
-        cls, command_name: str, base_body_name: str, scale: float, rgba: tuple[float, float, float, float]
+        cls, command_name: str, base_body_name: str, size: float, magnitude: float, rgba: tuple[float, float, float, float]
     ) -> Self:
         return cls(
             command_name=command_name,
             target_name=base_body_name,
             target_type="body",
             geom=mujoco.mjtGeom.mjGEOM_ARROW,
-            scale=(scale, scale, scale),
+            scale=(size, size, magnitude),
             rgba=rgba,
         )
 
@@ -416,7 +416,8 @@ class GlobalBodyQuaternionCommand(Command):
     base_body_name: str = attrs.field()
     base_id: int = attrs.field()
     switch_prob: float = attrs.field()
-    vis_scale: float = attrs.field()
+    vis_magnitude: float = attrs.field()
+    vis_size: float = attrs.field()
     vis_color: tuple[float, float, float, float] = attrs.field()
 
     def initial_command(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
@@ -431,7 +432,7 @@ class GlobalBodyQuaternionCommand(Command):
         return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
-        return [GlobalBodyQuaternionMarker.get(self.command_name, self.base_body_name, self.vis_scale, self.vis_color)]
+        return [GlobalBodyQuaternionMarker.get(self.command_name, self.base_body_name, self.vis_size, self.vis_magnitude, self.vis_color)]
 
     def get_name(self) -> str:
         if self.custom_name is not None:
@@ -444,7 +445,8 @@ class GlobalBodyQuaternionCommand(Command):
         model: PhysicsModel,
         base_name: str,
         switch_prob: float = 0.1,
-        vis_scale: float = 0.05,
+        vis_magnitude: float = 0.5,
+        vis_size: float = 0.05,
         vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
         command_name: str | None = None,
     ) -> Self:
@@ -453,7 +455,8 @@ class GlobalBodyQuaternionCommand(Command):
             base_body_name=base_name,
             base_id=base_id,
             switch_prob=switch_prob,
-            vis_scale=vis_scale,
+            vis_magnitude=vis_magnitude,
+            vis_size=vis_size,
             vis_color=vis_color,
             custom_name=command_name,
         )
