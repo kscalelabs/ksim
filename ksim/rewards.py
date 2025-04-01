@@ -481,8 +481,8 @@ class FeetNoContactReward(Reward):
     period is reset to 0.
     """
 
+    window_size: int = attrs.field()
     obs_name: str = attrs.field(default="feet_contact_observation")
-    window_size: int = attrs.field(default=10)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         feet_contact = trajectory.obs[self.obs_name]

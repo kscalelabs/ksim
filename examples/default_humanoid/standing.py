@@ -5,13 +5,14 @@ from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 import ksim
+import xax
 
 from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 
 @dataclass
 class HumanoidStandingTaskConfig(HumanoidWalkingTaskConfig):
-    pass
+    step_phase: float = xax.field(default=0.25)
 
 
 Config = TypeVar("Config", bound=HumanoidStandingTaskConfig)
@@ -22,7 +23,7 @@ class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
         return [
             ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, scale=1.0),
             ksim.StayAliveReward(scale=1.0),
-            ksim.FeetNoContactReward(scale=0.1),
+            ksim.FeetNoContactReward(window_size=round(self.config.step_phase / self.config.ctrl_dt), scale=0.1),
         ]
 
 
