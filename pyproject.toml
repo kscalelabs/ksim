@@ -42,6 +42,8 @@ module = [
     "mujoco.*",
     "optax.*",
     "scipy.*",
+    "bvhio.*",
+    "glm.*",
 ]
 ignore_missing_imports = true
 

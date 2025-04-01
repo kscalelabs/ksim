@@ -18,14 +18,15 @@ def set_random_seed() -> None:
 
 
 def get_mujoco_humanoid_model() -> mujoco.MjModel:
-    mjcf_path = (Path(__file__).parent / "fixed_assets" / "scene.mjcf").resolve().as_posix()
+    mjcf_path = (Path(__file__).parent / "fixed_assets" / "fixed_humanoid_scene.mjcf").resolve().as_posix()
     mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
     return mj_model
 
 
 def get_mjx_humanoid_model() -> mjx.Model:
     """Get a dummy mjx.Model for testing."""
-    mj_model = mujoco.MjModel.from_xml_path("tests/fixed_assets/scene.mjcf")
+    mjcf_path = (Path(__file__).parent / "fixed_assets" / "fixed_humanoid_scene.mjcf").resolve().as_posix()
+    mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
     mjx_model = mjx.put_model(mj_model)
     return mjx_model
 

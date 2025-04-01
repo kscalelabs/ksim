@@ -492,6 +492,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model: PyTree,
         carry: PyTree,
         physics_model: PhysicsModel,
+        physics_state: PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
@@ -506,6 +507,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             model: The current model.
             physics_model: The physics model.
+            physics_state: The current physics state.
             observations: The current observations.
             commands: The current commands.
             carry: The model carry from the previous step.
@@ -565,6 +567,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model=model,
             carry=rollout_variables.carry,
             physics_model=physics_model,
+            physics_state=rollout_variables.physics_state,
             observations=observations,
             commands=commands,
             rng=act_rng,
