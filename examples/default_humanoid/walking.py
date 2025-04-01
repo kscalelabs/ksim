@@ -409,7 +409,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def _run_critic(
         self,
-        model: DefaultHumanoidModel,
+        model: DefaultHumanoidCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
@@ -487,7 +487,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     ) -> Array:
         # Vectorize over both batch and time dimensions.
         par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_bt1 = par_fn(model, trajectories.obs, trajectories.command)
+        values_bt1 = par_fn(model.critic, trajectories.obs, trajectories.command)
 
         # Remove the last dimension.
         return values_bt1.squeeze(-1)
@@ -506,7 +506,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
 
-        critic_n = self._run_critic(model, observations, commands)
+        critic_n = self._run_critic(model.critic, observations, commands)
         value_n = critic_n.squeeze(-1)
 
         return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
