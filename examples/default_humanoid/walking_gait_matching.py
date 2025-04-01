@@ -219,7 +219,6 @@ if __name__ == "__main__":
             learning_rate=3e-4,
             clip_param=0.3,
             max_grad_norm=1.0,
-            use_mit_actuators=True,
             # Gait matching parameters.
             bvh_path=str(Path(__file__).parent / "data" / "walk-relaxed_actorcore.bvh"),
             rotate_bvh_euler=(0, np.pi / 2, 0),

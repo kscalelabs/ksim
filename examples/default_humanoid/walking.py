@@ -27,11 +27,6 @@ class AuxOutputs:
     values: Array
 
 
-class NaiveVelocityReward(ksim.Reward):
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qvel[..., 0].clip(max=5.0)
-
-
 class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
@@ -74,7 +69,7 @@ class DefaultHumanoidActor(eqx.Module):
         imu_gyro_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd_1: Array,
-    ) -> distrax.Normal:
+    ) -> distrax.Distribution:
         obs_n = jnp.concatenate(
             [
                 dh_joint_pos_n,  # NUM_JOINTS
@@ -97,8 +92,7 @@ class DefaultHumanoidActor(eqx.Module):
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
-        # return distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
-        return distrax.Normal(mean_n, std_n)
+        return distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
 
 
 class DefaultHumanoidCritic(eqx.Module):
@@ -190,10 +184,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
     # Mujoco parameters.
-    use_mit_actuators: bool = xax.field(
-        value=False,
-        help="Whether to use the MIT actuator model, where the actions are position commands",
-    )
     kp: float = xax.field(
         value=1.0,
         help="The Kp for the actuators",
@@ -271,12 +261,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         physics_model: ksim.PhysicsModel,
         metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> ksim.Actuators:
-        if self.config.use_mit_actuators:
-            if metadata is None:
-                raise ValueError("Metadata is required for MIT actuators")
-            return ksim.MITPositionActuators(physics_model, metadata)
-        else:
-            return ksim.TorqueActuators()
+        return ksim.TorqueActuators()
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
@@ -385,7 +370,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         model: DefaultHumanoidModel,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-    ) -> distrax.Normal:
+    ) -> distrax.Distribution:
         dh_joint_pos_n = observations["joint_position_observation"]
         dh_joint_vel_n = observations["joint_velocity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
