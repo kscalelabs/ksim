@@ -54,7 +54,11 @@ def compute_advantages_and_value_targets(
         adv_t = delta + decay_gamma * gae_lambda * mask * adv_t_plus_1
         return adv_t, adv_t
 
-    def compute_gae_and_targets_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> tuple[Array, Array]:
+    def compute_gae_and_targets_for_sample(
+        values_t: Array,
+        rewards_t: Array,
+        dones_t: Array,
+    ) -> tuple[Array, Array, Array, Array]:
         # Use the last value as the bootstrap value.
         values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
         mask_t = jnp.where(dones_t, 0.0, 1.0)
