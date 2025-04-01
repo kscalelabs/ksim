@@ -358,7 +358,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         loss_t: Array,
         on_policy_log_probs_tn: Array,
         log_probs_tn: Array,
-        entropy_tn: Array,
+        entropy_tn: Array | None,
         values_t: Array,
         on_policy_values_t: Array,
         value_targets_t: Array,
@@ -385,16 +385,18 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Returns:
             A dictionary of metrics to be logged.
         """
-        return {
+        metrics = {
             "loss": loss_t.mean(),
             "log_probs": log_probs_tn.mean(0).flatten(),
             "on_policy_log_probs": on_policy_log_probs_tn.mean(0).flatten(),
-            "entropy": entropy_tn.mean(0).flatten(),
             "value": values_t.mean(),
             "on_policy_value": on_policy_values_t.mean(),
             "value_targets": value_targets_t.mean(),
             "advantages": advantages_t.mean(),
         }
+        if entropy_tn is not None:
+            metrics["entropy"] = entropy_tn.mean(0).flatten()
+        return metrics
 
     def get_single_trajectory_metrics(
         self,
@@ -403,7 +405,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         loss_t: Array,
         on_policy_log_probs_tn: Array,
         log_probs_tn: Array,
-        entropy_tn: Array,
+        entropy_tn: Array | None,
         values_t: Array,
         value_targets_t: Array,
         advantages_t: Array,
@@ -433,15 +435,17 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A dictionary of metrics to be logged. Each metric should be a tensor
             with shape (T, *).
         """
-        return {
+        metrics= {
             "values": values_t,
             "value_targets": value_targets_t,
             "advantages": advantages_t,
-            "entropy": entropy_tn,
             "loss": loss_t,
             "gae": gae_t,
             "returns": returns_t,
         }
+        if entropy_tn is not None:
+            metrics["entropy"] = entropy_tn
+        return metrics
 
     @xax.jit(static_argnames=["self", "model_static"])
     def get_loss_and_metrics(
@@ -506,9 +510,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 log_clip_value=self.config.log_clip_value,
                 use_clipped_value_loss=self.config.use_clipped_value_loss,
             )
-
-            if entropy_tn is None:
-                raise ValueError("Entropy is required for PPO metrics")
 
             metrics = self.get_ppo_metrics(
                 trajectories=trajectories,
