@@ -1359,7 +1359,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Defines the vectorized initialization functions.
             carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
-            command_fn = jax.vmap(get_initial_commands, in_axes=(0, None))
+            command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None))
 
             rollout_variables = RolloutVariables(
                 carry=carry_fn(train_rngs),
