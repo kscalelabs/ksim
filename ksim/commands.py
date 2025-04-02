@@ -392,7 +392,7 @@ class GlobalBodyQuaternionMarker(Marker):
         command = trajectory.command[self.command_name]
         # Check if command is zeros (null quaternion)
         is_null = jnp.all(jnp.isclose(command, 0.0))
-        
+
         # Only update orientation if command is not null
         if not is_null:
             self.geom = mujoco.mjtGeom.mjGEOM_ARROW
