@@ -15,7 +15,7 @@ import ksim
 
 from .walking import NUM_JOINTS, AuxOutputs, DefaultHumanoidCritic, HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
-HIDDEN_SIZE = 512  # `_s`
+HIDDEN_SIZE = 64  # `_s`
 DEPTH = 2
 
 
@@ -116,11 +116,11 @@ class DefaultHumanoidActor(eqx.Module):
 
         def scan_fn(carry: Array, xt: Array) -> tuple[Array, Array]:
             xt, ht = self.multi_layer_gru(xt, carry)
+            xt = self.projector(xt)
             return ht, xt
 
         # Process through GRU cell.
-        new_hidden_states, last_h_tn = jax.lax.scan(scan_fn, hidden_states_dn, obs_tn)
-        out_tn = jax.vmap(self.projector, 0)(last_h_tn)
+        new_hidden_states, out_tn = jax.lax.scan(scan_fn, hidden_states_dn, obs_tn)
 
         mean_tn = out_tn[..., :NUM_JOINTS]
         std_tn = out_tn[..., NUM_JOINTS:]
