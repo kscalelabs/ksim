@@ -21,6 +21,17 @@ import ksim
 
 NUM_JOINTS = 21
 
+ACTION_RANGES = [
+    (-1.0, 1.0),
+    (-1.0, 1.0),
+    (-1.0, 1.0),
+    (-1.0, 1.0),
+    (-1.0, 1.0),
+    (-1.0, 1.0),
+    (-1.0, 1.0),
+    (-1.0, 1.0),
+]
+
 
 @attrs.define(frozen=True, kw_only=True)
 class NaiveForwardReward(ksim.Reward):
@@ -39,6 +50,7 @@ class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
+    action_ranges: Array
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
@@ -62,6 +74,7 @@ class DefaultHumanoidActor(eqx.Module):
             key=key,
             activation=jax.nn.relu,
         )
+        self.action_ranges = jnp.array(ACTION_RANGES)
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale

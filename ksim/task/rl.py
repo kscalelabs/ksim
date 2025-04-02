@@ -39,7 +39,7 @@ from dpshdl.dataset import Dataset
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
-from omegaconf import MISSING
+from omegaconf import MISSING, DictConfig, OmegaConf
 from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
@@ -66,7 +66,7 @@ from ksim.types import (
     SingleTrajectory,
     Trajectory,
 )
-from ksim.utils.mujoco import get_joint_metadata, load_model
+from ksim.utils.mujoco import get_joint_metadata, get_joint_names_in_order, get_joint_ranges, load_model
 from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
@@ -565,6 +565,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @property
     def rollout_num_samples(self) -> int:
         return self.rollout_length_steps * self.config.num_envs
+
+    def get_mujoco_model_info(self, mj_model: mujoco.MjModel) -> dict:
+        return {
+            "joint_names": get_joint_names_in_order(mj_model),
+            "action_ranges": get_joint_ranges(mj_model),
+        }
 
     @xax.jit(static_argnames=["self", "model_static", "engine", "rollout_constants"])
     def step_engine(
@@ -1185,7 +1191,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, model_rng = jax.random.split(rng)
             model, _ = self.load_initial_state(model_rng, load_optimizer=False)
 
+            # Loads the Mujoco model and logs some information about it.
             mj_model: PhysicsModel = self.get_mujoco_model()
+            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
+            self.logger.log_file("mujoco_info.yaml", mujoco_info)
+
             metadata = self.get_mujoco_model_metadata(mj_model)
             engine = self.get_engine(mj_model, metadata)
             observations = self.get_observations(mj_model)
@@ -1407,7 +1417,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, model_rng = jax.random.split(rng)
             model, optimizer, opt_state, state = self.load_initial_state(model_rng, load_optimizer=True)
 
+            # Loads the Mujoco model and logs some information about it.
             mj_model: PhysicsModel = self.get_mujoco_model()
+            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
+            self.logger.log_file("mujoco_info.yaml", mujoco_info)
+
             mjx_model = self.get_mjx_model(mj_model)
             metadata = self.get_mujoco_model_metadata(mjx_model)
             engine = self.get_engine(mjx_model, metadata)
