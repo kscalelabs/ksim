@@ -370,7 +370,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.EpisodeLengthCurriculum.create(
-            min_length_seconds=1.0,
+            min_length_seconds=0.1,
             max_length_seconds=4.0,
             ctrl_dt=self.config.ctrl_dt,
         )

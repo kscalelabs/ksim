@@ -134,11 +134,12 @@ def get_rewards(
 def get_terminations(
     physics_state: PhysicsState,
     termination_generators: Collection[Termination],
+    curriculum_level: Array,
 ) -> xax.FrozenDict[str, Array]:
     """Get the terminations from the physics state."""
     terminations = {}
     for termination in termination_generators:
-        termination_val = termination(physics_state.data)
+        termination_val = termination(physics_state.data, curriculum_level)
         chex.assert_type(termination_val, bool)
         name = termination.termination_name
         terminations[name] = termination_val
@@ -200,11 +201,12 @@ def apply_randomizations(
     physics_model: mjx.Model,
     engine: PhysicsEngine,
     randomizations: Collection[Randomization],
+    curriculum_level: Array,
     rng: PRNGKeyArray,
 ) -> tuple[xax.FrozenDict[str, Array], PhysicsState]:
     rand_rng, reset_rng = jax.random.split(rng)
     randomizations = get_randomizations(physics_model, randomizations, rand_rng)
-    physics_state = engine.reset(physics_model.tree_replace(randomizations), reset_rng)
+    physics_state = engine.reset(physics_model.tree_replace(randomizations), curriculum_level, reset_rng)
     return randomizations, physics_state
 
 
@@ -613,6 +615,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             action=action,
             physics_model=physics_model,
             physics_state=rollout_variables.physics_state,
+            curriculum_level=curriculum_level,
             rng=physics_rng,
         )
 
@@ -620,6 +623,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         terminations = get_terminations(
             physics_state=next_physics_state,
             termination_generators=rollout_constants.termination_generators,
+            curriculum_level=curriculum_level,
         )
         terminated = jax.tree.reduce(jnp.logical_or, list(terminations.values()))
 
@@ -661,7 +665,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 curriculum_level=curriculum_level,
             ),
             lambda: get_commands(
-                commands=rollout_variables.commands,
+                prev_commands=rollout_variables.commands,
                 physics_state=next_physics_state,
                 rng=cmd_rng,
                 command_generators=rollout_constants.command_generators,
@@ -671,7 +675,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         next_physics_state = jax.lax.cond(
             terminated,
-            lambda: engine.reset(physics_model, reset_rng),
+            lambda: engine.reset(physics_model, curriculum_level, reset_rng),
             lambda: next_physics_state,
         )
 
@@ -1190,7 +1194,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rand_dict = get_randomizations(mj_model, randomizations, rand_rng)
                 for k, v in rand_dict.items():
                     setattr(mj_model, k, v)
-                return engine.reset(mj_model, reset_rng)
+                return engine.reset(mj_model, curriculum_state.level, reset_rng)
 
             # Resets the physics state.
             rng, reset_rng = jax.random.split(rng)
@@ -1438,13 +1442,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Builds the variables for the training environment.
             train_rngs = jax.random.split(rng, self.config.num_envs)
 
-            # Applies randomizations to the physics model.
-            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, None, 0))
-            randomization_dict, physics_state = randomization_fn(mjx_model, engine, randomizations, train_rngs)
-
             # Gets the initial curriculum state.
             rng, curriculum_rng = jax.random.split(rng)
             curriculum_state = curriculum.get_initial_state(curriculum_rng)
+
+            # Applies randomizations to the physics model.
+            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, None, None, 0))
+            randomization_dict, physics_state = randomization_fn(
+                mjx_model,
+                engine,
+                randomizations,
+                curriculum_state.level,
+                train_rngs,
+            )
 
             # Defines the vectorized initialization functions.
             carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
