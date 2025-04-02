@@ -4,6 +4,7 @@ __version__ = "0.0.13"
 
 from .actuators import *
 from .commands import *
+from .curriculum import *
 from .engine import *
 from .events import *
 from .observation import *

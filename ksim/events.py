@@ -29,6 +29,7 @@ class Event(ABC):
         model: PhysicsModel,
         data: PhysicsData,
         event_state: PyTree,
+        curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
         """Apply the event to the data.
@@ -40,6 +41,7 @@ class Event(ABC):
             model: The physics model.
             data: The physics data.
             event_state: The state of the event.
+            curriculum_level: The curriculum level.
             rng: The random number generator.
 
         Returns:
@@ -75,6 +77,7 @@ class PushEvent(Event):
         model: PhysicsModel,
         data: PhysicsData,
         event_state: Array,
+        curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
         # Decrement by physics timestep.
@@ -130,6 +133,7 @@ class JumpEvent(Event):
         model: PhysicsModel,
         data: PhysicsData,
         event_state: Array,
+        curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
         # Decrement by physics timestep.

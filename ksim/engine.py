@@ -62,7 +62,7 @@ class PhysicsEngine(eqx.Module, ABC):
         self.max_action_latency_step = max_action_latency_step
 
     @abstractmethod
-    def reset(self, physics_model: PhysicsModel, rng: PRNGKeyArray) -> PhysicsState:
+    def reset(self, physics_model: PhysicsModel, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsState:
         """Reset the engine and return the physics data."""
 
     @abstractmethod
@@ -71,6 +71,7 @@ class PhysicsEngine(eqx.Module, ABC):
         action: Array,
         physics_model: PhysicsModel,
         physics_state: PhysicsState,
+        curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         """Step the engine and return the updated physics data."""
@@ -86,12 +87,12 @@ class PhysicsEngine(eqx.Module, ABC):
 class MjxEngine(PhysicsEngine):
     """Defines an engine for MJX models."""
 
-    def reset(self, physics_model: mjx.Model, rng: PRNGKeyArray) -> PhysicsState:
+    def reset(self, physics_model: mjx.Model, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsState:
         mjx_data = mjx.make_data(physics_model)
 
         for reset in self.resets:
             rng, reset_rng = jax.random.split(rng)
-            mjx_data = reset(mjx_data, reset_rng)
+            mjx_data = reset(mjx_data, curriculum_level, reset_rng)
 
         mjx_data = mjx.forward(physics_model, mjx_data)
         assert isinstance(mjx_data, mjx.Data)
@@ -108,6 +109,7 @@ class MjxEngine(PhysicsEngine):
         action: Array,
         physics_model: mjx.Model,
         physics_state: PhysicsState,
+        curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         mjx_data = physics_state.data
@@ -138,10 +140,11 @@ class MjxEngine(PhysicsEngine):
             for event in self.events:
                 rng, event_rng = jax.random.split(rng)
                 data, new_event_state = event(
-                    physics_model,
-                    data,
-                    event_states[event.event_name],
-                    event_rng,
+                    model=physics_model,
+                    data=data,
+                    event_state=event_states[event.event_name],
+                    curriculum_level=curriculum_level,
+                    rng=event_rng,
                 )
                 new_event_states[event.event_name] = new_event_state
 
@@ -164,12 +167,12 @@ class MjxEngine(PhysicsEngine):
 class MujocoEngine(PhysicsEngine):
     """Defines an engine for MuJoCo models."""
 
-    def reset(self, physics_model: mujoco.MjModel, rng: PRNGKeyArray) -> PhysicsState:
+    def reset(self, physics_model: mujoco.MjModel, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsState:
         mujoco_data = mujoco.MjData(physics_model)
 
         for reset in self.resets:
             rng, reset_rng = jax.random.split(rng)
-            mujoco_data = reset(mujoco_data, reset_rng)
+            mujoco_data = reset(mujoco_data, curriculum_level, reset_rng)
 
         mujoco.mj_forward(physics_model, mujoco_data)
         default_action = self.actuators.get_default_action(mujoco_data)
@@ -185,6 +188,7 @@ class MujocoEngine(PhysicsEngine):
         action: Array,
         physics_model: mujoco.MjModel,
         physics_state: PhysicsState,
+        curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         mujoco_data = physics_state.data
@@ -216,10 +220,11 @@ class MujocoEngine(PhysicsEngine):
             new_event_states = {}
             for event in self.events:
                 mujoco_data, new_event_state = event(
-                    physics_model,
-                    mujoco_data,
-                    event_states[event.event_name],
-                    rng,
+                    model=physics_model,
+                    data=mujoco_data,
+                    event_state=event_states[event.event_name],
+                    curriculum_level=curriculum_level,
+                    rng=rng,
                 )
                 new_event_states[event.event_name] = new_event_state
 

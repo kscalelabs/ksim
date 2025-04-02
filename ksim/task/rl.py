@@ -3,6 +3,8 @@
 __all__ = [
     "RLConfig",
     "RLTask",
+    "RolloutConstants",
+    "RolloutVariables",
 ]
 
 import bdb
@@ -42,13 +44,14 @@ from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
+from ksim.curriculum import Curriculum, CurriculumState
 from ksim.engine import (
     PhysicsEngine,
     engine_type_from_physics_model,
     get_physics_engine,
 )
 from ksim.events import Event
-from ksim.observation import Observation
+from ksim.observation import Observation, ObservationState
 from ksim.randomization import Randomization
 from ksim.resets import Reset
 from ksim.rewards import Reward
@@ -60,7 +63,6 @@ from ksim.types import (
     PhysicsModel,
     PhysicsState,
     Rewards,
-    RolloutVariables,
     SingleTrajectory,
     Trajectory,
 )
@@ -72,11 +74,21 @@ logger = logging.getLogger(__name__)
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
+class RolloutVariables:
+    carry: PyTree
+    commands: xax.FrozenDict[str, Array]
+    physics_state: PhysicsState
+    rng: PRNGKeyArray
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
 class RolloutConstants:
     obs_generators: Collection[Observation]
     command_generators: Collection[Command]
     reward_generators: Collection[Reward]
     termination_generators: Collection[Termination]
+    curriculum: Curriculum
 
 
 def get_observation(
@@ -87,9 +99,13 @@ def get_observation(
 ) -> xax.FrozenDict[str, Array]:
     """Get the observation from the physics state."""
     observations = {}
+    observation_state = ObservationState(
+        commands=rollout_state.commands,
+        physics_state=rollout_state.physics_state,
+    )
     for observation in obs_generators:
         rng, obs_rng = jax.random.split(rng)
-        observation_value = observation(rollout_state, obs_rng)
+        observation_value = observation(observation_state, obs_rng)
         observations[observation.observation_name] = observation_value
     return xax.FrozenDict(observations)
 
@@ -118,11 +134,12 @@ def get_rewards(
 def get_terminations(
     physics_state: PhysicsState,
     termination_generators: Collection[Termination],
+    curriculum_level: Array,
 ) -> xax.FrozenDict[str, Array]:
     """Get the terminations from the physics state."""
     terminations = {}
     for termination in termination_generators:
-        termination_val = termination(physics_state.data)
+        termination_val = termination(physics_state.data, curriculum_level)
         chex.assert_type(termination_val, bool)
         name = termination.termination_name
         terminations[name] = termination_val
@@ -134,6 +151,7 @@ def get_commands(
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
     command_generators: Collection[Command],
+    curriculum_level: Array,
 ) -> xax.FrozenDict[str, Array]:
     """Get the commands from the physics state."""
     commands = {}
@@ -142,7 +160,7 @@ def get_commands(
         command_name = command_generator.command_name
         prev_command = prev_commands[command_name]
         assert isinstance(prev_command, Array)
-        command_val = command_generator(prev_command, physics_state.data, cmd_rng)
+        command_val = command_generator(prev_command, physics_state.data, curriculum_level, cmd_rng)
         commands[command_name] = command_val
     return xax.FrozenDict(commands)
 
@@ -151,13 +169,14 @@ def get_initial_commands(
     rng: PRNGKeyArray,
     physics_data: PhysicsData,
     command_generators: Collection[Command],
+    curriculum_level: Array,
 ) -> xax.FrozenDict[str, Array]:
     """Get the initial commands from the physics state."""
     commands = {}
     for command_generator in command_generators:
         rng, cmd_rng = jax.random.split(rng)
         command_name = command_generator.command_name
-        command_val = command_generator.initial_command(physics_data, cmd_rng)
+        command_val = command_generator.initial_command(physics_data, curriculum_level, cmd_rng)
         commands[command_name] = command_val
     return xax.FrozenDict(commands)
 
@@ -182,11 +201,12 @@ def apply_randomizations(
     physics_model: mjx.Model,
     engine: PhysicsEngine,
     randomizations: Collection[Randomization],
+    curriculum_level: Array,
     rng: PRNGKeyArray,
 ) -> tuple[xax.FrozenDict[str, Array], PhysicsState]:
     rand_rng, reset_rng = jax.random.split(rng)
     randomizations = get_randomizations(physics_model, randomizations, rand_rng)
-    physics_state = engine.reset(physics_model.tree_replace(randomizations), reset_rng)
+    physics_state = engine.reset(physics_model.tree_replace(randomizations), curriculum_level, reset_rng)
     return randomizations, physics_state
 
 
@@ -496,6 +516,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
+    def get_curriculum(self, physics_model: PhysicsModel) -> Curriculum:
+        """Returns the curriculum for the current task.
+
+        Args:
+            physics_model: The physics model to get the curriculum for.
+        """
+
+    @abstractmethod
     def sample_action(
         self,
         model: PyTree,
@@ -532,7 +560,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     @property
     def rollout_num_samples(self) -> int:
-        return self.rollout_length_steps * self.config.num_envs * self.config.epochs_per_log_step
+        return self.rollout_length_steps * self.config.num_envs
 
     @xax.jit(static_argnames=["self", "model_static", "engine", "rollout_constants"])
     def step_engine(
@@ -543,6 +571,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
+        curriculum_level: Array,
     ) -> tuple[Trajectory, RolloutVariables]:
         """Runs a single step of the physics engine.
 
@@ -553,6 +582,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             engine: The physics engine.
             rollout_constants: The constants for the engine.
             rollout_variables: The variables for the engine.
+            curriculum_level: The current curriculum level.
 
         Returns:
             A tuple containing the trajectory and the next engine variables.
@@ -585,6 +615,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             action=action,
             physics_model=physics_model,
             physics_state=rollout_variables.physics_state,
+            curriculum_level=curriculum_level,
             rng=physics_rng,
         )
 
@@ -592,6 +623,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         terminations = get_terminations(
             physics_state=next_physics_state,
             termination_generators=rollout_constants.termination_generators,
+            curriculum_level=curriculum_level,
         )
         terminated = jax.tree.reduce(jnp.logical_or, list(terminations.values()))
 
@@ -626,15 +658,24 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Conditionally reset on termination.
         next_commands = jax.lax.cond(
             terminated,
-            lambda: get_initial_commands(cmd_rng, next_physics_state.data, rollout_constants.command_generators),
+            lambda: get_initial_commands(
+                rng=cmd_rng,
+                physics_data=next_physics_state.data,
+                command_generators=rollout_constants.command_generators,
+                curriculum_level=curriculum_level,
+            ),
             lambda: get_commands(
-                rollout_variables.commands, next_physics_state, cmd_rng, rollout_constants.command_generators
+                prev_commands=rollout_variables.commands,
+                physics_state=next_physics_state,
+                rng=cmd_rng,
+                command_generators=rollout_constants.command_generators,
+                curriculum_level=curriculum_level,
             ),
         )
 
         next_physics_state = jax.lax.cond(
             terminated,
-            lambda: engine.reset(physics_model, reset_rng),
+            lambda: engine.reset(physics_model, curriculum_level, reset_rng),
             lambda: next_physics_state,
         )
 
@@ -688,6 +729,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 ("🚂 train", metrics.train),
                 ("🎁 reward", metrics.reward),
                 ("💀 termination", metrics.termination),
+                ("🔄 curriculum", {"level": metrics.curriculum_level}),
             ):
                 for key, value in metric.items():
                     if isinstance(value, Histogram):
@@ -961,6 +1003,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
+        curriculum_level: Array,
     ) -> tuple[Trajectory, Rewards, RolloutVariables]:
         # Applies randomizations to the model.
         physics_model = physics_model.tree_replace(randomization_dict)
@@ -973,6 +1016,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 engine=engine,
                 rollout_constants=rollout_constants,
                 rollout_variables=carry,
+                curriculum_level=curriculum_level,
             )
             return next_rollout_variables, trajectory
 
@@ -1005,15 +1049,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
+        state: xax.State,
+        curriculum_state: CurriculumState,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, SingleTrajectory]:
+    ) -> tuple[PyTree, optax.OptState, Metrics, CurriculumState, RolloutVariables, SingleTrajectory]:
         """Runs a single step of the RL training loop."""
 
         def single_step_fn(
-            carry: tuple[PyTree, optax.OptState, RolloutVariables],
+            carry: tuple[PyTree, optax.OptState, RolloutVariables, CurriculumState],
             rng: PRNGKeyArray,
-        ) -> tuple[tuple[PyTree, optax.OptState, RolloutVariables], tuple[Metrics, SingleTrajectory]]:
-            model_arr, opt_state, rollout_variables = carry
+        ) -> tuple[
+            tuple[PyTree, optax.OptState, RolloutVariables, CurriculumState],
+            tuple[Metrics, SingleTrajectory],
+        ]:
+            model_arr, opt_state, rollout_variables, curriculum_state = carry
 
             # Rolls out a new trajectory.
             vmapped_unroll = jax.vmap(
@@ -1026,6 +1075,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     None,
                     None,
                     0,
+                    None,
                 ),
             )
             trajectories, rewards, rollout_variables = vmapped_unroll(
@@ -1036,6 +1086,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 engine,
                 rollout_constants,
                 rollout_variables,
+                curriculum_state.level,
             )
 
             # Runs update on the previous trajectory.
@@ -1049,17 +1100,32 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng=rng,
             )
 
+            # Update the state.
+            curriculum_state = rollout_constants.curriculum(
+                trajectory=trajectories,
+                training_state=state,
+                prev_state=curriculum_state,
+            )
+            rollout_variables = RolloutVariables(
+                carry=rollout_variables.carry,
+                commands=rollout_variables.commands,
+                physics_state=rollout_variables.physics_state,
+                rng=rollout_variables.rng,
+            )
+
+            # Store all the metrics to log.
             metrics = Metrics(
                 train=train_metrics,
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
+                curriculum_level=curriculum_state.level,
             )
 
-            return (model_arr, opt_state, rollout_variables), (metrics, single_traj)
+            return (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj)
 
-        (model_arr, opt_state, rollout_variables), (metrics, single_traj) = jax.lax.scan(
+        (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj) = jax.lax.scan(
             single_step_fn,
-            (model_arr, opt_state, rollout_variables),
+            (model_arr, opt_state, rollout_variables, curriculum_state),
             jax.random.split(rng, self.config.epochs_per_log_step),
         )
 
@@ -1071,7 +1137,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Metrics, final_trajectories, final_rewards batch dim of epochs.
         # Rollout variables has batch dim of num_envs and are used next rollout.
-        return model_arr, opt_state, metrics, rollout_variables, single_traj
+        return model_arr, opt_state, metrics, curriculum_state, rollout_variables, single_traj
 
     def on_context_stop(self, step: str, elapsed_time: float) -> None:
         super().on_context_stop(step, elapsed_time)
@@ -1114,6 +1180,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             terminations = self.get_terminations(mj_model)
             rewards = self.get_rewards(mj_model)
             randomizations = self.get_randomization(mj_model)
+            curriculum = self.get_curriculum(mj_model)
 
             # Creates the markers.
             markers = self.get_markers(
@@ -1122,21 +1189,30 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 randomizations=randomizations,
             )
 
+            # Gets initial variables.
+            rng, carry_rng, cmd_rng, curriculum_rng = jax.random.split(rng, 4)
+            initial_carry = self.get_initial_carry(carry_rng)
+            curriculum = self.get_curriculum(mj_model)
+            curriculum_state = curriculum.get_initial_state(curriculum_rng)
+
             def apply_randomizations_to_mujoco(rng: PRNGKeyArray) -> PhysicsState:
                 rand_rng, reset_rng = jax.random.split(rng)
                 rand_dict = get_randomizations(mj_model, randomizations, rand_rng)
                 for k, v in rand_dict.items():
                     setattr(mj_model, k, v)
-                return engine.reset(mj_model, reset_rng)
+                return engine.reset(mj_model, curriculum_state.level, reset_rng)
 
             # Resets the physics state.
             rng, reset_rng = jax.random.split(rng)
             physics_state = apply_randomizations_to_mujoco(reset_rng)
 
-            # Gets initial variables.
-            rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
-            initial_carry = self.get_initial_carry(carry_rng)
-            initial_commands = get_initial_commands(cmd_rng, physics_state.data, command_generators=commands)
+            # Gets initial commands.
+            initial_commands = get_initial_commands(
+                rng=cmd_rng,
+                physics_data=physics_state.data,
+                command_generators=commands,
+                curriculum_level=curriculum_state.level,
+            )
 
             try:
                 from ksim.viewer import MujocoViewer
@@ -1172,6 +1248,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 command_generators=commands,
                 reward_generators=rewards,
                 termination_generators=terminations,
+                curriculum=curriculum,
             )
 
             # These components are updated each step.
@@ -1213,6 +1290,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         engine=engine,
                         rollout_constants=rollout_constants,
                         rollout_variables=rollout_variables,
+                        curriculum_level=curriculum_state.level,
                     )
                     transitions.append(transition)
                     rng, rand_rng = jax.random.split(rng)
@@ -1325,6 +1403,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rewards_terms = self.get_rewards(mjx_model)
             terminations = self.get_terminations(mjx_model)
             randomizations = self.get_randomization(mjx_model)
+            curriculum = self.get_curriculum(mjx_model)
 
             # Creates the renderer.
             mj_renderer = mujoco.Renderer(
@@ -1354,6 +1433,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 command_generators=tuple(commands),
                 reward_generators=tuple(rewards_terms),
                 termination_generators=tuple(terminations),
+                curriculum=curriculum,
             )
 
             # JAX requires that we partition the model into mutable and static
@@ -1363,22 +1443,37 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Builds the variables for the training environment.
             train_rngs = jax.random.split(rng, self.config.num_envs)
 
+            # Gets the initial curriculum state.
+            rng, curriculum_rng = jax.random.split(rng)
+            curriculum_state = curriculum.get_initial_state(curriculum_rng)
+
             # Applies randomizations to the physics model.
-            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, None, 0))
-            randomization_dict, physics_state = randomization_fn(mjx_model, engine, randomizations, train_rngs)
+            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, None, None, 0))
+            randomization_dict, physics_state = randomization_fn(
+                mjx_model,
+                engine,
+                randomizations,
+                curriculum_state.level,
+                train_rngs,
+            )
 
             # Defines the vectorized initialization functions.
             carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
-            command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None))
+            command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, None))
+
+            state = self.on_training_start(state)
 
             rollout_variables = RolloutVariables(
                 carry=carry_fn(train_rngs),
-                commands=command_fn(train_rngs, physics_state.data, rollout_constants.command_generators),
+                commands=command_fn(
+                    train_rngs,
+                    physics_state.data,
+                    rollout_constants.command_generators,
+                    curriculum_state.level,
+                ),
                 physics_state=physics_state,
                 rng=train_rngs,
             )
-
-            state = self.on_training_start(state)
 
             def on_exit() -> None:
                 model = eqx.combine(model_arr, model_static)
@@ -1413,6 +1508,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             model_arr,
                             opt_state,
                             metrics,
+                            curriculum_state,
                             rollout_variables,
                             single_traj,
                         ) = self._rl_train_loop_step(
@@ -1425,18 +1521,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             engine=engine,
                             rollout_constants=rollout_constants,
                             rollout_variables=rollout_variables,
+                            state=state,
+                            curriculum_state=curriculum_state,
                             rng=update_rng,
                         )
+
+                    state = state.replace(
+                        num_steps=state.num_steps + self.config.epochs_per_log_step,
+                        num_samples=state.num_samples + self.rollout_num_samples * self.config.epochs_per_log_step,
+                    )
 
                     if is_first_step:
                         is_first_step = False
                         elapsed_time = xax.format_timedelta(datetime.timedelta(seconds=timer.elapsed_time), short=True)
                         logger.log(xax.LOG_STATUS, "First step time: %s", elapsed_time)
-
-                    state = state.replace(
-                        num_steps=state.num_steps + self.config.epochs_per_log_step,
-                        num_samples=state.num_samples + self.rollout_num_samples,
-                    )
 
                     # Only log trajectory information on validation steps.
                     if state.phase == "valid":

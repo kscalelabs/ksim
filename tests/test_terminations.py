@@ -15,7 +15,7 @@ import ksim
 class DummyTermination(ksim.Termination):
     """Dummy termination for testing."""
 
-    def __call__(self, state: ksim.PhysicsData) -> Array:
+    def __call__(self, state: ksim.PhysicsData, curriculum_level: Array) -> Array:
         return jnp.zeros((1,), dtype=jnp.bool_)
 
 
@@ -66,15 +66,16 @@ class TestPitchTooGreatTermination:
     def test_pitch_too_great_termination(self) -> None:
         """Test that the PitchTooGreatTermination terminates when pitch exceeds the max."""
         data = DummyMjxData()
+        curriculum_level = jnp.array(0.0)
 
         # With a small max_pitch, should terminate
         term = ksim.PitchTooGreatTermination(max_pitch=0.1)
-        result = term(data)
+        result = term(data, curriculum_level)
         assert result.item()
 
         # With a large max_pitch, should not terminate
         term = ksim.PitchTooGreatTermination(max_pitch=10.0)
-        result = term(data)
+        result = term(data, curriculum_level)
         assert not result.item()
 
 
@@ -84,15 +85,16 @@ class TestRollTooGreatTermination:
     def test_roll_too_great_termination(self) -> None:
         """Test that the RollTooGreatTermination terminates when roll exceeds the max."""
         data = DummyMjxData()
+        curriculum_level = jnp.array(0.0)
 
         # With a small max_roll, should terminate
         term = ksim.RollTooGreatTermination(max_roll=0.1)
-        result = term(data)
+        result = term(data, curriculum_level)
         assert result.item()
 
         # With a large max_roll, should not terminate
         term = ksim.RollTooGreatTermination(max_roll=10.0)
-        result = term(data)
+        result = term(data, curriculum_level)
         assert not result.item()
 
 
@@ -104,13 +106,15 @@ class TestMinimumHeightTermination:
         # With min_height above the current height, should terminate
         # The default qpos[2] in DummyMjxData is 3.0
         data = DummyMjxData()
+        curriculum_level = jnp.array(0.0)
+
         term = ksim.MinimumHeightTermination(min_height=4.0)
-        result = term(data)
+        result = term(data, curriculum_level)
         assert result.item()
 
         # With min_height below the current height, should not terminate
         term = ksim.MinimumHeightTermination(min_height=2.0)
-        result = term(data)
+        result = term(data, curriculum_level)
         assert not result.item()
 
 
@@ -121,19 +125,21 @@ class TestIllegalContactTermination:
         """Test that the IllegalContactTermination terminates when there's an illegal contact."""
         # Test with illegal contact present (original DummyMjxData has geom1=[0,2] and geom2=[1,3])
         data = DummyMjxData()
+        curriculum_level = jnp.array(0.0)
+
         term = ksim.IllegalContactTermination(illegal_geom_idxs=jnp.array([0, 3]))
-        result = term(data)
+        result = term(data, curriculum_level)
         assert result.item()
 
         # Test with no illegal contacts
         term = ksim.IllegalContactTermination(illegal_geom_idxs=jnp.array([4, 5]))
-        result = term(data)
+        result = term(data, curriculum_level)
         assert not result.item()
 
         # Test with no contacts at all
         data_no_contact = DummyMjxData(has_contact=False)
         term = ksim.IllegalContactTermination(illegal_geom_idxs=jnp.array([0, 1]))
-        result = term(data_no_contact)
+        result = term(data_no_contact, curriculum_level)
         assert not result.item()
 
     def test_illegal_contact_termination_builder(self, humanoid_model: mujoco.MjModel) -> None:

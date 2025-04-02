@@ -35,7 +35,7 @@ class Termination(ABC):
     """Base class for terminations."""
 
     @abstractmethod
-    def __call__(self, state: PhysicsData) -> Array:
+    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         """Checks if the environment has terminated. Shape of output should be (num_envs)."""
 
     def get_name(self) -> str:
@@ -52,7 +52,7 @@ class PitchTooGreatTermination(Termination):
 
     max_pitch: float
 
-    def __call__(self, state: PhysicsData) -> Array:
+    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         quat = state.qpos[3:7]
         pitch = jnp.arctan2(2 * quat[1] * quat[2] - 2 * quat[0] * quat[3], 1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2)
         return jnp.abs(pitch) > self.max_pitch
@@ -64,7 +64,7 @@ class RollTooGreatTermination(Termination):
 
     max_roll: float
 
-    def __call__(self, state: PhysicsData) -> Array:
+    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         quat = state.qpos[3:7]
         roll = jnp.arctan2(2 * quat[1] * quat[2] + 2 * quat[0] * quat[3], 1 - 2 * quat[2] ** 2 - 2 * quat[3] ** 2)
         return jnp.abs(roll) > self.max_roll
@@ -76,7 +76,7 @@ class MinimumHeightTermination(Termination):
 
     min_height: float = attrs.field()
 
-    def __call__(self, state: PhysicsData) -> Array:
+    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         return state.qpos[2] < self.min_height
 
 
@@ -88,8 +88,7 @@ class FallTermination(Termination):
     sensor_type: SensorType = attrs.field()
     max_pitch: float = attrs.field(default=0.78)
 
-    @xax.jit(static_argnames=["self"])
-    def __call__(self, state: PhysicsData) -> Array:
+    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         match self.sensor_type:
             case "quaternion_orientation":
                 quat = state.qpos[3:7]
@@ -162,7 +161,7 @@ class IllegalContactTermination(Termination):
     illegal_geom_idxs: jax.Array
     contact_eps: float = -0.001
 
-    def __call__(self, state: PhysicsData) -> Array:
+    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         if state.ncon == 0:
             return jnp.array(False)
 
@@ -210,7 +209,7 @@ class BadZTermination(Termination):
     unhealthy_z_lower: float = attrs.field()
     unhealthy_z_upper: float = attrs.field()
 
-    def __call__(self, state: PhysicsData) -> Array:
+    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         height = state.qpos[2]
         return (height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper)
 
@@ -223,7 +222,7 @@ class FastAccelerationTermination(Termination):
     max_ang_vel: float = attrs.field(default=100.0)
     max_lin_vel: float = attrs.field(default=100.0)
 
-    def __call__(self, state: PhysicsData) -> Array:
+    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         lin_vel = state.cvel[..., :3]
         ang_vel = state.cvel[..., 3:]
         return (lin_vel > self.max_lin_vel).any() | (ang_vel > self.max_ang_vel).any()

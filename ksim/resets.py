@@ -19,7 +19,7 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import xax
-from jaxtyping import PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
 from ksim.types import PhysicsData, PhysicsModel
@@ -33,7 +33,7 @@ class Reset(ABC):
     """Base class for resets."""
 
     @abstractmethod
-    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         """Resets the environment."""
 
     def get_name(self) -> str:
@@ -52,10 +52,10 @@ class HFieldXYPositionReset(Reset):
     padded_bounds: tuple[float, float, float, float]
     x_range: float = attrs.field(default=5.0)
     y_range: float = attrs.field(default=5.0)
-    hfield_data: jnp.ndarray
+    hfield_data: xax.HashableArray
     robot_base_height: float = attrs.field(default=0.0)
 
-    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         x_bound, y_bound, z_top, _ = self.bounds
 
         # Unpack padded bounds.
@@ -73,7 +73,7 @@ class HFieldXYPositionReset(Reset):
         qpos_j = qpos_j.at[1:2].set(new_y)
 
         # Map new XY to heightfield indices.
-        nx, ny = self.hfield_data.shape
+        nx, ny = self.hfield_data.array.shape
         x_idx = jnp.clip(
             (((new_x.squeeze() + x_bound) / (2 * x_bound)) * (nx - 1)).astype(jnp.int32),
             0,
@@ -86,23 +86,10 @@ class HFieldXYPositionReset(Reset):
         )
 
         # Get the height from the heightfield and add the z offset.
-        z = self.hfield_data[x_idx, y_idx]
+        z = self.hfield_data.array[x_idx, y_idx]
         qpos_j = qpos_j.at[2:3].set(z + z_top + self.robot_base_height)
         data = update_data_field(data, "qpos", qpos_j)
         return data
-
-    def __hash__(self) -> int:
-        array_bytes = self.hfield_data.tobytes()
-        return hash(
-            (
-                self.bounds,
-                self.padded_bounds,
-                self.x_range,
-                self.y_range,
-                self.hfield_data.shape,
-                array_bytes,
-            )
-        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -115,7 +102,7 @@ class PlaneXYPositionReset(Reset):
     y_range: float = attrs.field(default=5.0)
     robot_base_height: float = attrs.field(default=0.0)
 
-    def __call__(self, data: mjx.Data, rng: PRNGKeyArray) -> mjx.Data:
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         _, _, z_pos = self.bounds
 
         lower_x, upper_x, lower_y, upper_y = self.padded_bounds
@@ -141,7 +128,7 @@ class RandomJointPositionReset(Reset):
 
     scale: float = attrs.field(default=0.01)
 
-    def __call__(self, data: PhysicsData, rng: PRNGKeyArray) -> PhysicsData:
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         new_qpos = data.qpos[7:] + jax.random.uniform(rng, data.qpos[7:].shape, minval=-self.scale, maxval=self.scale)
         new_qpos = jnp.concatenate([data.qpos[:7], new_qpos])
         data = update_data_field(data, "qpos", new_qpos)
@@ -154,7 +141,7 @@ class RandomJointVelocityReset(Reset):
 
     scale: float = attrs.field(default=0.01)
 
-    def __call__(self, data: PhysicsData, rng: PRNGKeyArray) -> PhysicsData:
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         new_qvel = data.qvel[6:] + jax.random.uniform(rng, data.qvel[6:].shape, minval=-self.scale, maxval=self.scale)
         new_qvel = jnp.concatenate([data.qvel[:6], new_qvel])
         data = update_data_field(data, "qvel", new_qvel)
@@ -167,7 +154,7 @@ class RandomBaseVelocityXYReset(Reset):
 
     scale: float = attrs.field(default=0.01)
 
-    def __call__(self, data: PhysicsData, rng: PRNGKeyArray) -> PhysicsData:
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         qvel = data.qvel
         match type(data):
             case mujoco.MjData:
@@ -228,7 +215,7 @@ def get_xy_position_reset(
             padded_bounds=padded_bounds,
             x_range=x_range,
             y_range=y_range,
-            hfield_data=hfield_data,
+            hfield_data=xax.hashable_array(hfield_data),
             robot_base_height=robot_base_height,
         )
 

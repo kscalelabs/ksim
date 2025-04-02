@@ -33,11 +33,18 @@ class Command(ABC):
     custom_name: str | None = attrs.field(default=None)
 
     @abstractmethod
-    def initial_command(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         """Returns the initial command.
 
         Args:
             physics_data: The current physics data.
+            curriculum_level: The current curriculum level, a value between
+                zero and one that indicates the difficulty of the task.
             rng: The random number generator.
 
         Returns:
@@ -45,12 +52,20 @@ class Command(ABC):
         """
 
     @abstractmethod
-    def __call__(self, prev_command: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         """Updates the command.
 
         Args:
             prev_command: The previous command.
             physics_data: The current physics data.
+            curriculum_level: The current curriculum level, a value between
+                zero and one that indicates the difficulty of the task.
             rng: The random number generator.
 
         Returns:
@@ -151,7 +166,12 @@ class LinearVelocityCommand(Command):
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
 
-    def initial_command(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
         (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
         x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
@@ -165,10 +185,16 @@ class LinearVelocityCommand(Command):
             ]
         )
 
-    def __call__(self, prev_command: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, rng_b)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
@@ -186,17 +212,28 @@ class AngularVelocityCommand(Command):
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
 
-    def initial_command(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         """Returns (1,) array with angular velocity."""
         rng_a, rng_b = jax.random.split(rng)
         zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
         cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
-    def __call__(self, prev_command: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, rng_b)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
 
@@ -214,7 +251,12 @@ class LinearVelocityStepCommand(Command):
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
 
-    def initial_command(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
         (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
         x = jax.random.bernoulli(rng_x, self.x_fwd_prob, (1,)) * (xmax - xmin) + xmin
@@ -228,10 +270,16 @@ class LinearVelocityStepCommand(Command):
             ]
         )
 
-    def __call__(self, prev_command: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, rng_b)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
@@ -250,16 +298,27 @@ class AngularVelocityStepCommand(Command):
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
 
-    def initial_command(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         cmd = (jax.random.bernoulli(rng_a, self.prob, (1,)) * 2 - 1) * self.scale
         zero_mask = jax.random.bernoulli(rng_b, self.zero_prob)
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
-    def __call__(self, prev_command: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, rng_b)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
 
@@ -326,16 +385,27 @@ class CartesianBodyTargetCommand(Command):
 
         return jnp.array([x, y, z])
 
-    def initial_command(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         sphere_sample = self._sample_sphere(rng)
         pivot_pos = jnp.array(physics_data.xpos[self.pivot_id])
         base_pos = jnp.array(physics_data.xpos[self.base_id])
         return pivot_pos + sphere_sample - base_pos
 
-    def __call__(self, prev_command: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, rng_b)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
@@ -435,17 +505,28 @@ class GlobalBodyQuaternionCommand(Command):
     vis_size: float = attrs.field()
     vis_color: tuple[float, float, float, float] = attrs.field()
 
-    def initial_command(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         is_null = jax.random.bernoulli(rng_a, self.null_prob)
         quat = jax.random.normal(rng_b, (4,))
         random_quat = quat / jnp.linalg.norm(quat)
         return jnp.where(is_null, jnp.zeros(4), random_quat)
 
-    def __call__(self, prev_command: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, rng_b)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
