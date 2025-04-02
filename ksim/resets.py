@@ -129,7 +129,8 @@ class RandomJointPositionReset(Reset):
     scale: float = attrs.field(default=0.01)
 
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
-        new_qpos = data.qpos[7:] + jax.random.uniform(rng, data.qpos[7:].shape, minval=-self.scale, maxval=self.scale)
+        noise = jax.random.uniform(rng, data.qpos[7:].shape, minval=-self.scale, maxval=self.scale) * curriculum_level
+        new_qpos = data.qpos[7:] + noise
         new_qpos = jnp.concatenate([data.qpos[:7], new_qpos])
         data = update_data_field(data, "qpos", new_qpos)
         return data
@@ -142,7 +143,8 @@ class RandomJointVelocityReset(Reset):
     scale: float = attrs.field(default=0.01)
 
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
-        new_qvel = data.qvel[6:] + jax.random.uniform(rng, data.qvel[6:].shape, minval=-self.scale, maxval=self.scale)
+        noise = jax.random.uniform(rng, data.qvel[6:].shape, minval=-self.scale, maxval=self.scale) * curriculum_level
+        new_qvel = data.qvel[6:] + noise
         new_qvel = jnp.concatenate([data.qvel[:6], new_qvel])
         data = update_data_field(data, "qvel", new_qvel)
         return data
@@ -156,11 +158,12 @@ class RandomBaseVelocityXYReset(Reset):
 
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         qvel = data.qvel
+        noise = jax.random.uniform(rng, qvel[0:2].shape, minval=-self.scale, maxval=self.scale) * curriculum_level
         match type(data):
             case mujoco.MjData:
-                qvel[0:2] = jax.random.uniform(rng, qvel[0:2].shape, minval=-self.scale, maxval=self.scale)
+                qvel[0:2] = noise
             case mjx.Data:
-                qvel.at[0:2].set(jax.random.uniform(rng, qvel[0:2].shape, minval=-self.scale, maxval=self.scale))
+                qvel.at[0:2].set(noise)
         data = update_data_field(data, "qvel", qvel)
         return data
 

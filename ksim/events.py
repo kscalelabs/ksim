@@ -87,13 +87,18 @@ class PushEvent(Event):
         # Update the data if the time remaining is less than 0.
         updated_data, time_remaining = jax.lax.cond(
             time_remaining <= 0.0,
-            lambda: self._apply_random_force(data, rng),
+            lambda: self._apply_random_force(data, curriculum_level, rng),
             lambda: (data, time_remaining),
         )
 
         return updated_data, time_remaining
 
-    def _apply_random_force(self, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
+    def _apply_random_force(
+        self,
+        data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[PhysicsData, Array]:
         # Randomly applies a force.
         force_scales = jnp.array(
             [
@@ -106,7 +111,7 @@ class PushEvent(Event):
             ]
         )
         random_forces = jax.random.uniform(rng, (6,), minval=-1.0, maxval=1.0)
-        random_forces = random_forces * force_scales
+        random_forces = random_forces * force_scales * curriculum_level
         new_qvel = slice_update(data, "qvel", slice(0, 6), random_forces)
         updated_data = update_data_field(data, "qvel", new_qvel)
 
@@ -143,17 +148,23 @@ class JumpEvent(Event):
         # Update the data if the time remaining is less than 0.
         updated_data, time_remaining = jax.lax.cond(
             time_remaining <= 0.0,
-            lambda: self._apply_jump(model, data, rng),
+            lambda: self._apply_jump(model, data, curriculum_level, rng),
             lambda: (data, time_remaining),
         )
 
         return updated_data, time_remaining
 
-    def _apply_jump(self, model: PhysicsModel, data: PhysicsData, rng: PRNGKeyArray) -> tuple[PhysicsData, Array]:
+    def _apply_jump(
+        self,
+        model: PhysicsModel,
+        data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[PhysicsData, Array]:
         # Implements a jump as a vertical velocity impulse. We compute the
         # required vertical velocity impulse to reach the desired jump height.
         minval, maxval = self.jump_height_range
-        jump_height = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+        jump_height = jax.random.uniform(rng, (), minval=minval, maxval=maxval) * curriculum_level
         new_qvel = slice_update(data, "qvel", 2, jnp.sqrt(2 * model.opt.gravity * jump_height))
         updated_data = update_data_field(data, "qvel", new_qvel)
 

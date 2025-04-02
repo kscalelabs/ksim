@@ -93,9 +93,9 @@ class RolloutConstants:
 
 def get_observation(
     rollout_state: RolloutVariables,
-    rng: PRNGKeyArray,
-    *,
     obs_generators: Collection[Observation],
+    curriculum_level: Array,
+    rng: PRNGKeyArray,
 ) -> xax.FrozenDict[str, Array]:
     """Get the observation from the physics state."""
     observations = {}
@@ -105,7 +105,7 @@ def get_observation(
     )
     for observation in obs_generators:
         rng, obs_rng = jax.random.split(rng)
-        observation_value = observation(observation_state, obs_rng)
+        observation_value = observation(observation_state, curriculum_level, obs_rng)
         observations[observation.observation_name] = observation_value
     return xax.FrozenDict(observations)
 
@@ -595,8 +595,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Gets the observations from the physics state.
         observations = get_observation(
             rollout_state=rollout_variables,
-            rng=obs_rng,
             obs_generators=rollout_constants.obs_generators,
+            curriculum_level=curriculum_level,
+            rng=obs_rng,
         )
 
         # Samples an action from the model.

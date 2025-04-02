@@ -18,10 +18,6 @@ class DummyObservation(ksim.Observation):
         """Get a dummy observation from the state."""
         return jnp.zeros(1)
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
-        """Add noise to the observation."""
-        return observation
-
 
 class DummyMjxData(mjx.Data):
     """Mock mjx.Data for testing."""
