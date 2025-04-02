@@ -1062,20 +1062,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
+        state: xax.State,
         curriculum_state: CurriculumState,
         rollout_length: int,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, SingleTrajectory]:
+    ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, SingleTrajectory, xax.State, CurriculumState]:
         """Runs a single step of the RL training loop."""
 
         def single_step_fn(
-            carry: tuple[PyTree, optax.OptState, RolloutVariables, CurriculumState],
+            carry: tuple[PyTree, optax.OptState, RolloutVariables, xax.State, CurriculumState],
             rng: PRNGKeyArray,
         ) -> tuple[
-            tuple[PyTree, optax.OptState, RolloutVariables, CurriculumState],
+            tuple[PyTree, optax.OptState, RolloutVariables, xax.State, CurriculumState],
             tuple[Metrics, SingleTrajectory],
         ]:
-            model_arr, opt_state, rollout_variables, curriculum_state = carry
+            model_arr, opt_state, rollout_variables, state, curriculum_state = carry
 
             # Rolls out a new trajectory.
             vmapped_unroll = jax.vmap(
@@ -1137,11 +1138,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 prev_state=curriculum_state,
             )
 
-            return (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj)
+            return (model_arr, opt_state, rollout_variables, state, curriculum_state), (metrics, single_traj)
 
-        (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj) = jax.lax.scan(
+        (model_arr, opt_state, rollout_variables, state, curriculum_state), (metrics, single_traj) = jax.lax.scan(
             single_step_fn,
-            (model_arr, opt_state, rollout_variables, curriculum_state),
+            (model_arr, opt_state, rollout_variables, state, curriculum_state),
             jax.random.split(rng, self.config.epochs_per_log_step),
         )
 
@@ -1153,7 +1154,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Metrics, final_trajectories, final_rewards batch dim of epochs.
         # Rollout variables has batch dim of num_envs and are used next rollout.
-        return model_arr, opt_state, metrics, rollout_variables, single_traj, curriculum_state
+        return model_arr, opt_state, metrics, rollout_variables, single_traj, state, curriculum_state
 
     def on_context_stop(self, step: str, elapsed_time: float) -> None:
         super().on_context_stop(step, elapsed_time)
@@ -1517,6 +1518,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     else:
                         state = state.replace(phase="train")
 
+                    rollout_length = self.rollout_length_from_curriculum(curriculum_state.level)
+
                     # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
                     with xax.ContextTimer() as timer:
@@ -1526,6 +1529,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             metrics,
                             rollout_variables,
                             single_traj,
+                            state,
                             curriculum_state,
                         ) = self._rl_train_loop_step(
                             physics_model=mjx_model,
@@ -1537,8 +1541,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             engine=engine,
                             rollout_constants=rollout_constants,
                             rollout_variables=rollout_variables,
+                            state=state,
                             curriculum_state=curriculum_state,
-                            rollout_length=self.rollout_length_from_curriculum(curriculum_state.level),
+                            rollout_length=rollout_length,
                             rng=update_rng,
                         )
 
