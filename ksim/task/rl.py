@@ -249,6 +249,10 @@ class RLConfig(xax.Config):
         value=MISSING,
         help="The number of seconds to rollout each environment during training.",
     )
+    num_rollout_levels: int = xax.field(
+        value=1,
+        help="The number of distinct rollout levels.",
+    )
 
     # Override validation parameters.
     log_full_trajectory_on_first_step: bool = xax.field(
@@ -993,6 +997,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers.extend(randomization.get_markers())
         return markers
 
+    def rollout_length_from_curriculum(self, curriculum_level: Array) -> Array:
+        curriculum_bin = jnp.floor(curriculum_level * self.config.num_rollout_levels) + 1
+        return self.rollout_length_steps * curriculum_bin
+
     @xax.jit(static_argnames=["self", "model_static", "engine", "rollout_constants"])
     def _single_unroll(
         self,
@@ -1024,7 +1032,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         next_rollout_variables, trajectory = jax.lax.scan(
             scan_fn,
             rollout_variables,
-            length=self.rollout_length_steps,
+            length=self.rollout_length_from_curriculum(curriculum_level),
         )
 
         # Gets the rewards.
@@ -1516,7 +1524,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # Steps the curriculum.
                     curriculum_state = curriculum(
-                        trajectory=single_traj,
+                        trajectory=single_traj.trajectory,
+                        rewards=single_traj.rewards,
                         training_state=state,
                         prev_state=curriculum_state,
                     )
