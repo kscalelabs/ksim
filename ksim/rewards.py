@@ -513,7 +513,8 @@ class CartesianBodyTargetReward(Reward):
             sensitivity=sensitivity,
             command_name=command_name,
         )
-    
+
+
 @attrs.define(frozen=True, kw_only=True)
 class ContinuousCartesianBodyTargetReward(Reward):
     """Rewards the closeness of the body to the target position more for the longer it has been doing so."""
@@ -541,11 +542,9 @@ class ContinuousCartesianBodyTargetReward(Reward):
             return count, count
 
         _, consecutive_steps = jax.lax.scan(
-            count_scan_fn, 
-            init=jnp.zeros_like(under_threshold[0], dtype=jnp.int32),
-            xs=under_threshold
+            count_scan_fn, init=jnp.zeros_like(under_threshold[0], dtype=jnp.int32), xs=under_threshold
         )
-        
+
         time_bonus = consecutive_steps * self.time_bonus_scale
         return (base_reward + time_bonus).mean(axis=-1)
 
