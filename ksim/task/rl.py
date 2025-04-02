@@ -722,18 +722,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         else:
             self.run_training()
 
-    def log_train_metrics(self, metrics: Metrics) -> None:
+    def log_train_metrics(self, metrics: Metrics, rollout_length: int) -> None:
         """Logs the train metrics.
 
         Args:
             metrics: The metrics to log.
         """
         if self.config.log_train_metrics:
+            self.logger.log_scalar("rollout length", rollout_length * self.config.ctrl_dt, namespace="🔄 curriculum")
+
             for namespace, metric in (
                 ("🚂 train", metrics.train),
                 ("🎁 reward", metrics.reward),
                 ("💀 termination", metrics.termination),
-                ("🔄 curriculum", {"level": metrics.curriculum_level, "length": metrics.rollout_length}),
+                ("🔄 curriculum", {"level": metrics.curriculum_level}),
             ):
                 for key, value in metric.items():
                     if isinstance(value, Histogram):
@@ -1117,7 +1119,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
                 curriculum_level=curriculum_level,
-                rollout_length=jnp.array(rollout_length),
             )
 
             return (model_arr, opt_state, rollout_variables), (metrics, single_traj)
