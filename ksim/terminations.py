@@ -74,20 +74,18 @@ class RollTooGreatTermination(Termination):
 class MinimumHeightTermination(Termination):
     """Terminates the episode if the robot is too low."""
 
-    min_height: float
+    min_height: float = attrs.field()
 
     def __call__(self, state: PhysicsData) -> Array:
         return state.qpos[2] < self.min_height
 
 
-# ML: we should rewrite this to be fully understandable from the class name.
-# Don't love that we combine logic and bury stuff like gravity[2] < 0.0.
 @attrs.define(frozen=True, kw_only=True)
 class FallTermination(Termination):
     """Terminates the episode if the robot falls."""
 
-    sensor_name: str
-    sensor_type: SensorType
+    sensor_name: str = attrs.field()
+    sensor_type: SensorType = attrs.field()
     max_pitch: float = attrs.field(default=0.78)
 
     @xax.jit(static_argnames=["self"])

@@ -1,5 +1,6 @@
 """Defines simple task for training a walking policy for the default humanoid."""
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
@@ -41,7 +42,6 @@ class DefaultHumanoidActor(eqx.Module):
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
-    mean_scale: float = eqx.static_field()
 
     def __init__(
         self,
@@ -50,7 +50,6 @@ class DefaultHumanoidActor(eqx.Module):
         min_std: float,
         max_std: float,
         var_scale: float,
-        mean_scale: float,
     ) -> None:
         num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 2 + 1
         num_outputs = NUM_JOINTS
@@ -66,7 +65,6 @@ class DefaultHumanoidActor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
-        self.mean_scale = mean_scale
 
     def __call__(
         self,
@@ -92,9 +90,6 @@ class DefaultHumanoidActor(eqx.Module):
         prediction_n = self.mlp(obs_n)
         mean_n = prediction_n[..., :NUM_JOINTS]
         std_n = prediction_n[..., NUM_JOINTS:]
-
-        # Scale the mean.
-        mean_n = jnp.tanh(mean_n) * self.mean_scale
 
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
@@ -167,7 +162,6 @@ class DefaultHumanoidModel(eqx.Module):
             min_std=0.01,
             max_std=1.0,
             var_scale=1.0,
-            mean_scale=1.0,
         )
         self.critic = DefaultHumanoidCritic(key)
 
@@ -289,17 +283,18 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.PushEvent(
-                x_force=1.0,
-                y_force=1.0,
-                z_force=0.0,
-                x_angular_force=0.1,
-                y_angular_force=0.1,
-                z_angular_force=0.3,
-                interval_range=(0.25, 0.75),
-            ),
-        ]
+        # return [
+        #     ksim.PushEvent(
+        #         x_force=1.0,
+        #         y_force=1.0,
+        #         z_force=0.0,
+        #         x_angular_force=0.1,
+        #         y_angular_force=0.1,
+        #         z_angular_force=0.3,
+        #         interval_range=(0.25, 0.75),
+        #     ),
+        # ]
+        return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
@@ -354,25 +349,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=0.2,
                 zero_prob=0.9,
             ),
-            # ksim.LinearVelocityStepCommand(
-            #     x_range=(0.0, 2.5),
-            #     y_range=(0.0, 0.0),
-            #     x_fwd_prob=0.9,
-            #     y_fwd_prob=0.5,
-            #     x_zero_prob=0.1,
-            #     y_zero_prob=1.0,
-            #     switch_prob=self.config.ctrl_dt / 5,
-            # ),
-            # ksim.AngularVelocityStepCommand(
-            #     scale=0.2,
-            #     zero_prob=0.9,
-            # ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.LinearVelocityTrackingReward(index="x", scale=0.1),
-            ksim.LinearVelocityTrackingReward(index="y", scale=0.01),
+            ksim.LinearVelocityTrackingReward(index="x", scale=1.0),
+            ksim.LinearVelocityTrackingReward(index="y", scale=0.1),
             ksim.AngularVelocityTrackingReward(index="z", scale=0.01),
             # NaiveForwardReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
@@ -381,6 +363,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
+            ksim.PitchTooGreatTermination(max_pitch=math.pi / 3),
+            ksim.RollTooGreatTermination(max_roll=math.pi / 3),
             ksim.FastAccelerationTermination(),
         ]
 
@@ -479,7 +463,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
         # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
-        action_btn = trajectories.action / model.actor.mean_scale
+        action_btn = trajectories.action
         log_probs_btn = action_dist_btn.log_prob(action_btn)
 
         return log_probs_btn, None

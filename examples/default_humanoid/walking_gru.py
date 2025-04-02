@@ -58,7 +58,6 @@ class DefaultHumanoidActor(eqx.Module):
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
     hidden_size: int = eqx.static_field()
-    mean_scale: float = eqx.static_field()
 
     def __init__(
         self,
@@ -67,7 +66,6 @@ class DefaultHumanoidActor(eqx.Module):
         min_std: float,
         max_std: float,
         var_scale: float,
-        mean_scale: float,
         hidden_size: int,
     ) -> None:
         num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 2 + 1
@@ -92,7 +90,6 @@ class DefaultHumanoidActor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
-        self.mean_scale = mean_scale
         self.hidden_size = hidden_size
 
     def __call__(
@@ -103,7 +100,7 @@ class DefaultHumanoidActor(eqx.Module):
         imu_gyro_t3: Array,
         lin_vel_cmd_t2: Array,
         ang_vel_cmd_t1: Array,
-        hidden_states: Array,
+        hidden_states_dn: Array,
     ) -> tuple[distrax.Distribution, Array]:
         obs_tn = jnp.concatenate(
             [
@@ -122,19 +119,11 @@ class DefaultHumanoidActor(eqx.Module):
             return ht, xt
 
         # Process through GRU cell.
-        new_hidden_states, last_h_tn = jax.lax.scan(scan_fn, hidden_states, obs_tn)
-
-        breakpoint()
-
-        # Process through GRU cell
-        last_h_tn, new_hidden_states = self.multi_layer_gru(obs_tn, hidden_states)
-        out_tn = self.projector(last_h_tn)
+        new_hidden_states, last_h_tn = jax.lax.scan(scan_fn, hidden_states_dn, obs_tn)
+        out_tn = jax.vmap(self.projector, 0)(last_h_tn)
 
         mean_tn = out_tn[..., :NUM_JOINTS]
         std_tn = out_tn[..., NUM_JOINTS:]
-
-        # Scale the mean.
-        mean_tn = jnp.tanh(mean_tn) * self.mean_scale
 
         # Softplus and clip to ensure positive standard deviations.
         std_tn = jnp.clip((jax.nn.softplus(std_tn) + self.min_std) * self.var_scale, max=self.max_std)
@@ -155,7 +144,6 @@ class DefaultHumanoidModel(eqx.Module):
             min_std=0.01,
             max_std=1.0,
             var_scale=1.0,
-            mean_scale=1.0,
             hidden_size=HIDDEN_SIZE,
         )
         self.critic = DefaultHumanoidCritic(key)
@@ -182,7 +170,7 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         model: DefaultHumanoidActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry: Array,
+        carry_dn: Array,
     ) -> tuple[distrax.Distribution, Array]:
         dh_joint_pos_tn = observations["joint_position_observation"]
         dh_joint_vel_tn = observations["joint_velocity_observation"]
@@ -198,7 +186,7 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
             imu_gyro_t3=imu_gyro_t3 / 3.0,
             lin_vel_cmd_t2=lin_vel_cmd_t2,
             ang_vel_cmd_t1=ang_vel_cmd_t1,
-            hidden_states=carry,
+            hidden_states_dn=carry_dn,
         )
 
     def get_log_probs(
@@ -207,13 +195,9 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> tuple[Array, None]:
-        action_dist_n, _ = self._run_actor(model.actor, trajectories.obs, trajectories.command, carry)
-        log_probs_n = action_dist_n.log_prob(trajectories.action / model.actor.mean_scale)
-
-        # Runs the model over the sequence.
         initial_hidden_states = self.get_initial_carry(rng)
-        _, log_probs_tn = jax.lax.scan(scan_fn, initial_hidden_states, trajectories)
-
+        action_dist_tn, _ = self._run_actor(model.actor, trajectories.obs, trajectories.command, initial_hidden_states)
+        log_probs_tn = action_dist_tn.log_prob(trajectories.action)
         return log_probs_tn, None
 
     def get_values(
@@ -240,15 +224,15 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array, AuxOutputs]:
         # Unsqueeze first dimension as the time dimension.
-        (observations, commands, carry) = jax.tree.map(lambda x: x[None, ...], (observations, commands, carry))
-        action_dist_tn, next_carry = self._run_actor(model.actor, observations, commands, carry)
+        (observations_t, commands_t) = jax.tree.map(lambda x: x[None, ...], (observations, commands))
+        action_dist_tn, next_carry = self._run_actor(model.actor, observations_t, commands_t, carry)
 
         action_n = action_dist_tn.sample(seed=rng).squeeze(0)
         action_log_prob_n = action_dist_tn.log_prob(action_n).squeeze(0)
 
         critic_n = self._run_critic(model.critic, observations, commands)
         value_n = critic_n.squeeze(-1)
-        return action_n, next_carry.squeeze(0), AuxOutputs(log_probs=action_log_prob_n, values=value_n)
+        return action_n, next_carry, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
 
 if __name__ == "__main__":
