@@ -21,17 +21,6 @@ import ksim
 
 NUM_JOINTS = 21
 
-ACTION_RANGES = [
-    (-1.0, 1.0),
-    (-1.0, 1.0),
-    (-1.0, 1.0),
-    (-1.0, 1.0),
-    (-1.0, 1.0),
-    (-1.0, 1.0),
-    (-1.0, 1.0),
-    (-1.0, 1.0),
-]
-
 
 @attrs.define(frozen=True, kw_only=True)
 class NaiveForwardReward(ksim.Reward):
@@ -74,7 +63,6 @@ class DefaultHumanoidActor(eqx.Module):
             key=key,
             activation=jax.nn.relu,
         )
-        self.action_ranges = jnp.array(ACTION_RANGES)
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
@@ -107,7 +95,14 @@ class DefaultHumanoidActor(eqx.Module):
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
-        return distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
+        dist = distrax.Normal(mean_n, std_n)
+        dist = distrax.Transformed(dist, distrax.Tanh())
+        # For the default humanoid, the actions are torques in the range [-1, 1],
+        # which we can model as using a Tanh distribution. However, for different
+        # action spaces, it is probably a good idea to apply a scale / shift
+        # to better model the action space.
+        # dist = distrax.Transformed(dist, distrax.ScalarAffine(self.shift, self.scale))
+        return dist
 
 
 class DefaultHumanoidCritic(eqx.Module):
