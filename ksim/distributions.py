@@ -11,8 +11,9 @@ from distrax._src.utils import conversion
 from jaxtyping import Array
 
 
-def all_positive(x: Array) -> None:
+def all_positive(x: Array) -> Array:
     checkify.check((x > 0).all(), "Scale must be strictly positive.")
+    return x
 
 
 class AsymmetricBijector(distrax.Bijector):
