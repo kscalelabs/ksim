@@ -187,10 +187,7 @@ def geoms_colliding(state: PhysicsData, geom1: Array, geom2: Array) -> Array:
 
 def get_joint_names_in_order(model: PhysicsModel) -> list[str]:
     """Get the joint names in order of their indices."""
-    return [
-        bytes(model.names[model.name_jntadr[i] : model.name_jntadr[i + 1]]).decode("utf-8").split("\x00")[0]
-        for i in range(model.njnt)
-    ]
+    return [bytes(model.names[model.name_jntadr[i] :]).decode("utf-8").split("\x00")[0] for i in range(model.njnt)]
 
 
 def get_joint_ranges(model: PhysicsModel) -> dict[str, tuple[float, float]]:
@@ -199,7 +196,7 @@ def get_joint_ranges(model: PhysicsModel) -> dict[str, tuple[float, float]]:
     for i in range(model.njnt):
         name_start = model.name_jntadr[i]
         name = bytes(model.names[name_start:]).decode("utf-8").split("\x00")[0]
-        ranges[name] = (model.jnt_range[i, 0], model.jnt_range[i, 1])
+        ranges[name] = (float(model.jnt_range[i, 0]), float(model.jnt_range[i, 1]))
     return ranges
 
 
