@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
 
+import attrs
 import distrax
 import equinox as eqx
 import jax
-import attrs
 import jax.numpy as jnp
 import mujoco
 import optax

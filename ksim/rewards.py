@@ -94,7 +94,11 @@ def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) 
         logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", inst.reward_name, value)
 
 
-def dimension_index_validator(inst: "LinearVelocityTrackingReward", attr: attrs.Attribute, value: CartesianIndex,) -> None:
+def dimension_index_validator(
+    inst: "LinearVelocityTrackingReward",
+    attr: attrs.Attribute,
+    value: CartesianIndex,
+) -> None:
     choices = get_args(CartesianIndex)
     if value not in choices:
         raise ValueError(f"Linear velocity index must be one of {choices}, got {value}")
