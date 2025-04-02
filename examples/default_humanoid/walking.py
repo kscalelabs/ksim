@@ -128,7 +128,7 @@ class DefaultHumanoidActor(eqx.Module):
 
         dist = distrax.Normal(mean_n, std_n)
         dist = distrax.Transformed(dist, distrax.Tanh())
-        # dist = map_tanh_distribution(dist)
+        dist = map_tanh_distribution(dist)
         return dist
 
 

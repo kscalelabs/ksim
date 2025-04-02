@@ -4,6 +4,7 @@ __all__ = [
     "AsymmetricBijector",
 ]
 
+import chex
 import distrax
 import jax.numpy as jnp
 from distrax._src.utils import conversion
@@ -36,8 +37,8 @@ class AsymmetricBijector(distrax.Bijector):
 
         self._scale = conversion.as_float_array(scale)
 
-        if not jnp.all(self._scale > 0):
-            raise ValueError("Scale must be strictly positive.")
+        # Ensure that the scale is strictly positive.
+        chex.assert_equal(self._scale > 0, jnp.ones_like(self._scale, dtype=bool))
 
     @property
     def scale(self) -> Array:
