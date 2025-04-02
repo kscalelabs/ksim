@@ -149,35 +149,44 @@ class DistanceFromOriginCurriculum(Curriculum[None]):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class StepWhenSaturated(Curriculum[None]):
+class StepWhenSaturated(Curriculum[Array]):
     """Step the curriculum depending on how many deaths there are per episode.
 
     The logic here is that if there are fewer than `increase_threshold` deaths
     per episode on average, then we should increase the curriculum level.
     Similarly, if there are more than `decrease_threshold` deaths per episode
     on average, then we should decrease the curriculum level.
+
+    We only allow the level to be changed every `min_level_steps` steps.
     """
 
     num_levels: int = attrs.field()
     increase_threshold: float = attrs.field()
     decrease_threshold: float = attrs.field()
+    min_level_steps: int = attrs.field()
 
     def __call__(
         self,
         trajectory: Trajectory,
         rewards: Rewards,
         training_state: xax.State,
-        prev_state: CurriculumState[None],
-    ) -> CurriculumState[None]:
+        prev_state: CurriculumState[Array],
+    ) -> CurriculumState[Array]:
+        level, steps = prev_state.level, prev_state.state
+        level, steps = jax.lax.cond(
+            steps <= 0,
+            lambda: self._step_level(level, trajectory),
+            lambda: (level, steps - 1),
+        )
+        return CurriculumState(level=level, state=steps)
+
+    def _step_level(self, level: Array, trajectory: Trajectory) -> tuple[Array, Array]:
         deaths = trajectory.done.sum(axis=-1).mean()
-        level = prev_state.level
         should_increase = deaths < self.increase_threshold
         should_decrease = deaths > self.decrease_threshold
         delta = 1.0 / self.num_levels
-        level = jnp.where(should_increase, level + delta, level)
-        level = jnp.where(should_decrease, level - delta, level)
-        level = jnp.clip(level, 0.0, 1.0)
-        return CurriculumState(level=level, state=None)
+        level = jnp.where(should_increase, level + delta, jnp.where(should_decrease, level - delta, level))
+        return jnp.clip(level, 0.0, 1.0), jnp.array(self.min_level_steps, dtype=jnp.int32)
 
-    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
-        return CurriculumState(level=jnp.array(0.0), state=None)
+    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
+        return CurriculumState(level=jnp.array(0.0), state=jnp.array(self.min_level_steps, dtype=jnp.int32))

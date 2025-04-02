@@ -221,6 +221,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=5.0,
         help="Decrease the curriculum level when the deaths per episode is above this threshold.",
     )
+    min_level_steps: int = xax.field(
+        value=25,
+        help="The minimum number of steps to wait before changing the curriculum level.",
+    )
+
     # Rendering parameters.
     render_track_body_id: int | None = xax.field(
         value=0,
@@ -385,6 +390,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             num_levels=self.config.num_curriculum_levels,
             increase_threshold=self.config.increase_threshold,
             decrease_threshold=self.config.decrease_threshold,
+            min_level_steps=self.config.min_level_steps,
         )
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
