@@ -1542,7 +1542,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # Updates the state.
                     state = state.replace(
-                        num_steps=state.num_steps * self.config.epochs_per_log_step,
+                        num_steps=state.num_steps + self.config.epochs_per_log_step,
                         num_samples=state.num_samples + self.rollout_num_samples * self.config.epochs_per_log_step,
                     )
 
