@@ -208,6 +208,19 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The minimum phase for feet to be off the ground",
     )
 
+    # Curriculum parameters.
+    num_curriculum_levels: int = xax.field(
+        value=10,
+        help="The number of curriculum levels to use.",
+    )
+    increase_threshold: float = xax.field(
+        value=1.0,
+        help="The threshold for increasing the curriculum level.",
+    )
+    decrease_threshold: float = xax.field(
+        value=3.0,
+        help="The threshold for decreasing the curriculum level.",
+    )
     # Rendering parameters.
     render_track_body_id: int | None = xax.field(
         value=0,
@@ -368,10 +381,10 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.EpisodeLengthCurriculum.create(
-            min_length_seconds=1.0,
-            max_length_seconds=4.0,
-            ctrl_dt=self.config.ctrl_dt,
+        return ksim.StepWhenSaturated(
+            num_levels=self.config.num_curriculum_levels,
+            increase_threshold=self.config.increase_threshold,
+            decrease_threshold=self.config.decrease_threshold,
         )
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:

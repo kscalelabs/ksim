@@ -5,6 +5,7 @@ __all__ = [
     "LinearCurriculum",
     "EpisodeLengthCurriculum",
     "DistanceFromOriginCurriculum",
+    "StepWhenSaturated",
 ]
 
 from abc import ABC, abstractmethod
@@ -142,6 +143,41 @@ class DistanceFromOriginCurriculum(Curriculum[None]):
         distance = jnp.linalg.norm(trajectory.qpos[..., :3], axis=-1).max()
         level = (distance - self.min_distance) / (self.max_distance - self.min_distance)
         return CurriculumState(level=jnp.clip(level, 0.0, 1.0), state=None)
+
+    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
+        return CurriculumState(level=jnp.array(0.0), state=None)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class StepWhenSaturated(Curriculum[None]):
+    """Step the curriculum depending on how many deaths there are per episode.
+
+    The logic here is that if there are fewer than `increase_threshold` deaths
+    per episode on average, then we should increase the curriculum level.
+    Similarly, if there are more than `decrease_threshold` deaths per episode
+    on average, then we should decrease the curriculum level.
+    """
+
+    num_levels: int = attrs.field()
+    increase_threshold: float = attrs.field(default=1.0)
+    decrease_threshold: float = attrs.field(default=3.0)
+
+    def __call__(
+        self,
+        trajectory: Trajectory,
+        rewards: Rewards,
+        training_state: xax.State,
+        prev_state: CurriculumState[None],
+    ) -> CurriculumState[None]:
+        deaths = trajectory.done.sum(axis=-1).mean()
+        level = prev_state.level
+        should_increase = deaths < self.increase_threshold
+        should_decrease = deaths > self.decrease_threshold
+        delta = 1.0 / self.num_levels
+        level = jnp.where(should_increase, level + delta, level)
+        level = jnp.where(should_decrease, level - delta, level)
+        level = jnp.clip(level, 0.0, 1.0)
+        return CurriculumState(level=level, state=None)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
         return CurriculumState(level=jnp.array(0.0), state=None)
