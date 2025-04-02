@@ -38,7 +38,7 @@ class AsymmetricBijector(distrax.Bijector):
         self._scale = conversion.as_float_array(scale)
 
         # Ensure that the scale is strictly positive.
-        chex.assert_equal(self._scale > 0, jnp.ones_like(self._scale, dtype=bool))
+        chex.assert_scalar_non_negative((self._scale > 0).all())
 
     @property
     def scale(self) -> Array:
