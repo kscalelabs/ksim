@@ -7,13 +7,7 @@ __all__ = [
 import distrax
 import jax.numpy as jnp
 from distrax._src.utils import conversion
-from jax.experimental import checkify
 from jaxtyping import Array
-
-
-def all_positive(x: Array) -> Array:
-    checkify.check((x > 0).all(), "Scale must be strictly positive.")
-    return x
 
 
 class AsymmetricBijector(distrax.Bijector):
@@ -24,6 +18,11 @@ class AsymmetricBijector(distrax.Bijector):
     `scale = min / max`.
 
     `scale` must be broadcastable to the shape of the input.
+
+    NOTE: This expects that all the `min` values are strictly negative and
+    all the `max` values are strictly positive - you will likely encounter
+    NaN values if this is not the case. Similarly, `scale` should be strictly
+    positive, if using the `scale` parametrization instead.
     """
 
     def __init__(
@@ -40,10 +39,7 @@ class AsymmetricBijector(distrax.Bijector):
         else:
             assert min is None and max is None, "If scale is provided, min and max must not be provided."
 
-        all_positive_check = checkify.checkify(all_positive)
-        err, scale = all_positive_check(conversion.as_float_array(scale))
-        err.throw()
-        self._scale = scale
+        self._scale = conversion.as_float_array(scale)
 
     @property
     def scale(self) -> Array:
