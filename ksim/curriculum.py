@@ -29,7 +29,10 @@ class CurriculumState(Generic[T]):
 
 @attrs.define(frozen=True, kw_only=True)
 class Curriculum(ABC, Generic[T]):
-    """Base class for all curricula."""
+    """Base class for all curricula.
+
+    Curricula should return a level between 0 and 1.
+    """
 
     @abstractmethod
     def __call__(
@@ -37,12 +40,10 @@ class Curriculum(ABC, Generic[T]):
         trajectory: Trajectory,
         training_state: xax.State,
         prev_state: CurriculumState[T],
-    ) -> CurriculumState[T]:
-        pass
+    ) -> CurriculumState[T]: ...
 
     @abstractmethod
-    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[T]:
-        pass
+    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[T]: ...
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -60,11 +61,9 @@ class LinearCurriculum(Curriculum[None]):
         training_state: xax.State,
         prev_state: CurriculumState[None],
     ) -> CurriculumState[None]:
-        num_steps = training_state.num_steps
-        return CurriculumState(
-            level=jnp.clip(prev_state.level + self.step_size, self.min_level, self.max_level),
-            state=None,
-        )
+        level = (training_state.num_steps // self.step_every_n_epochs) * self.step_size
+        level = jnp.clip(level, self.min_level, self.max_level)
+        return CurriculumState(level=level, state=None)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
         return CurriculumState(level=jnp.array(self.min_level), state=None)
@@ -82,6 +81,11 @@ class EpisodeLengthCurriculum(Curriculum[None]):
         training_state: xax.State,
         prev_state: CurriculumState[None],
     ) -> CurriculumState[None]:
-        level = prev_state.level
-        level = jnp.clip(level + self.step_size, self.min_level, self.max_level)
+        tsz = trajectory.done.shape[-1]
+        num_episodes = trajectory.done.sum(axis=-1).mean() + 1
+        episode_length = tsz / num_episodes
+        level = jnp.clip(episode_length / self.max_length_steps, 0.0, 1.0)
         return CurriculumState(level=level, state=None)
+
+    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
+        return CurriculumState(level=jnp.array(0.0), state=None)
