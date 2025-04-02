@@ -1132,7 +1132,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 prev_state=curriculum_state,
             )
 
-            return (model_arr, opt_state, rollout_variables, state, curriculum_state), (metrics, single_traj)
+            return (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj)
 
         (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj) = jax.lax.scan(
             single_step_fn,
