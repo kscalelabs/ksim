@@ -21,6 +21,7 @@ __all__ = [
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
     "CartesianBodyTargetReward",
+    "ContinuousCartesianBodyTargetReward",
     "GlobalBodyQuaternionReward",
     "FeetNoContactReward",
 ]
@@ -511,6 +512,67 @@ class CartesianBodyTargetReward(Reward):
             scale=scale,
             sensitivity=sensitivity,
             command_name=command_name,
+        )
+    
+@attrs.define(frozen=True, kw_only=True)
+class ContinuousCartesianBodyTargetReward(Reward):
+    """Rewards the closeness of the body to the target position more for the longer it has been doing so."""
+
+    tracked_body_idx: int = attrs.field()
+    base_body_idx: int = attrs.field()
+    command_name: str = attrs.field()
+    norm: xax.NormType = attrs.field()
+    sensitivity: float = attrs.field()
+    threshold: float = attrs.field()
+    time_bonus_scale: float = attrs.field()
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+        target_pos = trajectory.command[self.command_name]
+
+        error = xax.get_norm(body_pos - target_pos, self.norm)
+        base_reward = jnp.exp(-error * self.sensitivity)
+        under_threshold = error < self.threshold
+
+        def count_scan_fn(carry: Array, x: Array) -> tuple[Array, Array]:
+            x = x.astype(jnp.int32)
+            # Reset counter to 0 if not under threshold, otherwise increment
+            count = jnp.where(x, carry + 1, 0)
+            return count, count
+
+        _, consecutive_steps = jax.lax.scan(
+            count_scan_fn, 
+            init=jnp.zeros_like(under_threshold[0], dtype=jnp.int32),
+            xs=under_threshold
+        )
+        
+        time_bonus = consecutive_steps * self.time_bonus_scale
+        return (base_reward + time_bonus).mean(axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        command_name: str,
+        tracked_body_name: str,
+        base_body_name: str,
+        norm: xax.NormType = "l2",
+        scale: float = 1.0,
+        sensitivity: float = 1.0,
+        threshold: float = 0.25,
+        time_bonus_scale: float = 0.1,
+    ) -> Self:
+        body_idx = get_body_data_idx_from_name(model, tracked_body_name)
+        base_idx = get_body_data_idx_from_name(model, base_body_name)
+        return cls(
+            tracked_body_idx=body_idx,
+            base_body_idx=base_idx,
+            norm=norm,
+            scale=scale,
+            sensitivity=sensitivity,
+            command_name=command_name,
+            threshold=threshold,
+            time_bonus_scale=time_bonus_scale,
         )
 
 
