@@ -1066,17 +1066,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         curriculum_state: CurriculumState,
         rollout_length: int,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, SingleTrajectory, xax.State, CurriculumState]:
+    ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, SingleTrajectory, CurriculumState]:
         """Runs a single step of the RL training loop."""
 
         def single_step_fn(
-            carry: tuple[PyTree, optax.OptState, RolloutVariables, xax.State, CurriculumState],
+            carry: tuple[PyTree, optax.OptState, RolloutVariables, CurriculumState],
             rng: PRNGKeyArray,
         ) -> tuple[
-            tuple[PyTree, optax.OptState, RolloutVariables, xax.State, CurriculumState],
+            tuple[PyTree, optax.OptState, RolloutVariables, CurriculumState],
             tuple[Metrics, SingleTrajectory],
         ]:
-            model_arr, opt_state, rollout_variables, state, curriculum_state = carry
+            model_arr, opt_state, rollout_variables, curriculum_state = carry
 
             # Rolls out a new trajectory.
             vmapped_unroll = jax.vmap(
@@ -1124,25 +1124,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 curriculum_level=curriculum_state.level,
             )
 
-            # Updates the state.
-            state = state.replace(
-                num_steps=state.num_steps,
-                num_samples=state.num_samples + self.rollout_num_samples,
-            )
-
             # Steps the curriculum.
             curriculum_state = rollout_constants.curriculum(
-                trajectory=single_traj.trajectory,
-                rewards=single_traj.rewards,
+                trajectory=trajectories,
+                rewards=rewards,
                 training_state=state,
                 prev_state=curriculum_state,
             )
 
             return (model_arr, opt_state, rollout_variables, state, curriculum_state), (metrics, single_traj)
 
-        (model_arr, opt_state, rollout_variables, state, curriculum_state), (metrics, single_traj) = jax.lax.scan(
+        (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj) = jax.lax.scan(
             single_step_fn,
-            (model_arr, opt_state, rollout_variables, state, curriculum_state),
+            (model_arr, opt_state, rollout_variables, curriculum_state),
             jax.random.split(rng, self.config.epochs_per_log_step),
         )
 
@@ -1154,7 +1148,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Metrics, final_trajectories, final_rewards batch dim of epochs.
         # Rollout variables has batch dim of num_envs and are used next rollout.
-        return model_arr, opt_state, metrics, rollout_variables, single_traj, state, curriculum_state
+        return model_arr, opt_state, metrics, rollout_variables, single_traj, curriculum_state
 
     def on_context_stop(self, step: str, elapsed_time: float) -> None:
         super().on_context_stop(step, elapsed_time)
@@ -1546,6 +1540,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             rollout_length=rollout_length,
                             rng=update_rng,
                         )
+
+                    # Updates the state.
+                    state = state.replace(
+                        num_steps=state.num_steps * self.config.epochs_per_log_step,
+                        num_samples=state.num_samples + self.rollout_num_samples * self.config.epochs_per_log_step,
+                    )
 
                     if is_first_step:
                         is_first_step = False
