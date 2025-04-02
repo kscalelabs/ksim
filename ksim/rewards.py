@@ -5,11 +5,11 @@ __all__ = [
     "norm_to_reward",
     "Reward",
     "StayAliveReward",
-    "LinearVelocityZPenalty",
-    "AngularVelocityXYPenalty",
+    "LinearVelocityPenalty",
+    "AngularVelocityPenalty",
     "JointVelocityPenalty",
-    "LinearVelocityTrackingPenalty",
-    "AngularVelocityTrackingPenalty",
+    "LinearVelocityTrackingReward",
+    "AngularVelocityTrackingReward",
     "BaseHeightReward",
     "BaseHeightRangeReward",
     "ActionSmoothnessPenalty",
@@ -27,7 +27,7 @@ __all__ = [
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Literal, Self
+from typing import Collection, Literal, Self, get_args
 
 import attrs
 import chex
@@ -43,6 +43,19 @@ from ksim.vis import Marker
 logger = logging.getLogger(__name__)
 
 MonotonicFn = Literal["exp", "inv"]
+CartesianIndex = Literal["x", "y", "z"]
+
+
+def cartesian_index_to_dim(index: CartesianIndex) -> int:
+    match index:
+        case "x":
+            return 0
+        case "y":
+            return 1
+        case "z":
+            return 2
+        case _:
+            raise ValueError(f"Invalid linear velocity index: {index}")
 
 
 def norm_to_reward(value: Array, temp: float, monotonic_fn: MonotonicFn) -> Array:
@@ -79,6 +92,18 @@ def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) 
             raise RuntimeError(f"Penalty function {inst.reward_name} has a positive scale {value}")
     else:
         logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", inst.reward_name, value)
+
+
+def dimension_index_validator(inst: "LinearVelocityTrackingReward", attr: attrs.Attribute, value: CartesianIndex,) -> None:
+    choices = get_args(CartesianIndex)
+    if value not in choices:
+        raise ValueError(f"Linear velocity index must be one of {choices}, got {value}")
+
+
+def norm_validator(inst: "LinearVelocityTrackingReward", attr: attrs.Attribute, value: xax.NormType) -> None:
+    choices = get_args(xax.NormType)
+    if value not in choices:
+        raise ValueError(f"Norm must be one of {choices}, got {value}")
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -129,32 +154,39 @@ class StayAliveReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class LinearVelocityZPenalty(Reward):
+class LinearVelocityPenalty(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
-    norm: xax.NormType = attrs.field(default="l2")
+    index: CartesianIndex = attrs.field(validator=dimension_index_validator)
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}_{self.index}"
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        lin_vel_z = trajectory.qvel[..., 2]
-        return xax.get_norm(lin_vel_z, self.norm)
+        dim = cartesian_index_to_dim(self.index)
+        lin_vel = trajectory.qvel[..., dim]
+        return xax.get_norm(lin_vel, self.norm)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class AngularVelocityXYPenalty(Reward):
+class AngularVelocityPenalty(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
-    norm: xax.NormType = attrs.field(default="l2")
+    index: CartesianIndex = attrs.field(validator=dimension_index_validator)
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        ang_vel_xy = trajectory.qvel[..., 3:5]
-        return xax.get_norm(ang_vel_xy, self.norm).mean(axis=-1)
+        dim = cartesian_index_to_dim(self.index) + 3
+        ang_vel = trajectory.qvel[..., dim]
+        return xax.get_norm(ang_vel, self.norm)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class JointVelocityPenalty(Reward):
     """Penalty for how fast the joint angular velocities are changing."""
 
-    norm: xax.NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
     freejoint_first: bool = attrs.field(default=True)
 
     def __call__(self, trajectory: Trajectory) -> Array:
@@ -166,33 +198,45 @@ class JointVelocityPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class LinearVelocityTrackingPenalty(Reward):
+class LinearVelocityTrackingReward(Reward):
     """Penalty for deviating from the linear velocity command."""
 
-    norm: xax.NormType = attrs.field(default="l2")
+    index: CartesianIndex = attrs.field(validator=dimension_index_validator)
+    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
     command_name: str = attrs.field(default="linear_velocity_command")
+    temp: float = attrs.field(default=1.0)
+    monotonic_fn: MonotonicFn = attrs.field(default="inv")
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        lin_vel_cmd = trajectory.command[self.command_name]
-        lin_vel_x_cmd = lin_vel_cmd[..., 0]
-        lin_vel_y_cmd = lin_vel_cmd[..., 1]
-        lin_vel_x = trajectory.qvel[..., 0]
-        lin_vel_y = trajectory.qvel[..., 1]
-        return xax.get_norm(lin_vel_x - lin_vel_x_cmd, self.norm) + xax.get_norm(lin_vel_y - lin_vel_y_cmd, self.norm)
+        dim = cartesian_index_to_dim(self.index)
+        lin_vel_cmd = trajectory.command[self.command_name][..., dim]
+        lin_vel = trajectory.qvel[..., dim]
+        norm = xax.get_norm(lin_vel - lin_vel_cmd, self.norm)
+        return norm_to_reward(norm, self.temp, self.monotonic_fn)
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}_{self.index}"
 
 
 @attrs.define(frozen=True, kw_only=True)
-class AngularVelocityTrackingPenalty(Reward):
+class AngularVelocityTrackingReward(Reward):
     """Penalty for deviating from the angular velocity command."""
 
-    norm: xax.NormType = attrs.field(default="l2")
+    index: CartesianIndex = attrs.field(validator=dimension_index_validator)
+    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
     command_name: str = attrs.field(default="angular_velocity_command")
+    temp: float = attrs.field(default=1.0)
+    monotonic_fn: MonotonicFn = attrs.field(default="inv")
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        ang_vel_cmd = trajectory.command[self.command_name]
-        ang_vel_z_cmd = ang_vel_cmd[..., 0]
-        ang_vel_z = trajectory.qvel[..., 5]
-        return xax.get_norm(ang_vel_z - ang_vel_z_cmd, self.norm)
+        dim = cartesian_index_to_dim(self.index) + 3
+        ang_vel_cmd = trajectory.command[self.command_name][..., dim]
+        ang_vel = trajectory.qvel[..., dim]
+        norm = xax.get_norm(ang_vel - ang_vel_cmd, self.norm)
+        return norm_to_reward(norm, self.temp, self.monotonic_fn)
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}_{self.index}"
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -200,9 +244,9 @@ class BaseHeightReward(Reward):
     """Penalty for deviating from the base height target."""
 
     height_target: float = attrs.field()
-    norm: xax.NormType = attrs.field(default="l1")
+    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
     temp: float = attrs.field(default=1.0)
-    monotonic_fn: MonotonicFn = attrs.field(default="exp")
+    monotonic_fn: MonotonicFn = attrs.field(default="inv")
 
     def __call__(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
@@ -228,7 +272,7 @@ class BaseHeightRangeReward(Reward):
 class ActionSmoothnessPenalty(Reward):
     """Penalty for large changes between consecutive actions."""
 
-    norm: xax.NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         current_actions = trajectory.action
@@ -251,7 +295,7 @@ class ActionSmoothnessPenalty(Reward):
 class ActuatorForcePenalty(Reward):
     """Penalty for high actuator forces."""
 
-    norm: xax.NormType = attrs.field(default="l1")
+    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
     observation_name: str = attrs.field(default="actuator_force_observation")
 
     def __call__(self, trajectory: Trajectory) -> Array:
@@ -265,7 +309,7 @@ class BaseJerkZPenalty(Reward):
     """Penalty for high base jerk."""
 
     ctrl_dt: float = attrs.field()
-    norm: xax.NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
     acc_obs_name: str = attrs.field(default="base_linear_acceleration_observation")
 
     def __call__(self, trajectory: Trajectory) -> Array:
@@ -287,7 +331,7 @@ class BaseJerkZPenalty(Reward):
 class ActuatorJerkPenalty(Reward):
     """Penalty for high actuator jerks."""
 
-    norm: xax.NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
     acc_obs_name: str = attrs.field(default="actuator_acceleration_observation")
     ctrl_dt: float = attrs.field()
 
@@ -419,7 +463,7 @@ class FeetLinearVelocityTrackingPenalty(Reward):
     ctrl_dt: float = attrs.field()
     command_name: str = attrs.field(default="linear_velocity_command")
     obs_name: str = attrs.field(default="feet_position_observation")
-    norm: xax.NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         cmd = trajectory.command[self.command_name]
@@ -459,7 +503,7 @@ class FeetFlatReward(Reward):
 
     obs_name: str = attrs.field(default="feet_orientation_observation")
     plane: tuple[float, float, float] = attrs.field(default=(0.0, 0.0, 1.0))
-    norm: xax.NormType = attrs.field(default="l2")
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         feet_quat = trajectory.obs[self.obs_name]
@@ -483,8 +527,8 @@ class CartesianBodyTargetReward(Reward):
     tracked_body_idx: int = attrs.field()
     base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
-    norm: xax.NormType = attrs.field()
     sensitivity: float = attrs.field()
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]

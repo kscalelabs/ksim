@@ -7,6 +7,7 @@ from typing import Generic, TypeVar
 import distrax
 import equinox as eqx
 import jax
+import attrs
 import jax.numpy as jnp
 import mujoco
 import optax
@@ -18,6 +19,12 @@ from mujoco import mjx
 import ksim
 
 NUM_JOINTS = 21
+
+
+@attrs.define(frozen=True, kw_only=True)
+class NaiveForwardReward(ksim.Reward):
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        return trajectory.qvel[..., 0].clip(max=5.0)
 
 
 @jax.tree_util.register_dataclass
@@ -345,7 +352,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             ksim.AngularVelocityCommand(
                 scale=0.2,
-                zero_prob=0.2,
+                zero_prob=0.9,
             ),
             # ksim.LinearVelocityStepCommand(
             #     x_range=(0.0, 2.5),
@@ -358,19 +365,16 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             # ),
             # ksim.AngularVelocityStepCommand(
             #     scale=0.2,
-            #     zero_prob=0.2,
+            #     zero_prob=0.9,
             # ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, dropoff=10.0, scale=1.0),
-            ksim.LinearVelocityZPenalty(scale=-0.01),
-            ksim.AngularVelocityXYPenalty(scale=-0.01),
-            ksim.LinearVelocityTrackingPenalty(scale=-0.1),
-            ksim.AngularVelocityTrackingPenalty(scale=-0.01),
+            # ksim.LinearVelocityTrackingPenalty(scale=-0.1),
+            # ksim.AngularVelocityTrackingPenalty(scale=-0.01),
+            NaiveForwardReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
-            ksim.FeetNoContactReward(window_size=round(self.config.step_phase / self.config.ctrl_dt), scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -398,7 +402,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd_1 = commands["angular_velocity_command"]
 
-        return model.actor(
+        return model(
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n / 10.0,
             imu_acc_3=imu_acc_3 / 50.0,
@@ -468,9 +472,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> tuple[Array, None]:
-        # Vectorize over both batch and time dimensions.
+        # Vectorize over the batch dimensions.
         par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_btn = par_fn(model, trajectories.obs, trajectories.command)
+        action_dist_btn = par_fn(model.actor, trajectories.obs, trajectories.command)
 
         # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
@@ -485,7 +489,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        # Vectorize over both batch and time dimensions.
+        # Vectorize over the batch dimensions.
         par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
         values_bt1 = par_fn(model.critic, trajectories.obs, trajectories.command)
 
@@ -502,7 +506,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, None, AuxOutputs]:
-        action_dist_n = self._run_actor(model, observations, commands)
+        action_dist_n = self._run_actor(model.actor, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
 

@@ -97,43 +97,52 @@ class DefaultHumanoidActor(eqx.Module):
 
     def __call__(
         self,
-        dh_joint_pos_n: Array,
-        dh_joint_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
-        lin_vel_cmd_2: Array,
-        ang_vel_cmd_1: Array,
+        dh_joint_pos_tn: Array,
+        dh_joint_vel_tn: Array,
+        imu_acc_t3: Array,
+        imu_gyro_t3: Array,
+        lin_vel_cmd_t2: Array,
+        ang_vel_cmd_t1: Array,
         hidden_states: Array,
     ) -> tuple[distrax.Distribution, Array]:
-        obs_n = jnp.concatenate(
+        obs_tn = jnp.concatenate(
             [
-                dh_joint_pos_n,  # NUM_JOINTS
-                dh_joint_vel_n,  # NUM_JOINTS
-                imu_acc_3,  # 3
-                imu_gyro_3,  # 3
-                lin_vel_cmd_2,  # 2
-                ang_vel_cmd_1,  # 1
+                dh_joint_pos_tn,  # NUM_JOINTS
+                dh_joint_vel_tn,  # NUM_JOINTS
+                imu_acc_t3,  # 3
+                imu_gyro_t3,  # 3
+                lin_vel_cmd_t2,  # 2
+                ang_vel_cmd_t1,  # 1
             ],
             axis=-1,
         )
 
-        # Process through GRU cell
-        last_h, new_hidden_states = self.multi_layer_gru(obs_n, hidden_states)
-        out_n = self.projector(last_h)
+        def scan_fn(carry: Array, xt: Array) -> tuple[Array, Array]:
+            xt, ht = self.multi_layer_gru(xt, carry)
+            return ht, xt
 
-        mean_n = out_n[..., :NUM_JOINTS]
-        std_n = out_n[..., NUM_JOINTS:]
+        # Process through GRU cell.
+        new_hidden_states, last_h_tn = jax.lax.scan(scan_fn, hidden_states, obs_tn)
+
+        breakpoint()
+
+        # Process through GRU cell
+        last_h_tn, new_hidden_states = self.multi_layer_gru(obs_tn, hidden_states)
+        out_tn = self.projector(last_h_tn)
+
+        mean_tn = out_tn[..., :NUM_JOINTS]
+        std_tn = out_tn[..., NUM_JOINTS:]
 
         # Scale the mean.
-        mean_n = jnp.tanh(mean_n) * self.mean_scale
+        mean_tn = jnp.tanh(mean_tn) * self.mean_scale
 
         # Softplus and clip to ensure positive standard deviations.
-        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
+        std_tn = jnp.clip((jax.nn.softplus(std_tn) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Parametrizes the action distribution.
-        action_dist = distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
+        action_dist_tn = distrax.Transformed(distrax.Normal(mean_tn, std_tn), distrax.Tanh())
 
-        return action_dist, new_hidden_states
+        return action_dist_tn, new_hidden_states
 
 
 class DefaultHumanoidModel(eqx.Module):
@@ -170,25 +179,25 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def _run_actor(
         self,
-        model: DefaultHumanoidModel,
+        model: DefaultHumanoidActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
-        dh_joint_pos_n = observations["joint_position_observation"]
-        dh_joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd_1 = commands["angular_velocity_command"]
+        dh_joint_pos_tn = observations["joint_position_observation"]
+        dh_joint_vel_tn = observations["joint_velocity_observation"]
+        imu_acc_t3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_t3 = observations["sensor_observation_imu_gyro"]
+        lin_vel_cmd_t2 = commands["linear_velocity_command"]
+        ang_vel_cmd_t1 = commands["angular_velocity_command"]
 
-        return model.actor(
-            dh_joint_pos_n=dh_joint_pos_n,
-            dh_joint_vel_n=dh_joint_vel_n / 10.0,
-            imu_acc_3=imu_acc_3 / 50.0,
-            imu_gyro_3=imu_gyro_3 / 3.0,
-            lin_vel_cmd_2=lin_vel_cmd_2,
-            ang_vel_cmd_1=ang_vel_cmd_1,
+        return model(
+            dh_joint_pos_tn=dh_joint_pos_tn,
+            dh_joint_vel_tn=dh_joint_vel_tn / 10.0,
+            imu_acc_t3=imu_acc_t3 / 50.0,
+            imu_gyro_t3=imu_gyro_t3 / 3.0,
+            lin_vel_cmd_t2=lin_vel_cmd_t2,
+            ang_vel_cmd_t1=ang_vel_cmd_t1,
             hidden_states=carry,
         )
 
@@ -198,13 +207,8 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> tuple[Array, None]:
-        def scan_fn(
-            carry: Array,
-            inputs: ksim.Trajectory,
-        ) -> tuple[Array, Array]:
-            action_dist_n, carry = self._run_actor(model, inputs.obs, inputs.command, carry)
-            log_probs_n = action_dist_n.log_prob(inputs.action / model.actor.mean_scale)
-            return carry, log_probs_n
+        action_dist_n, _ = self._run_actor(model.actor, trajectories.obs, trajectories.command, carry)
+        log_probs_n = action_dist_n.log_prob(trajectories.action / model.actor.mean_scale)
 
         # Runs the model over the sequence.
         initial_hidden_states = self.get_initial_carry(rng)
@@ -235,13 +239,16 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array, AuxOutputs]:
-        action_dist_n, next_carry = self._run_actor(model, observations, commands, carry)
-        action_n = action_dist_n.sample(seed=rng)
-        action_log_prob_n = action_dist_n.log_prob(action_n)
+        # Unsqueeze first dimension as the time dimension.
+        (observations, commands, carry) = jax.tree.map(lambda x: x[None, ...], (observations, commands, carry))
+        action_dist_tn, next_carry = self._run_actor(model.actor, observations, commands, carry)
+
+        action_n = action_dist_tn.sample(seed=rng).squeeze(0)
+        action_log_prob_n = action_dist_tn.log_prob(action_n).squeeze(0)
 
         critic_n = self._run_critic(model.critic, observations, commands)
         value_n = critic_n.squeeze(-1)
-        return action_n, next_carry, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
+        return action_n, next_carry.squeeze(0), AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
 
 if __name__ == "__main__":
