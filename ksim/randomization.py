@@ -257,7 +257,6 @@ class JointZeroPositionRandomization(Randomization):
     freejoint_first: bool = attrs.field(default=True)
 
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
-        qpos_0 = model.qpos0
         if self.freejoint_first:
             new_qpos = jax.random.uniform(
                 rng,
