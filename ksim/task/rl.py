@@ -1200,7 +1200,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rand_dict = get_randomizations(mj_model, randomizations, rand_rng)
                 for k, v in rand_dict.items():
                     setattr(mj_model, k, v)
-                return engine.reset(mj_model, reset_rng)
+                return engine.reset(mj_model, curriculum_state.level, reset_rng)
 
             # Resets the physics state.
             rng, reset_rng = jax.random.split(rng)
