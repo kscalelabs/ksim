@@ -202,12 +202,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The dynamic friction loss for the actuator",
     )
 
-    # Loss parameters.
-    step_phase: float = xax.field(
-        value=0.25,
-        help="The minimum phase for feet to be off the ground",
-    )
-
     # Curriculum parameters.
     num_curriculum_levels: int = xax.field(
         value=10,
@@ -222,7 +216,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="Decrease the curriculum level when the deaths per episode is above this threshold.",
     )
     min_level_steps: int = xax.field(
-        value=25,
+        value=50,
         help="The minimum number of steps to wait before changing the curriculum level.",
     )
 
