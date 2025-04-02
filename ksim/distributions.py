@@ -4,11 +4,15 @@ __all__ = [
     "AsymmetricBijector",
 ]
 
-import chex
+from jax.experimental import checkify
 import distrax
 import jax.numpy as jnp
 from distrax._src.utils import conversion
 from jaxtyping import Array
+
+
+def all_positive(x: Array) -> None:
+    checkify.check((x > 0).all(), "Scale must be strictly positive.")
 
 
 class AsymmetricBijector(distrax.Bijector):
@@ -35,10 +39,10 @@ class AsymmetricBijector(distrax.Bijector):
         else:
             assert min is None and max is None, "If scale is provided, min and max must not be provided."
 
-        self._scale = conversion.as_float_array(scale)
-
-        # Ensure that the scale is strictly positive.
-        chex.assert_scalar_non_negative((self._scale > 0).all())
+        all_positive_check = checkify.checkify(all_positive)
+        err, scale = all_positive_check(conversion.as_float_array(scale))
+        err.throw()
+        self._scale = scale
 
     @property
     def scale(self) -> Array:
