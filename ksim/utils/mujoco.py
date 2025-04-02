@@ -12,6 +12,9 @@ __all__ = [
     "get_floor_idx",
     "geoms_colliding",
     "get_joint_metadata",
+    "get_joint_names_in_order",
+    "get_position_limits",
+    "get_torque_limits",
     "update_model_field",
     "update_data_field",
     "slice_update",
@@ -190,13 +193,23 @@ def get_joint_names_in_order(model: PhysicsModel) -> list[str]:
     return [bytes(model.names[model.name_jntadr[i] :]).decode("utf-8").split("\x00")[0] for i in range(model.njnt)]
 
 
-def get_joint_ranges(model: PhysicsModel) -> dict[str, tuple[float, float]]:
+def get_position_limits(model: PhysicsModel) -> dict[str, tuple[float, float]]:
     """Get the ranges of the joints."""
     ranges = {}
     for i in range(model.njnt):
         name_start = model.name_jntadr[i]
         name = bytes(model.names[name_start:]).decode("utf-8").split("\x00")[0]
         ranges[name] = (float(model.jnt_range[i, 0]), float(model.jnt_range[i, 1]))
+    return ranges
+
+
+def get_torque_limits(model: PhysicsModel) -> dict[str, tuple[float, float]]:
+    """Get the torque limits of the joints."""
+    ranges = {}
+    for i in range(model.njnt):
+        name_start = model.name_jntadr[i]
+        name = bytes(model.names[name_start:]).decode("utf-8").split("\x00")[0]
+        ranges[name] = (float(model.jnt_actfrcrange[i, 0]), float(model.jnt_actfrcrange[i, 1]))
     return ranges
 
 
