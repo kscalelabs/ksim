@@ -268,7 +268,8 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=32,
             epochs_per_log_step=1,
-            rollout_length_seconds=4.0,
+            rollout_length_seconds=2.0,
+            num_rollout_levels=3,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,

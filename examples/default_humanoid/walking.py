@@ -369,7 +369,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.EpisodeLengthCurriculum.create(
-            min_length_seconds=1.5,
+            min_length_seconds=1.0,
             max_length_seconds=4.0,
             ctrl_dt=self.config.ctrl_dt,
         )
@@ -523,7 +523,8 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=32,
             epochs_per_log_step=1,
-            rollout_length_seconds=4.0,
+            rollout_length_seconds=2.0,
+            num_rollout_levels=3,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
