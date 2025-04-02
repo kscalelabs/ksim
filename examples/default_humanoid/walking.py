@@ -21,6 +21,30 @@ import ksim
 
 NUM_JOINTS = 21
 
+ACTION_RANGES = [
+    [-0.7853981633974483, 0.7853981633974483],
+    [-1.3089969389957472, 0.5235987755982988],
+    [-0.6108652381980153, 0.6108652381980153],
+    [-0.5235987755982988, 0.17453292519943295],
+    [-1.0471975511965976, 0.6108652381980153],
+    [-2.6179938779914944, 0.3490658503988659],
+    [-2.792526803190927, 0.03490658503988659],
+    [-0.8726646259971648, 0.8726646259971648],
+    [-0.8726646259971648, 0.8726646259971648],
+    [-0.5235987755982988, 0.17453292519943295],
+    [-1.0471975511965976, 0.6108652381980153],
+    [-2.6179938779914944, 0.3490658503988659],
+    [-2.792526803190927, 0.03490658503988659],
+    [-0.8726646259971648, 0.8726646259971648],
+    [-0.8726646259971648, 0.8726646259971648],
+    [-1.4835298641951802, 1.0471975511965976],
+    [-1.4835298641951802, 1.0471975511965976],
+    [-1.7453292519943295, 0.8726646259971648],
+    [-1.4835298641951802, 1.0471975511965976],
+    [-1.4835298641951802, 1.0471975511965976],
+    [-1.7453292519943295, 0.8726646259971648],
+]
+
 
 @attrs.define(frozen=True, kw_only=True)
 class NaiveForwardReward(ksim.Reward):
@@ -63,6 +87,7 @@ class DefaultHumanoidActor(eqx.Module):
             key=key,
             activation=jax.nn.relu,
         )
+        self.action_ranges = jnp.array(ACTION_RANGES)
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
@@ -97,11 +122,14 @@ class DefaultHumanoidActor(eqx.Module):
 
         dist = distrax.Normal(mean_n, std_n)
         dist = distrax.Transformed(dist, distrax.Tanh())
-        # For the default humanoid, the actions are torques in the range [-1, 1],
-        # which we can model as using a Tanh distribution. However, for different
-        # action spaces, it is probably a good idea to apply a scale / shift
-        # to better model the action space.
-        # dist = distrax.Transformed(dist, distrax.ScalarAffine(self.shift, self.scale))
+
+        # In order for the neural network to model the action space effectively,
+        # we apply a bijector to the Tanh distribution mapping the support
+        # from [-1, 1] to [-min, max], centered at zero.
+        action_min, action_max = self.action_ranges[..., 0], self.action_ranges[..., 1]
+        dist = distrax.Transformed(dist, distrax.ScalarAffine(shift=jnp.zeros_like(action_min), scale=action_max))
+        dist = distrax.Transformed(dist, ksim.AsymmetricBijector(min=action_min, max=action_max))
+
         return dist
 
 
@@ -286,7 +314,10 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         physics_model: ksim.PhysicsModel,
         metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> ksim.Actuators:
-        return ksim.TorqueActuators()
+        return ksim.MITPositionActuators(
+            physics_model=physics_model,
+            joint_name_to_metadata=metadata,
+        )
 
     def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
         return [
