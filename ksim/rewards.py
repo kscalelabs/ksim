@@ -22,6 +22,7 @@ __all__ = [
     "FeetFlatReward",
     "CartesianBodyTargetReward",
     "CartesianBodyTargetPenalty",
+    "CartesianBodyTargetVectorReward",
     "ContinuousCartesianBodyTargetReward",
     "GlobalBodyQuaternionReward",
     "FeetNoContactReward",
@@ -562,6 +563,63 @@ class CartesianBodyTargetReward(Reward):
             scale=scale,
             sensitivity=sensitivity,
             command_name=command_name,
+        )
+    
+@attrs.define(frozen=True, kw_only=True)
+class CartesianBodyTargetVectorReward(Reward):
+    """Rewards the alignment of the body's velocity vector to the direction of the target."""
+
+    tracked_body_idx: int = attrs.field()
+    base_body_idx: int = attrs.field()
+    command_name: str = attrs.field()
+    dt: float = attrs.field()
+    normalize_velocity: bool = attrs.field()
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    epsilon: float = attrs.field(default=1e-6)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+
+        body_pos_shifted = jnp.roll(body_pos, shift=1, axis=0)
+
+        # Zero out the first velocity
+        body_pos_shifted = body_pos_shifted.at[0].set(body_pos[0])
+
+        body_vel = (body_pos - body_pos_shifted) / self.dt
+
+        target_vector = trajectory.command[self.command_name] - body_pos
+        normalized_target_vector = target_vector / (jnp.linalg.norm(target_vector, axis=-1, keepdims=True) + self.epsilon)
+
+        if self.normalize_velocity:
+            normalized_body_vel = body_vel / (jnp.linalg.norm(body_vel, axis=-1, keepdims=True) + self.epsilon)
+            return jnp.sum(normalized_body_vel * normalized_target_vector, axis=-1)
+        else:
+            return jnp.sum(body_vel * normalized_target_vector, axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        command_name: str,
+        tracked_body_name: str,
+        base_body_name: str,
+        dt: float,
+        normalize_velocity: bool = True,
+        norm: xax.NormType = "l2",
+        scale: float = 1.0,
+        epsilon: float = 1e-6,
+    ) -> Self:
+        body_idx = get_body_data_idx_from_name(model, tracked_body_name)
+        base_idx = get_body_data_idx_from_name(model, base_body_name)
+        return cls(
+            tracked_body_idx=body_idx,
+            base_body_idx=base_idx,
+            norm=norm,
+            scale=scale,
+            command_name=command_name,
+            dt=dt,
+            normalize_velocity=normalize_velocity,
+            epsilon=epsilon,
         )
 
 

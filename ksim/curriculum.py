@@ -3,6 +3,7 @@
 __all__ = [
     "Curriculum",
     "LinearCurriculum",
+    "ConstantCurriculum",
     "EpisodeLengthCurriculum",
     "DistanceFromOriginCurriculum",
     "StepWhenSaturated",
