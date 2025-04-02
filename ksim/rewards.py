@@ -161,7 +161,7 @@ class LinearVelocityPenalty(Reward):
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_name(self) -> str:
-        return f"{super().get_name()}_{self.index}"
+        return f"{self.index}_{super().get_name()}"
 
     def __call__(self, trajectory: Trajectory) -> Array:
         dim = cartesian_index_to_dim(self.index)
@@ -215,7 +215,7 @@ class LinearVelocityTrackingReward(Reward):
         return norm_to_reward(norm, self.temp, self.monotonic_fn)
 
     def get_name(self) -> str:
-        return f"{super().get_name()}_{self.index}"
+        return f"{self.index}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -236,7 +236,7 @@ class AngularVelocityTrackingReward(Reward):
         return norm_to_reward(norm, self.temp, self.monotonic_fn)
 
     def get_name(self) -> str:
-        return f"{super().get_name()}_{self.index}"
+        return f"{self.index}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)

@@ -371,9 +371,10 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            # ksim.LinearVelocityTrackingPenalty(scale=-0.1),
-            # ksim.AngularVelocityTrackingPenalty(scale=-0.01),
-            NaiveForwardReward(scale=1.0),
+            ksim.LinearVelocityTrackingReward(index="x", scale=0.1),
+            ksim.LinearVelocityTrackingReward(index="y", scale=0.01),
+            ksim.AngularVelocityTrackingReward(index="z", scale=0.01),
+            # NaiveForwardReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
         ]
 
