@@ -4,8 +4,6 @@ __all__ = [
     "AsymmetricBijector",
 ]
 
-from typing import Tuple
-
 import distrax
 import jax.numpy as jnp
 from distrax._src.utils import conversion
@@ -43,12 +41,12 @@ class AsymmetricBijector(distrax.Bijector):
         """Computes log|det J(f)(x)|."""
         return jnp.where(x < 0, jnp.log(self._scale), 0.0)
 
-    def forward_and_log_det(self, x: Array) -> Tuple[Array, Array]:
+    def forward_and_log_det(self, x: Array) -> tuple[Array, Array]:
         """Computes y = f(x) and log|det J(f)(x)|."""
         y = jnp.where(x < 0, x * self._scale, x)
         return y, self.forward_log_det_jacobian(x)
 
-    def inverse_and_log_det(self, y: Array) -> Tuple[Array, Array]:
+    def inverse_and_log_det(self, y: Array) -> tuple[Array, Array]:
         """Computes x = f^{-1}(y) and log|det J(f^{-1})(y)|."""
         x = jnp.where(y < 0, y / self._scale, y)
         return x, -self.forward_log_det_jacobian(x)

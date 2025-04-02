@@ -46,6 +46,14 @@ ACTION_RANGES = [
 ]
 
 
+def map_tanh_distribution(dist: distrax.Distribution) -> distrax.Distribution:
+    action_ranges = jnp.array(ACTION_RANGES)
+    action_min, action_max = action_ranges[..., 0], action_ranges[..., 1]
+    dist = distrax.Transformed(dist, distrax.ScalarAffine(shift=jnp.zeros_like(action_min), scale=action_max))
+    dist = distrax.Transformed(dist, ksim.AsymmetricBijector(min=action_min, max=action_max))
+    return dist
+
+
 @attrs.define(frozen=True, kw_only=True)
 class NaiveForwardReward(ksim.Reward):
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
@@ -63,7 +71,6 @@ class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
-    action_ranges: Array
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
@@ -87,7 +94,6 @@ class DefaultHumanoidActor(eqx.Module):
             key=key,
             activation=jax.nn.relu,
         )
-        self.action_ranges = jnp.array(ACTION_RANGES)
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
@@ -122,14 +128,7 @@ class DefaultHumanoidActor(eqx.Module):
 
         dist = distrax.Normal(mean_n, std_n)
         dist = distrax.Transformed(dist, distrax.Tanh())
-
-        # In order for the neural network to model the action space effectively,
-        # we apply a bijector to the Tanh distribution mapping the support
-        # from [-1, 1] to [-min, max], centered at zero.
-        action_min, action_max = self.action_ranges[..., 0], self.action_ranges[..., 1]
-        dist = distrax.Transformed(dist, distrax.ScalarAffine(shift=jnp.zeros_like(action_min), scale=action_max))
-        dist = distrax.Transformed(dist, ksim.AsymmetricBijector(min=action_min, max=action_max))
-
+        # dist = map_tanh_distribution(dist)
         return dist
 
 
