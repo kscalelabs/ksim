@@ -76,6 +76,7 @@ class Metrics:
     reward: Mapping[str, Array | Histogram]
     termination: Mapping[str, Array | Histogram]
     curriculum_level: Array
+    rollout_length: Array
 
 
 @jax.tree_util.register_dataclass
