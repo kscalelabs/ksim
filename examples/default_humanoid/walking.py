@@ -1,9 +1,11 @@
 """Defines simple task for training a walking policy for the default humanoid."""
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
 
+import attrs
 import distrax
 import equinox as eqx
 import jax
@@ -20,6 +22,12 @@ import ksim
 NUM_JOINTS = 21
 
 
+@attrs.define(frozen=True, kw_only=True)
+class NaiveForwardReward(ksim.Reward):
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        return trajectory.qvel[..., 0].clip(max=5.0)
+
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class AuxOutputs:
@@ -34,7 +42,6 @@ class DefaultHumanoidActor(eqx.Module):
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
-    mean_scale: float = eqx.static_field()
 
     def __init__(
         self,
@@ -43,7 +50,6 @@ class DefaultHumanoidActor(eqx.Module):
         min_std: float,
         max_std: float,
         var_scale: float,
-        mean_scale: float,
     ) -> None:
         num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 2 + 1
         num_outputs = NUM_JOINTS
@@ -59,7 +65,6 @@ class DefaultHumanoidActor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
-        self.mean_scale = mean_scale
 
     def __call__(
         self,
@@ -85,9 +90,6 @@ class DefaultHumanoidActor(eqx.Module):
         prediction_n = self.mlp(obs_n)
         mean_n = prediction_n[..., :NUM_JOINTS]
         std_n = prediction_n[..., NUM_JOINTS:]
-
-        # Scale the mean.
-        mean_n = jnp.tanh(mean_n) * self.mean_scale
 
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
@@ -160,7 +162,6 @@ class DefaultHumanoidModel(eqx.Module):
             min_std=0.01,
             max_std=1.0,
             var_scale=1.0,
-            mean_scale=1.0,
         )
         self.critic = DefaultHumanoidCritic(key)
 
@@ -171,7 +172,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=1e-3,
+        value=3e-4,
         help="Learning rate for PPO.",
     )
     max_grad_norm: float = xax.field(
@@ -199,6 +200,12 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     friction: float = xax.field(
         value=1e-6,
         help="The dynamic friction loss for the actuator",
+    )
+
+    # Loss parameters.
+    step_phase: float = xax.field(
+        value=0.25,
+        help="The minimum phase for feet to be off the ground",
     )
 
     # Rendering parameters.
@@ -276,17 +283,18 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.PushEvent(
-                x_force=1.0,
-                y_force=1.0,
-                z_force=0.0,
-                x_angular_force=0.1,
-                y_angular_force=0.1,
-                z_angular_force=0.3,
-                interval_range=(0.25, 0.75),
-            ),
-        ]
+        # return [
+        #     ksim.PushEvent(
+        #         x_force=1.0,
+        #         y_force=1.0,
+        #         z_force=0.0,
+        #         x_angular_force=0.1,
+        #         y_angular_force=0.1,
+        #         z_angular_force=0.3,
+        #         interval_range=(0.25, 0.75),
+        #     ),
+        # ]
+        return []
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
@@ -339,35 +347,24 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             ksim.AngularVelocityCommand(
                 scale=0.2,
-                zero_prob=0.2,
+                zero_prob=0.9,
             ),
-            # ksim.LinearVelocityStepCommand(
-            #     x_range=(0.0, 2.5),
-            #     y_range=(0.0, 0.0),
-            #     x_fwd_prob=0.9,
-            #     y_fwd_prob=0.5,
-            #     x_zero_prob=0.1,
-            #     y_zero_prob=1.0,
-            #     switch_prob=self.config.ctrl_dt / 5,
-            # ),
-            # ksim.AngularVelocityStepCommand(
-            #     scale=0.2,
-            #     zero_prob=0.2,
-            # ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.BaseHeightRangeReward(z_lower=1.1, z_upper=1.5, dropoff=10.0, scale=-1.0),
-            ksim.LinearVelocityZPenalty(scale=-0.01),
-            ksim.AngularVelocityXYPenalty(scale=-0.01),
-            ksim.LinearVelocityTrackingPenalty(scale=-0.1),
-            ksim.AngularVelocityTrackingPenalty(scale=-0.01),
+            ksim.LinearVelocityTrackingReward(index="x", scale=1.0),
+            ksim.LinearVelocityTrackingReward(index="y", scale=0.1),
+            ksim.AngularVelocityTrackingReward(index="z", scale=0.01),
+            # NaiveForwardReward(scale=1.0),
+            ksim.StayAliveReward(scale=1.0),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
+            ksim.PitchTooGreatTermination(max_pitch=math.pi / 3),
+            ksim.RollTooGreatTermination(max_roll=math.pi / 3),
             ksim.FastAccelerationTermination(),
         ]
 
@@ -379,7 +376,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def _run_actor(
         self,
-        model: DefaultHumanoidModel,
+        model: DefaultHumanoidActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Distribution:
@@ -389,7 +386,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd_1 = commands["angular_velocity_command"]
-        return model.actor(
+
+        return model(
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n / 10.0,
             imu_acc_3=imu_acc_3 / 50.0,
@@ -400,7 +398,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def _run_critic(
         self,
-        model: DefaultHumanoidModel,
+        model: DefaultHumanoidCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
@@ -417,7 +415,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
         lin_vel_cmd_2 = commands["linear_velocity_command"]  # 2
         ang_vel_cmd_1 = commands["angular_velocity_command"]  # 1
-        return model.critic(
+        return model(
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n / 10.0,
             com_inertia_n=com_inertia_n,
@@ -439,6 +437,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+            raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.log_probs
 
     def get_on_policy_values(
@@ -447,6 +447,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+            raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.values
 
     def get_log_probs(
@@ -455,13 +457,13 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> tuple[Array, None]:
-        # Vectorize over both batch and time dimensions.
+        # Vectorize over the batch dimensions.
         par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_btn = par_fn(model, trajectories.obs, trajectories.command)
+        action_dist_btn = par_fn(model.actor, trajectories.obs, trajectories.command)
 
         # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
-        action_btn = trajectories.action / model.actor.mean_scale
+        action_btn = trajectories.action
         log_probs_btn = action_dist_btn.log_prob(action_btn)
 
         return log_probs_btn, None
@@ -472,9 +474,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> Array:
-        # Vectorize over both batch and time dimensions.
+        # Vectorize over the batch dimensions.
         par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_bt1 = par_fn(model, trajectories.obs, trajectories.command)
+        values_bt1 = par_fn(model.critic, trajectories.obs, trajectories.command)
 
         # Remove the last dimension.
         return values_bt1.squeeze(-1)
@@ -489,11 +491,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, None, AuxOutputs]:
-        action_dist_n = self._run_actor(model, observations, commands)
+        action_dist_n = self._run_actor(model.actor, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
 
-        critic_n = self._run_critic(model, observations, commands)
+        critic_n = self._run_critic(model.critic, observations, commands)
         value_n = critic_n.squeeze(-1)
 
         return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
@@ -513,11 +515,11 @@ if __name__ == "__main__":
             # Training parameters.
             num_envs=2048,
             batch_size=256,
-            num_passes=10,
-            epochs_per_log_step=10,
-            rollout_length_seconds=10.0,
+            num_passes=32,
+            epochs_per_log_step=1,
+            rollout_length_seconds=4.0,
             # Logging parameters.
-            log_full_trajectory_every_n_seconds=60,
+            # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,

@@ -125,8 +125,9 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
             ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, dropoff=10.0, scale=0.5),
-            ksim.LinearVelocityZPenalty(scale=-0.01),
-            ksim.AngularVelocityXYPenalty(scale=-0.01),
+            ksim.LinearVelocityPenalty(index="z", scale=-0.01),
+            ksim.AngularVelocityPenalty(index="x", scale=-0.01),
+            ksim.AngularVelocityPenalty(index="y", scale=-0.01),
             NaiveVelocityReward(scale=0.1),
             GaitMatchingReward(reference_gait=self.reference_gait, ctrl_dt=self.config.ctrl_dt, scale=0.1),
         ]

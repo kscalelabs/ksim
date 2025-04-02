@@ -4,8 +4,6 @@
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
-import xax
-
 import ksim
 
 from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
@@ -13,7 +11,7 @@ from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 @dataclass
 class HumanoidStandingTaskConfig(HumanoidWalkingTaskConfig):
-    step_phase: float = xax.field(value=0.25)
+    pass
 
 
 Config = TypeVar("Config", bound=HumanoidStandingTaskConfig)
@@ -43,15 +41,10 @@ if __name__ == "__main__":
             rollout_length_seconds=4.0,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
-            log_full_trajectory_on_first_step=True,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
-            # PPO parameters.
-            value_loss_coef=0.5,
-            gamma=0.97,
-            lam=0.98,
         ),
     )

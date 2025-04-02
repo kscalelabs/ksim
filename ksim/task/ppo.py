@@ -21,6 +21,15 @@ from ksim.task.rl import RLConfig, RLTask
 from ksim.types import Rewards, SingleTrajectory, Trajectory
 
 
+@jax.tree_util.register_dataclass
+@dataclass
+class PPOInputs:
+    advantages_t: Array
+    value_targets_t: Array
+    gae_t: Array
+    returns_t: Array
+
+
 @xax.jit(
     static_argnames=[
         "decay_gamma",
@@ -30,7 +39,7 @@ from ksim.types import Rewards, SingleTrajectory, Trajectory
         "monte_carlo_returns",
     ]
 )
-def compute_advantages_and_value_targets(
+def compute_ppo_inputs(
     values_t: Array,
     rewards_t: Array,
     dones_t: Array,
@@ -39,7 +48,7 @@ def compute_advantages_and_value_targets(
     normalize_advantages: bool = False,
     use_two_step_td_target: bool = False,
     monte_carlo_returns: bool = False,
-) -> tuple[Array, Array, Array, Array]:
+) -> PPOInputs:
     """Computes the advantages using Generalized Advantage Estimation (GAE)."""
 
     def returns_scan_fn(returns_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
@@ -54,11 +63,7 @@ def compute_advantages_and_value_targets(
         adv_t = delta + decay_gamma * gae_lambda * mask * adv_t_plus_1
         return adv_t, adv_t
 
-    def compute_gae_and_targets_for_sample(
-        values_t: Array,
-        rewards_t: Array,
-        dones_t: Array,
-    ) -> tuple[Array, Array, Array, Array]:
+    def compute_gae_and_targets_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> PPOInputs:
         # Use the last value as the bootstrap value.
         values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
         mask_t = jnp.where(dones_t, 0.0, 1.0)
@@ -74,21 +79,31 @@ def compute_advantages_and_value_targets(
         value_targets_t = returns_t if monte_carlo_returns else gae_t + values_t
 
         if not use_two_step_td_target:
-            return gae_t, value_targets_t, gae_t, returns_t
+            return PPOInputs(
+                advantages_t=gae_t,
+                value_targets_t=value_targets_t,
+                gae_t=gae_t,
+                returns_t=returns_t,
+            )
 
         # Apply another TD step to get the value targets.
         value_targets_shifted_t = jnp.concatenate([value_targets_t[1:], value_targets_t[-1:]], axis=0)
         advantages_t = rewards_t + decay_gamma * value_targets_shifted_t * mask_t - values_t
 
-        return advantages_t, value_targets_t, gae_t, returns_t
+        return PPOInputs(
+            advantages_t=advantages_t,
+            value_targets_t=value_targets_t,
+            gae_t=gae_t,
+            returns_t=returns_t,
+        )
 
     # Compute the advantages and value targets for each sample in the batch.
-    advantages_t, value_targets_t, gae_t, returns_t = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t)
+    inputs = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t)
 
     if normalize_advantages:
-        advantages_t = advantages_t / (advantages_t.std(axis=-1, keepdims=True) + 1e-6)
+        inputs.advantages_t = inputs.advantages_t / (inputs.advantages_t.std(axis=-1, keepdims=True) + 1e-6)
 
-    return advantages_t, value_targets_t, gae_t, returns_t
+    return inputs
 
 
 @xax.jit(static_argnames=["clip_param"])
@@ -107,12 +122,11 @@ def clipped_value_loss(
 
 @xax.jit(static_argnames=["clip_param", "value_loss_coef", "entropy_coef", "log_clip_value", "use_clipped_value_loss"])
 def compute_ppo_loss(
+    ppo_inputs: PPOInputs,
     log_probs_tn: Array,
     values_t: Array,
     on_policy_log_probs_tn: Array,
     on_policy_values_t: Array,
-    advantages_t: Array,
-    value_targets_t: Array,
     dones_t: Array,
     *,
     entropy_tn: Array | None = None,
@@ -125,14 +139,13 @@ def compute_ppo_loss(
     """Compute PPO loss.
 
     Args:
+        ppo_inputs: The pre-computed PPO inputs.
         log_probs_tn: The log probabilities of the actions, with shape (T, *A).
         values_t: The state-value estimates, with shape (T,).
         on_policy_log_probs_tn: The original policy's log probabilities of the
             actions, with shape (T, *A).
         on_policy_values_t: The original policy's values of the actions, with
             shape (T,).
-        advantages_t: The advantages, with shape (T,).
-        value_targets_t: The value targets, with shape (T,).
         dones_t: The termination mask, with shape (T,).
         entropy_tn: The entropy of the action distribution, with shape (T, *A).
         clip_param: The clip parameter for PPO.
@@ -150,8 +163,8 @@ def compute_ppo_loss(
             values_t,
             on_policy_log_probs_tn,
             on_policy_values_t,
-            advantages_t,
-            value_targets_t,
+            ppo_inputs.advantages_t,
+            ppo_inputs.value_targets_t,
             dones_t,
         ],
         prefix_len=1,
@@ -162,8 +175,7 @@ def compute_ppo_loss(
         values: Array,
         on_policy_log_probs_n: Array,
         on_policy_values: Array,
-        advantages: Array,
-        value_targets: Array,
+        ppo_inputs: PPOInputs,
         dones: Array,
         entropy_n: Array | None,
     ) -> Array:
@@ -171,8 +183,8 @@ def compute_ppo_loss(
         log_ratio = jnp.sum(log_probs_n - on_policy_log_probs_n, axis=-1)
         ratio = jnp.exp(jnp.clip(log_ratio, -log_clip_value, log_clip_value))
         clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
-        surrogate_1 = ratio * advantages
-        surrogate_2 = clipped_ratio * advantages
+        surrogate_1 = ratio * ppo_inputs.advantages_t
+        surrogate_2 = clipped_ratio * ppo_inputs.advantages_t
         policy_objective = jnp.minimum(surrogate_1, surrogate_2)
 
         # Computes the value loss, with or without clipping.
@@ -180,11 +192,11 @@ def compute_ppo_loss(
             value_mse = 0.5 * clipped_value_loss(
                 target_values=on_policy_values,
                 values=values,
-                value_targets=value_targets,
+                value_targets=ppo_inputs.value_targets_t,
                 clip_param=clip_param,
             )
         else:
-            value_mse = 0.5 * (value_targets - values) ** 2
+            value_mse = 0.5 * (ppo_inputs.value_targets_t - values) ** 2
 
         value_objective = value_loss_coef * value_mse
         total_objective = policy_objective - value_objective
@@ -209,8 +221,7 @@ def compute_ppo_loss(
         values_t,
         on_policy_log_probs_tn,
         on_policy_values_t,
-        advantages_t,
-        value_targets_t,
+        ppo_inputs,
         dones_t,
         entropy_tn,
     )
@@ -355,14 +366,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         self,
         trajectories: Trajectory,
         rewards: Rewards,
+        ppo_inputs: PPOInputs,
         loss_t: Array,
         on_policy_log_probs_tn: Array,
         log_probs_tn: Array,
         entropy_tn: Array | None,
         values_t: Array,
         on_policy_values_t: Array,
-        value_targets_t: Array,
-        advantages_t: Array,
     ) -> dict[str, Array]:
         """Gets the metrics to be logged.
 
@@ -373,14 +383,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Args:
             trajectories: The batch of trajectories to get metrics for.
             rewards: The rewards for the trajectories.
+            ppo_inputs: The PPO inputs.
             loss_t: The PPO loss value.
             on_policy_log_probs_tn: The log probabilities of the actions, with shape (T, *A).
             log_probs_tn: The log probabilities of the actions, with shape (T, *A).
             entropy_tn: The entropy of the action distribution, with shape (T, *A).
             values_t: The state-value estimates, with shape (T,).
             on_policy_values_t: The original policy's values of the actions, with shape (T,).
-            value_targets_t: The value targets, with shape (T,).
-            advantages_t: The advantages, with shape (T,).
 
         Returns:
             A dictionary of metrics to be logged.
@@ -391,8 +400,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "on_policy_log_probs": on_policy_log_probs_tn.mean(0).flatten(),
             "value": values_t.mean(),
             "on_policy_value": on_policy_values_t.mean(),
-            "value_targets": value_targets_t.mean(),
-            "advantages": advantages_t.mean(),
+            "value_targets": ppo_inputs.value_targets_t.mean(),
+            "advantages": ppo_inputs.advantages_t.mean(),
         }
         if entropy_tn is not None:
             metrics["entropy"] = entropy_tn.mean(0).flatten()
@@ -402,15 +411,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         self,
         trajectories: Trajectory,
         rewards: Rewards,
+        ppo_inputs: PPOInputs,
         loss_t: Array,
         on_policy_log_probs_tn: Array,
         log_probs_tn: Array,
         entropy_tn: Array | None,
         values_t: Array,
-        value_targets_t: Array,
-        advantages_t: Array,
-        gae_t: Array,
-        returns_t: Array,
     ) -> dict[str, Array]:
         """Gets the metrics to log for a single trajectory.
 
@@ -421,15 +427,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Args:
             trajectories: The batch of trajectories to get metrics for.
             rewards: The rewards for the trajectories.
+            ppo_inputs: The PPO inputs.
             loss_t: The PPO loss value.
             on_policy_log_probs_tn: The log probabilities of the actions, with shape (T, *A).
             log_probs_tn: The log probabilities of the actions, with shape (T, *A).
             entropy_tn: The entropy of the action distribution, with shape (T, *A).
             values_t: The state-value estimates, with shape (T,).
-            value_targets_t: The value targets, with shape (T,).
-            advantages_t: The advantages, with shape (T,).
-            gae_t: The GAE values, with shape (T,).
-            returns_t: The returns, with shape (T,).
 
         Returns:
             A dictionary of metrics to be logged. Each metric should be a tensor
@@ -437,11 +440,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
         metrics = {
             "values": values_t,
-            "value_targets": value_targets_t,
-            "advantages": advantages_t,
+            "value_targets": ppo_inputs.value_targets_t,
+            "advantages": ppo_inputs.advantages_t,
             "loss": loss_t,
-            "gae": gae_t,
-            "returns": returns_t,
+            "gae": ppo_inputs.gae_t,
+            "returns": ppo_inputs.returns_t,
         }
         if entropy_tn is not None:
             metrics["entropy"] = entropy_tn
@@ -484,7 +487,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             log_probs_tn, entropy_tn = self.get_log_probs(model, trajectories, rng3)
             values_t = self.get_values(model, trajectories, rng4)
 
-            advantages_t, value_targets_t, gae_t, returns_t = compute_advantages_and_value_targets(
+            ppo_inputs = compute_ppo_inputs(
                 values_t=jax.lax.stop_gradient(values_t),
                 rewards_t=rewards.total,
                 dones_t=trajectories.done,
@@ -496,12 +499,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             )
 
             loss_t = compute_ppo_loss(
+                ppo_inputs=ppo_inputs,
                 log_probs_tn=log_probs_tn,
                 values_t=values_t,
                 on_policy_log_probs_tn=on_policy_log_probs_tn,
                 on_policy_values_t=on_policy_values_t,
-                advantages_t=advantages_t,
-                value_targets_t=value_targets_t,
                 dones_t=trajectories.done,
                 entropy_tn=entropy_tn,
                 clip_param=self.config.clip_param,
@@ -514,28 +516,24 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             metrics = self.get_ppo_metrics(
                 trajectories=trajectories,
                 rewards=rewards,
+                ppo_inputs=ppo_inputs,
                 loss_t=loss_t,
                 on_policy_log_probs_tn=on_policy_log_probs_tn,
                 log_probs_tn=log_probs_tn,
                 entropy_tn=entropy_tn,
                 values_t=values_t,
                 on_policy_values_t=on_policy_values_t,
-                value_targets_t=value_targets_t,
-                advantages_t=advantages_t,
             )
 
             single_traj_metrics = self.get_single_trajectory_metrics(
                 trajectories=trajectories,
                 rewards=rewards,
+                ppo_inputs=ppo_inputs,
                 loss_t=loss_t,
                 on_policy_log_probs_tn=on_policy_log_probs_tn,
                 log_probs_tn=log_probs_tn,
                 entropy_tn=entropy_tn,
                 values_t=values_t,
-                value_targets_t=value_targets_t,
-                advantages_t=advantages_t,
-                gae_t=gae_t,
-                returns_t=returns_t,
             )
 
             single_traj = SingleTrajectory(
