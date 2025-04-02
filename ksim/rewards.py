@@ -21,6 +21,7 @@ __all__ = [
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
     "CartesianBodyTargetReward",
+    "CartesianBodyTargetPenalty",
     "ContinuousCartesianBodyTargetReward",
     "GlobalBodyQuaternionReward",
     "FeetNoContactReward",
@@ -512,6 +513,41 @@ class CartesianBodyTargetReward(Reward):
             norm=norm,
             scale=scale,
             sensitivity=sensitivity,
+            command_name=command_name,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class CartesianBodyTargetPenalty(Reward):
+    """Penalizes larger distances between the body and the target position."""
+
+    tracked_body_idx: int = attrs.field()
+    base_body_idx: int = attrs.field()
+    command_name: str = attrs.field()
+    norm: xax.NormType = attrs.field()
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+        target_pos = trajectory.command[self.command_name]
+        return xax.get_norm(body_pos - target_pos, self.norm).mean(axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        command_name: str,
+        tracked_body_name: str,
+        base_body_name: str,
+        norm: xax.NormType = "l2",
+        scale: float = 1.0,
+    ) -> Self:
+        body_idx = get_body_data_idx_from_name(model, tracked_body_name)
+        base_idx = get_body_data_idx_from_name(model, base_body_name)
+        return cls(
+            tracked_body_idx=body_idx,
+            base_body_idx=base_idx,
+            norm=norm,
+            scale=scale,
             command_name=command_name,
         )
 
