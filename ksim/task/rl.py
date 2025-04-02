@@ -1523,7 +1523,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             metrics,
                             rollout_variables,
                             single_traj,
-                            state,
                             curriculum_state,
                         ) = self._rl_train_loop_step(
                             physics_model=mjx_model,
