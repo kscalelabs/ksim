@@ -16,6 +16,8 @@ class AsymmetricBijector(distrax.Bijector):
     This maps a distribution with support `[-max, max]` to a distribution with
     support `[-min, max]`. Alternativly, this can be parametrized by providing
     `scale = min / max`.
+
+    `scale` must be broadcastable to the shape of the input.
     """
 
     def __init__(
@@ -24,14 +26,18 @@ class AsymmetricBijector(distrax.Bijector):
         max: Array | None = None,
         scale: Array | None = None,
     ) -> None:
+        super().__init__(event_ndims_in=0)
+
         if scale is None:
             assert min is not None and max is not None, "If scale is not provided, min and max must be provided."
-            scale = min / max
+            scale = -min / max
         else:
             assert min is None and max is None, "If scale is provided, min and max must not be provided."
 
-        super().__init__(event_ndims_in=0)
         self._scale = conversion.as_float_array(scale)
+
+        if not jnp.all(self._scale > 0):
+            raise ValueError("Scale must be strictly positive.")
 
     @property
     def scale(self) -> Array:
