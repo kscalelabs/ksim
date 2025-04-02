@@ -91,6 +91,8 @@ class Observation(ABC):
 
         Args:
             observation: The raw observation from the state
+            curriculum_level: The current curriculum level, a scalar between
+                zero and one.
             rng: A PRNGKeyArray to use for the noise
 
         Returns:
