@@ -39,6 +39,7 @@ class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
+    action_ranges: Array
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
@@ -94,7 +95,14 @@ class DefaultHumanoidActor(eqx.Module):
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
-        return distrax.Transformed(distrax.Normal(mean_n, std_n), distrax.Tanh())
+        dist = distrax.Normal(mean_n, std_n)
+        dist = distrax.Transformed(dist, distrax.Tanh())
+        # For the default humanoid, the actions are torques in the range [-1, 1],
+        # which we can model as using a Tanh distribution. However, for different
+        # action spaces, it is probably a good idea to apply a scale / shift
+        # to better model the action space.
+        # dist = distrax.Transformed(dist, distrax.ScalarAffine(self.shift, self.scale))
+        return dist
 
 
 class DefaultHumanoidCritic(eqx.Module):
