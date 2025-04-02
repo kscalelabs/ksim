@@ -340,6 +340,10 @@ class RLConfig(xax.Config):
         value=False,
         help="If true, render markers.",
     )
+    render_camera_name: str | int | None = xax.field(
+        value=None,
+        help="The name or id of the camera to use in rendering.",
+    )
 
 
 Config = TypeVar("Config", bound=RLConfig)
@@ -595,10 +599,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         qpos = rollout_variables.physics_state.data.qpos
         qvel = rollout_variables.physics_state.data.qvel
         xpos = rollout_variables.physics_state.data.xpos
+        xquat = rollout_variables.physics_state.data.xquat
         if isinstance(qpos, np.ndarray) and isinstance(qvel, np.ndarray) and isinstance(xpos, np.ndarray):
             qpos = jnp.array(qpos)
             qvel = jnp.array(qvel)
             xpos = jnp.array(xpos)
+            xquat = jnp.array(xquat)
 
         # Combines all the relevant data into a single object. Lives up here to
         # avoid accidentally incorporating information it shouldn't access to.
@@ -606,6 +612,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             qpos=qpos,
             qvel=qvel,
             xpos=xpos,
+            xquat=xquat,
             obs=observations,
             command=rollout_variables.commands,
             event_state=rollout_variables.physics_state.event_states,
@@ -734,6 +741,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if self.config.render_track_body_id is not None:
             mj_camera.trackbodyid = self.config.render_track_body_id
             mj_camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+
+        if self.config.render_camera_name is not None:
+            mj_camera = self.config.render_camera_name
 
         frame_list: list[np.ndarray] = []
         for frame_id, trajectory in enumerate(trajectory_list):

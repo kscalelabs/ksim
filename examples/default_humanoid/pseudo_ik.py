@@ -46,7 +46,7 @@ class DefaultHumanoidActor(eqx.Module):
         var_scale: float,
         mean_scale: float,
     ) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 4
         num_outputs = NUM_JOINTS
 
         self.mlp = eqx.nn.MLP(
@@ -68,6 +68,7 @@ class DefaultHumanoidActor(eqx.Module):
         dh_joint_vel_n: Array,
         imu_acc_3: Array,
         xyz_target_3: Array,
+        quat_target_4: Array,
     ) -> distrax.Normal:
         obs_n = jnp.concatenate(
             [
@@ -75,6 +76,7 @@ class DefaultHumanoidActor(eqx.Module):
                 dh_joint_vel_n,  # NUM_JOINTS
                 imu_acc_3,  # 3
                 xyz_target_3,  # 3
+                quat_target_4,  # 4
             ],
             axis=-1,
         )
@@ -98,7 +100,7 @@ class DefaultHumanoidCritic(eqx.Module):
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + NUM_JOINTS + 3 + 3
+        num_inputs = NUM_JOINTS + NUM_JOINTS + NUM_JOINTS + 3 + 3 + 4
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -117,6 +119,7 @@ class DefaultHumanoidCritic(eqx.Module):
         actuator_force_n: Array,
         imu_acc_3: Array,
         xyz_target_3: Array,
+        quat_target_4: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -125,6 +128,7 @@ class DefaultHumanoidCritic(eqx.Module):
                 actuator_force_n,  # NUM_JOINTS
                 imu_acc_3,  # 3
                 xyz_target_3,  # 3
+                quat_target_4,  # 4
             ],
             axis=-1,
         )
@@ -295,18 +299,39 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
             ),
+            ksim.GlobalBodyQuaternionCommand.create(
+                model=physics_model,
+                command_name="global_body_quaternion_command_hand_right",
+                base_name="hand_right",
+                switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
+                null_prob=0.5,
+                vis_magnitude=0.5,
+                vis_size=0.05,
+                vis_color=(0.0, 0.0, 1.0, 0.8),
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.CartesianBodyTargetReward.create(
+            ksim.ContinuousCartesianBodyTargetReward.create(
+                model=physics_model,
+                tracked_body_name="hand_right",
+                base_body_name="pelvis",
+                norm="l2",
+                scale=1.0,
+                sensitivity=1.0,
+                threshold=0.0001,  # with l2 norm, this is 1cm of error
+                time_bonus_scale=0.1,
+                command_name="cartesian_body_target_command_upper_arm_right",
+            ),
+            ksim.GlobalBodyQuaternionReward.create(
                 model=physics_model,
                 tracked_body_name="hand_right",
                 base_body_name="pelvis",
                 norm="l2",
                 scale=0.1,
                 sensitivity=1.0,
-                command_name="cartesian_body_target_command_upper_arm_right",
+                command_name="global_body_quaternion_command_hand_right",
             ),
         ]
 
@@ -332,11 +357,13 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_n = observations["joint_velocity_observation"] / 50.0
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
+        quat_target_4 = commands["global_body_quaternion_command_hand_right"]
         return model.actor(
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n,
             imu_acc_3=imu_acc_3,
             xyz_target_3=xyz_target_3,
+            quat_target_4=quat_target_4,
         )
 
     def _run_critic(
@@ -350,12 +377,14 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         actuator_force_n = observations["actuator_force_observation"]  # 27
         imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
         xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]  # 3
+        quat_target_4 = commands["global_body_quaternion_command_hand_right"]  # 4
         return model.critic(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             actuator_force_n=actuator_force_n,
             imu_acc_3=imu_acc_3,
             xyz_target_3=xyz_target_3,
+            quat_target_4=quat_target_4,
         )
 
     def get_on_policy_log_probs(
@@ -453,5 +482,7 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=4.0,
+            # If you experience segfaults, try disabling the markers.
+            # render_markers=True,
         ),
     )
