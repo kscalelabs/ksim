@@ -44,7 +44,7 @@ from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.curriculum import Curriculum, CurriculumState
+from ksim.curriculum import Curriculum
 from ksim.engine import (
     PhysicsEngine,
     engine_type_from_physics_model,
@@ -727,6 +727,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         Args:
             metrics: The metrics to log.
+            rollout_length: The length of the rollout.
         """
         if self.config.log_train_metrics:
             self.logger.log_scalar("rollout length", rollout_length * self.config.ctrl_dt, namespace="🔄 curriculum")

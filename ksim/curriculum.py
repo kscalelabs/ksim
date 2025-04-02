@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.types import Trajectory, Rewards
+from ksim.types import Rewards, Trajectory
 
 T = TypeVar("T")
 
