@@ -14,7 +14,7 @@ import ksim
 class DummyObservation(ksim.Observation):
     """A dummy observation for testing."""
 
-    def observe(self, state: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ksim.ObservationState, rng: PRNGKeyArray) -> Array:
         """Get a dummy observation from the state."""
         return jnp.zeros(1)
 

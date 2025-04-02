@@ -51,7 +51,7 @@ from ksim.engine import (
     get_physics_engine,
 )
 from ksim.events import Event
-from ksim.observation import Observation
+from ksim.observation import Observation, ObservationState
 from ksim.randomization import Randomization
 from ksim.resets import Reset
 from ksim.rewards import Reward
@@ -100,9 +100,13 @@ def get_observation(
 ) -> xax.FrozenDict[str, Array]:
     """Get the observation from the physics state."""
     observations = {}
+    observation_state = ObservationState(
+        commands=rollout_state.commands,
+        physics_state=rollout_state.physics_state,
+    )
     for observation in obs_generators:
         rng, obs_rng = jax.random.split(rng)
-        observation_value = observation(rollout_state, obs_rng)
+        observation_value = observation(observation_state, obs_rng)
         observations[observation.observation_name] = observation_value
     return xax.FrozenDict(observations)
 
