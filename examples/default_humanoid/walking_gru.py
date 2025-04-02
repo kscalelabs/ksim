@@ -68,7 +68,7 @@ class DefaultHumanoidActor(eqx.Module):
         var_scale: float,
         hidden_size: int,
     ) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 2 + 1
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 2 + 1 + NUM_JOINTS
         num_outputs = NUM_JOINTS
 
         self.multi_layer_gru = MultiLayerGRU(
@@ -100,6 +100,7 @@ class DefaultHumanoidActor(eqx.Module):
         imu_gyro_t3: Array,
         lin_vel_cmd_t2: Array,
         ang_vel_cmd_t1: Array,
+        prev_actions_tn: Array,
         hidden_states_dn: Array,
     ) -> tuple[distrax.Distribution, Array]:
         obs_tn = jnp.concatenate(
@@ -110,6 +111,7 @@ class DefaultHumanoidActor(eqx.Module):
                 imu_gyro_t3,  # 3
                 lin_vel_cmd_t2,  # 2
                 ang_vel_cmd_t1,  # 1
+                prev_actions_tn,  # NUM_JOINTS
             ],
             axis=-1,
         )
@@ -170,7 +172,8 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         model: DefaultHumanoidActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry_dn: Array,
+        prev_actions_tn: Array,
+        hidden_states_dn: Array,
     ) -> tuple[distrax.Distribution, Array]:
         dh_joint_pos_tn = observations["joint_position_observation"]
         dh_joint_vel_tn = observations["joint_velocity_observation"]
@@ -186,7 +189,8 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
             imu_gyro_t3=imu_gyro_t3 / 3.0,
             lin_vel_cmd_t2=lin_vel_cmd_t2,
             ang_vel_cmd_t1=ang_vel_cmd_t1,
-            hidden_states_dn=carry_dn,
+            prev_actions_tn=prev_actions_tn,
+            hidden_states_dn=hidden_states_dn,
         )
 
     def get_log_probs(
@@ -196,7 +200,13 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[Array, None]:
         initial_hidden_states = self.get_initial_carry(rng)
-        action_dist_tn, _ = self._run_actor(model.actor, trajectories.obs, trajectories.command, initial_hidden_states)
+        action_dist_tn, _ = self._run_actor(
+            model=model.actor,
+            observations=trajectories.obs,
+            commands=trajectories.command,
+            prev_actions_tn=trajectories.action,
+            hidden_states_dn=initial_hidden_states,
+        )
         log_probs_tn = action_dist_tn.log_prob(trajectories.action)
         return log_probs_tn, None
 
@@ -225,7 +235,13 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
     ) -> tuple[Array, Array, AuxOutputs]:
         # Unsqueeze first dimension as the time dimension.
         (observations_t, commands_t) = jax.tree.map(lambda x: x[None, ...], (observations, commands))
-        action_dist_tn, next_carry = self._run_actor(model.actor, observations_t, commands_t, carry)
+        action_dist_tn, next_carry = self._run_actor(
+            model=model.actor,
+            observations=observations_t,
+            commands=commands_t,
+            prev_actions_tn=physics_state.most_recent_action,
+            hidden_states_dn=carry,
+        )
 
         action_n = action_dist_tn.sample(seed=rng).squeeze(0)
         action_log_prob_n = action_dist_tn.log_prob(action_n).squeeze(0)
