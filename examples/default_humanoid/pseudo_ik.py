@@ -482,5 +482,7 @@ if __name__ == "__main__":
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=4.0,
+            # If you experience segfaults, try disabling the markers.
+            render_markers=True,
         ),
     )
