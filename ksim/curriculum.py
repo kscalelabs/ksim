@@ -8,7 +8,7 @@ __all__ = [
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import Generic, Self, TypeVar
 
 import attrs
 import jax
@@ -109,3 +109,14 @@ class EpisodeLengthCurriculum(Curriculum[None]):
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
         return CurriculumState(level=jnp.array(0.0), state=None)
+
+    @classmethod
+    def create(
+        cls,
+        min_length_seconds: float,
+        max_length_seconds: float,
+        ctrl_dt: float,
+    ) -> Self:
+        min_length_steps = round(min_length_seconds / ctrl_dt)
+        max_length_steps = round(max_length_seconds / ctrl_dt)
+        return cls(min_length_steps=min_length_steps, max_length_steps=max_length_steps)
