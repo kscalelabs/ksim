@@ -53,15 +53,24 @@ class StaticFrictionRandomization(Randomization):
     scale_lower: float = attrs.field(default=0.5)
     scale_upper: float = attrs.field(default=2.0)
 
+    freejoint_first: bool = attrs.field(default=True)
+
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
-        frictionloss = model.dof_frictionloss[6:] * jax.random.uniform(
-            rng,
-            shape=(model.dof_frictionloss.shape[0] - 6,),
-            minval=self.scale_lower,
-            maxval=self.scale_upper,
-        )
-        # Skip the first 6 DOFs (free joint)
-        new_frictionloss = jnp.concatenate([model.dof_frictionloss[:6], frictionloss])
+        if self.freejoint_first:
+            frictionloss = model.dof_frictionloss[6:] * jax.random.uniform(
+                rng,
+                shape=(model.dof_frictionloss.shape[0] - 6,),
+                minval=self.scale_lower,
+                maxval=self.scale_upper,
+            )
+            new_frictionloss = jnp.concatenate([model.dof_frictionloss[:6], frictionloss])
+        else:
+            new_frictionloss = model.dof_frictionloss * jax.random.uniform(
+                rng,
+                shape=(model.dof_frictionloss.shape[0],),
+                minval=self.scale_lower,
+                maxval=self.scale_upper,
+            )
         return {"dof_frictionloss": new_frictionloss}
 
 
@@ -105,15 +114,25 @@ class ArmatureRandomization(Randomization):
     scale_lower: float = attrs.field(default=0.95)
     scale_upper: float = attrs.field(default=1.05)
 
+    freejoint_first: bool = attrs.field(default=True)
+
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         # Skip the first 6 DOFs (free joint)
-        armature = model.dof_armature[6:] * jax.random.uniform(
-            rng,
-            shape=(model.dof_armature.shape[0] - 6,),
-            minval=self.scale_lower,
-            maxval=self.scale_upper,
-        )
-        new_armature = jnp.concatenate([model.dof_armature[:6], armature])
+        if self.freejoint_first:
+            armature = model.dof_armature[6:] * jax.random.uniform(
+                rng,
+                shape=(model.dof_armature.shape[0] - 6,),
+                minval=self.scale_lower,
+                maxval=self.scale_upper,
+            )
+            new_armature = jnp.concatenate([model.dof_armature[:6], armature])
+        else:
+            new_armature = model.dof_armature * jax.random.uniform(
+                rng,
+                shape=(model.dof_armature.shape[0],),
+                minval=self.scale_lower,
+                maxval=self.scale_upper,
+            )
         return {"dof_armature": new_armature}
 
 
@@ -206,15 +225,25 @@ class JointDampingRandomization(Randomization):
     scale_lower: float = attrs.field(default=0.9)
     scale_upper: float = attrs.field(default=1.1)
 
+    freejoint_first: bool = attrs.field(default=True)
+
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         # Skip the first 6 DOFs (free joint)
-        kd = model.dof_damping[6:] * jax.random.uniform(
-            rng,
-            shape=(model.dof_damping.shape[0] - 6,),
-            minval=self.scale_lower,
-            maxval=self.scale_upper,
-        )
-        dof_damping = jnp.concatenate([model.dof_damping[:6], kd])
+        if self.freejoint_first:
+            kd = model.dof_damping[6:] * jax.random.uniform(
+                rng,
+                shape=(model.dof_damping.shape[0] - 6,),
+                minval=self.scale_lower,
+                maxval=self.scale_upper,
+            )
+            dof_damping = jnp.concatenate([model.dof_damping[:6], kd])
+        else:
+            dof_damping = model.dof_damping * jax.random.uniform(
+                rng,
+                shape=(model.dof_damping.shape[0],),
+                minval=self.scale_lower,
+                maxval=self.scale_upper,
+            )
         return {"dof_damping": dof_damping}
 
 
@@ -225,14 +254,23 @@ class JointZeroPositionRandomization(Randomization):
     scale_lower: float = attrs.field(default=-0.01)
     scale_upper: float = attrs.field(default=0.01)
 
+    freejoint_first: bool = attrs.field(default=True)
+
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         qpos_0 = model.qpos0
-        new_qpos = jax.random.uniform(
-            rng,
-            shape=(model.qpos0.shape[0] - 7,),
-            minval=self.scale_lower,
-            maxval=self.scale_upper,
-        )
-        # Skip the first 7 DOFs (free joint - xyz + quat)
-        qpos_0 = slice_update(model, "qpos0", slice(7, None), new_qpos)
-        return {"qpos0": qpos_0}
+        if self.freejoint_first:
+            new_qpos = jax.random.uniform(
+                rng,
+                shape=(model.qpos0.shape[0] - 7,),
+                minval=self.scale_lower,
+                maxval=self.scale_upper,
+            )
+            new_qpos = jnp.concatenate([model.qpos0[:7], new_qpos])
+        else:
+            new_qpos = jax.random.uniform(
+                rng,
+                shape=(model.qpos0.shape[0],),
+                minval=self.scale_lower,
+                maxval=self.scale_upper,
+            )
+        return {"qpos0": new_qpos}
