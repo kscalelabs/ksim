@@ -200,11 +200,16 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[Array, None]:
         initial_hidden_states = self.get_initial_carry(rng)
+
+        # We need to shift the actions by one time step to get the previous actions.
+        actions_tn = trajectories.action
+        prev_actions_tn = jnp.concatenate([jnp.zeros_like(actions_tn[..., :1, :]), actions_tn[..., :-1, :]], axis=-2)
+
         action_dist_tn, _ = self._run_actor(
             model=model.actor,
             observations=trajectories.obs,
             commands=trajectories.command,
-            prev_actions_tn=trajectories.action,
+            prev_actions_tn=prev_actions_tn,
             hidden_states_dn=initial_hidden_states,
         )
         log_probs_tn = action_dist_tn.log_prob(trajectories.action)
