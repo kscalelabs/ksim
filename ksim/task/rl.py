@@ -44,7 +44,7 @@ from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
-from ksim.curriculum import Curriculum
+from ksim.curriculum import Curriculum, CurriculumState
 from ksim.engine import (
     PhysicsEngine,
     engine_type_from_physics_model,
@@ -88,6 +88,7 @@ class RolloutConstants:
     command_generators: Collection[Command]
     reward_generators: Collection[Reward]
     termination_generators: Collection[Termination]
+    curriculum: Curriculum
 
 
 def get_observation(
@@ -1061,20 +1062,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
-        curriculum_level: Array,
+        curriculum_state: CurriculumState,
         rollout_length: int,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, SingleTrajectory]:
         """Runs a single step of the RL training loop."""
 
         def single_step_fn(
-            carry: tuple[PyTree, optax.OptState, RolloutVariables],
+            carry: tuple[PyTree, optax.OptState, RolloutVariables, CurriculumState],
             rng: PRNGKeyArray,
         ) -> tuple[
-            tuple[PyTree, optax.OptState, RolloutVariables],
+            tuple[PyTree, optax.OptState, RolloutVariables, CurriculumState],
             tuple[Metrics, SingleTrajectory],
         ]:
-            model_arr, opt_state, rollout_variables = carry
+            model_arr, opt_state, rollout_variables, curriculum_state = carry
 
             # Rolls out a new trajectory.
             vmapped_unroll = jax.vmap(
@@ -1099,7 +1100,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 engine,
                 rollout_constants,
                 rollout_variables,
-                curriculum_level,
+                curriculum_state.level,
                 rollout_length,
             )
 
@@ -1119,14 +1120,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 train=train_metrics,
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
-                curriculum_level=curriculum_level,
+                curriculum_level=curriculum_state.level,
             )
 
-            return (model_arr, opt_state, rollout_variables), (metrics, single_traj)
+            # Updates the state.
+            state = state.replace(
+                num_steps=state.num_steps,
+                num_samples=state.num_samples + self.rollout_num_samples,
+            )
 
-        (model_arr, opt_state, rollout_variables), (metrics, single_traj) = jax.lax.scan(
+            # Steps the curriculum.
+            curriculum_state = rollout_constants.curriculum(
+                trajectory=single_traj.trajectory,
+                rewards=single_traj.rewards,
+                training_state=state,
+                prev_state=curriculum_state,
+            )
+
+            return (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj)
+
+        (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj) = jax.lax.scan(
             single_step_fn,
-            (model_arr, opt_state, rollout_variables),
+            (model_arr, opt_state, rollout_variables, curriculum_state),
             jax.random.split(rng, self.config.epochs_per_log_step),
         )
 
@@ -1138,7 +1153,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Metrics, final_trajectories, final_rewards batch dim of epochs.
         # Rollout variables has batch dim of num_envs and are used next rollout.
-        return model_arr, opt_state, metrics, rollout_variables, single_traj
+        return model_arr, opt_state, metrics, rollout_variables, single_traj, curriculum_state
 
     def on_context_stop(self, step: str, elapsed_time: float) -> None:
         super().on_context_stop(step, elapsed_time)
@@ -1249,6 +1264,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 command_generators=commands,
                 reward_generators=rewards,
                 termination_generators=terminations,
+                curriculum=curriculum,
             )
 
             # These components are updated each step.
@@ -1433,6 +1449,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 command_generators=tuple(commands),
                 reward_generators=tuple(rewards_terms),
                 termination_generators=tuple(terminations),
+                curriculum=curriculum,
             )
 
             # JAX requires that we partition the model into mutable and static
@@ -1500,9 +1517,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     else:
                         state = state.replace(phase="train")
 
-                    # Gets the rollout length.
-                    rollout_length = self.rollout_length_from_curriculum(curriculum_state.level)
-
                     # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
                     with xax.ContextTimer() as timer:
@@ -1512,6 +1526,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             metrics,
                             rollout_variables,
                             single_traj,
+                            curriculum_state,
                         ) = self._rl_train_loop_step(
                             physics_model=mjx_model,
                             randomization_dict=randomization_dict,
@@ -1522,24 +1537,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             engine=engine,
                             rollout_constants=rollout_constants,
                             rollout_variables=rollout_variables,
-                            curriculum_level=curriculum_state.level,
-                            rollout_length=rollout_length,
+                            curriculum_state=curriculum_state,
+                            rollout_length=self.rollout_length_from_curriculum(curriculum_state.level),
                             rng=update_rng,
                         )
-
-                    # Updates the state.
-                    state = state.replace(
-                        num_steps=state.num_steps + self.config.epochs_per_log_step,
-                        num_samples=state.num_samples + self.rollout_num_samples * self.config.epochs_per_log_step,
-                    )
-
-                    # Steps the curriculum.
-                    curriculum_state = curriculum(
-                        trajectory=single_traj.trajectory,
-                        rewards=single_traj.rewards,
-                        training_state=state,
-                        prev_state=curriculum_state,
-                    )
 
                     if is_first_step:
                         is_first_step = False
