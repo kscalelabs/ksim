@@ -980,10 +980,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         has_termination = (all_terminations.any(axis=-1)).sum(axis=-1)
         num_terminations = has_termination.sum().clip(min=1)
         num_timesteps = trajectories.done.shape[-1]
+        mean_terminations = trajectories.done.sum(-1).mean()
 
         return {
             "episode_length": (num_timesteps / (has_termination + 1).mean()) * self.config.ctrl_dt,
-            **{key: (value.sum() / num_terminations) for key, value in kvs},
+            "mean_terminations": mean_terminations,
+            **{f"prct/{key}": (value.sum() / num_terminations) for key, value in kvs},
         }
 
     def get_markers(

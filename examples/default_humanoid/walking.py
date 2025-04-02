@@ -51,7 +51,7 @@ class DefaultHumanoidActor(eqx.Module):
         max_std: float,
         var_scale: float,
     ) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 2 + 1
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 2 + 1 + NUM_JOINTS
         num_outputs = NUM_JOINTS
 
         self.mlp = eqx.nn.MLP(
@@ -74,6 +74,7 @@ class DefaultHumanoidActor(eqx.Module):
         imu_gyro_3: Array,
         lin_vel_cmd_2: Array,
         ang_vel_cmd_1: Array,
+        prev_actions_n: Array,
     ) -> distrax.Distribution:
         obs_n = jnp.concatenate(
             [
@@ -83,6 +84,7 @@ class DefaultHumanoidActor(eqx.Module):
                 imu_gyro_3,  # 3
                 lin_vel_cmd_2,  # 2
                 ang_vel_cmd_1,  # 1
+                prev_actions_n,  # NUM_JOINTS
             ],
             axis=-1,
         )
@@ -157,12 +159,7 @@ class DefaultHumanoidModel(eqx.Module):
     critic: DefaultHumanoidCritic
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        self.actor = DefaultHumanoidActor(
-            key,
-            min_std=0.01,
-            max_std=1.0,
-            var_scale=1.0,
-        )
+        self.actor = DefaultHumanoidActor(key, min_std=0.01, max_std=1.0, var_scale=0.5)
         self.critic = DefaultHumanoidCritic(key)
 
 
@@ -398,6 +395,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         model: DefaultHumanoidActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
+        prev_actions_n: Array,
     ) -> distrax.Distribution:
         dh_joint_pos_n = observations["joint_position_observation"]
         dh_joint_vel_n = observations["joint_velocity_observation"]
@@ -413,6 +411,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             imu_gyro_3=imu_gyro_3 / 3.0,
             lin_vel_cmd_2=lin_vel_cmd_2,
             ang_vel_cmd_1=ang_vel_cmd_1,
+            prev_actions_n=prev_actions_n,
         )
 
     def _run_critic(
@@ -476,9 +475,13 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> tuple[Array, None]:
+        # We need to shift the actions by one time step to get the previous actions.
+        actions_tn = trajectories.action
+        prev_actions_tn = jnp.concatenate([jnp.zeros_like(actions_tn[..., :1, :]), actions_tn[..., :-1, :]], axis=-2)
+
         # Vectorize over the batch dimensions.
-        par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_btn = par_fn(model.actor, trajectories.obs, trajectories.command)
+        par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0, 0))
+        action_dist_btn = par_fn(model.actor, trajectories.obs, trajectories.command, prev_actions_tn)
 
         # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
@@ -510,7 +513,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, None, AuxOutputs]:
-        action_dist_n = self._run_actor(model.actor, observations, commands)
+        action_dist_n = self._run_actor(
+            model=model.actor,
+            observations=observations,
+            commands=commands,
+            prev_actions_n=physics_state.most_recent_action,
+        )
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
 
