@@ -588,7 +588,11 @@ class GlobalBodyQuaternionReward(Reward):
     def __call__(self, trajectory: Trajectory) -> Array:
         body_quat = trajectory.xquat[..., self.tracked_body_idx, :]
         target_quat = trajectory.command[self.command_name]
-        return jnp.exp(-xax.get_norm(body_quat - target_quat, self.norm) * self.sensitivity).mean(axis=-1)
+
+        is_null = jnp.all(jnp.isclose(target_quat, 0.0), axis=-1, keepdims=True)
+
+        err = jnp.where(is_null, 0.0, xax.get_norm(body_quat - target_quat, self.norm))
+        return jnp.exp(-err * self.sensitivity).mean(axis=-1)
 
     @classmethod
     def create(

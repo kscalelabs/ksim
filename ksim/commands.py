@@ -389,7 +389,16 @@ class GlobalBodyQuaternionMarker(Marker):
 
     def update(self, trajectory: Trajectory) -> None:
         """Update the marker rotation."""
-        self.orientation = trajectory.command[self.command_name]
+        command = trajectory.command[self.command_name]
+        # Check if command is zeros (null quaternion)
+        is_null = jnp.all(jnp.isclose(command, 0.0))
+        
+        # Only update orientation if command is not null
+        if not is_null:
+            self.geom = mujoco.mjtGeom.mjGEOM_ARROW
+            self.orientation = command
+        else:
+            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
 
     @classmethod
     def get(
@@ -415,20 +424,23 @@ class GlobalBodyQuaternionCommand(Command):
     """Samples a target quaternion orientation for a body.
 
     This command samples random quaternions to specify target orientations
-    for a body in global coordinates.
+    for a body in global coordinates, with an option to sample a null quaternion.
     """
 
     base_body_name: str = attrs.field()
     base_id: int = attrs.field()
     switch_prob: float = attrs.field()
+    null_prob: float = attrs.field()  # Probability of sampling null quaternion
     vis_magnitude: float = attrs.field()
     vis_size: float = attrs.field()
     vis_color: tuple[float, float, float, float] = attrs.field()
 
     def initial_command(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
-        # Sample a random unit quaternion
-        quat = jax.random.normal(rng, (4,))
-        return quat / jnp.linalg.norm(quat)
+        rng_a, rng_b = jax.random.split(rng)
+        is_null = jax.random.bernoulli(rng_a, self.null_prob)
+        quat = jax.random.normal(rng_b, (4,))
+        random_quat = quat / jnp.linalg.norm(quat)
+        return jnp.where(is_null, jnp.zeros(4), random_quat)
 
     def __call__(self, prev_command: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
         rng_a, rng_b = jax.random.split(rng)
@@ -454,9 +466,10 @@ class GlobalBodyQuaternionCommand(Command):
         model: PhysicsModel,
         base_name: str,
         switch_prob: float = 0.1,
+        null_prob: float = 0.1,
         vis_magnitude: float = 0.5,
         vis_size: float = 0.05,
-        vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
+        vis_color: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 0.8),
         command_name: str | None = None,
     ) -> Self:
         base_id = get_body_data_idx_from_name(model, base_name)
@@ -464,6 +477,7 @@ class GlobalBodyQuaternionCommand(Command):
             base_body_name=base_name,
             base_id=base_id,
             switch_prob=switch_prob,
+            null_prob=null_prob,
             vis_magnitude=vis_magnitude,
             vis_size=vis_size,
             vis_color=vis_color,
