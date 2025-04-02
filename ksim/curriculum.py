@@ -159,8 +159,8 @@ class StepWhenSaturated(Curriculum[None]):
     """
 
     num_levels: int = attrs.field()
-    increase_threshold: float = attrs.field(default=1.0)
-    decrease_threshold: float = attrs.field(default=3.0)
+    increase_threshold: float = attrs.field()
+    decrease_threshold: float = attrs.field()
 
     def __call__(
         self,

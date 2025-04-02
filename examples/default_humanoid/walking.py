@@ -215,11 +215,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
     increase_threshold: float = xax.field(
         value=1.0,
-        help="The threshold for increasing the curriculum level.",
+        help="Increase the curriculum level when the deaths per episode is below this threshold.",
     )
     decrease_threshold: float = xax.field(
-        value=3.0,
-        help="The threshold for decreasing the curriculum level.",
+        value=5.0,
+        help="Decrease the curriculum level when the deaths per episode is above this threshold.",
     )
     # Rendering parameters.
     render_track_body_id: int | None = xax.field(
