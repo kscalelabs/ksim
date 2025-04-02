@@ -313,6 +313,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         physics_model: ksim.PhysicsModel,
         metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> ksim.Actuators:
+        assert metadata is not None, "Metadata is required"
         return ksim.MITPositionActuators(
             physics_model=physics_model,
             joint_name_to_metadata=metadata,
