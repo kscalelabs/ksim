@@ -611,6 +611,7 @@ class ContinuousCartesianBodyTargetReward(Reward):
     sensitivity: float = attrs.field()
     threshold: float = attrs.field()
     time_bonus_scale: float = attrs.field()
+    time_sensitivity: float = attrs.field()
 
     def __call__(self, trajectory: Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
@@ -630,8 +631,8 @@ class ContinuousCartesianBodyTargetReward(Reward):
             count_scan_fn, init=jnp.zeros_like(under_threshold[0], dtype=jnp.int32), xs=under_threshold
         )
 
-        time_bonus = consecutive_steps * self.time_bonus_scale
-        return (base_reward + time_bonus).mean(axis=-1)
+        time_bonus = jnp.exp(consecutive_steps * self.time_sensitivity) * self.time_bonus_scale
+        return (base_reward * time_bonus).mean(axis=-1)
 
     @classmethod
     def create(
@@ -643,6 +644,7 @@ class ContinuousCartesianBodyTargetReward(Reward):
         norm: xax.NormType = "l2",
         scale: float = 1.0,
         sensitivity: float = 1.0,
+        time_sensitivity: float = 0.01,
         threshold: float = 0.25,
         time_bonus_scale: float = 0.1,
     ) -> Self:
@@ -654,6 +656,7 @@ class ContinuousCartesianBodyTargetReward(Reward):
             norm=norm,
             scale=scale,
             sensitivity=sensitivity,
+            time_sensitivity=time_sensitivity,
             command_name=command_name,
             threshold=threshold,
             time_bonus_scale=time_bonus_scale,
