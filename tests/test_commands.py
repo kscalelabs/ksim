@@ -15,10 +15,12 @@ _TOL = 1e-4
 
 @attrs.define(frozen=True)
 class DummyCommand(ksim.Command):
-    def initial_command(self, physics_data: ksim.PhysicsData, rng: jax.Array) -> jnp.ndarray:
+    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: jax.Array) -> jnp.ndarray:
         return jnp.zeros((1,))
 
-    def __call__(self, prev_command: Array, physics_data: ksim.PhysicsData, rng: jax.Array) -> jnp.ndarray:
+    def __call__(
+        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: jax.Array
+    ) -> jnp.ndarray:
         return jnp.zeros((1,))
 
 
@@ -64,20 +66,22 @@ class TestLinearVelocityCommand:
     def test_command_shape(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command returns the correct shape."""
         cmd = ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-2.0, 2.0))
-        initial_command = cmd.initial_command(physics_data, rng)
-        result = cmd(initial_command, physics_data, rng)
+        curriculum_level = jnp.array(0.0)
+        initial_command = cmd.initial_command(physics_data, curriculum_level, rng)
+        result = cmd(initial_command, physics_data, curriculum_level, rng)
         chex.assert_shape(result, (2,))
 
     def test_command_bounds(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command values are within the expected bounds."""
         x_scale, y_scale = 2.0, 3.0
         cmd = ksim.LinearVelocityCommand(x_range=(-x_scale, x_scale), y_range=(-y_scale, y_scale))
-        command = cmd.initial_command(physics_data, rng)
+        curriculum_level = jnp.array(0.0)
+        command = cmd.initial_command(physics_data, curriculum_level, rng)
 
         # Run multiple times to test bounds probabilistically
         for i in range(100):
             key = jax.random.fold_in(rng, i)
-            command = cmd(command, physics_data, key)
+            command = cmd(command, physics_data, curriculum_level, key)
 
             assert command[0] >= -x_scale
             assert command[0] <= x_scale
@@ -87,8 +91,9 @@ class TestLinearVelocityCommand:
     def test_zero_probability(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command returns zeros when zero_prob is 1.0."""
         cmd = ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-2.0, 2.0), x_zero_prob=1.0, y_zero_prob=1.0)
-        command = cmd.initial_command(physics_data, rng)
-        result = cmd(command, physics_data, rng)
+        curriculum_level = jnp.array(0.0)
+        command = cmd.initial_command(physics_data, curriculum_level, rng)
+        result = cmd(command, physics_data, curriculum_level, rng)
         chex.assert_trees_all_close(
             result,
             jnp.zeros_like(result),
@@ -98,9 +103,10 @@ class TestLinearVelocityCommand:
     def test_update_mechanism(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command update mechanism works correctly."""
         cmd = ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-2.0, 2.0))
-        command = cmd.initial_command(physics_data, rng)
+        curriculum_level = jnp.array(0.0)
+        command = cmd.initial_command(physics_data, curriculum_level, rng)
 
-        next_command = cmd(command, physics_data, rng)
+        next_command = cmd(command, physics_data, curriculum_level, rng)
         assert jnp.array_equal(next_command, command)
 
 
@@ -120,20 +126,22 @@ class TestAngularVelocityCommand:
     def test_command_shape(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command returns the correct shape."""
         cmd = ksim.AngularVelocityCommand(scale=1.0)
-        initial_command = cmd.initial_command(physics_data, rng)
-        result = cmd(initial_command, physics_data, rng)
+        curriculum_level = jnp.array(0.0)
+        initial_command = cmd.initial_command(physics_data, curriculum_level, rng)
+        result = cmd(initial_command, physics_data, curriculum_level, rng)
         chex.assert_shape(result, (1,))
 
     def test_command_bounds(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command values are within the expected bounds."""
         scale = 2.0
         cmd = ksim.AngularVelocityCommand(scale=scale)
+        curriculum_level = jnp.array(0.0)
 
         # Run multiple times to test bounds probabilistically
         for i in range(100):
             key = jax.random.fold_in(rng, i)
-            command = cmd.initial_command(physics_data, key)
-            result = cmd(command, physics_data, key)
+            command = cmd.initial_command(physics_data, curriculum_level, key)
+            result = cmd(command, physics_data, curriculum_level, key)
 
             assert result[0] >= -scale
             assert result[0] <= scale
@@ -141,8 +149,9 @@ class TestAngularVelocityCommand:
     def test_zero_probability(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command returns zeros when zero_prob is 1.0."""
         cmd = ksim.AngularVelocityCommand(scale=1.0, zero_prob=1.0)
-        command = cmd.initial_command(physics_data, rng)
-        result = cmd(command, physics_data, rng)
+        curriculum_level = jnp.array(0.0)
+        command = cmd.initial_command(physics_data, curriculum_level, rng)
+        result = cmd(command, physics_data, curriculum_level, rng)
         chex.assert_trees_all_close(
             result,
             jnp.zeros_like(result),
@@ -152,7 +161,8 @@ class TestAngularVelocityCommand:
     def test_update_mechanism(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command update mechanism works correctly."""
         cmd = ksim.AngularVelocityCommand(scale=1.0)
-        command = cmd.initial_command(physics_data, rng)
+        curriculum_level = jnp.array(0.0)
+        command = cmd.initial_command(physics_data, curriculum_level, rng)
 
-        next_command = cmd(command, physics_data, rng)
+        next_command = cmd(command, physics_data, curriculum_level, rng)
         assert jnp.array_equal(next_command, command)

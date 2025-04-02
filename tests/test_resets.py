@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import pytest
+import xax
 from jaxtyping import Array
 
 import ksim
@@ -14,7 +15,7 @@ import ksim
 class DummyReset(ksim.Reset):
     """Dummy reset for testing."""
 
-    def __call__(self, data: ksim.PhysicsData, rng: jax.Array) -> dict[str, Array]:
+    def __call__(self, data: ksim.PhysicsData, curriculum_level: Array, rng: jax.Array) -> dict[str, Array]:
         return {"qpos": jnp.zeros((3,))}
 
 
@@ -63,7 +64,8 @@ class TestXYPositionResetBuilder:
         """Test that the XYPositionReset resets the XY position."""
         reset = ksim.get_xy_position_reset(humanoid_model)
         data = DummyMjxData()
-        result = reset(data, rng)
+        curriculum_level = jnp.array(0.0)
+        result = reset(data, curriculum_level, rng)
 
         # Check that the result is a DummyMjxData object
         assert isinstance(result, DummyMjxData)
@@ -77,7 +79,7 @@ class TestXYPositionResetBuilder:
             padded_bounds=(0.0, 0.0, 0.0, 0.0),
             x_range=1.0,
             y_range=1.0,
-            hfield_data=jnp.zeros((10, 10)),
+            hfield_data=xax.HashableArray(jnp.zeros((10, 10))),
         ),
         ksim.PlaneXYPositionReset(
             bounds=(0.0, 0.0, 0.0), padded_bounds=(0.0, 0.0, 0.0, 0.0), x_range=1.0, y_range=1.0, robot_base_height=0.0

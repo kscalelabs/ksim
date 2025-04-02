@@ -1189,24 +1189,24 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 randomizations=randomizations,
             )
 
+            # Gets initial variables.
+            rng, carry_rng, cmd_rng, curriculum_rng = jax.random.split(rng, 4)
+            initial_carry = self.get_initial_carry(carry_rng)
+            curriculum = self.get_curriculum(mj_model)
+            curriculum_state = curriculum.get_initial_state(curriculum_rng)
+
             def apply_randomizations_to_mujoco(rng: PRNGKeyArray) -> PhysicsState:
                 rand_rng, reset_rng = jax.random.split(rng)
                 rand_dict = get_randomizations(mj_model, randomizations, rand_rng)
                 for k, v in rand_dict.items():
                     setattr(mj_model, k, v)
-                return engine.reset(mj_model, curriculum_state.level, reset_rng)
+                return engine.reset(mj_model, reset_rng)
 
             # Resets the physics state.
             rng, reset_rng = jax.random.split(rng)
             physics_state = apply_randomizations_to_mujoco(reset_rng)
 
-            # Gets the curriculum state.
-            rng, curriculum_rng = jax.random.split(rng)
-            curriculum_state = curriculum.get_initial_state(curriculum_rng)
-
-            # Gets initial variables.
-            rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
-            initial_carry = self.get_initial_carry(carry_rng)
+            # Gets initial commands.
             initial_commands = get_initial_commands(
                 rng=cmd_rng,
                 physics_data=physics_state.data,
@@ -1290,6 +1290,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         engine=engine,
                         rollout_constants=rollout_constants,
                         rollout_variables=rollout_variables,
+                        curriculum_level=curriculum_state.level,
                     )
                     transitions.append(transition)
                     rng, rand_rng = jax.random.split(rng)
