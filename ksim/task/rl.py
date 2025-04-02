@@ -722,6 +722,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 ("🚂 train", metrics.train),
                 ("🎁 reward", metrics.reward),
                 ("💀 termination", metrics.termination),
+                ("🔄 curriculum", {"level": metrics.curriculum_level}),
             ):
                 for key, value in metric.items():
                     if isinstance(value, Histogram):
@@ -1107,6 +1108,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 train=train_metrics,
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
+                curriculum_level=curriculum_state.level,
             )
 
             return (model_arr, opt_state, rollout_variables, state), (metrics, single_traj)

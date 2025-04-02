@@ -92,6 +92,7 @@ class LinearCurriculum(Curriculum[None]):
 class EpisodeLengthCurriculum(Curriculum[None]):
     """Curriculum that updates the episode length."""
 
+    min_length_steps: int = attrs.field()
     max_length_steps: int = attrs.field()
 
     def __call__(
@@ -103,8 +104,8 @@ class EpisodeLengthCurriculum(Curriculum[None]):
         tsz = trajectory.done.shape[-1]
         num_episodes = trajectory.done.sum(axis=-1).mean() + 1
         episode_length = tsz / num_episodes
-        level = jnp.clip(episode_length / self.max_length_steps, 0.0, 1.0)
-        return CurriculumState(level=level, state=None)
+        level = (episode_length - self.min_length_steps) / (self.max_length_steps - self.min_length_steps)
+        return CurriculumState(level=jnp.clip(level, 0.0, 1.0), state=None)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
         return CurriculumState(level=jnp.array(0.0), state=None)

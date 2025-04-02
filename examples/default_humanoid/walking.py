@@ -368,6 +368,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.FastAccelerationTermination(),
         ]
 
+    def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
+        return ksim.EpisodeLengthCurriculum(
+            step_every_
+        )
+
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
