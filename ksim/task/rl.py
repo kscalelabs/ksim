@@ -150,6 +150,7 @@ def get_commands(
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
     command_generators: Collection[Command],
+    curriculum_level: Array,
 ) -> xax.FrozenDict[str, Array]:
     """Get the commands from the physics state."""
     commands = {}
@@ -158,7 +159,7 @@ def get_commands(
         command_name = command_generator.command_name
         prev_command = prev_commands[command_name]
         assert isinstance(prev_command, Array)
-        command_val = command_generator(prev_command, physics_state.data, cmd_rng)
+        command_val = command_generator(prev_command, physics_state.data, curriculum_level, cmd_rng)
         commands[command_name] = command_val
     return xax.FrozenDict(commands)
 
@@ -167,13 +168,14 @@ def get_initial_commands(
     rng: PRNGKeyArray,
     physics_data: PhysicsData,
     command_generators: Collection[Command],
+    curriculum_level: Array,
 ) -> xax.FrozenDict[str, Array]:
     """Get the initial commands from the physics state."""
     commands = {}
     for command_generator in command_generators:
         rng, cmd_rng = jax.random.split(rng)
         command_name = command_generator.command_name
-        command_val = command_generator.initial_command(physics_data, cmd_rng)
+        command_val = command_generator.initial_command(physics_data, curriculum_level, cmd_rng)
         commands[command_name] = command_val
     return xax.FrozenDict(commands)
 
@@ -567,6 +569,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
+        curriculum_level: Array,
     ) -> tuple[Trajectory, RolloutVariables]:
         """Runs a single step of the physics engine.
 
@@ -577,6 +580,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             engine: The physics engine.
             rollout_constants: The constants for the engine.
             rollout_variables: The variables for the engine.
+            curriculum_level: The current curriculum level.
 
         Returns:
             A tuple containing the trajectory and the next engine variables.
@@ -651,15 +655,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         next_commands = jax.lax.cond(
             terminated,
             lambda: get_initial_commands(
-                cmd_rng,
-                next_physics_state.data,
-                rollout_constants.command_generators,
+                rng=cmd_rng,
+                physics_data=next_physics_state.data,
+                command_generators=rollout_constants.command_generators,
+                curriculum_level=curriculum_level,
             ),
             lambda: get_commands(
-                rollout_variables.commands,
-                next_physics_state,
-                cmd_rng,
-                rollout_constants.command_generators,
+                commands=rollout_variables.commands,
+                physics_state=next_physics_state,
+                rng=cmd_rng,
+                command_generators=rollout_constants.command_generators,
+                curriculum_level=curriculum_level,
             ),
         )
 
@@ -1006,6 +1012,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 engine=engine,
                 rollout_constants=rollout_constants,
                 rollout_variables=carry,
+                curriculum_level=curriculum_level,
             )
             return next_rollout_variables, trajectory
 
@@ -1189,10 +1196,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, reset_rng = jax.random.split(rng)
             physics_state = apply_randomizations_to_mujoco(reset_rng)
 
+            # Gets the curriculum state.
+            rng, curriculum_rng = jax.random.split(rng)
+            curriculum_state = curriculum.get_initial_state(curriculum_rng)
+
             # Gets initial variables.
             rng, carry_rng, cmd_rng = jax.random.split(rng, 3)
             initial_carry = self.get_initial_carry(carry_rng)
-            initial_commands = get_initial_commands(cmd_rng, physics_state.data, command_generators=commands)
+            initial_commands = get_initial_commands(
+                rng=cmd_rng,
+                physics_data=physics_state.data,
+                command_generators=commands,
+                curriculum_level=curriculum_state.level,
+            )
 
             try:
                 from ksim.viewer import MujocoViewer
@@ -1432,13 +1448,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Defines the vectorized initialization functions.
             carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
-            command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None))
+            command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, None))
 
             state = self.on_training_start(state)
 
             rollout_variables = RolloutVariables(
                 carry=carry_fn(train_rngs),
-                commands=command_fn(train_rngs, physics_state.data, rollout_constants.command_generators),
+                commands=command_fn(
+                    train_rngs,
+                    physics_state.data,
+                    rollout_constants.command_generators,
+                    curriculum_state.level,
+                ),
                 physics_state=physics_state,
                 rng=train_rngs,
             )
