@@ -4,10 +4,10 @@ __all__ = [
     "AsymmetricBijector",
 ]
 
-from jax.experimental import checkify
 import distrax
 import jax.numpy as jnp
 from distrax._src.utils import conversion
+from jax.experimental import checkify
 from jaxtyping import Array
 
 
