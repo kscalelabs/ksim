@@ -51,12 +51,18 @@ class ObservationState:
     physics_state: PhysicsState
 
 
-def add_noise(observation: Array, rng: PRNGKeyArray, noise_type: NoiseType, noise: float) -> Array:
+def add_noise(
+    observation: Array,
+    rng: PRNGKeyArray,
+    noise_type: NoiseType,
+    noise: float,
+    curriculum_level: Array,
+) -> Array:
     match noise_type:
         case "gaussian":
-            return observation + jax.random.normal(rng, observation.shape) * noise
+            return observation + jax.random.normal(rng, observation.shape) * noise * curriculum_level
         case "uniform":
-            return observation + (jax.random.uniform(rng, observation.shape) * 2 - 1) * noise
+            return observation + (jax.random.uniform(rng, observation.shape) * 2 - 1) * noise * curriculum_level
         case _:
             raise ValueError(f"Invalid noise type: {noise_type}")
 
@@ -80,7 +86,7 @@ class Observation(ABC):
             The observation
         """
 
-    def add_noise(self, observation: Array, rng: PRNGKeyArray) -> Array:
+    def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         """Override to add noise to the observation.
 
         Args:
@@ -90,15 +96,15 @@ class Observation(ABC):
         Returns:
             The observation with noise added
         """
-        return jax.tree.map(lambda x: add_noise(x, rng, self.noise_type, self.noise), observation)
+        return jax.tree.map(lambda x: add_noise(x, rng, self.noise_type, self.noise, curriculum_level), observation)
 
     def get_markers(self) -> Collection[Marker]:
         return []
 
-    def __call__(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
+    def __call__(self, state: ObservationState, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         obs_rng, noise_rng = jax.random.split(rng)
         raw_observation = self.observe(state, obs_rng)
-        return self.add_noise(raw_observation, noise_rng)
+        return self.add_noise(raw_observation, curriculum_level, noise_rng)
 
     def get_name(self) -> str:
         """Get the name of the observation."""
