@@ -3,6 +3,7 @@
 __all__ = [
     "RLConfig",
     "RLTask",
+    "State",
 ]
 
 import bdb
