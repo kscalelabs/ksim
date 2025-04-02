@@ -234,12 +234,17 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array, AuxOutputs]:
         # Unsqueeze first dimension as the time dimension.
-        (observations_t, commands_t) = jax.tree.map(lambda x: x[None, ...], (observations, commands))
+        (observations_t, commands_t, prev_actions_tn) = jax.tree.map(
+            lambda x: x[None, ...],
+            (observations, commands, physics_state.most_recent_action),
+        )
+
+        # Runs the actor model to get the action distribution and next hidden states.
         action_dist_tn, next_carry = self._run_actor(
             model=model.actor,
             observations=observations_t,
             commands=commands_t,
-            prev_actions_tn=physics_state.most_recent_action,
+            prev_actions_tn=prev_actions_tn,
             hidden_states_dn=carry,
         )
 
