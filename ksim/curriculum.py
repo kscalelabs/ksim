@@ -4,6 +4,7 @@ __all__ = [
     "Curriculum",
     "LinearCurriculum",
     "EpisodeLengthCurriculum",
+    "DistanceFromOriginCurriculum",
 ]
 
 from abc import ABC, abstractmethod
@@ -69,8 +70,6 @@ class ConstantCurriculum(Curriculum[None]):
 class LinearCurriculum(Curriculum[None]):
     """Linear curriculum."""
 
-    min_level: float = attrs.field(default=0.0)
-    max_level: float = attrs.field(default=1.0)
     step_size: float = attrs.field(default=0.01)
     step_every_n_epochs: int = attrs.field(default=1)
 
@@ -81,11 +80,11 @@ class LinearCurriculum(Curriculum[None]):
         prev_state: CurriculumState[None],
     ) -> CurriculumState[None]:
         level = (training_state.num_steps // self.step_every_n_epochs) * self.step_size
-        level = jnp.clip(level, self.min_level, self.max_level)
+        level = jnp.clip(level, 0.0, 1.0)
         return CurriculumState(level=level, state=None)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
-        return CurriculumState(level=jnp.array(self.min_level), state=None)
+        return CurriculumState(level=jnp.array(0.0), state=None)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -120,3 +119,24 @@ class EpisodeLengthCurriculum(Curriculum[None]):
         min_length_steps = round(min_length_seconds / ctrl_dt)
         max_length_steps = round(max_length_seconds / ctrl_dt)
         return cls(min_length_steps=min_length_steps, max_length_steps=max_length_steps)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class DistanceFromOriginCurriculum(Curriculum[None]):
+    """Curriculum that updates the distance from the origin."""
+
+    min_distance: float = attrs.field()
+    max_distance: float = attrs.field()
+
+    def __call__(
+        self,
+        trajectory: Trajectory,
+        training_state: xax.State,
+        prev_state: CurriculumState[None],
+    ) -> CurriculumState[None]:
+        distance = jnp.linalg.norm(trajectory.qpos[..., :3], axis=-1).max()
+        level = (distance - self.min_distance) / (self.max_distance - self.min_distance)
+        return CurriculumState(level=jnp.clip(level, 0.0, 1.0), state=None)
+
+    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
+        return CurriculumState(level=jnp.array(0.0), state=None)
