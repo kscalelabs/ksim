@@ -3,6 +3,7 @@
 __all__ = [
     "Curriculum",
     "LinearCurriculum",
+    "EpisodeLengthCurriculum",
 ]
 
 from abc import ABC, abstractmethod
@@ -44,6 +45,24 @@ class Curriculum(ABC, Generic[T]):
 
     @abstractmethod
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[T]: ...
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ConstantCurriculum(Curriculum[None]):
+    """Constant curriculum."""
+
+    level: float = attrs.field()
+
+    def __call__(
+        self,
+        trajectory: Trajectory,
+        training_state: xax.State,
+        prev_state: CurriculumState[None],
+    ) -> CurriculumState[None]:
+        return prev_state
+
+    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
+        return CurriculumState(level=jnp.array(self.level), state=None)
 
 
 @attrs.define(frozen=True, kw_only=True)

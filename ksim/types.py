@@ -6,7 +6,6 @@ __all__ = [
     "PhysicsState",
     "Trajectory",
     "Rewards",
-    "RolloutVariables",
     "Histogram",
     "Metrics",
 ]
@@ -17,7 +16,7 @@ from typing import Mapping, TypeAlias
 import jax
 import mujoco
 import xax
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import Array, PyTree
 from mujoco import mjx
 
 PhysicsData: TypeAlias = mjx.Data | mujoco.MjData
@@ -76,15 +75,6 @@ class Metrics:
     train: Mapping[str, Array | Histogram]
     reward: Mapping[str, Array | Histogram]
     termination: Mapping[str, Array | Histogram]
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class RolloutVariables:
-    carry: PyTree
-    commands: xax.FrozenDict[str, Array]
-    physics_state: PhysicsState
-    rng: PRNGKeyArray
 
 
 @jax.tree_util.register_dataclass
