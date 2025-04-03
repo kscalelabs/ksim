@@ -48,7 +48,7 @@ ACTION_RANGES = [
 ]
 
 
-def map_sigmoid_distribution(dist: distrax.Distribution) -> distrax.Distribution:
+def map_unit_interval_distribution(dist: distrax.Distribution) -> distrax.Distribution:
     action_ranges = jnp.array(ACTION_RANGES)
     action_min, action_max = action_ranges[..., 0], action_ranges[..., 1]
     dist = distrax.Transformed(dist, ksim.UnitIntervalToRangeBijector(min=action_min, max=action_max))
@@ -144,7 +144,7 @@ class DefaultHumanoidActor(eqx.Module):
 
         dist = distrax.Normal(mean_n, std_n)
         dist = distrax.Transformed(dist, distrax.Sigmoid())
-        dist = map_sigmoid_distribution(dist)
+        dist = map_unit_interval_distribution(dist)
         return dist
 
 
