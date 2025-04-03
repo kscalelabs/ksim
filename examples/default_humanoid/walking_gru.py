@@ -13,7 +13,14 @@ from jaxtyping import Array, PRNGKeyArray
 
 import ksim
 
-from .walking import NUM_JOINTS, AuxOutputs, DefaultHumanoidCritic, HumanoidWalkingTask, HumanoidWalkingTaskConfig
+from .walking import (
+    NUM_JOINTS,
+    AuxOutputs,
+    DefaultHumanoidCritic,
+    HumanoidWalkingTask,
+    HumanoidWalkingTaskConfig,
+    map_tanh_distribution,
+)
 
 HIDDEN_SIZE = 64  # `_s`
 DEPTH = 2
@@ -131,9 +138,11 @@ class DefaultHumanoidActor(eqx.Module):
         std_tn = jnp.clip((jax.nn.softplus(std_tn) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Parametrizes the action distribution.
-        action_dist_tn = distrax.Transformed(distrax.Normal(mean_tn, std_tn), distrax.Tanh())
+        dist = distrax.Normal(mean_tn, std_tn)
+        dist = distrax.Transformed(dist, distrax.Tanh())
+        dist = map_tanh_distribution(dist)
 
-        return action_dist_tn, new_hidden_states
+        return dist, new_hidden_states
 
 
 class DefaultHumanoidModel(eqx.Module):
