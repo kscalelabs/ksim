@@ -564,7 +564,8 @@ class CartesianBodyTargetReward(Reward):
             sensitivity=sensitivity,
             command_name=command_name,
         )
-    
+
+
 @attrs.define(frozen=True, kw_only=True)
 class CartesianBodyTargetVectorReward(Reward):
     """Rewards the alignment of the body's velocity vector to the direction of the target."""
@@ -589,7 +590,9 @@ class CartesianBodyTargetVectorReward(Reward):
         body_vel = (body_pos - body_pos_shifted) / self.dt
 
         target_vector = trajectory.command[self.command_name] - body_pos
-        normalized_target_vector = target_vector / (jnp.linalg.norm(target_vector, axis=-1, keepdims=True) + self.epsilon)
+        normalized_target_vector = target_vector / (
+            jnp.linalg.norm(target_vector, axis=-1, keepdims=True) + self.epsilon
+        )
 
         # Threshold to only apply reward to the body when it is far from the target.
         distance_scalar = xax.get_norm(target_vector, self.norm).mean(axis=-1)
