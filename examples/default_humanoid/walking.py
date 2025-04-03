@@ -484,55 +484,42 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ang_vel_cmd_1=ang_vel_cmd_1,
         )
 
-    def get_on_policy_log_probs(
+    def get_on_policy_variables(
         self,
         model: DefaultHumanoidModel,
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
-    ) -> Array:
+    ) -> ksim.PPOVariables:
         if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.log_probs
+        return ksim.PPOVariables(
+            log_probs_tn=trajectories.aux_outputs.log_probs,
+            values_t=trajectories.aux_outputs.values,
+        )
 
-    def get_on_policy_values(
+    def get_off_policy_variables(
         self,
         model: DefaultHumanoidModel,
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
-    ) -> Array:
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
-            raise ValueError("No aux outputs found in trajectories")
-        return trajectories.aux_outputs.values
-
-    def get_log_probs(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, None]:
+    ) -> ksim.PPOVariables:
         # Vectorize over the batch dimensions.
-        par_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_btn = par_fn(model.actor, trajectories.obs, trajectories.command)
+        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
+        action_dist_btn = par_actor_fn(model.actor, trajectories.obs, trajectories.command)
+
+        # Vectorize over the batch dimensions.
+        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
+        values_t1 = par_critic_fn(model.critic, trajectories.obs, trajectories.command)
 
         # Compute the log probabilities of the trajectory's actions according
         # to the current policy, along with the entropy of the distribution.
         action_btn = trajectories.action
         log_probs_btn = action_dist_btn.log_prob(action_btn)
 
-        return log_probs_btn, None
-
-    def get_values(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        # Vectorize over the batch dimensions.
-        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_bt1 = par_fn(model.critic, trajectories.obs, trajectories.command)
-
-        # Remove the last dimension.
-        return values_bt1.squeeze(-1)
+        return ksim.PPOVariables(
+            log_probs_tn=log_probs_btn,
+            values_t=values_t1.squeeze(-1),
+        )
 
     def sample_action(
         self,

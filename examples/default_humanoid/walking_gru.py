@@ -16,7 +16,6 @@ import ksim
 from .walking import (
     NUM_JOINTS,
     AuxOutputs,
-    DefaultHumanoidCritic,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
     map_tanh_distribution,
@@ -24,6 +23,13 @@ from .walking import (
 
 HIDDEN_SIZE = 64  # `_s`
 DEPTH = 2
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Carry:
+    actor: Array
+    critic: Array
 
 
 class MultiLayerGRU(eqx.Module):
@@ -145,9 +151,85 @@ class DefaultHumanoidActor(eqx.Module):
         return dist, new_hidden_states
 
 
+class DefaultHumanoidGRUCritic(eqx.Module):
+    """GRU-based critic for the walking task."""
+
+    multi_layer_gru: MultiLayerGRU
+    projector: eqx.nn.MLP
+    hidden_size: int = eqx.static_field()
+
+    def __init__(self, key: PRNGKeyArray, *, hidden_size: int) -> None:
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 2 + 1
+        num_outputs = 1
+
+        self.multi_layer_gru = MultiLayerGRU(
+            key,
+            input_size=num_inputs,
+            hidden_size=hidden_size,
+            depth=DEPTH,
+        )
+
+        self.projector = eqx.nn.MLP(
+            in_size=hidden_size,
+            out_size=num_outputs,
+            width_size=64,
+            depth=2,
+            key=key,
+            activation=jax.nn.relu,
+        )
+
+        self.hidden_size = hidden_size
+
+    def __call__(
+        self,
+        dh_joint_pos_tn: Array,
+        dh_joint_vel_tn: Array,
+        com_inertia_n: Array,
+        com_vel_n: Array,
+        imu_acc_3: Array,
+        imu_gyro_3: Array,
+        act_frc_obs_n: Array,
+        base_pos_3: Array,
+        base_quat_4: Array,
+        lin_vel_obs_3: Array,
+        ang_vel_obs_3: Array,
+        lin_vel_cmd_2: Array,
+        ang_vel_cmd_1: Array,
+        hidden_states_dn: Array,
+    ) -> tuple[Array, Array]:
+        obs_tn = jnp.concatenate(
+            [
+                dh_joint_pos_tn,  # NUM_JOINTS
+                dh_joint_vel_tn,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3,  # 3
+                imu_gyro_3,  # 3
+                act_frc_obs_n,  # NUM_JOINTS
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                lin_vel_cmd_2,  # 2
+                ang_vel_cmd_1,  # 1
+            ],
+            axis=-1,
+        )
+
+        def scan_fn(carry: Array, xt: Array) -> tuple[Array, Array]:
+            xt, ht = self.multi_layer_gru(xt, carry)
+            xt = self.projector(xt)
+            return ht, xt
+
+        # Process through GRU cell.
+        new_hidden_states, out_tn = jax.lax.scan(scan_fn, hidden_states_dn, obs_tn)
+
+        return out_tn, new_hidden_states
+
+
 class DefaultHumanoidModel(eqx.Module):
     actor: DefaultHumanoidActor
-    critic: DefaultHumanoidCritic
+    critic: DefaultHumanoidGRUCritic
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.actor = DefaultHumanoidActor(
@@ -157,7 +239,7 @@ class DefaultHumanoidModel(eqx.Module):
             var_scale=1.0,
             hidden_size=HIDDEN_SIZE,
         )
-        self.critic = DefaultHumanoidCritic(key)
+        self.critic = DefaultHumanoidGRUCritic(key, hidden_size=HIDDEN_SIZE)
 
 
 @dataclass
@@ -172,9 +254,11 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
-        # Initialize the hidden state for GRU
-        return jnp.zeros((DEPTH, HIDDEN_SIZE))
+    def get_initial_carry(self, rng: PRNGKeyArray) -> Carry:
+        # Initialize the hidden states for both actor and critic GRUs
+        actor_hidden_states = jnp.zeros((DEPTH, HIDDEN_SIZE))
+        critic_hidden_states = jnp.zeros((DEPTH, HIDDEN_SIZE))
+        return Carry(actor=actor_hidden_states, critic=critic_hidden_states)
 
     def _run_actor(
         self,
@@ -202,13 +286,51 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
             hidden_states_dn=hidden_states_dn,
         )
 
-    def get_log_probs(
+    def _run_critic(
+        self,
+        model: DefaultHumanoidGRUCritic,
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
+        hidden_states_dn: Array,
+    ) -> tuple[Array, Array]:
+        dh_joint_pos_tn = observations["joint_position_observation"]
+        dh_joint_vel_tn = observations["joint_velocity_observation"]
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        act_frc_obs_n = observations["actuator_force_observation"]
+        base_pos_3 = observations["base_position_observation"]
+        base_quat_4 = observations["base_orientation_observation"]
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        lin_vel_cmd_2 = commands["linear_velocity_command"]
+        ang_vel_cmd_1 = commands["angular_velocity_command"]
+
+        return model(
+            dh_joint_pos_tn=dh_joint_pos_tn,
+            dh_joint_vel_tn=dh_joint_vel_tn / 10.0,
+            com_inertia_n=com_inertia_n,
+            com_vel_n=com_vel_n,
+            imu_acc_3=imu_acc_3 / 50.0,
+            imu_gyro_3=imu_gyro_3 / 3.0,
+            act_frc_obs_n=act_frc_obs_n / 100.0,
+            base_pos_3=base_pos_3,
+            base_quat_4=base_quat_4,
+            lin_vel_obs_3=lin_vel_obs_3,
+            ang_vel_obs_3=ang_vel_obs_3,
+            lin_vel_cmd_2=lin_vel_cmd_2,
+            ang_vel_cmd_1=ang_vel_cmd_1,
+            hidden_states_dn=hidden_states_dn,
+        )
+
+    def get_off_policy_variables(
         self,
         model: DefaultHumanoidModel,
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None]:
-        initial_hidden_states = self.get_initial_carry(rng)
+    ) -> ksim.PPOVariables:
+        initial_carry = self.get_initial_carry(rng)
 
         # We need to shift the actions by one time step to get the previous actions.
         actions_tn = trajectories.action
@@ -219,34 +341,31 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
             observations=trajectories.obs,
             commands=trajectories.command,
             prev_actions_tn=prev_actions_tn,
-            hidden_states_dn=initial_hidden_states,
+            hidden_states_dn=initial_carry.actor,
         )
         log_probs_tn = action_dist_tn.log_prob(trajectories.action)
-        return log_probs_tn, None
 
-    def get_values(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> Array:
         # Vectorize over both batch and time dimensions.
-        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_bt1 = par_fn(model.critic, trajectories.obs, trajectories.command)
+        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0, None))
+        values_t1, _ = par_fn(
+            model.critic,
+            trajectories.obs,
+            trajectories.command,
+            initial_carry.critic,
+        )
 
-        # Remove the last dimension.
-        return values_bt1.squeeze(-1)
+        return ksim.PPOVariables(log_probs_tn=log_probs_tn, values_t=values_t1.squeeze(-1))
 
     def sample_action(
         self,
         model: DefaultHumanoidModel,
-        carry: Array,
+        carry: Carry,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, AuxOutputs]:
+    ) -> tuple[Array, Carry, AuxOutputs]:
         # Unsqueeze first dimension as the time dimension.
         (observations_t, commands_t, prev_actions_tn) = jax.tree.map(
             lambda x: x[None, ...],
@@ -254,19 +373,30 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         )
 
         # Runs the actor model to get the action distribution and next hidden states.
-        action_dist_tn, next_carry = self._run_actor(
+        action_dist_tn, next_actor_hidden_states = self._run_actor(
             model=model.actor,
             observations=observations_t,
             commands=commands_t,
             prev_actions_tn=prev_actions_tn,
-            hidden_states_dn=carry,
+            hidden_states_dn=carry.actor,
         )
 
         action_n = action_dist_tn.sample(seed=rng).squeeze(0)
         action_log_prob_n = action_dist_tn.log_prob(action_n).squeeze(0)
 
-        critic_n = self._run_critic(model.critic, observations, commands)
+        # Run critic with its own hidden states
+        critic_n, next_critic_hidden_states = self._run_critic(
+            model=model.critic,
+            observations=observations,
+            commands=commands,
+            hidden_states_dn=carry.critic,
+        )
         value_n = critic_n.squeeze(-1)
+
+        next_carry = Carry(
+            actor=next_actor_hidden_states,
+            critic=next_critic_hidden_states,
+        )
         return action_n, next_carry, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
 
 

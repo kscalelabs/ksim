@@ -387,7 +387,7 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             quat_target_4=quat_target_4,
         )
 
-    def get_on_policy_log_probs(
+    def get_on_policy_variables(
         self,
         model: DefaultHumanoidModel,
         trajectories: ksim.Trajectory,
@@ -407,7 +407,7 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             raise ValueError("No aux outputs found in trajectories")
         return trajectories.aux_outputs.values
 
-    def get_log_probs(
+    def get_off_policy_variables(
         self,
         model: DefaultHumanoidModel,
         trajectories: ksim.Trajectory,
