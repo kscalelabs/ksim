@@ -175,38 +175,44 @@ def geoms_colliding(state: PhysicsData, geom1: Array, geom2: Array) -> Array:
     def get_colliding_inner(geom: Array, dist: Array, geom1: Array, geom2: Array) -> Array:
         # Create all pairs of geom indices
         g1, g2 = jnp.meshgrid(geom1, geom2, indexing="ij")
-        
-        def when_contacts_exist():
+
+        def when_contacts_exist() -> Array:
             # geom shape is (n_contacts, 2)
-            contact_geoms = geom  
+            contact_geoms = geom
             contact_dists = dist  # shape (n_contacts,)
-            
+
             g1_expanded = g1[..., jnp.newaxis]  # Shape: (n_geom1, n_geom2, 1)
             g2_expanded = g2[..., jnp.newaxis]  # Shape: (n_geom1, n_geom2, 1)
-            
+
             # Expand contact_geoms to shape (1, 1, n_contacts, 2)
             contacts_expanded = contact_geoms[jnp.newaxis, jnp.newaxis, :]  # Shape: (1, 1, n_contacts, 2)
-            
+
             # Check for matches in both orders (forward and reversed)
-            forward_match = (g1_expanded == contacts_expanded[:, :, :, 0]) & (g2_expanded == contacts_expanded[:, :, :, 1])
-            reverse_match = (g1_expanded == contacts_expanded[:, :, :, 1]) & (g2_expanded == contacts_expanded[:, :, :, 0])
-            
+            forward_match = (g1_expanded == contacts_expanded[:, :, :, 0]) & (
+                g2_expanded == contacts_expanded[:, :, :, 1]
+            )
+            reverse_match = (g1_expanded == contacts_expanded[:, :, :, 1]) & (
+                g2_expanded == contacts_expanded[:, :, :, 0]
+            )
+
             any_match = forward_match | reverse_match  # Shape: (n_geom1, n_geom2, n_contacts)
-            
+
             negative_dist = contact_dists < 0  # Shape: (n_contacts,)
-            collision_mask = any_match & negative_dist[jnp.newaxis, jnp.newaxis, :]  # Shape: (n_geom1, n_geom2, n_contacts)
-            
+            collision_mask = (
+                any_match & negative_dist[jnp.newaxis, jnp.newaxis, :]
+            )  # Shape: (n_geom1, n_geom2, n_contacts)
+
             is_colliding = collision_mask.any(axis=2)  # Shape: (n_geom1, n_geom2)
-            
+
             return is_colliding
-            
+
         return jax.lax.cond(
             geom.shape[0] == 0,
             lambda _: jnp.zeros(g1.shape, dtype=jnp.bool_),
             lambda _: when_contacts_exist(),
-            operand=None
+            operand=None,
         )
-    
+
     # Check if contact list is empty first
     return jax.lax.cond(
         jnp.equal(state.contact.geom.shape[0], 0),

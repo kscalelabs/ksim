@@ -256,6 +256,7 @@ class ActuatorAccelerationObservation(Observation):
         else:
             return state.physics_state.data.qacc
 
+
 @attrs.define(frozen=True, kw_only=True)
 class ContactObservation(Observation):
     geom_idxs: tuple[int, ...] = attrs.field()
@@ -271,7 +272,6 @@ class ContactObservation(Observation):
         noise: float = 0.0,
     ) -> Self:
         """Create a sensor observation from a physics model."""
-
         if isinstance(geom_names, str):
             geom_names = [geom_names]
         geom_idxs = [get_geom_data_idx_from_name(physics_model, name) for name in geom_names]
@@ -285,7 +285,7 @@ class ContactObservation(Observation):
         geom_idxs = jnp.array(self.geom_idxs)
         contact = geoms_colliding(state.physics_state.data, geom_idxs, geom_idxs).any(axis=-1)
         return contact
-    
+
     def get_name(self) -> str:
         if self.custom_name is not None:
             return self.custom_name

@@ -395,14 +395,16 @@ def joint_threshold_validator(
     if arr.dtype != jnp.float32:
         raise ValueError(f"Joint threshold must be a float array, got {arr.dtype}")
 
+
 @attrs.define(frozen=True, kw_only=True)
 class GeomContactPenalty(Reward):
-    """Penalty for any contact forces on the geoms"""
+    """Penalty for any contact forces on the geoms."""
 
     observation_name: str = attrs.field()
 
     def __call__(self, trajectory: Trajectory) -> Array:
         return trajectory.obs[self.observation_name].mean(axis=-1)
+
 
 @attrs.define(frozen=True, kw_only=True)
 class ActionNearPositionPenalty(Reward):
