@@ -23,6 +23,8 @@ from .walking import (
 
 HIDDEN_SIZE = 64  # `_s`
 DEPTH = 2
+NUM_HEADS = 4
+TRANSFORMER_DEPTH = 2
 
 
 @jax.tree_util.register_dataclass
@@ -60,6 +62,47 @@ class MultiLayerGRU(eqx.Module):
             new_h_states.append(x_n)
         stacked_h = jnp.stack(new_h_states, axis=0)
         return x_n, stacked_h
+
+
+class TransformerBlock(eqx.Module):
+    """A single transformer block with self-attention and feed-forward network."""
+    self_attn: eqx.nn.MultiheadAttention
+    mlp: eqx.nn.MLP
+    norm1: eqx.nn.LayerNorm
+    norm2: eqx.nn.LayerNorm
+
+    def __init__(self, key: PRNGKeyArray, *, hidden_size: int, num_heads: int) -> None:
+        key1, key2 = jax.random.split(key)
+        self.self_attn = eqx.nn.MultiheadAttention(
+            num_heads=num_heads,
+            query_size=hidden_size,
+            key_size=hidden_size,
+            value_size=hidden_size,
+            output_size=hidden_size,
+            key=key1,
+        )
+        self.mlp = eqx.nn.MLP(
+            in_size=hidden_size,
+            out_size=hidden_size,
+            width_size=hidden_size * 4,
+            depth=2,
+            key=key2,
+            activation=jax.nn.gelu,
+        )
+        self.norm1 = eqx.nn.LayerNorm(hidden_size)
+        self.norm2 = eqx.nn.LayerNorm(hidden_size)
+
+    def __call__(self, x: Array) -> Array:
+        # Self-attention
+        attn_out = self.self_attn(x, x, x)
+        x = x + attn_out
+        x = self.norm1(x)
+
+        # Feed-forward
+        mlp_out = self.mlp(x)
+        x = x + mlp_out
+        x = self.norm2(x)
+        return x
 
 
 class DefaultHumanoidGRUActor(eqx.Module):
@@ -151,31 +194,42 @@ class DefaultHumanoidGRUActor(eqx.Module):
         return dist, new_hidden_states
 
 
-class DefaultHumanoidGRUCritic(eqx.Module):
-    """GRU-based critic for the walking task."""
+class DefaultHumanoidTransformerCritic(eqx.Module):
+    """Transformer-based critic for the walking task."""
 
-    multi_layer_gru: MultiLayerGRU
-    projector: eqx.nn.MLP
+    input_proj: eqx.nn.Linear
+    transformer_blocks: tuple[TransformerBlock, ...]
+    output_proj: eqx.nn.Linear
     hidden_size: int = eqx.static_field()
 
     def __init__(self, key: PRNGKeyArray, *, hidden_size: int) -> None:
         num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 2 + 1
         num_outputs = 1
 
-        self.multi_layer_gru = MultiLayerGRU(
-            key,
-            input_size=num_inputs,
-            hidden_size=hidden_size,
-            depth=DEPTH,
+        key1, key2, key3 = jax.random.split(key, 3)
+
+        # Project input to hidden size
+        self.input_proj = eqx.nn.Linear(
+            in_features=num_inputs,
+            out_features=hidden_size,
+            key=key1,
         )
 
-        self.projector = eqx.nn.MLP(
-            in_size=hidden_size,
-            out_size=num_outputs,
-            width_size=64,
-            depth=2,
-            key=key,
-            activation=jax.nn.relu,
+        # Create transformer blocks
+        self.transformer_blocks = tuple(
+            TransformerBlock(
+                key=key2,
+                hidden_size=hidden_size,
+                num_heads=NUM_HEADS,
+            )
+            for _ in range(TRANSFORMER_DEPTH)
+        )
+
+        # Project to output
+        self.output_proj = eqx.nn.Linear(
+            in_features=hidden_size,
+            out_features=num_outputs,
+            key=key3,
         )
 
         self.hidden_size = hidden_size
@@ -195,7 +249,7 @@ class DefaultHumanoidGRUCritic(eqx.Module):
         ang_vel_obs_t3: Array,
         lin_vel_cmd_t2: Array,
         ang_vel_cmd_t1: Array,
-        hidden_states_dn: Array,
+        hidden_states_dn: Array,  # Unused for transformer
     ) -> tuple[Array, Array]:
         obs_tn = jnp.concatenate(
             [
@@ -216,20 +270,23 @@ class DefaultHumanoidGRUCritic(eqx.Module):
             axis=-1,
         )
 
-        def scan_fn(carry: Array, xt: Array) -> tuple[Array, Array]:
-            xt, ht = self.multi_layer_gru(xt, carry)
-            xt = self.projector(xt)
-            return ht, xt
+        # Project input to hidden size
+        x = self.input_proj(obs_tn)
 
-        # Process through GRU cell.
-        new_hidden_states, out_tn = jax.lax.scan(scan_fn, hidden_states_dn, obs_tn)
+        # Apply transformer blocks
+        for block in self.transformer_blocks:
+            x = block(x)
 
-        return out_tn, new_hidden_states
+        # Project to output
+        out = self.output_proj(x)
+
+        # Return output and dummy hidden states (unused for transformer)
+        return out, hidden_states_dn
 
 
 class DefaultHumanoidModel(eqx.Module):
     actor: DefaultHumanoidGRUActor
-    critic: DefaultHumanoidGRUCritic
+    critic: DefaultHumanoidTransformerCritic
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.actor = DefaultHumanoidGRUActor(
@@ -239,7 +296,7 @@ class DefaultHumanoidModel(eqx.Module):
             var_scale=1.0,
             hidden_size=HIDDEN_SIZE,
         )
-        self.critic = DefaultHumanoidGRUCritic(key, hidden_size=HIDDEN_SIZE)
+        self.critic = DefaultHumanoidTransformerCritic(key, hidden_size=HIDDEN_SIZE)
 
 
 @dataclass
@@ -288,7 +345,7 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def _run_critic(
         self,
-        model: DefaultHumanoidGRUCritic,
+        model: DefaultHumanoidTransformerCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         hidden_states_dn: Array,
