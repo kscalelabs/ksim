@@ -22,6 +22,7 @@ __all__ = [
     "FeetFlatReward",
     "CartesianBodyTargetReward",
     "CartesianBodyTargetPenalty",
+    "CartesianBodyTargetVectorReward",
     "ContinuousCartesianBodyTargetReward",
     "GlobalBodyQuaternionReward",
     "FeetNoContactReward",
@@ -566,6 +567,73 @@ class CartesianBodyTargetReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class CartesianBodyTargetVectorReward(Reward):
+    """Rewards the alignment of the body's velocity vector to the direction of the target."""
+
+    tracked_body_idx: int = attrs.field()
+    base_body_idx: int = attrs.field()
+    command_name: str = attrs.field()
+    dt: float = attrs.field()
+    normalize_velocity: bool = attrs.field()
+    distance_threshold: float = attrs.field()
+    epsilon: float = attrs.field(default=1e-6)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        body_pos_TL = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+
+        body_pos_right_shifted_TL = jnp.roll(body_pos_TL, shift=1, axis=0)
+
+        # Zero out the first velocity
+        body_pos_right_shifted_TL = body_pos_right_shifted_TL.at[0].set(body_pos_TL[0])
+
+        body_vel_TL = (body_pos_TL - body_pos_right_shifted_TL) / self.dt
+
+        target_vector = trajectory.command[self.command_name] - body_pos_TL
+        normalized_target_vector = target_vector / (
+            jnp.linalg.norm(target_vector, axis=-1, keepdims=True) + self.epsilon
+        )
+
+        # Threshold to only apply reward to the body when it is far from the target.
+        distance_scalar = jnp.linalg.norm(target_vector, axis=-1)
+        far_from_target = distance_scalar > self.distance_threshold
+
+        if self.normalize_velocity:
+            normalized_body_vel = body_vel_TL / (jnp.linalg.norm(body_vel_TL, axis=-1, keepdims=True) + self.epsilon)
+            original_products = normalized_body_vel * normalized_target_vector
+        else:
+            original_products = body_vel_TL * normalized_target_vector
+
+        # This will give maximum reward if near the target (and velocity is normalized)
+        return jnp.where(far_from_target, jnp.sum(original_products, axis=-1), 1.1)
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        command_name: str,
+        tracked_body_name: str,
+        base_body_name: str,
+        dt: float,
+        normalize_velocity: bool = True,
+        scale: float = 1.0,
+        epsilon: float = 1e-6,
+        distance_threshold: float = 0.1,
+    ) -> Self:
+        body_idx = get_body_data_idx_from_name(model, tracked_body_name)
+        base_idx = get_body_data_idx_from_name(model, base_body_name)
+        return cls(
+            tracked_body_idx=body_idx,
+            base_body_idx=base_idx,
+            scale=scale,
+            command_name=command_name,
+            dt=dt,
+            normalize_velocity=normalize_velocity,
+            epsilon=epsilon,
+            distance_threshold=distance_threshold,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
 class CartesianBodyTargetPenalty(Reward):
     """Penalizes larger distances between the body and the target position."""
 
@@ -611,6 +679,7 @@ class ContinuousCartesianBodyTargetReward(Reward):
     sensitivity: float = attrs.field()
     threshold: float = attrs.field()
     time_bonus_scale: float = attrs.field()
+    time_sensitivity: float = attrs.field()
 
     def __call__(self, trajectory: Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
@@ -630,6 +699,7 @@ class ContinuousCartesianBodyTargetReward(Reward):
             count_scan_fn, init=jnp.zeros_like(under_threshold[0], dtype=jnp.int32), xs=under_threshold
         )
 
+        # time_bonus = jnp.exp(consecutive_steps * self.time_sensitivity) * self.time_bonus_scale
         time_bonus = consecutive_steps * self.time_bonus_scale
         return (base_reward + time_bonus).mean(axis=-1)
 
@@ -643,6 +713,7 @@ class ContinuousCartesianBodyTargetReward(Reward):
         norm: xax.NormType = "l2",
         scale: float = 1.0,
         sensitivity: float = 1.0,
+        time_sensitivity: float = 0.01,
         threshold: float = 0.25,
         time_bonus_scale: float = 0.1,
     ) -> Self:
@@ -654,6 +725,7 @@ class ContinuousCartesianBodyTargetReward(Reward):
             norm=norm,
             scale=scale,
             sensitivity=sensitivity,
+            time_sensitivity=time_sensitivity,
             command_name=command_name,
             threshold=threshold,
             time_bonus_scale=time_bonus_scale,
