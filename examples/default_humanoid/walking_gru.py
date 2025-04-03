@@ -312,7 +312,7 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         return model(
             dh_joint_pos_tj=dh_joint_pos_tj,
             dh_joint_vel_tj=dh_joint_vel_tj / 10.0,
-            com_inertia_n=com_inertia_tn,
+            com_inertia_tn=com_inertia_tn,
             com_vel_tn=com_vel_tn,
             imu_acc_t3=imu_acc_t3 / 50.0,
             imu_gyro_t3=imu_gyro_t3 / 3.0,
