@@ -18,7 +18,7 @@ from .walking import (
     AuxOutputs,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
-    map_tanh_distribution,
+    map_sigmoid_distribution,
 )
 
 HIDDEN_SIZE = 64  # `_s`
@@ -66,6 +66,7 @@ class MultiLayerGRU(eqx.Module):
 
 class TransformerBlock(eqx.Module):
     """A single transformer block with self-attention and feed-forward network."""
+
     self_attn: eqx.nn.MultiheadAttention
     mlp: eqx.nn.MLP
     norm1: eqx.nn.LayerNorm
@@ -188,8 +189,8 @@ class DefaultHumanoidGRUActor(eqx.Module):
 
         # Parametrizes the action distribution.
         dist = distrax.Normal(mean_tn, std_tn)
-        dist = distrax.Transformed(dist, distrax.Tanh())
-        dist = map_tanh_distribution(dist)
+        dist = distrax.Transformed(dist, distrax.Sigmoid())
+        dist = map_sigmoid_distribution(dist)
 
         return dist, new_hidden_states
 

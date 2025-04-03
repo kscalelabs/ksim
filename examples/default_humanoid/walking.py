@@ -48,11 +48,10 @@ ACTION_RANGES = [
 ]
 
 
-def map_tanh_distribution(dist: distrax.Distribution) -> distrax.Distribution:
+def map_sigmoid_distribution(dist: distrax.Distribution) -> distrax.Distribution:
     action_ranges = jnp.array(ACTION_RANGES)
     action_min, action_max = action_ranges[..., 0], action_ranges[..., 1]
-    dist = distrax.Transformed(dist, distrax.ScalarAffine(shift=jnp.zeros_like(action_min), scale=action_max))
-    dist = distrax.Transformed(dist, ksim.AsymmetricBijector(min=action_min, max=action_max))
+    dist = distrax.Transformed(dist, ksim.UnitIntervalToRangeBijector(min=action_min, max=action_max))
     return dist
 
 
@@ -144,8 +143,8 @@ class DefaultHumanoidActor(eqx.Module):
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
         dist = distrax.Normal(mean_n, std_n)
-        dist = distrax.Transformed(dist, distrax.Tanh())
-        dist = map_tanh_distribution(dist)
+        dist = distrax.Transformed(dist, distrax.Sigmoid())
+        dist = map_sigmoid_distribution(dist)
         return dist
 
 
