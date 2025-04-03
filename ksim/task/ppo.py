@@ -3,11 +3,13 @@
 __all__ = [
     "PPOConfig",
     "PPOTask",
+    "PPOInputs",
+    "PPOVariables",
 ]
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import Generic, Mapping, TypeVar, cast
 
 import chex
 import equinox as eqx
@@ -28,6 +30,15 @@ class PPOInputs:
     value_targets_t: Array
     gae_t: Array
     returns_t: Array
+
+
+@jax.tree_util.register_dataclass
+@dataclass
+class PPOVariables:
+    log_probs_tj: Array
+    values_t: Array
+    entropy_tn: Array | None = None
+    aux_losses: Mapping[str, Array] | None = None
 
 
 @xax.jit(
@@ -123,13 +134,10 @@ def clipped_value_loss(
 @xax.jit(static_argnames=["clip_param", "value_loss_coef", "entropy_coef", "log_clip_value", "use_clipped_value_loss"])
 def compute_ppo_loss(
     ppo_inputs: PPOInputs,
-    log_probs_tn: Array,
-    values_t: Array,
-    on_policy_log_probs_tn: Array,
-    on_policy_values_t: Array,
+    on_policy_variables: PPOVariables,
+    off_policy_variables: PPOVariables,
     dones_t: Array,
     *,
-    entropy_tn: Array | None = None,
     clip_param: float = 0.2,
     value_loss_coef: float = 0.5,
     entropy_coef: float = 0.008,
@@ -140,14 +148,9 @@ def compute_ppo_loss(
 
     Args:
         ppo_inputs: The pre-computed PPO inputs.
-        log_probs_tn: The log probabilities of the actions, with shape (T, *A).
-        values_t: The state-value estimates, with shape (T,).
-        on_policy_log_probs_tn: The original policy's log probabilities of the
-            actions, with shape (T, *A).
-        on_policy_values_t: The original policy's values of the actions, with
-            shape (T,).
+        on_policy_variables: The variables for the original policy.
+        off_policy_variables: The variables for the new policy.
         dones_t: The termination mask, with shape (T,).
-        entropy_tn: The entropy of the action distribution, with shape (T, *A).
         clip_param: The clip parameter for PPO.
         value_loss_coef: The value loss coefficient for PPO.
         entropy_coef: The entropy coefficient for PPO.
@@ -159,28 +162,26 @@ def compute_ppo_loss(
     """
     chex.assert_equal_shape_prefix(
         [
-            log_probs_tn,
-            values_t,
-            on_policy_log_probs_tn,
-            on_policy_values_t,
+            on_policy_variables.log_probs_tj,
+            on_policy_variables.values_t,
+            off_policy_variables.log_probs_tj,
+            off_policy_variables.values_t,
             ppo_inputs.advantages_t,
             ppo_inputs.value_targets_t,
             dones_t,
-        ],
+        ]
+        + ([] if off_policy_variables.aux_losses is None else list(off_policy_variables.aux_losses.values())),
         prefix_len=1,
     )
 
     def compute_loss_for_sample(
-        log_probs_n: Array,
-        values: Array,
-        on_policy_log_probs_n: Array,
-        on_policy_values: Array,
+        on_policy_variables: PPOVariables,
+        off_policy_variables: PPOVariables,
         ppo_inputs: PPOInputs,
         dones: Array,
-        entropy_n: Array | None,
     ) -> Array:
         # Preventing underflow / overflow in calculating the ratio.
-        log_ratio = jnp.sum(log_probs_n - on_policy_log_probs_n, axis=-1)
+        log_ratio = jnp.sum(off_policy_variables.log_probs_tj - on_policy_variables.log_probs_tj, axis=-1)
         ratio = jnp.exp(jnp.clip(log_ratio, -log_clip_value, log_clip_value))
         clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
         surrogate_1 = ratio * ppo_inputs.advantages_t
@@ -190,20 +191,25 @@ def compute_ppo_loss(
         # Computes the value loss, with or without clipping.
         if use_clipped_value_loss:
             value_mse = 0.5 * clipped_value_loss(
-                target_values=on_policy_values,
-                values=values,
+                target_values=on_policy_variables.values_t,
+                values=off_policy_variables.values_t,
                 value_targets=ppo_inputs.value_targets_t,
                 clip_param=clip_param,
             )
         else:
-            value_mse = 0.5 * (ppo_inputs.value_targets_t - values) ** 2
+            value_mse = 0.5 * (ppo_inputs.value_targets_t - off_policy_variables.values_t) ** 2
 
         value_objective = value_loss_coef * value_mse
         total_objective = policy_objective - value_objective
 
         # Adds the entropy bonus term, if provided.
-        if entropy_n is not None:
-            total_objective = total_objective + entropy_coef * entropy_n.mean(axis=-1)
+        if off_policy_variables.entropy_tn is not None:
+            total_objective = total_objective + entropy_coef * off_policy_variables.entropy_tn.mean(axis=-1)
+
+        # Adds any additional auxiliary losses.
+        if off_policy_variables.aux_losses is not None:
+            for aux_loss_value in off_policy_variables.aux_losses.values():
+                total_objective = total_objective + jnp.mean(aux_loss_value)
 
         # Maximize the objective.
         total_loss = -total_objective
@@ -216,15 +222,7 @@ def compute_ppo_loss(
     par_fn = jax.vmap(compute_loss_for_sample, in_axes=0)
 
     # Computes the vectorized loss.
-    total_loss_t = par_fn(
-        log_probs_tn,
-        values_t,
-        on_policy_log_probs_tn,
-        on_policy_values_t,
-        ppo_inputs,
-        dones_t,
-        entropy_tn,
-    )
+    total_loss_t = par_fn(on_policy_variables, off_policy_variables, ppo_inputs, dones_t)
 
     return total_loss_t
 
@@ -288,7 +286,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
 
     @abstractmethod
-    def get_on_policy_log_probs(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> Array:
+    def get_on_policy_variables(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> PPOVariables:
         """Gets the initial log probabilities of the given trajectories.
 
         This function returns the log probabilities of the sampled actions,
@@ -306,23 +304,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def get_on_policy_values(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> Array:
-        """Gets the initial values of the given trajectories.
-
-        This function returns the values of the sampled actions, according to
-        the original policy that was used to sample the actions.
-
-        Args:
-            model: The user-provided model.
-            trajectories: The batch of trajectories to get probabilities for.
-            rng: A random seed.
-
-        Returns:
-            The values of the given actions, with shape (B, T).
-        """
-
-    @abstractmethod
-    def get_log_probs(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> tuple[Array, Array | None]:
+    def get_off_policy_variables(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> PPOVariables:
         """Gets the log probabilities of the given trajectories.
 
         This function operates on the entire batch of actions, observations,
@@ -343,36 +325,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             or None if we do not want to use the entropy bonus term.
         """
 
-    @abstractmethod
-    def get_values(self, model: PyTree, trajectories: Trajectory, rng: PRNGKeyArray) -> Array:
-        """Gets the state-value estimates for the given trajectories.
-
-        This is usually provided by a critic model.
-
-        This function operates on the entire batch of actions, observations,
-        and commands, so users who implement it should take care to vectorize
-        over the relevant dimensions.
-
-        Args:
-            model: The user-provided model.
-            trajectories: The batch of trajectories estimates for.
-            rng: A random seed.
-
-        Returns:
-            The state-value estimates for the given trajectories, with shape (B, T).
-        """
-
     def get_ppo_metrics(
         self,
         trajectories: Trajectory,
         rewards: Rewards,
-        ppo_inputs: PPOInputs,
         loss_t: Array,
-        on_policy_log_probs_tn: Array,
-        log_probs_tn: Array,
-        entropy_tn: Array | None,
-        values_t: Array,
-        on_policy_values_t: Array,
+        ppo_inputs: PPOInputs,
+        on_policy_variables: PPOVariables,
+        off_policy_variables: PPOVariables,
     ) -> dict[str, Array]:
         """Gets the metrics to be logged.
 
@@ -383,28 +343,28 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         Args:
             trajectories: The batch of trajectories to get metrics for.
             rewards: The rewards for the trajectories.
-            ppo_inputs: The PPO inputs.
             loss_t: The PPO loss value.
-            on_policy_log_probs_tn: The log probabilities of the actions, with shape (T, *A).
-            log_probs_tn: The log probabilities of the actions, with shape (T, *A).
-            entropy_tn: The entropy of the action distribution, with shape (T, *A).
-            values_t: The state-value estimates, with shape (T,).
-            on_policy_values_t: The original policy's values of the actions, with shape (T,).
+            ppo_inputs: The PPO inputs.
+            on_policy_variables: The variables for the original policy.
+            off_policy_variables: The variables for the new policy.
 
         Returns:
             A dictionary of metrics to be logged.
         """
         metrics = {
             "loss": loss_t.mean(),
-            "log_probs": log_probs_tn.mean(0).flatten(),
-            "on_policy_log_probs": on_policy_log_probs_tn.mean(0).flatten(),
-            "value": values_t.mean(),
-            "on_policy_value": on_policy_values_t.mean(),
+            "log_probs": off_policy_variables.log_probs_tj.mean(0).flatten(),
+            "on_policy_log_probs": on_policy_variables.log_probs_tj.mean(0).flatten(),
+            "value": off_policy_variables.values_t.mean(),
+            "on_policy_value": on_policy_variables.values_t.mean(),
             "value_targets": ppo_inputs.value_targets_t.mean(),
             "advantages": ppo_inputs.advantages_t.mean(),
         }
-        if entropy_tn is not None:
-            metrics["entropy"] = entropy_tn.mean(0).flatten()
+        if off_policy_variables.entropy_tn is not None:
+            metrics["entropy"] = off_policy_variables.entropy_tn.mean(0).flatten()
+        if off_policy_variables.aux_losses is not None:
+            for aux_loss_name, aux_loss_value in off_policy_variables.aux_losses.items():
+                metrics[aux_loss_name] = aux_loss_value.mean()
         return metrics
 
     def get_single_trajectory_metrics(
@@ -413,10 +373,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rewards: Rewards,
         ppo_inputs: PPOInputs,
         loss_t: Array,
-        on_policy_log_probs_tn: Array,
-        log_probs_tn: Array,
-        entropy_tn: Array | None,
-        values_t: Array,
+        on_policy_variables: PPOVariables,
+        off_policy_variables: PPOVariables,
     ) -> dict[str, Array]:
         """Gets the metrics to log for a single trajectory.
 
@@ -429,25 +387,26 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rewards: The rewards for the trajectories.
             ppo_inputs: The PPO inputs.
             loss_t: The PPO loss value.
-            on_policy_log_probs_tn: The log probabilities of the actions, with shape (T, *A).
-            log_probs_tn: The log probabilities of the actions, with shape (T, *A).
-            entropy_tn: The entropy of the action distribution, with shape (T, *A).
-            values_t: The state-value estimates, with shape (T,).
+            on_policy_variables: The variables for the original policy.
+            off_policy_variables: The variables for the new policy.
 
         Returns:
             A dictionary of metrics to be logged. Each metric should be a tensor
             with shape (T, *).
         """
         metrics = {
-            "values": values_t,
+            "values": off_policy_variables.values_t,
             "value_targets": ppo_inputs.value_targets_t,
             "advantages": ppo_inputs.advantages_t,
             "loss": loss_t,
             "gae": ppo_inputs.gae_t,
             "returns": ppo_inputs.returns_t,
         }
-        if entropy_tn is not None:
-            metrics["entropy"] = entropy_tn
+        if off_policy_variables.entropy_tn is not None:
+            metrics["entropy"] = off_policy_variables.entropy_tn
+        if off_policy_variables.aux_losses is not None:
+            for aux_loss_name, aux_loss_value in off_policy_variables.aux_losses.items():
+                metrics[aux_loss_name] = aux_loss_value
         return metrics
 
     @xax.jit(static_argnames=["self", "model_static"])
@@ -480,15 +439,16 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rewards: Rewards,
             rng: PRNGKeyArray,
         ) -> tuple[Array, xax.FrozenDict[str, Array], SingleTrajectory]:
-            rng, rng1, rng2, rng3, rng4 = jax.random.split(rng, 5)
+            rng, rng1, rng2 = jax.random.split(rng, 3)
 
-            on_policy_log_probs_tn = jax.lax.stop_gradient(self.get_on_policy_log_probs(model, trajectories, rng1))
-            on_policy_values_t = jax.lax.stop_gradient(self.get_on_policy_values(model, trajectories, rng2))
-            log_probs_tn, entropy_tn = self.get_log_probs(model, trajectories, rng3)
-            values_t = self.get_values(model, trajectories, rng4)
+            on_policy_variables = self.get_on_policy_variables(model, trajectories, rng1)
+            off_policy_variables = self.get_off_policy_variables(model, trajectories, rng2)
+
+            # Disable gradients to on-policy variables.
+            on_policy_variables = cast(PPOVariables, jax.tree.map(jax.lax.stop_gradient, on_policy_variables))
 
             ppo_inputs = compute_ppo_inputs(
-                values_t=jax.lax.stop_gradient(values_t),
+                values_t=jax.lax.stop_gradient(off_policy_variables.values_t),
                 rewards_t=rewards.total,
                 dones_t=trajectories.done,
                 decay_gamma=self.config.gamma,
@@ -500,12 +460,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
             loss_t = compute_ppo_loss(
                 ppo_inputs=ppo_inputs,
-                log_probs_tn=log_probs_tn,
-                values_t=values_t,
-                on_policy_log_probs_tn=on_policy_log_probs_tn,
-                on_policy_values_t=on_policy_values_t,
+                on_policy_variables=on_policy_variables,
+                off_policy_variables=off_policy_variables,
                 dones_t=trajectories.done,
-                entropy_tn=entropy_tn,
                 clip_param=self.config.clip_param,
                 value_loss_coef=self.config.value_loss_coef,
                 entropy_coef=self.config.entropy_coef,
@@ -516,24 +473,19 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             metrics = self.get_ppo_metrics(
                 trajectories=trajectories,
                 rewards=rewards,
-                ppo_inputs=ppo_inputs,
                 loss_t=loss_t,
-                on_policy_log_probs_tn=on_policy_log_probs_tn,
-                log_probs_tn=log_probs_tn,
-                entropy_tn=entropy_tn,
-                values_t=values_t,
-                on_policy_values_t=on_policy_values_t,
+                ppo_inputs=ppo_inputs,
+                on_policy_variables=on_policy_variables,
+                off_policy_variables=off_policy_variables,
             )
 
             single_traj_metrics = self.get_single_trajectory_metrics(
                 trajectories=trajectories,
                 rewards=rewards,
-                ppo_inputs=ppo_inputs,
                 loss_t=loss_t,
-                on_policy_log_probs_tn=on_policy_log_probs_tn,
-                log_probs_tn=log_probs_tn,
-                entropy_tn=entropy_tn,
-                values_t=values_t,
+                ppo_inputs=ppo_inputs,
+                on_policy_variables=on_policy_variables,
+                off_policy_variables=off_policy_variables,
             )
 
             single_traj = SingleTrajectory(
