@@ -14,8 +14,6 @@ from jaxtyping import Array, PRNGKeyArray
 import ksim
 
 from .walking import (
-    DEPTH,
-    HIDDEN_SIZE,
     NUM_INPUTS,
     NUM_JOINTS,
     AuxOutputs,
@@ -23,9 +21,6 @@ from .walking import (
     HumanoidWalkingTaskConfig,
     map_normal_distribution,
 )
-
-KERNEL_SIZE = 10
-KERNEL_DILATION = 1
 
 
 class DefaultHumanoidCNNActor(eqx.Module):
@@ -45,6 +40,10 @@ class DefaultHumanoidCNNActor(eqx.Module):
         min_std: float,
         max_std: float,
         var_scale: float,
+        hidden_size: int,
+        depth: int,
+        kernel_size: int,
+        dilation: int,
     ) -> None:
         num_inputs = NUM_INPUTS
         num_outputs = NUM_JOINTS
@@ -53,21 +52,21 @@ class DefaultHumanoidCNNActor(eqx.Module):
         key, input_proj_key = jax.random.split(key)
         self.input_proj = eqx.nn.Linear(
             in_features=num_inputs,
-            out_features=HIDDEN_SIZE,
+            out_features=hidden_size,
             key=input_proj_key,
         )
 
         # Create convolution blocks.
         cnn_blocks = []
-        for _ in range(DEPTH):
+        for _ in range(depth):
             key, cnn_key = jax.random.split(key)
             cnn_blocks.append(
                 eqx.nn.Conv1d(
-                    in_channels=HIDDEN_SIZE,
-                    out_channels=HIDDEN_SIZE,
-                    kernel_size=KERNEL_SIZE,
-                    dilation=KERNEL_DILATION,
-                    padding=[((KERNEL_SIZE - 1) * KERNEL_DILATION, 0)],  # Left-padding to keep the length constant.
+                    in_channels=hidden_size,
+                    out_channels=hidden_size,
+                    kernel_size=kernel_size,
+                    dilation=dilation,
+                    padding=[((kernel_size - 1) * dilation, 0)],  # Left-padding to keep the length constant.
                     key=cnn_key,
                 )
             )
@@ -75,10 +74,10 @@ class DefaultHumanoidCNNActor(eqx.Module):
 
         # Project to output
         self.output_proj = eqx.nn.MLP(
-            in_size=HIDDEN_SIZE,
+            in_size=hidden_size,
             out_size=num_outputs * 2,
-            width_size=HIDDEN_SIZE,
-            depth=DEPTH,
+            width_size=hidden_size,
+            depth=depth,
             key=key,
             activation=jax.nn.gelu,
         )
@@ -164,7 +163,15 @@ class DefaultHumanoidCNNCritic(eqx.Module):
     cnn_blocks: tuple[eqx.nn.Conv1d, ...]
     output_proj: eqx.nn.MLP
 
-    def __init__(self, key: PRNGKeyArray) -> None:
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        hidden_size: int,
+        depth: int,
+        kernel_size: int,
+        dilation: int,
+    ) -> None:
         num_inputs = NUM_INPUTS
         num_outputs = 1
 
@@ -172,21 +179,21 @@ class DefaultHumanoidCNNCritic(eqx.Module):
         key, input_proj_key = jax.random.split(key)
         self.input_proj = eqx.nn.Linear(
             in_features=num_inputs,
-            out_features=HIDDEN_SIZE,
+            out_features=hidden_size,
             key=input_proj_key,
         )
 
         # Create convolution blocks.
         cnn_blocks = []
-        for _ in range(DEPTH):
+        for _ in range(depth):
             key, cnn_key = jax.random.split(key)
             cnn_blocks.append(
                 eqx.nn.Conv1d(
-                    in_channels=HIDDEN_SIZE,
-                    out_channels=HIDDEN_SIZE,
-                    kernel_size=KERNEL_SIZE,
-                    dilation=KERNEL_DILATION,
-                    padding=[((KERNEL_SIZE - 1) * KERNEL_DILATION, 0)],  # Left-padding to keep the length constant.
+                    in_channels=hidden_size,
+                    out_channels=hidden_size,
+                    kernel_size=kernel_size,
+                    dilation=dilation,
+                    padding=[((kernel_size - 1) * dilation, 0)],  # Left-padding to keep the length constant.
                     key=cnn_key,
                 )
             )
@@ -194,10 +201,10 @@ class DefaultHumanoidCNNCritic(eqx.Module):
 
         # Project to output
         self.output_proj = eqx.nn.MLP(
-            in_size=HIDDEN_SIZE,
+            in_size=hidden_size,
             out_size=num_outputs,
-            width_size=HIDDEN_SIZE,
-            depth=DEPTH,
+            width_size=hidden_size,
+            depth=depth,
             key=key,
             activation=jax.nn.gelu,
         )
@@ -253,26 +260,63 @@ class DefaultHumanoidCNNCritic(eqx.Module):
         return out_tn
 
 
-class DefaultHumanoidModel(eqx.Module):
+class DefaultHumanoidCNNModel(eqx.Module):
     actor: DefaultHumanoidCNNActor
     critic: DefaultHumanoidCNNCritic
 
-    def __init__(self, key: PRNGKeyArray) -> None:
-        self.actor = DefaultHumanoidCNNActor(key, min_std=0.01, max_std=1.0, var_scale=0.5)
-        self.critic = DefaultHumanoidCNNCritic(key)
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        hidden_size: int,
+        depth: int,
+        kernel_size: int,
+        dilation: int,
+    ) -> None:
+        self.actor = DefaultHumanoidCNNActor(
+            key,
+            min_std=0.01,
+            max_std=1.0,
+            var_scale=0.5,
+            hidden_size=hidden_size,
+            depth=depth,
+            kernel_size=kernel_size,
+            dilation=dilation,
+        )
+        self.critic = DefaultHumanoidCNNCritic(
+            key,
+            hidden_size=hidden_size,
+            depth=depth,
+            kernel_size=kernel_size,
+            dilation=dilation,
+        )
 
 
 @dataclass
 class HumanoidWalkingCNNTaskConfig(HumanoidWalkingTaskConfig):
-    pass
+    # Model parameters.
+    kernel_size: int = xax.field(
+        value=1,
+        help="The kernel size for the CNN.",
+    )
+    dilation: int = xax.field(
+        value=1,
+        help="The dilation for the CNN.",
+    )
 
 
 Config = TypeVar("Config", bound=HumanoidWalkingCNNTaskConfig)
 
 
 class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
-    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
-        return DefaultHumanoidModel(key)
+    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidCNNModel:
+        return DefaultHumanoidCNNModel(
+            key,
+            hidden_size=self.config.hidden_size,
+            depth=self.config.depth,
+            kernel_size=self.config.kernel_size,
+            dilation=self.config.dilation,
+        )
 
     def _run_actor(
         self,
@@ -354,7 +398,7 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def get_on_policy_variables(
         self,
-        model: DefaultHumanoidModel,
+        model: DefaultHumanoidCNNModel,
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
@@ -376,7 +420,7 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def get_off_policy_variables(
         self,
-        model: DefaultHumanoidModel,
+        model: DefaultHumanoidCNNModel,
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
@@ -397,11 +441,11 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         )
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(shape=((KERNEL_SIZE - 1) * KERNEL_DILATION, NUM_INPUTS))
+        return jnp.zeros(shape=((self.config.kernel_size - 1) * self.config.dilation, NUM_INPUTS))
 
     def sample_action(
         self,
-        model: DefaultHumanoidModel,
+        model: DefaultHumanoidCNNModel,
         carry: Array,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
