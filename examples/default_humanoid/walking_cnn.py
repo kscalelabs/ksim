@@ -24,7 +24,7 @@ from .walking import (
     map_normal_distribution,
 )
 
-KERNEL_SIZE = 10
+KERNEL_SIZE = 1
 KERNEL_DILATION = 1
 
 
