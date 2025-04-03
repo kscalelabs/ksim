@@ -396,7 +396,7 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
         return ksim.PPOVariables(
-            log_probs_tn=trajectories.aux_outputs.log_probs,
+            log_probs_tj=trajectories.aux_outputs.log_probs,
             values_t=trajectories.aux_outputs.values,
         )
 
@@ -421,7 +421,7 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         entropy_tn = action_dist_tn.entropy()
 
         return ksim.PPOVariables(
-            log_probs_tn=log_probs_tn,
+            log_probs_tj=log_probs_tn,
             values_t=values_t1.squeeze(-1),
             entropy_tn=entropy_tn,
         )

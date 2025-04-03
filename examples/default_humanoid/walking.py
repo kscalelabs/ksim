@@ -493,7 +493,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
         return ksim.PPOVariables(
-            log_probs_tn=trajectories.aux_outputs.log_probs,
+            log_probs_tj=trajectories.aux_outputs.log_probs,
             values_t=trajectories.aux_outputs.values,
         )
 
@@ -517,7 +517,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         log_probs_btn = action_dist_btn.log_prob(action_btn)
 
         return ksim.PPOVariables(
-            log_probs_tn=log_probs_btn,
+            log_probs_tj=log_probs_btn,
             values_t=values_t1.squeeze(-1),
         )
 

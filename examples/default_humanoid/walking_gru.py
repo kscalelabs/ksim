@@ -107,24 +107,24 @@ class DefaultHumanoidActor(eqx.Module):
 
     def __call__(
         self,
-        dh_joint_pos_tn: Array,
-        dh_joint_vel_tn: Array,
+        dh_joint_pos_tj: Array,
+        dh_joint_vel_tj: Array,
         imu_acc_t3: Array,
         imu_gyro_t3: Array,
         lin_vel_cmd_t2: Array,
         ang_vel_cmd_t1: Array,
-        prev_actions_tn: Array,
+        prev_actions_tj: Array,
         hidden_states_dn: Array,
     ) -> tuple[distrax.Distribution, Array]:
         obs_tn = jnp.concatenate(
             [
-                dh_joint_pos_tn,  # NUM_JOINTS
-                dh_joint_vel_tn,  # NUM_JOINTS
+                dh_joint_pos_tj,  # NUM_JOINTS
+                dh_joint_vel_tj,  # NUM_JOINTS
                 imu_acc_t3,  # 3
                 imu_gyro_t3,  # 3
                 lin_vel_cmd_t2,  # 2
                 ang_vel_cmd_t1,  # 1
-                prev_actions_tn,  # NUM_JOINTS
+                prev_actions_tj,  # NUM_JOINTS
             ],
             axis=-1,
         )
@@ -182,39 +182,41 @@ class DefaultHumanoidGRUCritic(eqx.Module):
 
     def __call__(
         self,
-        dh_joint_pos_tn: Array,
-        dh_joint_vel_tn: Array,
-        com_inertia_n: Array,
-        com_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
-        act_frc_obs_n: Array,
-        base_pos_3: Array,
-        base_quat_4: Array,
-        lin_vel_obs_3: Array,
-        ang_vel_obs_3: Array,
-        lin_vel_cmd_2: Array,
-        ang_vel_cmd_1: Array,
+        dh_joint_pos_tj: Array,
+        dh_joint_vel_tj: Array,
+        com_inertia_tn: Array,
+        com_vel_tn: Array,
+        imu_acc_t3: Array,
+        imu_gyro_t3: Array,
+        act_frc_obs_tn: Array,
+        base_pos_t3: Array,
+        base_quat_t4: Array,
+        lin_vel_obs_t3: Array,
+        ang_vel_obs_t3: Array,
+        lin_vel_cmd_t2: Array,
+        ang_vel_cmd_t1: Array,
         hidden_states_dn: Array,
     ) -> tuple[Array, Array]:
         obs_tn = jnp.concatenate(
             [
-                dh_joint_pos_tn,  # NUM_JOINTS
-                dh_joint_vel_tn,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
-                imu_acc_3,  # 3
-                imu_gyro_3,  # 3
-                act_frc_obs_n,  # NUM_JOINTS
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
-                lin_vel_cmd_2,  # 2
-                ang_vel_cmd_1,  # 1
+                dh_joint_pos_tj,  # NUM_JOINTS
+                dh_joint_vel_tj,  # NUM_JOINTS
+                com_inertia_tn,  # 160
+                com_vel_tn,  # 96
+                imu_acc_t3,  # 3
+                imu_gyro_t3,  # 3
+                act_frc_obs_tn,  # NUM_JOINTS
+                base_pos_t3,  # 3
+                base_quat_t4,  # 4
+                lin_vel_obs_t3,  # 3
+                ang_vel_obs_t3,  # 3
+                lin_vel_cmd_t2,  # 2
+                ang_vel_cmd_t1,  # 1
             ],
             axis=-1,
         )
+
+        breakpoint()
 
         def scan_fn(carry: Array, xt: Array) -> tuple[Array, Array]:
             xt, ht = self.multi_layer_gru(xt, carry)
@@ -265,24 +267,24 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         model: DefaultHumanoidActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        prev_actions_tn: Array,
+        prev_actions_tj: Array,
         hidden_states_dn: Array,
     ) -> tuple[distrax.Distribution, Array]:
-        dh_joint_pos_tn = observations["joint_position_observation"]
-        dh_joint_vel_tn = observations["joint_velocity_observation"]
+        dh_joint_pos_tj = observations["joint_position_observation"]
+        dh_joint_vel_tj = observations["joint_velocity_observation"]
         imu_acc_t3 = observations["sensor_observation_imu_acc"]
         imu_gyro_t3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_t2 = commands["linear_velocity_command"]
         ang_vel_cmd_t1 = commands["angular_velocity_command"]
 
         return model(
-            dh_joint_pos_tn=dh_joint_pos_tn,
-            dh_joint_vel_tn=dh_joint_vel_tn / 10.0,
+            dh_joint_pos_tj=dh_joint_pos_tj,
+            dh_joint_vel_tj=dh_joint_vel_tj / 10.0,
             imu_acc_t3=imu_acc_t3 / 50.0,
             imu_gyro_t3=imu_gyro_t3 / 3.0,
             lin_vel_cmd_t2=lin_vel_cmd_t2,
             ang_vel_cmd_t1=ang_vel_cmd_t1,
-            prev_actions_tn=prev_actions_tn,
+            prev_actions_tj=prev_actions_tj,
             hidden_states_dn=hidden_states_dn,
         )
 
@@ -293,34 +295,34 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         hidden_states_dn: Array,
     ) -> tuple[Array, Array]:
-        dh_joint_pos_tn = observations["joint_position_observation"]
-        dh_joint_vel_tn = observations["joint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        act_frc_obs_n = observations["actuator_force_observation"]
-        base_pos_3 = observations["base_position_observation"]
-        base_quat_4 = observations["base_orientation_observation"]
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd_1 = commands["angular_velocity_command"]
+        dh_joint_pos_tj = observations["joint_position_observation"]
+        dh_joint_vel_tj = observations["joint_velocity_observation"]
+        com_inertia_tn = observations["center_of_mass_inertia_observation"]
+        com_vel_tn = observations["center_of_mass_velocity_observation"]
+        imu_acc_t3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_t3 = observations["sensor_observation_imu_gyro"]
+        act_frc_obs_tn = observations["actuator_force_observation"]
+        base_pos_t3 = observations["base_position_observation"]
+        base_quat_t4 = observations["base_orientation_observation"]
+        lin_vel_obs_t3 = observations["base_linear_velocity_observation"]
+        ang_vel_obs_t3 = observations["base_angular_velocity_observation"]
+        lin_vel_cmd_t2 = commands["linear_velocity_command"]
+        ang_vel_cmd_t1 = commands["angular_velocity_command"]
 
         return model(
-            dh_joint_pos_tn=dh_joint_pos_tn,
-            dh_joint_vel_tn=dh_joint_vel_tn / 10.0,
-            com_inertia_n=com_inertia_n,
-            com_vel_n=com_vel_n,
-            imu_acc_3=imu_acc_3 / 50.0,
-            imu_gyro_3=imu_gyro_3 / 3.0,
-            act_frc_obs_n=act_frc_obs_n / 100.0,
-            base_pos_3=base_pos_3,
-            base_quat_4=base_quat_4,
-            lin_vel_obs_3=lin_vel_obs_3,
-            ang_vel_obs_3=ang_vel_obs_3,
-            lin_vel_cmd_2=lin_vel_cmd_2,
-            ang_vel_cmd_1=ang_vel_cmd_1,
+            dh_joint_pos_tj=dh_joint_pos_tj,
+            dh_joint_vel_tj=dh_joint_vel_tj / 10.0,
+            com_inertia_n=com_inertia_tn,
+            com_vel_tn=com_vel_tn,
+            imu_acc_t3=imu_acc_t3 / 50.0,
+            imu_gyro_t3=imu_gyro_t3 / 3.0,
+            act_frc_obs_tn=act_frc_obs_tn / 100.0,
+            base_pos_t3=base_pos_t3,
+            base_quat_t4=base_quat_t4,
+            lin_vel_obs_t3=lin_vel_obs_t3,
+            ang_vel_obs_t3=ang_vel_obs_t3,
+            lin_vel_cmd_t2=lin_vel_cmd_t2,
+            ang_vel_cmd_t1=ang_vel_cmd_t1,
             hidden_states_dn=hidden_states_dn,
         )
 
@@ -333,28 +335,30 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         initial_carry = self.get_initial_carry(rng)
 
         # We need to shift the actions by one time step to get the previous actions.
-        actions_tn = trajectories.action
-        prev_actions_tn = jnp.concatenate([jnp.zeros_like(actions_tn[..., :1, :]), actions_tn[..., :-1, :]], axis=-2)
+        actions_tj = trajectories.action
+        prev_actions_tj = jnp.concatenate([jnp.zeros_like(actions_tj[..., :1, :]), actions_tj[..., :-1, :]], axis=-2)
 
-        action_dist_tn, _ = self._run_actor(
+        action_dist_tj, _ = self._run_actor(
             model=model.actor,
             observations=trajectories.obs,
             commands=trajectories.command,
-            prev_actions_tn=prev_actions_tn,
+            prev_actions_tj=prev_actions_tj,
             hidden_states_dn=initial_carry.actor,
         )
-        log_probs_tn = action_dist_tn.log_prob(trajectories.action)
+        log_probs_tj = action_dist_tj.log_prob(trajectories.action)
 
         # Vectorize over both batch and time dimensions.
-        par_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0, None))
-        values_t1, _ = par_fn(
-            model.critic,
-            trajectories.obs,
-            trajectories.command,
-            initial_carry.critic,
+        values_t1, _ = self._run_critic(
+            model=model.critic,
+            observations=trajectories.obs,
+            commands=trajectories.command,
+            hidden_states_dn=initial_carry.critic,
         )
 
-        return ksim.PPOVariables(log_probs_tn=log_probs_tn, values_t=values_t1.squeeze(-1))
+        return ksim.PPOVariables(
+            log_probs_tj=log_probs_tj,
+            values_t=values_t1.squeeze(-1),
+        )
 
     def sample_action(
         self,
@@ -367,37 +371,43 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[Array, Carry, AuxOutputs]:
         # Unsqueeze first dimension as the time dimension.
-        (observations_t, commands_t, prev_actions_tn) = jax.tree.map(
+        (observations_t, commands_t, prev_actions_tj) = jax.tree.map(
             lambda x: x[None, ...],
             (observations, commands, physics_state.most_recent_action),
         )
 
         # Runs the actor model to get the action distribution and next hidden states.
-        action_dist_tn, next_actor_hidden_states = self._run_actor(
+        action_dist_tj, next_actor_hidden_states = self._run_actor(
             model=model.actor,
             observations=observations_t,
             commands=commands_t,
-            prev_actions_tn=prev_actions_tn,
+            prev_actions_tj=prev_actions_tj,
             hidden_states_dn=carry.actor,
         )
 
-        action_n = action_dist_tn.sample(seed=rng).squeeze(0)
-        action_log_prob_n = action_dist_tn.log_prob(action_n).squeeze(0)
+        action_tj = action_dist_tj.sample(seed=rng).squeeze(0)
+        action_log_prob_tj = action_dist_tj.log_prob(action_tj).squeeze(0)
 
         # Run critic with its own hidden states
-        critic_n, next_critic_hidden_states = self._run_critic(
+        critic_1, next_critic_hidden_states = self._run_critic(
             model=model.critic,
-            observations=observations,
-            commands=commands,
+            observations=observations_t,
+            commands=commands_t,
             hidden_states_dn=carry.critic,
         )
-        value_n = critic_n.squeeze(-1)
+        value = critic_1.squeeze(-1)
 
         next_carry = Carry(
             actor=next_actor_hidden_states,
             critic=next_critic_hidden_states,
         )
-        return action_n, next_carry, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
+
+        aux_outputs = AuxOutputs(
+            log_probs=action_log_prob_tj,
+            values=value,
+        )
+
+        return action_tj, next_carry, aux_outputs
 
 
 if __name__ == "__main__":
