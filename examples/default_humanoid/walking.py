@@ -48,14 +48,6 @@ ACTION_RANGES = [
 ]
 
 
-def map_normal_distribution(dist: distrax.Distribution) -> distrax.Distribution:
-    action_ranges = jnp.array(ACTION_RANGES)
-    action_min, action_max = action_ranges[..., 0], action_ranges[..., 1]
-    dist = distrax.Transformed(dist, distrax.Tanh())
-    dist = distrax.Transformed(dist, ksim.DoubleUnitIntervalToRangeBijector(min=action_min, max=action_max))
-    return dist
-
-
 @attrs.define(frozen=True, kw_only=True)
 class NaiveForwardReward(ksim.Reward):
     clip_max: float = attrs.field(default=5.0)
@@ -77,6 +69,7 @@ class DefaultHumanoidActor(eqx.Module):
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
+    num_mixtures: int = eqx.static_field()
 
     def __init__(
         self,
@@ -87,13 +80,14 @@ class DefaultHumanoidActor(eqx.Module):
         var_scale: float,
         hidden_size: int,
         depth: int,
+        num_mixtures: int,
     ) -> None:
         num_inputs = NUM_INPUTS
         num_outputs = NUM_JOINTS
 
         self.mlp = eqx.nn.MLP(
             in_size=num_inputs,
-            out_size=num_outputs * 2,
+            out_size=num_outputs * 3 * num_mixtures,
             width_size=hidden_size,
             depth=depth,
             key=key,
@@ -102,6 +96,7 @@ class DefaultHumanoidActor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
+        self.num_mixtures = num_mixtures
 
     def forward(
         self,
@@ -141,15 +136,22 @@ class DefaultHumanoidActor(eqx.Module):
         )
 
         prediction_n = self.mlp(obs_n)
-        mean_n = prediction_n[..., :NUM_JOINTS]
-        std_n = prediction_n[..., NUM_JOINTS:]
+
+        # Splits the predictions into means, standard deviations, and logits.
+        slice_len = NUM_JOINTS * self.num_mixtures
+        mean_nm = prediction_n[:slice_len].reshape(NUM_JOINTS, self.num_mixtures)
+        std_nm = prediction_n[slice_len : slice_len * 2].reshape(NUM_JOINTS, self.num_mixtures)
+        logits_nm = prediction_n[slice_len * 2 :].reshape(NUM_JOINTS, self.num_mixtures)
 
         # Softplus and clip to ensure positive standard deviations.
-        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
+        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
 
-        dist = distrax.Normal(mean_n, std_n)
-        dist = map_normal_distribution(dist)
-        return dist
+        dist_n = distrax.MixtureSameFamily(
+            mixture_distribution=distrax.Categorical(logits=logits_nm),
+            components_distribution=distrax.Normal(mean_nm, std_nm),
+        )
+
+        return dist_n
 
 
 class DefaultHumanoidCritic(eqx.Module):
@@ -225,6 +227,7 @@ class DefaultHumanoidModel(eqx.Module):
         *,
         hidden_size: int,
         depth: int,
+        num_mixtures: int,
     ) -> None:
         self.actor = DefaultHumanoidActor(
             key,
@@ -233,6 +236,7 @@ class DefaultHumanoidModel(eqx.Module):
             var_scale=0.5,
             hidden_size=hidden_size,
             depth=depth,
+            num_mixtures=num_mixtures,
         )
         self.critic = DefaultHumanoidCritic(
             key,
@@ -253,6 +257,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     depth: int = xax.field(
         value=5,
         help="The depth for the MLPs.",
+    )
+    num_mixtures: int = xax.field(
+        value=5,
+        help="The number of mixtures for the actor.",
     )
 
     # Reward parameters.
@@ -489,7 +497,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         )
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
-        return DefaultHumanoidModel(key, hidden_size=self.config.hidden_size, depth=self.config.depth)
+        return DefaultHumanoidModel(
+            key,
+            hidden_size=self.config.hidden_size,
+            depth=self.config.depth,
+            num_mixtures=self.config.num_mixtures,
+        )
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> None:
         return None
@@ -597,8 +610,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     ) -> ksim.PPOVariables:
         # Vectorize over the time dimensions.
         par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_tn = par_actor_fn(model.actor, trajectories.obs, trajectories.command)
-        log_probs_tj = action_dist_tn.log_prob(trajectories.action)
+        action_dist_tj = par_actor_fn(model.actor, trajectories.obs, trajectories.command)
+        log_probs_tj = action_dist_tj.log_prob(trajectories.action)
 
         # Vectorize over the time dimensions.
         par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
