@@ -660,12 +660,5 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # Get the last trajectory.
         single_traj = jax.tree.map(lambda x: x[-1], single_traj)
 
-        # Manual version, instead of using scan.
-        # metrics = []
-        # for _ in range(self.config.num_passes):
-        #     carry, metric = batch_scan_fn(carry, None)
-        #     metrics.append(metric)
-        # metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
-
         model_arr, opt_state, _ = carry
         return model_arr, opt_state, metrics, single_traj
