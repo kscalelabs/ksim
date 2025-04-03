@@ -35,7 +35,7 @@ class PPOInputs:
 @jax.tree_util.register_dataclass
 @dataclass
 class PPOVariables:
-    log_probs_tj: Array
+    log_probs_tn: Array
     values_t: Array
     entropy_tn: Array | None = None
     aux_losses: Mapping[str, Array] | None = None
@@ -162,9 +162,9 @@ def compute_ppo_loss(
     """
     chex.assert_equal_shape_prefix(
         [
-            on_policy_variables.log_probs_tj,
+            on_policy_variables.log_probs_tn,
             on_policy_variables.values_t,
-            off_policy_variables.log_probs_tj,
+            off_policy_variables.log_probs_tn,
             off_policy_variables.values_t,
             ppo_inputs.advantages_t,
             ppo_inputs.value_targets_t,
@@ -181,7 +181,7 @@ def compute_ppo_loss(
         dones: Array,
     ) -> Array:
         # Preventing underflow / overflow in calculating the ratio.
-        log_ratio = jnp.sum(off_policy_variables.log_probs_tj - on_policy_variables.log_probs_tj, axis=-1)
+        log_ratio = jnp.sum(off_policy_variables.log_probs_tn - on_policy_variables.log_probs_tn, axis=-1)
         ratio = jnp.exp(jnp.clip(log_ratio, -log_clip_value, log_clip_value))
         clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
         surrogate_1 = ratio * ppo_inputs.advantages_t
@@ -353,8 +353,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
         metrics = {
             "loss": loss_t.mean(),
-            "log_probs": off_policy_variables.log_probs_tj.mean(0).flatten(),
-            "on_policy_log_probs": on_policy_variables.log_probs_tj.mean(0).flatten(),
+            "log_probs": off_policy_variables.log_probs_tn.mean(0).flatten(),
+            "on_policy_log_probs": on_policy_variables.log_probs_tn.mean(0).flatten(),
             "value": off_policy_variables.values_t.mean(),
             "on_policy_value": on_policy_variables.values_t.mean(),
             "value_targets": ppo_inputs.value_targets_t.mean(),

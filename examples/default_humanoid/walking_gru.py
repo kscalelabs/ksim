@@ -113,7 +113,7 @@ class DefaultHumanoidGRUActor(eqx.Module):
         imu_gyro_t3: Array,
         lin_vel_cmd_t2: Array,
         ang_vel_cmd_t1: Array,
-        prev_actions_tj: Array,
+        prev_actions_tn: Array,
         hidden_states_dn: Array,
     ) -> tuple[distrax.Distribution, Array]:
         obs_tn = jnp.concatenate(
@@ -124,7 +124,7 @@ class DefaultHumanoidGRUActor(eqx.Module):
                 imu_gyro_t3,  # 3
                 lin_vel_cmd_t2,  # 2
                 ang_vel_cmd_t1,  # 1
-                prev_actions_tj,  # NUM_JOINTS
+                prev_actions_tn,  # NUM_ACTIONS
             ],
             axis=-1,
         )
@@ -265,7 +265,7 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         model: DefaultHumanoidGRUActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        prev_actions_tj: Array,
+        prev_actions_tn: Array,
         hidden_states_dn: Array,
     ) -> tuple[distrax.Distribution, Array]:
         dh_joint_pos_tj = observations["joint_position_observation"]
@@ -282,7 +282,7 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
             imu_gyro_t3=imu_gyro_t3 / 3.0,
             lin_vel_cmd_t2=lin_vel_cmd_t2,
             ang_vel_cmd_t1=ang_vel_cmd_t1,
-            prev_actions_tj=prev_actions_tj,
+            prev_actions_tn=prev_actions_tn,
             hidden_states_dn=hidden_states_dn,
         )
 
@@ -333,17 +333,17 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         initial_carry = self.get_initial_carry(rng)
 
         # We need to shift the actions by one time step to get the previous actions.
-        actions_tj = trajectories.action
-        prev_actions_tj = jnp.concatenate([jnp.zeros_like(actions_tj[..., :1, :]), actions_tj[..., :-1, :]], axis=-2)
+        actions_tn = trajectories.action
+        prev_actions_tn = jnp.concatenate([jnp.zeros_like(actions_tn[..., :1, :]), actions_tn[..., :-1, :]], axis=-2)
 
-        action_dist_tj, _ = self._run_actor(
+        action_dist_tn, _ = self._run_actor(
             model=model.actor,
             observations=trajectories.obs,
             commands=trajectories.command,
-            prev_actions_tj=prev_actions_tj,
+            prev_actions_tn=prev_actions_tn,
             hidden_states_dn=initial_carry.actor,
         )
-        log_probs_tj = action_dist_tj.log_prob(trajectories.action)
+        log_probs_tn = action_dist_tn.log_prob(trajectories.action)
 
         # Vectorize over both batch and time dimensions.
         values_t1, _ = self._run_critic(
@@ -354,7 +354,7 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         )
 
         return ksim.PPOVariables(
-            log_probs_tj=log_probs_tj,
+            log_probs_tn=log_probs_tn,
             values_t=values_t1.squeeze(-1),
         )
 
@@ -369,22 +369,22 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[Array, Carry, AuxOutputs]:
         # Unsqueeze first dimension as the time dimension.
-        (observations_t, commands_t, prev_actions_tj) = jax.tree.map(
+        (observations_t, commands_t, prev_actions_tn) = jax.tree.map(
             lambda x: x[None, ...],
             (observations, commands, physics_state.most_recent_action),
         )
 
         # Runs the actor model to get the action distribution and next hidden states.
-        action_dist_tj, next_actor_hidden_states = self._run_actor(
+        action_dist_tn, next_actor_hidden_states = self._run_actor(
             model=model.actor,
             observations=observations_t,
             commands=commands_t,
-            prev_actions_tj=prev_actions_tj,
+            prev_actions_tn=prev_actions_tn,
             hidden_states_dn=carry.actor,
         )
 
-        action_tj = action_dist_tj.sample(seed=rng).squeeze(0)
-        action_log_prob_tj = action_dist_tj.log_prob(action_tj).squeeze(0)
+        action_tn = action_dist_tn.sample(seed=rng).squeeze(0)
+        action_log_prob_tn = action_dist_tn.log_prob(action_tn).squeeze(0)
 
         # Run critic with its own hidden states
         critic_1, next_critic_hidden_states = self._run_critic(
@@ -401,11 +401,11 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
         )
 
         aux_outputs = AuxOutputs(
-            log_probs=action_log_prob_tj,
+            log_probs=action_log_prob_tn,
             values=value,
         )
 
-        return action_tj, next_carry, aux_outputs
+        return action_tn, next_carry, aux_outputs
 
 
 if __name__ == "__main__":
