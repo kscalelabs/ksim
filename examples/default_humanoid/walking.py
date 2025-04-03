@@ -50,10 +50,8 @@ ACTION_RANGES = [
 ]
 
 
-def map_normal_distribution(dist: distrax.Distribution, unsqueeze: bool = False) -> distrax.Distribution:
+def map_normal_distribution(dist: distrax.Distribution) -> distrax.Distribution:
     action_ranges = jnp.array(ACTION_RANGES)
-    if unsqueeze:
-        action_ranges = action_ranges[None]
     action_min, action_max = action_ranges[..., 0], action_ranges[..., 1]
     dist = distrax.Transformed(dist, distrax.Tanh())
     dist = distrax.Transformed(dist, ksim.DoubleUnitIntervalToRangeBijector(min=action_min, max=action_max))

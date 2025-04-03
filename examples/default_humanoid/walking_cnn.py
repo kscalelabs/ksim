@@ -135,6 +135,7 @@ class DefaultHumanoidCNNActor(eqx.Module):
         # Apply transformer blocks
         for block in self.cnn_blocks:
             x_nt = block(x_nt)
+            x_nt = jax.nn.relu(x_nt)
 
         # Project to output
         x_tn = x_nt.transpose(1, 0)
@@ -152,7 +153,7 @@ class DefaultHumanoidCNNActor(eqx.Module):
         std_tn = jnp.clip((jax.nn.softplus(std_tn) + self.min_std) * self.var_scale, max=self.max_std)
 
         dist_tn = distrax.Normal(mean_tn, std_tn)
-        dist_tn = map_normal_distribution(dist_tn, unsqueeze=True)
+        dist_tn = map_normal_distribution(dist_tn)
         return dist_tn, obs_tn
 
 
@@ -164,7 +165,7 @@ class DefaultHumanoidCNNCritic(eqx.Module):
     output_proj: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        num_inputs = NUM_INPUTS + 1
+        num_inputs = NUM_INPUTS
         num_outputs = 1
 
         # Project input to hidden size
@@ -217,7 +218,6 @@ class DefaultHumanoidCNNCritic(eqx.Module):
         lin_vel_cmd_x_t1: Array,
         lin_vel_cmd_y_t1: Array,
         ang_vel_cmd_z_t1: Array,
-        done_t: Array,
     ) -> Array:
         obs_tn = jnp.concatenate(
             [
@@ -235,7 +235,6 @@ class DefaultHumanoidCNNCritic(eqx.Module):
                 lin_vel_cmd_x_t1,  # 1
                 lin_vel_cmd_y_t1,  # 1
                 ang_vel_cmd_z_t1,  # 1
-                done_t.reshape(-1, 1),  # 1
             ],
             axis=-1,
         )
@@ -259,7 +258,7 @@ class DefaultHumanoidModel(eqx.Module):
     critic: DefaultHumanoidCNNCritic
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        self.actor = DefaultHumanoidCNNActor(key, min_std=0.01, max_std=1.0, var_scale=1.0)
+        self.actor = DefaultHumanoidCNNActor(key, min_std=0.01, max_std=1.0, var_scale=0.5)
         self.critic = DefaultHumanoidCNNCritic(key)
 
 
@@ -320,7 +319,6 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         model: DefaultHumanoidCNNCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        done: Array,
     ) -> Array:
         dh_joint_pos_tj = observations["joint_position_observation"]
         dh_joint_vel_tj = observations["joint_velocity_observation"]
@@ -352,7 +350,6 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             lin_vel_cmd_x_t1=lin_vel_cmd_x_t1,
             lin_vel_cmd_y_t1=lin_vel_cmd_y_t1,
             ang_vel_cmd_z_t1=ang_vel_cmd_z_t1,
-            done_t=done,
         )
 
     def get_on_policy_variables(
@@ -370,7 +367,6 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             model=model.critic,
             observations=trajectories.obs,
             commands=trajectories.command,
-            done=trajectories.done,
         )
 
         return ksim.PPOVariables(
@@ -393,7 +389,6 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             model=model.critic,
             observations=trajectories.obs,
             commands=trajectories.command,
-            done=trajectories.done,
         )
 
         return ksim.PPOVariables(
