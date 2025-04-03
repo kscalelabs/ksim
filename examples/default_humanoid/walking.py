@@ -23,6 +23,8 @@ NUM_JOINTS = 21
 HIDDEN_SIZE = 256
 DEPTH = 5
 
+NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
+
 ACTION_RANGES = [
     [-0.7853981633974483, 0.7853981633974483],
     [-1.3089969389957472, 0.5235987755982988],
@@ -84,14 +86,14 @@ class DefaultHumanoidActor(eqx.Module):
         max_std: float,
         var_scale: float,
     ) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
+        num_inputs = NUM_INPUTS
         num_outputs = NUM_JOINTS
 
         self.mlp = eqx.nn.MLP(
             in_size=num_inputs,
             out_size=num_outputs * 2,
-            width_size=64,
-            depth=5,
+            width_size=HIDDEN_SIZE,
+            depth=DEPTH,
             key=key,
             activation=jax.nn.relu,
         )
@@ -154,7 +156,7 @@ class DefaultHumanoidCritic(eqx.Module):
     mlp: eqx.nn.MLP
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
+        num_inputs = NUM_INPUTS
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -563,15 +565,15 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, None, AuxOutputs]:
-        action_dist_n = self._run_actor(
+        action_dist_j = self._run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
         )
-        action_n = action_dist_n.sample(seed=rng)
-        action_log_prob_n = action_dist_n.log_prob(action_n)
+        action_j = action_dist_j.sample(seed=rng)
+        action_log_prob_j = action_dist_j.log_prob(action_j)
 
-        return action_n, None, AuxOutputs(log_probs=action_log_prob_n)
+        return action_j, None, AuxOutputs(log_probs=action_log_prob_j)
 
 
 if __name__ == "__main__":
