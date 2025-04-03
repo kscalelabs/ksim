@@ -288,7 +288,6 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
-                command_name="cartesian_body_target_command_upper_arm_right",
                 pivot_name="upper_arm_right",
                 base_name="pelvis",
                 sample_sphere_radius=0.5,
@@ -301,7 +300,6 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             ksim.GlobalBodyQuaternionCommand.create(
                 model=physics_model,
-                command_name="global_body_quaternion_command_hand_right",
                 base_name="hand_right",
                 switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
                 null_prob=0.5,

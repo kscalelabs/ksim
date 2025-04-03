@@ -156,7 +156,6 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
 
         aux_outputs = GaitMatchingAuxOutputs(
             log_probs=super_aux_outputs.log_probs,
-            values=super_aux_outputs.values,
             tracked_pos=xax.FrozenDict(tracked_positions),
         )
         return action_n, None, aux_outputs

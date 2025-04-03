@@ -9,7 +9,7 @@ __all__ = [
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Generic, Mapping, TypeVar, cast
+from typing import Generic, Mapping, TypeVar
 
 import chex
 import equinox as eqx
@@ -416,6 +416,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         rewards: Rewards,
+        on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[Array, tuple[xax.FrozenDict[str, Array], SingleTrajectory]]:
         """Computes the PPO loss and additional metrics.
@@ -425,6 +426,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             model_static: The static part of the model to optimize.
             trajectories: The batch of trajectories to compute the loss and metrics for.
             rewards: The rewards for the trajectories.
+            on_policy_variables: The PPO variables from the on-policy rollout.
             rng: A random seed.
 
         Returns:
@@ -437,15 +439,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             model: PyTree,
             trajectories: Trajectory,
             rewards: Rewards,
+            on_policy_variables: PPOVariables,
             rng: PRNGKeyArray,
         ) -> tuple[Array, xax.FrozenDict[str, Array], SingleTrajectory]:
-            rng, rng1, rng2 = jax.random.split(rng, 3)
+            rng, rng2 = jax.random.split(rng)
 
-            on_policy_variables = self.get_on_policy_variables(model, trajectories, rng1)
             off_policy_variables = self.get_off_policy_variables(model, trajectories, rng2)
-
-            # Disable gradients to on-policy variables.
-            on_policy_variables = cast(PPOVariables, jax.tree.map(jax.lax.stop_gradient, on_policy_variables))
 
             ppo_inputs = compute_ppo_inputs(
                 values_t=jax.lax.stop_gradient(off_policy_variables.values_t),
@@ -502,8 +501,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # Gets the loss and metrics for each trajectory in the batch.
         rngs = jax.random.split(rng, rewards.total.shape[0])
-        par_fn = jax.vmap(loss_and_metrics_fn, in_axes=(None, 0, 0, 0))
-        loss, metrics, single_traj = par_fn(model, trajectories, rewards, rngs)
+        par_fn = jax.vmap(loss_and_metrics_fn, in_axes=(None, 0, 0, 0, 0))
+        loss, metrics, single_traj = par_fn(model, trajectories, rewards, on_policy_variables, rngs)
 
         # Only take the last trajectory.
         single_traj = jax.tree.map(lambda x: x[-1], single_traj)
@@ -517,11 +516,19 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         rewards: Rewards,
+        on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[dict[str, Array], SingleTrajectory, PyTree]:
         loss_fn = jax.grad(self.get_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1])(loss_fn)
-        grads, (metrics, single_traj) = loss_fn(model_arr, model_static, trajectories, rewards, rng)
+        grads, (metrics, single_traj) = loss_fn(
+            model_arr,
+            model_static,
+            trajectories,
+            rewards,
+            on_policy_variables,
+            rng,
+        )
         return metrics, single_traj, grads
 
     @xax.jit(static_argnames=["self", "model_static", "optimizer"])
@@ -533,6 +540,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         trajectories: Trajectory,
         rewards: Rewards,
+        on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array], SingleTrajectory]:
         ppo_metrics, single_traj, grads = self._get_loss_metrics_and_grads(
@@ -540,6 +548,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             model_static=model_static,
             trajectories=trajectories,
             rewards=rewards,
+            on_policy_variables=on_policy_variables,
             rng=rng,
         )
 
@@ -577,6 +586,31 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A tuple containing the updated parameters, optimizer state, metrics,
             and the single trajectory to log.
         """
+        # Shuffling causes a strange kernel caching issue on GPUs.
+        # rng, indices_rng = jax.random.split(rng)
+        # indices = jax.random.permutation(indices_rng, trajectories.done.shape[0])
+        indices = jnp.arange(trajectories.done.shape[0])
+        indices = indices.reshape(self.num_batches, self.batch_size)
+
+        # Gets the on-policy variables for each trajectory before updating the model.
+        model = eqx.combine(model_arr, model_static)
+
+        def on_policy_scan_fn(
+            carry: PRNGKeyArray,
+            xt: Array,
+        ) -> tuple[PRNGKeyArray, PPOVariables]:
+            trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
+            rng, policy_vars_rng = jax.random.split(carry)
+            policy_vars_rngs = jax.random.split(policy_vars_rng, trajectory_batch.done.shape[0])
+            policy_vars_fn = jax.vmap(self.get_on_policy_variables, in_axes=(None, 0, 0))
+            on_policy_variables: PPOVariables = policy_vars_fn(model, trajectory_batch, policy_vars_rngs)
+            on_policy_variables = jax.tree.map(jax.lax.stop_gradient, on_policy_variables)
+            return rng, on_policy_variables
+
+        rng, on_policy_variables = jax.lax.scan(on_policy_scan_fn, rng, indices)
+        on_policy_variables = jax.tree.map(
+            lambda x: x.reshape(x.shape[0] * x.shape[1], *x.shape[2:]), on_policy_variables
+        )
 
         # Loops over the trajectory batches and applies gradient updates.
         def scan_fn(
@@ -589,6 +623,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             # Gets the current batch of trajectories and rewards.
             trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
             reward_batch = jax.tree.map(lambda x: x[xt], rewards)
+            on_policy_variables_batch = jax.tree.map(lambda x: x[xt], on_policy_variables)
 
             model_arr, opt_state, metrics, single_traj = self._single_step(
                 model_arr=model_arr,
@@ -597,6 +632,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 opt_state=opt_state,
                 trajectories=trajectory_batch,
                 rewards=reward_batch,
+                on_policy_variables=on_policy_variables_batch,
                 rng=batch_rng,
             )
 
@@ -607,12 +643,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             carry: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], tuple[xax.FrozenDict[str, Array], SingleTrajectory]]:
-            # Shuffling causes a strange kernel caching issue on GPUs.
-            # rng, indices_rng = jax.random.split(rng)
-            # indices = jax.random.permutation(indices_rng, trajectories.done.shape[0])
-            indices = jnp.arange(trajectories.done.shape[0])
-            indices = indices.reshape(self.num_batches, self.batch_size)
-
             arr, opt_state, rng = carry
             carry = (arr, opt_state, rng)
             carry, (metrics, single_traj) = jax.lax.scan(scan_fn, carry, indices)

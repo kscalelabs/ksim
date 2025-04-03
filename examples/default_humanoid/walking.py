@@ -20,6 +20,8 @@ from mujoco import mjx
 import ksim
 
 NUM_JOINTS = 21
+HIDDEN_SIZE = 256
+DEPTH = 5
 
 ACTION_RANGES = [
     [-0.7853981633974483, 0.7853981633974483],
@@ -46,11 +48,10 @@ ACTION_RANGES = [
 ]
 
 
-def map_tanh_distribution(dist: distrax.Distribution) -> distrax.Distribution:
+def map_sigmoid_distribution(dist: distrax.Distribution) -> distrax.Distribution:
     action_ranges = jnp.array(ACTION_RANGES)
     action_min, action_max = action_ranges[..., 0], action_ranges[..., 1]
-    dist = distrax.Transformed(dist, distrax.ScalarAffine(shift=jnp.zeros_like(action_min), scale=action_max))
-    dist = distrax.Transformed(dist, ksim.AsymmetricBijector(min=action_min, max=action_max))
+    dist = distrax.Transformed(dist, ksim.UnitIntervalToRangeBijector(min=action_min, max=action_max))
     return dist
 
 
@@ -64,7 +65,6 @@ class NaiveForwardReward(ksim.Reward):
 @dataclass(frozen=True)
 class AuxOutputs:
     log_probs: Array
-    values: Array
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -83,7 +83,7 @@ class DefaultHumanoidActor(eqx.Module):
         max_std: float,
         var_scale: float,
     ) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 3 + 3 + 2 + 1
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
         num_outputs = NUM_JOINTS
 
         self.mlp = eqx.nn.MLP(
@@ -98,59 +98,7 @@ class DefaultHumanoidActor(eqx.Module):
         self.max_std = max_std
         self.var_scale = var_scale
 
-    def __call__(
-        self,
-        dh_joint_pos_n: Array,
-        dh_joint_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
-        lin_vel_cmd_2: Array,
-        ang_vel_cmd_1: Array,
-    ) -> distrax.Distribution:
-        obs_n = jnp.concatenate(
-            [
-                dh_joint_pos_n,  # NUM_JOINTS
-                dh_joint_vel_n,  # NUM_JOINTS
-                imu_acc_3,  # 3
-                imu_gyro_3,  # 3
-                lin_vel_cmd_2,  # 2
-                ang_vel_cmd_1,  # 1
-            ],
-            axis=-1,
-        )
-
-        prediction_n = self.mlp(obs_n)
-        mean_n = prediction_n[..., :NUM_JOINTS]
-        std_n = prediction_n[..., NUM_JOINTS:]
-
-        # Softplus and clip to ensure positive standard deviations.
-        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
-
-        dist = distrax.Normal(mean_n, std_n)
-        dist = distrax.Transformed(dist, distrax.Tanh())
-        dist = map_tanh_distribution(dist)
-        return dist
-
-
-class DefaultHumanoidCritic(eqx.Module):
-    """Critic for the walking task."""
-
-    mlp: eqx.nn.MLP
-
-    def __init__(self, key: PRNGKeyArray) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 2 + 1
-        num_outputs = 1
-
-        self.mlp = eqx.nn.MLP(
-            in_size=num_inputs,
-            out_size=num_outputs,
-            width_size=64,
-            depth=5,
-            key=key,
-            activation=jax.nn.relu,
-        )
-
-    def __call__(
+    def forward(
         self,
         dh_joint_pos_n: Array,
         dh_joint_vel_n: Array,
@@ -163,8 +111,77 @@ class DefaultHumanoidCritic(eqx.Module):
         base_quat_4: Array,
         lin_vel_obs_3: Array,
         ang_vel_obs_3: Array,
-        lin_vel_cmd_2: Array,
-        ang_vel_cmd_1: Array,
+        lin_vel_cmd_x_1: Array,
+        lin_vel_cmd_y_1: Array,
+        ang_vel_cmd_z_1: Array,
+    ) -> distrax.Distribution:
+        obs_n = jnp.concatenate(
+            [
+                dh_joint_pos_n,  # NUM_JOINTS
+                dh_joint_vel_n,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3,  # 3
+                imu_gyro_3,  # 3
+                act_frc_obs_n,  # 21
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                lin_vel_cmd_x_1,  # 1
+                lin_vel_cmd_y_1,  # 1
+                ang_vel_cmd_z_1,  # 1
+            ],
+            axis=-1,
+        )
+
+        prediction_n = self.mlp(obs_n)
+        mean_n = prediction_n[..., :NUM_JOINTS]
+        std_n = prediction_n[..., NUM_JOINTS:]
+
+        # Softplus and clip to ensure positive standard deviations.
+        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
+
+        dist = distrax.Normal(mean_n, std_n)
+        dist = distrax.Transformed(dist, distrax.Sigmoid())
+        dist = map_sigmoid_distribution(dist)
+        return dist
+
+
+class DefaultHumanoidCritic(eqx.Module):
+    """Critic for the walking task."""
+
+    mlp: eqx.nn.MLP
+
+    def __init__(self, key: PRNGKeyArray) -> None:
+        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
+        num_outputs = 1
+
+        self.mlp = eqx.nn.MLP(
+            in_size=num_inputs,
+            out_size=num_outputs,
+            width_size=HIDDEN_SIZE,
+            depth=DEPTH,
+            key=key,
+            activation=jax.nn.relu,
+        )
+
+    def forward(
+        self,
+        dh_joint_pos_n: Array,
+        dh_joint_vel_n: Array,
+        com_inertia_n: Array,
+        com_vel_n: Array,
+        imu_acc_3: Array,
+        imu_gyro_3: Array,
+        act_frc_obs_n: Array,
+        base_pos_3: Array,
+        base_quat_4: Array,
+        lin_vel_obs_3: Array,
+        ang_vel_obs_3: Array,
+        lin_vel_cmd_x_1: Array,
+        lin_vel_cmd_y_1: Array,
+        ang_vel_cmd_z_1: Array,
     ) -> Array:
         x_n = jnp.concatenate(
             [
@@ -179,8 +196,9 @@ class DefaultHumanoidCritic(eqx.Module):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                lin_vel_cmd_2,  # 2
-                ang_vel_cmd_1,  # 1
+                lin_vel_cmd_x_1,  # 1
+                lin_vel_cmd_y_1,  # 1
+                ang_vel_cmd_z_1,  # 1
             ],
             axis=-1,
         )
@@ -382,25 +400,18 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
+        switch_prob = self.config.ctrl_dt / 5
         return [
-            ksim.LinearVelocityCommand(
-                x_range=(0.0, 2.5),
-                y_range=(0.0, 0.0),
-                x_zero_prob=0.2,
-                y_zero_prob=0.8,
-                switch_prob=self.config.ctrl_dt / 5,
-            ),
-            ksim.AngularVelocityCommand(
-                scale=0.2,
-                zero_prob=0.9,
-            ),
+            ksim.LinearVelocityCommand(index="x", range=(-1.0, 2.5), zero_prob=0.1, switch_prob=switch_prob),
+            ksim.LinearVelocityCommand(index="y", range=(-0.3, 0.3), zero_prob=0.9, switch_prob=switch_prob),
+            ksim.AngularVelocityCommand(index="z", scale=0.2, zero_prob=0.9, switch_prob=switch_prob),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.LinearVelocityTrackingReward(index="x", scale=1.0),
-            ksim.LinearVelocityTrackingReward(index="y", scale=0.1),
-            ksim.AngularVelocityTrackingReward(index="z", scale=0.01),
+            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
+            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
+            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
             # NaiveForwardReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
         ]
@@ -433,20 +444,36 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Distribution:
-        dh_joint_pos_n = observations["joint_position_observation"]
-        dh_joint_vel_n = observations["joint_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd_1 = commands["angular_velocity_command"]
+        dh_joint_pos_n = observations["joint_position_observation"]  # 26
+        dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
+        com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
+        com_vel_n = observations["center_of_mass_velocity_observation"]  # 96
+        imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]  # 3
+        act_frc_obs_n = observations["actuator_force_observation"] / 100.0  # 21
+        base_pos_3 = observations["base_position_observation"]  # 3
+        base_quat_4 = observations["base_orientation_observation"]  # 4
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]  # 3
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
+        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]  # 1
+        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]  # 1
+        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]  # 1
 
-        return model(
+        return model.forward(
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n / 10.0,
+            com_inertia_n=com_inertia_n,
+            com_vel_n=com_vel_n,
             imu_acc_3=imu_acc_3 / 50.0,
             imu_gyro_3=imu_gyro_3 / 3.0,
-            lin_vel_cmd_2=lin_vel_cmd_2,
-            ang_vel_cmd_1=ang_vel_cmd_1,
+            act_frc_obs_n=act_frc_obs_n,
+            base_pos_3=base_pos_3,
+            base_quat_4=base_quat_4,
+            lin_vel_obs_3=lin_vel_obs_3,
+            ang_vel_obs_3=ang_vel_obs_3,
+            lin_vel_cmd_x_1=lin_vel_cmd_x_1,
+            lin_vel_cmd_y_1=lin_vel_cmd_y_1,
+            ang_vel_cmd_z_1=ang_vel_cmd_z_1,
         )
 
     def _run_critic(
@@ -466,9 +493,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]  # 4
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]  # 3
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
-        lin_vel_cmd_2 = commands["linear_velocity_command"]  # 2
-        ang_vel_cmd_1 = commands["angular_velocity_command"]  # 1
-        return model(
+        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]  # 1
+        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]  # 1
+        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]  # 1
+
+        return model.forward(
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n / 10.0,
             com_inertia_n=com_inertia_n,
@@ -480,8 +509,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             base_quat_4=base_quat_4,
             lin_vel_obs_3=lin_vel_obs_3,
             ang_vel_obs_3=ang_vel_obs_3,
-            lin_vel_cmd_2=lin_vel_cmd_2,
-            ang_vel_cmd_1=ang_vel_cmd_1,
+            lin_vel_cmd_x_1=lin_vel_cmd_x_1,
+            lin_vel_cmd_y_1=lin_vel_cmd_y_1,
+            ang_vel_cmd_z_1=ang_vel_cmd_z_1,
         )
 
     def get_on_policy_variables(
@@ -490,11 +520,17 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
+        # Use cached log probabilities from training.
         if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
+
+        # Compute the values online.
+        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
+        values_t1 = par_critic_fn(model.critic, trajectories.obs, trajectories.command)
+
         return ksim.PPOVariables(
             log_probs_tn=trajectories.aux_outputs.log_probs,
-            values_t=trajectories.aux_outputs.values,
+            values_t=values_t1.squeeze(-1),
         )
 
     def get_off_policy_variables(
@@ -503,21 +539,17 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
-        # Vectorize over the batch dimensions.
+        # Vectorize over the time dimensions.
         par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_btn = par_actor_fn(model.actor, trajectories.obs, trajectories.command)
+        action_dist_tn = par_actor_fn(model.actor, trajectories.obs, trajectories.command)
+        log_probs_tj = action_dist_tn.log_prob(trajectories.action)
 
-        # Vectorize over the batch dimensions.
+        # Vectorize over the time dimensions.
         par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
         values_t1 = par_critic_fn(model.critic, trajectories.obs, trajectories.command)
 
-        # Compute the log probabilities of the trajectory's actions according
-        # to the current policy, along with the entropy of the distribution.
-        action_btn = trajectories.action
-        log_probs_btn = action_dist_btn.log_prob(action_btn)
-
         return ksim.PPOVariables(
-            log_probs_tn=log_probs_btn,
+            log_probs_tn=log_probs_tj,
             values_t=values_t1.squeeze(-1),
         )
 
@@ -539,10 +571,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
 
-        critic_n = self._run_critic(model.critic, observations, commands)
-        value_n = critic_n.squeeze(-1)
-
-        return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
+        return action_n, None, AuxOutputs(log_probs=action_log_prob_n)
 
 
 if __name__ == "__main__":
