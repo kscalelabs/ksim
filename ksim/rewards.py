@@ -31,7 +31,7 @@ __all__ = [
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Literal, Self, get_args
+from typing import Collection, Literal, Self
 
 import attrs
 import chex
@@ -42,24 +42,12 @@ from jaxtyping import Array
 
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name
+from ksim.utils.types import CartesianIndex, cartesian_index_to_dim, dimension_index_validator, norm_validator
 from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
 
 MonotonicFn = Literal["exp", "inv"]
-CartesianIndex = Literal["x", "y", "z"]
-
-
-def cartesian_index_to_dim(index: CartesianIndex) -> int:
-    match index:
-        case "x":
-            return 0
-        case "y":
-            return 1
-        case "z":
-            return 2
-        case _:
-            raise ValueError(f"Invalid linear velocity index: {index}")
 
 
 def norm_to_reward(value: Array, temp: float, monotonic_fn: MonotonicFn) -> Array:
@@ -96,22 +84,6 @@ def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) 
             raise RuntimeError(f"Penalty function {inst.reward_name} has a positive scale {value}")
     else:
         logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", inst.reward_name, value)
-
-
-def dimension_index_validator(
-    inst: "LinearVelocityTrackingReward",
-    attr: attrs.Attribute,
-    value: CartesianIndex,
-) -> None:
-    choices = get_args(CartesianIndex)
-    if value not in choices:
-        raise ValueError(f"Linear velocity index must be one of {choices}, got {value}")
-
-
-def norm_validator(inst: "LinearVelocityTrackingReward", attr: attrs.Attribute, value: xax.NormType) -> None:
-    choices = get_args(xax.NormType)
-    if value not in choices:
-        raise ValueError(f"Norm must be one of {choices}, got {value}")
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -210,14 +182,14 @@ class LinearVelocityTrackingReward(Reward):
     """Penalty for deviating from the linear velocity command."""
 
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
+    command_name: str = attrs.field()
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    command_name: str = attrs.field(default="linear_velocity_command")
     temp: float = attrs.field(default=1.0)
     monotonic_fn: MonotonicFn = attrs.field(default="inv")
 
     def __call__(self, trajectory: Trajectory) -> Array:
         dim = cartesian_index_to_dim(self.index)
-        lin_vel_cmd = trajectory.command[self.command_name][..., dim]
+        lin_vel_cmd = trajectory.command[self.command_name].squeeze(-1)
         lin_vel = trajectory.qvel[..., dim]
         norm = xax.get_norm(lin_vel - lin_vel_cmd, self.norm)
         return norm_to_reward(norm, self.temp, self.monotonic_fn)
@@ -238,7 +210,7 @@ class AngularVelocityTrackingReward(Reward):
 
     def __call__(self, trajectory: Trajectory) -> Array:
         dim = cartesian_index_to_dim(self.index) + 3
-        ang_vel_cmd = trajectory.command[self.command_name][..., dim]
+        ang_vel_cmd = trajectory.command[self.command_name].squeeze(-1)
         ang_vel = trajectory.qvel[..., dim]
         norm = xax.get_norm(ang_vel - ang_vel_cmd, self.norm)
         return norm_to_reward(norm, self.temp, self.monotonic_fn)
@@ -469,7 +441,7 @@ class FeetLinearVelocityTrackingPenalty(Reward):
     """
 
     ctrl_dt: float = attrs.field()
-    command_name: str = attrs.field(default="linear_velocity_command")
+    command_name: str = attrs.field()
     obs_name: str = attrs.field(default="feet_position_observation")
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 

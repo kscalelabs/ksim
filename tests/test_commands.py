@@ -65,32 +65,30 @@ class TestLinearVelocityCommand:
 
     def test_command_shape(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command returns the correct shape."""
-        cmd = ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-2.0, 2.0))
+        cmd = ksim.LinearVelocityCommand(range=(-1.0, 1.0))
         curriculum_level = jnp.array(0.0)
         initial_command = cmd.initial_command(physics_data, curriculum_level, rng)
         result = cmd(initial_command, physics_data, curriculum_level, rng)
-        chex.assert_shape(result, (2,))
+        chex.assert_shape(result, (1,))
 
     def test_command_bounds(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command values are within the expected bounds."""
-        x_scale, y_scale = 2.0, 3.0
-        cmd = ksim.LinearVelocityCommand(x_range=(-x_scale, x_scale), y_range=(-y_scale, y_scale))
+        scale = 2.0
+        cmd = ksim.LinearVelocityCommand(range=(-scale, scale))
         curriculum_level = jnp.array(0.0)
-        command = cmd.initial_command(physics_data, curriculum_level, rng)
 
         # Run multiple times to test bounds probabilistically
         for i in range(100):
             key = jax.random.fold_in(rng, i)
-            command = cmd(command, physics_data, curriculum_level, key)
+            command = cmd.initial_command(physics_data, curriculum_level, key)
+            result = cmd(command, physics_data, curriculum_level, key)
 
-            assert command[0] >= -x_scale
-            assert command[0] <= x_scale
-            assert command[1] >= -y_scale
-            assert command[1] <= y_scale
+            assert result[0] >= -scale
+            assert result[0] <= scale
 
     def test_zero_probability(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command returns zeros when zero_prob is 1.0."""
-        cmd = ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-2.0, 2.0), x_zero_prob=1.0, y_zero_prob=1.0)
+        cmd = ksim.LinearVelocityCommand(range=(-1.0, 1.0), zero_prob=1.0)
         curriculum_level = jnp.array(0.0)
         command = cmd.initial_command(physics_data, curriculum_level, rng)
         result = cmd(command, physics_data, curriculum_level, rng)
@@ -102,7 +100,7 @@ class TestLinearVelocityCommand:
 
     def test_update_mechanism(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command update mechanism works correctly."""
-        cmd = ksim.LinearVelocityCommand(x_range=(-1.0, 1.0), y_range=(-2.0, 2.0))
+        cmd = ksim.LinearVelocityCommand(range=(-1.0, 1.0))
         curriculum_level = jnp.array(0.0)
         command = cmd.initial_command(physics_data, curriculum_level, rng)
 

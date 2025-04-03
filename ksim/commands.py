@@ -12,7 +12,7 @@ __all__ = [
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Collection, Literal, Self
+from typing import Collection, Self
 
 import attrs
 import jax
@@ -23,14 +23,13 @@ from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name
+from ksim.utils.types import CartesianIndex, dimension_index_validator
 from ksim.vis import Marker
 
 
 @attrs.define(frozen=True, kw_only=True)
 class Command(ABC):
     """Base class for commands."""
-
-    custom_name: str | None = attrs.field(default=None)
 
     @abstractmethod
     def initial_command(
@@ -85,67 +84,11 @@ class Command(ABC):
 
     def get_name(self) -> str:
         """Get the name of the command."""
-        if self.custom_name is not None:
-            return self.custom_name
         return xax.camelcase_to_snakecase(self.__class__.__name__)
 
     @functools.cached_property
     def command_name(self) -> str:
         return self.get_name()
-
-
-VelocityAxis = Literal["x", "y"]
-
-
-@attrs.define(kw_only=True)
-class LinearVelocityArrow(Marker):
-    command_name: str = attrs.field()
-    axis: VelocityAxis = attrs.field()
-    vis_height: float = attrs.field()
-    vis_scale: float = attrs.field()
-
-    @property
-    def command_id(self) -> int:
-        return {"x": 0, "y": 1}[self.axis]
-
-    def update(self, trajectory: Trajectory) -> None:
-        value = float(trajectory.command[self.command_name][self.command_id])
-        self.scale = (self.vis_scale, self.vis_scale, value * 5.0 * self.vis_scale)
-        match self.axis:
-            case "x":
-                self.pos = ((self.vis_scale if value > 0 else -self.vis_scale) * 2.0, 0.0, self.vis_height)
-            case "y":
-                self.pos = (0.0, (self.vis_scale if value > 0 else -self.vis_scale) * 2.0, self.vis_height)
-
-    @classmethod
-    def get(cls, command_name: str, axis: VelocityAxis, vis_height: float, vis_scale: float) -> Self:
-        match axis:
-            case "x":
-                return cls(
-                    command_name=command_name,
-                    axis=axis,
-                    geom=mujoco.mjtGeom.mjGEOM_ARROW,
-                    orientation=cls.quat_from_direction((1.0, 0.0, 0.0)),
-                    rgba=(1.0, 0.0, 0.0, 0.8),
-                    target_type="root",
-                    vis_height=vis_height,
-                    vis_scale=vis_scale,
-                )
-
-            case "y":
-                return cls(
-                    command_name=command_name,
-                    axis=axis,
-                    geom=mujoco.mjtGeom.mjGEOM_ARROW,
-                    orientation=cls.quat_from_direction((0.0, 1.0, 0.0)),
-                    rgba=(0.0, 1.0, 0.0, 0.8),
-                    target_type="root",
-                    vis_height=vis_height,
-                    vis_scale=vis_scale,
-                )
-
-            case _:
-                raise ValueError(f"Invalid axis: {axis}")
 
 
 @attrs.define(frozen=True)
@@ -158,10 +101,9 @@ class LinearVelocityCommand(Command):
     any command.
     """
 
-    x_range: tuple[float, float] = attrs.field()
-    y_range: tuple[float, float] = attrs.field()
-    x_zero_prob: float = attrs.field(default=0.0)
-    y_zero_prob: float = attrs.field(default=0.0)
+    range: tuple[float, float] = attrs.field()
+    index: CartesianIndex | None = attrs.field(default=None, validator=dimension_index_validator)
+    zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
@@ -172,18 +114,11 @@ class LinearVelocityCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
-        (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
-        x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
-        y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
-        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
-        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
-        return jnp.concatenate(
-            [
-                jnp.where(x_zero_mask, 0.0, x),
-                jnp.where(y_zero_mask, 0.0, y),
-            ]
-        )
+        rng, rng_zero = jax.random.split(rng)
+        minval, maxval = self.range
+        value = jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
+        zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
+        return jnp.where(zero_mask, 0.0, value)
 
     def __call__(
         self,
@@ -197,11 +132,8 @@ class LinearVelocityCommand(Command):
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
 
-    def get_markers(self) -> Collection[Marker]:
-        return [
-            LinearVelocityArrow.get(self.command_name, "x", self.vis_height, self.vis_scale),
-            LinearVelocityArrow.get(self.command_name, "y", self.vis_height, self.vis_scale),
-        ]
+    def get_name(self) -> str:
+        return f"{super().get_name()}{'' if self.index is None else f'_{self.index}'}"
 
 
 @attrs.define(frozen=True)
@@ -209,6 +141,7 @@ class AngularVelocityCommand(Command):
     """Command to turn the robot."""
 
     scale: float = attrs.field()
+    index: CartesianIndex | None = attrs.field(default=None, validator=dimension_index_validator)
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
 
@@ -235,6 +168,9 @@ class AngularVelocityCommand(Command):
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}{'' if self.index is None else f'_{self.index}'}"
 
 
 @attrs.define(frozen=True)
@@ -281,12 +217,6 @@ class LinearVelocityStepCommand(Command):
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
-
-    def get_markers(self) -> Collection[Marker]:
-        return [
-            LinearVelocityArrow.get(self.command_name, "x", self.vis_height, self.vis_scale),
-            LinearVelocityArrow.get(self.command_name, "y", self.vis_height, self.vis_scale),
-        ]
 
 
 @attrs.define(frozen=True)
@@ -412,9 +342,7 @@ class CartesianBodyTargetCommand(Command):
         return [CartesianBodyTargetMarker.get(self.command_name, self.base_body_name, self.vis_radius, self.vis_color)]
 
     def get_name(self) -> str:
-        if self.custom_name is not None:
-            return self.custom_name
-        return xax.camelcase_to_snakecase(self.__class__.__name__) + "_" + self.pivot_body_name
+        return f"{super().get_name()}_{self.pivot_body_name}"
 
     @classmethod
     def create(
@@ -429,7 +357,6 @@ class CartesianBodyTargetCommand(Command):
         switch_prob: float = 0.1,
         vis_radius: float = 0.05,
         vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
-        command_name: str | None = None,
     ) -> Self:
         pivot_id = get_body_data_idx_from_name(model, pivot_name)
         base_id = get_body_data_idx_from_name(model, base_name)
@@ -445,7 +372,6 @@ class CartesianBodyTargetCommand(Command):
             switch_prob=switch_prob,
             vis_radius=vis_radius,
             vis_color=vis_color,
-            custom_name=command_name,
         )
 
 
@@ -537,9 +463,7 @@ class GlobalBodyQuaternionCommand(Command):
         ]
 
     def get_name(self) -> str:
-        if self.custom_name is not None:
-            return self.custom_name
-        return xax.camelcase_to_snakecase(self.__class__.__name__) + "_" + self.base_body_name
+        return f"{super().get_name()}_{self.base_body_name}"
 
     @classmethod
     def create(
@@ -551,7 +475,6 @@ class GlobalBodyQuaternionCommand(Command):
         vis_magnitude: float = 0.5,
         vis_size: float = 0.05,
         vis_color: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 0.8),
-        command_name: str | None = None,
     ) -> Self:
         base_id = get_body_data_idx_from_name(model, base_name)
         return cls(
@@ -562,5 +485,4 @@ class GlobalBodyQuaternionCommand(Command):
             vis_magnitude=vis_magnitude,
             vis_size=vis_size,
             vis_color=vis_color,
-            custom_name=command_name,
         )
