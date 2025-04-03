@@ -4,7 +4,6 @@ __all__ = [
     "AsymmetricBijector",
     "UnitIntervalToRangeBijector",
     "DoubleUnitIntervalToRangeBijector",
-    "ClippedAroundZeroBijector",
 ]
 
 import distrax
@@ -149,31 +148,3 @@ class DoubleUnitIntervalToRangeBijector(distrax.Bijector):
             and jnp.array_equal(self._min, other._min).all().item()
             and jnp.array_equal(self._max, other._max).all().item()
         )
-
-
-class ClippedAroundZeroBijector(distrax.Bijector):
-    """A bijector that clips a distribution to the range `[-1, 1]`."""
-
-    def forward_log_det_jacobian(self, x: Array) -> Array:
-        """Computes log|det J(f)(x)|."""
-        # For values outside [-1, 1], the transformation is not differentiable
-        # For values inside, the transformation is the identity (derivative = 1)
-        return jnp.where((x < -1.0) | (x > 1.0), -jnp.inf, 0.0)
-
-    def forward_and_log_det(self, x: Array) -> tuple[Array, Array]:
-        """Computes y = f(x) and log|det J(f)(x)|."""
-        y = jnp.clip(x, -1.0, 1.0)
-        log_det = self.forward_log_det_jacobian(x)
-        return y, log_det
-
-    def inverse_and_log_det(self, y: Array) -> tuple[Array, Array]:
-        """Computes x = f^{-1}(y) and log|det J(f^{-1})(y)|."""
-        # The inverse is not well-defined since clipping is not invertible
-        # We return the clipped value and a log det of -inf for values outside the range
-        x = y
-        log_det = jnp.where((y < -1.0) | (y > 1.0), -jnp.inf, 0.0)
-        return x, log_det
-
-    def same_as(self, other: distrax.Bijector) -> bool:
-        """Returns True if this bijector is guaranteed to be the same as `other`."""
-        return type(other) is ClippedAroundZeroBijector and self._scale == other._scale
