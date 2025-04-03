@@ -62,7 +62,7 @@ class MultiLayerGRU(eqx.Module):
         return x_n, stacked_h
 
 
-class DefaultHumanoidActor(eqx.Module):
+class DefaultHumanoidGRUActor(eqx.Module):
     """Actor for the walking task."""
 
     multi_layer_gru: MultiLayerGRU
@@ -216,8 +216,6 @@ class DefaultHumanoidGRUCritic(eqx.Module):
             axis=-1,
         )
 
-        breakpoint()
-
         def scan_fn(carry: Array, xt: Array) -> tuple[Array, Array]:
             xt, ht = self.multi_layer_gru(xt, carry)
             xt = self.projector(xt)
@@ -230,11 +228,11 @@ class DefaultHumanoidGRUCritic(eqx.Module):
 
 
 class DefaultHumanoidModel(eqx.Module):
-    actor: DefaultHumanoidActor
+    actor: DefaultHumanoidGRUActor
     critic: DefaultHumanoidGRUCritic
 
     def __init__(self, key: PRNGKeyArray) -> None:
-        self.actor = DefaultHumanoidActor(
+        self.actor = DefaultHumanoidGRUActor(
             key,
             min_std=0.01,
             max_std=1.0,
@@ -264,7 +262,7 @@ class HumanoidWalkingGRUTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def _run_actor(
         self,
-        model: DefaultHumanoidActor,
+        model: DefaultHumanoidGRUActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         prev_actions_tj: Array,

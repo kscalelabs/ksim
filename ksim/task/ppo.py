@@ -439,7 +439,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rewards: Rewards,
             rng: PRNGKeyArray,
         ) -> tuple[Array, xax.FrozenDict[str, Array], SingleTrajectory]:
-            rng, rng1, rng2 = jax.random.split(rng, 5)
+            rng, rng1, rng2 = jax.random.split(rng, 3)
 
             on_policy_variables = self.get_on_policy_variables(model, trajectories, rng1)
             off_policy_variables = self.get_off_policy_variables(model, trajectories, rng2)
@@ -482,12 +482,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             single_traj_metrics = self.get_single_trajectory_metrics(
                 trajectories=trajectories,
                 rewards=rewards,
-                ppo_inputs=ppo_inputs,
                 loss_t=loss_t,
-                on_policy_log_probs_tj=on_policy_variables.log_probs_tj,
-                log_probs_tj=off_policy_variables.log_probs_tj,
-                entropy_tn=off_policy_variables.entropy_tn,
-                values_t=off_policy_variables.values_t,
+                ppo_inputs=ppo_inputs,
+                on_policy_variables=on_policy_variables,
+                off_policy_variables=off_policy_variables,
             )
 
             single_traj = SingleTrajectory(
