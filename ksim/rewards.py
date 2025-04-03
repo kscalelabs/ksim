@@ -576,7 +576,6 @@ class CartesianBodyTargetVectorReward(Reward):
     dt: float = attrs.field()
     normalize_velocity: bool = attrs.field()
     distance_threshold: float = attrs.field()
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
     epsilon: float = attrs.field(default=1e-6)
 
     def __call__(self, trajectory: Trajectory) -> Array:
@@ -595,7 +594,7 @@ class CartesianBodyTargetVectorReward(Reward):
         )
 
         # Threshold to only apply reward to the body when it is far from the target.
-        distance_scalar = xax.get_norm(target_vector, self.norm).mean(axis=-1)
+        distance_scalar = jnp.linalg.norm(target_vector, axis=-1)
         far_from_target = distance_scalar > self.distance_threshold
 
         if self.normalize_velocity:
@@ -616,7 +615,6 @@ class CartesianBodyTargetVectorReward(Reward):
         base_body_name: str,
         dt: float,
         normalize_velocity: bool = True,
-        norm: xax.NormType = "l2",
         scale: float = 1.0,
         epsilon: float = 1e-6,
         distance_threshold: float = 0.1,
@@ -626,7 +624,6 @@ class CartesianBodyTargetVectorReward(Reward):
         return cls(
             tracked_body_idx=body_idx,
             base_body_idx=base_idx,
-            norm=norm,
             scale=scale,
             command_name=command_name,
             dt=dt,
