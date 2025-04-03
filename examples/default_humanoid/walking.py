@@ -565,15 +565,15 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, None, AuxOutputs]:
-        action_dist_n = self._run_actor(
+        action_dist_j = self._run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
         )
-        action_n = action_dist_n.sample(seed=rng)
-        action_log_prob_n = action_dist_n.log_prob(action_n)
+        action_j = action_dist_j.sample(seed=rng)
+        action_log_prob_j = action_dist_j.log_prob(action_j)
 
-        return action_n, None, AuxOutputs(log_probs=action_log_prob_n)
+        return action_j, None, AuxOutputs(log_probs=action_log_prob_j)
 
 
 if __name__ == "__main__":
