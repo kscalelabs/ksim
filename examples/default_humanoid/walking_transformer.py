@@ -242,7 +242,7 @@ class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config
         )
 
         return ksim.PPOVariables(
-            log_probs_tj=trajectories.aux_outputs.log_probs,
+            log_probs_tn=trajectories.aux_outputs.log_probs,
             values_t=values_t1.squeeze(-1),
         )
 
@@ -266,7 +266,7 @@ class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config
         )
 
         return ksim.PPOVariables(
-            log_probs_tj=log_probs_tj,
+            log_probs_tn=log_probs_tj,
             values_t=values_t1.squeeze(-1),
         )
 

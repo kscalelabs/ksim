@@ -4,7 +4,6 @@ import chex
 import distrax
 import jax
 from jaxtyping import Array
-import jax.numpy as jnp
 
 import ksim
 
