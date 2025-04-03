@@ -34,6 +34,9 @@ class DefaultHumanoidCNNActor(eqx.Module):
     input_proj: eqx.nn.Linear
     cnn_blocks: tuple[eqx.nn.Conv1d, ...]
     output_proj: eqx.nn.MLP
+    min_std: float = eqx.static_field()
+    max_std: float = eqx.static_field()
+    var_scale: float = eqx.static_field()
 
     def __init__(
         self,
@@ -44,7 +47,7 @@ class DefaultHumanoidCNNActor(eqx.Module):
         var_scale: float,
     ) -> None:
         num_inputs = NUM_INPUTS
-        num_outputs = NUM_JOINTS * 2
+        num_outputs = NUM_JOINTS
 
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
@@ -137,6 +140,10 @@ class DefaultHumanoidCNNActor(eqx.Module):
         x_tn = x_nt.transpose(1, 0)
         out_tn = jax.vmap(self.output_proj, in_axes=0)(x_tn)
 
+        # Remove the part of the output that was the carry.
+        if carry_tn is not None:
+            out_tn = out_tn[..., carry_tn.shape[-2] :, :]
+
         # Converts the output to a distribution.
         mean_tn = out_tn[..., :NUM_JOINTS]
         std_tn = out_tn[..., NUM_JOINTS:]
@@ -145,7 +152,7 @@ class DefaultHumanoidCNNActor(eqx.Module):
         std_tn = jnp.clip((jax.nn.softplus(std_tn) + self.min_std) * self.var_scale, max=self.max_std)
 
         dist_tn = distrax.Normal(mean_tn, std_tn)
-        dist_tn = map_normal_distribution(dist_tn)
+        dist_tn = map_normal_distribution(dist_tn, unsqueeze=True)
         return dist_tn, obs_tn
 
 
@@ -378,8 +385,7 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
         # Vectorize over the time dimensions.
-        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0, None))
-        action_dist_tj, _ = par_actor_fn(model.actor, trajectories.obs, trajectories.command)
+        action_dist_tj, _ = self._run_actor(model.actor, trajectories.obs, trajectories.command)
         log_probs_tj = action_dist_tj.log_prob(trajectories.action)
 
         # Gets the value by calling the critic.
@@ -408,6 +414,8 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> tuple[Array, Array, AuxOutputs]:
+        (observations, commands) = jax.tree.map(lambda x: x[None], (observations, commands))
+
         # Runs the actor model to get the action distribution.
         action_dist_tj, obs_tn = self._run_actor(
             model=model.actor,
@@ -416,19 +424,21 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             carry_tn=carry,
         )
 
-        breakpoint()
-
         # Get the true observation and the next carry.
         carry = obs_tn[..., 1:, :]
 
         action_tj = action_dist_tj.sample(seed=rng)
         action_log_prob_tj = action_dist_tj.log_prob(action_tj)
 
+        # Remove time dimension.
+        action_j = action_tj.squeeze(-2)
+        action_log_prob_j = action_log_prob_tj.squeeze(-2)
+
         aux_outputs = AuxOutputs(
-            log_probs=action_log_prob_tj,
+            log_probs=action_log_prob_j,
         )
 
-        return action_tj, carry, aux_outputs
+        return action_j, carry, aux_outputs
 
 
 if __name__ == "__main__":
