@@ -574,6 +574,7 @@ class CartesianBodyTargetVectorReward(Reward):
     command_name: str = attrs.field()
     dt: float = attrs.field()
     normalize_velocity: bool = attrs.field()
+    distance_threshold: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
     epsilon: float = attrs.field(default=1e-6)
 
@@ -590,11 +591,18 @@ class CartesianBodyTargetVectorReward(Reward):
         target_vector = trajectory.command[self.command_name] - body_pos
         normalized_target_vector = target_vector / (jnp.linalg.norm(target_vector, axis=-1, keepdims=True) + self.epsilon)
 
+        # Threshold to only apply reward to the body when it is far from the target.
+        distance_scalar = xax.get_norm(target_vector, self.norm).mean(axis=-1)
+        far_from_target = distance_scalar > self.distance_threshold
+
         if self.normalize_velocity:
             normalized_body_vel = body_vel / (jnp.linalg.norm(body_vel, axis=-1, keepdims=True) + self.epsilon)
-            return jnp.sum(normalized_body_vel * normalized_target_vector, axis=-1)
+            original_products = normalized_body_vel * normalized_target_vector
         else:
-            return jnp.sum(body_vel * normalized_target_vector, axis=-1)
+            original_products = body_vel * normalized_target_vector
+
+        # This will give maximum reward if near the target (and velocity is normalized)
+        return jnp.where(far_from_target, jnp.sum(original_products, axis=-1), 1.0)
 
     @classmethod
     def create(
@@ -608,6 +616,7 @@ class CartesianBodyTargetVectorReward(Reward):
         norm: xax.NormType = "l2",
         scale: float = 1.0,
         epsilon: float = 1e-6,
+        distance_threshold: float = 0.1,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
         base_idx = get_body_data_idx_from_name(model, base_body_name)
@@ -620,6 +629,7 @@ class CartesianBodyTargetVectorReward(Reward):
             dt=dt,
             normalize_velocity=normalize_velocity,
             epsilon=epsilon,
+            distance_threshold=distance_threshold,
         )
 
 
@@ -689,8 +699,9 @@ class ContinuousCartesianBodyTargetReward(Reward):
             count_scan_fn, init=jnp.zeros_like(under_threshold[0], dtype=jnp.int32), xs=under_threshold
         )
 
-        time_bonus = jnp.exp(consecutive_steps * self.time_sensitivity) * self.time_bonus_scale
-        return (base_reward * time_bonus).mean(axis=-1)
+        # time_bonus = jnp.exp(consecutive_steps * self.time_sensitivity) * self.time_bonus_scale
+        time_bonus = consecutive_steps * self.time_bonus_scale
+        return (base_reward + time_bonus).mean(axis=-1)
 
     @classmethod
     def create(
