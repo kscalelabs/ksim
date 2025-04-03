@@ -164,7 +164,13 @@ class ClippedAroundZeroBijector(distrax.Bijector):
 
     def forward_log_det_jacobian(self, x: Array) -> Array:
         """Computes log|det J(f)(x)|."""
-        return jnp.zeros_like(x)
+        # For values outside [-scale, scale], the transformation is not differentiable
+        # For values inside, the transformation is the identity (derivative = 1)
+        return jnp.where(
+            (x < -self._scale) | (x > self._scale),
+            -jnp.inf,  # Not differentiable at clipping points
+            0.0,  # Identity transformation has log det = 0
+        )
 
     def forward_and_log_det(self, x: Array) -> tuple[Array, Array]:
         """Computes y = f(x) and log|det J(f)(x)|."""
@@ -174,8 +180,14 @@ class ClippedAroundZeroBijector(distrax.Bijector):
 
     def inverse_and_log_det(self, y: Array) -> tuple[Array, Array]:
         """Computes x = f^{-1}(y) and log|det J(f^{-1})(y)|."""
+        # The inverse is not well-defined since clipping is not invertible
+        # We return the clipped value and a log det of -inf for values outside the range
         x = y
-        log_det = jnp.zeros_like(y)
+        log_det = jnp.where(
+            (y < -self._scale) | (y > self._scale),
+            -jnp.inf,  # Not differentiable at clipping points
+            0.0,  # Identity transformation has log det = 0
+        )
         return x, log_det
 
     def same_as(self, other: distrax.Bijector) -> bool:
