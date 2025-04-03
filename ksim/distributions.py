@@ -85,14 +85,10 @@ class UnitIntervalToRangeBijector(distrax.Bijector):
 
     def forward_log_det_jacobian(self, x: Array) -> Array:
         """Computes log|det J(f)(x)|."""
-        # The transformation is y = (max - min) * x + min
-        # The Jacobian is dy/dx = (max - min)
-        # So log|det J| = log(max - min)
         return jnp.log(self._max - self._min)
 
     def forward_and_log_det(self, x: Array) -> tuple[Array, Array]:
         """Computes y = f(x) and log|det J(f)(x)|."""
-        # Transform from [0,1] to [min,max]
         y = (self._max - self._min) * x + self._min
         log_det = self.forward_log_det_jacobian(x)
         return y, log_det
@@ -131,9 +127,6 @@ class DoubleUnitIntervalToRangeBijector(distrax.Bijector):
 
     def forward_log_det_jacobian(self, x: Array) -> Array:
         """Computes log|det J(f)(x)|."""
-        # The transformation is y = (max - min)/2 * x + (max + min)/2
-        # The Jacobian is dy/dx = (max - min)/2
-        # So log|det J| = log((max - min)/2)
         return jnp.log((self._max - self._min) / 2)
 
     def forward_and_log_det(self, x: Array) -> tuple[Array, Array]:
@@ -145,9 +138,8 @@ class DoubleUnitIntervalToRangeBijector(distrax.Bijector):
 
     def inverse_and_log_det(self, y: Array) -> tuple[Array, Array]:
         """Computes x = f^{-1}(y) and log|det J(f^{-1})(y)|."""
-        # Transform from [min,max] to [-1,1]
         x = (2 * y - (self._max + self._min)) / (self._max - self._min)
-        log_det = -self.forward_log_det_jacobian(x)  # Inverse log det is negative of forward
+        log_det = -self.forward_log_det_jacobian(x)
         return x, log_det
 
     def same_as(self, other: distrax.Bijector) -> bool:
@@ -172,8 +164,6 @@ class ClippedAroundZeroBijector(distrax.Bijector):
 
     def forward_log_det_jacobian(self, x: Array) -> Array:
         """Computes log|det J(f)(x)|."""
-        # For clipping, the log determinant is 0 since the transformation
-        # is not differentiable at the boundaries
         return jnp.zeros_like(x)
 
     def forward_and_log_det(self, x: Array) -> tuple[Array, Array]:
@@ -184,8 +174,6 @@ class ClippedAroundZeroBijector(distrax.Bijector):
 
     def inverse_and_log_det(self, y: Array) -> tuple[Array, Array]:
         """Computes x = f^{-1}(y) and log|det J(f^{-1})(y)|."""
-        # Since clipping is not invertible, we return the clipped value
-        # and a log determinant of 0
         x = y
         log_det = jnp.zeros_like(y)
         return x, log_det

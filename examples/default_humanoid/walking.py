@@ -48,10 +48,11 @@ ACTION_RANGES = [
 ]
 
 
-def map_unit_interval_distribution(dist: distrax.Distribution) -> distrax.Distribution:
+def map_normal_distribution(dist: distrax.Distribution) -> distrax.Distribution:
     action_ranges = jnp.array(ACTION_RANGES)
     action_min, action_max = action_ranges[..., 0], action_ranges[..., 1]
-    dist = distrax.Transformed(dist, ksim.UnitIntervalToRangeBijector(min=action_min, max=action_max))
+    dist = distrax.Transformed(dist, ksim.ClippedAroundZeroBijector())
+    dist = distrax.Transformed(dist, ksim.DoubleUnitIntervalToRangeBijector(min=action_min, max=action_max))
     return dist
 
 
@@ -143,8 +144,7 @@ class DefaultHumanoidActor(eqx.Module):
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
         dist = distrax.Normal(mean_n, std_n)
-        dist = distrax.Transformed(dist, distrax.Sigmoid())
-        dist = map_unit_interval_distribution(dist)
+        dist = map_normal_distribution(dist)
         return dist
 
 
