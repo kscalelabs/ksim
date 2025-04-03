@@ -20,9 +20,10 @@ from .walking import (
     HumanoidWalkingTaskConfig,
 )
 
-HIDDEN_SIZE = 128
+HIDDEN_SIZE = 256
 NUM_HEADS = HIDDEN_SIZE // 64
-TRANSFORMER_DEPTH = 5
+TRANSFORMER_DEPTH = 2
+DEPTH = 3
 
 
 class TransformerBlock(eqx.Module):
@@ -72,7 +73,7 @@ class DefaultHumanoidTransformerCritic(eqx.Module):
 
     input_proj: eqx.nn.Linear
     transformer_blocks: tuple[TransformerBlock, ...]
-    output_proj: eqx.nn.Linear
+    output_proj: eqx.nn.MLP
     hidden_size: int = eqx.static_field()
 
     def __init__(self, key: PRNGKeyArray, *, hidden_size: int) -> None:
@@ -101,10 +102,13 @@ class DefaultHumanoidTransformerCritic(eqx.Module):
         self.transformer_blocks = tuple(transformer_blocks)
 
         # Project to output
-        self.output_proj = eqx.nn.Linear(
-            in_features=hidden_size,
-            out_features=num_outputs,
+        self.output_proj = eqx.nn.MLP(
+            in_size=hidden_size,
+            out_size=num_outputs,
+            width_size=hidden_size,
+            depth=DEPTH,
             key=key,
+            activation=jax.nn.gelu,
         )
 
         self.hidden_size = hidden_size
