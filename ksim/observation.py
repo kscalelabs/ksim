@@ -30,7 +30,7 @@ import attrs
 import jax
 import xax
 from jax import numpy as jnp
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsModel, PhysicsState
 from ksim.utils.mujoco import (
@@ -49,6 +49,7 @@ NoiseType = Literal["gaussian", "uniform"]
 class ObservationState:
     commands: xax.FrozenDict[str, Array]
     physics_state: PhysicsState
+    carry: PyTree
 
 
 def add_noise(

@@ -581,12 +581,12 @@ class CartesianBodyTargetVectorReward(Reward):
     def __call__(self, trajectory: Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
 
-        body_pos_shifted = jnp.roll(body_pos, shift=1, axis=0)
+        body_pos_left_shifted = jnp.roll(body_pos, shift=1, axis=1)
 
         # Zero out the first velocity
-        body_pos_shifted = body_pos_shifted.at[0].set(body_pos[0])
+        body_pos_left_shifted = body_pos_left_shifted.at[:, 0].set(body_pos[:, 0])
 
-        body_vel = (body_pos - body_pos_shifted) / self.dt
+        body_vel = (body_pos - body_pos_left_shifted) / self.dt
 
         target_vector = trajectory.command[self.command_name] - body_pos
         normalized_target_vector = target_vector / (
