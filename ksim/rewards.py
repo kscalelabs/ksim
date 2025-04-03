@@ -579,16 +579,16 @@ class CartesianBodyTargetVectorReward(Reward):
     epsilon: float = attrs.field(default=1e-6)
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
+        body_pos_TL = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
 
-        body_pos_left_shifted = jnp.roll(body_pos, shift=1, axis=1)
+        body_pos_right_shifted_TL = jnp.roll(body_pos_TL, shift=1, axis=0)
 
         # Zero out the first velocity
-        body_pos_left_shifted = body_pos_left_shifted.at[:, 0].set(body_pos[:, 0])
+        body_pos_right_shifted_TL = body_pos_right_shifted_TL.at[0].set(body_pos_TL[0])
 
-        body_vel = (body_pos - body_pos_left_shifted) / self.dt
+        body_vel_TL = (body_pos_TL - body_pos_right_shifted_TL) / self.dt
 
-        target_vector = trajectory.command[self.command_name] - body_pos
+        target_vector = trajectory.command[self.command_name] - body_pos_TL
         normalized_target_vector = target_vector / (
             jnp.linalg.norm(target_vector, axis=-1, keepdims=True) + self.epsilon
         )
@@ -598,13 +598,13 @@ class CartesianBodyTargetVectorReward(Reward):
         far_from_target = distance_scalar > self.distance_threshold
 
         if self.normalize_velocity:
-            normalized_body_vel = body_vel / (jnp.linalg.norm(body_vel, axis=-1, keepdims=True) + self.epsilon)
+            normalized_body_vel = body_vel_TL / (jnp.linalg.norm(body_vel_TL, axis=-1, keepdims=True) + self.epsilon)
             original_products = normalized_body_vel * normalized_target_vector
         else:
-            original_products = body_vel * normalized_target_vector
+            original_products = body_vel_TL * normalized_target_vector
 
         # This will give maximum reward if near the target (and velocity is normalized)
-        return jnp.where(far_from_target, jnp.sum(original_products, axis=-1), 1.0)
+        return jnp.where(far_from_target, jnp.sum(original_products, axis=-1), 1.1)
 
     @classmethod
     def create(
