@@ -58,8 +58,10 @@ def map_normal_distribution(dist: distrax.Distribution) -> distrax.Distribution:
 
 @attrs.define(frozen=True, kw_only=True)
 class NaiveForwardReward(ksim.Reward):
+    clip_max: float = attrs.field(default=5.0)
+
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qvel[..., 0].clip(max=5.0)
+        return trajectory.qvel[..., 0].clip(max=self.clip_max)
 
 
 @jax.tree_util.register_dataclass
@@ -258,6 +260,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=False,
         help="Whether to use the naive reward.",
     )
+    naive_clip_max: float = xax.field(
+        value=5.0,
+        help="The maximum value for the naive reward.",
+    )
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
@@ -455,7 +461,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
         if self.config.use_naive_reward:
             rewards += [
-                NaiveForwardReward(scale=1.0),
+                NaiveForwardReward(clip_max=self.config.naive_clip_max, scale=1.0),
             ]
         else:
             rewards += [
