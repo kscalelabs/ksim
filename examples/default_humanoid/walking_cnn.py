@@ -13,105 +13,63 @@ from jaxtyping import Array, PRNGKeyArray
 import ksim
 
 from .walking import (
-    NUM_JOINTS,
+    DEPTH,
+    HIDDEN_SIZE,
+    NUM_INPUTS,
     AuxOutputs,
     DefaultHumanoidActor,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
 )
 
-HIDDEN_SIZE = 256
-NUM_HEADS = HIDDEN_SIZE // 64
-TRANSFORMER_DEPTH = 2
-DEPTH = 3
+KERNEL_SIZE = 10
+KERNEL_DILATION = 1
 
 
-class TransformerBlock(eqx.Module):
-    """A single transformer block with self-attention and feed-forward network."""
-
-    self_attn: eqx.nn.MultiheadAttention
-    mlp: eqx.nn.MLP
-    norm1: eqx.nn.LayerNorm
-    norm2: eqx.nn.LayerNorm
-
-    def __init__(self, key: PRNGKeyArray, *, hidden_size: int, num_heads: int) -> None:
-        key1, key2 = jax.random.split(key)
-        self.self_attn = eqx.nn.MultiheadAttention(
-            num_heads=num_heads,
-            query_size=hidden_size,
-            key_size=hidden_size,
-            value_size=hidden_size,
-            output_size=hidden_size,
-            key=key1,
-        )
-        self.mlp = eqx.nn.MLP(
-            in_size=hidden_size,
-            out_size=hidden_size,
-            width_size=hidden_size * 4,
-            depth=2,
-            key=key2,
-            activation=jax.nn.gelu,
-        )
-        self.norm1 = eqx.nn.LayerNorm(hidden_size)
-        self.norm2 = eqx.nn.LayerNorm(hidden_size)
-
-    def __call__(self, x: Array) -> Array:
-        # Self-attention
-        attn_out = self.self_attn(x, x, x)
-        x = x + attn_out
-        x = jax.vmap(self.norm1, in_axes=0)(x)
-
-        # Feed-forward
-        mlp_out = jax.vmap(self.mlp, in_axes=0)(x)
-        x = x + mlp_out
-        x = jax.vmap(self.norm2, in_axes=0)(x)
-        return x
-
-
-class DefaultHumanoidTransformerCritic(eqx.Module):
-    """Transformer-based critic for the walking task."""
+class DefaultHumanoidCNNCritic(eqx.Module):
+    """CNN-based critic for the walking task."""
 
     input_proj: eqx.nn.Linear
-    transformer_blocks: tuple[TransformerBlock, ...]
+    cnn_blocks: tuple[eqx.nn.Conv1d, ...]
     output_proj: eqx.nn.MLP
-    hidden_size: int = eqx.static_field()
 
-    def __init__(self, key: PRNGKeyArray, *, hidden_size: int) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1 + 1
+    def __init__(self, key: PRNGKeyArray) -> None:
+        num_inputs = NUM_INPUTS + 1
         num_outputs = 1
 
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
         self.input_proj = eqx.nn.Linear(
             in_features=num_inputs,
-            out_features=hidden_size,
+            out_features=HIDDEN_SIZE,
             key=input_proj_key,
         )
 
-        # Create transformer blocks
-        transformer_blocks = []
-        for _ in range(TRANSFORMER_DEPTH):
-            key, transformer_block_key = jax.random.split(key)
-            transformer_blocks.append(
-                TransformerBlock(
-                    key=transformer_block_key,
-                    hidden_size=hidden_size,
-                    num_heads=NUM_HEADS,
+        # Create convolution blocks.
+        cnn_blocks = []
+        for _ in range(DEPTH):
+            key, cnn_key = jax.random.split(key)
+            cnn_blocks.append(
+                eqx.nn.Conv1d(
+                    in_channels=HIDDEN_SIZE,
+                    out_channels=HIDDEN_SIZE,
+                    kernel_size=KERNEL_SIZE,
+                    dilation=KERNEL_DILATION,
+                    padding=[((KERNEL_SIZE - 1) * KERNEL_DILATION, 0)],  # Left-padding to keep the length constant.
+                    key=cnn_key,
                 )
             )
-        self.transformer_blocks = tuple(transformer_blocks)
+        self.cnn_blocks = tuple(cnn_blocks)
 
         # Project to output
         self.output_proj = eqx.nn.MLP(
-            in_size=hidden_size,
+            in_size=HIDDEN_SIZE,
             out_size=num_outputs,
-            width_size=hidden_size,
+            width_size=HIDDEN_SIZE,
             depth=DEPTH,
             key=key,
             activation=jax.nn.gelu,
         )
-
-        self.hidden_size = hidden_size
 
     def forward(
         self,
@@ -153,43 +111,45 @@ class DefaultHumanoidTransformerCritic(eqx.Module):
         )
 
         # Project input to hidden size
-        x = jax.vmap(self.input_proj, in_axes=0)(obs_tn)
+        x_tn = jax.vmap(self.input_proj, in_axes=0)(obs_tn)
+        x_nt = x_tn.transpose(1, 0)
 
         # Apply transformer blocks
-        for block in self.transformer_blocks:
-            x = block(x)
+        for block in self.cnn_blocks:
+            x_nt = block(x_nt)
 
         # Project to output
-        out = jax.vmap(self.output_proj, in_axes=0)(x)
+        x_tn = x_nt.transpose(1, 0)
+        out_tn = jax.vmap(self.output_proj, in_axes=0)(x_tn)
 
         # Return output and dummy hidden states (unused for transformer)
-        return out
+        return out_tn
 
 
 class DefaultHumanoidModel(eqx.Module):
     actor: DefaultHumanoidActor
-    critic: DefaultHumanoidTransformerCritic
+    critic: DefaultHumanoidCNNCritic
 
     def __init__(self, key: PRNGKeyArray) -> None:
         self.actor = DefaultHumanoidActor(key, min_std=0.01, max_std=1.0, var_scale=1.0)
-        self.critic = DefaultHumanoidTransformerCritic(key, hidden_size=HIDDEN_SIZE)
+        self.critic = DefaultHumanoidCNNCritic(key)
 
 
 @dataclass
-class HumanoidWalkingTransformerTaskConfig(HumanoidWalkingTaskConfig):
+class HumanoidWalkingCNNTaskConfig(HumanoidWalkingTaskConfig):
     pass
 
 
-Config = TypeVar("Config", bound=HumanoidWalkingTransformerTaskConfig)
+Config = TypeVar("Config", bound=HumanoidWalkingCNNTaskConfig)
 
 
-class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config]):
+class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
     def _run_critic(
         self,
-        model: DefaultHumanoidTransformerCritic,
+        model: DefaultHumanoidCNNCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         done: Array,
@@ -274,16 +234,19 @@ class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config
             values_t=values_t1.squeeze(-1),
         )
 
+    def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(shape=((KERNEL_SIZE - 1) * KERNEL_DILATION, NUM_INPUTS))
+
     def sample_action(
         self,
         model: DefaultHumanoidModel,
-        carry: None,
+        carry: Array,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, AuxOutputs]:
+    ) -> tuple[Array, Array, AuxOutputs]:
         # Runs the actor model to get the action distribution.
         action_dist_tj = self._run_actor(
             model=model.actor,
@@ -298,16 +261,16 @@ class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config
             log_probs=action_log_prob_tj,
         )
 
-        return action_tj, None, aux_outputs
+        return action_tj, carry, aux_outputs
 
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.default_humanoid.walking_gru
+    #   python -m examples.default_humanoid.walking_cnn
     # To visualize the environment, use the following command:
-    #   python -m examples.default_humanoid.walking_gru run_environment=True
-    HumanoidWalkingTransformerTask.launch(
-        HumanoidWalkingTransformerTaskConfig(
+    #   python -m examples.default_humanoid.walking_cnn run_environment=True
+    HumanoidWalkingCNNTask.launch(
+        HumanoidWalkingCNNTaskConfig(
             # Training parameters.
             num_envs=2048,
             batch_size=256,
