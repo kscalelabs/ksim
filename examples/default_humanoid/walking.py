@@ -253,6 +253,12 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The depth for the MLPs.",
     )
 
+    # Reward parameters.
+    use_naive_reward: bool = xax.field(
+        value=False,
+        help="Whether to use the naive reward.",
+    )
+
     # Optimizer parameters.
     learning_rate: float = xax.field(
         value=3e-4,
@@ -443,13 +449,22 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
-            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
-            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
-            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
-            # NaiveForwardReward(scale=1.0),
+        rewards = [
             ksim.StayAliveReward(scale=1.0),
         ]
+
+        if self.config.use_naive_reward:
+            rewards += [
+                NaiveForwardReward(scale=1.0),
+            ]
+        else:
+            rewards += [
+                ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
+                ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
+                ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
+            ]
+
+        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
