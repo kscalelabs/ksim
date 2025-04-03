@@ -20,8 +20,6 @@ from mujoco import mjx
 import ksim
 
 NUM_JOINTS = 21
-HIDDEN_SIZE = 256
-DEPTH = 5
 
 NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
 
@@ -85,6 +83,8 @@ class DefaultHumanoidActor(eqx.Module):
         min_std: float,
         max_std: float,
         var_scale: float,
+        hidden_size: int,
+        depth: int,
     ) -> None:
         num_inputs = NUM_INPUTS
         num_outputs = NUM_JOINTS
@@ -92,8 +92,8 @@ class DefaultHumanoidActor(eqx.Module):
         self.mlp = eqx.nn.MLP(
             in_size=num_inputs,
             out_size=num_outputs * 2,
-            width_size=HIDDEN_SIZE,
-            depth=DEPTH,
+            width_size=hidden_size,
+            depth=depth,
             key=key,
             activation=jax.nn.relu,
         )
@@ -155,15 +155,21 @@ class DefaultHumanoidCritic(eqx.Module):
 
     mlp: eqx.nn.MLP
 
-    def __init__(self, key: PRNGKeyArray) -> None:
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        hidden_size: int,
+        depth: int,
+    ) -> None:
         num_inputs = NUM_INPUTS
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
             in_size=num_inputs,
             out_size=num_outputs,
-            width_size=HIDDEN_SIZE,
-            depth=DEPTH,
+            width_size=hidden_size,
+            depth=depth,
             key=key,
             activation=jax.nn.relu,
         )
@@ -211,14 +217,41 @@ class DefaultHumanoidModel(eqx.Module):
     actor: DefaultHumanoidActor
     critic: DefaultHumanoidCritic
 
-    def __init__(self, key: PRNGKeyArray) -> None:
-        self.actor = DefaultHumanoidActor(key, min_std=0.01, max_std=1.0, var_scale=0.5)
-        self.critic = DefaultHumanoidCritic(key)
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        hidden_size: int,
+        depth: int,
+    ) -> None:
+        self.actor = DefaultHumanoidActor(
+            key,
+            min_std=0.01,
+            max_std=1.0,
+            var_scale=0.5,
+            hidden_size=hidden_size,
+            depth=depth,
+        )
+        self.critic = DefaultHumanoidCritic(
+            key,
+            hidden_size=hidden_size,
+            depth=depth,
+        )
 
 
 @dataclass
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
+
+    # Model parameters.
+    hidden_size: int = xax.field(
+        value=256,
+        help="The hidden size for the MLPs.",
+    )
+    depth: int = xax.field(
+        value=5,
+        help="The depth for the MLPs.",
+    )
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
@@ -435,7 +468,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         )
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
-        return DefaultHumanoidModel(key)
+        return DefaultHumanoidModel(key, hidden_size=self.config.hidden_size, depth=self.config.depth)
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> None:
         return None
