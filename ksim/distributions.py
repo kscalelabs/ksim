@@ -152,29 +152,17 @@ class DoubleUnitIntervalToRangeBijector(distrax.Bijector):
 
 
 class ClippedAroundZeroBijector(distrax.Bijector):
-    """A bijector that clips a distribution to the range `[-scale, scale]`."""
-
-    def __init__(self, scale: float = 1.0) -> None:
-        super().__init__(event_ndims_in=0)
-        self._scale = scale
-
-    @property
-    def scale(self) -> float:
-        return self._scale
+    """A bijector that clips a distribution to the range `[-1, 1]`."""
 
     def forward_log_det_jacobian(self, x: Array) -> Array:
         """Computes log|det J(f)(x)|."""
-        # For values outside [-scale, scale], the transformation is not differentiable
+        # For values outside [-1, 1], the transformation is not differentiable
         # For values inside, the transformation is the identity (derivative = 1)
-        return jnp.where(
-            (x < -self._scale) | (x > self._scale),
-            -jnp.inf,  # Not differentiable at clipping points
-            0.0,  # Identity transformation has log det = 0
-        )
+        return jnp.where((x < -1.0) | (x > 1.0), -jnp.inf, 0.0)
 
     def forward_and_log_det(self, x: Array) -> tuple[Array, Array]:
         """Computes y = f(x) and log|det J(f)(x)|."""
-        y = jnp.clip(x, -self._scale, self._scale)
+        y = jnp.clip(x, -1.0, 1.0)
         log_det = self.forward_log_det_jacobian(x)
         return y, log_det
 
@@ -183,11 +171,7 @@ class ClippedAroundZeroBijector(distrax.Bijector):
         # The inverse is not well-defined since clipping is not invertible
         # We return the clipped value and a log det of -inf for values outside the range
         x = y
-        log_det = jnp.where(
-            (y < -self._scale) | (y > self._scale),
-            -jnp.inf,  # Not differentiable at clipping points
-            0.0,  # Identity transformation has log det = 0
-        )
+        log_det = jnp.where((y < -1.0) | (y > 1.0), -jnp.inf, 0.0)
         return x, log_det
 
     def same_as(self, other: distrax.Bijector) -> bool:

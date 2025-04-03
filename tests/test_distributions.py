@@ -150,8 +150,7 @@ def test_clipped_around_zero_bijector() -> None:
         dist = distrax.Normal(mean, std)
 
         # Create clipped bijector with random scale
-        scale = jax.random.uniform(rng, (), minval=0.5, maxval=1.5)
-        dist = distrax.Transformed(dist, ksim.ClippedAroundZeroBijector(scale=scale))
+        dist = distrax.Transformed(dist, ksim.ClippedAroundZeroBijector())
 
         # Sample and compute log probability
         sample = dist.sample(seed=rng)
@@ -171,9 +170,8 @@ def test_clipped_around_zero_bijector() -> None:
     # Test forward and inverse transformations
     rng, rng1 = jax.random.split(rng, 2)
     x = jax.random.uniform(rng1, (DISTRIBUTION_SIZE,), minval=-2.0, maxval=2.0)
-    scale = 1.0
 
-    bijector = ksim.ClippedAroundZeroBijector(scale=scale)
+    bijector = ksim.ClippedAroundZeroBijector()
 
     # Test forward transformation
     y, log_det = bijector.forward_and_log_det(x)
@@ -186,5 +184,5 @@ def test_clipped_around_zero_bijector() -> None:
     chex.assert_trees_all_close(log_det, log_det_inv, atol=1e-6)  # Both should be 0
 
     # Test bounds
-    chex.assert_trees_all_close(jnp.minimum(y, scale), y, atol=1e-6)
-    chex.assert_trees_all_close(jnp.maximum(y, -scale), y, atol=1e-6)
+    chex.assert_trees_all_close(jnp.minimum(y, 1.0), y, atol=1e-6)
+    chex.assert_trees_all_close(jnp.maximum(y, -1.0), y, atol=1e-6)
