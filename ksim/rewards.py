@@ -20,7 +20,6 @@ __all__ = [
     "ActionNearPositionPenalty",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
-    "FeetPhaseReward",
     "FeetNoContactReward",
     "CartesianBodyTargetReward",
     "CartesianBodyTargetPenalty",
@@ -499,70 +498,6 @@ class FeetFlatReward(Reward):
             - xax.get_norm(unit_vec_x, self.norm)
             - xax.get_norm(unit_vec_y, self.norm)
         ).min(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class FeetPhaseReward(Reward):
-    """Reward for tracking the desired foot height.
-
-    This encourages the feet to follow a smooth trajectory defined by a set
-    of cubic Bézier curves, with a maximum height of `max_foot_height`. The
-    default height of the foot should be given in `foot_default_height` and
-    should be the height when the foot is on the ground.
-    """
-
-    ctrl_dt: float = attrs.field()
-    gait_freq: float = attrs.field()
-    max_foot_height: float = attrs.field()
-    foot_default_height: float = attrs.field()
-    feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
-    foot_pos_obs_idx: CartesianIndex = attrs.field(default="z")
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        if self.feet_pos_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
-        foot_pos = trajectory.obs[self.feet_pos_obs_name]
-        chex.assert_shape(foot_pos, (..., 2, None))
-
-        # Derives the gait phase as a function of time.
-        gait_phase = 2 * jnp.pi * self.gait_freq * trajectory.timestep
-        gait_phase = jnp.mod(gait_phase + jnp.pi, 2 * jnp.pi) - jnp.pi
-        phase = jnp.stack([gait_phase, gait_phase + jnp.pi], axis=-1)
-
-        foot_idx = cartesian_index_to_dim(self.foot_pos_obs_idx)
-        foot_z_tf = foot_pos[..., foot_idx]
-        ideal_z_tf = self.gait_phase(phase, swing_height=self.max_foot_height)
-        ideal_z_tf = ideal_z_tf + self.foot_default_height
-
-        error = jnp.sum(jnp.square(foot_z_tf - ideal_z_tf), axis=-1)
-        reward = jnp.exp(-error / 0.01)
-
-        return reward
-
-    def gait_phase(
-        self,
-        phi: Array | float,
-        swing_height: Array | float = 0.08,
-    ) -> Array:
-        """Interpolation logic for the gait phase with clear separation."""
-        stance_phase = phi > 0
-        swing_phase = ~stance_phase  # phi <= 0
-
-        # Calculate s for all elements
-        s = (phi + jnp.pi) / jnp.pi
-        s = jnp.clip(s, 0, 1)
-
-        # Calculate potential Z values for all elements
-        if isinstance(swing_height, float):
-            swing_height = jnp.array(swing_height)
-        z_rising = xax.cubic_bezier_interpolation(jnp.array(0.0), swing_height, 2.0 * s)
-        z_falling = xax.cubic_bezier_interpolation(swing_height, jnp.array(0.0), 2.0 * s - 1.0)
-        potential_swing_z = jnp.where(s <= 0.5, z_rising, z_falling)
-
-        # Calculate the final Z value using where based on swing phase
-        final_z = jnp.where(swing_phase, potential_swing_z, 0.0)
-
-        return final_z
 
 
 @attrs.define(frozen=True, kw_only=True)

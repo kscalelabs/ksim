@@ -108,7 +108,6 @@ def get_observation(
     observation_state = ObservationState(
         commands=rollout_state.commands,
         physics_state=rollout_state.physics_state,
-        carry=rollout_state.carry,
     )
     for observation in obs_generators:
         rng, obs_rng = jax.random.split(rng)

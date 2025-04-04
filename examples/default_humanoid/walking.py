@@ -21,7 +21,7 @@ import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1 + 1
 
 ACTION_RANGES = [
     [-0.7853981633974483, 0.7853981633974483],
@@ -100,6 +100,7 @@ class DefaultHumanoidActor(eqx.Module):
 
     def forward(
         self,
+        timestep_1: Array,
         dh_joint_pos_n: Array,
         dh_joint_vel_n: Array,
         com_inertia_n: Array,
@@ -117,6 +118,8 @@ class DefaultHumanoidActor(eqx.Module):
     ) -> distrax.Distribution:
         obs_n = jnp.concatenate(
             [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
                 dh_joint_pos_n,  # NUM_JOINTS
                 dh_joint_vel_n,  # NUM_JOINTS
                 com_inertia_n,  # 160
@@ -180,6 +183,7 @@ class DefaultHumanoidCritic(eqx.Module):
 
     def forward(
         self,
+        timestep_1: Array,
         dh_joint_pos_n: Array,
         dh_joint_vel_n: Array,
         com_inertia_n: Array,
@@ -197,6 +201,8 @@ class DefaultHumanoidCritic(eqx.Module):
     ) -> Array:
         x_n = jnp.concatenate(
             [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
                 dh_joint_pos_n,  # NUM_JOINTS
                 dh_joint_vel_n,  # NUM_JOINTS
                 com_inertia_n,  # 160
@@ -452,6 +458,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 foot_left_body_name="foot_left",
                 foot_right_body_name="foot_right",
             ),
+            ksim.TimestepObservation(),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -465,13 +472,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(scale=1.0),
-            ksim.FeetPhaseReward(
-                ctrl_dt=self.config.ctrl_dt,
-                gait_freq=1.5,
-                max_foot_height=0.12,
-                foot_default_height=0.04,
-                scale=1.0,
-            ),
         ]
 
         if self.config.use_naive_reward:
@@ -520,6 +520,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Distribution:
+        timestep_1 = observations["timestep_observation"]  # 1
         dh_joint_pos_n = observations["joint_position_observation"]  # 26
         dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
         com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
@@ -536,6 +537,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]  # 1
 
         return model.forward(
+            timestep_1=timestep_1,
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n / 10.0,
             com_inertia_n=com_inertia_n,
