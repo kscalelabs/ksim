@@ -34,7 +34,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
     """RNN-based actor for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnn: eqx.nn.GRUCell
+    rnns: tuple[eqx.nn.GRUCell, ...]
     output_proj: eqx.nn.MLP
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
@@ -63,20 +63,22 @@ class DefaultHumanoidRNNActor(eqx.Module):
 
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
-        self.rnn = eqx.nn.GRUCell(
-            input_size=hidden_size,
-            hidden_size=hidden_size,
-            key=rnn_key,
+        self.rnns = tuple(
+            [
+                eqx.nn.GRUCell(
+                    input_size=hidden_size,
+                    hidden_size=hidden_size,
+                    key=rnn_key,
+                )
+                for _ in range(depth)
+            ]
         )
 
         # Project to output
-        self.output_proj = eqx.nn.MLP(
-            in_size=hidden_size,
-            out_size=num_outputs * 2,
-            width_size=hidden_size,
-            depth=depth,
+        self.output_proj = eqx.nn.Linear(
+            in_features=hidden_size,
+            out_features=num_outputs * 2,
             key=key,
-            activation=jax.nn.gelu,
         )
 
         self.min_std = min_std
@@ -125,7 +127,10 @@ class DefaultHumanoidRNNActor(eqx.Module):
         )
 
         x_n = self.input_proj(obs_n)
-        x_n = self.rnn(x_n, carry)
+        out_carries = []
+        for i, rnn in enumerate(self.rnns):
+            x_n = rnn(x_n, carry[i])
+            out_carries.append(x_n)
         out_n = self.output_proj(x_n)
 
         # Converts the output to a distribution.
@@ -136,14 +141,14 @@ class DefaultHumanoidRNNActor(eqx.Module):
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
         dist_n = distrax.Normal(mean_n, std_n)
-        return dist_n, x_n
+        return dist_n, jnp.stack(out_carries, axis=0)
 
 
 class DefaultHumanoidRNNCritic(eqx.Module):
     """RNN-based critic for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnn: eqx.nn.GRUCell
+    rnns: tuple[eqx.nn.GRUCell, ...]
     output_proj: eqx.nn.MLP
 
     def __init__(
@@ -166,20 +171,22 @@ class DefaultHumanoidRNNCritic(eqx.Module):
 
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
-        self.rnn = eqx.nn.GRUCell(
-            input_size=hidden_size,
-            hidden_size=hidden_size,
-            key=rnn_key,
+        self.rnns = tuple(
+            [
+                eqx.nn.GRUCell(
+                    input_size=hidden_size,
+                    hidden_size=hidden_size,
+                    key=rnn_key,
+                )
+                for _ in range(depth)
+            ]
         )
 
         # Project to output
-        self.output_proj = eqx.nn.MLP(
-            in_size=hidden_size,
-            out_size=num_outputs,
-            width_size=hidden_size,
-            depth=depth,
+        self.output_proj = eqx.nn.Linear(
+            in_features=hidden_size,
+            out_features=num_outputs,
             key=key,
-            activation=jax.nn.gelu,
         )
 
     def forward(
@@ -224,10 +231,13 @@ class DefaultHumanoidRNNCritic(eqx.Module):
         )
 
         x_n = self.input_proj(obs_n)
-        x_n = self.rnn(x_n, carry)
+        out_carries = []
+        for i, rnn in enumerate(self.rnns):
+            x_n = rnn(x_n, carry[i])
+            out_carries.append(x_n)
         out_n = self.output_proj(x_n)
 
-        return out_n, x_n
+        return out_n, jnp.stack(out_carries, axis=0)
 
 
 class DefaultHumanoidRNNModel(eqx.Module):
@@ -407,7 +417,10 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         )
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        return jnp.zeros(shape=(self.config.hidden_size,)), jnp.zeros(shape=(self.config.hidden_size,))
+        return (
+            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+        )
 
     def sample_action(
         self,
