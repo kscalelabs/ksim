@@ -92,7 +92,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
         lin_vel_cmd_x_t1: Array,
         lin_vel_cmd_y_t1: Array,
         ang_vel_cmd_z_t1: Array,
-        carry: Array | None = None,
+        carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
         obs_tn = jnp.concatenate(
             [
@@ -115,10 +115,6 @@ class DefaultHumanoidRNNActor(eqx.Module):
             ],
             axis=-1,
         )
-
-        # Apply RNN
-        if carry is None:
-            carry = jnp.zeros((self.rnn.hidden_size,))
 
         def scan_fn(carry: Array, obs_n: Array) -> tuple[Array, Array]:
             x_n = self.input_proj(obs_n)
@@ -199,7 +195,7 @@ class DefaultHumanoidRNNCritic(eqx.Module):
         lin_vel_cmd_x_t1: Array,
         lin_vel_cmd_y_t1: Array,
         ang_vel_cmd_z_t1: Array,
-        carry: Array | None = None,
+        carry: Array,
     ) -> tuple[Array, Array]:
         obs_tn = jnp.concatenate(
             [
@@ -225,10 +221,6 @@ class DefaultHumanoidRNNCritic(eqx.Module):
 
         # Project input to hidden size
         x_tn = jax.vmap(self.input_proj, in_axes=0)(obs_tn)
-
-        # Apply RNN
-        if carry is None:
-            carry = jnp.zeros((self.rnn.hidden_size,))
 
         def scan_fn(carry: Array, x_n: Array) -> tuple[Array, Array]:
             x_n = self.rnn(x_n, carry)
@@ -295,7 +287,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         model: DefaultHumanoidRNNActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry: Array | None = None,
+        carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_tj = observations["joint_position_observation"]
@@ -337,7 +329,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         model: DefaultHumanoidRNNCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry: Array | None = None,
+        carry: Array,
     ) -> tuple[Array, Array]:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_tj = observations["joint_position_observation"]
@@ -385,10 +377,12 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             raise ValueError("No aux outputs found in trajectories")
 
         # Gets the value by calling the critic.
+        critic_carry = self.get_initial_carry(rng)
         values_t1, _ = self._run_critic(
             model=model.critic,
             observations=trajectories.obs,
             commands=trajectories.command,
+            carry=critic_carry,
         )
 
         return ksim.PPOVariables(
@@ -403,14 +397,22 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
         # Vectorize over the time dimensions.
-        action_dist_tj, _ = self._run_actor(model.actor, trajectories.obs, trajectories.command)
+        actor_carry = self.get_initial_carry(rng)
+        action_dist_tj, _ = self._run_actor(
+            model=model.actor,
+            observations=trajectories.obs,
+            commands=trajectories.command,
+            carry=actor_carry,
+        )
         log_probs_tj = action_dist_tj.log_prob(trajectories.action)
 
         # Gets the value by calling the critic.
+        critic_carry = self.get_initial_carry(rng)
         values_t1, _ = self._run_critic(
             model=model.critic,
             observations=trajectories.obs,
             commands=trajectories.command,
+            carry=critic_carry,
         )
 
         return ksim.PPOVariables(
@@ -434,11 +436,11 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         (observations, commands) = jax.tree.map(lambda x: x[None], (observations, commands))
 
         # Runs the actor model to get the action distribution.
-        action_dist_tj, carry = self._run_actor(
+        action_dist_tj, actor_carry = self._run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
-            carry=carry,
+            carry=actor_carry,
         )
 
         action_tj = action_dist_tj.sample(seed=rng)
@@ -448,7 +450,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         action_j = action_tj.squeeze(-2)
         action_log_prob_j = action_log_prob_tj.squeeze(-2)
 
-        return action_j, carry, AuxOutputs(log_probs=action_log_prob_j)
+        return action_j, actor_carry, AuxOutputs(log_probs=action_log_prob_j)
 
 
 if __name__ == "__main__":
