@@ -436,11 +436,11 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         (observations, commands) = jax.tree.map(lambda x: x[None], (observations, commands))
 
         # Runs the actor model to get the action distribution.
-        action_dist_tj, actor_carry = self._run_actor(
+        action_dist_tj, carry = self._run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
-            carry=actor_carry,
+            carry=carry,
         )
 
         action_tj = action_dist_tj.sample(seed=rng)
@@ -450,7 +450,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         action_j = action_tj.squeeze(-2)
         action_log_prob_j = action_log_prob_tj.squeeze(-2)
 
-        return action_j, actor_carry, AuxOutputs(log_probs=action_log_prob_j)
+        return action_j, carry, AuxOutputs(log_probs=action_log_prob_j)
 
 
 if __name__ == "__main__":
