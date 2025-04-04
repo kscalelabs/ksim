@@ -501,6 +501,57 @@ class FeetFlatReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class FeetPhaseReward(Reward):
+    """Reward for tracking the desired foot height."""
+
+    scale: float = attrs.field(default=1.0)
+    feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
+    max_foot_height: float = attrs.field(default=0.12)
+    foot_default_height: float = attrs.field(default=0.04)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        if self.feet_pos_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
+        foot_pos = trajectory.obs[self.feet_pos_obs_name]
+
+        breakpoint()
+
+        t = jnp.arange(trajectory.done.shape[-1])
+
+        foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
+        ideal_z = self.gait_phase(phase, swing_height=self.max_foot_height)
+        ideal_z = ideal_z + self.foot_default_height
+
+        error = jnp.sum(jnp.square(foot_z - ideal_z), axis=-1)
+        reward = jnp.exp(-error / 0.01)
+
+        return reward
+
+    def gait_phase(
+        self,
+        phi: Array | float,
+        swing_height: Array | float = 0.08,
+    ) -> Array:
+        """Interpolation logic for the gait phase with clear separation."""
+        stance_phase = phi > 0
+        swing_phase = ~stance_phase  # phi <= 0
+
+        # Calculate s for all elements
+        s = (phi + jnp.pi) / jnp.pi
+        s = jnp.clip(s, 0, 1)
+
+        # Calculate potential Z values for all elements
+        z_rising = cubic_bezier_interpolation(0.0, swing_height, 2.0 * s)
+        z_falling = cubic_bezier_interpolation(swing_height, 0.0, 2.0 * s - 1.0)
+        potential_swing_z = jnp.where(s <= 0.5, z_rising, z_falling)
+
+        # Calculate the final Z value using where based on swing phase
+        final_z = jnp.where(swing_phase, potential_swing_z, 0.0)
+
+        return final_z
+
+
+@attrs.define(frozen=True, kw_only=True)
 class CartesianBodyTargetReward(Reward):
     """Rewards the closeness of the body to the target position."""
 
