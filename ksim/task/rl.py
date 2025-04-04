@@ -121,6 +121,7 @@ def get_rewards(
     trajectory: Trajectory,
     reward_generators: Collection[Reward],
     ctrl_dt: float,
+    clip_min: float | None = None,
     clip_max: float | None = None,
 ) -> Rewards:
     """Get the rewards from the physics state."""
@@ -131,10 +132,12 @@ def get_rewards(
         reward_val = reward_generator(trajectory) * reward_generator.scale * ctrl_dt
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
-        if clip_max is not None:
-            reward_val = jnp.clip(reward_val, -clip_max, clip_max)
         rewards[reward_generator.reward_name] = reward_val
     total_reward = jax.tree.reduce(jnp.add, list(rewards.values()))
+    if clip_min is not None:
+        total_reward = jnp.maximum(total_reward, clip_min)
+    if clip_max is not None:
+        total_reward = jnp.minimum(total_reward, clip_max)
     return Rewards(total=total_reward, components=xax.FrozenDict(rewards))
 
 
@@ -362,6 +365,10 @@ class RLConfig(xax.Config):
     max_action_latency: float = xax.field(
         value=0.0,
         help="The maximum latency of the action.",
+    )
+    reward_clip_min: float | None = xax.field(
+        value=None,
+        help="The minimum value of the reward.",
     )
     reward_clip_max: float | None = xax.field(
         value=None,
@@ -1061,6 +1068,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             trajectory=trajectory,
             reward_generators=rollout_constants.reward_generators,
             ctrl_dt=self.config.ctrl_dt,
+            clip_min=self.config.reward_clip_min,
             clip_max=self.config.reward_clip_max,
         )
 
@@ -1352,6 +1360,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     trajectory=trajectory,
                     reward_generators=rollout_constants.reward_generators,
                     ctrl_dt=self.config.ctrl_dt,
+                    clip_min=self.config.reward_clip_min,
                     clip_max=self.config.reward_clip_max,
                 )
 
