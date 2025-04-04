@@ -1484,10 +1484,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
             # Builds the variables for the training environment.
-            train_rngs = jax.random.split(rng, self.config.num_envs)
+            rng, curriculum_rng, rand_rng, rollout_rng, command_rng, carry_rng = jax.random.split(rng, 6)
 
             # Gets the initial curriculum state.
-            rng, curriculum_rng = jax.random.split(rng)
             curriculum_state = curriculum.get_initial_state(curriculum_rng)
 
             # Applies randomizations to the physics model.
@@ -1497,7 +1496,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 engine,
                 randomizations,
                 curriculum_state.level,
-                train_rngs,
+                jax.random.split(rand_rng, self.config.num_envs),
             )
 
             # Defines the vectorized initialization functions.
@@ -1507,15 +1506,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             state = self.on_training_start(state)
 
             rollout_variables = RolloutVariables(
-                carry=carry_fn(train_rngs),
+                carry=carry_fn(jax.random.split(carry_rng, self.config.num_envs)),
                 commands=command_fn(
-                    train_rngs,
+                    jax.random.split(command_rng, self.config.num_envs),
                     physics_state.data,
                     rollout_constants.command_generators,
                     curriculum_state.level,
                 ),
                 physics_state=physics_state,
-                rng=train_rngs,
+                rng=jax.random.split(rollout_rng, self.config.num_envs),
             )
 
             def on_exit() -> None:
