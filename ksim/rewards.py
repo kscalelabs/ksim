@@ -506,10 +506,10 @@ class FeetPhaseReward(Reward):
     """Reward for tracking the desired foot height."""
 
     ctrl_dt: float = attrs.field()
-    gait_freq: float = attrs.field(default=1.5)
+    gait_freq: float = attrs.field()
+    max_foot_height: float = attrs.field()
     feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
     foot_pos_obs_idx: CartesianIndex = attrs.field(default="z")
-    max_foot_height: float = attrs.field(default=0.12)
     foot_default_height: float = attrs.field(default=0.04)
 
     def __call__(self, trajectory: Trajectory) -> Array:
