@@ -525,8 +525,7 @@ class FeetPhaseReward(Reward):
         chex.assert_shape(foot_pos, (..., 2, None))
 
         # Derives the gait phase as a function of time.
-        t = jnp.arange(trajectory.done.shape[-1]) * self.ctrl_dt
-        gait_phase = 2 * jnp.pi * self.gait_freq * t
+        gait_phase = 2 * jnp.pi * self.gait_freq * trajectory.timestep
         gait_phase = jnp.mod(gait_phase + jnp.pi, 2 * jnp.pi) - jnp.pi
         phase = jnp.stack([gait_phase, gait_phase + jnp.pi], axis=-1)
 
