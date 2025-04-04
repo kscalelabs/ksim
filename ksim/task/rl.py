@@ -138,6 +138,11 @@ def get_rewards(
         total_reward = jnp.maximum(total_reward, clip_min)
     if clip_max is not None:
         total_reward = jnp.minimum(total_reward, clip_max)
+
+    # TODO - make it task adaptable
+    # Calculate reward based on discriminator output
+    # reward = self.amp_reward_coef * jnp.clip(1.0 - 0.25 * jnp.square(d - 1.0), a_min=0.0)
+
     return Rewards(total=total_reward, components=xax.FrozenDict(rewards))
 
 
