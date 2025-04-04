@@ -268,15 +268,7 @@ class DefaultHumanoidRNNModel(eqx.Module):
 
 @dataclass
 class HumanoidWalkingRNNTaskConfig(HumanoidWalkingTaskConfig):
-    # Model parameters.
-    hidden_size: int = xax.field(
-        value=256,
-        help="The hidden size for the RNN.",
-    )
-    depth: int = xax.field(
-        value=5,
-        help="The depth for the MLPs.",
-    )
+    pass
 
 
 Config = TypeVar("Config", bound=HumanoidWalkingRNNTaskConfig)
