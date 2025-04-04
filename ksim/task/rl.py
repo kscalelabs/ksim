@@ -1535,14 +1535,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             try:
                 while not self.is_training_over(state):
                     state = self.on_step_start(state)
-
-                    # Using validation phase to log full trajectories.
-                    if self.log_full_trajectory(state, is_first_step, last_log_time):
-                        state = state.replace(phase="valid")
-                        last_log_time = time.time()
-                    else:
-                        state = state.replace(phase="train")
-
                     rollout_length = self.rollout_length_from_curriculum(curriculum_state.level)
 
                     # Runs the training loop.
@@ -1583,7 +1575,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         logger.log(xax.LOG_STATUS, "First step time: %s", elapsed_time)
 
                     # Only log trajectory information on validation steps.
-                    if state.phase == "valid":
+                    if self.log_full_trajectory(state, is_first_step, last_log_time):
+                        last_log_time = time.time()
                         self.log_single_trajectory(
                             single_traj=single_traj,
                             markers=markers,
