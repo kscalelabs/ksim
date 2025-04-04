@@ -10,6 +10,7 @@ import jax
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray
+from omegaconf import MISSING
 
 import ksim
 
@@ -300,7 +301,7 @@ class DefaultHumanoidCNNModel(eqx.Module):
 class HumanoidWalkingCNNTaskConfig(HumanoidWalkingTaskConfig):
     # Model parameters.
     kernel_size: int = xax.field(
-        value=1,
+        value=MISSING,
         help="The kernel size for the CNN.",
     )
     dilation: int = xax.field(
@@ -496,9 +497,9 @@ if __name__ == "__main__":
     HumanoidWalkingCNNTask.launch(
         HumanoidWalkingCNNTaskConfig(
             # Training parameters.
-            num_envs=2048,
+            num_envs=4096,
             batch_size=256,
-            num_passes=32,
+            num_passes=4,
             epochs_per_log_step=1,
             rollout_length_seconds=2.0,
             num_rollout_levels=3,

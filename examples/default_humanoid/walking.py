@@ -257,7 +257,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=3e-4,
+        value=1e-3,
         help="Learning rate for PPO.",
     )
     max_grad_norm: float = xax.field(
@@ -642,9 +642,9 @@ if __name__ == "__main__":
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             # Training parameters.
-            num_envs=2048,
+            num_envs=4096,
             batch_size=256,
-            num_passes=32,
+            num_passes=4,
             epochs_per_log_step=1,
             rollout_length_seconds=2.0,
             num_rollout_levels=3,
