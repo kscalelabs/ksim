@@ -87,6 +87,7 @@ class DefaultHumanoidCNNActor(eqx.Module):
 
     def forward(
         self,
+        timestep_1: Array,
         dh_joint_pos_tj: Array,
         dh_joint_vel_tj: Array,
         com_inertia_tn: Array,
@@ -105,6 +106,8 @@ class DefaultHumanoidCNNActor(eqx.Module):
     ) -> tuple[distrax.Distribution, Array]:
         obs_tn = jnp.concatenate(
             [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
                 dh_joint_pos_tj,  # NUM_JOINTS
                 dh_joint_vel_tj,  # NUM_JOINTS
                 com_inertia_tn,  # 160
@@ -209,6 +212,7 @@ class DefaultHumanoidCNNCritic(eqx.Module):
 
     def forward(
         self,
+        timestep_1: Array,
         dh_joint_pos_tj: Array,
         dh_joint_vel_tj: Array,
         com_inertia_tn: Array,
@@ -226,6 +230,8 @@ class DefaultHumanoidCNNCritic(eqx.Module):
     ) -> Array:
         obs_tn = jnp.concatenate(
             [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
                 dh_joint_pos_tj,  # NUM_JOINTS
                 dh_joint_vel_tj,  # NUM_JOINTS
                 com_inertia_tn,  # 160
@@ -323,6 +329,7 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         carry_tn: Array | None = None,
     ) -> tuple[distrax.Distribution, Array]:
+        timestep_1 = observations["timestep_observation"]
         dh_joint_pos_tj = observations["joint_position_observation"]
         dh_joint_vel_tj = observations["joint_velocity_observation"]
         com_inertia_tn = observations["center_of_mass_inertia_observation"]
@@ -339,6 +346,7 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         ang_vel_cmd_z_t1 = commands["angular_velocity_command_z"]
 
         return model.forward(
+            timestep_1=timestep_1,
             dh_joint_pos_tj=dh_joint_pos_tj,
             dh_joint_vel_tj=dh_joint_vel_tj / 10.0,
             com_inertia_tn=com_inertia_tn,
@@ -362,6 +370,7 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
+        timestep_1 = observations["timestep_observation"]
         dh_joint_pos_tj = observations["joint_position_observation"]
         dh_joint_vel_tj = observations["joint_velocity_observation"]
         com_inertia_tn = observations["center_of_mass_inertia_observation"]
@@ -378,6 +387,7 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         ang_vel_cmd_z_t1 = commands["angular_velocity_command_z"]
 
         return model.forward(
+            timestep_1=timestep_1,
             dh_joint_pos_tj=dh_joint_pos_tj,
             dh_joint_vel_tj=dh_joint_vel_tj / 10.0,
             com_inertia_tn=com_inertia_tn,

@@ -20,12 +20,12 @@ __all__ = [
     "ActionNearPositionPenalty",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
+    "FeetNoContactReward",
     "CartesianBodyTargetReward",
     "CartesianBodyTargetPenalty",
     "CartesianBodyTargetVectorReward",
     "ContinuousCartesianBodyTargetReward",
     "GlobalBodyQuaternionReward",
-    "FeetNoContactReward",
 ]
 
 import functools
@@ -501,6 +501,39 @@ class FeetFlatReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class FeetNoContactReward(Reward):
+    """Reward for keeping the feet off the ground.
+
+    This reward incentivizes the robot to keep at least one foot off the ground
+    for at least `window_size` steps at a time. If the foot touches the ground
+    again within `window_size` steps, the reward for the entire "off the ground"
+    period is reset to 0.
+    """
+
+    window_size: int = attrs.field()
+    obs_name: str = attrs.field(default="feet_contact_observation")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        feet_contact = trajectory.obs[self.obs_name]
+        chex.assert_shape(feet_contact, (..., 2))
+
+        def count_scan_fn(carry: Array, contact: Array) -> tuple[Array, Array]:
+            carry = jnp.where(contact, 0, carry + 1)
+            return carry, carry
+
+        _, counts = jax.lax.scan(count_scan_fn, jnp.zeros_like(feet_contact[0]), feet_contact, reverse=True)
+
+        def reward_scan_fn(carry: Array, counts: Array) -> tuple[Array, Array]:
+            carry = jnp.where(counts == 0, 0, jnp.where(carry == 0, counts, carry))
+            return carry, carry
+
+        _, counts = jax.lax.scan(reward_scan_fn, counts[0], counts)
+
+        no_contact = counts >= self.window_size
+        return no_contact.any(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class CartesianBodyTargetReward(Reward):
     """Rewards the closeness of the body to the target position."""
 
@@ -744,36 +777,3 @@ class GlobalBodyQuaternionReward(Reward):
             sensitivity=sensitivity,
             command_name=command_name,
         )
-
-
-@attrs.define(frozen=True, kw_only=True)
-class FeetNoContactReward(Reward):
-    """Reward for keeping the feet off the ground.
-
-    This reward incentivizes the robot to keep at least one foot off the ground
-    for at least `window_size` steps at a time. If the foot touches the ground
-    again within `window_size` steps, the reward for the entire "off the ground"
-    period is reset to 0.
-    """
-
-    window_size: int = attrs.field()
-    obs_name: str = attrs.field(default="feet_contact_observation")
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        feet_contact = trajectory.obs[self.obs_name]
-        chex.assert_shape(feet_contact, (..., 2))
-
-        def count_scan_fn(carry: Array, contact: Array) -> tuple[Array, Array]:
-            carry = jnp.where(contact, 0, carry + 1)
-            return carry, carry
-
-        _, counts = jax.lax.scan(count_scan_fn, jnp.zeros_like(feet_contact[0]), feet_contact, reverse=True)
-
-        def reward_scan_fn(carry: Array, counts: Array) -> tuple[Array, Array]:
-            carry = jnp.where(counts == 0, 0, jnp.where(carry == 0, counts, carry))
-            return carry, carry
-
-        _, counts = jax.lax.scan(reward_scan_fn, counts[0], counts)
-
-        no_contact = counts >= self.window_size
-        return no_contact.any(axis=-1)

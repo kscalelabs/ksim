@@ -1,15 +1,25 @@
 # Makefile
 
 format:
-	black ksim tests examples
-	ruff format ksim tests examples
-	ruff check --fix ksim tests examples
+	@echo "=== Running Black ==="
+	@black ksim tests examples
+	@echo ""
+	@echo "=== Running Ruff Formatting ==="
+	@ruff format ksim tests examples
+	@echo ""
+	@echo "=== Running Ruff Checks ==="
+	@ruff check --fix ksim tests examples
 .PHONY: format
 
 static-checks:
-	black --diff --check ksim tests examples
-	ruff check ksim tests examples
-	mypy --install-types --non-interactive ksim tests examples
+	@echo "=== Running Black ==="
+	@black --diff --check ksim tests examples
+	@echo ""
+	@echo "=== Running Ruff Checks ==="
+	@ruff check ksim tests examples
+	@echo ""
+	@echo "=== Running MyPy ==="
+	@mypy --install-types --non-interactive ksim tests examples
 .PHONY: lint
 
 test:
