@@ -938,6 +938,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         trajectories: Trajectory,
         rewards: Rewards,
+        rollout_constants: RolloutConstants,
+        rollout_variables: RolloutVariables,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array], SingleTrajectory]:
         """Updates the model on the given trajectory.
@@ -952,6 +954,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             opt_state: The optimizer state.
             trajectories: The trajectories to update the model on.
             rewards: The rewards to update the model on.
+            rollout_constants: The constants to use for the rollout.
+            rollout_variables: The variables to use for the rollout.
             rng: The random seed.
 
         Returns:
@@ -1121,7 +1125,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     None,
                 ),
             )
-            trajectories, rewards, rollout_variables = vmapped_unroll(
+            trajectories, rewards, next_rollout_variables = vmapped_unroll(
                 physics_model,
                 randomization_dict,
                 model_arr,
@@ -1141,6 +1145,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 opt_state=opt_state,
                 trajectories=trajectories,
                 rewards=rewards,
+                rollout_constants=rollout_constants,
+                rollout_variables=rollout_variables,
                 rng=rng,
             )
 
@@ -1160,7 +1166,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 prev_state=curriculum_state,
             )
 
-            return (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj)
+            return (model_arr, opt_state, next_rollout_variables, curriculum_state), (metrics, single_traj)
 
         (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj) = jax.lax.scan(
             single_step_fn,

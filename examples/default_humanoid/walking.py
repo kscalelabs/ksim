@@ -233,7 +233,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Model parameters.
     hidden_size: int = xax.field(
-        value=128,
+        value=256,
         help="The hidden size for the MLPs.",
     )
     depth: int = xax.field(
@@ -570,22 +570,43 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ang_vel_cmd_z_1=ang_vel_cmd_z_1,
         )
 
-    def get_ppo_variables(
+    def get_on_policy_variables(
+        self,
+        model: DefaultHumanoidModel,
+        trajectories: ksim.Trajectory,
+        rng: PRNGKeyArray,
+    ) -> ksim.PPOVariables:
+        # Use cached log probabilities from training.
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+            raise ValueError("No aux outputs found in trajectories")
+
+        # Compute the values online.
+        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
+        values_t1 = par_critic_fn(model.critic, trajectories.obs, trajectories.command)
+
+        return ksim.PPOVariables(
+            log_probs=trajectories.aux_outputs.log_probs,
+            values=values_t1.squeeze(-1),
+        )
+
+    def get_off_policy_variables(
         self,
         model: DefaultHumanoidModel,
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
         # Vectorize over the time dimensions.
-        action_dist_j = self._run_actor(model.actor, trajectories.obs, trajectories.command)
-        log_probs_j = action_dist_j.log_prob(trajectories.action)
+        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
+        action_dist_tj = par_actor_fn(model.actor, trajectories.obs, trajectories.command)
+        log_probs_tj = action_dist_tj.log_prob(trajectories.action)
 
         # Vectorize over the time dimensions.
-        values_1 = self._run_critic(model.critic, trajectories.obs, trajectories.command)
+        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
+        values_t1 = par_critic_fn(model.critic, trajectories.obs, trajectories.command)
 
         return ksim.PPOVariables(
-            log_probs=log_probs_j,
-            values=values_1.squeeze(-1),
+            log_probs=log_probs_tj,
+            values=values_t1.squeeze(-1),
         )
 
     def sample_action(
@@ -611,21 +632,22 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.walking
+    #   python -m examples.default_humanoid.walking
     # To visualize the environment, use the following command:
-    #   python -m examples.walking run_environment=True
+    #   python -m examples.default_humanoid.walking run_environment=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking num_envs=8 batch_size=4
+    #   python -m examples.default_humanoid.walking num_envs=8 batch_size=4
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             # Training parameters.
-            num_envs=2048,
-            batch_size=128,
+            num_envs=4096,
+            batch_size=256,
             num_passes=4,
-            epochs_per_log_step=10,
-            rollout_length_seconds=10.0,
+            epochs_per_log_step=1,
+            rollout_length_seconds=2.0,
+            num_rollout_levels=3,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.

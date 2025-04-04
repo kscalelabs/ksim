@@ -366,47 +366,28 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             carry=carry,
         )
 
-    def get_on_policy_variables(
+    def get_ppo_variables(
         self,
         model: DefaultHumanoidRNNModel,
         trajectories: ksim.Trajectory,
+        carry: tuple[Array, Array],
         rng: PRNGKeyArray,
-    ) -> ksim.PPOVariables:
-        # Use cached values from rollout.
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
-            raise ValueError("No aux outputs found in trajectories")
-
-        return ksim.PPOVariables(
-            log_probs_tn=trajectories.aux_outputs.log_probs,
-            values_t=trajectories.aux_outputs.values,
-        )
-
-    def get_off_policy_variables(
-        self,
-        model: DefaultHumanoidRNNModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> ksim.PPOVariables:
-        # Use cached values from rollout.
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
-            raise ValueError("No aux outputs found in trajectories")
-
-        actor_carry = trajectories.aux_outputs.actor_carry
-        critic_carry = trajectories.aux_outputs.critic_carry
+    ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
+        actor_carry, critic_carry = carry
 
         # Vectorize over the time dimensions.
-        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0, 0))
-        action_dist_tj, _ = par_actor_fn(model.actor, trajectories.obs, trajectories.command, actor_carry)
+        action_dist_tj, actor_carry = self._run_actor(model.actor, trajectories.obs, trajectories.command, actor_carry)
         log_probs_tj = action_dist_tj.log_prob(trajectories.action)
 
         # Gets the value by calling the critic.
-        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0, 0))
-        values_t1, _ = par_critic_fn(model.critic, trajectories.obs, trajectories.command, critic_carry)
+        values_t1, critic_carry = self._run_critic(model.critic, trajectories.obs, trajectories.command, critic_carry)
 
-        return ksim.PPOVariables(
-            log_probs_tn=log_probs_tj,
-            values_t=values_t1.squeeze(-1),
+        ppo_variables = ksim.PPOVariables(
+            log_probs=log_probs_tj,
+            values=values_t1.squeeze(-1),
         )
+
+        return ppo_variables, (actor_carry, critic_carry)
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (
@@ -435,28 +416,8 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         )
 
         action_j = action_dist_j.sample(seed=rng)
-        action_log_prob_j = action_dist_j.log_prob(action_j)
 
-        values_1, critic_carry = self._run_critic(
-            model=model.critic,
-            observations=observations,
-            commands=commands,
-            carry=critic_carry_in,
-        )
-
-        # Remove time dimension.
-        values = values_1.squeeze(-1)
-
-        return (
-            action_j,
-            (actor_carry, critic_carry),
-            AuxOutputs(
-                log_probs=action_log_prob_j,
-                values=values,
-                actor_carry=actor_carry_in,
-                critic_carry=critic_carry_in,
-            ),
-        )
+        return action_j, (actor_carry, critic_carry_in)
 
 
 if __name__ == "__main__":
