@@ -469,6 +469,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 ctrl_dt=self.config.ctrl_dt,
                 gait_freq=1.5,
                 max_foot_height=0.12,
+                foot_default_height=0.04,
                 scale=1.0,
             ),
         ]

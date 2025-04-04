@@ -503,14 +503,20 @@ class FeetFlatReward(Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetPhaseReward(Reward):
-    """Reward for tracking the desired foot height."""
+    """Reward for tracking the desired foot height.
+
+    This encourages the feet to follow a smooth trajectory defined by a set
+    of cubic Bézier curves, with a maximum height of `max_foot_height`. The
+    default height of the foot should be given in `foot_default_height` and
+    should be the height when the foot is on the ground.
+    """
 
     ctrl_dt: float = attrs.field()
     gait_freq: float = attrs.field()
     max_foot_height: float = attrs.field()
+    foot_default_height: float = attrs.field()
     feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
     foot_pos_obs_idx: CartesianIndex = attrs.field(default="z")
-    foot_default_height: float = attrs.field(default=0.04)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         if self.feet_pos_obs_name not in trajectory.obs:
