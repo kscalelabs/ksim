@@ -20,12 +20,13 @@ __all__ = [
     "ActionNearPositionPenalty",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
+    "FeetPhaseReward",
+    "FeetNoContactReward",
     "CartesianBodyTargetReward",
     "CartesianBodyTargetPenalty",
     "CartesianBodyTargetVectorReward",
     "ContinuousCartesianBodyTargetReward",
     "GlobalBodyQuaternionReward",
-    "FeetNoContactReward",
 ]
 
 import functools
@@ -504,8 +505,10 @@ class FeetFlatReward(Reward):
 class FeetPhaseReward(Reward):
     """Reward for tracking the desired foot height."""
 
-    scale: float = attrs.field(default=1.0)
+    ctrl_dt: float = attrs.field()
+    gait_freq: float = attrs.field(default=1.5)
     feet_pos_obs_name: str = attrs.field(default="feet_position_observation")
+    foot_pos_obs_idx: CartesianIndex = attrs.field(default="z")
     max_foot_height: float = attrs.field(default=0.12)
     foot_default_height: float = attrs.field(default=0.04)
 
@@ -513,16 +516,20 @@ class FeetPhaseReward(Reward):
         if self.feet_pos_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it as an observation in your task.")
         foot_pos = trajectory.obs[self.feet_pos_obs_name]
+        chex.assert_shape(foot_pos, (..., 2, None))
 
-        breakpoint()
+        # Derives the gait phase as a function of time.
+        t = jnp.arange(trajectory.done.shape[-1]) * self.ctrl_dt
+        gait_phase = 2 * jnp.pi * self.gait_freq * t
+        gait_phase = jnp.mod(gait_phase + jnp.pi, 2 * jnp.pi) - jnp.pi
+        phase = jnp.stack([gait_phase, gait_phase + jnp.pi], axis=-1)
 
-        t = jnp.arange(trajectory.done.shape[-1])
+        foot_idx = cartesian_index_to_dim(self.foot_pos_obs_idx)
+        foot_z_tf = foot_pos[..., foot_idx]
+        ideal_z_tf = self.gait_phase(phase, swing_height=self.max_foot_height)
+        ideal_z_tf = ideal_z_tf + self.foot_default_height
 
-        foot_z = jnp.array([foot_pos[..., 2], foot_pos[..., 5]]).T
-        ideal_z = self.gait_phase(phase, swing_height=self.max_foot_height)
-        ideal_z = ideal_z + self.foot_default_height
-
-        error = jnp.sum(jnp.square(foot_z - ideal_z), axis=-1)
+        error = jnp.sum(jnp.square(foot_z_tf - ideal_z_tf), axis=-1)
         reward = jnp.exp(-error / 0.01)
 
         return reward
@@ -541,14 +548,47 @@ class FeetPhaseReward(Reward):
         s = jnp.clip(s, 0, 1)
 
         # Calculate potential Z values for all elements
-        z_rising = cubic_bezier_interpolation(0.0, swing_height, 2.0 * s)
-        z_falling = cubic_bezier_interpolation(swing_height, 0.0, 2.0 * s - 1.0)
+        z_rising = xax.cubic_bezier_interpolation(0.0, swing_height, 2.0 * s)
+        z_falling = xax.cubic_bezier_interpolation(swing_height, 0.0, 2.0 * s - 1.0)
         potential_swing_z = jnp.where(s <= 0.5, z_rising, z_falling)
 
         # Calculate the final Z value using where based on swing phase
         final_z = jnp.where(swing_phase, potential_swing_z, 0.0)
 
         return final_z
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetNoContactReward(Reward):
+    """Reward for keeping the feet off the ground.
+
+    This reward incentivizes the robot to keep at least one foot off the ground
+    for at least `window_size` steps at a time. If the foot touches the ground
+    again within `window_size` steps, the reward for the entire "off the ground"
+    period is reset to 0.
+    """
+
+    window_size: int = attrs.field()
+    obs_name: str = attrs.field(default="feet_contact_observation")
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        feet_contact = trajectory.obs[self.obs_name]
+        chex.assert_shape(feet_contact, (..., 2))
+
+        def count_scan_fn(carry: Array, contact: Array) -> tuple[Array, Array]:
+            carry = jnp.where(contact, 0, carry + 1)
+            return carry, carry
+
+        _, counts = jax.lax.scan(count_scan_fn, jnp.zeros_like(feet_contact[0]), feet_contact, reverse=True)
+
+        def reward_scan_fn(carry: Array, counts: Array) -> tuple[Array, Array]:
+            carry = jnp.where(counts == 0, 0, jnp.where(carry == 0, counts, carry))
+            return carry, carry
+
+        _, counts = jax.lax.scan(reward_scan_fn, counts[0], counts)
+
+        no_contact = counts >= self.window_size
+        return no_contact.any(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -795,36 +835,3 @@ class GlobalBodyQuaternionReward(Reward):
             sensitivity=sensitivity,
             command_name=command_name,
         )
-
-
-@attrs.define(frozen=True, kw_only=True)
-class FeetNoContactReward(Reward):
-    """Reward for keeping the feet off the ground.
-
-    This reward incentivizes the robot to keep at least one foot off the ground
-    for at least `window_size` steps at a time. If the foot touches the ground
-    again within `window_size` steps, the reward for the entire "off the ground"
-    period is reset to 0.
-    """
-
-    window_size: int = attrs.field()
-    obs_name: str = attrs.field(default="feet_contact_observation")
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        feet_contact = trajectory.obs[self.obs_name]
-        chex.assert_shape(feet_contact, (..., 2))
-
-        def count_scan_fn(carry: Array, contact: Array) -> tuple[Array, Array]:
-            carry = jnp.where(contact, 0, carry + 1)
-            return carry, carry
-
-        _, counts = jax.lax.scan(count_scan_fn, jnp.zeros_like(feet_contact[0]), feet_contact, reverse=True)
-
-        def reward_scan_fn(carry: Array, counts: Array) -> tuple[Array, Array]:
-            carry = jnp.where(counts == 0, 0, jnp.where(carry == 0, counts, carry))
-            return carry, carry
-
-        _, counts = jax.lax.scan(reward_scan_fn, counts[0], counts)
-
-        no_contact = counts >= self.window_size
-        return no_contact.any(axis=-1)

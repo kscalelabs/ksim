@@ -465,6 +465,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(scale=1.0),
+            ksim.FeetPhaseReward(ctrl_dt=self.config.ctrl_dt, scale=1.0),
         ]
 
         if self.config.use_naive_reward:
