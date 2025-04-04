@@ -1,5 +1,5 @@
 # mypy: disable-error-code="override"
-"""Defines simple task for training a walking policy for the default humanoid using an GRU actor."""
+"""Defines simple task for training a walking policy for the default humanoid using an RNN actor."""
 
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -10,7 +10,6 @@ import jax
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from omegaconf import MISSING
 
 import ksim
 
@@ -23,11 +22,11 @@ from .walking import (
 )
 
 
-class DefaultHumanoidCNNActor(eqx.Module):
-    """CNN-based actor for the walking task."""
+class DefaultHumanoidRNNActor(eqx.Module):
+    """RNN-based actor for the walking task."""
 
     input_proj: eqx.nn.Linear
-    cnn_blocks: tuple[eqx.nn.Conv1d, ...]
+    rnn: eqx.nn.GRUCell
     output_proj: eqx.nn.MLP
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
@@ -42,8 +41,6 @@ class DefaultHumanoidCNNActor(eqx.Module):
         var_scale: float,
         hidden_size: int,
         depth: int,
-        kernel_size: int,
-        dilation: int,
     ) -> None:
         num_inputs = NUM_INPUTS
         num_outputs = NUM_JOINTS
@@ -56,21 +53,13 @@ class DefaultHumanoidCNNActor(eqx.Module):
             key=input_proj_key,
         )
 
-        # Create convolution blocks.
-        cnn_blocks = []
-        for _ in range(depth):
-            key, cnn_key = jax.random.split(key)
-            cnn_blocks.append(
-                eqx.nn.Conv1d(
-                    in_channels=hidden_size,
-                    out_channels=hidden_size,
-                    kernel_size=kernel_size,
-                    dilation=dilation,
-                    padding=[((kernel_size - 1) * dilation, 0)],  # Left-padding to keep the length constant.
-                    key=cnn_key,
-                )
-            )
-        self.cnn_blocks = tuple(cnn_blocks)
+        # Create RNN layer
+        key, rnn_key = jax.random.split(key)
+        self.rnn = eqx.nn.GRUCell(
+            input_size=hidden_size,
+            hidden_size=hidden_size,
+            key=rnn_key,
+        )
 
         # Project to output
         self.output_proj = eqx.nn.MLP(
@@ -103,7 +92,7 @@ class DefaultHumanoidCNNActor(eqx.Module):
         lin_vel_cmd_x_t1: Array,
         lin_vel_cmd_y_t1: Array,
         ang_vel_cmd_z_t1: Array,
-        carry_tn: Array | None = None,
+        carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
         obs_tn = jnp.concatenate(
             [
@@ -127,25 +116,13 @@ class DefaultHumanoidCNNActor(eqx.Module):
             axis=-1,
         )
 
-        if carry_tn is not None:
-            obs_tn = jnp.concatenate([carry_tn, obs_tn], axis=-2)
+        def scan_fn(carry: Array, obs_n: Array) -> tuple[Array, Array]:
+            x_n = self.input_proj(obs_n)
+            x_n = self.rnn(x_n, carry)
+            out_n = self.output_proj(x_n)
+            return x_n, out_n
 
-        # Project input to hidden size
-        x_tn = jax.vmap(self.input_proj, in_axes=0)(obs_tn)
-        x_nt = x_tn.transpose(1, 0)
-
-        # Apply transformer blocks
-        for block in self.cnn_blocks:
-            x_nt = block(x_nt)
-            x_nt = jax.nn.relu(x_nt)
-
-        # Project to output
-        x_tn = x_nt.transpose(1, 0)
-        out_tn = jax.vmap(self.output_proj, in_axes=0)(x_tn)
-
-        # Remove the part of the output that was the carry.
-        if carry_tn is not None:
-            out_tn = out_tn[..., carry_tn.shape[-2] :, :]
+        carry, out_tn = jax.lax.scan(scan_fn, carry, obs_tn)
 
         # Converts the output to a distribution.
         mean_tn = out_tn[..., :NUM_JOINTS]
@@ -155,14 +132,14 @@ class DefaultHumanoidCNNActor(eqx.Module):
         std_tn = jnp.clip((jax.nn.softplus(std_tn) + self.min_std) * self.var_scale, max=self.max_std)
 
         dist_tn = distrax.Normal(mean_tn, std_tn)
-        return dist_tn, obs_tn
+        return dist_tn, carry
 
 
-class DefaultHumanoidCNNCritic(eqx.Module):
-    """CNN-based critic for the walking task."""
+class DefaultHumanoidRNNCritic(eqx.Module):
+    """RNN-based critic for the walking task."""
 
     input_proj: eqx.nn.Linear
-    cnn_blocks: tuple[eqx.nn.Conv1d, ...]
+    rnn: eqx.nn.GRUCell
     output_proj: eqx.nn.MLP
 
     def __init__(
@@ -171,8 +148,6 @@ class DefaultHumanoidCNNCritic(eqx.Module):
         *,
         hidden_size: int,
         depth: int,
-        kernel_size: int,
-        dilation: int,
     ) -> None:
         num_inputs = NUM_INPUTS
         num_outputs = 1
@@ -185,21 +160,13 @@ class DefaultHumanoidCNNCritic(eqx.Module):
             key=input_proj_key,
         )
 
-        # Create convolution blocks.
-        cnn_blocks = []
-        for _ in range(depth):
-            key, cnn_key = jax.random.split(key)
-            cnn_blocks.append(
-                eqx.nn.Conv1d(
-                    in_channels=hidden_size,
-                    out_channels=hidden_size,
-                    kernel_size=kernel_size,
-                    dilation=dilation,
-                    padding=[((kernel_size - 1) * dilation, 0)],  # Left-padding to keep the length constant.
-                    key=cnn_key,
-                )
-            )
-        self.cnn_blocks = tuple(cnn_blocks)
+        # Create RNN layer
+        key, rnn_key = jax.random.split(key)
+        self.rnn = eqx.nn.GRUCell(
+            input_size=hidden_size,
+            hidden_size=hidden_size,
+            key=rnn_key,
+        )
 
         # Project to output
         self.output_proj = eqx.nn.MLP(
@@ -228,7 +195,8 @@ class DefaultHumanoidCNNCritic(eqx.Module):
         lin_vel_cmd_x_t1: Array,
         lin_vel_cmd_y_t1: Array,
         ang_vel_cmd_z_t1: Array,
-    ) -> Array:
+        carry: Array,
+    ) -> tuple[Array, Array]:
         obs_tn = jnp.concatenate(
             [
                 jnp.cos(timestep_1),  # 1
@@ -253,21 +221,20 @@ class DefaultHumanoidCNNCritic(eqx.Module):
 
         # Project input to hidden size
         x_tn = jax.vmap(self.input_proj, in_axes=0)(obs_tn)
-        x_nt = x_tn.transpose(1, 0)
 
-        # Apply transformer blocks
-        for block in self.cnn_blocks:
-            x_nt = block(x_nt)
+        def scan_fn(carry: Array, x_n: Array) -> tuple[Array, Array]:
+            x_n = self.rnn(x_n, carry)
+            out_n = self.output_proj(x_n)
+            return x_n, out_n
 
-        # Project to output
-        x_tn = x_nt.transpose(1, 0)
-        out_tn = jax.vmap(self.output_proj, in_axes=0)(x_tn)
-        return out_tn
+        carry, out_tn = jax.lax.scan(scan_fn, carry, x_tn)
+
+        return out_tn, carry
 
 
-class DefaultHumanoidCNNModel(eqx.Module):
-    actor: DefaultHumanoidCNNActor
-    critic: DefaultHumanoidCNNCritic
+class DefaultHumanoidRNNModel(eqx.Module):
+    actor: DefaultHumanoidRNNActor
+    critic: DefaultHumanoidRNNCritic
 
     def __init__(
         self,
@@ -275,60 +242,52 @@ class DefaultHumanoidCNNModel(eqx.Module):
         *,
         hidden_size: int,
         depth: int,
-        kernel_size: int,
-        dilation: int,
     ) -> None:
-        self.actor = DefaultHumanoidCNNActor(
+        self.actor = DefaultHumanoidRNNActor(
             key,
             min_std=0.01,
             max_std=1.0,
             var_scale=0.5,
             hidden_size=hidden_size,
             depth=depth,
-            kernel_size=kernel_size,
-            dilation=dilation,
         )
-        self.critic = DefaultHumanoidCNNCritic(
+        self.critic = DefaultHumanoidRNNCritic(
             key,
             hidden_size=hidden_size,
             depth=depth,
-            kernel_size=kernel_size,
-            dilation=dilation,
         )
 
 
 @dataclass
-class HumanoidWalkingCNNTaskConfig(HumanoidWalkingTaskConfig):
+class HumanoidWalkingRNNTaskConfig(HumanoidWalkingTaskConfig):
     # Model parameters.
-    kernel_size: int = xax.field(
-        value=MISSING,
-        help="The kernel size for the CNN.",
+    hidden_size: int = xax.field(
+        value=256,
+        help="The hidden size for the RNN.",
     )
-    dilation: int = xax.field(
-        value=1,
-        help="The dilation for the CNN.",
+    depth: int = xax.field(
+        value=5,
+        help="The depth for the MLPs.",
     )
 
 
-Config = TypeVar("Config", bound=HumanoidWalkingCNNTaskConfig)
+Config = TypeVar("Config", bound=HumanoidWalkingRNNTaskConfig)
 
 
-class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
-    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidCNNModel:
-        return DefaultHumanoidCNNModel(
+class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
+    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidRNNModel:
+        return DefaultHumanoidRNNModel(
             key,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
-            kernel_size=self.config.kernel_size,
-            dilation=self.config.dilation,
         )
 
     def _run_actor(
         self,
-        model: DefaultHumanoidCNNActor,
+        model: DefaultHumanoidRNNActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry_tn: Array | None = None,
+        carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_tj = observations["joint_position_observation"]
@@ -362,15 +321,16 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             lin_vel_cmd_x_t1=lin_vel_cmd_x_t1,
             lin_vel_cmd_y_t1=lin_vel_cmd_y_t1,
             ang_vel_cmd_z_t1=ang_vel_cmd_z_t1,
-            carry_tn=carry_tn,
+            carry=carry,
         )
 
     def _run_critic(
         self,
-        model: DefaultHumanoidCNNCritic,
+        model: DefaultHumanoidRNNCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-    ) -> Array:
+        carry: Array,
+    ) -> tuple[Array, Array]:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_tj = observations["joint_position_observation"]
         dh_joint_vel_tj = observations["joint_velocity_observation"]
@@ -403,11 +363,12 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             lin_vel_cmd_x_t1=lin_vel_cmd_x_t1,
             lin_vel_cmd_y_t1=lin_vel_cmd_y_t1,
             ang_vel_cmd_z_t1=ang_vel_cmd_z_t1,
+            carry=carry,
         )
 
     def get_on_policy_variables(
         self,
-        model: DefaultHumanoidCNNModel,
+        model: DefaultHumanoidRNNModel,
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
@@ -416,10 +377,12 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             raise ValueError("No aux outputs found in trajectories")
 
         # Gets the value by calling the critic.
-        values_t1 = self._run_critic(
+        critic_carry = self.get_initial_carry(rng)
+        values_t1, _ = self._run_critic(
             model=model.critic,
             observations=trajectories.obs,
             commands=trajectories.command,
+            carry=critic_carry,
         )
 
         return ksim.PPOVariables(
@@ -429,19 +392,27 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def get_off_policy_variables(
         self,
-        model: DefaultHumanoidCNNModel,
+        model: DefaultHumanoidRNNModel,
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
         # Vectorize over the time dimensions.
-        action_dist_tj, _ = self._run_actor(model.actor, trajectories.obs, trajectories.command)
+        actor_carry = self.get_initial_carry(rng)
+        action_dist_tj, _ = self._run_actor(
+            model=model.actor,
+            observations=trajectories.obs,
+            commands=trajectories.command,
+            carry=actor_carry,
+        )
         log_probs_tj = action_dist_tj.log_prob(trajectories.action)
 
         # Gets the value by calling the critic.
-        values_t1 = self._run_critic(
+        critic_carry = self.get_initial_carry(rng)
+        values_t1, _ = self._run_critic(
             model=model.critic,
             observations=trajectories.obs,
             commands=trajectories.command,
+            carry=critic_carry,
         )
 
         return ksim.PPOVariables(
@@ -450,11 +421,11 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         )
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(shape=((self.config.kernel_size - 1) * self.config.dilation, NUM_INPUTS))
+        return jnp.zeros(shape=(self.config.hidden_size,))
 
     def sample_action(
         self,
-        model: DefaultHumanoidCNNModel,
+        model: DefaultHumanoidRNNModel,
         carry: Array,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
@@ -465,15 +436,12 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         (observations, commands) = jax.tree.map(lambda x: x[None], (observations, commands))
 
         # Runs the actor model to get the action distribution.
-        action_dist_tj, obs_tn = self._run_actor(
+        action_dist_tj, carry = self._run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
-            carry_tn=carry,
+            carry=carry,
         )
-
-        # Get the true observation and the next carry.
-        carry = obs_tn[..., 1:, :]
 
         action_tj = action_dist_tj.sample(seed=rng)
         action_log_prob_tj = action_dist_tj.log_prob(action_tj)
@@ -487,11 +455,11 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.walking_cnn
+    #   python -m examples.walking_rnn
     # To visualize the environment, use the following command:
-    #   python -m examples.walking_cnn run_environment=True
-    HumanoidWalkingCNNTask.launch(
-        HumanoidWalkingCNNTaskConfig(
+    #   python -m examples.walking_rnn run_environment=True
+    HumanoidWalkingRNNTask.launch(
+        HumanoidWalkingRNNTaskConfig(
             # Training parameters.
             num_envs=4096,
             batch_size=256,
