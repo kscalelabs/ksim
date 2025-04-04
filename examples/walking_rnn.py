@@ -465,9 +465,8 @@ if __name__ == "__main__":
             num_envs=4096,
             batch_size=256,
             num_passes=4,
-            epochs_per_log_step=1,
-            rollout_length_seconds=2.0,
-            num_rollout_levels=3,
+            epochs_per_log_step=10,
+            rollout_length_seconds=10.0,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
