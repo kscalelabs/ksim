@@ -377,6 +377,8 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             raise ValueError("No aux outputs found in trajectories")
 
         # Gets the value by calling the critic.
+        # TODO: Need to figure out how to use the proper carry here. Can
+        # probably compute it at runtime.
         critic_carry = self.get_initial_carry(rng)
         values_t1, _ = self._run_critic(
             model=model.critic,
@@ -397,6 +399,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
         # Vectorize over the time dimensions.
+        # TODO: Need to figure out how to use the proper carry here.
         actor_carry = self.get_initial_carry(rng)
         action_dist_tj, _ = self._run_actor(
             model=model.actor,
