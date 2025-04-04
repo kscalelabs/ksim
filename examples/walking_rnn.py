@@ -462,7 +462,7 @@ if __name__ == "__main__":
     HumanoidWalkingRNNTask.launch(
         HumanoidWalkingRNNTaskConfig(
             # Training parameters.
-            num_envs=4096,
+            num_envs=2048,
             batch_size=256,
             num_passes=4,
             epochs_per_log_step=10,
