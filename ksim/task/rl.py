@@ -751,13 +751,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rollout_length: The length of the rollout.
         """
         if self.config.log_train_metrics:
-            self.logger.log_scalar("rollout length", rollout_length * self.config.ctrl_dt, namespace="🔄 curriculum")
+            self.logger.log_scalar(
+                "rollout length",
+                rollout_length * self.config.ctrl_dt,
+                namespace="🔄 curriculum",
+                secondary=True,
+            )
 
-            for namespace, metric in (
-                ("🚂 train", metrics.train),
-                ("🎁 reward", metrics.reward),
-                ("💀 termination", metrics.termination),
-                ("🔄 curriculum", {"level": metrics.curriculum_level}),
+            for namespace, metric, secondary in (
+                ("🚂 train", metrics.train, True),
+                ("🎁 reward", metrics.reward, False),
+                ("💀 termination", metrics.termination, True),
+                ("🔄 curriculum", {"level": metrics.curriculum_level}, True),
             ):
                 for key, value in metric.items():
                     if isinstance(value, Histogram):
@@ -771,9 +776,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             sum_squaresv=value.sum_squares,
                             namespace=f"{namespace} histograms",
                         )
-                        self.logger.log_scalar(key, value.mean, namespace=namespace)
+                        self.logger.log_scalar(key, value.mean, namespace=namespace, secondary=secondary)
                     else:
-                        self.logger.log_scalar(key, value.mean(), namespace=namespace)
+                        self.logger.log_scalar(key, value.mean(), namespace=namespace, secondary=secondary)
 
     def render_trajectory_video(
         self,
@@ -1172,11 +1177,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Metrics, final_trajectories, final_rewards batch dim of epochs.
         # Rollout variables has batch dim of num_envs and are used next rollout.
         return model_arr, opt_state, metrics, rollout_variables, single_traj, curriculum_state
-
-    def on_context_stop(self, step: str, elapsed_time: float) -> None:
-        super().on_context_stop(step, elapsed_time)
-
-        self.logger.log_scalar(key=step, value=elapsed_time, namespace="⌛ dt")
 
     def run_environment(
         self,

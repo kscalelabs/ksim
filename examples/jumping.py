@@ -45,9 +45,9 @@ class HumanoidJumpingTask(HumanoidWalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.default_humanoid.walking_gru
+    #   python -m examples.jumping
     # To visualize the environment, use the following command:
-    #   python -m examples.default_humanoid.walking_gru run_environment=True
+    #   python -m examples.jumping run_environment=True
     HumanoidJumpingTask.launch(
         HumanoidJumpingTaskConfig(
             num_envs=2048,

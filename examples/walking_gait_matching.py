@@ -196,13 +196,13 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.default_humanoid.walking
+    #   python -m examples.walking_gait_matching
     # To visualize the environment, use the following command:
-    #   python -m examples.default_humanoid.walking run_environment=True
+    #   python -m examples.walking_gait_matching run_environment=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.default_humanoid.walking num_envs=8 num_batches=2
+    #   python -m examples.walking_gait_matching num_envs=8 num_batches=2
     HumanoidWalkingGaitMatchingTask.launch(
         HumanoidWalkingGaitMatchingTaskConfig(
             num_envs=2048,

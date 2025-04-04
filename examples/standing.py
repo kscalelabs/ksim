@@ -27,9 +27,9 @@ class HumanoidStandingTask(HumanoidWalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.default_humanoid.standing
+    #   python -m examples.standing
     # To visualize the environment, use the following command:
-    #   python -m examples.default_humanoid.standing run_environment=True
+    #   python -m examples.standing run_environment=True
     HumanoidStandingTask.launch(
         HumanoidStandingTaskConfig(
             # Training parameters.
