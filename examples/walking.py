@@ -574,8 +574,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         self,
         model: DefaultHumanoidModel,
         trajectories: ksim.Trajectory,
+        carry: None,
         rng: PRNGKeyArray,
-    ) -> ksim.PPOVariables:
+    ) -> tuple[ksim.PPOVariables, None]:
         # Vectorize over the time dimensions.
         action_dist_j = self._run_actor(model.actor, trajectories.obs, trajectories.command)
         log_probs_j = action_dist_j.log_prob(trajectories.action)
@@ -583,10 +584,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         # Vectorize over the time dimensions.
         values_1 = self._run_critic(model.critic, trajectories.obs, trajectories.command)
 
-        return ksim.PPOVariables(
+        ppo_variables = ksim.PPOVariables(
             log_probs=log_probs_j,
             values=values_1.squeeze(-1),
         )
+
+        return ppo_variables, None
 
     def sample_action(
         self,

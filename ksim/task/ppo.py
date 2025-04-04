@@ -397,6 +397,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         rewards: Rewards,
+        init_carry: PyTree,
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[Array, tuple[xax.FrozenDict[str, Array], SingleTrajectory]]:
@@ -407,6 +408,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             model_static: The static part of the model to optimize.
             trajectories: The batch of trajectories to compute the loss and metrics for.
             rewards: The rewards for the trajectories.
+            init_carry: The initial carry for the model.
             on_policy_variables: The PPO variables from the on-policy rollout.
             rng: A random seed.
 
@@ -414,21 +416,21 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A tuple containing the loss value as a scalar, a dictionary of
             metrics to log, and the single trajectory to log.
         """
-        model = eqx.combine(model_arr, model_static)
 
         def loss_and_metrics_fn(
-            model: PyTree,
             trajectories: Trajectory,
             rewards: Rewards,
+            init_carry: PyTree,
             on_policy_variables: PPOVariables,
             rng: PRNGKeyArray,
         ) -> tuple[Array, xax.FrozenDict[str, Array], SingleTrajectory]:
             rng, rng2 = jax.random.split(rng)
 
-            off_policy_variables = self.get_off_policy_variables(model, trajectories, rng2)
+            off_policy_scan_fn = functools.partial(self._policy_scan_fn, model_arr=model_arr, model_static=model_static)
+            _, off_policy_variables = jax.lax.scan(off_policy_scan_fn, (rng2, init_carry), trajectories)
 
             ppo_inputs = compute_ppo_inputs(
-                values_t=jax.lax.stop_gradient(off_policy_variables.values_t),
+                values_t=jax.lax.stop_gradient(off_policy_variables.values),
                 rewards_t=rewards.total,
                 dones_t=trajectories.done,
                 decay_gamma=self.config.gamma,
@@ -482,8 +484,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # Gets the loss and metrics for each trajectory in the batch.
         rngs = jax.random.split(rng, rewards.total.shape[0])
-        par_fn = jax.vmap(loss_and_metrics_fn, in_axes=(None, 0, 0, 0, 0))
-        loss, metrics, single_traj = par_fn(model, trajectories, rewards, on_policy_variables, rngs)
+        par_fn = jax.vmap(loss_and_metrics_fn, in_axes=0)
+        loss, metrics, single_traj = par_fn(trajectories, rewards, init_carry, on_policy_variables, rngs)
 
         # Only take the last trajectory.
         single_traj = jax.tree.map(lambda x: x[-1], single_traj)
@@ -497,6 +499,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         rewards: Rewards,
+        init_carry: PyTree,
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[dict[str, Array], SingleTrajectory, PyTree]:
@@ -507,6 +510,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             model_static,
             trajectories,
             rewards,
+            init_carry,
             on_policy_variables,
             rng,
         )
@@ -521,6 +525,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         trajectories: Trajectory,
         rewards: Rewards,
+        init_carry: PyTree,
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array], SingleTrajectory]:
@@ -529,6 +534,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             model_static=model_static,
             trajectories=trajectories,
             rewards=rewards,
+            init_carry=init_carry,
             on_policy_variables=on_policy_variables,
             rng=rng,
         )
@@ -550,8 +556,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model_arr: PyTree,
         model_static: PyTree,
     ) -> tuple[tuple[PRNGKeyArray, PyTree], PPOVariables]:
-        rng, model_carry, carry_rng = carry
-        rng, ppo_rng = jax.random.split(rng)
+        rng, model_carry = carry
+        rng, ppo_rng, carry_rng = jax.random.split(rng, 3)
         model = eqx.combine(model_arr, model_static)
         ppo_vars, model_carry = self.get_ppo_variables(model, xt, model_carry, ppo_rng)
 
@@ -563,22 +569,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         return (rng, model_carry), ppo_vars
-
-    @xax.jit(static_argnames=["self", "model_static"])
-    def step_training(
-        self,
-        model_arr: PyTree,
-        model_static: PyTree,
-        trajectory: Trajectory,
-        carry: PyTree,
-        rng: PRNGKeyArray,
-    ) -> tuple[PPOVariables, PyTree]:
-        rng, ppo_rng, cmd_rng, act_rng, reset_rng, carry_rng, physics_rng = jax.random.split(rng, 7)
-
-        # Recombines the mutable and static parts of the model.
-        model = eqx.combine(model_arr, model_static)
-
-        ppo_variables, carry = self.get_ppo_variables(model, trajectory, carry, ppo_rng)
 
     def update_model(
         self,
@@ -615,29 +605,28 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         indices = jnp.arange(trajectories.done.shape[0])
         indices = indices.reshape(self.num_batches, self.batch_size)
 
-        def on_policy_batch_scan_fn(
-            carry: tuple[PRNGKeyArray, PyTree],
-            xt: Array,
-        ) -> tuple[tuple[PRNGKeyArray, PyTree], PPOVariables]:
-            rng, model_carry = carry
+        def on_policy_scan_fn(xi: tuple[PRNGKeyArray, Trajectory, PyTree]) -> PPOVariables:
+            rng, trajectory, model_carry = xi
             rng, policy_vars_rng = jax.random.split(rng)
-            trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
             on_policy_scan_fn = functools.partial(self._policy_scan_fn, model_arr=model_arr, model_static=model_static)
-            (rng, next_model_carry), on_policy_variables = jax.lax.scan(
-                on_policy_scan_fn,
-                (policy_vars_rng, model_carry),
-                trajectory_batch,
-            )
-            return (rng, next_model_carry), on_policy_variables
+            (rng, _), on_policy_variables = jax.lax.scan(on_policy_scan_fn, (policy_vars_rng, model_carry), trajectory)
+            return on_policy_variables
 
-        (rng, _), on_policy_variables = jax.lax.scan(on_policy_batch_scan_fn, (rng, rollout_variables.carry), indices)
+        def on_policy_batch_scan_fn(xi: tuple[PRNGKeyArray, Array]) -> PPOVariables:
+            rng, xt = xi
+            policy_vars_rng = jax.random.split(rng, self.batch_size)
+            trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
+            carry_batch = jax.tree.map(lambda x: x[xt], rollout_variables.carry)
+            on_policy_variables = jax.lax.map(on_policy_scan_fn, (policy_vars_rng, trajectory_batch, carry_batch))
+            return on_policy_variables
 
-        # Flattens the chunked batch dimensions.
-        on_policy_variables = jax.tree.map(
-            lambda x: x.reshape(x.shape[0] * x.shape[1], *x.shape[2:]), on_policy_variables
-        )
+        rng, prng = jax.random.split(rng)
+        on_policy_variables = jax.lax.map(on_policy_batch_scan_fn, (jax.random.split(prng, self.num_batches), indices))
 
-        breakpoint()
+        def flatten_fn(x: Array) -> Array:
+            return x.reshape(x.shape[0] * x.shape[1], *x.shape[2:])
+
+        on_policy_variables = jax.tree.map(flatten_fn, on_policy_variables)
 
         # Loops over the trajectory batches and applies gradient updates.
         def scan_fn(
@@ -650,6 +639,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             # Gets the current batch of trajectories and rewards.
             trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
             reward_batch = jax.tree.map(lambda x: x[xt], rewards)
+            carry_batch = jax.tree.map(lambda x: x[xt], rollout_variables.carry)
             on_policy_variables_batch = jax.tree.map(lambda x: x[xt], on_policy_variables)
 
             model_arr, opt_state, metrics, single_traj = self._single_step(
@@ -659,6 +649,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 opt_state=opt_state,
                 trajectories=trajectory_batch,
                 rewards=reward_batch,
+                init_carry=carry_batch,
                 on_policy_variables=on_policy_variables_batch,
                 rng=batch_rng,
             )
@@ -686,13 +677,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # Get the last trajectory.
         single_traj = jax.tree.map(lambda x: x[-1], single_traj)
-
-        # Manual version, instead of using scan.
-        # metrics = []
-        # for _ in range(self.config.num_passes):
-        #     carry, metric = batch_scan_fn(carry, None)
-        #     metrics.append(metric)
-        # metrics = jax.tree.map(lambda *x: jnp.stack(x, axis=0), *metrics)
 
         model_arr, opt_state, _ = carry
         return model_arr, opt_state, metrics, single_traj
