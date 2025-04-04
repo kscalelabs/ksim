@@ -548,8 +548,10 @@ class FeetPhaseReward(Reward):
         s = jnp.clip(s, 0, 1)
 
         # Calculate potential Z values for all elements
-        z_rising = xax.cubic_bezier_interpolation(0.0, swing_height, 2.0 * s)
-        z_falling = xax.cubic_bezier_interpolation(swing_height, 0.0, 2.0 * s - 1.0)
+        if isinstance(swing_height, float):
+            swing_height = jnp.array(swing_height)
+        z_rising = xax.cubic_bezier_interpolation(jnp.array(0.0), swing_height, 2.0 * s)
+        z_falling = xax.cubic_bezier_interpolation(swing_height, jnp.array(0.0), 2.0 * s - 1.0)
         potential_swing_z = jnp.where(s <= 0.5, z_rising, z_falling)
 
         # Calculate the final Z value using where based on swing phase
