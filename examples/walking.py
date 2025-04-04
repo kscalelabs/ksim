@@ -233,7 +233,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Model parameters.
     hidden_size: int = xax.field(
-        value=256,
+        value=128,
         help="The hidden size for the MLPs.",
     )
     depth: int = xax.field(
