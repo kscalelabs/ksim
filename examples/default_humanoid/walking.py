@@ -21,7 +21,7 @@ import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1 + 1
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
 
 ACTION_RANGES = [
     [-0.7853981633974483, 0.7853981633974483],
@@ -560,6 +560,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
+        timestep_1 = observations["timestep_observation"]  # 1
         dh_joint_pos_n = observations["joint_position_observation"]  # 26
         dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
         com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
@@ -576,6 +577,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]  # 1
 
         return model.forward(
+            timestep_1=timestep_1,
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n / 10.0,
             com_inertia_n=com_inertia_n,
