@@ -446,13 +446,13 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.default_humanoid.walking
+    #   python -m examples.pseudo_ik
     # To visualize the environment, use the following command:
-    #   python -m examples.default_humanoid.walking run_environment=True
+    #   python -m examples.pseudo_ik run_environment=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.default_humanoid.walking num_envs=8 batch_size=4
+    #   python -m examples.pseudo_ik num_envs=8 batch_size=4
     HumanoidPseudoIKTask.launch(
         HumanoidPseudoIKTaskConfig(
             # Training parameters.

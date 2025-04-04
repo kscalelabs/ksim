@@ -491,9 +491,9 @@ class HumanoidWalkingCNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.default_humanoid.walking_cnn
+    #   python -m examples.walking_cnn
     # To visualize the environment, use the following command:
-    #   python -m examples.default_humanoid.walking_cnn run_environment=True
+    #   python -m examples.walking_cnn run_environment=True
     HumanoidWalkingCNNTask.launch(
         HumanoidWalkingCNNTaskConfig(
             # Training parameters.
