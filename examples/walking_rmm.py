@@ -26,7 +26,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
     """RNN-based actor for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnn: eqx.nn.GRU
+    rnn: eqx.nn.GRUCell
     output_proj: eqx.nn.MLP
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
@@ -55,7 +55,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
 
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
-        self.rnn = eqx.nn.GRU(
+        self.rnn = eqx.nn.GRUCell(
             input_size=hidden_size,
             hidden_size=hidden_size,
             key=rnn_key,
@@ -142,7 +142,7 @@ class DefaultHumanoidRNNCritic(eqx.Module):
     """RNN-based critic for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnn: eqx.nn.GRU
+    rnn: eqx.nn.GRUCell
     output_proj: eqx.nn.MLP
 
     def __init__(
@@ -165,7 +165,7 @@ class DefaultHumanoidRNNCritic(eqx.Module):
 
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
-        self.rnn = eqx.nn.GRU(
+        self.rnn = eqx.nn.GRUCell(
             input_size=hidden_size,
             hidden_size=hidden_size,
             key=rnn_key,
