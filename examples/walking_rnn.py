@@ -16,10 +16,18 @@ import ksim
 from .walking import (
     NUM_INPUTS,
     NUM_JOINTS,
-    AuxOutputs,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
 )
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class AuxOutputs:
+    log_probs: Array
+    values: Array
+    actor_carry: Array
+    critic_carry: Array
 
 
 class DefaultHumanoidRNNActor(eqx.Module):
@@ -78,61 +86,57 @@ class DefaultHumanoidRNNActor(eqx.Module):
     def forward(
         self,
         timestep_1: Array,
-        dh_joint_pos_tj: Array,
-        dh_joint_vel_tj: Array,
-        com_inertia_tn: Array,
-        com_vel_tn: Array,
-        imu_acc_t3: Array,
-        imu_gyro_t3: Array,
-        act_frc_obs_tn: Array,
-        base_pos_t3: Array,
-        base_quat_t4: Array,
-        lin_vel_obs_t3: Array,
-        ang_vel_obs_t3: Array,
-        lin_vel_cmd_x_t1: Array,
-        lin_vel_cmd_y_t1: Array,
-        ang_vel_cmd_z_t1: Array,
+        dh_joint_pos_j: Array,
+        dh_joint_vel_j: Array,
+        com_inertia_n: Array,
+        com_vel_n: Array,
+        imu_acc_3: Array,
+        imu_gyro_3: Array,
+        act_frc_obs_n: Array,
+        base_pos_3: Array,
+        base_quat_4: Array,
+        lin_vel_obs_3: Array,
+        ang_vel_obs_3: Array,
+        lin_vel_cmd_x_1: Array,
+        lin_vel_cmd_y_1: Array,
+        ang_vel_cmd_z_1: Array,
         carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
-        obs_tn = jnp.concatenate(
+        obs_n = jnp.concatenate(
             [
                 jnp.cos(timestep_1),  # 1
                 jnp.sin(timestep_1),  # 1
-                dh_joint_pos_tj,  # NUM_JOINTS
-                dh_joint_vel_tj,  # NUM_JOINTS
-                com_inertia_tn,  # 160
-                com_vel_tn,  # 96
-                imu_acc_t3,  # 3
-                imu_gyro_t3,  # 3
-                act_frc_obs_tn,  # NUM_JOINTS
-                base_pos_t3,  # 3
-                base_quat_t4,  # 4
-                lin_vel_obs_t3,  # 3
-                ang_vel_obs_t3,  # 3
-                lin_vel_cmd_x_t1,  # 1
-                lin_vel_cmd_y_t1,  # 1
-                ang_vel_cmd_z_t1,  # 1
+                dh_joint_pos_j,  # NUM_JOINTS
+                dh_joint_vel_j,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3,  # 3
+                imu_gyro_3,  # 3
+                act_frc_obs_n,  # NUM_JOINTS
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                lin_vel_cmd_x_1,  # 1
+                lin_vel_cmd_y_1,  # 1
+                ang_vel_cmd_z_1,  # 1
             ],
             axis=-1,
         )
 
-        def scan_fn(carry: Array, obs_n: Array) -> tuple[Array, Array]:
-            x_n = self.input_proj(obs_n)
-            x_n = self.rnn(x_n, carry)
-            out_n = self.output_proj(x_n)
-            return x_n, out_n
-
-        carry, out_tn = jax.lax.scan(scan_fn, carry, obs_tn)
+        x_n = self.input_proj(obs_n)
+        x_n = self.rnn(x_n, carry)
+        out_n = self.output_proj(x_n)
 
         # Converts the output to a distribution.
-        mean_tn = out_tn[..., :NUM_JOINTS]
-        std_tn = out_tn[..., NUM_JOINTS:]
+        mean_n = out_n[..., :NUM_JOINTS]
+        std_n = out_n[..., NUM_JOINTS:]
 
         # Softplus and clip to ensure positive standard deviations.
-        std_tn = jnp.clip((jax.nn.softplus(std_tn) + self.min_std) * self.var_scale, max=self.max_std)
+        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
-        dist_tn = distrax.Normal(mean_tn, std_tn)
-        return dist_tn, carry
+        dist_n = distrax.Normal(mean_n, std_n)
+        return dist_n, x_n
 
 
 class DefaultHumanoidRNNCritic(eqx.Module):
@@ -181,55 +185,49 @@ class DefaultHumanoidRNNCritic(eqx.Module):
     def forward(
         self,
         timestep_1: Array,
-        dh_joint_pos_tj: Array,
-        dh_joint_vel_tj: Array,
-        com_inertia_tn: Array,
-        com_vel_tn: Array,
-        imu_acc_t3: Array,
-        imu_gyro_t3: Array,
-        act_frc_obs_tn: Array,
-        base_pos_t3: Array,
-        base_quat_t4: Array,
-        lin_vel_obs_t3: Array,
-        ang_vel_obs_t3: Array,
-        lin_vel_cmd_x_t1: Array,
-        lin_vel_cmd_y_t1: Array,
-        ang_vel_cmd_z_t1: Array,
+        dh_joint_pos_j: Array,
+        dh_joint_vel_j: Array,
+        com_inertia_n: Array,
+        com_vel_n: Array,
+        imu_acc_3: Array,
+        imu_gyro_3: Array,
+        act_frc_obs_n: Array,
+        base_pos_3: Array,
+        base_quat_4: Array,
+        lin_vel_obs_3: Array,
+        ang_vel_obs_3: Array,
+        lin_vel_cmd_x_1: Array,
+        lin_vel_cmd_y_1: Array,
+        ang_vel_cmd_z_1: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
-        obs_tn = jnp.concatenate(
+        obs_n = jnp.concatenate(
             [
                 jnp.cos(timestep_1),  # 1
                 jnp.sin(timestep_1),  # 1
-                dh_joint_pos_tj,  # NUM_JOINTS
-                dh_joint_vel_tj,  # NUM_JOINTS
-                com_inertia_tn,  # 160
-                com_vel_tn,  # 96
-                imu_acc_t3,  # 3
-                imu_gyro_t3,  # 3
-                act_frc_obs_tn,  # NUM_JOINTS
-                base_pos_t3,  # 3
-                base_quat_t4,  # 4
-                lin_vel_obs_t3,  # 3
-                ang_vel_obs_t3,  # 3
-                lin_vel_cmd_x_t1,  # 1
-                lin_vel_cmd_y_t1,  # 1
-                ang_vel_cmd_z_t1,  # 1
+                dh_joint_pos_j,  # NUM_JOINTS
+                dh_joint_vel_j,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3,  # 3
+                imu_gyro_3,  # 3
+                act_frc_obs_n,  # NUM_JOINTS
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                lin_vel_cmd_x_1,  # 1
+                lin_vel_cmd_y_1,  # 1
+                ang_vel_cmd_z_1,  # 1
             ],
             axis=-1,
         )
 
-        # Project input to hidden size
-        x_tn = jax.vmap(self.input_proj, in_axes=0)(obs_tn)
+        x_n = self.input_proj(obs_n)
+        x_n = self.rnn(x_n, carry)
+        out_n = self.output_proj(x_n)
 
-        def scan_fn(carry: Array, x_n: Array) -> tuple[Array, Array]:
-            x_n = self.rnn(x_n, carry)
-            out_n = self.output_proj(x_n)
-            return x_n, out_n
-
-        carry, out_tn = jax.lax.scan(scan_fn, carry, x_tn)
-
-        return out_tn, carry
+        return out_n, x_n
 
 
 class DefaultHumanoidRNNModel(eqx.Module):
@@ -290,37 +288,37 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
         timestep_1 = observations["timestep_observation"]
-        dh_joint_pos_tj = observations["joint_position_observation"]
-        dh_joint_vel_tj = observations["joint_velocity_observation"]
-        com_inertia_tn = observations["center_of_mass_inertia_observation"]
-        com_vel_tn = observations["center_of_mass_velocity_observation"]
-        imu_acc_t3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_t3 = observations["sensor_observation_imu_gyro"]
-        act_frc_obs_tn = observations["actuator_force_observation"]
-        base_pos_t3 = observations["base_position_observation"]
-        base_quat_t4 = observations["base_orientation_observation"]
-        lin_vel_obs_t3 = observations["base_linear_velocity_observation"]
-        ang_vel_obs_t3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_x_t1 = commands["linear_velocity_command_x"]
-        lin_vel_cmd_y_t1 = commands["linear_velocity_command_y"]
-        ang_vel_cmd_z_t1 = commands["angular_velocity_command_z"]
+        dh_joint_pos_j = observations["joint_position_observation"]
+        dh_joint_vel_j = observations["joint_velocity_observation"]
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        act_frc_obs_n = observations["actuator_force_observation"]
+        base_pos_3 = observations["base_position_observation"]
+        base_quat_4 = observations["base_orientation_observation"]
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
+        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
+        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
 
         return model.forward(
             timestep_1=timestep_1,
-            dh_joint_pos_tj=dh_joint_pos_tj,
-            dh_joint_vel_tj=dh_joint_vel_tj / 10.0,
-            com_inertia_tn=com_inertia_tn,
-            com_vel_tn=com_vel_tn,
-            imu_acc_t3=imu_acc_t3 / 50.0,
-            imu_gyro_t3=imu_gyro_t3 / 3.0,
-            act_frc_obs_tn=act_frc_obs_tn / 100.0,
-            base_pos_t3=base_pos_t3,
-            base_quat_t4=base_quat_t4,
-            lin_vel_obs_t3=lin_vel_obs_t3,
-            ang_vel_obs_t3=ang_vel_obs_t3,
-            lin_vel_cmd_x_t1=lin_vel_cmd_x_t1,
-            lin_vel_cmd_y_t1=lin_vel_cmd_y_t1,
-            ang_vel_cmd_z_t1=ang_vel_cmd_z_t1,
+            dh_joint_pos_j=dh_joint_pos_j,
+            dh_joint_vel_j=dh_joint_vel_j / 10.0,
+            com_inertia_n=com_inertia_n,
+            com_vel_n=com_vel_n,
+            imu_acc_3=imu_acc_3 / 50.0,
+            imu_gyro_3=imu_gyro_3 / 3.0,
+            act_frc_obs_n=act_frc_obs_n / 100.0,
+            base_pos_3=base_pos_3,
+            base_quat_4=base_quat_4,
+            lin_vel_obs_3=lin_vel_obs_3,
+            ang_vel_obs_3=ang_vel_obs_3,
+            lin_vel_cmd_x_1=lin_vel_cmd_x_1,
+            lin_vel_cmd_y_1=lin_vel_cmd_y_1,
+            ang_vel_cmd_z_1=ang_vel_cmd_z_1,
             carry=carry,
         )
 
@@ -332,37 +330,37 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         carry: Array,
     ) -> tuple[Array, Array]:
         timestep_1 = observations["timestep_observation"]
-        dh_joint_pos_tj = observations["joint_position_observation"]
-        dh_joint_vel_tj = observations["joint_velocity_observation"]
-        com_inertia_tn = observations["center_of_mass_inertia_observation"]
-        com_vel_tn = observations["center_of_mass_velocity_observation"]
-        imu_acc_t3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_t3 = observations["sensor_observation_imu_gyro"]
-        act_frc_obs_tn = observations["actuator_force_observation"]
-        base_pos_t3 = observations["base_position_observation"]
-        base_quat_t4 = observations["base_orientation_observation"]
-        lin_vel_obs_t3 = observations["base_linear_velocity_observation"]
-        ang_vel_obs_t3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_x_t1 = commands["linear_velocity_command_x"]
-        lin_vel_cmd_y_t1 = commands["linear_velocity_command_y"]
-        ang_vel_cmd_z_t1 = commands["angular_velocity_command_z"]
+        dh_joint_pos_j = observations["joint_position_observation"]
+        dh_joint_vel_j = observations["joint_velocity_observation"]
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        act_frc_obs_n = observations["actuator_force_observation"]
+        base_pos_3 = observations["base_position_observation"]
+        base_quat_4 = observations["base_orientation_observation"]
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
+        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
+        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
 
         return model.forward(
             timestep_1=timestep_1,
-            dh_joint_pos_tj=dh_joint_pos_tj,
-            dh_joint_vel_tj=dh_joint_vel_tj / 10.0,
-            com_inertia_tn=com_inertia_tn,
-            com_vel_tn=com_vel_tn,
-            imu_acc_t3=imu_acc_t3 / 50.0,
-            imu_gyro_t3=imu_gyro_t3 / 3.0,
-            act_frc_obs_tn=act_frc_obs_tn / 100.0,
-            base_pos_t3=base_pos_t3,
-            base_quat_t4=base_quat_t4,
-            lin_vel_obs_t3=lin_vel_obs_t3,
-            ang_vel_obs_t3=ang_vel_obs_t3,
-            lin_vel_cmd_x_t1=lin_vel_cmd_x_t1,
-            lin_vel_cmd_y_t1=lin_vel_cmd_y_t1,
-            ang_vel_cmd_z_t1=ang_vel_cmd_z_t1,
+            dh_joint_pos_j=dh_joint_pos_j,
+            dh_joint_vel_j=dh_joint_vel_j / 10.0,
+            com_inertia_n=com_inertia_n,
+            com_vel_n=com_vel_n,
+            imu_acc_3=imu_acc_3 / 50.0,
+            imu_gyro_3=imu_gyro_3 / 3.0,
+            act_frc_obs_n=act_frc_obs_n / 100.0,
+            base_pos_3=base_pos_3,
+            base_quat_4=base_quat_4,
+            lin_vel_obs_3=lin_vel_obs_3,
+            ang_vel_obs_3=ang_vel_obs_3,
+            lin_vel_cmd_x_1=lin_vel_cmd_x_1,
+            lin_vel_cmd_y_1=lin_vel_cmd_y_1,
+            ang_vel_cmd_z_1=ang_vel_cmd_z_1,
             carry=carry,
         )
 
@@ -372,22 +370,13 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
-        # Use cached log probabilities from rollout.
+        # Use cached values from rollout.
         if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
 
-        # Gets the value by calling the critic.
-        critic_carry = self.get_initial_carry(rng)
-        values_t1, _ = self._run_critic(
-            model=model.critic,
-            observations=trajectories.obs,
-            commands=trajectories.command,
-            carry=critic_carry,
-        )
-
         return ksim.PPOVariables(
             log_probs_tn=trajectories.aux_outputs.log_probs,
-            values_t=values_t1.squeeze(-1),
+            values_t=trajectories.aux_outputs.values,
         )
 
     def get_off_policy_variables(
@@ -396,61 +385,73 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
+        # Use cached values from rollout.
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+            raise ValueError("No aux outputs found in trajectories")
+
+        actor_carry = trajectories.aux_outputs.actor_carry
+        critic_carry = trajectories.aux_outputs.critic_carry
+
         # Vectorize over the time dimensions.
-        actor_carry = self.get_initial_carry(rng)
-        action_dist_tj, _ = self._run_actor(
-            model=model.actor,
-            observations=trajectories.obs,
-            commands=trajectories.command,
-            carry=actor_carry,
-        )
+        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0, 0))
+        action_dist_tj, _ = par_actor_fn(model.actor, trajectories.obs, trajectories.command, actor_carry)
         log_probs_tj = action_dist_tj.log_prob(trajectories.action)
 
         # Gets the value by calling the critic.
-        critic_carry = self.get_initial_carry(rng)
-        values_t1, _ = self._run_critic(
-            model=model.critic,
-            observations=trajectories.obs,
-            commands=trajectories.command,
-            carry=critic_carry,
-        )
+        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0, 0))
+        values_t1, _ = par_critic_fn(model.critic, trajectories.obs, trajectories.command, critic_carry)
 
         return ksim.PPOVariables(
             log_probs_tn=log_probs_tj,
             values_t=values_t1.squeeze(-1),
         )
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(shape=(self.config.hidden_size,))
+    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return jnp.zeros(shape=(self.config.hidden_size,)), jnp.zeros(shape=(self.config.hidden_size,))
 
     def sample_action(
         self,
         model: DefaultHumanoidRNNModel,
-        carry: Array,
+        carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, AuxOutputs]:
-        (observations, commands) = jax.tree.map(lambda x: x[None], (observations, commands))
+    ) -> tuple[Array, tuple[Array, Array], AuxOutputs]:
+        actor_carry_in, critic_carry_in = carry
 
         # Runs the actor model to get the action distribution.
-        action_dist_tj, carry = self._run_actor(
+        action_dist_j, actor_carry = self._run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
-            carry=carry,
+            carry=actor_carry_in,
         )
 
-        action_tj = action_dist_tj.sample(seed=rng)
-        action_log_prob_tj = action_dist_tj.log_prob(action_tj)
+        action_j = action_dist_j.sample(seed=rng)
+        action_log_prob_j = action_dist_j.log_prob(action_j)
+
+        values_1, critic_carry = self._run_critic(
+            model=model.critic,
+            observations=observations,
+            commands=commands,
+            carry=critic_carry_in,
+        )
 
         # Remove time dimension.
-        action_j = action_tj.squeeze(-2)
-        action_log_prob_j = action_log_prob_tj.squeeze(-2)
+        values = values_1.squeeze(-1)
 
-        return action_j, carry, AuxOutputs(log_probs=action_log_prob_j)
+        return (
+            action_j,
+            (actor_carry, critic_carry),
+            AuxOutputs(
+                log_probs=action_log_prob_j,
+                values=values,
+                actor_carry=actor_carry_in,
+                critic_carry=critic_carry_in,
+            ),
+        )
 
 
 if __name__ == "__main__":
