@@ -16,10 +16,18 @@ import ksim
 from .walking import (
     NUM_INPUTS,
     NUM_JOINTS,
-    AuxOutputs,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
 )
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class AuxOutputs:
+    log_probs: Array
+    values: Array
+    actor_carry: Array
+    critic_carry: Array
 
 
 class DefaultHumanoidRNNActor(eqx.Module):
@@ -116,13 +124,9 @@ class DefaultHumanoidRNNActor(eqx.Module):
             axis=-1,
         )
 
-        def scan_fn(carry: Array, obs_n: Array) -> tuple[Array, Array]:
-            x_n = self.input_proj(obs_n)
-            x_n = self.rnn(x_n, carry)
-            out_n = self.output_proj(x_n)
-            return x_n, out_n
-
-        carry, out_tn = jax.lax.scan(scan_fn, carry, obs_tn)
+        x_tn = jax.vmap(self.input_proj, in_axes=0)(obs_tn)
+        x_tn = jax.vmap(self.rnn, in_axes=0)(x_tn, carry)
+        out_tn = jax.vmap(self.output_proj, in_axes=0)(x_tn)
 
         # Converts the output to a distribution.
         mean_tn = out_tn[..., :NUM_JOINTS]
@@ -132,7 +136,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
         std_tn = jnp.clip((jax.nn.softplus(std_tn) + self.min_std) * self.var_scale, max=self.max_std)
 
         dist_tn = distrax.Normal(mean_tn, std_tn)
-        return dist_tn, carry
+        return dist_tn, x_tn
 
 
 class DefaultHumanoidRNNCritic(eqx.Module):
@@ -219,17 +223,11 @@ class DefaultHumanoidRNNCritic(eqx.Module):
             axis=-1,
         )
 
-        # Project input to hidden size
         x_tn = jax.vmap(self.input_proj, in_axes=0)(obs_tn)
+        x_tn = jax.vmap(self.rnn, in_axes=0)(x_tn, carry)
+        out_tn = jax.vmap(self.output_proj, in_axes=0)(x_tn)
 
-        def scan_fn(carry: Array, x_n: Array) -> tuple[Array, Array]:
-            x_n = self.rnn(x_n, carry)
-            out_n = self.output_proj(x_n)
-            return x_n, out_n
-
-        carry, out_tn = jax.lax.scan(scan_fn, carry, x_tn)
-
-        return out_tn, carry
+        return out_tn, x_tn
 
 
 class DefaultHumanoidRNNModel(eqx.Module):
@@ -372,24 +370,13 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
-        # Use cached log probabilities from rollout.
+        # Use cached values from rollout.
         if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
 
-        # Gets the value by calling the critic.
-        # TODO: Need to figure out how to use the proper carry here. Can
-        # probably compute it at runtime.
-        critic_carry = self.get_initial_carry(rng)
-        values_t1, _ = self._run_critic(
-            model=model.critic,
-            observations=trajectories.obs,
-            commands=trajectories.command,
-            carry=critic_carry,
-        )
-
         return ksim.PPOVariables(
             log_probs_tn=trajectories.aux_outputs.log_probs,
-            values_t=values_t1.squeeze(-1),
+            values_t=trajectories.aux_outputs.values,
         )
 
     def get_off_policy_variables(
@@ -398,24 +385,25 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         trajectories: ksim.Trajectory,
         rng: PRNGKeyArray,
     ) -> ksim.PPOVariables:
+        # Use cached values from rollout.
+        if not isinstance(trajectories.aux_outputs, AuxOutputs):
+            raise ValueError("No aux outputs found in trajectories")
+
         # Vectorize over the time dimensions.
-        # TODO: Need to figure out how to use the proper carry here.
-        actor_carry = self.get_initial_carry(rng)
         action_dist_tj, _ = self._run_actor(
             model=model.actor,
             observations=trajectories.obs,
             commands=trajectories.command,
-            carry=actor_carry,
+            carry=trajectories.aux_outputs.actor_carry,
         )
         log_probs_tj = action_dist_tj.log_prob(trajectories.action)
 
         # Gets the value by calling the critic.
-        critic_carry = self.get_initial_carry(rng)
         values_t1, _ = self._run_critic(
             model=model.critic,
             observations=trajectories.obs,
             commands=trajectories.command,
-            carry=critic_carry,
+            carry=trajectories.aux_outputs.critic_carry,
         )
 
         return ksim.PPOVariables(
@@ -423,37 +411,55 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             values_t=values_t1.squeeze(-1),
         )
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(shape=(self.config.hidden_size,))
+    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return jnp.zeros(shape=(self.config.hidden_size,)), jnp.zeros(shape=(self.config.hidden_size,))
 
     def sample_action(
         self,
         model: DefaultHumanoidRNNModel,
-        carry: Array,
+        carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, AuxOutputs]:
-        (observations, commands) = jax.tree.map(lambda x: x[None], (observations, commands))
+    ) -> tuple[Array, tuple[Array, Array], AuxOutputs]:
+        (observations, commands, carry) = jax.tree.map(lambda x: x[None], (observations, commands, carry))
+        actor_carry_in, critic_carry_in = carry
 
         # Runs the actor model to get the action distribution.
-        action_dist_tj, carry = self._run_actor(
+        action_dist_tj, actor_carry = self._run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
-            carry=carry,
+            carry=actor_carry_in,
         )
 
         action_tj = action_dist_tj.sample(seed=rng)
         action_log_prob_tj = action_dist_tj.log_prob(action_tj)
 
+        values_t1, critic_carry = self._run_critic(
+            model=model.critic,
+            observations=observations,
+            commands=commands,
+            carry=critic_carry_in,
+        )
+
         # Remove time dimension.
         action_j = action_tj.squeeze(-2)
         action_log_prob_j = action_log_prob_tj.squeeze(-2)
+        values_1 = values_t1.squeeze(-1)
 
-        return action_j, carry, AuxOutputs(log_probs=action_log_prob_j)
+        return (
+            action_j,
+            (actor_carry.squeeze(0), critic_carry.squeeze(0)),
+            AuxOutputs(
+                log_probs=action_log_prob_j,
+                values=values_1,
+                actor_carry=actor_carry_in.squeeze(0),
+                critic_carry=critic_carry_in.squeeze(0),
+            ),
+        )
 
 
 if __name__ == "__main__":
