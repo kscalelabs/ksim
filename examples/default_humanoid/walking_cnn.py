@@ -19,7 +19,6 @@ from .walking import (
     AuxOutputs,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
-    map_normal_distribution,
 )
 
 
@@ -152,7 +151,6 @@ class DefaultHumanoidCNNActor(eqx.Module):
         std_tn = jnp.clip((jax.nn.softplus(std_tn) + self.min_std) * self.var_scale, max=self.max_std)
 
         dist_tn = distrax.Normal(mean_tn, std_tn)
-        dist_tn = map_normal_distribution(dist_tn)
         return dist_tn, obs_tn
 
 

@@ -198,8 +198,8 @@ def compute_ppo_loss(
             )
         else:
             value_mse = 0.5 * (ppo_inputs.value_targets_t - off_policy_variables.values_t) ** 2
-
         value_objective = value_loss_coef * value_mse
+
         total_objective = policy_objective - value_objective
 
         # Adds the entropy bonus term, if provided.
