@@ -26,7 +26,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
     """RNN-based actor for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnn: eqx.nn.GRU
+    rnn: eqx.nn.GRUCell
     output_proj: eqx.nn.MLP
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
@@ -55,7 +55,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
 
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
-        self.rnn = eqx.nn.GRU(
+        self.rnn = eqx.nn.GRUCell(
             input_size=hidden_size,
             hidden_size=hidden_size,
             key=rnn_key,
@@ -116,16 +116,17 @@ class DefaultHumanoidRNNActor(eqx.Module):
             axis=-1,
         )
 
-        # Project input to hidden size
-        x_tn = jax.vmap(self.input_proj, in_axes=0)(obs_tn)
-
         # Apply RNN
         if carry is None:
             carry = jnp.zeros((self.rnn.hidden_size,))
-        x_tn, carry = jax.vmap(self.rnn)(x_tn, carry)
 
-        # Project to output
-        out_tn = jax.vmap(self.output_proj, in_axes=0)(x_tn)
+        def scan_fn(carry: Array, obs_n: Array) -> tuple[Array, Array]:
+            x_n = self.input_proj(obs_n)
+            x_n = self.rnn(x_n, carry)
+            out_n = self.output_proj(x_n)
+            return x_n, out_n
+
+        carry, out_tn = jax.lax.scan(scan_fn, carry, obs_tn)
 
         # Converts the output to a distribution.
         mean_tn = out_tn[..., :NUM_JOINTS]
@@ -142,7 +143,7 @@ class DefaultHumanoidRNNCritic(eqx.Module):
     """RNN-based critic for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnn: eqx.nn.GRU
+    rnn: eqx.nn.GRUCell
     output_proj: eqx.nn.MLP
 
     def __init__(
@@ -165,7 +166,7 @@ class DefaultHumanoidRNNCritic(eqx.Module):
 
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
-        self.rnn = eqx.nn.GRU(
+        self.rnn = eqx.nn.GRUCell(
             input_size=hidden_size,
             hidden_size=hidden_size,
             key=rnn_key,
@@ -228,10 +229,14 @@ class DefaultHumanoidRNNCritic(eqx.Module):
         # Apply RNN
         if carry is None:
             carry = jnp.zeros((self.rnn.hidden_size,))
-        x_tn, carry = jax.vmap(self.rnn)(x_tn, carry)
 
-        # Project to output
-        out_tn = jax.vmap(self.output_proj, in_axes=0)(x_tn)
+        def scan_fn(carry: Array, x_n: Array) -> tuple[Array, Array]:
+            x_n = self.rnn(x_n, carry)
+            out_n = self.output_proj(x_n)
+            return x_n, out_n
+
+        carry, out_tn = jax.lax.scan(scan_fn, carry, x_tn)
+
         return out_tn, carry
 
 
@@ -448,9 +453,9 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.default_humanoid.walking_cnn
+    #   python -m examples.walking_rnn
     # To visualize the environment, use the following command:
-    #   python -m examples.default_humanoid.walking_cnn run_environment=True
+    #   python -m examples.walking_rnn run_environment=True
     HumanoidWalkingRNNTask.launch(
         HumanoidWalkingRNNTaskConfig(
             # Training parameters.
