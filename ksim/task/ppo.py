@@ -605,23 +605,22 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         model = eqx.combine(model_arr, model_static)
 
-        def on_policy_scan_fn(xi: tuple[PRNGKeyArray, Trajectory, PyTree]) -> PPOVariables:
-            rng, trajectory, model_carry = xi
+        def on_policy_scan_fn(rng: PRNGKeyArray, trajectory: Trajectory, model_carry: PyTree) -> PPOVariables:
             rng, policy_vars_rng = jax.random.split(rng)
             on_policy_scan_fn = functools.partial(self._policy_scan_fn, model=model)
             (rng, _), on_policy_variables = jax.lax.scan(on_policy_scan_fn, (policy_vars_rng, model_carry), trajectory)
             return on_policy_variables
 
-        def on_policy_batch_scan_fn(xi: tuple[PRNGKeyArray, Array]) -> PPOVariables:
-            rng, xt = xi
-            policy_vars_rng = jax.random.split(rng, self.batch_size)
+        def on_policy_batch_scan_fn(carry: PRNGKeyArray, xt: Array) -> tuple[PRNGKeyArray, PPOVariables]:
+            rng, prng = jax.random.split(carry)
+            policy_vars_rng = jax.random.split(prng, self.batch_size)
             trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
             carry_batch = jax.tree.map(lambda x: x[xt], rollout_variables.carry)
-            on_policy_variables = jax.lax.map(on_policy_scan_fn, (policy_vars_rng, trajectory_batch, carry_batch))
-            return on_policy_variables
+            scan_fn = jax.vmap(on_policy_scan_fn, in_axes=0)
+            on_policy_variables = scan_fn(policy_vars_rng, trajectory_batch, carry_batch)
+            return rng, on_policy_variables
 
-        rng, prng = jax.random.split(rng)
-        on_policy_variables = jax.lax.map(on_policy_batch_scan_fn, (jax.random.split(prng, self.num_batches), indices))
+        rng, on_policy_variables = jax.lax.scan(on_policy_batch_scan_fn, rng, indices)
 
         def flatten_fn(x: Array) -> Array:
             return x.reshape(x.shape[0] * x.shape[1], *x.shape[2:])
