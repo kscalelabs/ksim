@@ -41,7 +41,6 @@ class NaiveVelocityReward(ksim.Reward):
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class GaitMatchingAuxOutputs:
-    log_probs: Array
     tracked_pos: xax.FrozenDict[int, Array]
 
 
@@ -152,12 +151,11 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
             body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
             tracked_positions[body_id] = jnp.array(body_pos)
 
-        aux_outputs = GaitMatchingAuxOutputs(
-            tracked_pos=xax.FrozenDict(tracked_positions),
-        )
         return ksim.Action(
             action=action_n.action,
-            aux_outputs=aux_outputs,
+            aux_outputs=GaitMatchingAuxOutputs(
+                tracked_pos=xax.FrozenDict(tracked_positions),
+            ),
         )
 
     def run(self) -> None:
