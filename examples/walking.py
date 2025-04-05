@@ -32,12 +32,6 @@ class NaiveForwardReward(ksim.Reward):
         return trajectory.qvel[..., 0].clip(max=self.clip_max)
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-
-
 class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
@@ -570,44 +564,26 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ang_vel_cmd_z_1=ang_vel_cmd_z_1,
         )
 
-    def get_on_policy_variables(
+    def get_ppo_variables(
         self,
         model: DefaultHumanoidModel,
         trajectories: ksim.Trajectory,
+        carry: None,
         rng: PRNGKeyArray,
-    ) -> ksim.PPOVariables:
-        # Use cached log probabilities from training.
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
-            raise ValueError("No aux outputs found in trajectories")
-
-        # Compute the values online.
-        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_t1 = par_critic_fn(model.critic, trajectories.obs, trajectories.command)
-
-        return ksim.PPOVariables(
-            log_probs_tn=trajectories.aux_outputs.log_probs,
-            values_t=values_t1.squeeze(-1),
-        )
-
-    def get_off_policy_variables(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> ksim.PPOVariables:
+    ) -> tuple[ksim.PPOVariables, None]:
         # Vectorize over the time dimensions.
-        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_tj = par_actor_fn(model.actor, trajectories.obs, trajectories.command)
-        log_probs_tj = action_dist_tj.log_prob(trajectories.action)
+        action_dist_j = self._run_actor(model.actor, trajectories.obs, trajectories.command)
+        log_probs_j = action_dist_j.log_prob(trajectories.action)
 
         # Vectorize over the time dimensions.
-        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_t1 = par_critic_fn(model.critic, trajectories.obs, trajectories.command)
+        values_1 = self._run_critic(model.critic, trajectories.obs, trajectories.command)
 
-        return ksim.PPOVariables(
-            log_probs_tn=log_probs_tj,
-            values_t=values_t1.squeeze(-1),
+        ppo_variables = ksim.PPOVariables(
+            log_probs=log_probs_j,
+            values=values_1.squeeze(-1),
         )
+
+        return ppo_variables, None
 
     def sample_action(
         self,
@@ -618,16 +594,14 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, AuxOutputs]:
+    ) -> ksim.Action:
         action_dist_j = self._run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
         )
         action_j = action_dist_j.sample(seed=rng)
-        action_log_prob_j = action_dist_j.log_prob(action_j)
-
-        return action_j, None, AuxOutputs(log_probs=action_log_prob_j)
+        return ksim.Action(action=action_j, carry=None, aux_outputs=None)
 
 
 if __name__ == "__main__":
@@ -643,9 +617,9 @@ if __name__ == "__main__":
         HumanoidWalkingTaskConfig(
             # Training parameters.
             num_envs=2048,
-            batch_size=128,
+            batch_size=256,
             num_passes=4,
-            epochs_per_log_step=10,
+            epochs_per_log_step=1,
             rollout_length_seconds=10.0,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,

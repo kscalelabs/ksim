@@ -394,8 +394,8 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         if not isinstance(trajectories.aux_outputs, AuxOutputs):
             raise ValueError("No aux outputs found in trajectories")
         return ksim.PPOVariables(
-            log_probs_tn=trajectories.aux_outputs.log_probs,
-            values_t=trajectories.aux_outputs.values,
+            log_probs=trajectories.aux_outputs.log_probs,
+            values=trajectories.aux_outputs.values,
         )
 
     def get_off_policy_variables(
@@ -419,9 +419,9 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         entropy_tn = action_dist_tn.entropy()
 
         return ksim.PPOVariables(
-            log_probs_tn=log_probs_tn,
-            values_t=values_t1.squeeze(-1),
-            entropy_tn=entropy_tn,
+            log_probs=log_probs_tn,
+            values=values_t1.squeeze(-1),
+            entropy=entropy_tn,
         )
 
     def sample_action(
@@ -433,7 +433,7 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, AuxOutputs]:
+    ) -> ksim.Action:
         action_dist_n = self._run_actor(model, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
@@ -441,7 +441,10 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         critic_n = self._run_critic(model, observations, commands)
         value_n = critic_n.squeeze(-1)
 
-        return action_n, None, AuxOutputs(log_probs=action_log_prob_n, values=value_n)
+        return ksim.Action(
+            action=action_n,
+            aux_outputs=AuxOutputs(log_probs=action_log_prob_n, values=value_n),
+        )
 
 
 if __name__ == "__main__":

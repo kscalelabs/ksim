@@ -5,6 +5,7 @@ __all__ = [
     "RLTask",
     "RolloutConstants",
     "RolloutVariables",
+    "Action",
 ]
 
 import bdb
@@ -95,6 +96,14 @@ class RolloutConstants:
     reward_generators: Collection[Reward]
     termination_generators: Collection[Termination]
     curriculum: Curriculum
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Action:
+    action: Array
+    carry: PyTree = None
+    aux_outputs: PyTree = None
 
 
 def get_observation(
@@ -550,7 +559,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, PyTree | None, PyTree | None]:
+    ) -> Action:
         """Gets an action for the current observation.
 
         This function returns the action to take, the next carry (for models
@@ -625,7 +634,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Samples an action from the model.
-        action, next_carry, aux_outputs = self.sample_action(
+        action = self.sample_action(
             model=model,
             carry=rollout_variables.carry,
             physics_model=physics_model,
@@ -637,7 +646,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Steps the physics engine.
         next_physics_state: PhysicsState = engine.step(
-            action=action,
+            action=action.action,
             physics_model=physics_model,
             physics_state=rollout_variables.physics_state,
             curriculum_level=curriculum_level,
@@ -673,11 +682,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             obs=observations,
             command=rollout_variables.commands,
             event_state=rollout_variables.physics_state.event_states,
-            action=action,
+            action=action.action,
             done=terminated,
             timestep=rollout_variables.physics_state.data.time,
             termination_components=terminations,
-            aux_outputs=aux_outputs,
+            aux_outputs=action.aux_outputs,
         )
 
         # Conditionally reset on termination.
@@ -707,7 +716,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         next_carry = jax.lax.cond(
             terminated,
             lambda: self.get_initial_carry(carry_rng),
-            lambda: next_carry,
+            lambda: action.carry,
         )
 
         # Gets the variables for the next step.
@@ -938,6 +947,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         opt_state: optax.OptState,
         trajectories: Trajectory,
         rewards: Rewards,
+        rollout_constants: RolloutConstants,
+        rollout_variables: RolloutVariables,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array], SingleTrajectory]:
         """Updates the model on the given trajectory.
@@ -952,6 +963,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             opt_state: The optimizer state.
             trajectories: The trajectories to update the model on.
             rewards: The rewards to update the model on.
+            rollout_constants: The constants to use for the rollout.
+            rollout_variables: The variables to use for the rollout.
             rng: The random seed.
 
         Returns:
@@ -1121,7 +1134,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     None,
                 ),
             )
-            trajectories, rewards, rollout_variables = vmapped_unroll(
+            trajectories, rewards, next_rollout_variables = vmapped_unroll(
                 physics_model,
                 randomization_dict,
                 model_arr,
@@ -1141,6 +1154,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 opt_state=opt_state,
                 trajectories=trajectories,
                 rewards=rewards,
+                rollout_constants=rollout_constants,
+                rollout_variables=rollout_variables,
                 rng=rng,
             )
 
@@ -1160,7 +1175,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 prev_state=curriculum_state,
             )
 
-            return (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj)
+            return (model_arr, opt_state, next_rollout_variables, curriculum_state), (metrics, single_traj)
 
         (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj) = jax.lax.scan(
             single_step_fn,

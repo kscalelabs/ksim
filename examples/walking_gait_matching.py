@@ -27,7 +27,6 @@ from ksim.utils.reference_gait import (
 )
 
 from .walking import (
-    AuxOutputs,
     DefaultHumanoidModel,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
@@ -41,7 +40,7 @@ class NaiveVelocityReward(ksim.Reward):
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class GaitMatchingAuxOutputs(AuxOutputs):
+class GaitMatchingAuxOutputs:
     tracked_pos: xax.FrozenDict[int, Array]
 
 
@@ -143,10 +142,8 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, GaitMatchingAuxOutputs]:
-        action_n, _, super_aux_outputs = super().sample_action(
-            model, carry, physics_model, physics_state, observations, commands, rng
-        )
+    ) -> ksim.Action:
+        action_n = super().sample_action(model, carry, physics_model, physics_state, observations, commands, rng)
 
         # Getting the local cartesian positions for all tracked bodies.
         tracked_positions: dict[int, Array] = {}
@@ -154,11 +151,12 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
             body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
             tracked_positions[body_id] = jnp.array(body_pos)
 
-        aux_outputs = GaitMatchingAuxOutputs(
-            log_probs=super_aux_outputs.log_probs,
-            tracked_pos=xax.FrozenDict(tracked_positions),
+        return ksim.Action(
+            action=action_n.action,
+            aux_outputs=GaitMatchingAuxOutputs(
+                tracked_pos=xax.FrozenDict(tracked_positions),
+            ),
         )
-        return action_n, None, aux_outputs
 
     def run(self) -> None:
         mj_model: PhysicsModel = self.get_mujoco_model()
