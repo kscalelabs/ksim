@@ -267,7 +267,7 @@ class PPOConfig(RLConfig):
         help="Lambda for GAE: high = more bias; low = more variance",
     )
     normalize_advantages: bool = xax.field(
-        value=True,
+        value=False,
         help="Whether to normalize the advantages.",
     )
     use_two_step_td_target: bool = xax.field(
