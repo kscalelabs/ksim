@@ -404,7 +404,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, tuple[Array, Array], AuxOutputs]:
+    ) -> ksim.Action:
         actor_carry_in, critic_carry_in = carry
 
         # Runs the actor model to get the action distribution.
@@ -417,7 +417,11 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
         action_j = action_dist_j.sample(seed=rng)
 
-        return action_j, (actor_carry, critic_carry_in)
+        return ksim.Action(
+            action=action_j,
+            carry=(actor_carry, critic_carry_in),
+            aux_outputs=None,
+        )
 
 
 if __name__ == "__main__":
@@ -431,7 +435,7 @@ if __name__ == "__main__":
             num_envs=2048,
             batch_size=128,
             num_passes=4,
-            epochs_per_log_step=10,
+            epochs_per_log_step=1,
             rollout_length_seconds=10.0,
             # Simulation parameters.
             dt=0.005,

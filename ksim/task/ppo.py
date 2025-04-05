@@ -416,6 +416,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A tuple containing the loss value as a scalar, a dictionary of
             metrics to log, and the single trajectory to log.
         """
+        model = eqx.combine(model_arr, model_static)
 
         def loss_and_metrics_fn(
             trajectories: Trajectory,
@@ -426,7 +427,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         ) -> tuple[Array, xax.FrozenDict[str, Array], SingleTrajectory]:
             rng, rng2 = jax.random.split(rng)
 
-            off_policy_scan_fn = functools.partial(self._policy_scan_fn, model_arr=model_arr, model_static=model_static)
+            off_policy_scan_fn = functools.partial(self._policy_scan_fn, model=model)
             _, off_policy_variables = jax.lax.scan(off_policy_scan_fn, (rng2, init_carry), trajectories)
 
             ppo_inputs = compute_ppo_inputs(
@@ -548,17 +549,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return new_model_arr, new_opt_state, xax.FrozenDict(dict(ppo_metrics) | dict(grad_metrics)), single_traj
 
-    @xax.jit(static_argnames=["self", "model_static"])
     def _policy_scan_fn(
         self,
         carry: tuple[PRNGKeyArray, PyTree],
         xt: Trajectory,
-        model_arr: PyTree,
-        model_static: PyTree,
+        model: PyTree,
     ) -> tuple[tuple[PRNGKeyArray, PyTree], PPOVariables]:
         rng, model_carry = carry
         rng, ppo_rng, carry_rng = jax.random.split(rng, 3)
-        model = eqx.combine(model_arr, model_static)
         ppo_vars, model_carry = self.get_ppo_variables(model, xt, model_carry, ppo_rng)
 
         # Conditionally reset the model carry on termination.
@@ -605,10 +603,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         indices = jnp.arange(trajectories.done.shape[0])
         indices = indices.reshape(self.num_batches, self.batch_size)
 
+        model = eqx.combine(model_arr, model_static)
+
         def on_policy_scan_fn(xi: tuple[PRNGKeyArray, Trajectory, PyTree]) -> PPOVariables:
             rng, trajectory, model_carry = xi
             rng, policy_vars_rng = jax.random.split(rng)
-            on_policy_scan_fn = functools.partial(self._policy_scan_fn, model_arr=model_arr, model_static=model_static)
+            on_policy_scan_fn = functools.partial(self._policy_scan_fn, model=model)
             (rng, _), on_policy_variables = jax.lax.scan(on_policy_scan_fn, (policy_vars_rng, model_carry), trajectory)
             return on_policy_variables
 

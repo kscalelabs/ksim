@@ -5,6 +5,7 @@ __all__ = [
     "RLTask",
     "RolloutConstants",
     "RolloutVariables",
+    "Action",
 ]
 
 import bdb
@@ -95,6 +96,14 @@ class RolloutConstants:
     reward_generators: Collection[Reward]
     termination_generators: Collection[Termination]
     curriculum: Curriculum
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Action:
+    action: Array
+    carry: PyTree
+    aux_outputs: PyTree
 
 
 def get_observation(
@@ -550,7 +559,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, PyTree | None, PyTree | None]:
+    ) -> Action:
         """Gets an action for the current observation.
 
         This function returns the action to take, the next carry (for models
@@ -625,7 +634,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Samples an action from the model.
-        action, next_carry, aux_outputs = self.sample_action(
+        action = self.sample_action(
             model=model,
             carry=rollout_variables.carry,
             physics_model=physics_model,
@@ -637,7 +646,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Steps the physics engine.
         next_physics_state: PhysicsState = engine.step(
-            action=action,
+            action=action.action,
             physics_model=physics_model,
             physics_state=rollout_variables.physics_state,
             curriculum_level=curriculum_level,
@@ -673,11 +682,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             obs=observations,
             command=rollout_variables.commands,
             event_state=rollout_variables.physics_state.event_states,
-            action=action,
+            action=action.action,
             done=terminated,
             timestep=rollout_variables.physics_state.data.time,
             termination_components=terminations,
-            aux_outputs=aux_outputs,
+            aux_outputs=action.aux_outputs,
         )
 
         # Conditionally reset on termination.
@@ -707,7 +716,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         next_carry = jax.lax.cond(
             terminated,
             lambda: self.get_initial_carry(carry_rng),
-            lambda: next_carry,
+            lambda: action.carry,
         )
 
         # Gets the variables for the next step.

@@ -32,12 +32,6 @@ class NaiveForwardReward(ksim.Reward):
         return trajectory.qvel[..., 0].clip(max=self.clip_max)
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-
-
 class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
@@ -600,16 +594,14 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, AuxOutputs]:
+    ) -> ksim.Action:
         action_dist_j = self._run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
         )
         action_j = action_dist_j.sample(seed=rng)
-        action_log_prob_j = action_dist_j.log_prob(action_j)
-
-        return action_j, None, AuxOutputs(log_probs=action_log_prob_j)
+        return ksim.Action(action=action_j, carry=None, aux_outputs=None)
 
 
 if __name__ == "__main__":
@@ -627,7 +619,7 @@ if __name__ == "__main__":
             num_envs=2048,
             batch_size=128,
             num_passes=4,
-            epochs_per_log_step=10,
+            epochs_per_log_step=1,
             rollout_length_seconds=10.0,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
