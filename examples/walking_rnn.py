@@ -35,7 +35,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
 
     input_proj: eqx.nn.Linear
     rnns: tuple[eqx.nn.GRUCell, ...]
-    output_proj: eqx.nn.MLP
+    output_proj: eqx.nn.Linear
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
@@ -149,7 +149,7 @@ class DefaultHumanoidRNNCritic(eqx.Module):
 
     input_proj: eqx.nn.Linear
     rnns: tuple[eqx.nn.GRUCell, ...]
-    output_proj: eqx.nn.MLP
+    output_proj: eqx.nn.Linear
 
     def __init__(
         self,

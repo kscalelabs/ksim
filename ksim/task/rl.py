@@ -102,8 +102,8 @@ class RolloutConstants:
 @dataclass(frozen=True)
 class Action:
     action: Array
-    carry: PyTree
-    aux_outputs: PyTree
+    carry: PyTree = None
+    aux_outputs: PyTree = None
 
 
 def get_observation(
