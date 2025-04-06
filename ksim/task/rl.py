@@ -85,6 +85,7 @@ class RolloutVariables:
     carry: PyTree
     commands: xax.FrozenDict[str, Array]
     physics_state: PhysicsState
+    curriculum_state: CurriculumState
     rng: PRNGKeyArray
 
 
@@ -604,7 +605,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
-        curriculum_level: Array,
     ) -> tuple[Trajectory, RolloutVariables]:
         """Runs a single step of the physics engine.
 
@@ -629,7 +629,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         observations = get_observation(
             rollout_state=rollout_variables,
             obs_generators=rollout_constants.obs_generators,
-            curriculum_level=curriculum_level,
+            curriculum_level=rollout_variables.curriculum_state.level,
             rng=obs_rng,
         )
 
@@ -649,7 +649,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             action=action.action,
             physics_model=physics_model,
             physics_state=rollout_variables.physics_state,
-            curriculum_level=curriculum_level,
+            curriculum_level=rollout_variables.curriculum_state.level,
             rng=physics_rng,
         )
 
@@ -657,7 +657,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         terminations = get_terminations(
             physics_state=next_physics_state,
             termination_generators=rollout_constants.termination_generators,
-            curriculum_level=curriculum_level,
+            curriculum_level=rollout_variables.curriculum_state.level,
         )
         terminated = jax.tree.reduce(jnp.logical_or, list(terminations.values()))
 
@@ -696,20 +696,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng=cmd_rng,
                 physics_data=next_physics_state.data,
                 command_generators=rollout_constants.command_generators,
-                curriculum_level=curriculum_level,
+                curriculum_level=rollout_variables.curriculum_state.level,
             ),
             lambda: get_commands(
                 prev_commands=rollout_variables.commands,
                 physics_state=next_physics_state,
                 rng=cmd_rng,
                 command_generators=rollout_constants.command_generators,
-                curriculum_level=curriculum_level,
+                curriculum_level=rollout_variables.curriculum_state.level,
             ),
         )
 
         next_physics_state = jax.lax.cond(
             terminated,
-            lambda: engine.reset(physics_model, curriculum_level, reset_rng),
+            lambda: engine.reset(physics_model, rollout_variables.curriculum_state.level, reset_rng),
             lambda: next_physics_state,
         )
 
@@ -724,6 +724,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             carry=next_carry,
             commands=next_commands,
             physics_state=next_physics_state,
+            curriculum_state=rollout_variables.curriculum_state,
             rng=rng,
         )
 
@@ -1063,7 +1064,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
-        curriculum_level: Array,
         rollout_length: int,
     ) -> tuple[Trajectory, Rewards, RolloutVariables]:
         # Applies randomizations to the model.
@@ -1077,7 +1077,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 engine=engine,
                 rollout_constants=rollout_constants,
                 rollout_variables=carry,
-                curriculum_level=curriculum_level,
             )
             return next_rollout_variables, trajectory
 
@@ -1112,20 +1111,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
         state: xax.State,
-        curriculum_state: CurriculumState,
         rollout_length: int,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, SingleTrajectory, CurriculumState]:
+    ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, SingleTrajectory]:
         """Runs a single step of the RL training loop."""
 
         def single_step_fn(
-            carry: tuple[PyTree, optax.OptState, RolloutVariables, CurriculumState],
+            carry: tuple[PyTree, optax.OptState, RolloutVariables],
             rng: PRNGKeyArray,
         ) -> tuple[
-            tuple[PyTree, optax.OptState, RolloutVariables, CurriculumState],
+            tuple[PyTree, optax.OptState, RolloutVariables],
             tuple[Metrics, SingleTrajectory],
         ]:
-            model_arr, opt_state, rollout_variables, curriculum_state = carry
+            model_arr, opt_state, rollout_variables = carry
 
             # Rolls out a new trajectory.
             vmapped_unroll = jax.vmap(
@@ -1139,7 +1137,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     None,
                     0,
                     None,
-                    None,
                 ),
             )
             trajectories, rewards, next_rollout_variables = vmapped_unroll(
@@ -1150,7 +1147,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 engine,
                 rollout_constants,
                 rollout_variables,
-                curriculum_state.level,
                 rollout_length,
             )
 
@@ -1172,7 +1168,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 train=train_metrics,
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
-                curriculum_level=curriculum_state.level,
+                curriculum_level=rollout_variables.curriculum_state.level,
             )
 
             # Steps the curriculum.
@@ -1180,14 +1176,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 trajectory=trajectories,
                 rewards=rewards,
                 training_state=state,
-                prev_state=curriculum_state,
+                prev_state=rollout_variables.curriculum_state,
             )
 
-            return (model_arr, opt_state, next_rollout_variables, curriculum_state), (metrics, single_traj)
+            next_rollout_variables = RolloutVariables(
+                carry=next_rollout_variables.carry,
+                commands=next_rollout_variables.commands,
+                physics_state=next_rollout_variables.physics_state,
+                curriculum_state=curriculum_state,
+                rng=next_rollout_variables.rng,
+            )
 
-        (model_arr, opt_state, rollout_variables, curriculum_state), (metrics, single_traj) = jax.lax.scan(
+            return (model_arr, opt_state, next_rollout_variables), (metrics, single_traj)
+
+        (model_arr, opt_state, rollout_variables), (metrics, single_traj) = jax.lax.scan(
             single_step_fn,
-            (model_arr, opt_state, rollout_variables, curriculum_state),
+            (model_arr, opt_state, rollout_variables),
             jax.random.split(rng, self.config.epochs_per_log_step),
         )
 
