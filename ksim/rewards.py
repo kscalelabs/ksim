@@ -580,6 +580,9 @@ class CartesianBodyTargetVectorReward(Reward):
         distance_scalar = jnp.linalg.norm(target_vector, axis=-1)
         far_from_target = distance_scalar > self.distance_threshold
 
+        velocity_scalar = jnp.linalg.norm(body_vel_TL, axis=-1)
+        high_velocity = velocity_scalar > 0.1
+
         if self.normalize_velocity:
             normalized_body_vel = body_vel_TL / (jnp.linalg.norm(body_vel_TL, axis=-1, keepdims=True) + self.epsilon)
             original_products = normalized_body_vel * normalized_target_vector
@@ -587,7 +590,7 @@ class CartesianBodyTargetVectorReward(Reward):
             original_products = body_vel_TL * normalized_target_vector
 
         # This will give maximum reward if near the target (and velocity is normalized)
-        return jnp.where(far_from_target, jnp.sum(original_products, axis=-1), 1.1)
+        return jnp.where(far_from_target & high_velocity, jnp.sum(original_products, axis=-1), 1.1)
 
     @classmethod
     def create(
