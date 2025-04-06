@@ -287,12 +287,12 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The number of curriculum levels to use.",
     )
     increase_threshold: float = xax.field(
-        value=0.1,
-        help="Increase the curriculum level when the deaths per episode is below this threshold.",
+        value=3.0,
+        help="Increase the curriculum level when the mean trajectory length is above this threshold.",
     )
     decrease_threshold: float = xax.field(
-        value=5.0,
-        help="Decrease the curriculum level when the deaths per episode is above this threshold.",
+        value=1.0,
+        help="Decrease the curriculum level when the mean trajectory length is below this threshold.",
     )
     min_level_steps: int = xax.field(
         value=50,
@@ -466,7 +466,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.StepWhenSaturated(
+        return ksim.EpisodeLengthCurriculum(
             num_levels=self.config.num_curriculum_levels,
             increase_threshold=self.config.increase_threshold,
             decrease_threshold=self.config.decrease_threshold,
