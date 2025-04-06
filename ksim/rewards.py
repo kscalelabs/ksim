@@ -140,13 +140,13 @@ class LinearVelocityPenalty(Reward):
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
-    def get_name(self) -> str:
-        return f"{self.index}_{super().get_name()}"
-
     def __call__(self, trajectory: Trajectory) -> Array:
         dim = cartesian_index_to_dim(self.index)
         lin_vel = trajectory.qvel[..., dim]
         return xax.get_norm(lin_vel, self.norm)
+
+    def get_name(self) -> str:
+        return f"{self.index}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -160,6 +160,9 @@ class AngularVelocityPenalty(Reward):
         dim = cartesian_index_to_dim(self.index) + 3
         ang_vel = trajectory.qvel[..., dim]
         return xax.get_norm(ang_vel, self.norm)
+
+    def get_name(self) -> str:
+        return f"{self.index}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)
