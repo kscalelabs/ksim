@@ -105,8 +105,8 @@ class EpisodeLengthCurriculum(Curriculum[Array]):
         trajectory: Trajectory,
         rewards: Rewards,
         training_state: xax.State,
-        prev_state: CurriculumState[None],
-    ) -> CurriculumState[None]:
+        prev_state: CurriculumState[Array],
+    ) -> CurriculumState[Array]:
         step_size = 1 / self.num_levels
         episode_length = trajectory.episode_length().mean()
         steps = prev_state.state
@@ -119,7 +119,7 @@ class EpisodeLengthCurriculum(Curriculum[Array]):
         next_level = jnp.clip(next_level, 0.0, 1.0)
         return CurriculumState(level=next_level, state=next_steps)
 
-    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
+    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
         return CurriculumState(level=jnp.array(0.0), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
 
 
