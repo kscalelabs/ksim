@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Mapping, TypeAlias
 
 import jax
+import jax.numpy as jnp
 import mujoco
 import xax
 from jaxtyping import Array, PyTree
@@ -48,6 +49,11 @@ class Trajectory:
     timestep: Array
     termination_components: xax.FrozenDict[str, Array]
     aux_outputs: PyTree
+
+    def episode_length(self) -> Array:
+        done_mask = self.done.at[..., -1].set(True)  # Make the final timestep a termination.
+        termination_sum = jnp.sum(jnp.where(done_mask, self.timestep, 0.0), axis=-1) - self.timestep[..., 0]
+        return (termination_sum / (done_mask.sum(axis=-1) + 1)).mean()
 
 
 @jax.tree_util.register_dataclass
