@@ -1,5 +1,5 @@
 # mypy: disable-error-code="override"
-"""Defines simple task for training a jumping policy for the default humanoid using an GRU actor."""
+"""Defines simple task for training a jumping policy."""
 
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -10,7 +10,7 @@ from jaxtyping import Array
 
 import ksim
 
-from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
+from .walking_rnn import HumanoidWalkingRNNTask, HumanoidWalkingRNNTaskConfig
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -26,14 +26,14 @@ class UpwardReward(ksim.Reward):
 
 
 @dataclass
-class HumanoidJumpingTaskConfig(HumanoidWalkingTaskConfig):
+class HumanoidJumpingTaskConfig(HumanoidWalkingRNNTaskConfig):
     pass
 
 
 Config = TypeVar("Config", bound=HumanoidJumpingTaskConfig)
 
 
-class HumanoidJumpingTask(HumanoidWalkingTask[Config], Generic[Config]):
+class HumanoidJumpingTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             UpwardReward(scale=0.5),
