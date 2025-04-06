@@ -350,7 +350,7 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
     def _run_actor(
         self,
-        model: DefaultHumanoidModel,
+        model: DefaultHumanoidActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Normal:
@@ -369,7 +369,7 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
 
     def _run_critic(
         self,
-        model: DefaultHumanoidModel,
+        model: DefaultHumanoidCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
@@ -386,45 +386,6 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             imu_acc_3=imu_acc_3,
             xyz_target_3=xyz_target_3,
             quat_target_4=quat_target_4,
-        )
-
-    def get_on_policy_variables(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> ksim.PPOVariables:
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
-            raise ValueError("No aux outputs found in trajectories")
-        return ksim.PPOVariables(
-            log_probs=trajectories.aux_outputs.log_probs,
-            values=trajectories.aux_outputs.values,
-        )
-
-    def get_off_policy_variables(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> ksim.PPOVariables:
-        # Vectorize over both batch and time dimensions.
-        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_tn = par_actor_fn(model, trajectories.obs, trajectories.command)
-
-        # Vectorize over both batch and time dimensions.
-        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_t1 = par_critic_fn(model, trajectories.obs, trajectories.command)
-
-        # Compute the log probabilities of the trajectory's actions according
-        # to the current policy, along with the entropy of the distribution.
-        action_tn = trajectories.action / model.actor.mean_scale
-        log_probs_tn = action_dist_tn.log_prob(action_tn)
-        entropy_tn = action_dist_tn.entropy()
-
-        return ksim.PPOVariables(
-            log_probs=log_probs_tn,
-            values=values_t1.squeeze(-1),
-            entropy=entropy_tn,
         )
 
     def get_ppo_variables(
