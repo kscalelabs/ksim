@@ -1013,19 +1013,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             trajectories: The trajectories to get the termination metrics for.
         """
+        termination_timesteps_selected = jnp.where(trajectories.done, trajectories.timestep, 0.0)
+        total_termination_time = jnp.sum(termination_timesteps_selected)
+        total_terminations = trajectories.done.sum()
+        episode_length = jnp.where(
+            total_terminations > 0,
+            total_termination_time / total_terminations,
+            0.0,
+        )
         kvs = list(trajectories.termination_components.items())
         all_terminations = jnp.stack([v for _, v in kvs], axis=-1)
         has_termination = (all_terminations.any(axis=-1)).sum(axis=-1)
         num_terminations = has_termination.sum().clip(min=1)
         mean_terminations = trajectories.done.sum(-1).mean()
-        done = trajectories.done
-        timestep = trajectories.timestep
-        termination_timesteps_selected = jnp.where(done, timestep, 0.0)
-        total_termination_time = jnp.sum(termination_timesteps_selected)
-        total_terminations = done.sum()
-        mean_termination_time = jnp.where(total_terminations > 0, total_termination_time / total_terminations, 0.0)
         return {
-            "episode_length": mean_termination_time,
+            "episode_length": episode_length,
             "mean_terminations": mean_terminations,
             **{f"prct/{key}": (value.sum() / num_terminations) for key, value in kvs},
         }
