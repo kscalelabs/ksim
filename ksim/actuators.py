@@ -82,12 +82,15 @@ class MITPositionActuators(Actuators):
         self,
         physics_model: PhysicsModel,
         joint_name_to_metadata: dict[str, JointMetadataOutput],
+        default_targets: tuple[float, ...] = (),
+        *,
         action_noise: float = 0.0,
         action_noise_type: NoiseType = "none",
         torque_noise: float = 0.0,
         torque_noise_type: NoiseType = "none",
         ctrl_clip: list[float] | None = None,
         freejoint_first: bool = True,
+        action_scale: float = 1.0,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
@@ -114,10 +117,12 @@ class MITPositionActuators(Actuators):
 
         self.kps = jnp.array(kps_list)
         self.kds = jnp.array(kds_list)
+        self.default_targets = jnp.array(default_targets)
         self.action_noise = action_noise
         self.action_noise_type = action_noise_type
         self.torque_noise = torque_noise
         self.torque_noise_type = torque_noise_type
+        self.action_scale = action_scale
 
         if ctrl_clip is not None:
             self.ctrl_clip = jnp.array(ctrl_clip)
@@ -136,14 +141,17 @@ class MITPositionActuators(Actuators):
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
         """Get the control signal from the (position) action vector."""
         pos_rng, tor_rng = jax.random.split(rng)
+        action = action * self.action_scale
         if self.freejoint_first:
             current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
             current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
         else:
             current_pos = physics_data.qpos[:]
             current_vel = physics_data.qvel[:]
+
+        target_positions = action + self.default_targets
         target_velocities = jnp.zeros_like(action)
-        pos_delta = self.add_noise(self.action_noise, self.action_noise_type, action - current_pos, pos_rng)
+        pos_delta = self.add_noise(self.action_noise, self.action_noise_type, target_positions - current_pos, pos_rng)
         vel_delta = target_velocities - current_vel
 
         ctrl = self.kps * pos_delta + self.kds * vel_delta
@@ -162,6 +170,8 @@ class MITPositionVelocityActuators(MITPositionActuators):
         self,
         physics_model: PhysicsModel,
         joint_name_to_metadata: dict[str, JointMetadataOutput],
+        default_targets: tuple[float, ...] = (),
+        *,
         pos_action_noise: float = 0.0,
         pos_action_noise_type: NoiseType = "none",
         vel_action_noise: float = 0.0,
@@ -169,6 +179,7 @@ class MITPositionVelocityActuators(MITPositionActuators):
         torque_noise: float = 0.0,
         torque_noise_type: NoiseType = "none",
         ctrl_clip: list[float] | None = None,
+        action_scale: float = 1.0,
         freejoint_first: bool = True,
     ) -> None:
         super().__init__(
@@ -180,6 +191,8 @@ class MITPositionVelocityActuators(MITPositionActuators):
             torque_noise_type=torque_noise_type,
             ctrl_clip=ctrl_clip,
             freejoint_first=freejoint_first,
+            action_scale=action_scale,
+            default_targets=default_targets,
         )
 
         self.vel_action_noise = vel_action_noise
@@ -197,14 +210,13 @@ class MITPositionVelocityActuators(MITPositionActuators):
             current_vel = physics_data.qvel[:]
 
         # Adds position and velocity noise.
-        target_position = action[: len(current_pos)]
-        target_velocity = action[len(current_pos) :]
+        target_position = action[: len(current_pos)] * self.action_scale + self.default_targets
+        target_velocity = action[len(current_pos) :] * self.action_scale
         target_position = self.add_noise(self.action_noise, self.action_noise_type, target_position, pos_rng)
         target_velocity = self.add_noise(self.vel_action_noise, self.vel_action_noise_type, target_velocity, vel_rng)
 
         pos_delta = target_position - current_pos
         vel_delta = target_velocity - current_vel
-
         ctrl = self.kps * pos_delta + self.kds * vel_delta
         return jnp.clip(
             self.add_noise(self.torque_noise, self.torque_noise_type, ctrl, tor_rng),
