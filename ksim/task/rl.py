@@ -1203,7 +1203,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Metrics, final_trajectories, final_rewards batch dim of epochs.
         # Rollout variables has batch dim of num_envs and are used next rollout.
-        return model_arr, opt_state, metrics, rollout_variables, single_traj, curriculum_state
+        return model_arr, opt_state, metrics, rollout_variables, single_traj
 
     def run_environment(
         self,
@@ -1541,6 +1541,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     curriculum_state.level,
                 ),
                 physics_state=physics_state,
+                curriculum_state=curriculum_state,
                 rng=jax.random.split(rollout_rng, self.config.num_envs),
             )
 
@@ -1562,7 +1563,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             try:
                 while not self.is_training_over(state):
                     state = self.on_step_start(state)
-                    rollout_length = self.rollout_length_from_curriculum(curriculum_state.level)
+                    rollout_length = self.rollout_length_from_curriculum(rollout_variables.curriculum_state.level)
 
                     # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
@@ -1573,7 +1574,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             metrics,
                             rollout_variables,
                             single_traj,
-                            curriculum_state,
                         ) = self._rl_train_loop_step(
                             physics_model=mjx_model,
                             randomization_dict=randomization_dict,
@@ -1585,7 +1585,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             rollout_constants=rollout_constants,
                             rollout_variables=rollout_variables,
                             state=state,
-                            curriculum_state=curriculum_state,
                             rollout_length=rollout_length,
                             rng=update_rng,
                         )
