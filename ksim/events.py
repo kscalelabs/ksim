@@ -112,13 +112,13 @@ class PushEvent(Event):
         )
         random_forces = jax.random.uniform(rng, (6,), minval=-1.0, maxval=1.0)
         random_forces = random_forces * force_scales * curriculum_level
+        random_forces += data.qvel[:6]
         new_qvel = slice_update(data, "qvel", slice(0, 6), random_forces)
         updated_data = update_data_field(data, "qvel", new_qvel)
 
         # Chooses a new remaining interval.
         minval, maxval = self.interval_range
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
-
         return updated_data, time_remaining
 
     def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:

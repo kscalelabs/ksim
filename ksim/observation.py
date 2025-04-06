@@ -20,6 +20,7 @@ __all__ = [
     "FeetContactObservation",
     "FeetPositionObservation",
     "FeetOrientationObservation",
+    "TimestepObservation",
 ]
 
 import functools
@@ -31,7 +32,7 @@ import attrs
 import jax
 import xax
 from jax import numpy as jnp
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsModel, PhysicsState
 from ksim.utils.mujoco import (
@@ -50,7 +51,6 @@ NoiseType = Literal["gaussian", "uniform"]
 class ObservationState:
     commands: xax.FrozenDict[str, Array]
     physics_state: PhysicsState
-    carry: PyTree
 
 
 def add_noise(
@@ -390,3 +390,11 @@ class FeetOrientationObservation(Observation):
         foot_left_quat = state.physics_state.data.xquat[self.foot_left]
         foot_right_quat = state.physics_state.data.xquat[self.foot_right]
         return jnp.stack([foot_left_quat, foot_right_quat], axis=-2)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TimestepObservation(Observation):
+    """Returns the current timestep in the episode."""
+
+    def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
+        return state.physics_state.data.time.reshape(1)

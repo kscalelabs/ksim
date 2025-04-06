@@ -231,7 +231,6 @@ class MujocoEngine(PhysicsEngine):
             event_states = xax.FrozenDict(new_event_states)
             torques = self.actuators.get_ctrl(ctrl, mujoco_data, action_rng)
             mujoco_data.ctrl[:] = torques
-            # mujoco.mj_forward(physics_model, mujoco_data)
             mujoco.mj_step(physics_model, mujoco_data)
 
         return PhysicsState(data=mujoco_data, most_recent_action=action, event_states=event_states)

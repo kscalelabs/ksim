@@ -20,52 +20,16 @@ from mujoco import mjx
 import ksim
 
 NUM_JOINTS = 21
-HIDDEN_SIZE = 256
-DEPTH = 5
 
-ACTION_RANGES = [
-    [-0.7853981633974483, 0.7853981633974483],
-    [-1.3089969389957472, 0.5235987755982988],
-    [-0.6108652381980153, 0.6108652381980153],
-    [-0.5235987755982988, 0.17453292519943295],
-    [-1.0471975511965976, 0.6108652381980153],
-    [-2.6179938779914944, 0.3490658503988659],
-    [-2.792526803190927, 0.03490658503988659],
-    [-0.8726646259971648, 0.8726646259971648],
-    [-0.8726646259971648, 0.8726646259971648],
-    [-0.5235987755982988, 0.17453292519943295],
-    [-1.0471975511965976, 0.6108652381980153],
-    [-2.6179938779914944, 0.3490658503988659],
-    [-2.792526803190927, 0.03490658503988659],
-    [-0.8726646259971648, 0.8726646259971648],
-    [-0.8726646259971648, 0.8726646259971648],
-    [-1.4835298641951802, 1.0471975511965976],
-    [-1.4835298641951802, 1.0471975511965976],
-    [-1.7453292519943295, 0.8726646259971648],
-    [-1.4835298641951802, 1.0471975511965976],
-    [-1.4835298641951802, 1.0471975511965976],
-    [-1.7453292519943295, 0.8726646259971648],
-]
-
-
-def map_normal_distribution(dist: distrax.Distribution) -> distrax.Distribution:
-    action_ranges = jnp.array(ACTION_RANGES)
-    action_min, action_max = action_ranges[..., 0], action_ranges[..., 1]
-    dist = distrax.Transformed(dist, distrax.Tanh())
-    dist = distrax.Transformed(dist, ksim.DoubleUnitIntervalToRangeBijector(min=action_min, max=action_max))
-    return dist
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
 
 
 @attrs.define(frozen=True, kw_only=True)
 class NaiveForwardReward(ksim.Reward):
+    clip_max: float = attrs.field(default=5.0)
+
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qvel[..., 0].clip(max=5.0)
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
+        return trajectory.qvel[..., 0].clip(max=self.clip_max)
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -75,6 +39,7 @@ class DefaultHumanoidActor(eqx.Module):
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
+    num_mixtures: int = eqx.static_field()
 
     def __init__(
         self,
@@ -83,24 +48,29 @@ class DefaultHumanoidActor(eqx.Module):
         min_std: float,
         max_std: float,
         var_scale: float,
+        hidden_size: int,
+        depth: int,
+        num_mixtures: int,
     ) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
+        num_inputs = NUM_INPUTS
         num_outputs = NUM_JOINTS
 
         self.mlp = eqx.nn.MLP(
             in_size=num_inputs,
-            out_size=num_outputs * 2,
-            width_size=64,
-            depth=5,
+            out_size=num_outputs * 3 * num_mixtures,
+            width_size=hidden_size,
+            depth=depth,
             key=key,
             activation=jax.nn.relu,
         )
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
+        self.num_mixtures = num_mixtures
 
     def forward(
         self,
+        timestep_1: Array,
         dh_joint_pos_n: Array,
         dh_joint_vel_n: Array,
         com_inertia_n: Array,
@@ -118,6 +88,8 @@ class DefaultHumanoidActor(eqx.Module):
     ) -> distrax.Distribution:
         obs_n = jnp.concatenate(
             [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
                 dh_joint_pos_n,  # NUM_JOINTS
                 dh_joint_vel_n,  # NUM_JOINTS
                 com_inertia_n,  # 160
@@ -137,15 +109,22 @@ class DefaultHumanoidActor(eqx.Module):
         )
 
         prediction_n = self.mlp(obs_n)
-        mean_n = prediction_n[..., :NUM_JOINTS]
-        std_n = prediction_n[..., NUM_JOINTS:]
+
+        # Splits the predictions into means, standard deviations, and logits.
+        slice_len = NUM_JOINTS * self.num_mixtures
+        mean_nm = prediction_n[:slice_len].reshape(NUM_JOINTS, self.num_mixtures)
+        std_nm = prediction_n[slice_len : slice_len * 2].reshape(NUM_JOINTS, self.num_mixtures)
+        logits_nm = prediction_n[slice_len * 2 :].reshape(NUM_JOINTS, self.num_mixtures)
 
         # Softplus and clip to ensure positive standard deviations.
-        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
+        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
 
-        dist = distrax.Normal(mean_n, std_n)
-        dist = map_normal_distribution(dist)
-        return dist
+        dist_n = distrax.MixtureSameFamily(
+            mixture_distribution=distrax.Categorical(logits=logits_nm),
+            components_distribution=distrax.Normal(mean_nm, std_nm),
+        )
+
+        return dist_n
 
 
 class DefaultHumanoidCritic(eqx.Module):
@@ -153,21 +132,28 @@ class DefaultHumanoidCritic(eqx.Module):
 
     mlp: eqx.nn.MLP
 
-    def __init__(self, key: PRNGKeyArray) -> None:
-        num_inputs = NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        hidden_size: int,
+        depth: int,
+    ) -> None:
+        num_inputs = NUM_INPUTS
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
             in_size=num_inputs,
             out_size=num_outputs,
-            width_size=HIDDEN_SIZE,
-            depth=DEPTH,
+            width_size=hidden_size,
+            depth=depth,
             key=key,
             activation=jax.nn.relu,
         )
 
     def forward(
         self,
+        timestep_1: Array,
         dh_joint_pos_n: Array,
         dh_joint_vel_n: Array,
         com_inertia_n: Array,
@@ -185,6 +171,8 @@ class DefaultHumanoidCritic(eqx.Module):
     ) -> Array:
         x_n = jnp.concatenate(
             [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
                 dh_joint_pos_n,  # NUM_JOINTS
                 dh_joint_vel_n,  # NUM_JOINTS
                 com_inertia_n,  # 160
@@ -209,18 +197,61 @@ class DefaultHumanoidModel(eqx.Module):
     actor: DefaultHumanoidActor
     critic: DefaultHumanoidCritic
 
-    def __init__(self, key: PRNGKeyArray) -> None:
-        self.actor = DefaultHumanoidActor(key, min_std=0.01, max_std=1.0, var_scale=0.5)
-        self.critic = DefaultHumanoidCritic(key)
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        hidden_size: int,
+        depth: int,
+        num_mixtures: int,
+    ) -> None:
+        self.actor = DefaultHumanoidActor(
+            key,
+            min_std=0.01,
+            max_std=1.0,
+            var_scale=0.5,
+            hidden_size=hidden_size,
+            depth=depth,
+            num_mixtures=num_mixtures,
+        )
+        self.critic = DefaultHumanoidCritic(
+            key,
+            hidden_size=hidden_size,
+            depth=depth,
+        )
 
 
 @dataclass
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
+    # Model parameters.
+    hidden_size: int = xax.field(
+        value=128,
+        help="The hidden size for the MLPs.",
+    )
+    depth: int = xax.field(
+        value=5,
+        help="The depth for the MLPs.",
+    )
+    num_mixtures: int = xax.field(
+        value=5,
+        help="The number of mixtures for the actor.",
+    )
+
+    # Reward parameters.
+    use_naive_reward: bool = xax.field(
+        value=False,
+        help="Whether to use the naive reward.",
+    )
+    naive_clip_max: float = xax.field(
+        value=5.0,
+        help="The maximum value for the naive reward.",
+    )
+
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=3e-4,
+        value=1e-3,
         help="Learning rate for PPO.",
     )
     max_grad_norm: float = xax.field(
@@ -256,7 +287,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The number of curriculum levels to use.",
     )
     increase_threshold: float = xax.field(
-        value=1.0,
+        value=0.1,
         help="Increase the curriculum level when the deaths per episode is below this threshold.",
     )
     decrease_threshold: float = xax.field(
@@ -397,6 +428,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 foot_left_body_name="foot_left",
                 foot_right_body_name="foot_right",
             ),
+            ksim.TimestepObservation(),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -408,13 +440,22 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
-            ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
-            ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
-            ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
-            # NaiveForwardReward(scale=1.0),
+        rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(scale=1.0),
         ]
+
+        if self.config.use_naive_reward:
+            rewards += [
+                NaiveForwardReward(clip_max=self.config.naive_clip_max, scale=1.0),
+            ]
+        else:
+            rewards += [
+                ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
+                ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
+                ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
+            ]
+
+        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
@@ -433,7 +474,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         )
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
-        return DefaultHumanoidModel(key)
+        return DefaultHumanoidModel(
+            key,
+            hidden_size=self.config.hidden_size,
+            depth=self.config.depth,
+            num_mixtures=self.config.num_mixtures,
+        )
 
     def get_initial_carry(self, rng: PRNGKeyArray) -> None:
         return None
@@ -444,6 +490,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Distribution:
+        timestep_1 = observations["timestep_observation"]  # 1
         dh_joint_pos_n = observations["joint_position_observation"]  # 26
         dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
         com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
@@ -460,6 +507,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]  # 1
 
         return model.forward(
+            timestep_1=timestep_1,
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n / 10.0,
             com_inertia_n=com_inertia_n,
@@ -482,6 +530,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
+        timestep_1 = observations["timestep_observation"]  # 1
         dh_joint_pos_n = observations["joint_position_observation"]  # 26
         dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
         com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
@@ -498,6 +547,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]  # 1
 
         return model.forward(
+            timestep_1=timestep_1,
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n / 10.0,
             com_inertia_n=com_inertia_n,
@@ -514,44 +564,26 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ang_vel_cmd_z_1=ang_vel_cmd_z_1,
         )
 
-    def get_on_policy_variables(
+    def get_ppo_variables(
         self,
         model: DefaultHumanoidModel,
         trajectories: ksim.Trajectory,
+        carry: None,
         rng: PRNGKeyArray,
-    ) -> ksim.PPOVariables:
-        # Use cached log probabilities from training.
-        if not isinstance(trajectories.aux_outputs, AuxOutputs):
-            raise ValueError("No aux outputs found in trajectories")
-
-        # Compute the values online.
-        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_t1 = par_critic_fn(model.critic, trajectories.obs, trajectories.command)
-
-        return ksim.PPOVariables(
-            log_probs_tn=trajectories.aux_outputs.log_probs,
-            values_t=values_t1.squeeze(-1),
-        )
-
-    def get_off_policy_variables(
-        self,
-        model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        rng: PRNGKeyArray,
-    ) -> ksim.PPOVariables:
+    ) -> tuple[ksim.PPOVariables, None]:
         # Vectorize over the time dimensions.
-        par_actor_fn = jax.vmap(self._run_actor, in_axes=(None, 0, 0))
-        action_dist_tn = par_actor_fn(model.actor, trajectories.obs, trajectories.command)
-        log_probs_tj = action_dist_tn.log_prob(trajectories.action)
+        action_dist_j = self._run_actor(model.actor, trajectories.obs, trajectories.command)
+        log_probs_j = action_dist_j.log_prob(trajectories.action)
 
         # Vectorize over the time dimensions.
-        par_critic_fn = jax.vmap(self._run_critic, in_axes=(None, 0, 0))
-        values_t1 = par_critic_fn(model.critic, trajectories.obs, trajectories.command)
+        values_1 = self._run_critic(model.critic, trajectories.obs, trajectories.command)
 
-        return ksim.PPOVariables(
-            log_probs_tn=log_probs_tj,
-            values_t=values_t1.squeeze(-1),
+        ppo_variables = ksim.PPOVariables(
+            log_probs=log_probs_j,
+            values=values_1.squeeze(-1),
         )
+
+        return ppo_variables, None
 
     def sample_action(
         self,
@@ -562,36 +594,33 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[Array, None, AuxOutputs]:
-        action_dist_n = self._run_actor(
+    ) -> ksim.Action:
+        action_dist_j = self._run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
         )
-        action_n = action_dist_n.sample(seed=rng)
-        action_log_prob_n = action_dist_n.log_prob(action_n)
-
-        return action_n, None, AuxOutputs(log_probs=action_log_prob_n)
+        action_j = action_dist_j.sample(seed=rng)
+        return ksim.Action(action=action_j, carry=None, aux_outputs=None)
 
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.default_humanoid.walking
+    #   python -m examples.walking
     # To visualize the environment, use the following command:
-    #   python -m examples.default_humanoid.walking run_environment=True
+    #   python -m examples.walking run_environment=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.default_humanoid.walking num_envs=8 batch_size=4
+    #   python -m examples.walking num_envs=8 batch_size=4
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             # Training parameters.
             num_envs=2048,
             batch_size=256,
-            num_passes=32,
+            num_passes=4,
             epochs_per_log_step=1,
-            rollout_length_seconds=2.0,
-            num_rollout_levels=3,
+            rollout_length_seconds=10.0,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
