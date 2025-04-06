@@ -117,6 +117,7 @@ class EpisodeLengthCurriculum(Curriculum[Array]):
         should_dec = (episode_length < self.decrease_threshold) & can_step
         next_level = jnp.where(should_inc, level + step_size, jnp.where(should_dec, level - step_size, level))
         next_level = jnp.clip(next_level, 0.0, 1.0)
+        next_steps = jnp.where(should_inc | should_dec, self.min_level_steps, next_steps)
         return CurriculumState(level=next_level, state=next_steps)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
