@@ -258,7 +258,7 @@ class JointZeroPositionRandomization(Randomization):
 
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         if self.freejoint_first:
-            new_qpos = jax.random.uniform(
+            new_qpos = model.qpos0[7:] + jax.random.uniform(
                 rng,
                 shape=(model.qpos0.shape[0] - 7,),
                 minval=self.scale_lower,
@@ -266,7 +266,7 @@ class JointZeroPositionRandomization(Randomization):
             )
             new_qpos = jnp.concatenate([model.qpos0[:7], new_qpos])
         else:
-            new_qpos = jax.random.uniform(
+            new_qpos = model.qpos0 + jax.random.uniform(
                 rng,
                 shape=(model.qpos0.shape[0],),
                 minval=self.scale_lower,
