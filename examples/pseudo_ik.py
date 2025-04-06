@@ -62,7 +62,7 @@ class DefaultHumanoidActor(eqx.Module):
         self.var_scale = var_scale
         self.mean_scale = mean_scale
 
-    def __call__(
+    def forward(
         self,
         dh_joint_pos_n: Array,
         dh_joint_vel_n: Array,
@@ -112,7 +112,7 @@ class DefaultHumanoidCritic(eqx.Module):
             activation=jax.nn.relu,
         )
 
-    def __call__(
+    def forward(
         self,
         joint_pos_n: Array,
         joint_vel_n: Array,
@@ -339,6 +339,9 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             # TODO: add for collisions
         ]
 
+    def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
+        return ksim.ConstantCurriculum(level=1.0)
+
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(key)
 
@@ -356,7 +359,7 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
         quat_target_4 = commands["global_body_quaternion_command_hand_right"]
-        return model.actor(
+        return model.forward(
             dh_joint_pos_n=dh_joint_pos_n,
             dh_joint_vel_n=dh_joint_vel_n,
             imu_acc_3=imu_acc_3,
@@ -376,7 +379,7 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
         xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]  # 3
         quat_target_4 = commands["global_body_quaternion_command_hand_right"]  # 4
-        return model.critic(
+        return model.forward(
             joint_pos_n=joint_pos_n,
             joint_vel_n=joint_vel_n,
             actuator_force_n=actuator_force_n,
@@ -424,6 +427,27 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
             entropy=entropy_tn,
         )
 
+    def get_ppo_variables(
+        self,
+        model: DefaultHumanoidModel,
+        trajectories: ksim.Trajectory,
+        carry: None,
+        rng: PRNGKeyArray,
+    ) -> tuple[ksim.PPOVariables, None]:
+        # Vectorize over the time dimensions.
+        action_dist_j = self._run_actor(model.actor, trajectories.obs, trajectories.command)
+        log_probs_j = action_dist_j.log_prob(trajectories.action)
+
+        # Vectorize over the time dimensions.
+        values_1 = self._run_critic(model.critic, trajectories.obs, trajectories.command)
+
+        ppo_variables = ksim.PPOVariables(
+            log_probs=log_probs_j,
+            values=values_1.squeeze(-1),
+        )
+
+        return ppo_variables, None
+
     def sample_action(
         self,
         model: DefaultHumanoidModel,
@@ -434,11 +458,11 @@ class HumanoidPseudoIKTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        action_dist_n = self._run_actor(model, observations, commands)
+        action_dist_n = self._run_actor(model.actor, observations, commands)
         action_n = action_dist_n.sample(seed=rng)
         action_log_prob_n = action_dist_n.log_prob(action_n)
 
-        critic_n = self._run_critic(model, observations, commands)
+        critic_n = self._run_critic(model.critic, observations, commands)
         value_n = critic_n.squeeze(-1)
 
         return ksim.Action(
