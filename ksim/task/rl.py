@@ -1592,11 +1592,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         num_samples=state.num_samples + self.rollout_num_samples * self.config.epochs_per_log_step,
                     )
 
-                    if is_first_step:
-                        is_first_step = False
-                        elapsed_time = xax.format_timedelta(datetime.timedelta(seconds=timer.elapsed_time), short=True)
-                        logger.log(xax.LOG_STATUS, "First step time: %s", elapsed_time)
-
                     # Only log trajectory information on validation steps.
                     if self.log_full_trajectory(state, is_first_step, last_log_time):
                         last_log_time = time.time()
@@ -1606,6 +1601,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             mj_model=mj_model,
                             mj_renderer=mj_renderer,
                         )
+
+                    if is_first_step:
+                        is_first_step = False
+                        elapsed_time = xax.format_timedelta(datetime.timedelta(seconds=timer.elapsed_time), short=True)
+                        logger.log(xax.LOG_STATUS, "First step time: %s", elapsed_time)
 
                     self.log_train_metrics(metrics, rollout_length)
                     self.log_state_timers(state)
