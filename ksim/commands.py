@@ -301,17 +301,23 @@ class CartesianBodyTargetCommand(Command):
 
     def _sample_sphere(self, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         # Sample a random unit vector symmetrically.
-        vec = jax.random.normal(rng, (3,))
+        rng, rng_vec, rng_u = jax.random.split(rng, 3)
+        vec = jax.random.normal(rng_vec, (3,))
         vec /= jnp.linalg.norm(vec)
 
-        # Generate a random radius with the proper distribution.
-        u = jax.random.uniform(rng, (1,))
-        r = self.sample_sphere_radius * (u ** (1 / 3)) * (curriculum_level*self.curriculum_scale + 1.0)
+        # Generate a random radius with the proper distribution, ensuring scalar u.
+        u = jax.random.uniform(rng_u, ()) # Sample u as a scalar
+        r_scale = u ** (1 / 3) # r_scale is scalar
+        r = self.sample_sphere_radius * r_scale * (curriculum_level*self.curriculum_scale + 1.0) # r is scalar
 
-        x, y, z = vec * r
-        x = jnp.where(self.positive_x and x > 0.0, x, -x)
-        y = jnp.where(self.positive_y and y > 0.0, y, -y)
-        z = jnp.where(self.positive_z and z > 0.0, z, -z)
+        # Scale the unit vector by the scalar radius.
+        scaled_vec = vec * r # (3,) * () -> (3,)
+
+        # Apply sign constraints (original logic was slightly off, needed to unpack first)
+        x, y, z = scaled_vec
+        x = jnp.where(self.positive_x, jnp.abs(x), -jnp.abs(x))
+        y = jnp.where(self.positive_y, jnp.abs(y), -jnp.abs(y))
+        z = jnp.where(self.positive_z, jnp.abs(z), -jnp.abs(z))
 
         return jnp.array([x, y, z])
 

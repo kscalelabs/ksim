@@ -260,7 +260,7 @@ class ActuatorAccelerationObservation(Observation):
 @attrs.define(frozen=True, kw_only=True)
 class ContactObservation(Observation):
     geom_idxs: tuple[int, ...] = attrs.field()
-    custom_name: str | None = attrs.field(default=None)
+    contact_group: str | None = attrs.field(default=None)
 
     @classmethod
     def create(
@@ -268,7 +268,7 @@ class ContactObservation(Observation):
         *,
         physics_model: PhysicsModel,
         geom_names: str | Collection[str],
-        custom_observation_name: str | None = None,
+        contact_group: str | None = None,
         noise: float = 0.0,
     ) -> Self:
         """Create a sensor observation from a physics model."""
@@ -278,7 +278,7 @@ class ContactObservation(Observation):
         return cls(
             geom_idxs=tuple(geom_idxs),
             noise=noise,
-            custom_name=custom_observation_name,
+            contact_group=contact_group,
         )
 
     def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
@@ -287,8 +287,8 @@ class ContactObservation(Observation):
         return contact
 
     def get_name(self) -> str:
-        if self.custom_name is not None:
-            return self.custom_name
+        if self.contact_group is not None:
+            return f"{super().get_name()}_{self.contact_group}"
         else:
             return super().get_name()
 

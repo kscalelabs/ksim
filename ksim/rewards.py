@@ -26,7 +26,7 @@ __all__ = [
     "CartesianBodyTargetVectorReward",
     "ContinuousCartesianBodyTargetReward",
     "GlobalBodyQuaternionReward",
-    "GeomContactPenalty",
+    "ObservationMeanPenalty",
     "FeetNoContactReward",
 ]
 
@@ -401,8 +401,8 @@ def joint_threshold_validator(
 
 
 @attrs.define(frozen=True, kw_only=True)
-class GeomContactPenalty(Reward):
-    """Penalty for any contact forces on the geoms."""
+class ObservationMeanPenalty(Reward):
+    """Penalty for the mean of an observation."""
 
     observation_name: str = attrs.field()
 

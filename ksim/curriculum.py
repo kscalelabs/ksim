@@ -172,20 +172,28 @@ class RewardLevelCurriculum(Curriculum[Array]):
         prev_state: CurriculumState[Array],
     ) -> CurriculumState[Array]:
         level, steps = prev_state.level, prev_state.state
-        reward = rewards.components[self.reward_name].mean()
-        level, steps = jax.lax.cond(
-            steps <= 0,
-            lambda: self._step_level(level, reward),
-            lambda: (level, steps - 1),
-        )
-        return CurriculumState(level=level, state=steps)
+
+        reward_per_env = rewards.components[self.reward_name].mean(axis=-1)
+
+        can_update = steps <= 0
+
+        new_level, new_steps = self._step_level(level, reward_per_env)
+
+        steps_if_not_update = steps - 1
+
+        final_level = jnp.where(can_update, new_level, level)
+        final_steps = jnp.where(can_update, new_steps, steps_if_not_update)
+
+        return CurriculumState(level=final_level, state=final_steps)
 
     def _step_level(self, level: Array, reward: Array) -> tuple[Array, Array]:
         should_increase = reward > self.increase_threshold
         should_decrease = reward < self.decrease_threshold
         delta = 1.0 / self.num_levels
         level = jnp.where(should_increase, level + delta, jnp.where(should_decrease, level - delta, level))
-        return jnp.clip(level, 0.0, 1.0), jnp.array(self.min_level_steps, dtype=jnp.int32)
+
+        new_steps = jnp.full_like(level, self.min_level_steps, dtype=jnp.int32)
+        return jnp.clip(level, 0.0, 1.0), new_steps
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
         return CurriculumState(level=jnp.array(0.0), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
