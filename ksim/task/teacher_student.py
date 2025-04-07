@@ -9,6 +9,11 @@ dataset of state-action pairs in simulation using a powerful teacher policy,
 then use this dataset to fine-tune a student policy using a more restricted
 set of observations and other constrants which are helpful for making the
 policy transfer to the real world.
+
+In practice, the dataset of trajectories can grow quite large, and it is
+impractical to write a large dataset to disk. Instead, we use the teacher model
+to generate trajectories on-the-fly. This has the added benefit that the
+student model is only updated on new samples.
 """
 
 __all__ = [
@@ -26,7 +31,6 @@ import jax
 import xax
 from jaxtyping import PRNGKeyArray, PyTree
 
-from ksim.task.rl import RLConfig, RLTask
 from ksim.types import Trajectory
 
 
@@ -44,7 +48,7 @@ class StudentVariables:
 
 @jax.tree_util.register_dataclass
 @dataclass
-class TeacherStudentConfig(RLConfig):
+class TeacherStudentConfig(xax.Config):
     # Batching parameters.
     num_passes: int = xax.field(
         value=1,
@@ -55,7 +59,7 @@ class TeacherStudentConfig(RLConfig):
 Config = TypeVar("Config", bound=TeacherStudentConfig)
 
 
-class TeacherStudentTask(RLTask[Config], Generic[Config], ABC):
+class TeacherStudentTask(xax.Task[Config], Generic[Config], ABC):
     """Base class for teacher-student tasks."""
 
     @abstractmethod

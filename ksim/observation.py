@@ -364,4 +364,3 @@ class TimestepObservation(Observation):
         if not isinstance(time, Array):
             time = jnp.array(time)
         return time.reshape(1)
-
