@@ -1303,6 +1303,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 carry=initial_carry,
                 commands=initial_commands,
                 physics_state=physics_state,
+                curriculum_state=curriculum_state,
                 rng=rng,
             )
 
@@ -1320,6 +1321,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     carry=self.get_initial_carry(carry_rng),
                     commands=rollout_variables.commands,
                     physics_state=physics_state,
+                    curriculum_state=rollout_variables.curriculum_state,
                     rng=rng,
                 )
                 return physics_model, rollout_variables
@@ -1337,7 +1339,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         engine=engine,
                         rollout_constants=rollout_constants,
                         rollout_variables=rollout_variables,
-                        curriculum_level=curriculum_state.level,
                     )
                     transitions.append(transition)
                     rng, rand_rng = jax.random.split(rng)
