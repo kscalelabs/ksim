@@ -1,3 +1,4 @@
+# mypy: disable-error-code="override"
 """Pseudo-Inverse Kinematics task for the default humanoid."""
 
 from dataclasses import dataclass
