@@ -147,6 +147,7 @@ class DistanceFromOriginCurriculum(Curriculum[None]):
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
         return CurriculumState(level=jnp.array(0.0), state=None)
 
+
 @attrs.define(frozen=True, kw_only=True)
 class RewardLevelCurriculum(Curriculum[Array]):
     """Step the curriculum depending on a specific reward level.
@@ -154,7 +155,7 @@ class RewardLevelCurriculum(Curriculum[Array]):
     The logic here is that if the reward is above a certain threshold, then we
     should increase the curriculum level. Similarly, if the reward is below a
     certain threshold, then we should decrease the curriculum level.
-    
+
     We only allow the level to be changed every `min_level_steps` steps.
     """
 

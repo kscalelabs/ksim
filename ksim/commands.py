@@ -306,12 +306,12 @@ class CartesianBodyTargetCommand(Command):
         vec /= jnp.linalg.norm(vec)
 
         # Generate a random radius with the proper distribution, ensuring scalar u.
-        u = jax.random.uniform(rng_u, ()) # Sample u as a scalar
-        r_scale = u ** (1 / 3) # r_scale is scalar
-        r = self.sample_sphere_radius * r_scale * (curriculum_level*self.curriculum_scale + 1.0) # r is scalar
+        u = jax.random.uniform(rng_u, ())  # Sample u as a scalar
+        r_scale = u ** (1 / 3)  # r_scale is scalar
+        r = self.sample_sphere_radius * r_scale * (curriculum_level * self.curriculum_scale + 1.0)  # r is scalar
 
         # Scale the unit vector by the scalar radius.
-        scaled_vec = vec * r # (3,) * () -> (3,)
+        scaled_vec = vec * r  # (3,) * () -> (3,)
 
         # Apply sign constraints (original logic was slightly off, needed to unpack first)
         x, y, z = scaled_vec

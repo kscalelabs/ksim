@@ -188,12 +188,8 @@ def geoms_colliding(state: PhysicsData, geom1: Array, geom2: Array) -> Array:
             contacts_expanded = contact_geoms[jnp.newaxis, jnp.newaxis, :]  # Shape: (1, 1, n_contacts, 2)
 
             # Check for matches in both orders (forward and reversed)
-            forward_match = (g1_expanded == contacts_expanded[..., 0]) & (
-                g2_expanded == contacts_expanded[..., 1]
-            )
-            reverse_match = (g1_expanded == contacts_expanded[..., 1]) & (
-                g2_expanded == contacts_expanded[..., 0]
-            )
+            forward_match = (g1_expanded == contacts_expanded[..., 0]) & (g2_expanded == contacts_expanded[..., 1])
+            reverse_match = (g1_expanded == contacts_expanded[..., 1]) & (g2_expanded == contacts_expanded[..., 0])
 
             any_match = forward_match | reverse_match  # Shape: (n_geom1, n_geom2, n_contacts)
 
@@ -212,7 +208,7 @@ def geoms_colliding(state: PhysicsData, geom1: Array, geom2: Array) -> Array:
             lambda _: when_contacts_exist(),
             operand=None,
         )
-    
+
     return get_colliding_inner(state.contact.geom, state.contact.dist, geom1, geom2)
 
 
