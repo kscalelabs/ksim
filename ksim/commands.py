@@ -298,14 +298,14 @@ class CartesianBodyTargetCommand(Command):
     vis_radius: float = attrs.field()
     vis_color: tuple[float, float, float, float] = attrs.field()
 
-    def _sample_sphere(self, rng: PRNGKeyArray) -> Array:
+    def _sample_sphere(self, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         # Sample a random unit vector symmetrically.
         vec = jax.random.normal(rng, (3,))
         vec /= jnp.linalg.norm(vec)
 
         # Generate a random radius with the proper distribution.
         u = jax.random.uniform(rng, (1,))
-        r = self.sample_sphere_radius * (u ** (1 / 3))
+        r = self.sample_sphere_radius * (u ** (1 / 3)) * (curriculum_level*0.1 + 1.0)
 
         x, y, z = vec * r
         x = jnp.where(self.positive_x and x > 0.0, x, -x)
@@ -320,10 +320,9 @@ class CartesianBodyTargetCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        sphere_sample = self._sample_sphere(rng)
+        sphere_sample = self._sample_sphere(rng, curriculum_level)
         pivot_pos = jnp.array(self.pivot_point)
-        base_pos = jnp.array(physics_data.xpos[self.base_id])
-        return pivot_pos + sphere_sample - base_pos
+        return pivot_pos + sphere_sample
 
     def __call__(
         self,
