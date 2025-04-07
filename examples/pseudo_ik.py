@@ -89,27 +89,6 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
 
         return model.forward(obs_n, carry)
 
-    def get_actuators(
-        self,
-        physics_model: ksim.PhysicsModel,
-        metadata: dict[str, JointMetadataOutput] | None = None,
-    ) -> ksim.Actuators:
-        assert metadata is not None, "Metadata is required"
-        return ksim.MITPositionActuators(
-            physics_model=physics_model,
-            joint_name_to_metadata=metadata,
-            freejoint_first=False,
-        )
-
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
-        return []
-
-    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return []
-
-    def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
-        return []
-
     def run_critic(
         self,
         model: DefaultHumanoidRNNCritic,
@@ -138,6 +117,27 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         )
 
         return model.forward(obs_n, carry)
+
+    def get_actuators(
+        self,
+        physics_model: ksim.PhysicsModel,
+        metadata: dict[str, JointMetadataOutput] | None = None,
+    ) -> ksim.Actuators:
+        assert metadata is not None, "Metadata is required"
+        return ksim.MITPositionActuators(
+            physics_model=physics_model,
+            joint_name_to_metadata=metadata,
+            freejoint_first=False,
+        )
+
+    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+        return []
+
+    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
+        return []
+
+    def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
+        return []
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
