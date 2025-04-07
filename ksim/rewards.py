@@ -708,6 +708,7 @@ class PositionTrackingReward(Reward):
     tracked_body_idx: int = attrs.field()
     base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
+    body_name: str = attrs.field()
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
 
     def __call__(self, trajectory: Trajectory) -> Array:
@@ -740,8 +741,12 @@ class PositionTrackingReward(Reward):
             base_body_idx=base_idx,
             norm=norm,
             command_name=command_name,
+            body_name=tracked_body_name,
             scale=scale,
         )
+
+    def get_name(self) -> str:
+        return f"{self.body_name}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)
