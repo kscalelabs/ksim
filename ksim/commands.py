@@ -287,9 +287,8 @@ class CartesianBodyTargetCommand(Command):
     with the base but only the base.
     """
 
-    pivot_body_name: str = attrs.field()
+    pivot_point: tuple[float, float, float] = attrs.field()
     base_body_name: str = attrs.field()
-    pivot_id: int = attrs.field()
     base_id: int = attrs.field()
     sample_sphere_radius: float = attrs.field()
     positive_x: bool = attrs.field()
@@ -298,20 +297,27 @@ class CartesianBodyTargetCommand(Command):
     switch_prob: float = attrs.field()
     vis_radius: float = attrs.field()
     vis_color: tuple[float, float, float, float] = attrs.field()
+    curriculum_scale: float = attrs.field(default=1.0)
 
-    def _sample_sphere(self, rng: PRNGKeyArray) -> Array:
+    def _sample_sphere(self, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         # Sample a random unit vector symmetrically.
-        vec = jax.random.normal(rng, (3,))
+        rng, rng_vec, rng_u = jax.random.split(rng, 3)
+        vec = jax.random.normal(rng_vec, (3,))
         vec /= jnp.linalg.norm(vec)
 
-        # Generate a random radius with the proper distribution.
-        u = jax.random.uniform(rng, (1,))
-        r = self.sample_sphere_radius * (u ** (1 / 3))
+        # Generate a random radius with the proper distribution, ensuring scalar u.
+        u = jax.random.uniform(rng_u, ())  # Sample u as a scalar
+        r_scale = u ** (1 / 3)  # r_scale is scalar
+        r = self.sample_sphere_radius * r_scale * (curriculum_level * self.curriculum_scale + 1.0)  # r is scalar
 
-        x, y, z = vec * r
-        x = jnp.where(self.positive_x and x > 0.0, x, -x)
-        y = jnp.where(self.positive_y and y > 0.0, y, -y)
-        z = jnp.where(self.positive_z and z > 0.0, z, -z)
+        # Scale the unit vector by the scalar radius.
+        scaled_vec = vec * r  # (3,) * () -> (3,)
+
+        # Apply sign constraints (original logic was slightly off, needed to unpack first)
+        x, y, z = scaled_vec
+        x = jnp.where(self.positive_x, jnp.abs(x), -jnp.abs(x))
+        y = jnp.where(self.positive_y, jnp.abs(y), -jnp.abs(y))
+        z = jnp.where(self.positive_z, jnp.abs(z), -jnp.abs(z))
 
         return jnp.array([x, y, z])
 
@@ -321,10 +327,9 @@ class CartesianBodyTargetCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        sphere_sample = self._sample_sphere(rng)
-        pivot_pos = jnp.array(physics_data.xpos[self.pivot_id])
-        base_pos = jnp.array(physics_data.xpos[self.base_id])
-        return pivot_pos + sphere_sample - base_pos
+        sphere_sample = self._sample_sphere(rng, curriculum_level)
+        pivot_pos = jnp.array(self.pivot_point)
+        return pivot_pos + sphere_sample
 
     def __call__(
         self,
@@ -342,15 +347,16 @@ class CartesianBodyTargetCommand(Command):
         return [CartesianBodyTargetMarker.get(self.command_name, self.base_body_name, self.vis_radius, self.vis_color)]
 
     def get_name(self) -> str:
-        return f"{super().get_name()}_{self.pivot_body_name}"
+        return f"{super().get_name()}_{self.base_body_name}"
 
     @classmethod
     def create(
         cls,
         model: PhysicsModel,
-        pivot_name: str,
+        pivot_point: tuple[float, float, float],
         base_name: str,
         sample_sphere_radius: float,
+        curriculum_scale: float = 1.0,
         positive_x: bool = True,
         positive_y: bool = True,
         positive_z: bool = True,
@@ -358,14 +364,13 @@ class CartesianBodyTargetCommand(Command):
         vis_radius: float = 0.05,
         vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
     ) -> Self:
-        pivot_id = get_body_data_idx_from_name(model, pivot_name)
         base_id = get_body_data_idx_from_name(model, base_name)
         return cls(
-            pivot_body_name=pivot_name,
+            pivot_point=pivot_point,
             base_body_name=base_name,
-            pivot_id=pivot_id,
             base_id=base_id,
             sample_sphere_radius=sample_sphere_radius,
+            curriculum_scale=curriculum_scale,
             positive_x=positive_x,
             positive_y=positive_y,
             positive_z=positive_z,

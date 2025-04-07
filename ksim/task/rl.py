@@ -1172,7 +1172,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
                 curriculum_level=rollout_env_vars.curriculum_state.level,
             )
-
             # Steps the curriculum.
             curriculum_state = rollout_constants.curriculum(
                 trajectory=trajectories,
@@ -1438,7 +1437,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if isinstance(mj_model, mjx.Model):
             # Defines the vectorized initialization functions.
             carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
-            command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, None))
+            command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, 0))
 
             # Gets the initial curriculum state.
             curriculum_state = jax.vmap(rollout_constants.curriculum.get_initial_state, in_axes=0)(

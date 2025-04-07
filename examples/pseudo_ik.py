@@ -151,7 +151,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         return [
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
-                pivot_name="upper_arm_right",
+                # pivot_name="upper_arm_right",
+                pivot_point=(0.0, 0.0, 0.0),
                 base_name="pelvis",
                 sample_sphere_radius=0.5,
                 positive_x=True,  # only sample in the positive x direction

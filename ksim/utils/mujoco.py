@@ -168,24 +168,48 @@ def get_floor_idx(physics_model: PhysicsModel, floor_name: str = "floor") -> int
 
 
 def geoms_colliding(state: PhysicsData, geom1: Array, geom2: Array) -> Array:
-    """Return True if the two geoms are colliding."""
+    """Return True if the geoms are colliding."""
     chex.assert_shape(geom1, (None,))
     chex.assert_shape(geom2, (None,))
 
     def get_colliding_inner(geom: Array, dist: Array, geom1: Array, geom2: Array) -> Array:
-        x, y = jnp.meshgrid(geom1, geom2, indexing="ij")
-        xy = jnp.concatenate([x, y], axis=-1)
-        yx = jnp.concatenate([y, x], axis=-1)
-        mask = (xy[:, None] == geom[None, :]).all(axis=-1) | (yx[:, None] == geom[None, :]).all(axis=-1)
-        dist = jnp.where(mask, dist[None, :], 1e4).min(axis=-1)
-        return dist < 0
+        # Create all pairs of geom indices
+        g1, g2 = jnp.meshgrid(geom1, geom2, indexing="ij")
 
-    return jax.lax.cond(
-        jnp.equal(state.contact.geom.shape[0], 0),
-        lambda _: jnp.zeros(geom1.shape[0] * geom2.shape[0], dtype=jnp.bool_),
-        lambda _: get_colliding_inner(state.contact.geom, state.contact.dist, geom1, geom2),
-        operand=None,
-    )
+        def when_contacts_exist() -> Array:
+            # geom shape is (n_contacts, 2)
+            contact_geoms = geom
+            contact_dists = dist  # shape (n_contacts,)
+
+            g1_expanded = g1[..., jnp.newaxis]  # Shape: (n_geom1, n_geom2, 1)
+            g2_expanded = g2[..., jnp.newaxis]  # Shape: (n_geom1, n_geom2, 1)
+
+            # Expand contact_geoms to shape (1, 1, n_contacts, 2)
+            contacts_expanded = contact_geoms[jnp.newaxis, jnp.newaxis, :]  # Shape: (1, 1, n_contacts, 2)
+
+            # Check for matches in both orders (forward and reversed)
+            forward_match = (g1_expanded == contacts_expanded[..., 0]) & (g2_expanded == contacts_expanded[..., 1])
+            reverse_match = (g1_expanded == contacts_expanded[..., 1]) & (g2_expanded == contacts_expanded[..., 0])
+
+            any_match = forward_match | reverse_match  # Shape: (n_geom1, n_geom2, n_contacts)
+
+            negative_dist = contact_dists < 0  # Shape: (n_contacts,)
+            collision_mask = (
+                any_match & negative_dist[jnp.newaxis, jnp.newaxis, :]
+            )  # Shape: (n_geom1, n_geom2, n_contacts)
+
+            is_colliding = collision_mask.any(axis=2)  # Shape: (n_geom1, n_geom2)
+
+            return is_colliding
+
+        return jax.lax.cond(
+            geom.shape[0] == 0,
+            lambda _: jnp.zeros(g1.shape, dtype=jnp.bool_),
+            lambda _: when_contacts_exist(),
+            operand=None,
+        )
+
+    return get_colliding_inner(state.contact.geom, state.contact.dist, geom1, geom2)
 
 
 def get_joint_names_in_order(model: PhysicsModel) -> list[str]:
