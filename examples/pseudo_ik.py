@@ -175,24 +175,20 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.ContinuousCartesianBodyTargetReward.create(
+            ksim.PositionTrackingReward.create(
                 model=physics_model,
                 tracked_body_name="hand_right",
                 base_body_name="pelvis",
                 norm="l2",
                 scale=1.0,
-                sensitivity=1.0,
-                threshold=0.0001,  # with l2 norm, this is 1cm of error
-                time_bonus_scale=0.1,
                 command_name="cartesian_body_target_command_upper_arm_right",
             ),
-            ksim.GlobalBodyQuaternionReward.create(
+            ksim.QuaternionTrackingReward.create(
                 model=physics_model,
                 tracked_body_name="hand_right",
                 base_body_name="pelvis",
                 norm="l2",
                 scale=0.1,
-                sensitivity=1.0,
                 command_name="global_body_quaternion_command_hand_right",
             ),
         ]
