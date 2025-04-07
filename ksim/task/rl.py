@@ -1301,7 +1301,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rollout_env_vars: RolloutEnvironmentVariables,
                 rng: PRNGKeyArray,
             ) -> tuple[mujoco.MjModel, RolloutEnvironmentVariables]:
-                rng, carry_rng = jax.random.split(rng, 3)
+                rng, carry_rng = jax.random.split(rng)
                 rollout_env_vars = RolloutEnvironmentVariables(
                     carry=self.get_initial_carry(carry_rng),
                     commands=rollout_env_vars.commands,
@@ -1316,17 +1316,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             try:
                 for _ in iterator:
-                    transition, rollout_variables = self.step_engine(
+                    transition, rollout_env_vars = self.step_engine(
                         rollout_constants=rollout_constants,
                         rollout_env_vars=rollout_env_vars,
                         rollout_ctrl_vars=rollout_ctrl_vars,
                     )
                     transitions.append(transition)
                     rng, rand_rng = jax.random.split(rng)
-                    mj_model, rollout_variables = jax.lax.cond(
+
+                    # Resets the Mujoco model if the episode is done.
+                    mj_model, rollout_env_vars = jax.lax.cond(
                         transition.done,
-                        lambda: reset_mujoco_model(mj_model, rollout_variables, rand_rng),
-                        lambda: (mj_model, rollout_variables),
+                        lambda: reset_mujoco_model(mj_model, rollout_env_vars, rand_rng),
+                        lambda: (mj_model, rollout_env_vars),
                     )
 
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
@@ -1334,7 +1336,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             marker(model, data, scene, transition)
 
                     # Logs the frames to render.
-                    viewer.data = rollout_variables.physics_state.data
+                    viewer.data = rollout_env_vars.physics_state.data
                     if save_path is None:
                         viewer.render(callback=render_callback)
                     else:
