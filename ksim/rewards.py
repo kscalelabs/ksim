@@ -752,19 +752,28 @@ class QuaternionTrackingReward(Reward):
     base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    eps: float = attrs.field(default=1e-6)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         body_quat = trajectory.xquat[..., self.tracked_body_idx, :]
         target_quat = trajectory.command[self.command_name]
 
-        body_xyz = xax.quat_to_euler(body_quat)
-        target_xyz = xax.quat_to_euler(target_quat)
+        # Ensure unit quaternions (safe for numerical drift).
+        body_quat = body_quat / jnp.linalg.norm(body_quat, axis=-1, keepdims=True).clip(min=self.eps)
+        target_quat = target_quat / jnp.linalg.norm(target_quat, axis=-1, keepdims=True).clip(min=self.eps)
 
-        error = xax.get_norm(body_xyz - target_xyz, self.norm).sum(-1)
-        prev_error = jnp.concatenate([error[..., :1], error[..., :-1]], axis=-1)
-        error_diff = error - prev_error
+        # Compute absolute dot product to handle antipodal symmetry.
+        dot = jnp.sum(body_quat * target_quat, axis=-1)
+        dot = jnp.clip(jnp.abs(dot), self.eps, 1.0 - self.eps)
 
-        # If error goes down compared to the previous step, this is a reward.
+        # Quaternion angular distance (geodesic distance on S^3).
+        angle_error = 2.0 * jnp.arccos(dot)
+
+        # Previous angle error.
+        prev_error = jnp.concatenate([angle_error[..., :1], angle_error[..., :-1]], axis=-1)
+        error_diff = angle_error - prev_error
+
+        # Negative delta error as reward: improving alignment yields positive reward.
         reward = -error_diff
 
         return reward
