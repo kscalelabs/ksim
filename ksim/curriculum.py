@@ -12,7 +12,7 @@ __all__ = [
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Generic, Self, TypeVar
+from typing import Generic, TypeVar
 
 import attrs
 import jax
@@ -56,7 +56,7 @@ class Curriculum(ABC, Generic[T]):
 class ConstantCurriculum(Curriculum[None]):
     """Constant curriculum."""
 
-    level: float = attrs.field()
+    level: float = attrs.field(validator=attrs.validators.ge(0.0))
 
     def __call__(
         self,
@@ -75,8 +75,8 @@ class ConstantCurriculum(Curriculum[None]):
 class LinearCurriculum(Curriculum[None]):
     """Linear curriculum."""
 
-    step_size: float = attrs.field(default=0.01)
-    step_every_n_epochs: int = attrs.field(default=1)
+    step_size: float = attrs.field(default=0.01, validator=attrs.validators.ge(0.0))
+    step_every_n_epochs: int = attrs.field(default=1, validator=attrs.validators.ge(1))
 
     def __call__(
         self,
@@ -94,46 +94,44 @@ class LinearCurriculum(Curriculum[None]):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class EpisodeLengthCurriculum(Curriculum[None]):
+class EpisodeLengthCurriculum(Curriculum[Array]):
     """Curriculum that updates the episode length."""
 
-    min_length_steps: int = attrs.field()
-    max_length_steps: int = attrs.field()
+    num_levels: int = attrs.field(validator=attrs.validators.ge(1))
+    increase_threshold: float = attrs.field(validator=attrs.validators.ge(0.0))
+    decrease_threshold: float = attrs.field(validator=attrs.validators.ge(0.0))
+    min_level_steps: int = attrs.field(validator=attrs.validators.ge(0))
 
     def __call__(
         self,
         trajectory: Trajectory,
         rewards: Rewards,
         training_state: xax.State,
-        prev_state: CurriculumState[None],
-    ) -> CurriculumState[None]:
-        tsz = trajectory.done.shape[-1]
-        num_episodes = trajectory.done.sum(axis=-1).mean() + 1
-        episode_length = tsz / num_episodes
-        level = (episode_length - self.min_length_steps) / (self.max_length_steps - self.min_length_steps)
-        return CurriculumState(level=jnp.clip(level, 0.0, 1.0), state=None)
+        prev_state: CurriculumState[Array],
+    ) -> CurriculumState[Array]:
+        step_size = 1 / self.num_levels
+        episode_length = trajectory.episode_length().mean()
+        steps = prev_state.state
+        level = prev_state.level
+        next_steps = (steps - 1).clip(min=0)
+        can_step = next_steps == 0
+        should_inc = (episode_length > self.increase_threshold) & can_step
+        should_dec = (episode_length < self.decrease_threshold) & can_step
+        next_level = jnp.where(should_inc, level + step_size, jnp.where(should_dec, level - step_size, level))
+        next_level = jnp.clip(next_level, 0.0, 1.0)
+        next_steps = jnp.where(should_inc | should_dec, self.min_level_steps, next_steps)
+        return CurriculumState(level=next_level, state=next_steps)
 
-    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
-        return CurriculumState(level=jnp.array(0.0), state=None)
-
-    @classmethod
-    def create(
-        cls,
-        min_length_seconds: float,
-        max_length_seconds: float,
-        ctrl_dt: float,
-    ) -> Self:
-        min_length_steps = round(min_length_seconds / ctrl_dt)
-        max_length_steps = round(max_length_seconds / ctrl_dt)
-        return cls(min_length_steps=min_length_steps, max_length_steps=max_length_steps)
+    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
+        return CurriculumState(level=jnp.array(0.0), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
 
 
 @attrs.define(frozen=True, kw_only=True)
 class DistanceFromOriginCurriculum(Curriculum[None]):
     """Curriculum that updates the distance from the origin."""
 
-    min_distance: float = attrs.field()
-    max_distance: float = attrs.field()
+    min_distance: float = attrs.field(validator=attrs.validators.ge(0.0))
+    max_distance: float = attrs.field(validator=attrs.validators.ge(0.0))
 
     def __call__(
         self,

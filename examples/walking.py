@@ -287,12 +287,12 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The number of curriculum levels to use.",
     )
     increase_threshold: float = xax.field(
-        value=0.1,
-        help="Increase the curriculum level when the deaths per episode is below this threshold.",
+        value=3.0,
+        help="Increase the curriculum level when the mean trajectory length is above this threshold.",
     )
     decrease_threshold: float = xax.field(
-        value=5.0,
-        help="Decrease the curriculum level when the deaths per episode is above this threshold.",
+        value=1.0,
+        help="Decrease the curriculum level when the mean trajectory length is below this threshold.",
     )
     min_level_steps: int = xax.field(
         value=50,
@@ -466,7 +466,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.StepWhenSaturated(
+        return ksim.EpisodeLengthCurriculum(
             num_levels=self.config.num_curriculum_levels,
             increase_threshold=self.config.increase_threshold,
             decrease_threshold=self.config.decrease_threshold,
@@ -484,7 +484,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_initial_carry(self, rng: PRNGKeyArray) -> None:
         return None
 
-    def _run_actor(
+    def run_actor(
         self,
         model: DefaultHumanoidActor,
         observations: xax.FrozenDict[str, Array],
@@ -524,7 +524,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ang_vel_cmd_z_1=ang_vel_cmd_z_1,
         )
 
-    def _run_critic(
+    def run_critic(
         self,
         model: DefaultHumanoidCritic,
         observations: xax.FrozenDict[str, Array],
@@ -572,11 +572,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, None]:
         # Vectorize over the time dimensions.
-        action_dist_j = self._run_actor(model.actor, trajectories.obs, trajectories.command)
+        action_dist_j = self.run_actor(model.actor, trajectories.obs, trajectories.command)
         log_probs_j = action_dist_j.log_prob(trajectories.action)
 
         # Vectorize over the time dimensions.
-        values_1 = self._run_critic(model.critic, trajectories.obs, trajectories.command)
+        values_1 = self.run_critic(model.critic, trajectories.obs, trajectories.command)
 
         ppo_variables = ksim.PPOVariables(
             log_probs=log_probs_j,
@@ -595,7 +595,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        action_dist_j = self._run_actor(
+        action_dist_j = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,

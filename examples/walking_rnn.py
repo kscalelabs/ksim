@@ -36,6 +36,8 @@ class DefaultHumanoidRNNActor(eqx.Module):
     input_proj: eqx.nn.Linear
     rnns: tuple[eqx.nn.GRUCell, ...]
     output_proj: eqx.nn.Linear
+    num_inputs: int = eqx.static_field()
+    num_outputs: int = eqx.static_field()
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
@@ -44,15 +46,14 @@ class DefaultHumanoidRNNActor(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        num_inputs: int,
+        num_outputs: int,
         min_std: float,
         max_std: float,
         var_scale: float,
         hidden_size: int,
         depth: int,
     ) -> None:
-        num_inputs = NUM_INPUTS
-        num_outputs = NUM_JOINTS
-
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
         self.input_proj = eqx.nn.Linear(
@@ -81,51 +82,13 @@ class DefaultHumanoidRNNActor(eqx.Module):
             key=key,
         )
 
+        self.num_inputs = num_inputs
+        self.num_outputs = num_outputs
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
 
-    def forward(
-        self,
-        timestep_1: Array,
-        dh_joint_pos_j: Array,
-        dh_joint_vel_j: Array,
-        com_inertia_n: Array,
-        com_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
-        act_frc_obs_n: Array,
-        base_pos_3: Array,
-        base_quat_4: Array,
-        lin_vel_obs_3: Array,
-        ang_vel_obs_3: Array,
-        lin_vel_cmd_x_1: Array,
-        lin_vel_cmd_y_1: Array,
-        ang_vel_cmd_z_1: Array,
-        carry: Array,
-    ) -> tuple[distrax.Distribution, Array]:
-        obs_n = jnp.concatenate(
-            [
-                jnp.cos(timestep_1),  # 1
-                jnp.sin(timestep_1),  # 1
-                dh_joint_pos_j,  # NUM_JOINTS
-                dh_joint_vel_j,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
-                imu_acc_3,  # 3
-                imu_gyro_3,  # 3
-                act_frc_obs_n,  # NUM_JOINTS
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
-            ],
-            axis=-1,
-        )
-
+    def forward(self, obs_n: Array, carry: Array) -> tuple[distrax.Distribution, Array]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -134,8 +97,8 @@ class DefaultHumanoidRNNActor(eqx.Module):
         out_n = self.output_proj(x_n)
 
         # Converts the output to a distribution.
-        mean_n = out_n[..., :NUM_JOINTS]
-        std_n = out_n[..., NUM_JOINTS:]
+        mean_n = out_n[..., : self.num_outputs]
+        std_n = out_n[..., self.num_outputs :]
 
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
@@ -155,10 +118,10 @@ class DefaultHumanoidRNNCritic(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        num_inputs: int,
         hidden_size: int,
         depth: int,
     ) -> None:
-        num_inputs = NUM_INPUTS
         num_outputs = 1
 
         # Project input to hidden size
@@ -189,47 +152,7 @@ class DefaultHumanoidRNNCritic(eqx.Module):
             key=key,
         )
 
-    def forward(
-        self,
-        timestep_1: Array,
-        dh_joint_pos_j: Array,
-        dh_joint_vel_j: Array,
-        com_inertia_n: Array,
-        com_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
-        act_frc_obs_n: Array,
-        base_pos_3: Array,
-        base_quat_4: Array,
-        lin_vel_obs_3: Array,
-        ang_vel_obs_3: Array,
-        lin_vel_cmd_x_1: Array,
-        lin_vel_cmd_y_1: Array,
-        ang_vel_cmd_z_1: Array,
-        carry: Array,
-    ) -> tuple[Array, Array]:
-        obs_n = jnp.concatenate(
-            [
-                jnp.cos(timestep_1),  # 1
-                jnp.sin(timestep_1),  # 1
-                dh_joint_pos_j,  # NUM_JOINTS
-                dh_joint_vel_j,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
-                imu_acc_3,  # 3
-                imu_gyro_3,  # 3
-                act_frc_obs_n,  # NUM_JOINTS
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
-            ],
-            axis=-1,
-        )
-
+    def forward(self, obs_n: Array, carry: Array) -> tuple[Array, Array]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -248,11 +171,15 @@ class DefaultHumanoidRNNModel(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        num_inputs: int,
+        num_joints: int,
         hidden_size: int,
         depth: int,
     ) -> None:
         self.actor = DefaultHumanoidRNNActor(
             key,
+            num_inputs=num_inputs,
+            num_outputs=num_joints,
             min_std=0.01,
             max_std=1.0,
             var_scale=0.5,
@@ -261,6 +188,7 @@ class DefaultHumanoidRNNModel(eqx.Module):
         )
         self.critic = DefaultHumanoidRNNCritic(
             key,
+            num_inputs=num_inputs,
             hidden_size=hidden_size,
             depth=depth,
         )
@@ -278,11 +206,13 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidRNNModel:
         return DefaultHumanoidRNNModel(
             key,
+            num_inputs=NUM_INPUTS,
+            num_joints=NUM_JOINTS,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
         )
 
-    def _run_actor(
+    def run_actor(
         self,
         model: DefaultHumanoidRNNActor,
         observations: xax.FrozenDict[str, Array],
@@ -305,26 +235,31 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
         ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
 
-        return model.forward(
-            timestep_1=timestep_1,
-            dh_joint_pos_j=dh_joint_pos_j,
-            dh_joint_vel_j=dh_joint_vel_j / 10.0,
-            com_inertia_n=com_inertia_n,
-            com_vel_n=com_vel_n,
-            imu_acc_3=imu_acc_3 / 50.0,
-            imu_gyro_3=imu_gyro_3 / 3.0,
-            act_frc_obs_n=act_frc_obs_n / 100.0,
-            base_pos_3=base_pos_3,
-            base_quat_4=base_quat_4,
-            lin_vel_obs_3=lin_vel_obs_3,
-            ang_vel_obs_3=ang_vel_obs_3,
-            lin_vel_cmd_x_1=lin_vel_cmd_x_1,
-            lin_vel_cmd_y_1=lin_vel_cmd_y_1,
-            ang_vel_cmd_z_1=ang_vel_cmd_z_1,
-            carry=carry,
+        obs_n = jnp.concatenate(
+            [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
+                dh_joint_pos_j,  # NUM_JOINTS
+                dh_joint_vel_j / 10.0,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3 / 50.0,  # 3
+                imu_gyro_3 / 3.0,  # 3
+                act_frc_obs_n / 100.0,  # NUM_JOINTS
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                lin_vel_cmd_x_1,  # 1
+                lin_vel_cmd_y_1,  # 1
+                ang_vel_cmd_z_1,  # 1
+            ],
+            axis=-1,
         )
 
-    def _run_critic(
+        return model.forward(obs_n, carry)
+
+    def run_critic(
         self,
         model: DefaultHumanoidRNNCritic,
         observations: xax.FrozenDict[str, Array],
@@ -347,24 +282,29 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
         ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
 
-        return model.forward(
-            timestep_1=timestep_1,
-            dh_joint_pos_j=dh_joint_pos_j,
-            dh_joint_vel_j=dh_joint_vel_j / 10.0,
-            com_inertia_n=com_inertia_n,
-            com_vel_n=com_vel_n,
-            imu_acc_3=imu_acc_3 / 50.0,
-            imu_gyro_3=imu_gyro_3 / 3.0,
-            act_frc_obs_n=act_frc_obs_n / 100.0,
-            base_pos_3=base_pos_3,
-            base_quat_4=base_quat_4,
-            lin_vel_obs_3=lin_vel_obs_3,
-            ang_vel_obs_3=ang_vel_obs_3,
-            lin_vel_cmd_x_1=lin_vel_cmd_x_1,
-            lin_vel_cmd_y_1=lin_vel_cmd_y_1,
-            ang_vel_cmd_z_1=ang_vel_cmd_z_1,
-            carry=carry,
+        obs_n = jnp.concatenate(
+            [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
+                dh_joint_pos_j,  # NUM_JOINTS
+                dh_joint_vel_j / 10.0,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3 / 50.0,  # 3
+                imu_gyro_3 / 3.0,  # 3
+                act_frc_obs_n / 100.0,  # NUM_JOINTS
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                lin_vel_cmd_x_1,  # 1
+                lin_vel_cmd_y_1,  # 1
+                ang_vel_cmd_z_1,  # 1
+            ],
+            axis=-1,
         )
+
+        return model.forward(obs_n, carry)
 
     def get_ppo_variables(
         self,
@@ -376,11 +316,11 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         actor_carry, critic_carry = carry
 
         # Vectorize over the time dimensions.
-        action_dist_tj, actor_carry = self._run_actor(model.actor, trajectories.obs, trajectories.command, actor_carry)
+        action_dist_tj, actor_carry = self.run_actor(model.actor, trajectories.obs, trajectories.command, actor_carry)
         log_probs_tj = action_dist_tj.log_prob(trajectories.action)
 
         # Gets the value by calling the critic.
-        values_t1, critic_carry = self._run_critic(model.critic, trajectories.obs, trajectories.command, critic_carry)
+        values_t1, critic_carry = self.run_critic(model.critic, trajectories.obs, trajectories.command, critic_carry)
 
         ppo_variables = ksim.PPOVariables(
             log_probs=log_probs_tj,
@@ -408,7 +348,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         actor_carry_in, critic_carry_in = carry
 
         # Runs the actor model to get the action distribution.
-        action_dist_j, actor_carry = self._run_actor(
+        action_dist_j, actor_carry = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,

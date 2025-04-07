@@ -107,6 +107,73 @@ class MujocoViewer:
         # Set up viewport
         self.viewport = mujoco.MjrRect(0, 0, framebuffer_width, framebuffer_height)
 
+        # Mouse interaction variables
+        self._button_left = False
+        self._button_right = False
+        self._button_middle = False
+        self._last_mouse_x = 0.0
+        self._last_mouse_y = 0.0
+
+        # Set up mouse and keyboard callbacks
+        if self.render_mode == "window":
+            glfw.set_cursor_pos_callback(self.window, self._mouse_move)
+            glfw.set_mouse_button_callback(self.window, self._mouse_button)
+            glfw.set_scroll_callback(self.window, self._scroll)
+            glfw.set_key_callback(self.window, self._keyboard)
+
+    def _mouse_move(self, window: glfw._GLFWwindow, xpos: float, ypos: float) -> None:
+        """Mouse motion callback."""
+        dx = xpos - self._last_mouse_x
+        dy = ypos - self._last_mouse_y
+
+        # Update mouse position
+        self._last_mouse_x = xpos
+        self._last_mouse_y = ypos
+
+        # Left button: rotate camera
+        if self._button_left:
+            self.cam.azimuth -= dx * 0.5
+            self.cam.elevation -= dy * 0.5
+
+        # Right button: pan camera
+        elif self._button_right:
+            forward = np.array(
+                [
+                    np.cos(np.deg2rad(self.cam.azimuth)) * np.cos(np.deg2rad(self.cam.elevation)),
+                    np.sin(np.deg2rad(self.cam.azimuth)) * np.cos(np.deg2rad(self.cam.elevation)),
+                    np.sin(np.deg2rad(self.cam.elevation)),
+                ]
+            )
+            right = np.array([-np.sin(np.deg2rad(self.cam.azimuth)), np.cos(np.deg2rad(self.cam.azimuth)), 0])
+            up = np.cross(right, forward)
+
+            # Scale pan speed with distance
+            scale = self.cam.distance * 0.001
+
+            self.cam.lookat[0] += right[0] * dx * scale - up[0] * dy * scale
+            self.cam.lookat[1] += right[1] * dx * scale - up[1] * dy * scale
+            self.cam.lookat[2] += right[2] * dx * scale - up[2] * dy * scale
+
+    def _mouse_button(self, window: glfw._GLFWwindow, button: int, act: int, mods: int) -> None:
+        """Mouse button callback."""
+        self._button_left = glfw.get_mouse_button(window, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
+        self._button_right = glfw.get_mouse_button(window, glfw.MOUSE_BUTTON_RIGHT) == glfw.PRESS
+        self._button_middle = glfw.get_mouse_button(window, glfw.MOUSE_BUTTON_MIDDLE) == glfw.PRESS
+
+        # Update cursor position
+        x, y = glfw.get_cursor_pos(window)
+        self._last_mouse_x = x
+        self._last_mouse_y = y
+
+    def _scroll(self, window: glfw._GLFWwindow, xoffset: float, yoffset: float) -> None:
+        """Mouse scroll callback."""
+        self.cam.distance *= 0.9 if yoffset > 0 else 1.1
+
+    def _keyboard(self, window: glfw._GLFWwindow, key: int, scancode: int, act: int, mods: int) -> None:
+        """Keyboard callback."""
+        if act == glfw.PRESS and key == glfw.KEY_ESCAPE:
+            self._handle_quit()
+
     def _handle_quit(self) -> None:
         glfw.set_window_should_close(self.window, True)
 
