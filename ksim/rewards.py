@@ -739,8 +739,8 @@ class PositionTrackingReward(Reward):
             tracked_body_idx=body_idx,
             base_body_idx=base_idx,
             norm=norm,
-            scale=scale,
             command_name=command_name,
+            scale=scale,
         )
 
 
@@ -752,18 +752,22 @@ class QuaternionTrackingReward(Reward):
     base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-    scale: float = attrs.field(default=1.0)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         body_quat = trajectory.xquat[..., self.tracked_body_idx, :]
         target_quat = trajectory.command[self.command_name]
 
-        breakpoint()
-
         body_xyz = xax.quat_to_euler(body_quat)
         target_xyz = xax.quat_to_euler(target_quat)
 
-        raise NotImplementedError
+        error = xax.get_norm(body_xyz - target_xyz, self.norm).sum(-1)
+        prev_error = jnp.concatenate([error[..., :1], error[..., :-1]], axis=-1)
+        error_diff = error - prev_error
+
+        # If error goes down compared to the previous step, this is a reward.
+        reward = -error_diff
+
+        return reward
 
     @classmethod
     def create(
@@ -781,6 +785,6 @@ class QuaternionTrackingReward(Reward):
             tracked_body_idx=body_idx,
             base_body_idx=base_idx,
             norm=norm,
-            scale=scale,
             command_name=command_name,
+            scale=scale,
         )
