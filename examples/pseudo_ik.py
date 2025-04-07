@@ -191,6 +191,7 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
                 scale=0.001,
                 command_name="global_body_quaternion_command_hand_right",
             ),
+            ksim.ActionSmoothnessPenalty(scale=-0.001),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
