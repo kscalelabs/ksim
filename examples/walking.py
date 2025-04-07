@@ -484,7 +484,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_initial_carry(self, rng: PRNGKeyArray) -> None:
         return None
 
-    def _run_actor(
+    def run_actor(
         self,
         model: DefaultHumanoidActor,
         observations: xax.FrozenDict[str, Array],
@@ -524,7 +524,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ang_vel_cmd_z_1=ang_vel_cmd_z_1,
         )
 
-    def _run_critic(
+    def run_critic(
         self,
         model: DefaultHumanoidCritic,
         observations: xax.FrozenDict[str, Array],
@@ -572,11 +572,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, None]:
         # Vectorize over the time dimensions.
-        action_dist_j = self._run_actor(model.actor, trajectories.obs, trajectories.command)
+        action_dist_j = self.run_actor(model.actor, trajectories.obs, trajectories.command)
         log_probs_j = action_dist_j.log_prob(trajectories.action)
 
         # Vectorize over the time dimensions.
-        values_1 = self._run_critic(model.critic, trajectories.obs, trajectories.command)
+        values_1 = self.run_critic(model.critic, trajectories.obs, trajectories.command)
 
         ppo_variables = ksim.PPOVariables(
             log_probs=log_probs_j,
@@ -595,7 +595,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        action_dist_j = self._run_actor(
+        action_dist_j = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
