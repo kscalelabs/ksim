@@ -19,7 +19,6 @@ import sys
 import textwrap
 import time
 import traceback
-import warnings
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
@@ -41,12 +40,13 @@ from dpshdl.dataset import Dataset
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
-from omegaconf import II, MISSING, DictConfig, OmegaConf
+from omegaconf import MISSING, DictConfig, OmegaConf
 from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
 from ksim.commands import Command
 from ksim.curriculum import Curriculum, CurriculumState
+from ksim.dataset import TrajectoryDataset
 from ksim.engine import (
     PhysicsEngine,
     engine_type_from_physics_model,
@@ -278,8 +278,8 @@ class RLConfig(xax.Config):
         value=False,
         help="If true, collect a dataset.",
     )
-    dataset_num_trajectories: int = xax.field(
-        II("batch_size"),
+    dataset_num_batches: int = xax.field(
+        1,
         help="The number of trajectories to collect at a time.",
     )
     dataset_save_path: str | None = xax.field(
@@ -789,7 +789,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         elif self.config.collect_dataset:
             self.collect_dataset(
-                num_trajectories=self.config.dataset_num_trajectories,
+                num_batches=self.config.dataset_num_batches,
                 save_path=self.config.dataset_save_path,
             )
 
@@ -1498,21 +1498,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def collect_dataset(
         self,
-        num_trajectories: int,
+        num_batches: int,
         save_path: str | Path | None = None,
     ) -> None:
         """Collects a dataset of state-action pairs by running the environment loop.
 
         Args:
-            num_trajectories: The number of trajectories to collect at a time.
+            num_batches: The number of batches to collect at a time.
             save_path: Where to save the dataset; if not specified, will save
                 to the experimental directory.
         """
         with self:
-            num_batches = (num_trajectories + self.batch_size - 1) // self.batch_size
-            if num_trajectories % self.batch_size != 0:
-                warnings.warn(f"Collecting {num_trajectories} trajectories instead of {num_batches * self.batch_size}")
-
             rng = self.prng_key()
             self.set_loggers()
 
@@ -1543,10 +1539,24 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             state = self.on_training_start(state)
 
-            for _ in tqdm.trange(num_batches):
-                breakpoint()
+            @xax.jit()
+            def get_batch(
+                rollout_env_vars: RolloutEnvironmentVariables,
+            ) -> tuple[Trajectory, Rewards, RolloutEnvironmentVariables]:
+                vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(None, 0, None))
+                return vmapped_unroll(rollout_constants, rollout_env_vars, rollout_ctrl_vars)
 
-                asdf
+            with TrajectoryDataset.writer(save_path, num_batches * self.batch_size) as writer:
+                for _ in tqdm.trange(num_batches):
+                    trajectories, rewards, rollout_env_vars = get_batch(rollout_env_vars)
+
+                    # Splits trajectories and rewards into a list of `batch_size` samples.
+                    for i in range(0, len(trajectories.done), self.batch_size):
+                        trajectory = jax.tree.map(lambda x: x[i], trajectories)
+                        reward = jax.tree.map(lambda x: x[i], rewards)
+                        writer.write(trajectory, reward)
+
+            logger.info("Saved dataset to %s", save_path)
 
     def log_full_trajectory(self, state: xax.State, is_first_step: bool, last_log_time: float) -> bool:
         if is_first_step and self.config.log_full_trajectory_on_first_step:
