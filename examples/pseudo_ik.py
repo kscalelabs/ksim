@@ -188,7 +188,7 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
                 tracked_body_name="hand_right",
                 base_body_name="pelvis",
                 norm="l2",
-                scale=0.1,
+                scale=0.01,
                 command_name="global_body_quaternion_command_hand_right",
             ),
         ]
