@@ -269,10 +269,6 @@ class RLConfig(xax.Config):
         value=MISSING,
         help="The number of seconds to rollout each environment during training.",
     )
-    num_rollout_levels: int = xax.field(
-        value=1,
-        help="The number of distinct rollout levels.",
-    )
 
     # Override validation parameters.
     log_full_trajectory_on_first_step: bool = xax.field(
@@ -753,7 +749,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         else:
             self.run_training()
 
-    def log_train_metrics(self, metrics: Metrics, rollout_length: int) -> None:
+    def log_train_metrics(self, metrics: Metrics) -> None:
         """Logs the train metrics.
 
         Args:
@@ -761,13 +757,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rollout_length: The length of the rollout.
         """
         if self.config.log_train_metrics:
-            self.logger.log_scalar(
-                "rollout length",
-                rollout_length * self.config.ctrl_dt,
-                namespace="🔄 curriculum",
-                secondary=True,
-            )
-
             for namespace, metric, secondary in (
                 ("🚂 train", metrics.train, True),
                 ("🎁 reward", metrics.reward, False),
@@ -1050,11 +1039,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers.extend(randomization.get_markers())
         return markers
 
-    def rollout_length_from_curriculum(self, curriculum_level: Array) -> int:
-        curriculum_bin = jnp.floor(curriculum_level * self.config.num_rollout_levels) + 1
-        return int(self.rollout_length_steps * curriculum_bin.item())
-
-    @xax.jit(static_argnames=["self", "model_static", "engine", "rollout_constants", "rollout_length"])
+    @xax.jit(static_argnames=["self", "model_static", "engine", "rollout_constants"])
     def _single_unroll(
         self,
         physics_model: PhysicsModel,
@@ -1064,7 +1049,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         engine: PhysicsEngine,
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
-        rollout_length: int,
     ) -> tuple[Trajectory, Rewards, RolloutVariables]:
         # Applies randomizations to the model.
         physics_model = physics_model.tree_replace(randomization_dict)
@@ -1084,7 +1068,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         next_rollout_variables, trajectory = jax.lax.scan(
             scan_fn,
             rollout_variables,
-            length=rollout_length,
+            length=self.rollout_length_steps,
         )
 
         # Gets the rewards.
@@ -1098,7 +1082,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return trajectory, reward, next_rollout_variables
 
-    @xax.jit(static_argnames=["self", "model_static", "optimizer", "engine", "rollout_constants", "rollout_length"])
+    @xax.jit(static_argnames=["self", "model_static", "optimizer", "engine", "rollout_constants"])
     def _rl_train_loop_step(
         self,
         physics_model: PhysicsModel,
@@ -1111,7 +1095,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rollout_constants: RolloutConstants,
         rollout_variables: RolloutVariables,
         state: xax.State,
-        rollout_length: int,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, Metrics, RolloutVariables, SingleTrajectory]:
         """Runs a single step of the RL training loop."""
@@ -1136,7 +1119,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     None,
                     None,
                     0,
-                    None,
                 ),
             )
             trajectories, rewards, next_rollout_variables = vmapped_unroll(
@@ -1147,7 +1129,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 engine,
                 rollout_constants,
                 rollout_variables,
-                rollout_length,
             )
 
             # Runs update on the previous trajectory.
@@ -1179,6 +1160,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 prev_state=rollout_variables.curriculum_state,
             )
 
+            # Constructs the final rollout variables.
             next_rollout_variables = RolloutVariables(
                 carry=next_rollout_variables.carry,
                 commands=next_rollout_variables.commands,
@@ -1514,10 +1496,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, curriculum_rng, rand_rng, rollout_rng, command_rng, carry_rng = jax.random.split(rng, 6)
 
             # Gets the initial curriculum state.
-            curriculum_state = curriculum.get_initial_state(curriculum_rng)
+            curriculum_state = jax.vmap(curriculum.get_initial_state, in_axes=0)(
+                jax.random.split(curriculum_rng, self.config.num_envs)
+            )
 
             # Applies randomizations to the physics model.
-            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, None, None, 0))
+            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, None, 0, 0))
             randomization_dict, physics_state = randomization_fn(
                 mjx_model,
                 engine,
@@ -1532,6 +1516,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             state = self.on_training_start(state)
 
+            # Constructs the initial rollout variables.
             rollout_variables = RolloutVariables(
                 carry=carry_fn(jax.random.split(carry_rng, self.config.num_envs)),
                 commands=command_fn(
@@ -1563,7 +1548,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             try:
                 while not self.is_training_over(state):
                     state = self.on_step_start(state)
-                    rollout_length = self.rollout_length_from_curriculum(rollout_variables.curriculum_state.level)
 
                     # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
@@ -1585,7 +1569,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             rollout_constants=rollout_constants,
                             rollout_variables=rollout_variables,
                             state=state,
-                            rollout_length=rollout_length,
                             rng=update_rng,
                         )
 
@@ -1610,7 +1593,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         elapsed_time = xax.format_timedelta(datetime.timedelta(seconds=timer.elapsed_time), short=True)
                         logger.log(xax.LOG_STATUS, "First step time: %s", elapsed_time)
 
-                    self.log_train_metrics(metrics, rollout_length)
+                    self.log_train_metrics(metrics)
                     self.log_state_timers(state)
                     self.write_logs(state)
 
