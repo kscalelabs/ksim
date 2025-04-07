@@ -180,7 +180,7 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
                 tracked_body_name="hand_right",
                 base_body_name="pelvis",
                 norm="l2",
-                scale=10.0,
+                scale=1.0,
                 command_name="cartesian_body_target_command_upper_arm_right",
             ),
             ksim.QuaternionTrackingReward.create(
