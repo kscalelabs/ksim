@@ -56,6 +56,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
             key,
             num_inputs=NUM_INPUTS,
             num_joints=NUM_JOINTS,
+            min_std=0.0001,
+            max_std=1.0,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
         )
@@ -155,17 +157,17 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
                 pivot_point=(0.0, 0.0, 0.0),
                 base_name="pelvis",
                 sample_sphere_radius=0.5,
-                positive_x=True,  # only sample in the positive x direction
+                positive_x=True,
                 positive_y=False,
                 positive_z=False,
-                switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
+                switch_prob=self.config.ctrl_dt * 4,  # Will last 1/4 seconds in expectation
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
             ),
             ksim.GlobalBodyQuaternionCommand.create(
                 model=physics_model,
                 base_name="hand_right",
-                switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
+                switch_prob=self.config.ctrl_dt * 4,  # Will last 1/4 seconds in expectation
                 null_prob=0.5,
                 vis_magnitude=0.5,
                 vis_size=0.05,
@@ -248,7 +250,7 @@ if __name__ == "__main__":
             num_passes=10,
             epochs_per_log_step=1,
             # Logging parameters.
-            log_full_trajectory_every_n_seconds=60,
+            # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
