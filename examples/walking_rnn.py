@@ -97,8 +97,8 @@ class DefaultHumanoidRNNActor(eqx.Module):
         out_n = self.output_proj(x_n)
 
         # Converts the output to a distribution.
-        mean_n = out_n[..., :self.num_outputs]
-        std_n = out_n[..., self.num_outputs:]
+        mean_n = out_n[..., : self.num_outputs]
+        std_n = out_n[..., self.num_outputs :]
 
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
