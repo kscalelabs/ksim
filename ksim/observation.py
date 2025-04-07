@@ -360,4 +360,7 @@ class TimestepObservation(Observation):
     """Returns the current timestep in the episode."""
 
     def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
-        return state.physics_state.data.time.reshape(1)
+        time = state.physics_state.data.time
+        if not isinstance(time, Array):
+            time = jnp.array(time)
+        return time.reshape(1)

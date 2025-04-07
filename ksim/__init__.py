@@ -5,6 +5,7 @@ __version__ = "0.0.16"
 from .actuators import *
 from .commands import *
 from .curriculum import *
+from .dataset import *
 from .distributions import *
 from .engine import *
 from .events import *

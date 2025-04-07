@@ -20,7 +20,7 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.task.rl import RLConfig, RLTask, RolloutConstants, RolloutVariables
+from ksim.task.rl import RLConfig, RLTask, RolloutConstants, RolloutControlVariables, RolloutEnvironmentVariables
 from ksim.types import Rewards, SingleTrajectory, Trajectory
 
 
@@ -570,27 +570,25 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
     def update_model(
         self,
-        model_arr: PyTree,
-        model_static: PyTree,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         trajectories: Trajectory,
         rewards: Rewards,
         rollout_constants: RolloutConstants,
-        rollout_variables: RolloutVariables,
+        rollout_env_vars: RolloutEnvironmentVariables,
+        rollout_ctrl_vars: RolloutControlVariables,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array], SingleTrajectory]:
         """Runs PPO updates on a given set of trajectory batches.
 
         Args:
-            model_arr: The mutable part of the model to update.
-            model_static: The static part of the model to update.
             optimizer: The optimizer to use.
             opt_state: The optimizer state.
             trajectories: The trajectories to update the model on.
             rewards: The rewards for the trajectories.
             rollout_constants: The constant inputs into the rollout.
-            rollout_variables: The variables inputs into the rollout.
+            rollout_env_vars: The environment variables inputs into the rollout.
+            rollout_ctrl_vars: The control variables inputs into the rollout.
             rng: A random seed.
 
         Returns:
@@ -603,7 +601,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         indices = jnp.arange(trajectories.done.shape[0])
         indices = indices.reshape(self.num_batches, self.batch_size)
 
-        model = eqx.combine(model_arr, model_static)
+        model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
 
         def on_policy_scan_fn(rng: PRNGKeyArray, trajectory: Trajectory, model_carry: PyTree) -> PPOVariables:
             rng, policy_vars_rng = jax.random.split(rng)
@@ -615,7 +613,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rng, prng = jax.random.split(carry)
             policy_vars_rng = jax.random.split(prng, self.batch_size)
             trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
-            carry_batch = jax.tree.map(lambda x: x[xt], rollout_variables.carry)
+            carry_batch = jax.tree.map(lambda x: x[xt], rollout_env_vars.carry)
             scan_fn = jax.vmap(on_policy_scan_fn, in_axes=0)
             on_policy_variables = scan_fn(policy_vars_rng, trajectory_batch, carry_batch)
             return rng, on_policy_variables
@@ -638,12 +636,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             # Gets the current batch of trajectories and rewards.
             trajectory_batch = jax.tree.map(lambda x: x[xt], trajectories)
             reward_batch = jax.tree.map(lambda x: x[xt], rewards)
-            carry_batch = jax.tree.map(lambda x: x[xt], rollout_variables.carry)
+            carry_batch = jax.tree.map(lambda x: x[xt], rollout_env_vars.carry)
             on_policy_variables_batch = jax.tree.map(lambda x: x[xt], on_policy_variables)
 
             model_arr, opt_state, metrics, single_traj = self._single_step(
                 model_arr=model_arr,
-                model_static=model_static,
+                model_static=rollout_constants.model_static,
                 optimizer=optimizer,
                 opt_state=opt_state,
                 trajectories=trajectory_batch,
@@ -669,7 +667,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
             return carry, (metrics, single_traj)
 
-        carry = (model_arr, opt_state, rng)
+        carry = (rollout_ctrl_vars.model_arr, opt_state, rng)
 
         # Applies gradient updates.
         carry, (metrics, single_traj) = jax.lax.scan(batch_scan_fn, carry, length=self.config.num_passes)
