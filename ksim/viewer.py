@@ -121,7 +121,7 @@ class MujocoViewer:
             glfw.set_scroll_callback(self.window, self._scroll)
             glfw.set_key_callback(self.window, self._keyboard)
 
-    def _mouse_move(self, window: glfw.LP__GLFWwindow, xpos: float, ypos: float) -> None:
+    def _mouse_move(self, window: glfw._GLFWwindow, xpos: float, ypos: float) -> None:
         """Mouse motion callback."""
         dx = xpos - self._last_mouse_x
         dy = ypos - self._last_mouse_y
@@ -154,7 +154,7 @@ class MujocoViewer:
             self.cam.lookat[1] += right[1] * dx * scale - up[1] * dy * scale
             self.cam.lookat[2] += right[2] * dx * scale - up[2] * dy * scale
 
-    def _mouse_button(self, window: glfw.LP__GLFWwindow, button: int, act: int, mods: int) -> None:
+    def _mouse_button(self, window: glfw._GLFWwindow, button: int, act: int, mods: int) -> None:
         """Mouse button callback."""
         self._button_left = glfw.get_mouse_button(window, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
         self._button_right = glfw.get_mouse_button(window, glfw.MOUSE_BUTTON_RIGHT) == glfw.PRESS
@@ -165,11 +165,11 @@ class MujocoViewer:
         self._last_mouse_x = x
         self._last_mouse_y = y
 
-    def _scroll(self, window: glfw.LP__GLFWwindow, xoffset: float, yoffset: float) -> None:
+    def _scroll(self, window: glfw._GLFWwindow, xoffset: float, yoffset: float) -> None:
         """Mouse scroll callback."""
         self.cam.distance *= 0.9 if yoffset > 0 else 1.1
 
-    def _keyboard(self, window: glfw.LP__GLFWwindow, key: int, scancode: int, act: int, mods: int) -> None:
+    def _keyboard(self, window: glfw._GLFWwindow, key: int, scancode: int, act: int, mods: int) -> None:
         """Keyboard callback."""
         if act == glfw.PRESS and key == glfw.KEY_ESCAPE:
             self._handle_quit()
