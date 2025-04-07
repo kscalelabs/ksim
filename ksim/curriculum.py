@@ -174,7 +174,7 @@ class RewardLevelCurriculum(Curriculum[Array]):
         prev_state: CurriculumState[Array],
     ) -> CurriculumState[Array]:
         level, steps = prev_state.level, prev_state.state
-        reward = rewards.components[self.reward_name].sum(axis=-1).mean()
+        reward = rewards.components[self.reward_name].mean()
         level, steps = jax.lax.cond(
             steps <= 0,
             lambda: self._step_level(level, reward),
