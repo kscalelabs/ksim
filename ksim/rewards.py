@@ -767,7 +767,7 @@ class QuaternionTrackingReward(Reward):
         dot = jnp.clip(jnp.abs(dot), self.eps, 1.0 - self.eps)
 
         # Quaternion angular distance (geodesic distance on S^3).
-        angle_error = -jnp.square(dot)
+        angle_error = 2.0 * jnp.arccos(dot)
 
         # Previous angle error.
         prev_error = jnp.concatenate([angle_error[..., :1], angle_error[..., :-1]], axis=-1)
