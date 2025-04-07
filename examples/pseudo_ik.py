@@ -26,7 +26,7 @@ from .walking_rnn import (
 
 NUM_JOINTS = 3
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + NUM_JOINTS + 3 + 4
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + NUM_JOINTS + 3 + 3
 
 
 @dataclass
@@ -73,8 +73,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
-        xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
-        quat_target_4 = commands["global_body_quaternion_command_hand_right"]
+        xyz_upper_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
+        xyz_lower_target_3 = commands["cartesian_body_target_command_lower_arm_right"]
 
         obs_n = jnp.concatenate(
             [
@@ -83,8 +83,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
                 dh_joint_pos_j,  # NUM_JOINTS
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
-                xyz_target_3,  # 3
-                quat_target_4,  # 4
+                xyz_upper_target_3,  # 3
+                xyz_lower_target_3,  # 3
             ],
             axis=-1,
         )
@@ -102,8 +102,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
-        xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
-        quat_target_4 = commands["global_body_quaternion_command_hand_right"]
+        xyz_upper_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
+        xyz_lower_target_3 = commands["cartesian_body_target_command_lower_arm_right"]
 
         obs_n = jnp.concatenate(
             [
@@ -112,8 +112,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
                 dh_joint_pos_j,  # NUM_JOINTS
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
-                xyz_target_3,  # 3
-                quat_target_4,  # 4
+                xyz_upper_target_3,  # 3
+                xyz_lower_target_3,  # 3
             ],
             axis=-1,
         )
@@ -160,17 +160,20 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
                 positive_x=True,
                 positive_y=False,
                 positive_z=False,
-                switch_prob=self.config.ctrl_dt * 4,  # Will last 1/4 seconds in expectation
+                switch_prob=self.config.ctrl_dt * 2,  # Will last 1/2 seconds in expectation
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
             ),
-            ksim.GlobalBodyQuaternionCommand.create(
+            ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
-                base_name="hand_right",
-                switch_prob=self.config.ctrl_dt * 4,  # Will last 1/4 seconds in expectation
-                null_prob=0.5,
-                vis_magnitude=0.5,
-                vis_size=0.05,
+                pivot_name="lower_arm_right",
+                base_name="pelvis",
+                sample_sphere_radius=0.5,
+                positive_x=True,
+                positive_y=False,
+                positive_z=False,
+                switch_prob=self.config.ctrl_dt * 2,  # Will last 1/2 seconds in expectation
+                vis_radius=0.05,
                 vis_color=(0.0, 0.0, 1.0, 0.8),
             ),
         ]
@@ -181,17 +184,15 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
                 model=physics_model,
                 tracked_body_name="hand_right",
                 base_body_name="pelvis",
-                norm="l2",
                 scale=1.0,
                 command_name="cartesian_body_target_command_upper_arm_right",
             ),
-            ksim.QuaternionTrackingReward.create(
+            ksim.PositionTrackingReward.create(
                 model=physics_model,
-                tracked_body_name="hand_right",
+                tracked_body_name="upper_arm_right",
                 base_body_name="pelvis",
-                norm="l2",
-                scale=0.001,
-                command_name="global_body_quaternion_command_hand_right",
+                scale=0.1,
+                command_name="cartesian_body_target_command_lower_arm_right",
             ),
         ]
 

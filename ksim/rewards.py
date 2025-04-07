@@ -708,7 +708,7 @@ class PositionTrackingReward(Reward):
     tracked_body_idx: int = attrs.field()
     base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
-    norm: xax.NormType = attrs.field()
+    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
@@ -730,7 +730,7 @@ class PositionTrackingReward(Reward):
         command_name: str,
         tracked_body_name: str,
         base_body_name: str,
-        norm: xax.NormType = "l2",
+        norm: xax.NormType = "l1",
         scale: float = 1.0,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
@@ -751,7 +751,7 @@ class QuaternionTrackingReward(Reward):
     tracked_body_idx: int = attrs.field()
     base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
     eps: float = attrs.field(default=1e-6)
 
     def __call__(self, trajectory: Trajectory) -> Array:
@@ -785,7 +785,7 @@ class QuaternionTrackingReward(Reward):
         command_name: str,
         tracked_body_name: str,
         base_body_name: str,
-        norm: xax.NormType = "l2",
+        norm: xax.NormType = "l1",
         scale: float = 1.0,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
