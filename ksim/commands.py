@@ -287,9 +287,8 @@ class CartesianBodyTargetCommand(Command):
     with the base but only the base.
     """
 
-    pivot_body_name: str = attrs.field()
+    pivot_point: tuple[float, float, float] = attrs.field()
     base_body_name: str = attrs.field()
-    pivot_id: int = attrs.field()
     base_id: int = attrs.field()
     sample_sphere_radius: float = attrs.field()
     positive_x: bool = attrs.field()
@@ -322,7 +321,7 @@ class CartesianBodyTargetCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         sphere_sample = self._sample_sphere(rng)
-        pivot_pos = jnp.array(physics_data.xpos[self.pivot_id])
+        pivot_pos = jnp.array(self.pivot_point)
         base_pos = jnp.array(physics_data.xpos[self.base_id])
         return pivot_pos + sphere_sample - base_pos
 
@@ -342,13 +341,13 @@ class CartesianBodyTargetCommand(Command):
         return [CartesianBodyTargetMarker.get(self.command_name, self.base_body_name, self.vis_radius, self.vis_color)]
 
     def get_name(self) -> str:
-        return f"{super().get_name()}_{self.pivot_body_name}"
+        return f"{super().get_name()}_{self.base_body_name}"
 
     @classmethod
     def create(
         cls,
         model: PhysicsModel,
-        pivot_name: str,
+        pivot_point: tuple[float, float, float],
         base_name: str,
         sample_sphere_radius: float,
         positive_x: bool = True,
@@ -358,12 +357,10 @@ class CartesianBodyTargetCommand(Command):
         vis_radius: float = 0.05,
         vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
     ) -> Self:
-        pivot_id = get_body_data_idx_from_name(model, pivot_name)
         base_id = get_body_data_idx_from_name(model, base_name)
         return cls(
-            pivot_body_name=pivot_name,
+            pivot_point=pivot_point,
             base_body_name=base_name,
-            pivot_id=pivot_id,
             base_id=base_id,
             sample_sphere_radius=sample_sphere_radius,
             positive_x=positive_x,
