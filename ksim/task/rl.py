@@ -19,6 +19,7 @@ import sys
 import textwrap
 import time
 import traceback
+import warnings
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
@@ -92,10 +93,10 @@ class RolloutVariables:
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class RolloutConstants:
-    obs_generators: Collection[Observation]
-    command_generators: Collection[Command]
-    reward_generators: Collection[Reward]
-    termination_generators: Collection[Termination]
+    observations: Collection[Observation]
+    commands: Collection[Command]
+    rewards: Collection[Reward]
+    terminations: Collection[Termination]
     curriculum: Curriculum
 
 
@@ -109,95 +110,95 @@ class Action:
 
 def get_observation(
     rollout_state: RolloutVariables,
-    obs_generators: Collection[Observation],
+    observations: Collection[Observation],
     curriculum_level: Array,
     rng: PRNGKeyArray,
 ) -> xax.FrozenDict[str, Array]:
     """Get the observation from the physics state."""
-    observations = {}
+    observation_dict = {}
     observation_state = ObservationState(
         commands=rollout_state.commands,
         physics_state=rollout_state.physics_state,
     )
-    for observation in obs_generators:
+    for observation in observations:
         rng, obs_rng = jax.random.split(rng)
         observation_value = observation(observation_state, curriculum_level, obs_rng)
-        observations[observation.observation_name] = observation_value
-    return xax.FrozenDict(observations)
+        observation_dict[observation.observation_name] = observation_value
+    return xax.FrozenDict(observation_dict)
 
 
 def get_rewards(
     trajectory: Trajectory,
-    reward_generators: Collection[Reward],
+    rewards: Collection[Reward],
     ctrl_dt: float,
     clip_min: float | None = None,
     clip_max: float | None = None,
 ) -> Rewards:
     """Get the rewards from the physics state."""
-    rewards = {}
+    reward_dict = {}
     target_shape = trajectory.done.shape
-    for reward_generator in reward_generators:
+    for reward_generator in rewards:
         reward_name = reward_generator.reward_name
         reward_val = reward_generator(trajectory) * reward_generator.scale * ctrl_dt
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
-        rewards[reward_generator.reward_name] = reward_val
-    total_reward = jax.tree.reduce(jnp.add, list(rewards.values()))
+        reward_dict[reward_name] = reward_val
+    total_reward = jax.tree.reduce(jnp.add, list(reward_dict.values()))
     if clip_min is not None:
         total_reward = jnp.maximum(total_reward, clip_min)
     if clip_max is not None:
         total_reward = jnp.minimum(total_reward, clip_max)
-    return Rewards(total=total_reward, components=xax.FrozenDict(rewards))
+    return Rewards(total=total_reward, components=xax.FrozenDict(reward_dict))
 
 
 def get_terminations(
     physics_state: PhysicsState,
-    termination_generators: Collection[Termination],
+    terminations: Collection[Termination],
     curriculum_level: Array,
 ) -> xax.FrozenDict[str, Array]:
     """Get the terminations from the physics state."""
-    terminations = {}
-    for termination in termination_generators:
+    termination_dict = {}
+    for termination in terminations:
         termination_val = termination(physics_state.data, curriculum_level)
         chex.assert_type(termination_val, bool)
         name = termination.termination_name
-        terminations[name] = termination_val
-    return xax.FrozenDict(terminations)
+        termination_dict[name] = termination_val
+    return xax.FrozenDict(termination_dict)
 
 
 def get_commands(
     prev_commands: xax.FrozenDict[str, Array],
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
-    command_generators: Collection[Command],
+    commands: Collection[Command],
     curriculum_level: Array,
 ) -> xax.FrozenDict[str, Array]:
     """Get the commands from the physics state."""
-    commands = {}
-    for command_generator in command_generators:
+    command_dict = {}
+    for command_generator in commands:
         rng, cmd_rng = jax.random.split(rng)
         command_name = command_generator.command_name
         prev_command = prev_commands[command_name]
         assert isinstance(prev_command, Array)
         command_val = command_generator(prev_command, physics_state.data, curriculum_level, cmd_rng)
-        commands[command_name] = command_val
-    return xax.FrozenDict(commands)
+        command_dict[command_name] = command_val
+    return xax.FrozenDict(command_dict)
 
 
 def get_initial_commands(
     rng: PRNGKeyArray,
     physics_data: PhysicsData,
-    command_generators: Collection[Command],
+    commands: Collection[Command],
     curriculum_level: Array,
 ) -> xax.FrozenDict[str, Array]:
     """Get the initial commands from the physics state."""
-    commands = {}
-    for command_generator in command_generators:
+    command_dict = {}
+    for command_generator in commands:
         rng, cmd_rng = jax.random.split(rng)
         command_name = command_generator.command_name
         command_val = command_generator.initial_command(physics_data, curriculum_level, cmd_rng)
-        commands[command_name] = command_val
-    return xax.FrozenDict(commands)
+        command_dict[command_name] = command_val
+    return xax.FrozenDict(command_dict)
 
 
 def get_randomizations(
@@ -232,7 +233,7 @@ def apply_randomizations(
 @jax.tree_util.register_dataclass
 @dataclass
 class RLConfig(xax.Config):
-    # Debugging parameters.
+    # Toggle this to run the environment viewer loop.
     run_environment: bool = xax.field(
         value=False,
         help="Instead of dropping into the training loop, run the environment loop.",
@@ -244,6 +245,20 @@ class RLConfig(xax.Config):
     run_environment_save_path: str | None = xax.field(
         value=None,
         help="If provided, save the rendered video to the given path.",
+    )
+
+    # Toggle this to collect a dataset.
+    collect_dataset: bool = xax.field(
+        value=False,
+        help="If true, collect a dataset.",
+    )
+    dataset_num_trajectories: int = xax.field(
+        MISSING,
+        help="The number of trajectories to collect at a time.",
+    )
+    dataset_save_path: str | None = xax.field(
+        value=None,
+        help="If provided, save the dataset to the given path.",
     )
 
     # Logging parameters.
@@ -624,7 +639,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Gets the observations from the physics state.
         observations = get_observation(
             rollout_state=rollout_variables,
-            obs_generators=rollout_constants.obs_generators,
+            observations=rollout_constants.observations,
             curriculum_level=rollout_variables.curriculum_state.level,
             rng=obs_rng,
         )
@@ -652,7 +667,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Gets termination components and a single termination boolean.
         terminations = get_terminations(
             physics_state=next_physics_state,
-            termination_generators=rollout_constants.termination_generators,
+            terminations=rollout_constants.terminations,
             curriculum_level=rollout_variables.curriculum_state.level,
         )
         terminated = jax.tree.reduce(jnp.logical_or, list(terminations.values()))
@@ -691,14 +706,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             lambda: get_initial_commands(
                 rng=cmd_rng,
                 physics_data=next_physics_state.data,
-                command_generators=rollout_constants.command_generators,
+                commands=rollout_constants.commands,
                 curriculum_level=rollout_variables.curriculum_state.level,
             ),
             lambda: get_commands(
                 prev_commands=rollout_variables.commands,
                 physics_state=next_physics_state,
                 rng=cmd_rng,
-                command_generators=rollout_constants.command_generators,
+                commands=rollout_constants.commands,
                 curriculum_level=rollout_variables.curriculum_state.level,
             ),
         )
@@ -746,6 +761,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 ),
                 save_path=self.config.run_environment_save_path,
             )
+
+        elif self.config.collect_dataset:
+            self.collect_dataset(
+                num_trajectories=self.config.dataset_num_trajectories,
+                save_path=self.config.dataset_save_path,
+            )
+
         else:
             self.run_training()
 
@@ -1074,7 +1096,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Gets the rewards.
         reward = get_rewards(
             trajectory=trajectory,
-            reward_generators=rollout_constants.reward_generators,
+            rewards=rollout_constants.rewards,
             ctrl_dt=self.config.ctrl_dt,
             clip_min=self.config.reward_clip_min,
             clip_max=self.config.reward_clip_max,
@@ -1222,17 +1244,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             metadata = self.get_mujoco_model_metadata(mj_model)
             engine = self.get_engine(mj_model, metadata)
-            observations = self.get_observations(mj_model)
-            commands = self.get_commands(mj_model)
-            terminations = self.get_terminations(mj_model)
-            rewards = self.get_rewards(mj_model)
             randomizations = self.get_randomization(mj_model)
-            curriculum = self.get_curriculum(mj_model)
+            rollout_constants = self._get_rollout_constants(mj_model)
 
             # Creates the markers.
             markers = self.get_markers(
-                commands=commands,
-                observations=observations,
+                commands=rollout_constants.commands,
+                observations=rollout_constants.observations,
                 randomizations=randomizations,
             )
 
@@ -1257,7 +1275,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             initial_commands = get_initial_commands(
                 rng=cmd_rng,
                 physics_data=physics_state.data,
-                command_generators=commands,
+                commands=rollout_constants.commands,
                 curriculum_level=curriculum_state.level,
             )
 
@@ -1288,15 +1306,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             if self.config.render_track_body_id is not None:
                 viewer.cam.trackbodyid = self.config.render_track_body_id
                 viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-
-            # These components remain constant across the entire episode.
-            rollout_constants = RolloutConstants(
-                obs_generators=observations,
-                command_generators=commands,
-                reward_generators=rewards,
-                termination_generators=terminations,
-                curriculum=curriculum,
-            )
 
             # These components are updated each step.
             rollout_variables = RolloutVariables(
@@ -1367,7 +1376,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 get_rewards(
                     trajectory=trajectory,
-                    reward_generators=rollout_constants.reward_generators,
+                    rewards=rollout_constants.rewards,
                     ctrl_dt=self.config.ctrl_dt,
                     clip_min=self.config.reward_clip_min,
                     clip_max=self.config.reward_clip_max,
@@ -1417,6 +1426,128 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     case _:
                         raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
 
+    def _get_rollout_constants(self, mj_model: PhysicsModel) -> RolloutConstants:
+        observations = self.get_observations(mj_model)
+        commands = self.get_commands(mj_model)
+        rewards_terms = self.get_rewards(mj_model)
+        terminations = self.get_terminations(mj_model)
+        curriculum = self.get_curriculum(mj_model)
+        return RolloutConstants(
+            observations=tuple(observations),
+            commands=tuple(commands),
+            rewards=tuple(rewards_terms),
+            terminations=tuple(terminations),
+            curriculum=curriculum,
+        )
+
+    def _get_rollout_variables(
+        self,
+        rng: PRNGKeyArray,
+        physics_state: PhysicsState,
+        rollout_constants: RolloutConstants,
+    ) -> RolloutVariables:
+        rng, carry_rng, command_rng, rollout_rng = jax.random.split(rng, 4)
+
+        # Defines the vectorized initialization functions.
+        carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
+        command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, None))
+
+        return RolloutVariables(
+            carry=carry_fn(jax.random.split(carry_rng, self.config.num_envs)),
+            commands=command_fn(
+                jax.random.split(command_rng, self.config.num_envs),
+                physics_state.data,
+                rollout_constants.commands,
+                curriculum_state.level,
+            ),
+            physics_state=physics_state,
+            rng=jax.random.split(rollout_rng, self.config.num_envs),
+        )
+
+
+    def collect_dataset(
+        self,
+        num_trajectories: int,
+        save_path: str | Path | None = None,
+    ) -> None:
+        """Collects a dataset of state-action pairs by running the environment loop.
+
+        Args:
+            num_trajectories: The number of trajectories to collect at a time.
+            save_path: Where to save the dataset; if not specified, will save
+                to the experimental directory.
+        """
+        with self:
+            num_batches = (num_trajectories + self.batch_size - 1) // self.batch_size
+            if num_trajectories % self.batch_size != 0:
+                warnings.warn(f"Collecting {num_trajectories} trajectories instead of {num_batches * self.batch_size}")
+
+            rng = self.prng_key()
+            self.set_loggers()
+
+            if xax.is_master():
+                Thread(target=self.log_state, daemon=True).start()
+
+            rng, model_rng = jax.random.split(rng)
+            model, state = self.load_initial_state(model_rng, load_optimizer=False)
+
+            if save_path is None:
+                save_path = self.exp_dir / f"dataset_{state.num_steps}.npz"
+
+            # Loads the Mujoco model and logs some information about it.
+            mj_model: PhysicsModel = self.get_mujoco_model()
+            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
+            self.logger.log_file("mujoco_info.yaml", mujoco_info)
+
+            mjx_model = self.get_mjx_model(mj_model)
+            metadata = self.get_mujoco_model_metadata(mjx_model)
+            engine = self.get_engine(mjx_model, metadata)
+            randomizations = self.get_randomization(mjx_model)
+            rollout_constants = self._get_rollout_constants(mjx_model)
+
+            # JAX requires that we partition the model into mutable and static
+            # parts in order to use lax.scan, so that `arr` can be a PyTree.`
+            model_arr, model_static = eqx.partition(model, self.model_partition_fn)
+
+            # Builds the variables for the training environment.
+            rng, curriculum_rng, rand_rng, rollout_rng, command_rng, carry_rng = jax.random.split(rng, 6)
+
+            # Gets the initial curriculum state.
+            curriculum_state = rollout_constants.curriculum.get_initial_state(curriculum_rng)
+
+            # Applies randomizations to the physics model.
+            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, None, None, 0))
+            randomization_dict, physics_state = randomization_fn(
+                mjx_model,
+                engine,
+                randomizations,
+                curriculum_state.level,
+                jax.random.split(rand_rng, self.config.num_envs),
+            )
+
+            # Defines the vectorized initialization functions.
+            carry_fn = jax.vmap(self.get_initial_carry, in_axes=0)
+            command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, None))
+
+            state = self.on_training_start(state)
+
+            rollout_variables = RolloutVariables(
+                carry=carry_fn(jax.random.split(carry_rng, self.config.num_envs)),
+                commands=command_fn(
+                    jax.random.split(command_rng, self.config.num_envs),
+                    physics_state.data,
+                    rollout_constants.commands,
+                    curriculum_state.level,
+                ),
+                physics_state=physics_state,
+                rng=jax.random.split(rollout_rng, self.config.num_envs),
+            )
+
+            for _ in tqdm.trange(num_batches):
+                breakpoint()
+
+                asdf
+
     def log_full_trajectory(self, state: xax.State, is_first_step: bool, last_log_time: float) -> bool:
         if is_first_step and self.config.log_full_trajectory_on_first_step:
             return True
@@ -1451,12 +1582,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mjx_model = self.get_mjx_model(mj_model)
             metadata = self.get_mujoco_model_metadata(mjx_model)
             engine = self.get_engine(mjx_model, metadata)
-            observations = self.get_observations(mjx_model)
-            commands = self.get_commands(mjx_model)
-            rewards_terms = self.get_rewards(mjx_model)
-            terminations = self.get_terminations(mjx_model)
             randomizations = self.get_randomization(mjx_model)
-            curriculum = self.get_curriculum(mjx_model)
+            rollout_constants = self._get_rollout_constants(mjx_model)
 
             # Creates the renderer.
             mj_renderer = mujoco.Renderer(
@@ -1475,18 +1602,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Creates the markers.
             markers = self.get_markers(
-                commands=commands,
-                observations=observations,
+                commands=rollout_constants.commands,
+                observations=rollout_constants.observations,
                 randomizations=randomizations,
-            )
-
-            # These remain constant across the entire episode.
-            rollout_constants = RolloutConstants(
-                obs_generators=tuple(observations),
-                command_generators=tuple(commands),
-                reward_generators=tuple(rewards_terms),
-                termination_generators=tuple(terminations),
-                curriculum=curriculum,
             )
 
             # JAX requires that we partition the model into mutable and static
@@ -1497,7 +1615,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng, curriculum_rng, rand_rng, rollout_rng, command_rng, carry_rng = jax.random.split(rng, 6)
 
             # Gets the initial curriculum state.
-            curriculum_state = jax.vmap(curriculum.get_initial_state, in_axes=0)(
+            curriculum_state = jax.vmap(rollout_constants.curriculum.get_initial_state, in_axes=0)(
                 jax.random.split(curriculum_rng, self.config.num_envs)
             )
 
@@ -1523,7 +1641,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 commands=command_fn(
                     jax.random.split(command_rng, self.config.num_envs),
                     physics_state.data,
-                    rollout_constants.command_generators,
+                    rollout_constants.commands,
                     curriculum_state.level,
                 ),
                 physics_state=physics_state,
