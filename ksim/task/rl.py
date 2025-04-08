@@ -692,24 +692,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
         terminated = jax.tree.reduce(jnp.logical_or, list(terminations.values()))
 
-        # Combines all the relevant data into a single object.
-        qpos = next_physics_state.data.qpos
-        qvel = next_physics_state.data.qvel
-        xpos = next_physics_state.data.xpos
-        xquat = next_physics_state.data.xquat
-        if isinstance(qpos, np.ndarray) and isinstance(qvel, np.ndarray) and isinstance(xpos, np.ndarray):
-            qpos = jnp.array(qpos)
-            qvel = jnp.array(qvel)
-            xpos = jnp.array(xpos)
-            xquat = jnp.array(xquat)
-
         # Combines all the relevant data into a single object. Lives up here to
         # avoid accidentally incorporating information it shouldn't access to.
         transition = Trajectory(
-            qpos=qpos,
-            qvel=qvel,
-            xpos=xpos,
-            xquat=xquat,
+            qpos=jnp.array(next_physics_state.data.qpos),
+            qvel=jnp.array(next_physics_state.data.qvel),
+            xpos=jnp.array(next_physics_state.data.xpos),
+            xquat=jnp.array(next_physics_state.data.xquat),
             obs=observations,
             command=rollout_env_state.commands,
             event_state=next_physics_state.event_states,
@@ -1176,7 +1165,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Constructs the final rollout variables.
             next_rollout_env_states = RolloutEnvState(
-                model_carry=next_rollout_env_states.model_carry,
+                model_carry=next_model_carry,
                 commands=next_rollout_env_states.commands,
                 physics_state=next_rollout_env_states.physics_state,
                 curriculum_state=curriculum_state,

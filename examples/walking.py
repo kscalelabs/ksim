@@ -572,8 +572,13 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, None]:
         # Vectorize over the time dimensions.
-        action_dist_tj = jax.vmap(self.run_actor, in_axes=(None, 0, 0))(model.actor, trajectory.obs, trajectory.command)
-        log_probs_tj = action_dist_tj.log_prob(trajectory.action)
+        def get_log_prob(transition: ksim.Trajectory) -> Array:
+            action_dist_tj = self.run_actor(model.actor, transition.obs, transition.command)
+            log_probs_tj = action_dist_tj.log_prob(transition.action)
+            assert isinstance(log_probs_tj, Array)
+            return log_probs_tj
+
+        log_probs_tj = jax.vmap(get_log_prob)(trajectory)
         assert isinstance(log_probs_tj, Array)
 
         # Vectorize over the time dimensions.
@@ -581,7 +586,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
         ppo_variables = ksim.PPOVariables(
             log_probs=log_probs_tj,
-            values=values_tj,
+            values=values_tj.squeeze(-1),
         )
 
         return ppo_variables, None

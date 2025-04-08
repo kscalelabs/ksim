@@ -173,6 +173,16 @@ def compute_ppo_loss(
         + ([] if off_policy_variables.aux_losses is None else list(off_policy_variables.aux_losses.values())),
         prefix_len=1,
     )
+    # The following should not have any singleton dimensions.
+    chex.assert_rank(on_policy_variables.values, 1)
+    chex.assert_rank(off_policy_variables.values, 1)
+    chex.assert_rank(ppo_inputs.advantages_t, 1)
+    chex.assert_rank(ppo_inputs.value_targets_t, 1)
+    chex.assert_rank(dones_t, 1)
+
+    # Log probs should have an extra dimension for the number of actions.
+    chex.assert_rank(on_policy_variables.log_probs, 2)
+    chex.assert_rank(off_policy_variables.log_probs, 2)
 
     def compute_loss_for_sample(
         on_policy_variables: PPOVariables,
@@ -331,10 +341,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         """
         metrics = {
             "loss": loss_t.mean(),
-            "log_probs": off_policy_variables.log_probs.mean(0).flatten(),
             "on_policy_log_probs": on_policy_variables.log_probs.mean(0).flatten(),
-            "value": off_policy_variables.values.mean(),
-            "on_policy_value": on_policy_variables.values.mean(),
+            "off_policy_log_probs": off_policy_variables.log_probs.mean(0).flatten(),
+            "on_policy_values": on_policy_variables.values.mean(0).flatten(),
+            "off_policy_values": off_policy_variables.values.mean(0).flatten(),
             "value_targets": ppo_inputs.value_targets_t.mean(),
             "advantages": ppo_inputs.advantages_t.mean(),
         }
@@ -467,7 +477,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             )
 
             # Mean over all non-masked trajectories.
-            num_valid = jnp.sum(~trajectories.done)
+            num_valid = jnp.sum(~trajectory.done)
             loss = loss_t.sum() / (num_valid + 1e-6)
 
             return loss, xax.FrozenDict(metrics), logged_trajectory
