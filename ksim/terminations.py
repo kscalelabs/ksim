@@ -5,10 +5,10 @@ __all__ = [
     "PitchTooGreatTermination",
     "RollTooGreatTermination",
     "MinimumHeightTermination",
-    "FallTermination",
     "IllegalContactTermination",
     "BadZTermination",
     "FastAccelerationTermination",
+    "FarFromOriginTermination",
 ]
 
 import functools
@@ -23,7 +23,7 @@ import xax
 from jaxtyping import Array
 
 from ksim.types import PhysicsData, PhysicsModel
-from ksim.utils.mujoco import get_geom_data_idx_by_name, get_sensor_data_idxs_by_name
+from ksim.utils.mujoco import get_geom_data_idx_by_name
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,18 @@ class Termination(ABC):
 
     @abstractmethod
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        """Checks if the environment has terminated. Shape of output should be (num_envs)."""
+        """Checks if the environment has terminated. Shape of output should be (num_envs).
+
+        Args:
+            state: The current state of the environment.
+            curriculum_level: The current curriculum level.
+
+        Returns:
+            A integer array of shape (num_envs) indicating. If the episode
+            has been terminated, the value should be either 1 or -1, where
+            1 represents a successful episode and -1 represents a failed episode.
+            It should be 0 if the episode is not terminated.
+        """
 
     def get_name(self) -> str:
         return xax.camelcase_to_snakecase(self.__class__.__name__)
@@ -50,108 +61,34 @@ class Termination(ABC):
 class PitchTooGreatTermination(Termination):
     """Terminates the episode if the pitch is too great."""
 
-    max_pitch: float
+    max_pitch: float = attrs.field(validator=attrs.validators.gt(0.0))
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         quat = state.qpos[3:7]
         pitch = jnp.arctan2(2 * quat[1] * quat[2] - 2 * quat[0] * quat[3], 1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2)
-        return jnp.abs(pitch) > self.max_pitch
+        return jnp.where(jnp.abs(pitch) > self.max_pitch, -1, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class RollTooGreatTermination(Termination):
     """Terminates the episode if the roll is too great."""
 
-    max_roll: float
+    max_roll: float = attrs.field(validator=attrs.validators.gt(0.0))
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         quat = state.qpos[3:7]
         roll = jnp.arctan2(2 * quat[1] * quat[2] + 2 * quat[0] * quat[3], 1 - 2 * quat[2] ** 2 - 2 * quat[3] ** 2)
-        return jnp.abs(roll) > self.max_roll
+        return jnp.where(jnp.abs(roll) > self.max_roll, -1, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class MinimumHeightTermination(Termination):
     """Terminates the episode if the robot is too low."""
 
-    min_height: float = attrs.field()
+    min_height: float = attrs.field(validator=attrs.validators.gt(0.0))
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        return state.qpos[2] < self.min_height
-
-
-@attrs.define(frozen=True, kw_only=True)
-class FallTermination(Termination):
-    """Terminates the episode if the robot falls."""
-
-    sensor_name: str = attrs.field()
-    sensor_type: SensorType = attrs.field()
-    max_pitch: float = attrs.field(default=0.78)
-
-    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        match self.sensor_type:
-            case "quaternion_orientation":
-                quat = state.qpos[3:7]
-                pitch = jnp.arctan2(
-                    2 * quat[1] * quat[2] - 2 * quat[0] * quat[3],
-                    1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2,
-                )
-                return jnp.abs(pitch) > self.max_pitch
-
-            case "gravity_vector":
-                gravity = state.sensor[self.sensor_name]  # ML: does this exist?
-                return gravity[2] < 0.0
-
-            case "base_orientation":
-                quat = state.qpos[3:7]
-                pitch = jnp.arctan2(
-                    2 * quat[1] * quat[2] - 2 * quat[0] * quat[3],
-                    1 - 2 * quat[1] ** 2 - 2 * quat[2] ** 2,
-                )
-                return jnp.abs(pitch) > self.max_pitch
-
-    @classmethod
-    def create_from_quaternion_sensor(cls, physics_model: PhysicsModel, quaternion_sensor: str) -> Self:
-        try:
-            _ = get_sensor_data_idxs_by_name(physics_model)[quaternion_sensor]
-            return cls(
-                sensor_name=quaternion_sensor,
-                sensor_type="quaternion_orientation",
-            )
-        except KeyError:
-            raise ValueError(f"Quaternion sensor {quaternion_sensor} not found.")
-
-    @classmethod
-    def create_from_projected_gravity_sensor(cls, physics_model: PhysicsModel, projected_gravity_sensor: str) -> Self:
-        try:
-            _ = get_sensor_data_idxs_by_name(physics_model)[projected_gravity_sensor]
-            return cls(
-                sensor_name=projected_gravity_sensor,
-                sensor_type="gravity_vector",
-            )
-        except KeyError:
-            raise ValueError(f"Projected gravity sensor {projected_gravity_sensor} not found.")
-
-    @classmethod
-    def create(
-        cls,
-        physics_model: PhysicsModel,
-        quaternion_sensor: str | None = None,
-        projected_gravity_sensor: str | None = None,
-    ) -> Self:
-        if quaternion_sensor and projected_gravity_sensor:
-            raise ValueError("Only one of quaternion or projected gravity sensor can be specified.")
-
-        if quaternion_sensor:
-            return cls.create_from_quaternion_sensor(physics_model, quaternion_sensor)
-
-        if projected_gravity_sensor:
-            return cls.create_from_projected_gravity_sensor(physics_model, projected_gravity_sensor)
-
-        return cls(
-            sensor_name="base",
-            sensor_type="base_orientation",
-        )
+        return jnp.where(state.qpos[2] < self.min_height, -1, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -170,7 +107,7 @@ class IllegalContactTermination(Termination):
         illegal_contact = jnp.logical_or(illegal_geom1, illegal_geom2)
         significant_contact = jnp.where(illegal_contact, state.contact.dist < self.contact_eps, False).any()
 
-        return jnp.array(significant_contact)
+        return jnp.where(significant_contact, -1, 0)
 
     def __hash__(self) -> int:
         """Convert JAX arrays to tuples for hashing."""
@@ -211,7 +148,7 @@ class BadZTermination(Termination):
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         height = state.qpos[2]
-        return (height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper)
+        return jnp.where((height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper), -1, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -225,4 +162,17 @@ class FastAccelerationTermination(Termination):
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         lin_vel = state.cvel[..., :3]
         ang_vel = state.cvel[..., 3:]
-        return (lin_vel > self.max_lin_vel).any() | (ang_vel > self.max_ang_vel).any()
+        return jnp.where((lin_vel > self.max_lin_vel).any() | (ang_vel > self.max_ang_vel).any(), -1, 0)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FarFromOriginTermination(Termination):
+    """Terminates the episode if the robot is too far from the origin.
+
+    This is treated as a positive termination.
+    """
+
+    max_dist: float = attrs.field(validator=attrs.validators.gt(0.0))
+
+    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
+        return jnp.where(state.qpos[..., :3].norm(axis=-1) > self.max_dist, 1, 0)

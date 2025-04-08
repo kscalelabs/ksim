@@ -46,6 +46,7 @@ class Trajectory:
     event_state: xax.FrozenDict[str, Array]
     action: Array
     done: Array
+    success: Array
     timestep: Array
     termination_components: xax.FrozenDict[str, Array]
     aux_outputs: PyTree
