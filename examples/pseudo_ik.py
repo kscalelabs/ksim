@@ -14,7 +14,7 @@ from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
 
 import ksim
-from ksim.utils.mujoco import remove_joints_except
+from ksim.utils.mujoco import remove_mujoco_joints_except
 
 from .walking_rnn import (
     DefaultHumanoidRNNActor,
@@ -40,7 +40,9 @@ Config = TypeVar("Config", bound=HumanoidPseudoIKTaskConfig)
 class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
-        mj_model_joint_removed = remove_joints_except(mjcf_path, ["shoulder1_right", "shoulder2_right", "elbow_right"])
+        mj_model_joint_removed = remove_mujoco_joints_except(
+            mjcf_path, ["shoulder1_right", "shoulder2_right", "elbow_right"]
+        )
         mj_model = mujoco.MjModel.from_xml_string(mj_model_joint_removed)
 
         mj_model.opt.timestep = jnp.array(self.config.dt)

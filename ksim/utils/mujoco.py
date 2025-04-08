@@ -26,7 +26,8 @@ __all__ = [
     "get_body_pose_by_name",
     "get_geom_pose_by_name",
     "get_site_pose_by_name",
-    "remove_joints_except",
+    "remove_mujoco_joints_except",
+    "add_new_mujoco_body",
 ]
 
 import logging
@@ -376,7 +377,7 @@ def get_site_pose_by_name(
     return get_site_pose(data, site_idx)
 
 
-def remove_joints_except(file_path: str, joint_names: list[str]) -> str:
+def remove_mujoco_joints_except(file_path: str, joint_names: list[str]) -> str:
     """Remove all joints and references unless listed."""
     tree = ET.parse(file_path)
     root = tree.getroot()
@@ -407,11 +408,11 @@ def remove_joints_except(file_path: str, joint_names: list[str]) -> str:
     dfs_remove_joints(root)
     dfs_remove_references(root)
 
-    # write it to a file
+    # Re-write to file.
     return ET.tostring(root, encoding="utf-8").decode("utf-8")
 
 
-def add_new_body(
+def add_new_mujoco_body(
     file_path: str,
     parent_body_name: str,
     new_body_name: str,
@@ -442,7 +443,14 @@ def add_new_body(
         raise ValueError(f"Parent body '{parent_body_name}' not found in model")
 
     # add the new body to the model
-    new_body = ET.Element("body", {"name": new_body_name, "pos": f"{pos[0]} {pos[1]} {pos[2]}", "quat": f"{quat[0]} {quat[1]} {quat[2]} {quat[3]}"})
+    new_body = ET.Element(
+        "body",
+        {
+            "name": new_body_name,
+            "pos": f"{pos[0]} {pos[1]} {pos[2]}",
+            "quat": f"{quat[0]} {quat[1]} {quat[2]} {quat[3]}",
+        },
+    )
 
     if add_visual:
         visual_geom = ET.Element(
