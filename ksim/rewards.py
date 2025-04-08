@@ -27,7 +27,6 @@ __all__ = [
     "ObservationMeanPenalty",
     "FeetNoContactReward",
     "PositionTrackingReward",
-    "QuaternionTrackingReward",
 ]
 
 import functools
@@ -701,14 +700,13 @@ class PositionTrackingReward(Reward):
     """Rewards the closeness of the body to the target position more for the longer it has been doing so."""
 
     tracked_body_idx: int = attrs.field()
-    base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
     body_name: str = attrs.field()
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
-        target_pos = trajectory.command[self.command_name]
+        body_pos = trajectory.xpos[..., self.tracked_body_idx, :]
+        target_pos = trajectory.command[self.command_name][..., :3]
 
         error = xax.get_norm(body_pos - target_pos, self.norm).sum(-1)
         prev_error = jnp.concatenate([error[..., :1], error[..., :-1]], axis=-1)
@@ -725,15 +723,12 @@ class PositionTrackingReward(Reward):
         model: PhysicsModel,
         command_name: str,
         tracked_body_name: str,
-        base_body_name: str,
         norm: xax.NormType = "l1",
         scale: float = 1.0,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
-        base_idx = get_body_data_idx_from_name(model, base_body_name)
         return cls(
             tracked_body_idx=body_idx,
-            base_body_idx=base_idx,
             norm=norm,
             command_name=command_name,
             body_name=tracked_body_name,
@@ -742,58 +737,3 @@ class PositionTrackingReward(Reward):
 
     def get_name(self) -> str:
         return f"{self.body_name}_{super().get_name()}"
-
-
-@attrs.define(frozen=True, kw_only=True)
-class QuaternionTrackingReward(Reward):
-    """Rewards the closeness of the body orientation to the target quaternion."""
-
-    tracked_body_idx: int = attrs.field()
-    base_body_idx: int = attrs.field()
-    command_name: str = attrs.field()
-    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    eps: float = attrs.field(default=1e-6)
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        body_quat = trajectory.xquat[..., self.tracked_body_idx, :]
-        target_quat = trajectory.command[self.command_name]
-
-        # Ensure unit quaternions (safe for numerical drift).
-        body_quat = body_quat / jnp.linalg.norm(body_quat, axis=-1, keepdims=True).clip(min=self.eps)
-        target_quat = target_quat / jnp.linalg.norm(target_quat, axis=-1, keepdims=True).clip(min=self.eps)
-
-        # Compute absolute dot product to handle antipodal symmetry.
-        dot = jnp.sum(body_quat * target_quat, axis=-1)
-        dot = jnp.clip(jnp.abs(dot), self.eps, 1.0 - self.eps)
-
-        # Quaternion angular distance (geodesic distance on S^3).
-        angle_error = 2.0 * jnp.arccos(dot)
-
-        # Previous angle error.
-        prev_error = jnp.concatenate([angle_error[..., :1], angle_error[..., :-1]], axis=-1)
-        error_diff = angle_error - prev_error
-
-        # Negative delta error as reward: improving alignment yields positive reward.
-        reward = -error_diff
-
-        return reward
-
-    @classmethod
-    def create(
-        cls,
-        model: PhysicsModel,
-        command_name: str,
-        tracked_body_name: str,
-        base_body_name: str,
-        norm: xax.NormType = "l1",
-        scale: float = 1.0,
-    ) -> Self:
-        body_idx = get_body_data_idx_from_name(model, tracked_body_name)
-        base_idx = get_body_data_idx_from_name(model, base_body_name)
-        return cls(
-            tracked_body_idx=body_idx,
-            base_body_idx=base_idx,
-            norm=norm,
-            command_name=command_name,
-            scale=scale,
-        )

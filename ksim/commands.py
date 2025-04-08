@@ -6,8 +6,7 @@ __all__ = [
     "AngularVelocityCommand",
     "LinearVelocityStepCommand",
     "AngularVelocityStepCommand",
-    "CartesianBodyTargetCommand",
-    "GlobalBodyQuaternionCommand",
+    "PositionCommand",
 ]
 
 import functools
@@ -253,25 +252,23 @@ class AngularVelocityStepCommand(Command):
 
 
 @attrs.define(kw_only=True)
-class CartesianBodyTargetMarker(Marker):
+class PositionCommandMarker(Marker):
     command_name: str = attrs.field()
-
-    def __attrs_post_init__(self) -> None:
-        if self.target_name is None or self.target_type != "body":
-            raise ValueError("Base body name must be provided. Make sure to create with `get`.")
 
     def update(self, trajectory: Trajectory) -> None:
         """Update the marker position and rotation."""
-        self.pos = trajectory.command[self.command_name]
+        self.pos = trajectory.command[self.command_name][..., :3]
 
     @classmethod
     def get(
-        cls, command_name: str, base_body_name: str, radius: float, rgba: tuple[float, float, float, float]
+        cls,
+        command_name: str,
+        radius: float,
+        rgba: tuple[float, float, float, float],
     ) -> Self:
         return cls(
             command_name=command_name,
-            target_name=base_body_name,
-            target_type="body",
+            target_name=None,
             geom=mujoco.mjtGeom.mjGEOM_SPHERE,
             scale=(radius, radius, radius),
             rgba=rgba,
@@ -279,48 +276,45 @@ class CartesianBodyTargetMarker(Marker):
 
 
 @attrs.define(frozen=True)
-class CartesianBodyTargetCommand(Command):
-    """Samples a target xyz position along a sphere from a pivot point.
+class PositionCommand(Command):
+    """Samples a target xyz position within a bounding box relative to a base body.
 
-    E.g. sample a sphere centered around the shoulder, where the sampled point
-    is the relative xpos with respect to the pelvis. This point will move along
-    with the base but only the base.
+    The bounding box is defined by min and max coordinates relative to the base body.
+    The target will smoothly transition between points within this box.
     """
 
-    pivot_point: tuple[float, float, float] = attrs.field()
-    base_body_name: str = attrs.field()
-    base_id: int = attrs.field()
-    sample_sphere_radius: float = attrs.field()
-    positive_x: bool = attrs.field()
-    positive_y: bool = attrs.field()
-    positive_z: bool = attrs.field()
-    switch_prob: float = attrs.field()
-    vis_radius: float = attrs.field()
-    vis_color: tuple[float, float, float, float] = attrs.field()
-    curriculum_scale: float = attrs.field(default=1.0)
-    pivot_name: str | None = attrs.field(default=None)
+    box_min: tuple[float, float, float] = attrs.field()
+    box_max: tuple[float, float, float] = attrs.field()
+    base_id: int | None = attrs.field(default=None)
+    vis_radius: float = attrs.field(default=0.05)
+    vis_color: tuple[float, float, float, float] = attrs.field(default=(1.0, 0.0, 0.0, 0.8))
+    min_speed: float = attrs.field(default=0.5)
+    max_speed: float = attrs.field(default=3.0)
+    unique_name: str | None = attrs.field(default=None)
+    eps: float = attrs.field(default=1e-3)
 
-    def _sample_sphere(self, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
-        # Sample a random unit vector symmetrically.
-        rng, rng_vec, rng_u = jax.random.split(rng, 3)
-        vec = jax.random.normal(rng_vec, (3,))
-        vec /= jnp.linalg.norm(vec)
+    def _sample_box(self, rng: PRNGKeyArray, physics_data: PhysicsData) -> Array:
+        # Sample uniformly within the box
+        rng_x, rng_y, rng_z = jax.random.split(rng, 3)
+        min_x, min_y, min_z = self.box_min
+        max_x, max_y, max_z = self.box_max
 
-        # Generate a random radius with the proper distribution, ensuring scalar u.
-        u = jax.random.uniform(rng_u, ())  # Sample u as a scalar
-        r_scale = u ** (1 / 3)  # r_scale is scalar
-        r = self.sample_sphere_radius * r_scale * (curriculum_level * self.curriculum_scale + 1.0)  # r is scalar
+        # Scale the box size based on curriculum level
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        center_z = (min_z + max_z) / 2
 
-        # Scale the unit vector by the scalar radius.
-        scaled_vec = vec * r  # (3,) * () -> (3,)
+        # Sample and scale around center
+        x = center_x + (jax.random.uniform(rng_x, ()) - 0.5) * (max_x - min_x)
+        y = center_y + (jax.random.uniform(rng_y, ()) - 0.5) * (max_y - min_y)
+        z = center_z + (jax.random.uniform(rng_z, ()) - 0.5) * (max_z - min_z)
 
-        # Apply sign constraints (original logic was slightly off, needed to unpack first)
-        x, y, z = scaled_vec
-        x = jnp.where(self.positive_x, jnp.abs(x), -jnp.abs(x))
-        y = jnp.where(self.positive_y, jnp.abs(y), -jnp.abs(y))
-        z = jnp.where(self.positive_z, jnp.abs(z), -jnp.abs(z))
+        xyz = jnp.array([x, y, z])
 
-        return jnp.array([x, y, z])
+        if self.base_id is not None:
+            xyz = xyz + physics_data.xpos[self.base_id]
+
+        return xyz
 
     def initial_command(
         self,
@@ -328,9 +322,13 @@ class CartesianBodyTargetCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        sphere_sample = self._sample_sphere(rng, curriculum_level)
-        pivot_pos = jnp.array(self.pivot_point)
-        return pivot_pos + sphere_sample
+        # Sample initial target and speed
+        rng_target, rng_speed = jax.random.split(rng)
+        target = self._sample_box(rng_target, physics_data)
+        speed = jax.random.uniform(rng_speed, (), minval=self.min_speed, maxval=self.max_speed)
+
+        # Return [current_x, current_y, current_z, target_x, target_y, target_z, speed]
+        return jnp.concatenate([target, target, jnp.array([speed])])
 
     def __call__(
         self,
@@ -339,161 +337,71 @@ class CartesianBodyTargetCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
+        # Unpack previous command
+        current = prev_command[:3]
+        target = prev_command[3:6]
+        speed = prev_command[6]
+
+        # Calculate distance to target
+        distance = jnp.linalg.norm(target - current)
+
+        # If we've reached the target, sample a new one
         rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
+        reached_target = distance < self.eps
+
+        # Sample new target and speed if reached
+        new_target = self._sample_box(rng_a, physics_data)
+        new_speed = jax.random.uniform(rng_b, (), minval=self.min_speed, maxval=self.max_speed)
+
+        # Update target and speed if reached
+        target = jnp.where(reached_target, new_target, target)
+        speed = jnp.where(reached_target, new_speed, speed)
+
+        # Calculate step size based on speed and timestep
+        dt = physics_data.model.opt.timestep
+        step_size = speed * dt
+
+        # Move current position towards target
+        direction = target - current
+        direction_norm = jnp.linalg.norm(direction)
+        direction = jnp.where(direction_norm > 0, direction / direction_norm, direction)
+
+        # Calculate new position
+        new_current = current + direction * jnp.minimum(step_size, distance)
+
+        # Return updated command
+        return jnp.concatenate([new_current, target, jnp.array([speed])])
 
     def get_markers(self) -> Collection[Marker]:
-        return [CartesianBodyTargetMarker.get(self.command_name, self.base_body_name, self.vis_radius, self.vis_color)]
+        return [PositionCommandMarker.get(self.command_name, self.vis_radius, self.vis_color)]
 
     def get_name(self) -> str:
-        name = f"{super().get_name()}_{self.base_body_name}"
-        if self.pivot_name is not None:
-            name = f"{self.pivot_name}_{name}"
+        name = super().get_name()
+        if self.unique_name is not None:
+            name = f"{self.unique_name}_{name}"
         return name
 
     @classmethod
     def create(
         cls,
         model: PhysicsModel,
-        pivot_point: tuple[float, float, float],
-        base_body_name: str,
-        sample_sphere_radius: float,
-        curriculum_scale: float = 1.0,
-        positive_x: bool = True,
-        positive_y: bool = True,
-        positive_z: bool = True,
-        switch_prob: float = 0.1,
+        box_min: tuple[float, float, float],
+        box_max: tuple[float, float, float],
+        base_body_name: str | None = None,
         vis_radius: float = 0.05,
         vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
-        pivot_name: str | None = None,
+        unique_name: str | None = None,
+        min_speed: float = 0.5,
+        max_speed: float = 3.0,
     ) -> Self:
-        base_id = get_body_data_idx_from_name(model, base_body_name)
+        base_id = None if base_body_name is None else get_body_data_idx_from_name(model, base_body_name)
         return cls(
-            pivot_point=pivot_point,
-            base_body_name=base_body_name,
             base_id=base_id,
-            sample_sphere_radius=sample_sphere_radius,
-            curriculum_scale=curriculum_scale,
-            positive_x=positive_x,
-            positive_y=positive_y,
-            positive_z=positive_z,
-            switch_prob=switch_prob,
+            box_min=box_min,
+            box_max=box_max,
             vis_radius=vis_radius,
             vis_color=vis_color,
-            pivot_name=pivot_name,
-        )
-
-
-@attrs.define(kw_only=True)
-class GlobalBodyQuaternionMarker(Marker):
-    command_name: str = attrs.field()
-
-    def __attrs_post_init__(self) -> None:
-        if self.target_name is None or self.target_type != "body":
-            raise ValueError("Base body name must be provided. Make sure to create with `get`.")
-
-    def update(self, trajectory: Trajectory) -> None:
-        """Update the marker rotation."""
-        command = trajectory.command[self.command_name]
-        # Check if command is zeros (null quaternion)
-        is_null = jnp.all(jnp.isclose(command, 0.0))
-
-        # Only update orientation if command is not null
-        if not is_null:
-            self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-            self.orientation = command
-        else:
-            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
-
-    @classmethod
-    def get(
-        cls,
-        command_name: str,
-        base_body_name: str,
-        size: float,
-        magnitude: float,
-        rgba: tuple[float, float, float, float],
-    ) -> Self:
-        return cls(
-            command_name=command_name,
-            target_name=base_body_name,
-            target_type="body",
-            geom=mujoco.mjtGeom.mjGEOM_ARROW,
-            scale=(size, size, magnitude),
-            rgba=rgba,
-        )
-
-
-@attrs.define(frozen=True)
-class GlobalBodyQuaternionCommand(Command):
-    """Samples a target quaternion orientation for a body.
-
-    This command samples random quaternions to specify target orientations
-    for a body in global coordinates, with an option to sample a null quaternion.
-    """
-
-    base_body_name: str = attrs.field()
-    base_id: int = attrs.field()
-    switch_prob: float = attrs.field()
-    null_prob: float = attrs.field()  # Probability of sampling null quaternion
-    vis_magnitude: float = attrs.field()
-    vis_size: float = attrs.field()
-    vis_color: tuple[float, float, float, float] = attrs.field()
-
-    def initial_command(
-        self,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        is_null = jax.random.bernoulli(rng_a, self.null_prob)
-        quat = jax.random.normal(rng_b, (4,))
-        random_quat = quat / jnp.linalg.norm(quat)
-        return jnp.where(is_null, jnp.zeros(4), random_quat)
-
-    def __call__(
-        self,
-        prev_command: Array,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
-
-    def get_markers(self) -> Collection[Marker]:
-        return [
-            GlobalBodyQuaternionMarker.get(
-                self.command_name, self.base_body_name, self.vis_size, self.vis_magnitude, self.vis_color
-            )
-        ]
-
-    def get_name(self) -> str:
-        return f"{super().get_name()}_{self.base_body_name}"
-
-    @classmethod
-    def create(
-        cls,
-        model: PhysicsModel,
-        base_name: str,
-        switch_prob: float = 0.1,
-        null_prob: float = 0.1,
-        vis_magnitude: float = 0.5,
-        vis_size: float = 0.05,
-        vis_color: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 0.8),
-    ) -> Self:
-        base_id = get_body_data_idx_from_name(model, base_name)
-        return cls(
-            base_body_name=base_name,
-            base_id=base_id,
-            switch_prob=switch_prob,
-            null_prob=null_prob,
-            vis_magnitude=vis_magnitude,
-            vis_size=vis_size,
-            vis_color=vis_color,
+            unique_name=unique_name,
+            min_speed=min_speed,
+            max_speed=max_speed,
         )
