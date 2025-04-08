@@ -1239,7 +1239,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rollout_shared_state,
                 rollout_constants,
             )
-            jax.debug.print(f"trajectories.done.shape: {trajectories.done.shape}")
 
             model_arr, opt_state, next_model_carrys, train_metrics, single_traj = self.update_model(
                 optimizer=optimizer,
@@ -1251,8 +1250,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rollout_constants=rollout_constants,
                 rng=rng,
             )
-
-            jax.debug.print(f"next_model_carrys.values.shape: {next_model_carrys.values.shape}")
 
             metrics = Metrics(
                 train=train_metrics,
@@ -1285,8 +1282,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             return (opt_state, next_rollout_env_states, next_rollout_shared_state), (metrics, single_traj)
-
-        jax.profiler.save_device_memory_profile("prof_after_epoch.prof")
 
         (opt_state, rollout_env_states, rollout_shared_state), (metrics, logged_trajs) = jax.lax.scan(
             train_single_epoch,
@@ -1679,7 +1674,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             state = self.on_training_start(state)
 
             def on_exit() -> None:
-                model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
+                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
                 self.save_checkpoint(
                     model=model,
                     optimizer=optimizer,
@@ -1708,7 +1703,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             metrics,
                             rollout_env_states,
                             rollout_shared_state,
-                            single_traj,
+                            logged_traj,
                         ) = self._rl_train_loop_step(
                             optimizer=optimizer,
                             opt_state=opt_state,
@@ -1721,9 +1716,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         if self.config.profile_memory:
                             opt_state = jax.block_until_ready(opt_state)
-                            rollout_env_vars = jax.block_until_ready(rollout_env_vars)
-                            rollout_ctrl_vars = jax.block_until_ready(rollout_ctrl_vars)
-                            single_traj = jax.block_until_ready(single_traj)
+                            rollout_env_states = jax.block_until_ready(rollout_env_states)
+                            rollout_shared_state = jax.block_until_ready(rollout_shared_state)
+                            logged_traj = jax.block_until_ready(logged_traj)
                             jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
 
                     # Updates the state.
@@ -1736,7 +1731,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     if self.log_full_trajectory(state, is_first_step, last_log_time):
                         last_log_time = time.time()
                         self.log_single_trajectory(
-                            single_traj=single_traj,
+                            single_traj=logged_traj,
                             markers=markers,
                             mj_model=mj_model,
                             mj_renderer=mj_renderer,
@@ -1752,13 +1747,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     self.write_logs(state)
 
                     if self.should_checkpoint(state):
-                        model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
+                        model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
                         self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
                     state = self.on_step_end(state)
 
                 # Save the checkpoint when done.
-                model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
+                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
                 self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
             except xax.TrainingFinishedError:
@@ -1766,7 +1761,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     msg = f"Finished training after {state.num_steps}steps and {state.num_samples} samples"
                     xax.show_info(msg, important=True)
 
-                model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
+                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
                 self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
             except (KeyboardInterrupt, bdb.BdbQuit):
@@ -1778,7 +1773,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
 
-                model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
+                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
                 self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
             finally:
