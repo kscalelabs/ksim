@@ -73,8 +73,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
-        xyz_upper_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
-        xyz_lower_target_3 = commands["cartesian_body_target_command_lower_arm_right"]
+        xyz_upper_target_3 = commands["hand_position_command"][..., :3]
+        xyz_lower_target_3 = commands["elbow_position_command"][..., :3]
 
         obs_n = jnp.concatenate(
             [
@@ -102,8 +102,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
-        xyz_upper_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
-        xyz_lower_target_3 = commands["cartesian_body_target_command_lower_arm_right"]
+        xyz_upper_target_3 = commands["hand_position_command"][..., :3]
+        xyz_lower_target_3 = commands["elbow_position_command"][..., :3]
 
         obs_n = jnp.concatenate(
             [
@@ -151,31 +151,27 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.CartesianBodyTargetCommand.create(
+            ksim.PositionCommand.create(
                 model=physics_model,
-                # pivot_name="upper_arm_right",
-                pivot_point=(0.0, 0.0, 0.0),
-                base_name="pelvis",
-                sample_sphere_radius=0.5,
-                positive_x=True,
-                positive_y=False,
-                positive_z=False,
-                switch_prob=self.config.ctrl_dt * 2,  # Will last 1/2 seconds in expectation
+                box_min=(0.0, -0.6, -0.6),
+                box_max=(0.6, 0.6, 0.6),
+                base_body_name="upper_arm_right",
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
+                min_speed=0.5,
+                max_speed=4.0,
+                unique_name="hand",
             ),
-            ksim.CartesianBodyTargetCommand.create(
+            ksim.PositionCommand.create(
                 model=physics_model,
-                # pivot_name="lower_arm_right",
-                pivot_point=(0.0, 0.0, 0.0),
-                base_name="pelvis",
-                sample_sphere_radius=0.5,
-                positive_x=True,
-                positive_y=False,
-                positive_z=False,
-                switch_prob=self.config.ctrl_dt * 2,  # Will last 1/2 seconds in expectation
+                box_min=(0.0, -0.3, -0.3),
+                box_max=(0.3, 0.3, 0.3),
+                base_body_name="upper_arm_right",
                 vis_radius=0.05,
                 vis_color=(0.0, 0.0, 1.0, 0.8),
+                min_speed=0.25,
+                max_speed=2.0,
+                unique_name="elbow",
             ),
         ]
 
@@ -184,16 +180,14 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
             ksim.PositionTrackingReward.create(
                 model=physics_model,
                 tracked_body_name="hand_right",
-                base_body_name="pelvis",
                 scale=1.0,
-                command_name="cartesian_body_target_command_upper_arm_right",
+                command_name="hand_position_command",
             ),
             ksim.PositionTrackingReward.create(
                 model=physics_model,
                 tracked_body_name="upper_arm_right",
-                base_body_name="pelvis",
                 scale=0.1,
-                command_name="cartesian_body_target_command_lower_arm_right",
+                command_name="elbow_position_command",
             ),
         ]
 

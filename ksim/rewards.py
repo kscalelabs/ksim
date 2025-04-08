@@ -17,17 +17,12 @@ __all__ = [
     "BaseJerkZPenalty",
     "ActuatorJerkPenalty",
     "AvoidLimitsReward",
+    "ObservationMeanPenalty",
     "ActionNearPositionPenalty",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
     "FeetNoContactReward",
-    "CartesianBodyTargetReward",
-    "CartesianBodyTargetPenalty",
-    "CartesianBodyTargetVectorReward",
-    "ObservationMeanPenalty",
-    "FeetNoContactReward",
     "PositionTrackingReward",
-    "QuaternionTrackingReward",
 ]
 
 import functools
@@ -554,170 +549,21 @@ class FeetNoContactReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class CartesianBodyTargetReward(Reward):
-    """Rewards the closeness of the body to the target position."""
-
-    tracked_body_idx: int = attrs.field()
-    base_body_idx: int = attrs.field()
-    command_name: str = attrs.field()
-    sensitivity: float = attrs.field()
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
-        target_pos = trajectory.command[self.command_name]
-        return jnp.exp(-xax.get_norm(body_pos - target_pos, self.norm) * self.sensitivity).mean(axis=-1)
-
-    @classmethod
-    def create(
-        cls,
-        model: PhysicsModel,
-        command_name: str,
-        tracked_body_name: str,
-        base_body_name: str,
-        norm: xax.NormType = "l2",
-        scale: float = 1.0,
-        sensitivity: float = 1.0,
-    ) -> Self:
-        body_idx = get_body_data_idx_from_name(model, tracked_body_name)
-        base_idx = get_body_data_idx_from_name(model, base_body_name)
-        return cls(
-            tracked_body_idx=body_idx,
-            base_body_idx=base_idx,
-            norm=norm,
-            scale=scale,
-            sensitivity=sensitivity,
-            command_name=command_name,
-        )
-
-
-@attrs.define(frozen=True, kw_only=True)
-class CartesianBodyTargetVectorReward(Reward):
-    """Rewards the alignment of the body's velocity vector to the direction of the target."""
-
-    tracked_body_idx: int = attrs.field()
-    base_body_idx: int = attrs.field()
-    command_name: str = attrs.field()
-    dt: float = attrs.field()
-    normalize_velocity: bool = attrs.field()
-    distance_threshold: float = attrs.field()
-    epsilon: float = attrs.field(default=1e-6)
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        body_pos_TL = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
-
-        body_pos_right_shifted_TL = jnp.roll(body_pos_TL, shift=1, axis=0)
-
-        # Zero out the first velocity
-        body_pos_right_shifted_TL = body_pos_right_shifted_TL.at[0].set(body_pos_TL[0])
-
-        body_vel_TL = (body_pos_TL - body_pos_right_shifted_TL) / self.dt
-
-        target_vector = trajectory.command[self.command_name] - body_pos_TL
-        normalized_target_vector = target_vector / (
-            jnp.linalg.norm(target_vector, axis=-1, keepdims=True) + self.epsilon
-        )
-
-        # Threshold to only apply reward to the body when it is far from the target.
-        distance_scalar = jnp.linalg.norm(target_vector, axis=-1)
-        far_from_target = distance_scalar > self.distance_threshold
-
-        velocity_scalar = jnp.linalg.norm(body_vel_TL, axis=-1)
-        high_velocity = velocity_scalar > 0.1
-
-        if self.normalize_velocity:
-            normalized_body_vel = body_vel_TL / (jnp.linalg.norm(body_vel_TL, axis=-1, keepdims=True) + self.epsilon)
-            original_products = normalized_body_vel * normalized_target_vector
-        else:
-            original_products = body_vel_TL * normalized_target_vector
-
-        # This will give maximum reward if near the target (and velocity is normalized)
-        return jnp.where(far_from_target & high_velocity, jnp.sum(original_products, axis=-1), 1.1)
-
-    @classmethod
-    def create(
-        cls,
-        model: PhysicsModel,
-        command_name: str,
-        tracked_body_name: str,
-        base_body_name: str,
-        dt: float,
-        normalize_velocity: bool = True,
-        scale: float = 1.0,
-        epsilon: float = 1e-6,
-        distance_threshold: float = 0.1,
-    ) -> Self:
-        body_idx = get_body_data_idx_from_name(model, tracked_body_name)
-        base_idx = get_body_data_idx_from_name(model, base_body_name)
-        return cls(
-            tracked_body_idx=body_idx,
-            base_body_idx=base_idx,
-            scale=scale,
-            command_name=command_name,
-            dt=dt,
-            normalize_velocity=normalize_velocity,
-            epsilon=epsilon,
-            distance_threshold=distance_threshold,
-        )
-
-
-@attrs.define(frozen=True, kw_only=True)
-class CartesianBodyTargetPenalty(Reward):
-    """Penalizes larger distances between the body and the target position."""
-
-    tracked_body_idx: int = attrs.field()
-    base_body_idx: int = attrs.field()
-    command_name: str = attrs.field()
-    norm: xax.NormType = attrs.field()
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
-        target_pos = trajectory.command[self.command_name]
-        return xax.get_norm(body_pos - target_pos, self.norm).mean(axis=-1)
-
-    @classmethod
-    def create(
-        cls,
-        model: PhysicsModel,
-        command_name: str,
-        tracked_body_name: str,
-        base_body_name: str,
-        norm: xax.NormType = "l2",
-        scale: float = 1.0,
-    ) -> Self:
-        body_idx = get_body_data_idx_from_name(model, tracked_body_name)
-        base_idx = get_body_data_idx_from_name(model, base_body_name)
-        return cls(
-            tracked_body_idx=body_idx,
-            base_body_idx=base_idx,
-            norm=norm,
-            scale=scale,
-            command_name=command_name,
-        )
-
-
-@attrs.define(frozen=True, kw_only=True)
 class PositionTrackingReward(Reward):
     """Rewards the closeness of the body to the target position more for the longer it has been doing so."""
 
     tracked_body_idx: int = attrs.field()
-    base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
     body_name: str = attrs.field()
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
+    temp: float = attrs.field(default=1.0)
+    monotonic_fn: MonotonicFn = attrs.field(default="inv")
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
-        target_pos = trajectory.command[self.command_name]
-
+        body_pos = trajectory.xpos[..., self.tracked_body_idx, :]
+        target_pos = trajectory.command[self.command_name][..., :3]
         error = xax.get_norm(body_pos - target_pos, self.norm).sum(-1)
-        prev_error = jnp.concatenate([error[..., :1], error[..., :-1]], axis=-1)
-        error_diff = error - prev_error
-
-        # If error goes down compared to the previous step, this is a reward.
-        reward = -error_diff
-
-        return reward
+        return norm_to_reward(error, self.temp, self.monotonic_fn)
 
     @classmethod
     def create(
@@ -725,75 +571,21 @@ class PositionTrackingReward(Reward):
         model: PhysicsModel,
         command_name: str,
         tracked_body_name: str,
-        base_body_name: str,
         norm: xax.NormType = "l1",
+        temp: float = 1.0,
+        monotonic_fn: MonotonicFn = "inv",
         scale: float = 1.0,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
-        base_idx = get_body_data_idx_from_name(model, base_body_name)
         return cls(
             tracked_body_idx=body_idx,
-            base_body_idx=base_idx,
             norm=norm,
             command_name=command_name,
             body_name=tracked_body_name,
             scale=scale,
+            temp=temp,
+            monotonic_fn=monotonic_fn,
         )
 
     def get_name(self) -> str:
         return f"{self.body_name}_{super().get_name()}"
-
-
-@attrs.define(frozen=True, kw_only=True)
-class QuaternionTrackingReward(Reward):
-    """Rewards the closeness of the body orientation to the target quaternion."""
-
-    tracked_body_idx: int = attrs.field()
-    base_body_idx: int = attrs.field()
-    command_name: str = attrs.field()
-    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    eps: float = attrs.field(default=1e-6)
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        body_quat = trajectory.xquat[..., self.tracked_body_idx, :]
-        target_quat = trajectory.command[self.command_name]
-
-        # Ensure unit quaternions (safe for numerical drift).
-        body_quat = body_quat / jnp.linalg.norm(body_quat, axis=-1, keepdims=True).clip(min=self.eps)
-        target_quat = target_quat / jnp.linalg.norm(target_quat, axis=-1, keepdims=True).clip(min=self.eps)
-
-        # Compute absolute dot product to handle antipodal symmetry.
-        dot = jnp.sum(body_quat * target_quat, axis=-1)
-        dot = jnp.clip(jnp.abs(dot), self.eps, 1.0 - self.eps)
-
-        # Quaternion angular distance (geodesic distance on S^3).
-        angle_error = 2.0 * jnp.arccos(dot)
-
-        # Previous angle error.
-        prev_error = jnp.concatenate([angle_error[..., :1], angle_error[..., :-1]], axis=-1)
-        error_diff = angle_error - prev_error
-
-        # Negative delta error as reward: improving alignment yields positive reward.
-        reward = -error_diff
-
-        return reward
-
-    @classmethod
-    def create(
-        cls,
-        model: PhysicsModel,
-        command_name: str,
-        tracked_body_name: str,
-        base_body_name: str,
-        norm: xax.NormType = "l1",
-        scale: float = 1.0,
-    ) -> Self:
-        body_idx = get_body_data_idx_from_name(model, tracked_body_name)
-        base_idx = get_body_data_idx_from_name(model, base_body_name)
-        return cls(
-            tracked_body_idx=body_idx,
-            base_body_idx=base_idx,
-            norm=norm,
-            command_name=command_name,
-            scale=scale,
-        )
