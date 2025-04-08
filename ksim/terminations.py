@@ -175,4 +175,4 @@ class FarFromOriginTermination(Termination):
     max_dist: float = attrs.field(validator=attrs.validators.gt(0.0))
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        return jnp.where(state.qpos[..., :3].norm(axis=-1) > self.max_dist, 1, 0)
+        return jnp.where(jnp.linalg.norm(state.qpos[..., :3], axis=-1) > self.max_dist, 1, 0)
