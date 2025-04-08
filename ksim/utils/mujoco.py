@@ -418,6 +418,8 @@ def add_new_body(
     pos: tuple[float, float, float],
     quat: tuple[float, float, float, float],
     add_visual: bool = True,
+    visual_geom_color: tuple[float, float, float, float] = (1, 0, 0, 1),
+    visual_geom_size: tuple[float, float, float] = (0.05, 0.05, 0.05),
 ) -> str:
     """Add a new body to the model."""
     tree = ET.parse(file_path)
@@ -448,8 +450,8 @@ def add_new_body(
             {
                 "name": "visual",
                 "type": "sphere",
-                "size": "0.05 0.05 0.05",
-                "rgba": "1 0 0 1",
+                "size": f"{visual_geom_size[0]} {visual_geom_size[1]} {visual_geom_size[2]}",
+                "rgba": f"{visual_geom_color[0]} {visual_geom_color[1]} {visual_geom_color[2]} {visual_geom_color[3]}",
                 "pos": f"{pos[0]} {pos[1]} {pos[2]}",
                 "quat": f"{quat[0]} {quat[1]} {quat[2]} {quat[3]}",
             },
