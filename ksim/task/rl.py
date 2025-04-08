@@ -1682,14 +1682,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     if self.should_checkpoint(state):
                         model = eqx.combine(model_arr, model_static)
-                        self.save_checkpoint(
-                            model=model,
-                            optimizer=optimizer,
-                            opt_state=opt_state,
-                            state=state,
-                        )
+                        self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
                     state = self.on_step_end(state)
+
+                # Save the checkpoint when done.
+                model = eqx.combine(model_arr, model_static)
+                self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
@@ -1697,12 +1696,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     xax.show_info(msg, important=True)
 
                 model = eqx.combine(model_arr, model_static)
-                self.save_checkpoint(
-                    model=model,
-                    optimizer=optimizer,
-                    opt_state=opt_state,
-                    state=state,
-                )
+                self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 if xax.is_master():
@@ -1714,12 +1708,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 sys.stdout.flush()
 
                 model = eqx.combine(model_arr, model_static)
-                self.save_checkpoint(
-                    model=model,
-                    optimizer=optimizer,
-                    opt_state=opt_state,
-                    state=state,
-                )
+                self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
             finally:
                 state = self.on_training_end(state)
