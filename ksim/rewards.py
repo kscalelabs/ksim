@@ -24,15 +24,10 @@ __all__ = [
     "CartesianBodyTargetReward",
     "CartesianBodyTargetPenalty",
     "CartesianBodyTargetVectorReward",
-<<<<<<< HEAD
-    "ContinuousCartesianBodyTargetReward",
-    "GlobalBodyQuaternionReward",
     "ObservationMeanPenalty",
     "FeetNoContactReward",
-=======
     "PositionTrackingReward",
     "QuaternionTrackingReward",
->>>>>>> c05af2f (pseudo ik improvements)
 ]
 
 import functools
