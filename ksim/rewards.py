@@ -130,9 +130,10 @@ class StayAliveReward(Reward):
     """
 
     balance: float = attrs.field(default=10.0)
+    success_reward: float = attrs.field(default=0.0)
 
     def __call__(self, trajectory: Trajectory) -> Array:
-        return jnp.where(trajectory.done, -1.0, 1.0 / self.balance)
+        return jnp.where(trajectory.done, jnp.where(trajectory.success, self.success_reward, -1.0), 1.0 / self.balance)
 
 
 @attrs.define(frozen=True, kw_only=True)
