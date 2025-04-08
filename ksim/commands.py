@@ -298,6 +298,7 @@ class CartesianBodyTargetCommand(Command):
     vis_radius: float = attrs.field()
     vis_color: tuple[float, float, float, float] = attrs.field()
     curriculum_scale: float = attrs.field(default=1.0)
+    pivot_name: str | None = attrs.field(default=None)
 
     def _sample_sphere(self, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         # Sample a random unit vector symmetrically.
@@ -347,14 +348,17 @@ class CartesianBodyTargetCommand(Command):
         return [CartesianBodyTargetMarker.get(self.command_name, self.base_body_name, self.vis_radius, self.vis_color)]
 
     def get_name(self) -> str:
-        return f"{super().get_name()}_{self.base_body_name}_{self.pivot_point}"
+        name = f"{super().get_name()}_{self.base_body_name}"
+        if self.pivot_name is not None:
+            name = f"{self.pivot_name}_{name}"
+        return name
 
     @classmethod
     def create(
         cls,
         model: PhysicsModel,
         pivot_point: tuple[float, float, float],
-        base_name: str,
+        base_body_name: str,
         sample_sphere_radius: float,
         curriculum_scale: float = 1.0,
         positive_x: bool = True,
@@ -363,11 +367,12 @@ class CartesianBodyTargetCommand(Command):
         switch_prob: float = 0.1,
         vis_radius: float = 0.05,
         vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
+        pivot_name: str | None = None,
     ) -> Self:
-        base_id = get_body_data_idx_from_name(model, base_name)
+        base_id = get_body_data_idx_from_name(model, base_body_name)
         return cls(
             pivot_point=pivot_point,
-            base_body_name=base_name,
+            base_body_name=base_body_name,
             base_id=base_id,
             sample_sphere_radius=sample_sphere_radius,
             curriculum_scale=curriculum_scale,
@@ -377,6 +382,7 @@ class CartesianBodyTargetCommand(Command):
             switch_prob=switch_prob,
             vis_radius=vis_radius,
             vis_color=vis_color,
+            pivot_name=pivot_name,
         )
 
 

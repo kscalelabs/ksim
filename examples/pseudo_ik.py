@@ -153,9 +153,9 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         return [
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
-                # pivot_name="upper_arm_right",
                 pivot_point=(0.0, 0.0, 0.0),
-                base_name="pelvis",
+                pivot_name="upper_arm_right",
+                base_body_name="pelvis",
                 sample_sphere_radius=0.5,
                 positive_x=True,
                 positive_y=False,
@@ -166,9 +166,9 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
             ),
             ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
-                # pivot_name="lower_arm_right",
                 pivot_point=(0.0, 0.0, 0.0),
-                base_name="pelvis",
+                pivot_name="lower_arm_right",
+                base_body_name="pelvis",
                 sample_sphere_radius=0.5,
                 positive_x=True,
                 positive_y=False,
@@ -186,14 +186,14 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
                 tracked_body_name="hand_right",
                 base_body_name="pelvis",
                 scale=1.0,
-                command_name="cartesian_body_target_command_upper_arm_right",
+                command_name="upper_arm_right_cartesian_body_target_command",
             ),
             ksim.PositionTrackingReward.create(
                 model=physics_model,
                 tracked_body_name="upper_arm_right",
                 base_body_name="pelvis",
                 scale=0.1,
-                command_name="cartesian_body_target_command_lower_arm_right",
+                command_name="lower_arm_right_cartesian_body_target_command",
             ),
         ]
 
