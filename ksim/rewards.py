@@ -24,8 +24,10 @@ __all__ = [
     "CartesianBodyTargetReward",
     "CartesianBodyTargetPenalty",
     "CartesianBodyTargetVectorReward",
-    "ContinuousCartesianBodyTargetReward",
-    "GlobalBodyQuaternionReward",
+    "ObservationMeanPenalty",
+    "FeetNoContactReward",
+    "PositionTrackingReward",
+    "QuaternionTrackingReward",
 ]
 
 import functools
@@ -42,7 +44,12 @@ from jaxtyping import Array
 
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name
-from ksim.utils.types import CartesianIndex, cartesian_index_to_dim, dimension_index_validator, norm_validator
+from ksim.utils.types import (
+    CartesianIndex,
+    cartesian_index_to_dim,
+    dimension_index_validator,
+    norm_validator,
+)
 from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
@@ -399,6 +406,16 @@ def joint_threshold_validator(
 
 
 @attrs.define(frozen=True, kw_only=True)
+class ObservationMeanPenalty(Reward):
+    """Penalty for the mean of an observation."""
+
+    observation_name: str = attrs.field()
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        return trajectory.obs[self.observation_name].mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class ActionNearPositionPenalty(Reward):
     """Penalizes the action for being too far from the target position.
 
@@ -605,6 +622,9 @@ class CartesianBodyTargetVectorReward(Reward):
         distance_scalar = jnp.linalg.norm(target_vector, axis=-1)
         far_from_target = distance_scalar > self.distance_threshold
 
+        velocity_scalar = jnp.linalg.norm(body_vel_TL, axis=-1)
+        high_velocity = velocity_scalar > 0.1
+
         if self.normalize_velocity:
             normalized_body_vel = body_vel_TL / (jnp.linalg.norm(body_vel_TL, axis=-1, keepdims=True) + self.epsilon)
             original_products = normalized_body_vel * normalized_target_vector
@@ -612,7 +632,7 @@ class CartesianBodyTargetVectorReward(Reward):
             original_products = body_vel_TL * normalized_target_vector
 
         # This will give maximum reward if near the target (and velocity is normalized)
-        return jnp.where(far_from_target, jnp.sum(original_products, axis=-1), 1.1)
+        return jnp.where(far_from_target & high_velocity, jnp.sum(original_products, axis=-1), 1.1)
 
     @classmethod
     def create(
@@ -677,39 +697,27 @@ class CartesianBodyTargetPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class ContinuousCartesianBodyTargetReward(Reward):
+class PositionTrackingReward(Reward):
     """Rewards the closeness of the body to the target position more for the longer it has been doing so."""
 
     tracked_body_idx: int = attrs.field()
     base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
-    norm: xax.NormType = attrs.field()
-    sensitivity: float = attrs.field()
-    threshold: float = attrs.field()
-    time_bonus_scale: float = attrs.field()
-    time_sensitivity: float = attrs.field()
+    body_name: str = attrs.field()
+    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :] - trajectory.xpos[..., self.base_body_idx, :]
         target_pos = trajectory.command[self.command_name]
 
-        error = xax.get_norm(body_pos - target_pos, self.norm)
-        base_reward = jnp.exp(-error * self.sensitivity)
-        under_threshold = error < self.threshold
+        error = xax.get_norm(body_pos - target_pos, self.norm).sum(-1)
+        prev_error = jnp.concatenate([error[..., :1], error[..., :-1]], axis=-1)
+        error_diff = error - prev_error
 
-        def count_scan_fn(carry: Array, x: Array) -> tuple[Array, Array]:
-            x = x.astype(jnp.int32)
-            # Reset counter to 0 if not under threshold, otherwise increment
-            count = jnp.where(x, carry + 1, 0)
-            return count, count
+        # If error goes down compared to the previous step, this is a reward.
+        reward = -error_diff
 
-        _, consecutive_steps = jax.lax.scan(
-            count_scan_fn, init=jnp.zeros_like(under_threshold[0], dtype=jnp.int32), xs=under_threshold
-        )
-
-        # time_bonus = jnp.exp(consecutive_steps * self.time_sensitivity) * self.time_bonus_scale
-        time_bonus = consecutive_steps * self.time_bonus_scale
-        return (base_reward + time_bonus).mean(axis=-1)
+        return reward
 
     @classmethod
     def create(
@@ -718,12 +726,8 @@ class ContinuousCartesianBodyTargetReward(Reward):
         command_name: str,
         tracked_body_name: str,
         base_body_name: str,
-        norm: xax.NormType = "l2",
+        norm: xax.NormType = "l1",
         scale: float = 1.0,
-        sensitivity: float = 1.0,
-        time_sensitivity: float = 0.01,
-        threshold: float = 0.25,
-        time_bonus_scale: float = 0.1,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
         base_idx = get_body_data_idx_from_name(model, base_body_name)
@@ -731,33 +735,48 @@ class ContinuousCartesianBodyTargetReward(Reward):
             tracked_body_idx=body_idx,
             base_body_idx=base_idx,
             norm=norm,
-            scale=scale,
-            sensitivity=sensitivity,
-            time_sensitivity=time_sensitivity,
             command_name=command_name,
-            threshold=threshold,
-            time_bonus_scale=time_bonus_scale,
+            body_name=tracked_body_name,
+            scale=scale,
         )
+
+    def get_name(self) -> str:
+        return f"{self.body_name}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)
-class GlobalBodyQuaternionReward(Reward):
+class QuaternionTrackingReward(Reward):
     """Rewards the closeness of the body orientation to the target quaternion."""
 
     tracked_body_idx: int = attrs.field()
     base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
-    norm: xax.NormType = attrs.field()
-    sensitivity: float = attrs.field()
+    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
+    eps: float = attrs.field(default=1e-6)
 
     def __call__(self, trajectory: Trajectory) -> Array:
         body_quat = trajectory.xquat[..., self.tracked_body_idx, :]
         target_quat = trajectory.command[self.command_name]
 
-        is_null = jnp.all(jnp.isclose(target_quat, 0.0), axis=-1, keepdims=True)
+        # Ensure unit quaternions (safe for numerical drift).
+        body_quat = body_quat / jnp.linalg.norm(body_quat, axis=-1, keepdims=True).clip(min=self.eps)
+        target_quat = target_quat / jnp.linalg.norm(target_quat, axis=-1, keepdims=True).clip(min=self.eps)
 
-        err = jnp.where(is_null, 0.0, xax.get_norm(body_quat - target_quat, self.norm))
-        return jnp.exp(-err * self.sensitivity).mean(axis=-1)
+        # Compute absolute dot product to handle antipodal symmetry.
+        dot = jnp.sum(body_quat * target_quat, axis=-1)
+        dot = jnp.clip(jnp.abs(dot), self.eps, 1.0 - self.eps)
+
+        # Quaternion angular distance (geodesic distance on S^3).
+        angle_error = 2.0 * jnp.arccos(dot)
+
+        # Previous angle error.
+        prev_error = jnp.concatenate([angle_error[..., :1], angle_error[..., :-1]], axis=-1)
+        error_diff = angle_error - prev_error
+
+        # Negative delta error as reward: improving alignment yields positive reward.
+        reward = -error_diff
+
+        return reward
 
     @classmethod
     def create(
@@ -766,9 +785,8 @@ class GlobalBodyQuaternionReward(Reward):
         command_name: str,
         tracked_body_name: str,
         base_body_name: str,
-        norm: xax.NormType = "l2",
+        norm: xax.NormType = "l1",
         scale: float = 1.0,
-        sensitivity: float = 1.0,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
         base_idx = get_body_data_idx_from_name(model, base_body_name)
@@ -776,7 +794,6 @@ class GlobalBodyQuaternionReward(Reward):
             tracked_body_idx=body_idx,
             base_body_idx=base_idx,
             norm=norm,
-            scale=scale,
-            sensitivity=sensitivity,
             command_name=command_name,
+            scale=scale,
         )

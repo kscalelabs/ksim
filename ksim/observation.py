@@ -16,6 +16,7 @@ __all__ = [
     "BaseLinearAccelerationObservation",
     "BaseAngularAccelerationObservation",
     "ActuatorAccelerationObservation",
+    "ContactObservation",
     "FeetContactObservation",
     "FeetPositionObservation",
     "FeetOrientationObservation",
@@ -254,6 +255,42 @@ class ActuatorAccelerationObservation(Observation):
             return state.physics_state.data.qacc[6:]
         else:
             return state.physics_state.data.qacc
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ContactObservation(Observation):
+    geom_idxs: tuple[int, ...] = attrs.field()
+    contact_group: str | None = attrs.field(default=None)
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        geom_names: str | Collection[str],
+        contact_group: str | None = None,
+        noise: float = 0.0,
+    ) -> Self:
+        """Create a sensor observation from a physics model."""
+        if isinstance(geom_names, str):
+            geom_names = [geom_names]
+        geom_idxs = [get_geom_data_idx_from_name(physics_model, name) for name in geom_names]
+        return cls(
+            geom_idxs=tuple(geom_idxs),
+            noise=noise,
+            contact_group=contact_group,
+        )
+
+    def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
+        geom_idxs = jnp.array(self.geom_idxs)
+        contact = geoms_colliding(state.physics_state.data, geom_idxs, geom_idxs).any(axis=-1)
+        return contact
+
+    def get_name(self) -> str:
+        if self.contact_group is not None:
+            return f"{super().get_name()}_{self.contact_group}"
+        else:
+            return super().get_name()
 
 
 @attrs.define(frozen=True, kw_only=True)

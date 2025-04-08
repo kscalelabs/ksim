@@ -51,9 +51,10 @@ class Trajectory:
     aux_outputs: PyTree
 
     def episode_length(self) -> Array:
-        done_mask = self.done.at[..., -1].set(True)  # Make the final timestep a termination.
-        termination_sum = jnp.sum(jnp.where(done_mask, self.timestep, 0.0), axis=-1) - self.timestep[..., 0]
-        return (termination_sum / (done_mask.sum(axis=-1) + 1)).mean()
+        done_mask = self.done.at[..., -1].set(True)
+        termination_sum = jnp.sum(jnp.where(done_mask, self.timestep, 0.0), axis=-1)
+        episode_length = termination_sum / done_mask.sum(axis=-1)
+        return episode_length
 
 
 @jax.tree_util.register_dataclass

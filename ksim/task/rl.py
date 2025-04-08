@@ -1130,13 +1130,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             trajectories: The trajectories to get the termination metrics for.
         """
-        # Compute the episode length from the timesteps. The maximum episode
-        # length will plateau at the number of timesteps in the rollout.
-        timestep = trajectories.timestep
-        done_mask = trajectories.done.at[..., -1].set(True)
-        termination_sum = jnp.sum(jnp.where(done_mask, timestep, 0.0), axis=-1) - timestep[..., 0]
-        episode_length = (termination_sum / (done_mask.sum(axis=-1) + 1)).mean()
-
         # Compute the mean number of terminations per episode, broken down by
         # the type of termination.
         kvs = list(trajectories.termination_components.items())
@@ -1146,7 +1139,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         mean_terminations = trajectories.done.sum(-1).mean()
 
         return {
-            "episode_length": episode_length,
+            "episode_length": trajectories.episode_length(),
             "mean_terminations": mean_terminations,
             **{f"prct/{key}": (value.sum() / num_terminations) for key, value in kvs},
         }
@@ -1682,7 +1675,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             state = self.on_training_start(state)
 
             def on_exit() -> None:
-                model = eqx.combine(model_arr, model_static)
+                model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
                 self.save_checkpoint(
                     model=model,
                     optimizer=optimizer,
@@ -1695,6 +1688,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             is_first_step = True
             last_log_time = time.time()
+
+            # Clean up variables which are not part of the control loop.
+            del model_arr, model_static, mjx_model, randomizations
 
             try:
                 while not self.is_training_over(state):
@@ -1745,28 +1741,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     self.write_logs(state)
 
                     if self.should_checkpoint(state):
-                        model = eqx.combine(model_arr, model_static)
-                        self.save_checkpoint(
-                            model=model,
-                            optimizer=optimizer,
-                            opt_state=opt_state,
-                            state=state,
-                        )
+                        model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
+                        self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
                     state = self.on_step_end(state)
+
+                # Save the checkpoint when done.
+                model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
+                self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
                     msg = f"Finished training after {state.num_steps}steps and {state.num_samples} samples"
                     xax.show_info(msg, important=True)
 
-                model = eqx.combine(model_arr, model_static)
-                self.save_checkpoint(
-                    model=model,
-                    optimizer=optimizer,
-                    opt_state=opt_state,
-                    state=state,
-                )
+                model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
+                self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 if xax.is_master():
@@ -1777,13 +1767,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
 
-                model = eqx.combine(model_arr, model_static)
-                self.save_checkpoint(
-                    model=model,
-                    optimizer=optimizer,
-                    opt_state=opt_state,
-                    state=state,
-                )
+                model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
+                self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
 
             finally:
                 state = self.on_training_end(state)
