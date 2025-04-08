@@ -285,13 +285,13 @@ class PositionCommand(Command):
 
     box_min: tuple[float, float, float] = attrs.field()
     box_max: tuple[float, float, float] = attrs.field()
+    dt: float = attrs.field()
     base_id: int | None = attrs.field(default=None)
     vis_radius: float = attrs.field(default=0.05)
     vis_color: tuple[float, float, float, float] = attrs.field(default=(1.0, 0.0, 0.0, 0.8))
     min_speed: float = attrs.field(default=0.5)
     max_speed: float = attrs.field(default=3.0)
     unique_name: str | None = attrs.field(default=None)
-    eps: float = attrs.field(default=1e-3)
 
     def _sample_box(self, rng: PRNGKeyArray, physics_data: PhysicsData) -> Array:
         # Sample uniformly within the box
@@ -347,7 +347,7 @@ class PositionCommand(Command):
 
         # If we've reached the target, sample a new one
         rng_a, rng_b = jax.random.split(rng)
-        reached_target = distance < self.eps
+        reached_target = distance < self.dt * speed * 0.5
 
         # Sample new target and speed if reached
         new_target = self._sample_box(rng_a, physics_data)
@@ -358,7 +358,7 @@ class PositionCommand(Command):
         speed = jnp.where(reached_target, new_speed, speed)
 
         # Calculate step size based on speed and timestep
-        dt = physics_data.model.opt.timestep
+        dt = self.dt
         step_size = speed * dt
 
         # Move current position towards target
@@ -399,6 +399,7 @@ class PositionCommand(Command):
             base_id=base_id,
             box_min=box_min,
             box_max=box_max,
+            dt=float(model.opt.timestep),
             vis_radius=vis_radius,
             vis_color=vis_color,
             unique_name=unique_name,
