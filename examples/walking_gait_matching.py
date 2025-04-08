@@ -204,7 +204,7 @@ if __name__ == "__main__":
     HumanoidWalkingGaitMatchingTask.launch(
         HumanoidWalkingGaitMatchingTaskConfig(
             num_envs=2048,
-            batch_size=256,
+            rollouts_per_batch=256,
             num_passes=10,
             epochs_per_log_step=1,
             valid_every_n_steps=10,

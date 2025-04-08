@@ -101,7 +101,7 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
             freejoint_first=False,
         )
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return []
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
@@ -242,12 +242,12 @@ if __name__ == "__main__":
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.pseudo_ik num_envs=8 batch_size=4
+    #   python -m examples.pseudo_ik num_envs=8 rollouts_per_batch=4
     HumanoidPseudoIKTask.launch(
         HumanoidPseudoIKTaskConfig(
             # Training parameters.
             num_envs=2048,
-            batch_size=256,
+            rollouts_per_batch=256,
             num_passes=10,
             epochs_per_log_step=1,
             # Logging parameters.

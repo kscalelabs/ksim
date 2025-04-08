@@ -368,13 +368,13 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             joint_name_to_metadata=metadata,
         )
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
-            ksim.StaticFrictionRandomization(),
-            ksim.ArmatureRandomization(),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "torso"),
-            ksim.JointDampingRandomization(),
-            ksim.JointZeroPositionRandomization(),
+            ksim.StaticFrictionPhysicsRandomizer(),
+            ksim.ArmaturePhysicsRandomizer(),
+            ksim.MassMultiplicationPhysicsRandomizer.from_body_name(physics_model, "torso"),
+            ksim.JointDampingPhysicsRandomizer(),
+            ksim.JointZeroPositionPhysicsRandomizer(),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
@@ -481,7 +481,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             num_mixtures=self.config.num_mixtures,
         )
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> None:
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
         return None
 
     def run_actor(
@@ -567,20 +567,21 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_ppo_variables(
         self,
         model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        carry: None,
+        trajectory: ksim.Trajectory,
+        model_carry: None,
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, None]:
         # Vectorize over the time dimensions.
-        action_dist_j = self.run_actor(model.actor, trajectories.obs, trajectories.command)
-        log_probs_j = action_dist_j.log_prob(trajectories.action)
+        action_dist_tj = jax.vmap(self.run_actor, in_axes=(None, 0, 0))(model.actor, trajectory.obs, trajectory.command)
+        log_probs_tj = jax.vmap(action_dist_tj.log_prob)(trajectory.action)
+        assert isinstance(log_probs_tj, Array)
 
         # Vectorize over the time dimensions.
-        values_1 = self.run_critic(model.critic, trajectories.obs, trajectories.command)
+        values_tj = jax.vmap(self.run_critic, in_axes=(None, 0, 0))(model.critic, trajectory.obs, trajectory.command)
 
         ppo_variables = ksim.PPOVariables(
-            log_probs=log_probs_j,
-            values=values_1.squeeze(-1),
+            log_probs=log_probs_tj,
+            values=values_tj,
         )
 
         return ppo_variables, None
@@ -612,12 +613,12 @@ if __name__ == "__main__":
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking num_envs=8 batch_size=4
+    #   python -m examples.walking num_envs=8 rollouts_per_batch=4
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             # Training parameters.
-            num_envs=2048,
-            batch_size=256,
+            num_envs=4,
+            rollouts_per_batch=4,
             num_passes=4,
             epochs_per_log_step=1,
             rollout_length_seconds=10.0,

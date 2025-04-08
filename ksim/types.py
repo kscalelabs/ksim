@@ -86,7 +86,7 @@ class Metrics:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class SingleTrajectory:
+class LoggedTrajectory:
     trajectory: Trajectory
     rewards: Rewards
     metrics: xax.FrozenDict[str, Array]

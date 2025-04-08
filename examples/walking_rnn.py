@@ -329,7 +329,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
         return ppo_variables, (actor_carry, critic_carry)
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
@@ -373,7 +373,7 @@ if __name__ == "__main__":
         HumanoidWalkingRNNTaskConfig(
             # Training parameters.
             num_envs=2048,
-            batch_size=256,
+            rollouts_per_batch=256,
             num_passes=4,
             epochs_per_log_step=1,
             rollout_length_seconds=10.0,

@@ -54,7 +54,7 @@ def test_floor_friction_randomization(
     simple_mjx_model: mjx.Model,
     rng: jax.Array,
 ) -> None:
-    randomization = ksim.FloorFrictionRandomization.from_geom_name(
+    randomization = ksim.FloorFrictionPhysicsRandomizer.from_geom_name(
         simple_model, "floor", scale_lower=0.4, scale_upper=1.0
     )
     mj_dict = randomization(simple_model, rng)
@@ -67,7 +67,7 @@ def test_armature_randomization(
     simple_mjx_model: mjx.Model,
     rng: jax.Array,
 ) -> None:
-    randomization = ksim.ArmatureRandomization(scale_lower=0.9, scale_upper=1.1)
+    randomization = ksim.ArmaturePhysicsRandomizer(scale_lower=0.9, scale_upper=1.1)
     mj_dict = randomization(simple_model, rng)
     mjx_dict = randomization(simple_mjx_model, rng)
     assert np.allclose(mj_dict["dof_armature"], mjx_dict["dof_armature"])
@@ -78,7 +78,7 @@ def test_torso_mass_randomization(
     simple_mjx_model: mjx.Model,
     rng: jax.Array,
 ) -> None:
-    randomization = ksim.MassAdditionRandomization(body_id=0, scale_lower=-1.0, scale_upper=1.0)
+    randomization = ksim.MassAdditionPhysicsRandomizer(body_id=0, scale_lower=-1.0, scale_upper=1.0)
     mj_dict = randomization(simple_model, rng)
     mjx_dict = randomization(simple_mjx_model, rng)
     assert np.allclose(mj_dict["body_mass"], mjx_dict["body_mass"])
@@ -89,7 +89,7 @@ def test_joint_damping_randomization(
     simple_mjx_model: mjx.Model,
     rng: jax.Array,
 ) -> None:
-    randomization = ksim.JointDampingRandomization(scale_lower=0.9, scale_upper=1.1)
+    randomization = ksim.JointDampingPhysicsRandomizer(scale_lower=0.9, scale_upper=1.1)
     mj_dict = randomization(simple_model, rng)
     mjx_dict = randomization(simple_mjx_model, rng)
     assert np.allclose(mj_dict["dof_damping"], mjx_dict["dof_damping"])
@@ -100,7 +100,7 @@ def test_joint_zero_position_randomization(
     simple_mjx_model: mjx.Model,
     rng: jax.Array,
 ) -> None:
-    randomization = ksim.JointZeroPositionRandomization(scale_lower=-0.1, scale_upper=0.1)
+    randomization = ksim.JointZeroPositionPhysicsRandomizer(scale_lower=-0.1, scale_upper=0.1)
     mj_dict = randomization(simple_model, rng)
     mjx_dict = randomization(simple_mjx_model, rng)
     assert np.allclose(mj_dict["qpos0"], mjx_dict["qpos0"])
@@ -111,7 +111,7 @@ def test_static_friction_randomization(
     simple_mjx_model: mjx.Model,
     rng: jax.Array,
 ) -> None:
-    randomization = ksim.StaticFrictionRandomization(scale_lower=0.5, scale_upper=2.0)
+    randomization = ksim.StaticFrictionPhysicsRandomizer(scale_lower=0.5, scale_upper=2.0)
     mj_dict = randomization(simple_model, rng)
     mjx_dict = randomization(simple_mjx_model, rng)
     assert np.allclose(mj_dict["dof_frictionloss"], mjx_dict["dof_frictionloss"])
