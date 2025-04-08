@@ -20,7 +20,7 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.task.rl import RLConfig, RLTask, RolloutConstants, RolloutControlVariables, RolloutEnvironmentVariables
+from ksim.task.rl import RLConfig, RLTask, RolloutConstants, RolloutSharedState, RolloutEnvState
 from ksim.types import Rewards, SingleTrajectory, Trajectory
 
 
@@ -575,8 +575,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: Rewards,
         rollout_constants: RolloutConstants,
-        rollout_env_vars: RolloutEnvironmentVariables,
-        rollout_ctrl_vars: RolloutControlVariables,
+        rollout_env_vars: RolloutEnvState,
+        rollout_shared_state: RolloutSharedState,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array], SingleTrajectory]:
         """Runs PPO updates on a given set of trajectory batches.
@@ -588,7 +588,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rewards: The rewards for the trajectories.
             rollout_constants: The constant inputs into the rollout.
             rollout_env_vars: The environment variables inputs into the rollout.
-            rollout_ctrl_vars: The control variables inputs into the rollout.
+            rollout_shared_state: The control variables inputs into the rollout.
             rng: A random seed.
 
         Returns:
@@ -601,7 +601,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         indices = jnp.arange(trajectories.done.shape[0])
         indices = indices.reshape(self.num_batches, self.batch_size)
 
-        model = eqx.combine(rollout_ctrl_vars.model_arr, rollout_constants.model_static)
+        model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
 
         def on_policy_scan_fn(rng: PRNGKeyArray, trajectory: Trajectory, model_carry: PyTree) -> PPOVariables:
             rng, policy_vars_rng = jax.random.split(rng)
@@ -667,7 +667,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
             return carry, (metrics, single_traj)
 
-        carry = (rollout_ctrl_vars.model_arr, opt_state, rng)
+        carry = (rollout_shared_state.model_arr, opt_state, rng)
 
         # Applies gradient updates.
         carry, (metrics, single_traj) = jax.lax.scan(batch_scan_fn, carry, length=self.config.num_passes)
