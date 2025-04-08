@@ -54,7 +54,7 @@ from ksim.engine import (
 )
 from ksim.events import Event
 from ksim.observation import Observation, ObservationState
-from ksim.randomization import Randomization
+from ksim.randomization import PhysicsRandomizer
 from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
@@ -219,13 +219,13 @@ def get_initial_commands(
 
 def get_randomizations(
     physics_model: PhysicsModel,
-    randomizations: Collection[Randomization],
+    randomizers: Collection[PhysicsRandomizer],
     rng: PRNGKeyArray,
 ) -> xax.FrozenDict[str, Array]:
     all_randomizations: dict[str, dict[str, Array]] = {}
-    for randomization in randomizations:
+    for randomizer in randomizers:
         rng, randomization_rng = jax.random.split(rng)
-        all_randomizations[randomization.randomization_name] = randomization(physics_model, randomization_rng)
+        all_randomizations[randomizer.randomization_name] = randomizer(physics_model, randomization_rng)
     for name, count in Counter([k for d in all_randomizations.values() for k in d.keys()]).items():
         if count > 1:
             name_to_keys = {k: set(v.keys()) for k, v in all_randomizations.items()}
@@ -236,12 +236,12 @@ def get_randomizations(
 def apply_randomizations(
     physics_model: PhysicsModel,
     engine: PhysicsEngine,
-    randomizations: Collection[Randomization],
+    randomizers: Collection[PhysicsRandomizer],
     curriculum_level: Array,
     rng: PRNGKeyArray,
 ) -> tuple[xax.FrozenDict[str, Array], PhysicsState]:
     rand_rng, reset_rng = jax.random.split(rng)
-    randomizations = get_randomizations(physics_model, randomizations, rand_rng)
+    randomizations = get_randomizations(physics_model, randomizers, rand_rng)
 
     # Applies the randomizations to the model.
     if isinstance(physics_model, mjx.Model):
@@ -487,7 +487,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
     @abstractmethod
-    def get_randomization(self, physics_model: PhysicsModel) -> Collection[Randomization]:
+    def get_randomization(self, physics_model: PhysicsModel) -> Collection[PhysicsRandomizer]:
         """Returns randomizers, for randomizing each environment.
 
         Args:
@@ -1066,15 +1066,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         commands: Collection[Command],
         observations: Collection[Observation],
-        randomizations: Collection[Randomization],
+        randomizers: Collection[PhysicsRandomizer],
     ) -> Collection[Marker]:
         markers: list[Marker] = []
         for command in commands:
             markers.extend(command.get_markers())
         for observation in observations:
             markers.extend(observation.get_markers())
-        for randomization in randomizations:
-            markers.extend(randomization.get_markers())
+        for randomizer in randomizers:
+            markers.extend(randomizer.get_markers())
         return markers
 
     @xax.jit(static_argnames=["self", "rollout_constants"])
@@ -1240,21 +1240,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_file("mujoco_info.yaml", mujoco_info)
 
             # Initializes the control loop variables.
-            randomizations = self.get_randomization(mj_model)
+            randomizers = self.get_randomization(mj_model)
 
             # JAX requires that we partition the model into mutable and static
             # parts in order to use lax.scan, so that `arr` can be a PyTree.
             model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
             rollout_constants = self._get_rollout_constants(mj_model, model_static)
-            rollout_env_vars = self._get_rollout_env_vars(rng, rollout_constants, mj_model, randomizations)
+            rollout_env_vars = self._get_rollout_env_vars(rng, rollout_constants, mj_model, randomizers)
             rollout_ctrl_vars = self._get_rollout_ctrl_vars(mj_model, model_arr)
 
             # Creates the markers.
             markers = self.get_markers(
                 commands=rollout_constants.commands,
                 observations=rollout_constants.observations,
-                randomizations=randomizations,
+                randomizers=randomizers,
             )
 
             try:
@@ -1422,7 +1422,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
         rollout_constants: RolloutConstants,
         mj_model: PhysicsModel,
-        randomizations: Collection[Randomization],
+        randomizers: Collection[PhysicsRandomizer],
     ) -> RolloutEnvironmentVariables:
         rng, carry_rng, command_rng, rand_rng, rollout_rng, curriculum_rng = jax.random.split(rng, 6)
 
@@ -1442,7 +1442,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             randomization_dict, physics_state = randomization_fn(
                 mj_model,
                 rollout_constants.engine,
-                randomizations,
+                randomizers,
                 curriculum_state.level,
                 jax.random.split(rand_rng, self.config.num_envs),
             )
@@ -1469,7 +1469,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             randomization_dict, physics_state = apply_randomizations(
                 mj_model,
                 rollout_constants.engine,
-                randomizations,
+                randomizers,
                 curriculum_state.level,
                 rand_rng,
             )
@@ -1612,7 +1612,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers = self.get_markers(
                 commands=rollout_constants.commands,
                 observations=rollout_constants.observations,
-                randomizations=randomizations,
+                randomizers=randomizers,
             )
 
             state = self.on_training_start(state)
@@ -1633,7 +1633,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             last_log_time = time.time()
 
             # Clean up variables which are not part of the control loop.
-            del model_arr, model_static, mjx_model, randomizations
+            del model_arr, model_static, mjx_model, randomizers
 
             try:
                 while not self.is_training_over(state):

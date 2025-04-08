@@ -1,14 +1,14 @@
 """Randomize each environment when gathering trajectories."""
 
 __all__ = [
-    "Randomization",
-    "StaticFrictionRandomization",
-    "FloorFrictionRandomization",
-    "ArmatureRandomization",
-    "MassAdditionRandomization",
-    "MassMultiplicationRandomization",
-    "JointDampingRandomization",
-    "JointZeroPositionRandomization",
+    "PhysicsRandomizer",
+    "StaticFrictionRandomizer",
+    "FloorFrictionRandomizer",
+    "ArmatureRandomizer",
+    "MassAdditionRandomizer",
+    "MassMultiplicationRandomizer",
+    "JointDampingRandomizer",
+    "JointZeroPositionRandomizer",
 ]
 
 import functools
@@ -27,7 +27,7 @@ from ksim.vis import Marker
 
 
 @attrs.define(frozen=True, kw_only=True)
-class Randomization(ABC):
+class PhysicsRandomizer(ABC):
     """Randomize the joint positions of the robot."""
 
     @abstractmethod
@@ -47,7 +47,7 @@ class Randomization(ABC):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class StaticFrictionRandomization(Randomization):
+class StaticFrictionRandomizer(PhysicsRandomizer):
     """Randomizes the static friction."""
 
     scale_lower: float = attrs.field(default=0.5)
@@ -75,7 +75,7 @@ class StaticFrictionRandomization(Randomization):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class FloorFrictionRandomization(Randomization):
+class FloorFrictionRandomizer(PhysicsRandomizer):
     """Randomizes the floor friction."""
 
     floor_geom_id: int = attrs.field()
@@ -108,7 +108,7 @@ class FloorFrictionRandomization(Randomization):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class ArmatureRandomization(Randomization):
+class ArmatureRandomizer(PhysicsRandomizer):
     """Randomizes the armature."""
 
     scale_lower: float = attrs.field(default=0.95)
@@ -137,7 +137,7 @@ class ArmatureRandomization(Randomization):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class MassAdditionRandomization(Randomization):
+class MassAdditionRandomizer(PhysicsRandomizer):
     """Randomizes the mass of some body."""
 
     body_id: int = attrs.field()
@@ -177,7 +177,7 @@ class MassAdditionRandomization(Randomization):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class MassMultiplicationRandomization(Randomization):
+class MassMultiplicationRandomizer(PhysicsRandomizer):
     """Randomizes the mass of some body."""
 
     body_id: int = attrs.field()
@@ -219,7 +219,7 @@ class MassMultiplicationRandomization(Randomization):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointDampingRandomization(Randomization):
+class JointDampingRandomizer(PhysicsRandomizer):
     """Randomizes the joint damping."""
 
     scale_lower: float = attrs.field(default=0.9)
@@ -248,7 +248,7 @@ class JointDampingRandomization(Randomization):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointZeroPositionRandomization(Randomization):
+class JointZeroPositionRandomizer(PhysicsRandomizer):
     """Randomizes the joint zero position."""
 
     scale_lower: float = attrs.field(default=-0.01)
