@@ -1048,11 +1048,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             trajectories: The trajectories to get the termination metrics for.
         """
-        # Mean over finished and unfinished episodes
-        done_mask = trajectories.done.at[..., -1].set(True)
-        termination_sum = jnp.sum(jnp.where(done_mask, trajectories.timestep, 0.0))
-        episode_length = termination_sum / done_mask.sum()  # this will never be 0
-
         # Compute the mean number of terminations per episode, broken down by
         # the type of termination.
         kvs = list(trajectories.termination_components.items())
@@ -1062,7 +1057,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         mean_terminations = trajectories.done.sum(-1).mean()
 
         return {
-            "episode_length": episode_length,
+            "episode_length": trajectories.episode_length(),
             "mean_terminations": mean_terminations,
             **{f"prct/{key}": (value.sum() / num_terminations) for key, value in kvs},
         }
