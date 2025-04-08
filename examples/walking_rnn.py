@@ -313,27 +313,41 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_ppo_variables(
         self,
         model: DefaultHumanoidRNNModel,
-        trajectories: ksim.Trajectory,
-        carry: tuple[Array, Array],
+        trajectory: ksim.Trajectory,
+        model_carry: tuple[Array, Array],
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
-        actor_carry, critic_carry = carry
+        def scan_fn(
+            actor_critic_carry: tuple[Array, Array], transition: ksim.Trajectory
+        ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
+            actor_carry, critic_carry = actor_critic_carry
+            actor_dist, actor_carry = self.run_actor(
+                model=model.actor,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=actor_carry,
+            )
+            log_probs = actor_dist.log_prob(transition.action)
+            assert isinstance(log_probs, Array)
+            value, critic_carry = self.run_critic(
+                model=model.critic,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=critic_carry,
+            )
 
-        # Vectorize over the time dimensions.
-        action_dist_tj, actor_carry = self.run_actor(model.actor, trajectories.obs, trajectories.command, actor_carry)
-        log_probs_tj = action_dist_tj.log_prob(trajectories.action)
+            transition_ppo_variables = ksim.PPOVariables(
+                log_probs=log_probs,
+                values=value,
+            )
 
-        # Gets the value by calling the critic.
-        values_t1, critic_carry = self.run_critic(model.critic, trajectories.obs, trajectories.command, critic_carry)
+            return (actor_carry, critic_carry), transition_ppo_variables
 
-        ppo_variables = ksim.PPOVariables(
-            log_probs=log_probs_tj,
-            values=values_t1.squeeze(-1),
-        )
+        next_model_carry, ppo_variables = jax.lax.scan(scan_fn, model_carry, trajectory)
 
-        return ppo_variables, (actor_carry, critic_carry)
+        return ppo_variables, next_model_carry
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
@@ -342,14 +356,14 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: DefaultHumanoidRNNModel,
-        carry: tuple[Array, Array],
+        model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> ksim.Action:
-        actor_carry_in, critic_carry_in = carry
+        actor_carry_in, critic_carry_in = model_carry
 
         # Runs the actor model to get the action distribution.
         action_dist_j, actor_carry = self.run_actor(
