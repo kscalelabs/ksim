@@ -132,7 +132,7 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
             freejoint_first=False,
         )
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
+    def get_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return []
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:

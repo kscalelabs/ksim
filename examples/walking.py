@@ -368,7 +368,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             joint_name_to_metadata=metadata,
         )
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
+    def get_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
             ksim.StaticFrictionRandomizer(),
             ksim.ArmatureRandomizer(),

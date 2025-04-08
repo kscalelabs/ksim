@@ -217,7 +217,7 @@ def get_initial_commands(
     return xax.FrozenDict(command_dict)
 
 
-def get_randomizations(
+def get_randomizers(
     physics_model: PhysicsModel,
     randomizers: Collection[PhysicsRandomizer],
     rng: PRNGKeyArray,
@@ -241,7 +241,7 @@ def apply_randomizations(
     rng: PRNGKeyArray,
 ) -> tuple[xax.FrozenDict[str, Array], PhysicsState]:
     rand_rng, reset_rng = jax.random.split(rng)
-    randomizations = get_randomizations(physics_model, randomizers, rand_rng)
+    randomizations = get_randomizers(physics_model, randomizers, rand_rng)
 
     # Applies the randomizations to the model.
     if isinstance(physics_model, mjx.Model):
@@ -487,7 +487,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
     @abstractmethod
-    def get_randomization(self, physics_model: PhysicsModel) -> Collection[PhysicsRandomizer]:
+    def get_randomizers(self, physics_model: PhysicsModel) -> Collection[PhysicsRandomizer]:
         """Returns randomizers, for randomizing each environment.
 
         Args:
@@ -1240,7 +1240,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_file("mujoco_info.yaml", mujoco_info)
 
             # Initializes the control loop variables.
-            randomizers = self.get_randomization(mj_model)
+            randomizers = self.get_randomizers(mj_model)
 
             # JAX requires that we partition the model into mutable and static
             # parts in order to use lax.scan, so that `arr` can be a PyTree.
@@ -1519,7 +1519,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.logger.log_file("mujoco_info.yaml", mujoco_info)
 
             mjx_model = self.get_mjx_model(mj_model)
-            randomizations = self.get_randomization(mjx_model)
+            randomizations = self.get_randomizers(mjx_model)
 
             # JAX requires that we partition the model into mutable and static
             # parts in order to use lax.scan, so that `arr` can be a PyTree.
@@ -1583,14 +1583,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Loads the MJX model, and initializes the loop variables.
             mjx_model = self.get_mjx_model(mj_model)
-            randomizations = self.get_randomization(mjx_model)
+            randomizers = self.get_randomizers(mjx_model)
 
             # JAX requires that we partition the model into mutable and static
             # parts in order to use lax.scan, so that `arr` can be a PyTree.
             model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
             rollout_constants = self._get_rollout_constants(mjx_model, model_static)
-            rollout_env_vars = self._get_rollout_env_vars(rng, rollout_constants, mjx_model, randomizations)
+            rollout_env_vars = self._get_rollout_env_vars(rng, rollout_constants, mjx_model, randomizers)
             rollout_shared_state = self._get_rollout_shared_state(mjx_model, model_arr)
 
             # Creates the renderer.
