@@ -1573,8 +1573,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             if xax.is_master():
                 Thread(target=self.log_state, daemon=True).start()
 
-            test
-
             rng, model_rng = jax.random.split(rng)
             model, optimizer, opt_state, state = self.load_initial_state(model_rng, load_optimizer=True)
 
