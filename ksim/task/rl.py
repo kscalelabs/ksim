@@ -296,6 +296,10 @@ class RLConfig(xax.Config):
         value=1,
         help="The number of epochs between logging steps.",
     )
+    profile_memory: bool = xax.field(
+        value=False,
+        help="If true, profile memory usage.",
+    )
 
     # Training parameters.
     num_envs: int = xax.field(
@@ -1657,6 +1661,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             state=state,
                             rng=update_rng,
                         )
+
+                        if self.config.profile_memory:
+                            opt_state = jax.block_until_ready(opt_state)
+                            rollout_env_vars = jax.block_until_ready(rollout_env_vars)
+                            rollout_ctrl_vars = jax.block_until_ready(rollout_ctrl_vars)
+                            single_traj = jax.block_until_ready(single_traj)
+                            jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
 
                     # Updates the state.
                     state = state.replace(
