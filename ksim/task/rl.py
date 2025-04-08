@@ -1048,12 +1048,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         Args:
             trajectories: The trajectories to get the termination metrics for.
         """
-        # Compute the episode length from the timesteps. The maximum episode
-        # length will plateau at the number of timesteps in the rollout.
-        timestep = trajectories.timestep
+        # Mean over finished and unfinished episodes
         done_mask = trajectories.done.at[..., -1].set(True)
-        termination_sum = jnp.sum(jnp.where(done_mask, timestep, 0.0), axis=-1) - timestep[..., 0]
-        episode_length = (termination_sum / (done_mask.sum(axis=-1) + 1)).mean()
+        termination_sum = jnp.sum(jnp.where(done_mask, trajectories.timestep, 0.0))
+        episode_length = termination_sum / done_mask.sum()  # this will never be 0
 
         # Compute the mean number of terminations per episode, broken down by
         # the type of termination.
