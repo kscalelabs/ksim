@@ -58,7 +58,7 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
             key,
             num_inputs=NUM_INPUTS,
             num_joints=NUM_JOINTS,
-            min_std=0.0001,
+            min_std=0.0,
             max_std=1.0,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
