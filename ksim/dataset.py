@@ -63,12 +63,13 @@ class TrajectoryDatasetWriter:
             raise ValueError("Dataset is full")
 
         sample: Mapping[str, Array | Mapping[str, Array]] = {
-            "done": trajectory.done,
             "xquat": trajectory.xquat,
             "xpos": trajectory.xpos,
             "qpos": trajectory.qpos,
             "qvel": trajectory.qvel,
             "action": trajectory.action,
+            "done": trajectory.done,
+            "success": trajectory.success,
             "timestep": trajectory.timestep,
             "obs": trajectory.obs,
             "command": trajectory.command,
@@ -152,6 +153,7 @@ class TrajectoryDataset(Dataset[tuple[Trajectory, Rewards], tuple[Trajectory, Re
                 event_state=_dict("event_state"),
                 action=arrs["action"],
                 done=arrs["done"],
+                success=arrs["success"],
                 timestep=arrs["timestep"],
                 termination_components=_dict("termination_components"),
                 aux_outputs=_dict("aux_outputs"),

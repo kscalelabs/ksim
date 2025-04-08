@@ -176,7 +176,8 @@ def get_terminations(
     termination_dict = {}
     for termination in terminations:
         termination_val = termination(physics_state.data, curriculum_level)
-        chex.assert_type(termination_val, bool)
+        chex.assert_type(termination_val, int)
+        chex.assert_scalar_in(termination_val, -1, 1)
         name = termination.termination_name
         termination_dict[name] = termination_val
     return xax.FrozenDict(termination_dict)
@@ -694,7 +695,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             terminations=rollout_constants.terminations,
             curriculum_level=rollout_env_vars.curriculum_state.level,
         )
-        terminated = jax.tree.reduce(jnp.logical_or, list(terminations.values()))
+        terminated = jax.tree.reduce(jnp.logical_or, [t != 0 for t in terminations.values()])
+        success = jax.tree.reduce(jnp.logical_and, [t != -1 for t in terminations.values()]) & terminated
 
         # Combines all the relevant data into a single object.
         qpos = next_physics_state.data.qpos
@@ -719,6 +721,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             event_state=next_physics_state.event_states,
             action=action.action,
             done=terminated,
+            success=success,
             timestep=next_physics_state.data.time,
             termination_components=terminations,
             aux_outputs=action.aux_outputs,
