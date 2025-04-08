@@ -5,7 +5,6 @@ __all__ = [
     "PitchTooGreatTermination",
     "RollTooGreatTermination",
     "MinimumHeightTermination",
-    "FallTermination",
     "IllegalContactTermination",
     "BadZTermination",
     "FastAccelerationTermination",
