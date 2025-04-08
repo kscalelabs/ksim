@@ -26,7 +26,7 @@ from .walking_rnn import (
 
 NUM_JOINTS = 3
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + NUM_JOINTS + 3 + 4
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + NUM_JOINTS + 3 + 3
 
 
 @dataclass
@@ -56,6 +56,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
             key,
             num_inputs=NUM_INPUTS,
             num_joints=NUM_JOINTS,
+            min_std=0.0001,
+            max_std=1.0,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
         )
@@ -71,8 +73,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
-        xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
-        quat_target_4 = commands["global_body_quaternion_command_hand_right"]
+        xyz_upper_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
+        xyz_lower_target_3 = commands["cartesian_body_target_command_lower_arm_right"]
 
         obs_n = jnp.concatenate(
             [
@@ -81,8 +83,37 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
                 dh_joint_pos_j,  # NUM_JOINTS
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
-                xyz_target_3,  # 3
-                quat_target_4,  # 4
+                xyz_upper_target_3,  # 3
+                xyz_lower_target_3,  # 3
+            ],
+            axis=-1,
+        )
+
+        return model.forward(obs_n, carry)
+
+    def run_critic(
+        self,
+        model: DefaultHumanoidRNNCritic,
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
+        carry: Array,
+    ) -> tuple[Array, Array]:
+        timestep_1 = observations["timestep_observation"]
+        dh_joint_pos_j = observations["joint_position_observation"]
+        dh_joint_vel_j = observations["joint_velocity_observation"]
+        act_frc_obs_n = observations["actuator_force_observation"]
+        xyz_upper_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
+        xyz_lower_target_3 = commands["cartesian_body_target_command_lower_arm_right"]
+
+        obs_n = jnp.concatenate(
+            [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
+                dh_joint_pos_j,  # NUM_JOINTS
+                dh_joint_vel_j / 10.0,  # NUM_JOINTS
+                act_frc_obs_n / 100.0,  # NUM_JOINTS
+                xyz_upper_target_3,  # 3
+                xyz_lower_target_3,  # 3
             ],
             axis=-1,
         )
@@ -110,35 +141,6 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return []
 
-    def run_critic(
-        self,
-        model: DefaultHumanoidRNNCritic,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
-        carry: Array,
-    ) -> tuple[Array, Array]:
-        timestep_1 = observations["timestep_observation"]
-        dh_joint_pos_j = observations["joint_position_observation"]
-        dh_joint_vel_j = observations["joint_velocity_observation"]
-        act_frc_obs_n = observations["actuator_force_observation"]
-        xyz_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
-        quat_target_4 = commands["global_body_quaternion_command_hand_right"]
-
-        obs_n = jnp.concatenate(
-            [
-                jnp.cos(timestep_1),  # 1
-                jnp.sin(timestep_1),  # 1
-                dh_joint_pos_j,  # NUM_JOINTS
-                dh_joint_vel_j / 10.0,  # NUM_JOINTS
-                act_frc_obs_n / 100.0,  # NUM_JOINTS
-                xyz_target_3,  # 3
-                quat_target_4,  # 4
-            ],
-            axis=-1,
-        )
-
-        return model.forward(obs_n, carry)
-
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             ksim.JointPositionObservation(freejoint_first=False),
@@ -155,45 +157,43 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
                 pivot_point=(0.0, 0.0, 0.0),
                 base_name="pelvis",
                 sample_sphere_radius=0.5,
-                positive_x=True,  # only sample in the positive x direction
+                positive_x=True,
                 positive_y=False,
                 positive_z=False,
-                switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
+                switch_prob=self.config.ctrl_dt * 2,  # Will last 1/2 seconds in expectation
                 vis_radius=0.05,
                 vis_color=(1.0, 0.0, 0.0, 0.8),
             ),
-            ksim.GlobalBodyQuaternionCommand.create(
+            ksim.CartesianBodyTargetCommand.create(
                 model=physics_model,
-                base_name="hand_right",
-                switch_prob=self.config.ctrl_dt / 1,  # will last 1 seconds in expectation
-                null_prob=0.5,
-                vis_magnitude=0.5,
-                vis_size=0.05,
+                # pivot_name="lower_arm_right",
+                pivot_point=(0.0, 0.0, 0.0),
+                base_name="pelvis",
+                sample_sphere_radius=0.5,
+                positive_x=True,
+                positive_y=False,
+                positive_z=False,
+                switch_prob=self.config.ctrl_dt * 2,  # Will last 1/2 seconds in expectation
+                vis_radius=0.05,
                 vis_color=(0.0, 0.0, 1.0, 0.8),
             ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.ContinuousCartesianBodyTargetReward.create(
+            ksim.PositionTrackingReward.create(
                 model=physics_model,
                 tracked_body_name="hand_right",
                 base_body_name="pelvis",
-                norm="l2",
                 scale=1.0,
-                sensitivity=1.0,
-                threshold=0.0001,  # with l2 norm, this is 1cm of error
-                time_bonus_scale=0.1,
                 command_name="cartesian_body_target_command_upper_arm_right",
             ),
-            ksim.GlobalBodyQuaternionReward.create(
+            ksim.PositionTrackingReward.create(
                 model=physics_model,
-                tracked_body_name="hand_right",
+                tracked_body_name="upper_arm_right",
                 base_body_name="pelvis",
-                norm="l2",
                 scale=0.1,
-                sensitivity=1.0,
-                command_name="global_body_quaternion_command_hand_right",
+                command_name="cartesian_body_target_command_lower_arm_right",
             ),
         ]
 
@@ -252,7 +252,7 @@ if __name__ == "__main__":
             num_passes=10,
             epochs_per_log_step=1,
             # Logging parameters.
-            log_full_trajectory_every_n_seconds=60,
+            # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
