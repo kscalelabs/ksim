@@ -177,7 +177,6 @@ def get_terminations(
     for termination in terminations:
         termination_val = termination(physics_state.data, curriculum_level)
         chex.assert_type(termination_val, int)
-        chex.assert_scalar_in(termination_val, -1, 1)
         name = termination.termination_name
         termination_dict[name] = termination_val
     return xax.FrozenDict(termination_dict)
@@ -695,6 +694,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             terminations=rollout_constants.terminations,
             curriculum_level=rollout_env_vars.curriculum_state.level,
         )
+
+        # Convert ternary terminations to binary arrays.
         terminated = jax.tree.reduce(jnp.logical_or, [t != 0 for t in terminations.values()])
         success = jax.tree.reduce(jnp.logical_and, [t != -1 for t in terminations.values()]) & terminated
 
