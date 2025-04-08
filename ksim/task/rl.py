@@ -1251,6 +1251,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng=rng,
             )
 
+            trajectories = jax.block_until_ready(trajectories)
+            rewards = jax.block_until_ready(rewards)
+            model_arr = jax.block_until_ready(model_arr)
+            next_model_carrys = jax.block_until_ready(next_model_carrys)
+            train_metrics = jax.block_until_ready(train_metrics)
+            single_traj = jax.block_until_ready(single_traj)
+            jax.profiler.save_device_memory_profile(self.exp_dir / "mid_train_loop_step.prof")
+
             metrics = Metrics(
                 train=train_metrics,
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
