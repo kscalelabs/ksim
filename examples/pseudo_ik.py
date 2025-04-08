@@ -187,7 +187,7 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
             ),
             ksim.PositionTrackingReward.create(
                 model=physics_model,
-                tracked_body_name="upper_arm_right",
+                tracked_body_name="lower_arm_right",
                 scale=0.1,
                 command_name="elbow_position_command",
             ),
