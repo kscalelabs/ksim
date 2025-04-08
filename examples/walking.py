@@ -68,46 +68,7 @@ class DefaultHumanoidActor(eqx.Module):
         self.var_scale = var_scale
         self.num_mixtures = num_mixtures
 
-    def forward(
-        self,
-        timestep_1: Array,
-        dh_joint_pos_n: Array,
-        dh_joint_vel_n: Array,
-        com_inertia_n: Array,
-        com_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
-        act_frc_obs_n: Array,
-        base_pos_3: Array,
-        base_quat_4: Array,
-        lin_vel_obs_3: Array,
-        ang_vel_obs_3: Array,
-        lin_vel_cmd_x_1: Array,
-        lin_vel_cmd_y_1: Array,
-        ang_vel_cmd_z_1: Array,
-    ) -> distrax.Distribution:
-        obs_n = jnp.concatenate(
-            [
-                jnp.cos(timestep_1),  # 1
-                jnp.sin(timestep_1),  # 1
-                dh_joint_pos_n,  # NUM_JOINTS
-                dh_joint_vel_n,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
-                imu_acc_3,  # 3
-                imu_gyro_3,  # 3
-                act_frc_obs_n,  # 21
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
-            ],
-            axis=-1,
-        )
-
+    def forward(self, obs_n: Array) -> distrax.Distribution:
         prediction_n = self.mlp(obs_n)
 
         # Splits the predictions into means, standard deviations, and logits.
@@ -151,46 +112,8 @@ class DefaultHumanoidCritic(eqx.Module):
             activation=jax.nn.relu,
         )
 
-    def forward(
-        self,
-        timestep_1: Array,
-        dh_joint_pos_n: Array,
-        dh_joint_vel_n: Array,
-        com_inertia_n: Array,
-        com_vel_n: Array,
-        imu_acc_3: Array,
-        imu_gyro_3: Array,
-        act_frc_obs_n: Array,
-        base_pos_3: Array,
-        base_quat_4: Array,
-        lin_vel_obs_3: Array,
-        ang_vel_obs_3: Array,
-        lin_vel_cmd_x_1: Array,
-        lin_vel_cmd_y_1: Array,
-        ang_vel_cmd_z_1: Array,
-    ) -> Array:
-        x_n = jnp.concatenate(
-            [
-                jnp.cos(timestep_1),  # 1
-                jnp.sin(timestep_1),  # 1
-                dh_joint_pos_n,  # NUM_JOINTS
-                dh_joint_vel_n,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
-                imu_acc_3,  # 3
-                imu_gyro_3,  # 3
-                act_frc_obs_n,  # 21
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
-            ],
-            axis=-1,
-        )
-        return self.mlp(x_n)
+    def forward(self, obs_n: Array) -> Array:
+        return self.mlp(obs_n)
 
 
 class DefaultHumanoidModel(eqx.Module):
@@ -490,39 +413,45 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Distribution:
-        timestep_1 = observations["timestep_observation"]  # 1
-        dh_joint_pos_n = observations["joint_position_observation"]  # 26
-        dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
-        com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
-        com_vel_n = observations["center_of_mass_velocity_observation"]  # 96
-        imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]  # 3
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0  # 21
-        base_pos_3 = observations["base_position_observation"]  # 3
-        base_quat_4 = observations["base_orientation_observation"]  # 4
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]  # 3
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
-        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]  # 1
-        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]  # 1
-        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]  # 1
+        timestep_1 = observations["timestep_observation"]
+        dh_joint_pos_j = observations["joint_position_observation"]
+        dh_joint_vel_j = observations["joint_velocity_observation"]
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        act_frc_obs_n = observations["actuator_force_observation"]
+        base_pos_3 = observations["base_position_observation"]
+        base_quat_4 = observations["base_orientation_observation"]
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
+        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
+        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
 
-        return model.forward(
-            timestep_1=timestep_1,
-            dh_joint_pos_n=dh_joint_pos_n,
-            dh_joint_vel_n=dh_joint_vel_n / 10.0,
-            com_inertia_n=com_inertia_n,
-            com_vel_n=com_vel_n,
-            imu_acc_3=imu_acc_3 / 50.0,
-            imu_gyro_3=imu_gyro_3 / 3.0,
-            act_frc_obs_n=act_frc_obs_n,
-            base_pos_3=base_pos_3,
-            base_quat_4=base_quat_4,
-            lin_vel_obs_3=lin_vel_obs_3,
-            ang_vel_obs_3=ang_vel_obs_3,
-            lin_vel_cmd_x_1=lin_vel_cmd_x_1,
-            lin_vel_cmd_y_1=lin_vel_cmd_y_1,
-            ang_vel_cmd_z_1=ang_vel_cmd_z_1,
+        obs_n = jnp.concatenate(
+            [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
+                dh_joint_pos_j,  # NUM_JOINTS
+                dh_joint_vel_j / 10.0,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3 / 50.0,  # 3
+                imu_gyro_3 / 3.0,  # 3
+                act_frc_obs_n / 100.0,  # NUM_JOINTS
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                lin_vel_cmd_x_1,  # 1
+                lin_vel_cmd_y_1,  # 1
+                ang_vel_cmd_z_1,  # 1
+            ],
+            axis=-1,
         )
+
+        return model.forward(obs_n)
 
     def run_critic(
         self,
@@ -530,39 +459,45 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
-        timestep_1 = observations["timestep_observation"]  # 1
-        dh_joint_pos_n = observations["joint_position_observation"]  # 26
-        dh_joint_vel_n = observations["joint_velocity_observation"]  # 27
-        com_inertia_n = observations["center_of_mass_inertia_observation"]  # 160
-        com_vel_n = observations["center_of_mass_velocity_observation"]  # 96
-        imu_acc_3 = observations["sensor_observation_imu_acc"]  # 3
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]  # 3
-        act_frc_obs_n = observations["actuator_force_observation"] / 100.0  # 21
-        base_pos_3 = observations["base_position_observation"]  # 3
-        base_quat_4 = observations["base_orientation_observation"]  # 4
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]  # 3
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]  # 3
-        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]  # 1
-        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]  # 1
-        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]  # 1
+        timestep_1 = observations["timestep_observation"]
+        dh_joint_pos_j = observations["joint_position_observation"]
+        dh_joint_vel_j = observations["joint_velocity_observation"]
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        act_frc_obs_n = observations["actuator_force_observation"]
+        base_pos_3 = observations["base_position_observation"]
+        base_quat_4 = observations["base_orientation_observation"]
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
+        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
+        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
 
-        return model.forward(
-            timestep_1=timestep_1,
-            dh_joint_pos_n=dh_joint_pos_n,
-            dh_joint_vel_n=dh_joint_vel_n / 10.0,
-            com_inertia_n=com_inertia_n,
-            com_vel_n=com_vel_n,
-            imu_acc_3=imu_acc_3 / 50.0,
-            imu_gyro_3=imu_gyro_3 / 3.0,
-            act_frc_obs_n=act_frc_obs_n,
-            base_pos_3=base_pos_3,
-            base_quat_4=base_quat_4,
-            lin_vel_obs_3=lin_vel_obs_3,
-            ang_vel_obs_3=ang_vel_obs_3,
-            lin_vel_cmd_x_1=lin_vel_cmd_x_1,
-            lin_vel_cmd_y_1=lin_vel_cmd_y_1,
-            ang_vel_cmd_z_1=ang_vel_cmd_z_1,
+        obs_n = jnp.concatenate(
+            [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
+                dh_joint_pos_j,  # NUM_JOINTS
+                dh_joint_vel_j / 10.0,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3 / 50.0,  # 3
+                imu_gyro_3 / 3.0,  # 3
+                act_frc_obs_n / 100.0,  # NUM_JOINTS
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                lin_vel_cmd_x_1,  # 1
+                lin_vel_cmd_y_1,  # 1
+                ang_vel_cmd_z_1,  # 1
+            ],
+            axis=-1,
         )
+
+        return model.forward(obs_n)
 
     def get_ppo_variables(
         self,
