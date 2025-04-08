@@ -8,6 +8,7 @@ __all__ = [
     "IllegalContactTermination",
     "BadZTermination",
     "FastAccelerationTermination",
+    "FarFromOriginTermination",
 ]
 
 import functools
