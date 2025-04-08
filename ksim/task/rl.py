@@ -1116,10 +1116,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return trajectory, reward, next_rollout_variables
 
-    @xax.jit(
-        static_argnames=["self", "optimizer", "rollout_constants"],
-        donate_argnames=["rollout_env_vars", "rollout_ctrl_vars"],
-    )
+    @xax.jit(static_argnames=["self", "optimizer", "rollout_constants"])
     def _rl_train_loop_step(
         self,
         optimizer: optax.GradientTransformation,
@@ -1634,6 +1631,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             is_first_step = True
             last_log_time = time.time()
+
+            # Clean up variables which are not part of the control loop.
+            del model_arr, model_static, mjx_model, randomizations
 
             try:
                 while not self.is_training_over(state):
