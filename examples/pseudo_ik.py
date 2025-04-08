@@ -73,8 +73,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
-        xyz_upper_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
-        xyz_lower_target_3 = commands["cartesian_body_target_command_lower_arm_right"]
+        xyz_upper_target_3 = commands["upper_arm_right_cartesian_body_target_command"]
+        xyz_lower_target_3 = commands["lower_arm_right_cartesian_body_target_command"]
 
         obs_n = jnp.concatenate(
             [
@@ -102,8 +102,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
-        xyz_upper_target_3 = commands["cartesian_body_target_command_upper_arm_right"]
-        xyz_lower_target_3 = commands["cartesian_body_target_command_lower_arm_right"]
+        xyz_upper_target_3 = commands["upper_arm_right_cartesian_body_target_command"]
+        xyz_lower_target_3 = commands["lower_arm_right_cartesian_body_target_command"]
 
         obs_n = jnp.concatenate(
             [
