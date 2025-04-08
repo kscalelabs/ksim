@@ -338,10 +338,13 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
             transition_ppo_variables = ksim.PPOVariables(
                 log_probs=log_probs,
-                values=value,
+                values=value.squeeze(-1),
             )
 
-            return (actor_carry, critic_carry), transition_ppo_variables
+            initial_carry = self.get_initial_model_carry(rng)
+            next_carry = jax.tree.map(lambda x, y: jnp.where(transition.done, x, y), initial_carry, actor_critic_carry)
+
+            return next_carry, transition_ppo_variables
 
         next_model_carry, ppo_variables = jax.lax.scan(scan_fn, model_carry, trajectory)
 
