@@ -347,7 +347,7 @@ class CartesianBodyTargetCommand(Command):
         return [CartesianBodyTargetMarker.get(self.command_name, self.base_body_name, self.vis_radius, self.vis_color)]
 
     def get_name(self) -> str:
-        return f"{super().get_name()}_{self.base_body_name}"
+        return f"{super().get_name()}_{self.base_body_name}_{self.pivot_point}"
 
     @classmethod
     def create(
