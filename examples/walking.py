@@ -355,11 +355,15 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
-        switch_prob = self.config.ctrl_dt / 5
         return [
-            ksim.LinearVelocityCommand(index="x", range=(-1.0, 2.5), zero_prob=0.1, switch_prob=switch_prob),
-            ksim.LinearVelocityCommand(index="y", range=(-0.3, 0.3), zero_prob=0.9, switch_prob=switch_prob),
-            ksim.AngularVelocityCommand(index="z", scale=0.2, zero_prob=0.9, switch_prob=switch_prob),
+            ksim.VectorCommand(
+                ranges=[
+                    (-5.0, 5.0),  # x
+                    (-5.0, 5.0),  # y
+                ],
+                zero_prob=0.1,
+                switch_prob=self.config.ctrl_dt / 5,
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:

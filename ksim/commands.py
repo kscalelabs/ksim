@@ -2,10 +2,7 @@
 
 __all__ = [
     "Command",
-    "LinearVelocityCommand",
-    "AngularVelocityCommand",
-    "LinearVelocityStepCommand",
-    "AngularVelocityStepCommand",
+    "VectorCommand",
     "PositionCommand",
 ]
 
@@ -22,7 +19,6 @@ from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name
-from ksim.utils.types import CartesianIndex, dimension_index_validator
 from ksim.vis import Marker
 
 
@@ -91,17 +87,14 @@ class Command(ABC):
 
 
 @attrs.define(frozen=True)
-class LinearVelocityCommand(Command):
-    """Command to move the robot in a straight line.
+class VectorCommand(Command):
+    """Samples a set of scalars uniformly within some bounding box.
 
-    By convention, X is forward and Y is left. The switching probability is the
-    probability of resampling the command at each step. The zero probability is
-    the probability of the command being zero - this can be used to turn off
-    any command.
+    The commands update to some new commands with some probability. They can
+    be used to represent any vector, such as target position, velocity, etc.
     """
 
-    range: tuple[float, float] = attrs.field()
-    index: CartesianIndex | None = attrs.field(default=None, validator=dimension_index_validator)
+    ranges: list[tuple[float, float]] = attrs.field()
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
@@ -114,129 +107,10 @@ class LinearVelocityCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         rng, rng_zero = jax.random.split(rng)
-        minval, maxval = self.range
-        value = jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
+        ranges = jnp.array(self.ranges)  # (N, 2)
+        values = jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
         zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
-        return jnp.where(zero_mask, 0.0, value)
-
-    def __call__(
-        self,
-        prev_command: Array,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
-
-    def get_name(self) -> str:
-        return f"{super().get_name()}{'' if self.index is None else f'_{self.index}'}"
-
-
-@attrs.define(frozen=True)
-class AngularVelocityCommand(Command):
-    """Command to turn the robot."""
-
-    scale: float = attrs.field()
-    index: CartesianIndex | None = attrs.field(default=None, validator=dimension_index_validator)
-    zero_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
-
-    def initial_command(
-        self,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        """Returns (1,) array with angular velocity."""
-        rng_a, rng_b = jax.random.split(rng)
-        zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
-        cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
-        return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
-
-    def __call__(
-        self,
-        prev_command: Array,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
-
-    def get_name(self) -> str:
-        return f"{super().get_name()}{'' if self.index is None else f'_{self.index}'}"
-
-
-@attrs.define(frozen=True)
-class LinearVelocityStepCommand(Command):
-    """This is the same as LinearVelocityCommand, but it is discrete."""
-
-    x_range: tuple[float, float] = attrs.field()
-    y_range: tuple[float, float] = attrs.field()
-    x_fwd_prob: float = attrs.field()
-    y_fwd_prob: float = attrs.field()
-    x_zero_prob: float = attrs.field(default=0.0)
-    y_zero_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
-    vis_height: float = attrs.field(default=1.0)
-    vis_scale: float = attrs.field(default=0.05)
-
-    def initial_command(
-        self,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
-        (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
-        x = jax.random.bernoulli(rng_x, self.x_fwd_prob, (1,)) * (xmax - xmin) + xmin
-        y = jax.random.bernoulli(rng_y, self.y_fwd_prob, (1,)) * (ymax - ymin) + ymin
-        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
-        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
-        return jnp.concatenate(
-            [
-                jnp.where(x_zero_mask, 0.0, x),
-                jnp.where(y_zero_mask, 0.0, y),
-            ]
-        )
-
-    def __call__(
-        self,
-        prev_command: Array,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
-
-
-@attrs.define(frozen=True)
-class AngularVelocityStepCommand(Command):
-    """This is the same as AngularVelocityCommand, but it is discrete."""
-
-    scale: float = attrs.field()
-    prob: float = attrs.field(default=0.5)
-    zero_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
-
-    def initial_command(
-        self,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        cmd = (jax.random.bernoulli(rng_a, self.prob, (1,)) * 2 - 1) * self.scale
-        zero_mask = jax.random.bernoulli(rng_b, self.zero_prob)
-        return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
+        return jnp.where(zero_mask, 0.0, values)
 
     def __call__(
         self,
