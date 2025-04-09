@@ -361,9 +361,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.StayAliveReward(success_reward=1.0, scale=1.0),
-            ksim.AngularVelocityPenalty(index="x", scale=-0.01),
-            ksim.AngularVelocityPenalty(index="y", scale=-0.01),
+            ksim.StayAliveReward(scale=1.0),
             ksim.JoystickReward(
                 linear_velocity_clip_max=self.config.linear_velocity_clip_max,
                 angular_velocity_clip_max=self.config.angular_velocity_clip_max,
