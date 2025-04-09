@@ -1669,9 +1669,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         if self.config.profile_memory:
                             opt_state = jax.block_until_ready(opt_state)
-                            rollout_env_vars = jax.block_until_ready(rollout_env_vars)
-                            rollout_ctrl_vars = jax.block_until_ready(rollout_ctrl_vars)
-                            single_traj = jax.block_until_ready(single_traj)
+                            rollout_env_states = jax.block_until_ready(rollout_env_states)
+                            rollout_shared_state = jax.block_until_ready(rollout_shared_state)
+                            logged_traj = jax.block_until_ready(logged_traj)
                             jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
 
                     # Updates the state.
