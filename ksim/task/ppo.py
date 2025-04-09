@@ -19,8 +19,8 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.task.rl import RLConfig, RLTask, RolloutConstants, RolloutSharedState, RolloutEnvState
-from ksim.types import Rewards, LoggedTrajectory, Trajectory
+from ksim.task.rl import RLConfig, RLTask, RolloutConstants, RolloutEnvState, RolloutSharedState
+from ksim.types import LoggedTrajectory, Rewards, Trajectory
 
 
 @jax.tree_util.register_dataclass

@@ -60,12 +60,12 @@ from ksim.rewards import Reward
 from ksim.terminations import Termination
 from ksim.types import (
     Histogram,
+    LoggedTrajectory,
     Metrics,
     PhysicsData,
     PhysicsModel,
     PhysicsState,
     Rewards,
-    LoggedTrajectory,
     Trajectory,
 )
 from ksim.utils.mujoco import (
