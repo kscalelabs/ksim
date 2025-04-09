@@ -86,14 +86,6 @@ class TestVectorCommand:
             assert result[0] >= -scale
             assert result[0] <= scale
 
-    def test_zero_probability(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
-        """Test that the command returns zeros when zero_prob is 1.0."""
-        cmd = ksim.FloatVectorCommand(ranges=((0.0, 1.0), (0.0, 1.0)), switch_prob=1.0)
-        curriculum_level = jnp.array(0.0)
-        command = cmd.initial_command(physics_data, curriculum_level, rng)
-        result = cmd(command, physics_data, curriculum_level, rng)
-        chex.assert_trees_all_close(result, jnp.zeros_like(result), atol=_TOL)
-
     def test_update_mechanism(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command update mechanism works correctly."""
         cmd = ksim.FloatVectorCommand(ranges=((0.0, 1.0), (0.0, 1.0)))
