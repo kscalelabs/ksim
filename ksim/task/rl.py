@@ -1061,7 +1061,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return {
             "episode_length": trajectories.episode_length() * self.config.ctrl_dt,
             "mean_terminations": mean_terminations,
-            **{f"prct/{key}": (value.sum() / num_terminations) for key, value in kvs},
+            **{f"prct/{key}": ((value != 0).sum() / num_terminations) for key, value in kvs},
         }
 
     def get_markers(
