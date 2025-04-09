@@ -618,7 +618,8 @@ class JoystickReward(Reward):
                         ).mean(-1)
                         * self.norm_penalty,
                         # Stationary penalty.
-                        -xax.get_norm(
+                        1.0
+                        - xax.get_norm(
                             jnp.stack([xvel, yvel, zvel, dxvel, dyvel, dzvel], axis=-1),
                             self.norm,
                         ).mean(-1)
