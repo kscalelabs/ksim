@@ -103,7 +103,7 @@ def visualize_reference_gait(
     base_id: int,
     reference_gait: xax.FrozenDict[int, np.ndarray],
 ) -> None:
-    """Animates the model and adds real geoms to the scene for each joint position
+    """Animates the model and adds real geoms to the scene for each joint position.
 
     Args:
         model: The Mujoco model
