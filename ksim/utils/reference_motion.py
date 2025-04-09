@@ -1,4 +1,4 @@
-"""Reference gait utilities."""
+"""Reference motion utilities."""
 
 import time
 from dataclasses import dataclass
@@ -97,21 +97,21 @@ def get_body_ids(model: mujoco.MjModel, mappings: tuple[ReferenceMapping, ...]) 
     return tuple([get_body_id(model, mapping.mj_body_name) for mapping in mappings])
 
 
-def visualize_reference_gait(
+def visualize_reference_motion(
     model: mujoco.MjModel,
     *,
     base_id: int,
-    reference_gait: xax.FrozenDict[int, np.ndarray],
+    reference_motion: xax.FrozenDict[int, np.ndarray],
 ) -> None:
     """Animates the model and adds real geoms to the scene for each joint position.
 
     Args:
         model: The Mujoco model
         base_id: The ID of the Mujoco base
-        reference_gait: The reference gait (if root and reference_base_id are None)
+        reference_motion: The reference motion (if root and reference_base_id are None)
         display_names: Whether to display the names of the bodies / reference joints
     """
-    total_frames = list(reference_gait.values())[0].shape[0]
+    total_frames = list(reference_motion.values())[0].shape[0]
     data = mujoco.MjData(model)
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
@@ -123,7 +123,7 @@ def visualize_reference_gait(
             scene.ngeom = 0  # Clear previous geoms
 
             # Showing default humanoid geoms for reference
-            for body_id, reference_poses in reference_gait.items():
+            for body_id, reference_poses in reference_motion.items():
                 agent_local_pos = get_local_xpos(data.xpos, body_id, base_id)
                 agent_xpos = local_to_absolute(data.xpos, agent_local_pos, base_id)
                 assert isinstance(agent_xpos, np.ndarray)
@@ -149,7 +149,7 @@ def visualize_reference_gait(
             frame += 1
 
 
-def generate_reference_gait(
+def generate_reference_motion(
     mappings: tuple[ReferenceMapping, ...],
     model: mujoco.MjModel,
     root: BvhioJoint,
@@ -158,7 +158,7 @@ def generate_reference_gait(
     scaling_factor: float = 1.0,
     offset: np.ndarray | jax.Array | None = None,
 ) -> xax.FrozenDict[int, np.ndarray]:
-    """Generates the reference gait for the given model and data.
+    """Generates the reference motion for the given model and data.
 
     Args:
         mappings: The mappings of BVH joints to Mujoco bodies
@@ -166,8 +166,8 @@ def generate_reference_gait(
         root: The root of the BVH tree
         reference_base_id: The ID of the reference base (of the BVH file)
         root_callback: A callback to modify the root of the BVH tree
-        scaling_factor: The scaling factor for the reference gait
-        offset: The offset of the reference gait
+        scaling_factor: The scaling factor for the reference motion
+        offset: The offset of the reference motion
 
     Returns:
         A tuple of tuples, where each tuple contains a Mujoco body ID and the target positions.
@@ -177,7 +177,7 @@ def generate_reference_gait(
     body_ids = get_body_ids(model, mappings)
 
     total_frames = len(root.layout()[0][0].Keyframes)
-    reference_gait: xax.FrozenDict[int, np.ndarray] = xax.FrozenDict(
+    reference_motion: xax.FrozenDict[int, np.ndarray] = xax.FrozenDict(
         {body_id: np.zeros((total_frames, 3)) for body_id in body_ids}
     )
 
@@ -189,6 +189,6 @@ def generate_reference_gait(
 
         for body_id, reference_joint_id in zip(body_ids, reference_joint_ids):
             ref_pos = get_local_reference_pos(root, reference_joint_id, reference_base_id, scaling_factor)
-            reference_gait[body_id][frame] = ref_pos + offset
+            reference_motion[body_id][frame] = ref_pos + offset
 
-    return reference_gait
+    return reference_motion
