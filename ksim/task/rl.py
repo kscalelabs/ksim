@@ -890,6 +890,24 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return np.stack(frame_list, axis=0), fps
 
+    def _log_trajectory_thread(
+        self,
+        logged_traj: LoggedTrajectory,
+        markers: Collection[Marker],
+        mj_model: mujoco.MjModel,
+        mj_renderer: mujoco.Renderer,
+    ) -> None:
+        """Logs trajectory information in a separate thread."""
+        try:
+            self.log_logged_trajectory(
+                logged_traj=logged_traj,
+                markers=markers,
+                mj_model=mj_model,
+                mj_renderer=mj_renderer,
+            )
+        except Exception as e:
+            logger.error("Error in trajectory logging thread: %s", e)
+
     def log_logged_trajectory(
         self,
         logged_traj: LoggedTrajectory,
@@ -1664,12 +1682,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     # Only log trajectory information on validation steps.
                     if self.log_full_trajectory(state, is_first_step, last_log_time):
                         last_log_time = time.time()
-                        self.log_logged_trajectory(
-                            logged_traj=logged_traj,
-                            markers=markers,
-                            mj_model=mj_model,
-                            mj_renderer=mj_renderer,
-                        )
+
+                        # Start logging in a separate thread
+                        Thread(
+                            target=self._log_trajectory_thread,
+                            args=(logged_traj, markers, mj_model, mj_renderer),
+                            daemon=True,
+                        ).start()
 
                     if is_first_step:
                         is_first_step = False
