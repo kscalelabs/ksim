@@ -30,6 +30,7 @@ import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import matplotlib
 import matplotlib.pyplot as plt
 import mujoco
 import numpy as np
@@ -439,6 +440,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def __init__(self, config: Config) -> None:
         super().__init__(config)
 
+        # Using this Matplotlib backend since it is non-interactive.
+        matplotlib.use("agg")
+
         if self.config.num_envs % self.config.batch_size != 0:
             raise ValueError(
                 f"The number of environments ({self.config.num_envs}) must be divisible by "
@@ -783,7 +787,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
         else:
-            asyncio.run(self.run_training())
+            self.run_training()
 
     def log_train_metrics(self, metrics: Metrics) -> None:
         """Logs the train metrics.
