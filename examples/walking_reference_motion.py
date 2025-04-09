@@ -18,7 +18,7 @@ from scipy.spatial.transform import Rotation as R
 
 import ksim
 from ksim.types import PhysicsModel
-from ksim.utils.reference_gait import (
+from ksim.utils.reference_motion import (
     ReferenceMapping,
     generate_reference_gait,
     get_local_xpos,
