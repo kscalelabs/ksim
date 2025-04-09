@@ -26,7 +26,8 @@ __all__ = [
     "get_body_pose_by_name",
     "get_geom_pose_by_name",
     "get_site_pose_by_name",
-    "remove_joints_except",
+    "remove_mujoco_joints_except",
+    "add_new_mujoco_body",
 ]
 
 import logging
@@ -376,7 +377,7 @@ def get_site_pose_by_name(
     return get_site_pose(data, site_idx)
 
 
-def remove_joints_except(file_path: str, joint_names: list[str]) -> str:
+def remove_mujoco_joints_except(file_path: str, joint_names: list[str]) -> str:
     """Remove all joints and references unless listed."""
     tree = ET.parse(file_path)
     root = tree.getroot()
@@ -407,5 +408,64 @@ def remove_joints_except(file_path: str, joint_names: list[str]) -> str:
     dfs_remove_joints(root)
     dfs_remove_references(root)
 
-    # write it to a file
+    # Re-write to file.
+    return ET.tostring(root, encoding="utf-8").decode("utf-8")
+
+
+def add_new_mujoco_body(
+    file_path: str,
+    parent_body_name: str,
+    new_body_name: str,
+    pos: tuple[float, float, float],
+    quat: tuple[float, float, float, float],
+    add_visual: bool = True,
+    visual_geom_color: tuple[float, float, float, float] = (1, 0, 0, 1),
+    visual_geom_size: tuple[float, float, float] = (0.05, 0.05, 0.05),
+) -> str:
+    """Add a new body to the model."""
+    tree = ET.parse(file_path)
+    root = tree.getroot()
+
+    parent_body = None
+
+    def dfs_find_body(element: ET.Element) -> ET.Element | None:
+        for child in element:
+            if child.tag == "body" and child.get("name") == parent_body_name:
+                return child
+
+            found = dfs_find_body(child)
+            if found is not None:
+                return found
+        return None
+
+    parent_body = dfs_find_body(root)
+    if parent_body is None:
+        raise ValueError(f"Parent body '{parent_body_name}' not found in model")
+
+    # add the new body to the model
+    new_body = ET.Element(
+        "body",
+        {
+            "name": new_body_name,
+            "pos": f"{pos[0]} {pos[1]} {pos[2]}",
+            "quat": f"{quat[0]} {quat[1]} {quat[2]} {quat[3]}",
+        },
+    )
+
+    if add_visual:
+        visual_geom = ET.Element(
+            "geom",
+            {
+                "name": "visual",
+                "type": "sphere",
+                "size": f"{visual_geom_size[0]} {visual_geom_size[1]} {visual_geom_size[2]}",
+                "rgba": f"{visual_geom_color[0]} {visual_geom_color[1]} {visual_geom_color[2]} {visual_geom_color[3]}",
+                "pos": "0 0 0",
+                "quat": "1 0 0 0",
+            },
+        )
+        new_body.append(visual_geom)
+
+    parent_body.append(new_body)
+
     return ET.tostring(root, encoding="utf-8").decode("utf-8")

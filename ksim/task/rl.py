@@ -177,7 +177,7 @@ def get_terminations(
     termination_dict = {}
     for termination in terminations:
         termination_val = termination(physics_state.data, curriculum_level)
-        chex.assert_type(termination_val, bool)
+        chex.assert_type(termination_val, int)
         name = termination.termination_name
         termination_dict[name] = termination_val
     return xax.FrozenDict(termination_dict)
@@ -296,6 +296,10 @@ class RLConfig(xax.Config):
     epochs_per_log_step: int = xax.field(
         value=1,
         help="The number of epochs between logging steps.",
+    )
+    profile_memory: bool = xax.field(
+        value=False,
+        help="If true, profile memory usage.",
     )
 
     # Training parameters.
@@ -694,7 +698,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             terminations=rollout_constants.terminations,
             curriculum_level=rollout_env_state.curriculum_state.level,
         )
-        terminated = jax.tree.reduce(jnp.logical_or, list(terminations.values()))
+
+        # Convert ternary terminations to binary arrays.
+        terminated = jax.tree.reduce(jnp.logical_or, [t != 0 for t in terminations.values()])
+        success = jax.tree.reduce(jnp.logical_and, [t != -1 for t in terminations.values()]) & terminated
 
         # Combines all the relevant data into a single object. Lives up here to
         # avoid accidentally incorporating information it shouldn't access to.
@@ -708,6 +715,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             event_state=next_physics_state.event_states,
             action=action.action,
             done=terminated,
+            success=success,
             timestep=next_physics_state.data.time,
             termination_components=terminations,
             aux_outputs=action.aux_outputs,
@@ -1051,7 +1059,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         mean_terminations = trajectories.done.sum(-1).mean()
 
         return {
-            "episode_length": trajectories.episode_length(),
+            "episode_length": trajectories.episode_length() * self.config.ctrl_dt,
             "mean_terminations": mean_terminations,
             **{f"prct/{key}": (value.sum() / num_terminations) for key, value in kvs},
         }
@@ -1658,6 +1666,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             state=state,
                             rng=update_rng,
                         )
+
+                        if self.config.profile_memory:
+                            opt_state = jax.block_until_ready(opt_state)
+                            rollout_env_vars = jax.block_until_ready(rollout_env_vars)
+                            rollout_ctrl_vars = jax.block_until_ready(rollout_ctrl_vars)
+                            single_traj = jax.block_until_ready(single_traj)
+                            jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
 
                     # Updates the state.
                     state = state.replace(
