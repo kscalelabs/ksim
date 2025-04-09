@@ -5,14 +5,22 @@ from pathlib import Path
 from typing import Generic, TypeVar
 
 import attrs
-import bvhio
 import glm
 import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
 import xax
-from bvhio.lib.hierarchy import Joint as BvhioJoint
+
+try:
+    import bvhio
+    from bvhio.lib.hierarchy import Joint as BvhioJoint
+except ImportError as e:
+    raise ImportError(
+        "In order to use reference motion utilities, please install Bvhio, using 'pip install bvhio'."
+    ) from e
+
+
 from jaxtyping import Array, PRNGKeyArray
 from scipy.spatial.transform import Rotation as R
 
@@ -209,7 +217,7 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             valid_every_n_steps=10,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
