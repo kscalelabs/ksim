@@ -8,8 +8,6 @@ __all__ = [
     "LinearVelocityPenalty",
     "AngularVelocityPenalty",
     "JointVelocityPenalty",
-    "LinearVelocityTrackingReward",
-    "AngularVelocityTrackingReward",
     "BaseHeightReward",
     "BaseHeightRangeReward",
     "ActionSmoothnessPenalty",
@@ -23,6 +21,7 @@ __all__ = [
     "FeetFlatReward",
     "FeetNoContactReward",
     "PositionTrackingReward",
+    "JoystickReward",
 ]
 
 import functools
@@ -181,48 +180,6 @@ class JointVelocityPenalty(Reward):
             return xax.get_norm(joint_vel, self.norm).mean(axis=-1)
         else:
             return xax.get_norm(trajectory.qvel, self.norm).mean(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class LinearVelocityTrackingReward(Reward):
-    """Penalty for deviating from the linear velocity command."""
-
-    index: CartesianIndex = attrs.field(validator=dimension_index_validator)
-    command_name: str = attrs.field()
-    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    temp: float = attrs.field(default=1.0)
-    monotonic_fn: MonotonicFn = attrs.field(default="inv")
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        dim = cartesian_index_to_dim(self.index)
-        lin_vel_cmd = trajectory.command[self.command_name].squeeze(-1)
-        lin_vel = trajectory.qvel[..., dim]
-        norm = xax.get_norm(lin_vel - lin_vel_cmd, self.norm)
-        return norm_to_reward(norm, self.temp, self.monotonic_fn)
-
-    def get_name(self) -> str:
-        return f"{self.index}_{super().get_name()}"
-
-
-@attrs.define(frozen=True, kw_only=True)
-class AngularVelocityTrackingReward(Reward):
-    """Penalty for deviating from the angular velocity command."""
-
-    index: CartesianIndex = attrs.field(validator=dimension_index_validator)
-    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    command_name: str = attrs.field(default="angular_velocity_command")
-    temp: float = attrs.field(default=1.0)
-    monotonic_fn: MonotonicFn = attrs.field(default="inv")
-
-    def __call__(self, trajectory: Trajectory) -> Array:
-        dim = cartesian_index_to_dim(self.index) + 3
-        ang_vel_cmd = trajectory.command[self.command_name].squeeze(-1)
-        ang_vel = trajectory.qvel[..., dim]
-        norm = xax.get_norm(ang_vel - ang_vel_cmd, self.norm)
-        return norm_to_reward(norm, self.temp, self.monotonic_fn)
-
-    def get_name(self) -> str:
-        return f"{self.index}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -590,3 +547,78 @@ class PositionTrackingReward(Reward):
 
     def get_name(self) -> str:
         return f"{self.body_name}_{super().get_name()}"
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JoystickReward(Reward):
+    """Defines a reward for following joystick controls.
+
+    Command mapping:
+
+        0 = stand still
+        1 = walk forward
+        2 = walk backward
+        3 = turn left
+        4 = turn right
+        5 = jump
+    """
+
+    linear_velocity_clip_max: float = attrs.field(validator=attrs.validators.gt(0.0))
+    angular_velocity_clip_max: float = attrs.field(validator=attrs.validators.gt(0.0))
+    command_name: str = attrs.field(default="joystick_command")
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    norm_penalty: float = attrs.field(default=0.01)
+
+    def __call__(self, trajectory: Trajectory) -> Array:
+        command = trajectory.command[self.command_name]
+        chex.assert_shape(command, (..., 1))
+        command = command.squeeze(-1)
+
+        # Gets the velocity of the robot.
+        xvel = trajectory.qvel[..., 0]
+        yvel = trajectory.qvel[..., 1]
+        zvel = trajectory.qvel[..., 2]
+        dxvel = trajectory.qvel[..., 4]
+        dyvel = trajectory.qvel[..., 5]
+        dzvel = trajectory.qvel[..., 6]
+
+        return jnp.where(
+            command == 1,
+            # Forward
+            xvel.clip(max=self.linear_velocity_clip_max)
+            - xax.get_norm(jnp.stack([yvel, zvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(-1)
+            * self.norm_penalty,
+            jnp.where(
+                command == 2,
+                # Backward
+                -xvel.clip(max=self.linear_velocity_clip_max)
+                - xax.get_norm(jnp.stack([yvel, zvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(-1)
+                * self.norm_penalty,
+                jnp.where(
+                    command == 3,
+                    # Turn left
+                    dzvel.clip(max=self.angular_velocity_clip_max)
+                    - xax.get_norm(jnp.stack([xvel, yvel, zvel, dxvel, dyvel], axis=-1), self.norm).mean(-1)
+                    * self.norm_penalty,
+                    jnp.where(
+                        command == 4,
+                        # Turn right
+                        -dzvel.clip(max=self.angular_velocity_clip_max)
+                        - xax.get_norm(jnp.stack([xvel, yvel, zvel, dxvel, dyvel], axis=-1), self.norm).mean(-1)
+                        * self.norm_penalty,
+                        jnp.where(
+                            command == 5,
+                            # Jump (no clipping since gravity is applied)
+                            zvel
+                            - xax.get_norm(jnp.stack([xvel, yvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(-1)
+                            * self.norm_penalty,
+                            # Stationary penalty.
+                            -xax.get_norm(jnp.stack([xvel, yvel, zvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(
+                                -1
+                            )
+                            * self.norm_penalty,
+                        ),
+                    ),
+                ),
+            ),
+        )

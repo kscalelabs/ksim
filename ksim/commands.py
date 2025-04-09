@@ -2,7 +2,9 @@
 
 __all__ = [
     "Command",
-    "VectorCommand",
+    "FloatVectorCommand",
+    "IntVectorCommand",
+    "JoystickCommand",
     "PositionCommand",
 ]
 
@@ -87,18 +89,15 @@ class Command(ABC):
 
 
 @attrs.define(frozen=True)
-class VectorCommand(Command):
+class FloatVectorCommand(Command):
     """Samples a set of scalars uniformly within some bounding box.
 
     The commands update to some new commands with some probability. They can
     be used to represent any vector, such as target position, velocity, etc.
     """
 
-    ranges: list[tuple[float, float]] = attrs.field()
-    zero_prob: float = attrs.field(default=0.0)
+    ranges: tuple[tuple[float, float], ...] = attrs.field()
     switch_prob: float = attrs.field(default=0.0)
-    vis_height: float = attrs.field(default=1.0)
-    vis_scale: float = attrs.field(default=0.05)
 
     def initial_command(
         self,
@@ -106,11 +105,8 @@ class VectorCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        rng, rng_zero = jax.random.split(rng)
         ranges = jnp.array(self.ranges)  # (N, 2)
-        values = jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
-        zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
-        return jnp.where(zero_mask, 0.0, values)
+        return jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
 
     def __call__(
         self,
@@ -123,6 +119,52 @@ class VectorCommand(Command):
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
+
+
+@attrs.define(frozen=True)
+class IntVectorCommand(Command):
+    """Samples an integer vector uniformly within some bounding box."""
+
+    ranges: tuple[tuple[int, int], ...] = attrs.field()
+    switch_prob: float = attrs.field(default=0.0)
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        ranges = jnp.array(self.ranges)  # (N, 2)
+        return jax.random.randint(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
+
+@attrs.define(frozen=True)
+class JoystickCommand(IntVectorCommand):
+    """Provides joystick-like controls for the robot.
+
+    Command mapping:
+
+        0 = stand still
+        1 = walk forward
+        2 = walk backward
+        3 = turn left
+        4 = turn right
+        5 = jump
+    """
+
+    ranges: tuple[tuple[int, int], ...] = attrs.field(default=((0, 5),))
 
 
 @attrs.define(kw_only=True)
