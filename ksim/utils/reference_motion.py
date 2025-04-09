@@ -17,14 +17,6 @@ class ReferenceMapping:
     mj_body_name: str
 
 
-@dataclass
-class ReferenceGait:
-    body_id: int
-    """The order in which the body appears in a MuJoCo-like xpos struct."""
-    local_pos: np.ndarray
-    """The position of the joint relative to the torso or base."""
-
-
 def _add_reference_marker_to_scene(
     scene: mujoco.MjvScene,
     *,
@@ -117,6 +109,7 @@ def visualize_reference_gait(
         model: The Mujoco model
         base_id: The ID of the Mujoco base
         reference_gait: The reference gait (if root and reference_base_id are None)
+        display_names: Whether to display the names of the bodies / reference joints
     """
     total_frames = list(reference_gait.values())[0].shape[0]
     data = mujoco.MjData(model)
@@ -163,6 +156,7 @@ def generate_reference_gait(
     reference_base_id: int,
     root_callback: Callable[[BvhioJoint], None] | None,
     scaling_factor: float = 1.0,
+    offset: np.ndarray | jax.Array | None = None,
 ) -> xax.FrozenDict[int, np.ndarray]:
     """Generates the reference gait for the given model and data.
 
@@ -173,6 +167,7 @@ def generate_reference_gait(
         reference_base_id: The ID of the reference base (of the BVH file)
         root_callback: A callback to modify the root of the BVH tree
         scaling_factor: The scaling factor for the reference gait
+        offset: The offset of the reference gait
 
     Returns:
         A tuple of tuples, where each tuple contains a Mujoco body ID and the target positions.
@@ -194,6 +189,6 @@ def generate_reference_gait(
 
         for body_id, reference_joint_id in zip(body_ids, reference_joint_ids):
             ref_pos = get_local_reference_pos(root, reference_joint_id, reference_base_id, scaling_factor)
-            reference_gait[body_id][frame] = ref_pos
+            reference_gait[body_id][frame] = ref_pos + offset
 
     return reference_gait
