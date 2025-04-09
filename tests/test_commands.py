@@ -65,7 +65,7 @@ class TestVectorCommand:
 
     def test_command_shape(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command returns the correct shape."""
-        cmd = ksim.FloatVectorCommand(ranges=[(0.0, 1.0), (0.0, 1.0)])
+        cmd = ksim.FloatVectorCommand(ranges=((0.0, 1.0), (0.0, 1.0)))
         curriculum_level = jnp.array(0.0)
         initial_command = cmd.initial_command(physics_data, curriculum_level, rng)
         result = cmd(initial_command, physics_data, curriculum_level, rng)
@@ -74,7 +74,7 @@ class TestVectorCommand:
     def test_command_bounds(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command values are within the expected bounds."""
         scale = 2.0
-        cmd = ksim.FloatVectorCommand(ranges=[(0.0, scale), (0.0, scale)])
+        cmd = ksim.FloatVectorCommand(ranges=((0.0, scale), (0.0, scale)))
         curriculum_level = jnp.array(0.0)
 
         # Run multiple times to test bounds probabilistically
@@ -88,7 +88,7 @@ class TestVectorCommand:
 
     def test_zero_probability(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command returns zeros when zero_prob is 1.0."""
-        cmd = ksim.FloatVectorCommand(ranges=[(0.0, 1.0), (0.0, 1.0)], zero_prob=1.0)
+        cmd = ksim.FloatVectorCommand(ranges=((0.0, 1.0), (0.0, 1.0)), switch_prob=1.0)
         curriculum_level = jnp.array(0.0)
         command = cmd.initial_command(physics_data, curriculum_level, rng)
         result = cmd(command, physics_data, curriculum_level, rng)
@@ -96,7 +96,7 @@ class TestVectorCommand:
 
     def test_update_mechanism(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command update mechanism works correctly."""
-        cmd = ksim.FloatVectorCommand(ranges=[(0.0, 1.0), (0.0, 1.0)])
+        cmd = ksim.FloatVectorCommand(ranges=((0.0, 1.0), (0.0, 1.0)))
         curriculum_level = jnp.array(0.0)
         command = cmd.initial_command(physics_data, curriculum_level, rng)
 
