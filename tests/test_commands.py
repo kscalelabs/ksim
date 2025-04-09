@@ -50,8 +50,8 @@ def get_simple_model() -> mujoco.MjModel:
     return mujoco.MjData(mj_model)
 
 
-class TestLinearVelocityCommand:
-    """Tests for the LinearVelocityCommand class."""
+class TestVectorCommand:
+    """Tests for the VectorCommand class."""
 
     @pytest.fixture
     def rng(self) -> jax.Array:
@@ -65,16 +65,16 @@ class TestLinearVelocityCommand:
 
     def test_command_shape(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command returns the correct shape."""
-        cmd = ksim.LinearVelocityCommand(range=(-1.0, 1.0))
+        cmd = ksim.FloatVectorCommand(ranges=((0.0, 1.0), (0.0, 1.0)))
         curriculum_level = jnp.array(0.0)
         initial_command = cmd.initial_command(physics_data, curriculum_level, rng)
         result = cmd(initial_command, physics_data, curriculum_level, rng)
-        chex.assert_shape(result, (1,))
+        chex.assert_shape(result, (2,))
 
     def test_command_bounds(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command values are within the expected bounds."""
         scale = 2.0
-        cmd = ksim.LinearVelocityCommand(range=(-scale, scale))
+        cmd = ksim.FloatVectorCommand(ranges=((0.0, scale), (0.0, scale)))
         curriculum_level = jnp.array(0.0)
 
         # Run multiple times to test bounds probabilistically
@@ -86,79 +86,9 @@ class TestLinearVelocityCommand:
             assert result[0] >= -scale
             assert result[0] <= scale
 
-    def test_zero_probability(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
-        """Test that the command returns zeros when zero_prob is 1.0."""
-        cmd = ksim.LinearVelocityCommand(range=(-1.0, 1.0), zero_prob=1.0)
-        curriculum_level = jnp.array(0.0)
-        command = cmd.initial_command(physics_data, curriculum_level, rng)
-        result = cmd(command, physics_data, curriculum_level, rng)
-        chex.assert_trees_all_close(
-            result,
-            jnp.zeros_like(result),
-            atol=_TOL,
-        )
-
     def test_update_mechanism(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
         """Test that the command update mechanism works correctly."""
-        cmd = ksim.LinearVelocityCommand(range=(-1.0, 1.0))
-        curriculum_level = jnp.array(0.0)
-        command = cmd.initial_command(physics_data, curriculum_level, rng)
-
-        next_command = cmd(command, physics_data, curriculum_level, rng)
-        assert jnp.array_equal(next_command, command)
-
-
-class TestAngularVelocityCommand:
-    """Tests for the AngularVelocityCommand class."""
-
-    @pytest.fixture
-    def rng(self) -> jax.Array:
-        """Return a random number generator key."""
-        return jax.random.PRNGKey(0)
-
-    @pytest.fixture
-    def physics_data(self) -> ksim.PhysicsData:
-        """Get a simple model for testing."""
-        return get_simple_model()
-
-    def test_command_shape(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
-        """Test that the command returns the correct shape."""
-        cmd = ksim.AngularVelocityCommand(scale=1.0)
-        curriculum_level = jnp.array(0.0)
-        initial_command = cmd.initial_command(physics_data, curriculum_level, rng)
-        result = cmd(initial_command, physics_data, curriculum_level, rng)
-        chex.assert_shape(result, (1,))
-
-    def test_command_bounds(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
-        """Test that the command values are within the expected bounds."""
-        scale = 2.0
-        cmd = ksim.AngularVelocityCommand(scale=scale)
-        curriculum_level = jnp.array(0.0)
-
-        # Run multiple times to test bounds probabilistically
-        for i in range(100):
-            key = jax.random.fold_in(rng, i)
-            command = cmd.initial_command(physics_data, curriculum_level, key)
-            result = cmd(command, physics_data, curriculum_level, key)
-
-            assert result[0] >= -scale
-            assert result[0] <= scale
-
-    def test_zero_probability(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
-        """Test that the command returns zeros when zero_prob is 1.0."""
-        cmd = ksim.AngularVelocityCommand(scale=1.0, zero_prob=1.0)
-        curriculum_level = jnp.array(0.0)
-        command = cmd.initial_command(physics_data, curriculum_level, rng)
-        result = cmd(command, physics_data, curriculum_level, rng)
-        chex.assert_trees_all_close(
-            result,
-            jnp.zeros_like(result),
-            atol=_TOL,
-        )
-
-    def test_update_mechanism(self, rng: jax.Array, physics_data: ksim.PhysicsData) -> None:
-        """Test that the command update mechanism works correctly."""
-        cmd = ksim.AngularVelocityCommand(scale=1.0)
+        cmd = ksim.FloatVectorCommand(ranges=((0.0, 1.0), (0.0, 1.0)))
         curriculum_level = jnp.array(0.0)
         command = cmd.initial_command(physics_data, curriculum_level, rng)
 

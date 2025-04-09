@@ -21,7 +21,7 @@ import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -163,13 +163,13 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
     # Reward parameters.
-    use_naive_reward: bool = xax.field(
-        value=False,
-        help="Whether to use the naive reward.",
-    )
-    naive_clip_max: float = xax.field(
+    linear_velocity_clip_max: float = xax.field(
         value=5.0,
-        help="The maximum value for the naive reward.",
+        help="The maximum value for the linear velocity reward.",
+    )
+    angular_velocity_clip_max: float = xax.field(
+        value=math.pi / 2,
+        help="The maximum value for the angular velocity reward.",
     )
 
     # Optimizer parameters.
@@ -291,13 +291,13 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             joint_name_to_metadata=metadata,
         )
 
-    def get_randomization(self, physics_model: ksim.PhysicsModel) -> list[ksim.Randomization]:
+    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
-            ksim.StaticFrictionRandomization(),
-            ksim.ArmatureRandomization(),
-            ksim.MassMultiplicationRandomization.from_body_name(physics_model, "torso"),
-            ksim.JointDampingRandomization(),
-            ksim.JointZeroPositionRandomization(),
+            ksim.StaticFrictionRandomizer(),
+            ksim.ArmatureRandomizer(),
+            ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "torso"),
+            ksim.JointDampingRandomizer(),
+            ksim.JointZeroPositionRandomizer(),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
@@ -355,30 +355,19 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
-        switch_prob = self.config.ctrl_dt / 5
         return [
-            ksim.LinearVelocityCommand(index="x", range=(-1.0, 2.5), zero_prob=0.1, switch_prob=switch_prob),
-            ksim.LinearVelocityCommand(index="y", range=(-0.3, 0.3), zero_prob=0.9, switch_prob=switch_prob),
-            ksim.AngularVelocityCommand(index="z", scale=0.2, zero_prob=0.9, switch_prob=switch_prob),
+            ksim.JoystickCommand(switch_prob=self.config.ctrl_dt / 5),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        rewards: list[ksim.Reward] = [
-            ksim.StayAliveReward(success_reward=1.0, scale=1.0),
+        return [
+            ksim.StayAliveReward(scale=1.0),
+            ksim.JoystickReward(
+                linear_velocity_clip_max=self.config.linear_velocity_clip_max,
+                angular_velocity_clip_max=self.config.angular_velocity_clip_max,
+                scale=1.0,
+            ),
         ]
-
-        if self.config.use_naive_reward:
-            rewards += [
-                NaiveForwardReward(clip_max=self.config.naive_clip_max, scale=1.0),
-            ]
-        else:
-            rewards += [
-                ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
-                ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
-                ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
-            ]
-
-        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
@@ -406,7 +395,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             num_mixtures=self.config.num_mixtures,
         )
 
-    def get_initial_carry(self, rng: PRNGKeyArray) -> None:
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
         return None
 
     def run_actor(
@@ -427,9 +416,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
-        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
-        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
+        joystick_cmd_1 = commands["joystick_command"]
+        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
 
         obs_n = jnp.concatenate(
             [
@@ -446,9 +434,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
+                joystick_cmd_ohe_6,  # 6
             ],
             axis=-1,
         )
@@ -473,9 +459,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
-        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
-        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
+        joystick_cmd_1 = commands["joystick_command"]
+        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
 
         obs_n = jnp.concatenate(
             [
@@ -492,9 +477,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
+                joystick_cmd_ohe_6,  # 6
             ],
             axis=-1,
         )
@@ -504,20 +487,26 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_ppo_variables(
         self,
         model: DefaultHumanoidModel,
-        trajectories: ksim.Trajectory,
-        carry: None,
+        trajectory: ksim.Trajectory,
+        model_carry: None,
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, None]:
         # Vectorize over the time dimensions.
-        action_dist_j = self.run_actor(model.actor, trajectories.obs, trajectories.command)
-        log_probs_j = action_dist_j.log_prob(trajectories.action)
+        def get_log_prob(transition: ksim.Trajectory) -> Array:
+            action_dist_tj = self.run_actor(model.actor, transition.obs, transition.command)
+            log_probs_tj = action_dist_tj.log_prob(transition.action)
+            assert isinstance(log_probs_tj, Array)
+            return log_probs_tj
+
+        log_probs_tj = jax.vmap(get_log_prob)(trajectory)
+        assert isinstance(log_probs_tj, Array)
 
         # Vectorize over the time dimensions.
-        values_1 = self.run_critic(model.critic, trajectories.obs, trajectories.command)
+        values_tj = jax.vmap(self.run_critic, in_axes=(None, 0, 0))(model.critic, trajectory.obs, trajectory.command)
 
         ppo_variables = ksim.PPOVariables(
-            log_probs=log_probs_j,
-            values=values_1.squeeze(-1),
+            log_probs=log_probs_tj,
+            values=values_tj.squeeze(-1),
         )
 
         return ppo_variables, None
@@ -525,7 +514,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: DefaultHumanoidModel,
-        carry: None,
+        model_carry: None,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
@@ -549,7 +538,7 @@ if __name__ == "__main__":
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking num_envs=8 batch_size=4
+    #   python -m examples.walking num_envs=8 rollouts_per_batch=4
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             # Training parameters.
