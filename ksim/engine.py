@@ -27,7 +27,7 @@ from mujoco import mjx
 from ksim.actuators import Actuators
 from ksim.events import Event
 from ksim.resets import Reset
-from ksim.types import PhysicsModel, PhysicsState
+from ksim.types import PhysicsModel, PhysicsState, PlannerState
 
 logger = logging.getLogger(__name__)
 
@@ -98,10 +98,15 @@ class MjxEngine(PhysicsEngine):
         assert isinstance(mjx_data, mjx.Data)
         default_action = self.actuators.get_default_action(mjx_data)
 
+        initial_position = mjx_data.qpos[7:]
+        initial_velocity = jnp.zeros_like(initial_position)
+        default_planner = PlannerState(position=initial_position, velocity=initial_velocity)
+
         return PhysicsState(
             data=mjx_data,
             most_recent_action=default_action,
             event_states=self._reset_events(rng),
+            planner_state=default_planner,
         )
 
     def step(
@@ -127,10 +132,10 @@ class MjxEngine(PhysicsEngine):
         )
 
         def move_physics(
-            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree]],
+            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PlannerState],
             rng: PRNGKeyArray,
-        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree]], None]:
-            data, step_num, event_states = carry
+        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PlannerState], None]:
+            data, step_num, event_states, planner_state = carry
 
             # Randomly apply the action with some latency.
             ctrl = jax.lax.select(step_num >= latency_steps, action, prev_action)
@@ -149,19 +154,19 @@ class MjxEngine(PhysicsEngine):
                 new_event_states[event.event_name] = new_event_state
 
             rng, ctrl_rng = jax.random.split(rng)
-            torques = self.actuators.get_ctrl(ctrl, data, ctrl_rng)
+            new_planner_state, torques = self.actuators.get_ctrl(planner_state, ctrl, data, ctrl_rng)
             data_with_ctrl = data.replace(ctrl=torques)
             new_data = mjx.step(physics_model, data_with_ctrl)
-            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states)), None
+            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), new_planner_state), None
 
         # Runs the model for N steps.
-        (mjx_data, *_, event_info), _ = jax.lax.scan(
+        (mjx_data, *_, event_info, planner_state_final), _ = jax.lax.scan(
             move_physics,
-            (mjx_data, jnp.array(0.0), physics_state.event_states),
+            (mjx_data, jnp.array(0.0), physics_state.event_states, physics_state.planner_state),
             jax.random.split(rng, phys_steps_per_ctrl_steps),
         )
 
-        return PhysicsState(data=mjx_data, most_recent_action=action, event_states=xax.FrozenDict(event_info))
+        return PhysicsState(data=mjx_data, most_recent_action=action, event_states=xax.FrozenDict(event_info), planner_state=planner_state_final)
 
 
 class MujocoEngine(PhysicsEngine):
@@ -176,11 +181,15 @@ class MujocoEngine(PhysicsEngine):
 
         mujoco.mj_forward(physics_model, mujoco_data)
         default_action = self.actuators.get_default_action(mujoco_data)
+        initial_position = mujoco_data.qpos[7:]
+        initial_velocity = jnp.zeros_like(initial_position)
+        default_planner = PlannerState(position=initial_position, velocity=initial_velocity)
 
         return PhysicsState(
             data=mujoco_data,
             most_recent_action=default_action,
             event_states=self._reset_events(rng),
+            planner_state=default_planner,
         )
 
     def step(
@@ -229,11 +238,11 @@ class MujocoEngine(PhysicsEngine):
                 new_event_states[event.event_name] = new_event_state
 
             event_states = xax.FrozenDict(new_event_states)
-            torques = self.actuators.get_ctrl(ctrl, mujoco_data, action_rng)
+            new_planner_state, torques = self.actuators.get_ctrl(physics_state.planner_state, ctrl, mujoco_data, action_rng)
             mujoco_data.ctrl[:] = torques
             mujoco.mj_step(physics_model, mujoco_data)
 
-        return PhysicsState(data=mujoco_data, most_recent_action=action, event_states=event_states)
+        return PhysicsState(data=mujoco_data, most_recent_action=action, event_states=event_states, planner_state=new_planner_state)
 
 
 def get_physics_engine(
