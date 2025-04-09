@@ -78,11 +78,6 @@ class HumanoidWalkingReferenceMotionTaskConfig(HumanoidWalkingTaskConfig):
         value=False,
         help="Whether to visualize the reference motion.",
     )
-    # TODO: remove
-    device: str = xax.field(
-        value="cpu",
-        help="The device to run the task on.",
-    )
 
 
 HUMANOID_REFERENCE_MAPPINGS = (
@@ -235,5 +230,6 @@ if __name__ == "__main__":
             bvh_scaling_factor=1 / 100,
             mj_base_name="pelvis",
             reference_base_name="CC_Base_Pelvis",
+            visualize_reference_motion=True,
         ),
     )

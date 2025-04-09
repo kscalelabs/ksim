@@ -156,7 +156,7 @@ def generate_reference_motion(
     reference_base_id: int,
     root_callback: Callable[[BvhioJoint], None] | None,
     scaling_factor: float = 1.0,
-    offset: np.ndarray | jax.Array | None = None,
+    offset: np.ndarray | jax.Array = np.array([0.0, 0.0, 0.0]),
 ) -> xax.FrozenDict[int, np.ndarray]:
     """Generates the reference motion for the given model and data.
 
