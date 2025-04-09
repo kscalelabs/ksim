@@ -161,10 +161,9 @@ class JoystickCommand(IntVectorCommand):
         2 = walk backward
         3 = turn left
         4 = turn right
-        5 = jump
     """
 
-    ranges: tuple[tuple[int, int], ...] = attrs.field(default=((0, 5),))
+    ranges: tuple[tuple[int, int], ...] = attrs.field(default=((0, 4),))
 
 
 @attrs.define(kw_only=True)

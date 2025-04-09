@@ -560,7 +560,6 @@ class JoystickReward(Reward):
         2 = walk backward
         3 = turn left
         4 = turn right
-        5 = jump
     """
 
     linear_velocity_clip_max: float = attrs.field(validator=attrs.validators.gt(0.0))
@@ -618,22 +617,12 @@ class JoystickReward(Reward):
                             self.norm,
                         ).mean(-1)
                         * self.norm_penalty,
-                        jnp.where(
-                            command == 5,
-                            # Jump (no clipping since gravity is applied)
-                            zvel
-                            - xax.get_norm(
-                                jnp.stack([xvel, yvel, dxvel, dyvel, dzvel], axis=-1),
-                                self.norm,
-                            ).mean(-1)
-                            * self.norm_penalty,
-                            # Stationary penalty.
-                            -xax.get_norm(
-                                jnp.stack([xvel, yvel, zvel, dxvel, dyvel, dzvel], axis=-1),
-                                self.norm,
-                            ).mean(-1)
-                            * self.norm_penalty,
-                        ),
+                        # Stationary penalty.
+                        -xax.get_norm(
+                            jnp.stack([xvel, yvel, zvel, dxvel, dyvel, dzvel], axis=-1),
+                            self.norm,
+                        ).mean(-1)
+                        * self.norm_penalty,
                     ),
                 ),
             ),
