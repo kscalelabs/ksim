@@ -21,7 +21,7 @@ import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 1 + 1 + 1
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -163,13 +163,13 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
     # Reward parameters.
-    use_naive_reward: bool = xax.field(
-        value=False,
-        help="Whether to use the naive reward.",
-    )
-    naive_clip_max: float = xax.field(
+    linear_velocity_clip_max: float = xax.field(
         value=5.0,
-        help="The maximum value for the naive reward.",
+        help="The maximum value for the linear velocity reward.",
+    )
+    angular_velocity_clip_max: float = xax.field(
+        value=math.pi / 2,
+        help="The maximum value for the angular velocity reward.",
     )
 
     # Optimizer parameters.
@@ -355,30 +355,19 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
-        switch_prob = self.config.ctrl_dt / 5
         return [
-            ksim.LinearVelocityCommand(index="x", range=(-1.0, 2.5), zero_prob=0.1, switch_prob=switch_prob),
-            ksim.LinearVelocityCommand(index="y", range=(-0.3, 0.3), zero_prob=0.9, switch_prob=switch_prob),
-            ksim.AngularVelocityCommand(index="z", scale=0.2, zero_prob=0.9, switch_prob=switch_prob),
+            ksim.JoystickCommand(switch_prob=self.config.ctrl_dt / 5),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        rewards: list[ksim.Reward] = [
-            ksim.StayAliveReward(success_reward=1.0, scale=1.0),
+        return [
+            ksim.StayAliveReward(scale=1.0),
+            ksim.JoystickReward(
+                linear_velocity_clip_max=self.config.linear_velocity_clip_max,
+                angular_velocity_clip_max=self.config.angular_velocity_clip_max,
+                scale=1.0,
+            ),
         ]
-
-        if self.config.use_naive_reward:
-            rewards += [
-                NaiveForwardReward(clip_max=self.config.naive_clip_max, scale=1.0),
-            ]
-        else:
-            rewards += [
-                ksim.LinearVelocityTrackingReward(index="x", command_name="linear_velocity_command_x", scale=1.0),
-                ksim.LinearVelocityTrackingReward(index="y", command_name="linear_velocity_command_y", scale=0.1),
-                ksim.AngularVelocityTrackingReward(index="z", command_name="angular_velocity_command_z", scale=0.01),
-            ]
-
-        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
@@ -427,9 +416,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
-        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
-        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
+        joystick_cmd_1 = commands["joystick_command"]
+        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
 
         obs_n = jnp.concatenate(
             [
@@ -446,9 +434,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
+                joystick_cmd_ohe_6,  # 6
             ],
             axis=-1,
         )
@@ -473,9 +459,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        lin_vel_cmd_x_1 = commands["linear_velocity_command_x"]
-        lin_vel_cmd_y_1 = commands["linear_velocity_command_y"]
-        ang_vel_cmd_z_1 = commands["angular_velocity_command_z"]
+        joystick_cmd_1 = commands["joystick_command"]
+        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
 
         obs_n = jnp.concatenate(
             [
@@ -492,9 +477,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                lin_vel_cmd_x_1,  # 1
-                lin_vel_cmd_y_1,  # 1
-                ang_vel_cmd_z_1,  # 1
+                joystick_cmd_ohe_6,  # 6
             ],
             axis=-1,
         )
@@ -564,7 +547,6 @@ if __name__ == "__main__":
             num_passes=4,
             epochs_per_log_step=1,
             rollout_length_seconds=10.0,
-            use_naive_reward=True,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
