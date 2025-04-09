@@ -612,15 +612,17 @@ class JoystickReward(Reward):
             penalty = xax.get_norm(jnp.stack([xvel, yvel, zvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(-1)
             return -penalty * self.norm_penalty
 
-        # Use jax.lax.switch to select the appropriate reward function
-        return jax.lax.switch(
-            command,
-            [
-                stationary_reward,  # command 0
-                forward_reward,  # command 1
-                backward_reward,  # command 2
-                turn_left_reward,  # command 3
-                turn_right_reward,  # command 4
-                jump_reward,  # command 5
-            ],
-        )()
+        def reward(command: Array) -> Array:
+            return jax.lax.switch(
+                command,
+                [
+                    stationary_reward,
+                    forward_reward,
+                    backward_reward,
+                    turn_left_reward,
+                    turn_right_reward,
+                    jump_reward,
+                ],
+            )()
+
+        return jax.vmap(reward)(command)
