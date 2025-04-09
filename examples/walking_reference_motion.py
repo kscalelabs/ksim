@@ -5,14 +5,22 @@ from pathlib import Path
 from typing import Generic, TypeVar
 
 import attrs
-import bvhio
 import glm
 import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
 import xax
-from bvhio.lib.hierarchy import Joint as BvhioJoint
+
+try:
+    import bvhio
+    from bvhio.lib.hierarchy import Joint as BvhioJoint
+except ImportError as e:
+    raise ImportError(
+        "In order to use reference motion utilities, please install Bvhio, using 'pip install bvhio'."
+    ) from e
+
+
 from jaxtyping import Array, PRNGKeyArray
 from scipy.spatial.transform import Rotation as R
 
@@ -20,10 +28,10 @@ import ksim
 from ksim.types import PhysicsModel
 from ksim.utils.reference_motion import (
     ReferenceMapping,
-    generate_reference_gait,
+    generate_reference_motion,
     get_local_xpos,
     get_reference_joint_id,
-    visualize_reference_gait,
+    visualize_reference_motion,
 )
 
 from .walking import (
@@ -40,12 +48,12 @@ class NaiveVelocityReward(ksim.Reward):
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class GaitMatchingAuxOutputs:
+class MotionAuxOutputs:
     tracked_pos: xax.FrozenDict[int, Array]
 
 
 @dataclass
-class HumanoidWalkingGaitMatchingTaskConfig(HumanoidWalkingTaskConfig):
+class HumanoidWalkingReferenceMotionTaskConfig(HumanoidWalkingTaskConfig):
     bvh_path: str = xax.field(
         value=str(Path(__file__).parent / "data" / "walk-relaxed_actorcore.bvh"),
         help="The path to the BVH file.",
@@ -66,14 +74,9 @@ class HumanoidWalkingGaitMatchingTaskConfig(HumanoidWalkingTaskConfig):
         value="CC_Base_Pelvis",
         help="The BVH joint name of the base of the humanoid",
     )
-    visualize_reference_gait: bool = xax.field(
+    visualize_reference_motion: bool = xax.field(
         value=False,
-        help="Whether to visualize the reference gait.",
-    )
-    # TODO: remove
-    device: str = xax.field(
-        value="cpu",
-        help="The device to run the task on.",
+        help="Whether to visualize the reference motion.",
     )
 
 
@@ -93,25 +96,25 @@ HUMANOID_REFERENCE_MAPPINGS = (
 )
 
 
-Config = TypeVar("Config", bound=HumanoidWalkingGaitMatchingTaskConfig)
+Config = TypeVar("Config", bound=HumanoidWalkingReferenceMotionTaskConfig)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class GaitMatchingReward(ksim.Reward):
-    reference_gait: xax.FrozenDict[int, xax.HashableArray]
+class ReferenceMotionReward(ksim.Reward):
+    reference_motion: xax.FrozenDict[int, xax.HashableArray]
     ctrl_dt: float
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
 
     @property
     def num_frames(self) -> int:
-        return list(self.reference_gait.values())[0].array.shape[0]
+        return list(self.reference_motion.values())[0].array.shape[0]
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        assert isinstance(trajectory.aux_outputs, GaitMatchingAuxOutputs)
-        reference_gait: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_gait)
+        assert isinstance(trajectory.aux_outputs, MotionAuxOutputs)
+        reference_motion: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_motion)
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
-        target_pos = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_gait)
+        target_pos = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
         tracked_pos = trajectory.aux_outputs.tracked_pos
         error = jax.tree.map(lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos, tracked_pos)
         mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
@@ -120,7 +123,7 @@ class GaitMatchingReward(ksim.Reward):
         return reward
 
 
-class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Config]):
+class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
             ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, dropoff=10.0, scale=0.5),
@@ -128,7 +131,7 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
             ksim.AngularVelocityPenalty(index="x", scale=-0.01),
             ksim.AngularVelocityPenalty(index="y", scale=-0.01),
             NaiveVelocityReward(scale=0.1),
-            GaitMatchingReward(reference_gait=self.reference_gait, ctrl_dt=self.config.ctrl_dt, scale=0.1),
+            ReferenceMotionReward(reference_motion=self.reference_motion, ctrl_dt=self.config.ctrl_dt, scale=0.1),
         ]
 
         return rewards
@@ -153,7 +156,7 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
 
         return ksim.Action(
             action=action_n.action,
-            aux_outputs=GaitMatchingAuxOutputs(
+            aux_outputs=MotionAuxOutputs(
                 tracked_pos=xax.FrozenDict(tracked_positions),
             ),
         )
@@ -169,7 +172,7 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
             quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
             root.applyRotation(glm.quat(*quat), bake=True)
 
-        np_reference_gait = generate_reference_gait(
+        np_reference_motion = generate_reference_motion(
             mappings=HUMANOID_REFERENCE_MAPPINGS,
             model=mj_model,
             root=root,
@@ -177,16 +180,16 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
             root_callback=rotation_callback,
             scaling_factor=self.config.bvh_scaling_factor,
         )
-        self.reference_gait: xax.FrozenDict[int, xax.HashableArray] = jax.tree.map(
-            lambda x: xax.hashable_array(jnp.array(x)), np_reference_gait
+        self.reference_motion: xax.FrozenDict[int, xax.HashableArray] = jax.tree.map(
+            lambda x: xax.hashable_array(jnp.array(x)), np_reference_motion
         )
-        self.tracked_body_ids = tuple(self.reference_gait.keys())
+        self.tracked_body_ids = tuple(self.reference_motion.keys())
 
-        if self.config.visualize_reference_gait:
-            visualize_reference_gait(
+        if self.config.visualize_reference_motion:
+            visualize_reference_motion(
                 mj_model,
                 base_id=self.mj_base_id,
-                reference_gait=np_reference_gait,
+                reference_motion=np_reference_motion,
             )
         else:
             super().run()
@@ -194,22 +197,22 @@ class HumanoidWalkingGaitMatchingTask(HumanoidWalkingTask[Config], Generic[Confi
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.walking_gait_matching
+    #   python -m examples.walking_reference_motion
     # To visualize the environment, use the following command:
-    #   python -m examples.walking_gait_matching run_environment=True
+    #   python -m examples.walking_reference_motion run_environment=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking_gait_matching num_envs=8 num_batches=2
-    HumanoidWalkingGaitMatchingTask.launch(
-        HumanoidWalkingGaitMatchingTaskConfig(
+    #   python -m examples.walking_reference_motion num_envs=8 num_batches=2
+    HumanoidWalkingReferenceMotionTask.launch(
+        HumanoidWalkingReferenceMotionTaskConfig(
             num_envs=2048,
             batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
             valid_every_n_steps=10,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
@@ -227,5 +230,6 @@ if __name__ == "__main__":
             bvh_scaling_factor=1 / 100,
             mj_base_name="pelvis",
             reference_base_name="CC_Base_Pelvis",
+            visualize_reference_motion=True,
         ),
     )
