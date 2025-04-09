@@ -586,36 +586,52 @@ class JoystickReward(Reward):
             command == 1,
             # Forward
             xvel.clip(max=self.linear_velocity_clip_max)
-            - xax.get_norm(jnp.stack([yvel, zvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(-1)
+            - xax.get_norm(
+                jnp.stack([yvel, zvel, dxvel, dyvel, dzvel], axis=-1),
+                self.norm,
+            ).mean(-1)
             * self.norm_penalty,
             jnp.where(
                 command == 2,
                 # Backward
-                -xvel.clip(max=self.linear_velocity_clip_max)
-                - xax.get_norm(jnp.stack([yvel, zvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(-1)
+                (-xvel).clip(max=self.linear_velocity_clip_max)
+                - xax.get_norm(
+                    jnp.stack([yvel, zvel, dxvel, dyvel, dzvel], axis=-1),
+                    self.norm,
+                ).mean(-1)
                 * self.norm_penalty,
                 jnp.where(
                     command == 3,
                     # Turn left
                     dzvel.clip(max=self.angular_velocity_clip_max)
-                    - xax.get_norm(jnp.stack([xvel, yvel, zvel, dxvel, dyvel], axis=-1), self.norm).mean(-1)
+                    - xax.get_norm(
+                        jnp.stack([xvel, yvel, zvel, dxvel, dyvel], axis=-1),
+                        self.norm,
+                    ).mean(-1)
                     * self.norm_penalty,
                     jnp.where(
                         command == 4,
                         # Turn right
-                        -dzvel.clip(max=self.angular_velocity_clip_max)
-                        - xax.get_norm(jnp.stack([xvel, yvel, zvel, dxvel, dyvel], axis=-1), self.norm).mean(-1)
+                        (-dzvel).clip(max=self.angular_velocity_clip_max)
+                        - xax.get_norm(
+                            jnp.stack([xvel, yvel, zvel, dxvel, dyvel], axis=-1),
+                            self.norm,
+                        ).mean(-1)
                         * self.norm_penalty,
                         jnp.where(
                             command == 5,
                             # Jump (no clipping since gravity is applied)
                             zvel
-                            - xax.get_norm(jnp.stack([xvel, yvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(-1)
+                            - xax.get_norm(
+                                jnp.stack([xvel, yvel, dxvel, dyvel, dzvel], axis=-1),
+                                self.norm,
+                            ).mean(-1)
                             * self.norm_penalty,
                             # Stationary penalty.
-                            -xax.get_norm(jnp.stack([xvel, yvel, zvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(
-                                -1
-                            )
+                            -xax.get_norm(
+                                jnp.stack([xvel, yvel, zvel, dxvel, dyvel, dzvel], axis=-1),
+                                self.norm,
+                            ).mean(-1)
                             * self.norm_penalty,
                         ),
                     ),
