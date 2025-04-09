@@ -310,6 +310,10 @@ class RLConfig(xax.Config):
         value=MISSING,
         help="The number of seconds to rollout each environment during training.",
     )
+    use_on_policy_model_carry: bool = xax.field(
+        value=False,
+        help="Use the previous rollout's model carry as the initial carry for the next rollout.",
+    )
 
     # Override validation parameters.
     log_full_trajectory_on_first_step: bool = xax.field(
@@ -1165,7 +1169,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Constructs the final rollout variables.
             next_rollout_env_states = RolloutEnvState(
-                model_carry=next_model_carry,
+                model_carry=(
+                    rollout_env_states.model_carry if self.config.use_on_policy_model_carry else next_model_carry
+                ),
                 commands=next_rollout_env_states.commands,
                 physics_state=next_rollout_env_states.physics_state,
                 curriculum_state=curriculum_state,

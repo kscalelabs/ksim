@@ -321,7 +321,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             actor_critic_carry: tuple[Array, Array], transition: ksim.Trajectory
         ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
             actor_carry, critic_carry = actor_critic_carry
-            actor_dist, actor_carry = self.run_actor(
+            actor_dist, next_actor_carry = self.run_actor(
                 model=model.actor,
                 observations=transition.obs,
                 commands=transition.command,
@@ -329,7 +329,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             )
             log_probs = actor_dist.log_prob(transition.action)
             assert isinstance(log_probs, Array)
-            value, critic_carry = self.run_critic(
+            value, next_critic_carry = self.run_critic(
                 model=model.critic,
                 observations=transition.obs,
                 commands=transition.command,
@@ -342,7 +342,9 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             )
 
             initial_carry = self.get_initial_model_carry(rng)
-            next_carry = jax.tree.map(lambda x, y: jnp.where(transition.done, x, y), initial_carry, actor_critic_carry)
+            next_carry = jax.tree.map(
+                lambda x, y: jnp.where(transition.done, x, y), initial_carry, (next_actor_carry, next_critic_carry)
+            )
 
             return next_carry, transition_ppo_variables
 
