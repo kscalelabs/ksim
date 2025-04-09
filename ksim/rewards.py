@@ -582,59 +582,45 @@ class JoystickReward(Reward):
         dyvel = trajectory.qvel[..., 5]
         dzvel = trajectory.qvel[..., 6]
 
-        return jnp.where(
-            command == 1,
-            # Forward
-            xvel.clip(max=self.linear_velocity_clip_max)
-            - xax.get_norm(
-                jnp.stack([yvel, zvel, dxvel, dyvel, dzvel], axis=-1),
-                self.norm,
-            ).mean(-1)
-            * self.norm_penalty,
-            jnp.where(
-                command == 2,
-                # Backward
-                (-xvel).clip(max=self.linear_velocity_clip_max)
-                - xax.get_norm(
-                    jnp.stack([yvel, zvel, dxvel, dyvel, dzvel], axis=-1),
-                    self.norm,
-                ).mean(-1)
-                * self.norm_penalty,
-                jnp.where(
-                    command == 3,
-                    # Turn left
-                    dzvel.clip(max=self.angular_velocity_clip_max)
-                    - xax.get_norm(
-                        jnp.stack([xvel, yvel, zvel, dxvel, dyvel], axis=-1),
-                        self.norm,
-                    ).mean(-1)
-                    * self.norm_penalty,
-                    jnp.where(
-                        command == 4,
-                        # Turn right
-                        (-dzvel).clip(max=self.angular_velocity_clip_max)
-                        - xax.get_norm(
-                            jnp.stack([xvel, yvel, zvel, dxvel, dyvel], axis=-1),
-                            self.norm,
-                        ).mean(-1)
-                        * self.norm_penalty,
-                        jnp.where(
-                            command == 5,
-                            # Jump (no clipping since gravity is applied)
-                            zvel
-                            - xax.get_norm(
-                                jnp.stack([xvel, yvel, dxvel, dyvel, dzvel], axis=-1),
-                                self.norm,
-                            ).mean(-1)
-                            * self.norm_penalty,
-                            # Stationary penalty.
-                            -xax.get_norm(
-                                jnp.stack([xvel, yvel, zvel, dxvel, dyvel, dzvel], axis=-1),
-                                self.norm,
-                            ).mean(-1)
-                            * self.norm_penalty,
-                        ),
-                    ),
-                ),
-            ),
-        )
+        # Define command-specific reward functions
+        def forward_reward() -> Array:
+            reward = xvel.clip(max=self.linear_velocity_clip_max)
+            penalty = xax.get_norm(jnp.stack([yvel, zvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(-1)
+            return reward - penalty * self.norm_penalty
+
+        def backward_reward() -> Array:
+            reward = (-xvel).clip(max=self.linear_velocity_clip_max)
+            penalty = xax.get_norm(jnp.stack([yvel, zvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(-1)
+            return reward - penalty * self.norm_penalty
+
+        def turn_left_reward() -> Array:
+            reward = dzvel.clip(max=self.angular_velocity_clip_max)
+            penalty = xax.get_norm(jnp.stack([xvel, yvel, zvel, dxvel, dyvel], axis=-1), self.norm).mean(-1)
+            return reward - penalty * self.norm_penalty
+
+        def turn_right_reward() -> Array:
+            reward = (-dzvel).clip(max=self.angular_velocity_clip_max)
+            penalty = xax.get_norm(jnp.stack([xvel, yvel, zvel, dxvel, dyvel], axis=-1), self.norm).mean(-1)
+            return reward - penalty * self.norm_penalty
+
+        def jump_reward() -> Array:
+            reward = zvel  # No clipping, because gravity clips naturally.
+            penalty = xax.get_norm(jnp.stack([xvel, yvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(-1)
+            return reward - penalty * self.norm_penalty
+
+        def stationary_reward() -> Array:
+            penalty = xax.get_norm(jnp.stack([xvel, yvel, zvel, dxvel, dyvel, dzvel], axis=-1), self.norm).mean(-1)
+            return -penalty * self.norm_penalty
+
+        # Use jax.lax.switch to select the appropriate reward function
+        return jax.lax.switch(
+            command,
+            [
+                stationary_reward,  # command 0
+                forward_reward,  # command 1
+                backward_reward,  # command 2
+                turn_left_reward,  # command 3
+                turn_right_reward,  # command 4
+                jump_reward,  # command 5
+            ],
+        )()
