@@ -322,7 +322,7 @@ class RLConfig(xax.Config):
         help="Log the full trajectory every N steps.",
     )
     log_full_trajectory_every_n_seconds: float | None = xax.field(
-        60.0,
+        60.0 * 2.5,
         help="Log the full trajectory every N seconds.",
     )
 
