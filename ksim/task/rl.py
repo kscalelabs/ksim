@@ -310,10 +310,6 @@ class RLConfig(xax.Config):
         value=MISSING,
         help="The number of seconds to rollout each environment during training.",
     )
-    use_on_policy_model_carry: bool = xax.field(
-        value=False,
-        help="Use the previous rollout's model carry as the initial carry for the next rollout.",
-    )
 
     # Override validation parameters.
     log_full_trajectory_on_first_step: bool = xax.field(
@@ -1159,6 +1155,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
                 curriculum_level=rollout_env_states.curriculum_state.level,
             )
+
             # Steps the curriculum.
             curriculum_state = rollout_constants.curriculum(
                 trajectory=trajectories,
@@ -1169,9 +1166,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Constructs the final rollout variables.
             next_rollout_env_states = RolloutEnvState(
-                model_carry=(
-                    rollout_env_states.model_carry if self.config.use_on_policy_model_carry else next_model_carry
-                ),
+                # For the next rollout, we use the model carry from the output
+                # of the model update instead of the output of the rollout.
+                # This was shown to work slightly better in practice - for an
+                # RNN model, for example, after updating the model, the model
+                # carry will be new and the previous rollout's model carry will
+                # be incorrect.
+                model_carry=next_model_carry,
                 commands=next_rollout_env_states.commands,
                 physics_state=next_rollout_env_states.physics_state,
                 curriculum_state=curriculum_state,
