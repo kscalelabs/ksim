@@ -840,8 +840,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectory: Trajectory,
         markers: Collection[Marker],
-        mj_model: mujoco.MjModel,
-        mj_renderer: mujoco.Renderer,
+        viewer: MujocoViewer,
         target_fps: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
@@ -860,9 +859,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         num_steps = trajectory.done.shape[0]
         trajectory_list: list[Trajectory] = [jax.tree.map(lambda arr: arr[i], trajectory) for i in range(num_steps)]
 
-        # Holds the current data.
-        mj_data = mujoco.MjData(mj_model)
-
         # Builds the camera for viewing the scene.
         mj_camera = mujoco.MjvCamera()
         mj_camera.distance = self.config.render_distance
@@ -879,23 +875,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         frame_list: list[np.ndarray] = []
 
         if self.config.render_markers:
-            mj_renderer.scene.ngeom = 0
+            viewer.scn.ngeom = 0
 
         for frame_id, trajectory in enumerate(trajectory_list):
-            mj_data.qpos = np.array(trajectory.qpos)
-            mj_data.qvel = np.array(trajectory.qvel)
+            viewer.data.qpos = np.array(trajectory.qpos)
+            viewer.data.qvel = np.array(trajectory.qvel)
 
-            # Renders the current frame.
-            mujoco.mj_forward(mj_model, mj_data)
+            def render_callback(model: mujoco.MjModel, data: mujoco.mjData, scene: mujoco.MjvScene) -> None:
+                if self.config.render_markers:
+                    for marker in markers:
+                        marker(model, data, scene, trajectory)
 
-            mj_renderer.update_scene(mj_data, camera=mj_camera)
-            # For some reason, using markers here will sometimes cause weird
-            # segfaults
-            if self.config.render_markers:
-                for marker in markers:
-                    marker(mj_renderer.model, mj_data, mj_renderer.scene, trajectory)
-
-            frame = mj_renderer.render()
+            frame = viewer.read_pixels(depth=False, callback=render_callback)
 
             # Overlays the frame number on the frame.
             frame_img = Image.fromarray(frame)
@@ -919,16 +910,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         logged_traj: LoggedTrajectory,
         markers: Collection[Marker],
-        mj_model: mujoco.MjModel,
-        mj_renderer: mujoco.Renderer,
+        viewer: MujocoViewer,
     ) -> None:
         """Visualizes a single trajectory.
 
         Args:
             logged_traj: The single trajectory to log.
             markers: The markers to visualize.
-            mj_model: The Mujoco model to render the scene with.
-            mj_renderer: The Mujoco renderer to render the scene with.
+            viewer: The Mujoco viewer to render the scene with.
             name: The name of the trajectory being logged.
         """
         # Clips the trajectory to the desired length.
@@ -978,8 +967,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         frames, fps = self.render_trajectory_video(
             trajectory=logged_traj.trajectory,
             markers=markers,
-            mj_model=mj_model,
-            mj_renderer=mj_renderer,
+            viewer=viewer,
             target_fps=self.config.render_fps,
         )
         self.logger.log_video(
@@ -1596,17 +1584,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rollout_shared_state = self._get_rollout_shared_state(mjx_model, model_arr)
 
             # Creates the renderer.
-            mj_renderer = mujoco.Renderer(
+            viewer = MujocoViewer(
                 mj_model,
+                mode="offscreen",
                 height=self.config.render_height,
                 width=self.config.render_width,
             )
 
-            mj_renderer.scene.ngeom = 0
+            viewer.scn.ngeom = 0
 
             configure_scene(
-                mj_renderer._scene,
-                mj_renderer._scene_option,
+                viewer.scn,
+                viewer.vopt,
                 shadow=self.config.render_shadow,
                 contact_force=self.config.render_contact_force,
                 contact_point=self.config.render_contact_point,
@@ -1685,12 +1674,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # Only log trajectory information on validation steps.
                     if state.phase == "valid":
-                        self.log_logged_trajectory(
-                            logged_traj=logged_traj,
-                            markers=markers,
-                            mj_model=mj_model,
-                            mj_renderer=mj_renderer,
-                        )
+                        self.log_logged_trajectory(logged_traj=logged_traj, markers=markers, viewer=viewer)
 
                     if is_first_step:
                         is_first_step = False
