@@ -1648,6 +1648,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 while not self.is_training_over(state):
                     state = self.on_step_start(state)
 
+                    # Use a different phase for logging full trajectories.
+                    if self.log_full_trajectory(state, is_first_step, last_log_time):
+                        last_log_time = time.time()
+                        state = state.replace(phase="valid")
+                    else:
+                        state = state.replace(phase="train")
+
                     # Runs the training loop.
                     rng, update_rng = jax.random.split(rng)
                     with xax.ContextTimer() as timer:
@@ -1681,8 +1688,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     )
 
                     # Only log trajectory information on validation steps.
-                    if self.log_full_trajectory(state, is_first_step, last_log_time):
-                        last_log_time = time.time()
+                    if state.phase == "valid":
                         self.log_logged_trajectory(
                             logged_traj=logged_traj,
                             markers=markers,
