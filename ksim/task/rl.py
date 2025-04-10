@@ -86,13 +86,13 @@ logger = logging.getLogger(__name__)
 class RolloutEnvState:
     """Per-environment variables for the rollout loop."""
 
-    model_carry: PyTree
     commands: xax.FrozenDict[str, Array]
     physics_state: PhysicsState
-    curriculum_state: CurriculumState
     randomization_dict: xax.FrozenDict[str, Array]
-    rng: PRNGKeyArray
+    model_carry: PyTree
     reward_carry: xax.FrozenDict[str, Array]
+    curriculum_state: CurriculumState
+    rng: PRNGKeyArray
 
 
 @jax.tree_util.register_dataclass
@@ -589,6 +589,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
+    def get_initial_reward_carry(self, rng: PRNGKeyArray) -> xax.FrozenDict[str, Array]:
+        """Resets the reward carry."""
+
+    @abstractmethod
+    def update_reward_carry(
+        self,
+        reward_carry: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, Array],
+        physics_state: PhysicsState,
+        commands: xax.FrozenDict[str, Array],
+    ) -> xax.FrozenDict[str, Array]:
+        """Updates the reward carry."""
+
+    @abstractmethod
     def get_curriculum(self, physics_model: PhysicsModel) -> Curriculum:
         """Returns the curriculum for the current task.
 
@@ -707,7 +721,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Update reward carry.
         next_reward_carry = jax.lax.cond(
             terminated,
-            lambda: self.reset_reward_carry(carry_rng),
+            lambda: self.get_initial_reward_carry(carry_rng),
             lambda: self.update_reward_carry(
                 reward_carry=rollout_env_state.reward_carry,
                 observations=observations,
@@ -771,13 +785,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Gets the variables for the next step.
         next_variables = RolloutEnvState(
-            model_carry=next_carry,
             commands=next_commands,
             physics_state=next_physics_state,
-            curriculum_state=rollout_env_state.curriculum_state,
             randomization_dict=rollout_env_state.randomization_dict,
-            rng=rng,
+            model_carry=next_carry,
             reward_carry=next_reward_carry,
+            curriculum_state=rollout_env_state.curriculum_state,
+            rng=rng,
         )
 
         return transition, next_variables
@@ -1203,13 +1217,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 # RNN model, for example, after updating the model, the model
                 # carry will be new and the previous rollout's model carry will
                 # be incorrect.
-                model_carry=next_model_carry,
                 commands=next_rollout_env_states.commands,
                 physics_state=next_rollout_env_states.physics_state,
-                curriculum_state=curriculum_state,
                 randomization_dict=rollout_env_states.randomization_dict,
-                rng=next_rollout_env_states.rng,
+                model_carry=next_model_carry,
                 reward_carry=next_rollout_env_states.reward_carry,
+                curriculum_state=curriculum_state,
+                rng=next_rollout_env_states.rng,
             )
 
             next_rollout_shared_state = RolloutSharedState(
@@ -1316,23 +1330,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
             frames: list[np.ndarray] = []
-
-            def reset_mujoco_model(
-                physics_model: mujoco.MjModel,
-                rollout_env_state: RolloutEnvState,
-                rng: PRNGKeyArray,
-            ) -> tuple[mujoco.MjModel, RolloutEnvState]:
-                rng, carry_rng = jax.random.split(rng)
-                rollout_env_state = RolloutEnvState(
-                    model_carry=self.get_initial_model_carry(carry_rng),
-                    commands=rollout_env_state.commands,
-                    physics_state=rollout_env_state.physics_state,
-                    curriculum_state=rollout_env_state.curriculum_state,
-                    randomization_dict=rollout_env_state.randomization_dict,
-                    rng=rng,
-                )
-                return physics_model, rollout_env_state
-
             transitions = []
 
             try:
@@ -1343,14 +1340,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         rollout_shared_state=rollout_shared_state,
                     )
                     transitions.append(transition)
-                    rng, rand_rng = jax.random.split(rng)
-
-                    # Resets the Mujoco model if the episode is done.
-                    mj_model, rollout_env_state = jax.lax.cond(
-                        transition.done,
-                        lambda: reset_mujoco_model(mj_model, rollout_env_state, rand_rng),
-                        lambda: (mj_model, rollout_env_state),
-                    )
 
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                         for marker in markers:
@@ -1460,7 +1449,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Defines the vectorized initialization functions.
             carry_fn = jax.vmap(self.get_initial_model_carry, in_axes=0)
             command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, 0))
-            reward_carry_fn = jax.vmap(self.reset_reward_carry, in_axes=0)
+            reward_carry_fn = jax.vmap(self.get_initial_reward_carry, in_axes=0)
 
             # Gets the initial curriculum state.
             curriculum_state = jax.vmap(rollout_constants.curriculum.get_initial_state, in_axes=0)(
@@ -1478,7 +1467,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             return RolloutEnvState(
-                model_carry=carry_fn(jax.random.split(carry_rng, self.config.num_envs)),
                 commands=command_fn(
                     jax.random.split(command_rng, self.config.num_envs),
                     physics_state.data,
@@ -1486,10 +1474,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     curriculum_state.level,
                 ),
                 physics_state=physics_state,
-                curriculum_state=curriculum_state,
                 randomization_dict=randomization_dict,
-                rng=jax.random.split(rollout_rng, self.config.num_envs),
+                model_carry=carry_fn(jax.random.split(carry_rng, self.config.num_envs)),
                 reward_carry=reward_carry_fn(jax.random.split(reward_rng, self.config.num_envs)),
+                curriculum_state=curriculum_state,
+                rng=jax.random.split(rollout_rng, self.config.num_envs),
             )
 
         else:
@@ -1506,7 +1495,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             return RolloutEnvState(
-                model_carry=self.get_initial_model_carry(carry_rng),
                 commands=get_initial_commands(
                     command_rng,
                     physics_state.data,
@@ -1514,10 +1502,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     curriculum_state.level,
                 ),
                 physics_state=physics_state,
-                curriculum_state=curriculum_state,
                 randomization_dict=randomization_dict,
+                model_carry=self.get_initial_model_carry(carry_rng),
+                reward_carry=self.get_initial_reward_carry(reward_rng),
+                curriculum_state=curriculum_state,
                 rng=rollout_rng,
-                reward_carry=self.reset_reward_carry(reward_rng),
             )
 
     def collect_dataset(
@@ -1763,17 +1752,3 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             finally:
                 state = self.on_training_end(state)
-
-    @abstractmethod
-    def reset_reward_carry(self, rng: PRNGKeyArray) -> xax.FrozenDict[str, Array]:
-        """Resets the reward carry."""
-
-    @abstractmethod
-    def update_reward_carry(
-        self,
-        reward_carry: xax.FrozenDict[str, Array],
-        observations: xax.FrozenDict[str, Array],
-        physics_state: PhysicsState,
-        commands: xax.FrozenDict[str, Array],
-    ) -> xax.FrozenDict[str, Array]:
-        """Updates the reward carry."""
