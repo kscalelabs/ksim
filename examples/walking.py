@@ -234,9 +234,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="Whether to export the model for inference.",
     )
 
-    gait_freq_lower: float = xax.field(value=1.25)
-    gait_freq_upper: float = xax.field(value=1.25)
-
 
 Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 
