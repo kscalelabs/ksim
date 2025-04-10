@@ -511,6 +511,7 @@ class PositionTrackingReward(Reward):
     """Rewards the closeness of the body to the target position more for the longer it has been doing so."""
 
     tracked_body_idx: int = attrs.field()
+    base_body_idx: int = attrs.field()
     command_name: str = attrs.field()
     body_name: str = attrs.field()
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
@@ -519,8 +520,9 @@ class PositionTrackingReward(Reward):
 
     def __call__(self, trajectory: Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :]
+        base_pos = trajectory.xpos[..., self.base_body_idx, :]
         target_pos = trajectory.command[self.command_name][..., :3]
-        error = xax.get_norm(body_pos - target_pos, self.norm).sum(-1)
+        error = xax.get_norm((body_pos - base_pos) - target_pos, self.norm).sum(-1)
         return norm_to_reward(error, self.temp, self.monotonic_fn)
 
     @classmethod
@@ -529,14 +531,17 @@ class PositionTrackingReward(Reward):
         model: PhysicsModel,
         command_name: str,
         tracked_body_name: str,
+        base_body_name: str,
         norm: xax.NormType = "l1",
         temp: float = 1.0,
         monotonic_fn: MonotonicFn = "inv",
         scale: float = 1.0,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
+        base_body_idx = get_body_data_idx_from_name(model, base_body_name)
         return cls(
             tracked_body_idx=body_idx,
+            base_body_idx=base_body_idx,
             norm=norm,
             command_name=command_name,
             body_name=tracked_body_name,

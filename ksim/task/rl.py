@@ -868,14 +868,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_camera = self.config.render_camera_name
 
         frame_list: list[np.ndarray] = []
+
+        if self.config.render_markers:
+            mj_renderer.scene.ngeom = 0
+
         for frame_id, trajectory in enumerate(trajectory_list):
             mj_data.qpos = np.array(trajectory.qpos)
             mj_data.qvel = np.array(trajectory.qvel)
 
             # Renders the current frame.
             mujoco.mj_forward(mj_model, mj_data)
-            mj_renderer.update_scene(mj_data, camera=mj_camera)
 
+            mj_renderer.update_scene(mj_data, camera=mj_camera)
             # For some reason, using markers here will sometimes cause weird
             # segfaults
             if self.config.render_markers:
@@ -1608,6 +1612,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 height=self.config.render_height,
                 width=self.config.render_width,
             )
+
+            mj_renderer.scene.ngeom = 0
+
             configure_scene(
                 mj_renderer._scene,
                 mj_renderer._scene_option,
