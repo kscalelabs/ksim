@@ -172,7 +172,7 @@ class PositionCommandMarker(Marker):
 
     def update(self, trajectory: Trajectory) -> None:
         """Update the marker position and rotation."""
-        self.pos = trajectory.command[self.command_name][..., :3]
+        self.pos = trajectory.command[self.command_name][:3]
 
     @classmethod
     def get(
@@ -209,26 +209,30 @@ class PositionCommand(Command):
     max_speed: float = attrs.field(default=3.0)
     switch_prob: float = attrs.field(default=0.0)
     unique_name: str | None = attrs.field(default=None)
+    curriculum_scale: float = attrs.field(default=0.1)
 
-    def _sample_box(self, rng: PRNGKeyArray, physics_data: PhysicsData) -> Array:
-        # Sample uniformly within the box
-        rng_x, rng_y, rng_z = jax.random.split(rng, 3)
-        min_x, min_y, min_z = self.box_min
-        max_x, max_y, max_z = self.box_max
+    def _sample_box(self, rng: PRNGKeyArray, physics_data: PhysicsData, curriculum_level: Array) -> Array:
+        min_coords = jnp.array(self.box_min)
+        max_coords = jnp.array(self.box_max)
 
-        # Scale the box size based on curriculum level
-        center_x = (min_x + max_x) / 2
-        center_y = (min_y + max_y) / 2
-        center_z = (min_z + max_z) / 2
+        # Calculate the center and half-size (extent) of the box
+        center = (min_coords + max_coords) / 2.0
+        half_size = (max_coords - min_coords) / 2.0
 
-        # Sample and scale around center
-        x = center_x + (jax.random.uniform(rng_x, ()) - 0.5) * (max_x - min_x)
-        y = center_y + (jax.random.uniform(rng_y, ()) - 0.5) * (max_y - min_y)
-        z = center_z + (jax.random.uniform(rng_z, ()) - 0.5) * (max_z - min_z)
+        # Scale the half-size based on curriculum level
+        scale_factor = (self.curriculum_scale * curriculum_level + 1.0)
+        scaled_half_size = half_size * scale_factor
 
-        xyz = jnp.array([x, y, z])
+        scaled_min_coords = center - scaled_half_size
+        scaled_max_coords = center + scaled_half_size
 
-        return xyz
+        # Sample uniformly within the scaled box
+        return jax.random.uniform(
+            rng,
+            shape=(3,),
+            minval=scaled_min_coords,
+            maxval=scaled_max_coords,
+        )
 
     def initial_command(
         self,
@@ -238,7 +242,7 @@ class PositionCommand(Command):
     ) -> Array:
         # Sample initial target and speed
         rng_target, rng_speed = jax.random.split(rng)
-        target = self._sample_box(rng_target, physics_data)
+        target = self._sample_box(rng_target, physics_data, curriculum_level)
         speed = jax.random.uniform(rng_speed, (), minval=self.min_speed, maxval=self.max_speed)
 
         # Return [current_x, current_y, current_z, target_x, target_y, target_z, speed]
@@ -264,7 +268,7 @@ class PositionCommand(Command):
         reached_target = distance < self.dt * speed * 0.5
 
         # Sample new target and speed if reached
-        new_target = self._sample_box(rng_a, physics_data)
+        new_target = self._sample_box(rng_a, physics_data, curriculum_level)
         new_speed = jax.random.uniform(rng_b, (), minval=self.min_speed, maxval=self.max_speed)
 
         switch_mask = jax.random.bernoulli(rng_c, self.switch_prob)
@@ -310,6 +314,7 @@ class PositionCommand(Command):
         min_speed: float = 0.5,
         max_speed: float = 3.0,
         switch_prob: float = 1.0,
+        curriculum_scale: float = 1.0,
     ) -> Self:
         return cls(
             base_name=vis_target_name,
@@ -322,4 +327,5 @@ class PositionCommand(Command):
             min_speed=min_speed,
             max_speed=max_speed,
             switch_prob=switch_prob,
+            curriculum_scale=curriculum_scale,
         )
