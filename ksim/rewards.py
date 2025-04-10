@@ -112,10 +112,10 @@ class Reward(ABC):
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         """Initial reward carry for the trajectory, optionally overridable.
 
-        Some rewards require information from the previous episode. E.g. a
-        reward could require the last time the robot was in contact with the
-        ground. This function simply returns the initial reward carry, which is
-        `None` by default.
+        Some rewards require information from the same episode in a previous
+        rollout. E.g. a reward could require the last time the robot was in
+        contact with the ground. This function simply returns the initial reward
+        carry, which is `None` by default.
         """
         return None
 
