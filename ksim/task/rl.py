@@ -881,7 +881,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             viewer.data.qpos = np.array(trajectory.qpos)
             viewer.data.qvel = np.array(trajectory.qvel)
 
-            def render_callback(model: mujoco.MjModel, data: mujoco.mjData, scene: mujoco.MjvScene) -> None:
+            def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                 if self.config.render_markers:
                     for marker in markers:
                         marker(model, data, scene, trajectory)
@@ -1589,6 +1589,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 mode="offscreen",
                 height=self.config.render_height,
                 width=self.config.render_width,
+                shadow=self.config.render_shadow,
+                reflection=self.config.render_reflection,
+                contact_force=self.config.render_contact_force,
+                contact_point=self.config.render_contact_point,
+                inertia=self.config.render_inertia,
             )
 
             viewer.scn.ngeom = 0
