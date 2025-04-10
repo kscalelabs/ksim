@@ -50,6 +50,7 @@ class Trajectory:
     timestep: Array
     termination_components: xax.FrozenDict[str, Array]
     aux_outputs: PyTree
+    reward_carry: xax.FrozenDict[str, Array]
 
     def episode_length(self) -> Array:
         done_mask = self.done.at[..., -1].set(True)
