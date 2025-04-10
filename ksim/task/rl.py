@@ -76,6 +76,7 @@ from ksim.utils.mujoco import (
     get_torque_limits,
     load_model,
 )
+from ksim.viewer import MujocoViewer
 from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
@@ -1269,12 +1270,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 observations=rollout_constants.observations,
                 randomizers=randomizers,
             )
-
-            try:
-                from ksim.viewer import MujocoViewer
-
-            except ModuleNotFoundError:
-                raise ModuleNotFoundError("glfw not installed - install with `pip install glfw`")
 
             viewer = MujocoViewer(
                 mj_model,
