@@ -208,6 +208,7 @@ class PositionCommand(Command):
     min_speed: float = attrs.field(default=0.5)
     max_speed: float = attrs.field(default=3.0)
     switch_prob: float = attrs.field(default=0.0)
+    jump_prob: float = attrs.field(default=0.0)
     unique_name: str | None = attrs.field(default=None)
     curriculum_scale: float = attrs.field(default=0.1)
 
@@ -273,9 +274,11 @@ class PositionCommand(Command):
 
         switch_mask = jax.random.bernoulli(rng_c, self.switch_prob)
 
+        jump_mask = jax.random.bernoulli(rng_c, self.jump_prob)
+
         # Update target and speed if reached
-        target = jnp.where(reached_target & switch_mask, new_target, target)
-        speed = jnp.where(reached_target & switch_mask, new_speed, speed)
+        target = jnp.where((reached_target & switch_mask) | jump_mask, new_target, target)
+        speed = jnp.where((reached_target & switch_mask) | jump_mask, new_speed, speed)
 
         # Calculate step size based on speed and timestep
         dt = self.dt
@@ -314,6 +317,7 @@ class PositionCommand(Command):
         min_speed: float = 0.5,
         max_speed: float = 3.0,
         switch_prob: float = 1.0,
+        jump_prob: float = 0.0,
         curriculum_scale: float = 1.0,
     ) -> Self:
         return cls(
@@ -327,5 +331,6 @@ class PositionCommand(Command):
             min_speed=min_speed,
             max_speed=max_speed,
             switch_prob=switch_prob,
+            jump_prob=jump_prob,
             curriculum_scale=curriculum_scale,
         )

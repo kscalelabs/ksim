@@ -1613,6 +1613,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 width=self.config.render_width,
             )
 
+            mj_renderer.scene.ngeom = 0
+
             configure_scene(
                 mj_renderer._scene,
                 mj_renderer._scene_option,
