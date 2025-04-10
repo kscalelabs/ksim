@@ -38,12 +38,8 @@ from .walking import (
     DefaultHumanoidModel,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
+    NaiveForwardReward,
 )
-
-
-class NaiveVelocityReward(ksim.Reward):
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qvel[..., 0].clip(max=5.0)
 
 
 @jax.tree_util.register_dataclass
@@ -110,7 +106,7 @@ class ReferenceMotionReward(ksim.Reward):
     def num_frames(self) -> int:
         return list(self.reference_motion.values())[0].array.shape[0]
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: None) -> tuple[Array, None]:
         assert isinstance(trajectory.aux_outputs, MotionAuxOutputs)
         reference_motion: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_motion)
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
@@ -120,7 +116,7 @@ class ReferenceMotionReward(ksim.Reward):
         mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
         mean_error = mean_error_over_bodies.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
-        return reward
+        return reward, None
 
 
 class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Config]):
@@ -130,7 +126,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             ksim.LinearVelocityPenalty(index="z", scale=-0.01),
             ksim.AngularVelocityPenalty(index="x", scale=-0.01),
             ksim.AngularVelocityPenalty(index="y", scale=-0.01),
-            NaiveVelocityReward(scale=0.1),
+            NaiveForwardReward(scale=0.1),
             ReferenceMotionReward(reference_motion=self.reference_motion, ctrl_dt=self.config.ctrl_dt, scale=0.1),
         ]
 

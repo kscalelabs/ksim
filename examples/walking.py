@@ -28,8 +28,8 @@ NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4
 class NaiveForwardReward(ksim.Reward):
     clip_max: float = attrs.field(default=5.0)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qvel[..., 0].clip(max=self.clip_max)
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: None) -> tuple[Array, None]:
+        return trajectory.qvel[..., 0].clip(max=self.clip_max), None
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -552,7 +552,6 @@ if __name__ == "__main__":
             rollout_length_seconds=10.0,
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
-            # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
             max_action_latency=0.0,

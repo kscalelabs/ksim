@@ -102,6 +102,7 @@ class Reward(ABC):
 
         Args:
             trajectory: The trajectory to get the reward for.
+            reward_carry: The reward carry for the trajectory.
 
         Returns:
             An array of shape (time, *leaf_dims) containing the reward for each
