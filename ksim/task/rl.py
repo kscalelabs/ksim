@@ -5,7 +5,6 @@ __all__ = [
     "RLTask",
     "RolloutConstants",
     "RolloutEnvState",
-    "Action",
 ]
 
 import bdb
@@ -60,6 +59,7 @@ from ksim.resets import Reset
 from ksim.rewards import Reward
 from ksim.terminations import Termination
 from ksim.types import (
+    Action,
     Histogram,
     LoggedTrajectory,
     Metrics,
@@ -118,14 +118,6 @@ class RolloutConstants:
     curriculum: Curriculum
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class Action:
-    action: Array
-    carry: PyTree = None
-    aux_outputs: PyTree = None
-
-
 def get_observation(
     rollout_env_state: RolloutEnvState,
     observations: Collection[Observation],
@@ -133,7 +125,7 @@ def get_observation(
     rng: PRNGKeyArray,
 ) -> xax.FrozenDict[str, Array]:
     """Get the observation from the physics state."""
-    observation_dict = {}
+    observation_dict: dict[str, Array] = {}
     observation_state = ObservationState(
         commands=rollout_env_state.commands,
         physics_state=rollout_env_state.physics_state,
@@ -148,25 +140,39 @@ def get_observation(
 def get_rewards(
     trajectory: Trajectory,
     rewards: Collection[Reward],
+    reward_carry: xax.FrozenDict[str, PyTree],
     ctrl_dt: float,
     clip_min: float | None = None,
     clip_max: float | None = None,
 ) -> Rewards:
     """Get the rewards from the physics state."""
-    reward_dict = {}
+    reward_dict: dict[str, Array] = {}
+    next_reward_carry: dict[str, PyTree] = {}
     target_shape = trajectory.done.shape
     for reward_generator in rewards:
         reward_name = reward_generator.reward_name
-        reward_val = reward_generator(trajectory) * reward_generator.scale * ctrl_dt
+        reward_val, reward_carry = reward_generator(trajectory, reward_carry)
+        reward_val = reward_val * reward_generator.scale * ctrl_dt
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
         reward_dict[reward_name] = reward_val
+        next_reward_carry[reward_name] = reward_carry
     total_reward = jax.tree.reduce(jnp.add, list(reward_dict.values()))
     if clip_min is not None:
         total_reward = jnp.maximum(total_reward, clip_min)
     if clip_max is not None:
         total_reward = jnp.minimum(total_reward, clip_max)
-    return Rewards(total=total_reward, components=xax.FrozenDict(reward_dict))
+
+    return Rewards(total=total_reward, components=xax.FrozenDict(reward_dict), carry=xax.FrozenDict(next_reward_carry))
+
+
+def get_initial_reward_carry(
+    rng: PRNGKeyArray,
+    rewards: Collection[Reward],
+) -> xax.FrozenDict[str, Array]:
+    """Get the initial reward carry."""
+    rngs = jax.random.split(rng, len(rewards))
+    return xax.FrozenDict({reward.reward_name: reward.initial_carry(rng) for reward, rng in zip(rewards, rngs)})
 
 
 def get_terminations(
@@ -589,20 +595,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def get_initial_reward_carry(self, rng: PRNGKeyArray) -> xax.FrozenDict[str, Array]:
-        """Resets the reward carry."""
-
-    @abstractmethod
-    def update_reward_carry(
-        self,
-        reward_carry: xax.FrozenDict[str, Array],
-        observations: xax.FrozenDict[str, Array],
-        physics_state: PhysicsState,
-        commands: xax.FrozenDict[str, Array],
-    ) -> xax.FrozenDict[str, Array]:
-        """Updates the reward carry."""
-
-    @abstractmethod
     def get_curriculum(self, physics_model: PhysicsModel) -> Curriculum:
         """Returns the curriculum for the current task.
 
@@ -718,18 +710,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         terminated = jax.tree.reduce(jnp.logical_or, [t != 0 for t in terminations.values()])
         success = jax.tree.reduce(jnp.logical_and, [t != -1 for t in terminations.values()]) & terminated
 
-        # Update reward carry.
-        next_reward_carry = jax.lax.cond(
-            terminated,
-            lambda: self.get_initial_reward_carry(carry_rng),
-            lambda: self.update_reward_carry(
-                reward_carry=rollout_env_state.reward_carry,
-                observations=observations,
-                physics_state=next_physics_state,
-                commands=rollout_env_state.commands,
-            ),
-        )
-
         # Combines all the relevant data into a single object. Lives up here to
         # avoid accidentally incorporating information it shouldn't access to.
         transition = Trajectory(
@@ -746,7 +726,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             timestep=next_physics_state.data.time,
             termination_components=terminations,
             aux_outputs=action.aux_outputs,
-            reward_carry=next_reward_carry,
         )
 
         # Conditionally reset on termination.
@@ -784,17 +763,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Gets the variables for the next step.
-        next_variables = RolloutEnvState(
+        next_rollout_env_state = RolloutEnvState(
             commands=next_commands,
             physics_state=next_physics_state,
             randomization_dict=rollout_env_state.randomization_dict,
             model_carry=next_carry,
-            reward_carry=next_reward_carry,
+            reward_carry=rollout_env_state.reward_carry,
             curriculum_state=rollout_env_state.curriculum_state,
             rng=rng,
         )
 
-        return transition, next_variables
+        return transition, next_rollout_env_state
 
     def get_dataset(self, phase: xax.Phase) -> Dataset:
         raise NotImplementedError("RL tasks do not require datasets, since trajectory histories are stored in-memory.")
@@ -1144,6 +1123,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         reward = get_rewards(
             trajectory=trajectory,
             rewards=rollout_constants.rewards,
+            reward_carry=rollout_env_state.reward_carry,
             ctrl_dt=self.config.ctrl_dt,
             clip_min=self.config.reward_clip_min,
             clip_max=self.config.reward_clip_max,
@@ -1180,6 +1160,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rollout_env_states,
                 rollout_shared_state,
             )
+            # The reward carry is updated every rollout using the last episode.
+            next_reward_carry = rewards.carry
 
             # Runs update on the previous trajectory.
             model_arr, opt_state, next_model_carry, train_metrics, logged_traj = self.update_model(
@@ -1221,7 +1203,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 physics_state=next_rollout_env_states.physics_state,
                 randomization_dict=rollout_env_states.randomization_dict,
                 model_carry=next_model_carry,
-                reward_carry=next_rollout_env_states.reward_carry,
+                reward_carry=next_reward_carry,
                 curriculum_state=curriculum_state,
                 rng=next_rollout_env_states.rng,
             )
@@ -1361,6 +1343,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 get_rewards(
                     trajectory=trajectory,
                     rewards=rollout_constants.rewards,
+                    reward_carry=rollout_env_state.reward_carry,
                     ctrl_dt=self.config.ctrl_dt,
                     clip_min=self.config.reward_clip_min,
                     clip_max=self.config.reward_clip_max,
@@ -1445,11 +1428,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rng, carry_rng, command_rng, rand_rng, rollout_rng, curriculum_rng, reward_rng = jax.random.split(rng, 7)
 
         # Vectorize across N environments for MJX models, use single model for Mujoco.
+        # TODO (for a later refactor): just one code path and vmap on the outside.
         if isinstance(mj_model, mjx.Model):
             # Defines the vectorized initialization functions.
             carry_fn = jax.vmap(self.get_initial_model_carry, in_axes=0)
             command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, 0))
-            reward_carry_fn = jax.vmap(self.get_initial_reward_carry, in_axes=0)
+            reward_carry_fn = jax.vmap(get_initial_reward_carry, in_axes=(0, None))
 
             # Gets the initial curriculum state.
             curriculum_state = jax.vmap(rollout_constants.curriculum.get_initial_state, in_axes=0)(
@@ -1476,7 +1460,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 physics_state=physics_state,
                 randomization_dict=randomization_dict,
                 model_carry=carry_fn(jax.random.split(carry_rng, self.config.num_envs)),
-                reward_carry=reward_carry_fn(jax.random.split(reward_rng, self.config.num_envs)),
+                reward_carry=reward_carry_fn(
+                    jax.random.split(reward_rng, self.config.num_envs), rollout_constants.rewards
+                ),
                 curriculum_state=curriculum_state,
                 rng=jax.random.split(rollout_rng, self.config.num_envs),
             )
@@ -1504,7 +1490,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 physics_state=physics_state,
                 randomization_dict=randomization_dict,
                 model_carry=self.get_initial_model_carry(carry_rng),
-                reward_carry=self.get_initial_reward_carry(reward_rng),
+                reward_carry=get_initial_reward_carry(reward_rng, rollout_constants.rewards),
                 curriculum_state=curriculum_state,
                 rng=rollout_rng,
             )

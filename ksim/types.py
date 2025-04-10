@@ -6,6 +6,7 @@ __all__ = [
     "PhysicsState",
     "Trajectory",
     "Rewards",
+    "Action",
     "Histogram",
     "Metrics",
 ]
@@ -50,7 +51,6 @@ class Trajectory:
     timestep: Array
     termination_components: xax.FrozenDict[str, Array]
     aux_outputs: PyTree
-    reward_carry: xax.FrozenDict[str, Array]
 
     def episode_length(self) -> Array:
         done_mask = self.done.at[..., -1].set(True)
@@ -64,6 +64,15 @@ class Trajectory:
 class Rewards:
     total: Array
     components: xax.FrozenDict[str, Array]
+    carry: xax.FrozenDict[str, PyTree]
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Action:
+    action: Array
+    carry: PyTree = None
+    aux_outputs: PyTree = None
 
 
 @jax.tree_util.register_dataclass

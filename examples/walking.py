@@ -532,68 +532,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         action_j = action_dist_j.sample(seed=rng)
         return ksim.Action(action=action_j, carry=None, aux_outputs=None)
 
-    def reset_reward_carry(self, rng: PRNGKeyArray) -> xax.FrozenDict[str, Array]:
-        key, _ = jax.random.split(rng)
-        gait_freq = jax.random.uniform(
-            key, (1,), minval=self.config.gait_freq_lower, maxval=self.config.gait_freq_upper
-        )
-        phase_dt = 2 * jnp.pi * gait_freq * self.config.ctrl_dt
-        phase = jnp.array([0, jnp.pi])  # trotting gait
-        reward_carry = xax.FrozenDict(
-            {
-                "first_contact": jnp.zeros(2, dtype=bool),
-                "feet_air_time": jnp.zeros(2),
-                "last_contact": jnp.zeros(2, dtype=bool),
-                "swing_peak": jnp.zeros(2),
-                "phase_dt": phase_dt,
-                "phase": phase,
-            }
-        )
-
-        return reward_carry
-
-    def update_reward_carry(
-        self,
-        reward_carry: xax.FrozenDict[str, Array],
-        observations: xax.FrozenDict[str, Array],
-        physics_state: ksim.PhysicsState,
-        commands: xax.FrozenDict[str, Array],
-    ) -> xax.FrozenDict[str, Array]:
-        # Phase:
-        phase_tp1 = reward_carry["phase"] + reward_carry["phase_dt"]
-        phase = jnp.fmod(phase_tp1 + jnp.pi, 2 * jnp.pi) - jnp.pi
-
-        # Contact dependency:
-        contact = observations["feet_contact_observation"]
-        contact_bool = contact.astype(bool)
-
-        # Current or the last contact to factor in randomness:
-        contact_filt = contact_bool | reward_carry["last_contact"]
-        first_contact = (reward_carry["feet_air_time"] > 0.0) * contact_filt
-        last_contact = contact_bool
-
-        # Feet air time:
-        feet_air_time = reward_carry["feet_air_time"] + self.config.ctrl_dt
-        feet_air_time *= ~contact_bool
-
-        # Swing peak:
-        position_feet = observations["feet_position_observation"]
-        position_feet_z = jnp.array([position_feet[2], position_feet[5]])
-        swing_peak = jnp.maximum(reward_carry["swing_peak"], position_feet_z)
-        swing_peak = swing_peak * ~contact_bool  # And here
-
-        # Last contact:
-        reward_carry = xax.FrozenDict(
-            {
-                "first_contact": first_contact,
-                "feet_air_time": feet_air_time,
-                "last_contact": last_contact,
-                "swing_peak": swing_peak,
-                "phase_dt": reward_carry["phase_dt"],  # constant across the rollout
-                "phase": phase,
-            }
-        )
-
 
 if __name__ == "__main__":
     # To run training, use the following command:

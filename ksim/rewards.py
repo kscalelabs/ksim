@@ -34,7 +34,7 @@ import chex
 import jax
 import jax.numpy as jnp
 import xax
-from jaxtyping import Array
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name
@@ -94,7 +94,7 @@ class Reward(ABC):
     scale: float = attrs.field(validator=reward_scale_validator)
 
     @abstractmethod
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         """Get the reward for a single trajectory.
 
         You may assume that the dimensionality is (time, *leaf_dims) accross all
@@ -108,7 +108,18 @@ class Reward(ABC):
             timestep.
         """
 
+    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
+        """Initial reward carry for the trajectory, optionally overridable.
+
+        Some rewards require information from the previous episode. E.g. a
+        reward could require the last time the robot was in contact with the
+        ground. This function simply returns the initial reward carry, which is
+        `None` by default.
+        """
+        return None
+
     def get_markers(self) -> Collection[Marker]:
+        """Get the markers for the reward, optionally overridable."""
         return []
 
     def get_name(self) -> str:
@@ -131,8 +142,11 @@ class StayAliveReward(Reward):
     balance: float = attrs.field(default=10.0)
     success_reward: float = attrs.field(default=0.0)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
-        return jnp.where(trajectory.done, jnp.where(trajectory.success, self.success_reward, -1.0), 1.0 / self.balance)
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
+        reward = jnp.where(
+            trajectory.done, jnp.where(trajectory.success, self.success_reward, -1.0), 1.0 / self.balance
+        )
+        return reward, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -142,10 +156,10 @@ class LinearVelocityPenalty(Reward):
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         dim = cartesian_index_to_dim(self.index)
         lin_vel = trajectory.qvel[..., dim]
-        return xax.get_norm(lin_vel, self.norm)
+        return xax.get_norm(lin_vel, self.norm), None
 
     def get_name(self) -> str:
         return f"{self.index}_{super().get_name()}"
@@ -158,10 +172,10 @@ class AngularVelocityPenalty(Reward):
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         dim = cartesian_index_to_dim(self.index) + 3
         ang_vel = trajectory.qvel[..., dim]
-        return xax.get_norm(ang_vel, self.norm)
+        return xax.get_norm(ang_vel, self.norm), None
 
     def get_name(self) -> str:
         return f"{self.index}_{super().get_name()}"
@@ -174,12 +188,12 @@ class JointVelocityPenalty(Reward):
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
     freejoint_first: bool = attrs.field(default=True)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         if self.freejoint_first:
             joint_vel = trajectory.qvel[..., 6:]
-            return xax.get_norm(joint_vel, self.norm).mean(axis=-1)
+            return xax.get_norm(joint_vel, self.norm).mean(axis=-1), None
         else:
-            return xax.get_norm(trajectory.qvel, self.norm).mean(axis=-1)
+            return xax.get_norm(trajectory.qvel, self.norm).mean(axis=-1), None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -191,9 +205,10 @@ class BaseHeightReward(Reward):
     temp: float = attrs.field(default=1.0)
     monotonic_fn: MonotonicFn = attrs.field(default="inv")
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         base_height = trajectory.qpos[..., 2]
-        return norm_to_reward(xax.get_norm(base_height - self.height_target, self.norm), self.temp, self.monotonic_fn)
+        reward = norm_to_reward(xax.get_norm(base_height - self.height_target, self.norm), self.temp, self.monotonic_fn)
+        return reward, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -204,11 +219,12 @@ class BaseHeightRangeReward(Reward):
     z_upper: float = attrs.field()
     dropoff: float = attrs.field()
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         base_height = trajectory.qpos[..., 2]
         too_low = self.z_lower - base_height
         too_high = base_height - self.z_upper
-        return (1.0 - jnp.maximum(too_low, too_high).clip(min=0.0) * self.dropoff).clip(min=0.0)
+        reward = (1.0 - jnp.maximum(too_low, too_high).clip(min=0.0) * self.dropoff).clip(min=0.0)
+        return reward, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -217,7 +233,7 @@ class ActionSmoothnessPenalty(Reward):
 
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         current_actions = trajectory.action
 
         # Shift actions to get previous actions (pad with first action)
@@ -230,8 +246,8 @@ class ActionSmoothnessPenalty(Reward):
         )
 
         action_deltas = current_actions - previous_actions
-
-        return xax.get_norm(action_deltas, self.norm).mean(axis=-1)
+        reward = xax.get_norm(action_deltas, self.norm).mean(axis=-1)
+        return reward, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -241,10 +257,11 @@ class ActuatorForcePenalty(Reward):
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
     observation_name: str = attrs.field(default="actuator_force_observation")
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         if self.observation_name not in trajectory.obs:
             raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
-        return xax.get_norm(trajectory.obs[self.observation_name], self.norm).mean(axis=-1)
+        reward = xax.get_norm(trajectory.obs[self.observation_name], self.norm).mean(axis=-1)
+        return reward, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -255,7 +272,7 @@ class BaseJerkZPenalty(Reward):
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
     acc_obs_name: str = attrs.field(default="base_linear_acceleration_observation")
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         if self.acc_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.acc_obs_name} not found; add it as an observation in your task.")
         acc = trajectory.obs[self.acc_obs_name]
@@ -267,7 +284,8 @@ class BaseJerkZPenalty(Reward):
         # for the penalty to be roughly the same magnitude as a velocity
         # penalty.
         jerk_z = (acc_z - prev_acc_z) * self.ctrl_dt
-        return xax.get_norm(jerk_z, self.norm).squeeze(0)
+        reward = xax.get_norm(jerk_z, self.norm).squeeze(0)
+        return reward, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -278,7 +296,7 @@ class ActuatorJerkPenalty(Reward):
     acc_obs_name: str = attrs.field(default="actuator_acceleration_observation")
     ctrl_dt: float = attrs.field()
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         if self.acc_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.acc_obs_name} not found; add it as an observation in your task.")
         acc = trajectory.obs[self.acc_obs_name]
@@ -289,7 +307,8 @@ class ActuatorJerkPenalty(Reward):
         # for the penalty to be roughly the same magnitude as a velocity
         # penalty.
         jerk = (acc - prev_acc) * self.ctrl_dt
-        return xax.get_norm(jerk, self.norm).mean(axis=-1).squeeze(0)
+        reward = xax.get_norm(jerk, self.norm).mean(axis=-1).squeeze(0)
+        return reward, None
 
 
 def joint_limits_validator(inst: "AvoidLimitsReward", attr: attrs.Attribute, value: xax.HashableArray) -> None:
@@ -317,13 +336,13 @@ class AvoidLimitsReward(Reward):
     joint_limits: xax.HashableArray = attrs.field(validator=joint_limits_validator)
     joint_limited: xax.HashableArray = attrs.field(validator=joint_limited_validator)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         joint_pos = trajectory.qpos[..., 7:]
         joint_limits = self.joint_limits.array
         joint_limited = self.joint_limited.array
         in_bounds = (joint_pos > joint_limits[..., 0]) & (joint_pos < joint_limits[..., 1])
         reward = jnp.where(joint_limited, in_bounds, 0)
-        return reward.all(axis=-1).astype(trajectory.qpos.dtype)
+        return reward.all(axis=-1).astype(trajectory.qpos.dtype), None
 
     @classmethod
     def create(
@@ -364,8 +383,9 @@ class ObservationMeanPenalty(Reward):
 
     observation_name: str = attrs.field()
 
-    def __call__(self, trajectory: Trajectory) -> Array:
-        return trajectory.obs[self.observation_name].mean(axis=-1)
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
+        reward = trajectory.obs[self.observation_name].mean(axis=-1)
+        return reward, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -378,11 +398,11 @@ class ActionNearPositionPenalty(Reward):
 
     joint_threshold: xax.HashableArray = attrs.field(validator=joint_threshold_validator)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         current_position = trajectory.qpos[..., 7:]
         action = trajectory.action
         out_of_bounds = jnp.abs(current_position - action) > self.joint_threshold.array
-        return out_of_bounds.astype(trajectory.qpos.dtype).mean(axis=-1)
+        return out_of_bounds.astype(trajectory.qpos.dtype).mean(axis=-1), None
 
     @classmethod
     def create(
@@ -418,7 +438,7 @@ class FeetLinearVelocityTrackingPenalty(Reward):
     obs_name: str = attrs.field(default="feet_position_observation")
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         cmd = trajectory.command[self.command_name]
         chex.assert_shape(cmd, (..., 2))
         lin_vel_x_cmd = cmd[..., 0]
@@ -447,7 +467,7 @@ class FeetLinearVelocityTrackingPenalty(Reward):
         # Don't penalize after falling over.
         penalty = jnp.where(trajectory.done, 0.0, penalty)
 
-        return penalty
+        return penalty, None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -458,7 +478,7 @@ class FeetFlatReward(Reward):
     plane: tuple[float, float, float] = attrs.field(default=(0.0, 0.0, 1.0))
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         feet_quat = trajectory.obs[self.obs_name]
         chex.assert_shape(feet_quat, (..., 2, 4))
         unit_vec = jnp.array(self.plane, dtype=feet_quat.dtype)
@@ -470,7 +490,7 @@ class FeetFlatReward(Reward):
             xax.get_norm(unit_vec_z, self.norm)
             - xax.get_norm(unit_vec_x, self.norm)
             - xax.get_norm(unit_vec_y, self.norm)
-        ).min(axis=-1)
+        ).min(axis=-1), None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -486,7 +506,7 @@ class FeetNoContactReward(Reward):
     window_size: int = attrs.field()
     obs_name: str = attrs.field(default="feet_contact_observation")
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         feet_contact = trajectory.obs[self.obs_name]
         chex.assert_shape(feet_contact, (..., 2))
 
@@ -503,7 +523,7 @@ class FeetNoContactReward(Reward):
         _, counts = jax.lax.scan(reward_scan_fn, counts[0], counts)
 
         no_contact = counts >= self.window_size
-        return no_contact.any(axis=-1)
+        return no_contact.any(axis=-1), None
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -518,12 +538,13 @@ class PositionTrackingReward(Reward):
     temp: float = attrs.field(default=1.0)
     monotonic_fn: MonotonicFn = attrs.field(default="inv")
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :]
         base_pos = trajectory.xpos[..., self.base_body_idx, :]
         target_pos = trajectory.command[self.command_name][..., :3]
         error = xax.get_norm((body_pos - base_pos) - target_pos, self.norm).sum(-1)
-        return norm_to_reward(error, self.temp, self.monotonic_fn)
+        reward = norm_to_reward(error, self.temp, self.monotonic_fn)
+        return reward, None
 
     @classmethod
     def create(
@@ -573,7 +594,7 @@ class JoystickReward(Reward):
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
     norm_penalty: float = attrs.field(default=0.01)
 
-    def __call__(self, trajectory: Trajectory) -> Array:
+    def __call__(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         command = trajectory.command[self.command_name]
         chex.assert_shape(command, (..., 1))
         command = command.squeeze(-1)
@@ -586,7 +607,7 @@ class JoystickReward(Reward):
         dyvel = trajectory.qvel[..., 5]
         dzvel = trajectory.qvel[..., 6]
 
-        return jnp.where(
+        reward = jnp.where(
             command == 1,
             # Forward
             xvel.clip(max=self.linear_velocity_clip_max)
@@ -633,3 +654,4 @@ class JoystickReward(Reward):
                 ),
             ),
         )
+        return reward, None
