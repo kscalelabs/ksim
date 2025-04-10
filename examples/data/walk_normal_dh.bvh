@@ -469,7 +469,7 @@ ROOT CC_Base_BoneRoot
 							}
 							JOINT CC_Base_L_UpperarmTwist01
 							{
-								OFFSET 0.000006 0.000000 -0.000092
+								OFFSET -1.000006 -3.000000 2.000092
 								CHANNELS 3 Xrotation Yrotation Zrotation
 								JOINT CC_Base_L_UpperarmTwist02
 								{
@@ -493,7 +493,7 @@ ROOT CC_Base_BoneRoot
 							CHANNELS 3 Xrotation Yrotation Zrotation
 							JOINT CC_Base_R_UpperarmTwist01
 							{
-								OFFSET 0.000004 -0.000002 0.000061
+								OFFSET 1.000004 -3.000002 0.500061
 								CHANNELS 3 Xrotation Yrotation Zrotation
 								JOINT CC_Base_R_UpperarmTwist02
 								{

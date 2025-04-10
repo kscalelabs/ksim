@@ -225,7 +225,7 @@ if __name__ == "__main__":
             clip_param=0.3,
             max_grad_norm=1.0,
             # Gait matching parameters.
-            bvh_path=str(Path(__file__).parent / "data" / "walk-relaxed_actorcore.bvh"),
+            bvh_path=str(Path(__file__).parent / "data" / "walk_normal_dh.bvh"),
             rotate_bvh_euler=(0, np.pi / 2, 0),
             bvh_scaling_factor=1 / 100,
             mj_base_name="pelvis",
