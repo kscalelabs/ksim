@@ -178,12 +178,13 @@ class PositionCommandMarker(Marker):
     def get(
         cls,
         command_name: str,
+        base_name: str | None,
         radius: float,
         rgba: tuple[float, float, float, float],
     ) -> Self:
         return cls(
             command_name=command_name,
-            target_name=None,
+            target_name=base_name,
             geom=mujoco.mjtGeom.mjGEOM_SPHERE,
             scale=(radius, radius, radius),
             rgba=rgba,
@@ -192,20 +193,21 @@ class PositionCommandMarker(Marker):
 
 @attrs.define(frozen=True)
 class PositionCommand(Command):
-    """Samples a target xyz position within a bounding box relative to a base body.
+    """Samples a target xyz position within a bounding box.
 
-    The bounding box is defined by min and max coordinates relative to the base body.
+    The bounding box is defined by min and max coordinates.
     The target will smoothly transition between points within this box.
     """
 
     box_min: tuple[float, float, float] = attrs.field()
     box_max: tuple[float, float, float] = attrs.field()
     dt: float = attrs.field()
-    base_id: int | None = attrs.field(default=None)
+    base_name: str | None = attrs.field(default=None)
     vis_radius: float = attrs.field(default=0.05)
     vis_color: tuple[float, float, float, float] = attrs.field(default=(1.0, 0.0, 0.0, 0.8))
     min_speed: float = attrs.field(default=0.5)
     max_speed: float = attrs.field(default=3.0)
+    switch_prob: float = attrs.field(default=0.0)
     unique_name: str | None = attrs.field(default=None)
 
     def _sample_box(self, rng: PRNGKeyArray, physics_data: PhysicsData) -> Array:
@@ -225,9 +227,6 @@ class PositionCommand(Command):
         z = center_z + (jax.random.uniform(rng_z, ()) - 0.5) * (max_z - min_z)
 
         xyz = jnp.array([x, y, z])
-
-        if self.base_id is not None:
-            xyz = xyz + physics_data.xpos[self.base_id]
 
         return xyz
 
@@ -261,16 +260,18 @@ class PositionCommand(Command):
         distance = jnp.linalg.norm(target - current)
 
         # If we've reached the target, sample a new one
-        rng_a, rng_b = jax.random.split(rng)
+        rng_a, rng_b, rng_c = jax.random.split(rng, 3)
         reached_target = distance < self.dt * speed * 0.5
 
         # Sample new target and speed if reached
         new_target = self._sample_box(rng_a, physics_data)
         new_speed = jax.random.uniform(rng_b, (), minval=self.min_speed, maxval=self.max_speed)
 
+        switch_mask = jax.random.bernoulli(rng_c, self.switch_prob)
+
         # Update target and speed if reached
-        target = jnp.where(reached_target, new_target, target)
-        speed = jnp.where(reached_target, new_speed, speed)
+        target = jnp.where(reached_target & switch_mask, new_target, target)
+        speed = jnp.where(reached_target & switch_mask, new_speed, speed)
 
         # Calculate step size based on speed and timestep
         dt = self.dt
@@ -288,7 +289,7 @@ class PositionCommand(Command):
         return jnp.concatenate([new_current, target, jnp.array([speed])])
 
     def get_markers(self) -> Collection[Marker]:
-        return [PositionCommandMarker.get(self.command_name, self.vis_radius, self.vis_color)]
+        return [PositionCommandMarker.get(self.command_name, self.base_name, self.vis_radius, self.vis_color)]
 
     def get_name(self) -> str:
         name = super().get_name()
@@ -302,16 +303,16 @@ class PositionCommand(Command):
         model: PhysicsModel,
         box_min: tuple[float, float, float],
         box_max: tuple[float, float, float],
-        base_body_name: str | None = None,
+        vis_target_name: str | None = None,
         vis_radius: float = 0.05,
         vis_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.8),
         unique_name: str | None = None,
         min_speed: float = 0.5,
         max_speed: float = 3.0,
+        switch_prob: float = 1.0,
     ) -> Self:
-        base_id = None if base_body_name is None else get_body_data_idx_from_name(model, base_body_name)
         return cls(
-            base_id=base_id,
+            base_name=vis_target_name,
             box_min=box_min,
             box_max=box_max,
             dt=float(model.opt.timestep),
@@ -320,4 +321,5 @@ class PositionCommand(Command):
             unique_name=unique_name,
             min_speed=min_speed,
             max_speed=max_speed,
+            switch_prob=switch_prob,
         )
