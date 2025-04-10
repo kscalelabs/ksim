@@ -367,6 +367,9 @@ class ObservationMeanPenalty(Reward):
     def __call__(self, trajectory: Trajectory) -> Array:
         return trajectory.obs[self.observation_name].mean(axis=-1)
 
+    def get_name(self) -> str:
+        return f"{super().get_name()}_{self.observation_name}"
+
 
 @attrs.define(frozen=True, kw_only=True)
 class ActionNearPositionPenalty(Reward):
