@@ -20,7 +20,6 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
-from ksim.utils.mujoco import get_body_data_idx_from_name
 from ksim.vis import Marker
 
 
@@ -221,7 +220,7 @@ class PositionCommand(Command):
         half_size = (max_coords - min_coords) / 2.0
 
         # Scale the half-size based on curriculum level
-        scale_factor = (self.curriculum_scale * curriculum_level + 1.0)
+        scale_factor = self.curriculum_scale * curriculum_level + 1.0
         scaled_half_size = half_size * scale_factor
 
         scaled_min_coords = center - scaled_half_size
