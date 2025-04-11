@@ -1,12 +1,13 @@
 """MuJoCo viewer implementation with interactive visualization capabilities."""
 
 __all__ = [
-    "MujocoViewer",
+    "GlfwMujocoViewer",
 ]
 
 import time
+from abc import ABC, abstractmethod
 from threading import Lock
-from typing import Callable, Literal, get_args, overload
+from typing import Callable, Literal, get_args
 
 import glfw
 import mujoco
@@ -18,7 +19,111 @@ RenderMode = Literal["window", "offscreen"]
 Callback = Callable[[mujoco.MjModel, mujoco.MjData, mujoco.MjvScene], None]
 
 
-class MujocoViewer:
+class BaseMujocoViewer(ABC):
+    @abstractmethod
+    def read_pixels(self, callback: Callback | None = None) -> np.ndarray:
+        """Renders the current MuJoCo scene to an RGB image array.
+
+        Args:
+            callback: Callback to call after rendering
+
+        Returns:
+            RGB image array
+        """
+
+    @abstractmethod
+    def render(self, callback: Callback | None = None) -> None:
+        """Renders the current MuJoCo scene to the screen.
+
+        Args:
+            callback: Callback to call after rendering
+        """
+
+
+class DefaultMujocoViewer(BaseMujocoViewer):
+    """MuJoCo viewer implementation using offscreen OpenGL context."""
+
+    def __init__(
+        self,
+        model: mujoco.MjModel,
+        width: int = 320,
+        height: int = 240,
+        max_geom: int = 10000,
+    ) -> None:
+        """Initialize the default MuJoCo viewer.
+
+        Args:
+            model: MuJoCo model
+            width: Width of the viewer
+            height: Height of the viewer
+            max_geom: Maximum number of geoms to render
+        """
+        self.model = model
+        self.width = width
+        self.height = height
+
+        # Validate framebuffer size
+        if width > model.vis.global_.offwidth or height > model.vis.global_.offheight:
+            raise ValueError(
+                f"Image size ({width}x{height}) exceeds offscreen buffer size "
+                f"({model.vis.global_.offwidth}x{model.vis.global_.offheight}). "
+                "Increase `offwidth`/`offheight` in the XML model."
+            )
+
+        # Offscreen rendering context
+        self._gl_context = mujoco.gl_context.GLContext(width, height)
+        self._gl_context.make_current()
+
+        # MuJoCo scene setup
+        self.scn = mujoco.MjvScene(model, maxgeom=max_geom)
+        self.vopt = mujoco.MjvOption()
+        self.rect = mujoco.MjrRect(0, 0, width, height)
+        self.cam = mujoco.MjvCamera()
+        mujoco.mjv_defaultFreeCamera(model, self.cam)
+
+        self.ctx = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150.value)
+        mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_OFFSCREEN, self.ctx)
+
+    def read_pixels(self, callback: Callback | None = None) -> np.ndarray:
+        self._gl_context.make_current()
+
+        # Update scene
+        mujoco.mjv_updateScene(
+            self.model,
+            mujoco.MjData(self.model),
+            self.vopt,
+            None,
+            self.cam,
+            mujoco.mjtCatBit.mjCAT_ALL.value,
+            self.scn,
+        )
+
+        if callback is not None:
+            data = mujoco.MjData(self.model)
+            callback(self.model, data, self.scn)
+
+        # Render
+        mujoco.mjr_render(self.rect, self.scn, self.ctx)
+
+        # Read pixels
+        rgb_array = np.empty((self.height, self.width, 3), dtype=np.uint8)
+        mujoco.mjr_readPixels(rgb_array, None, self.rect, self.ctx)
+
+        return np.flipud(rgb_array)
+
+    def render(self, callback: Callback | None = None) -> None:
+        raise NotImplementedError("Default viewer does not support rendering.")
+
+    def close(self) -> None:
+        if self._gl_context:
+            self._gl_context.free()
+            self._gl_context = None
+        if self.ctx:
+            self.ctx.free()
+            self.ctx = None
+
+
+class GlfwMujocoViewer(BaseMujocoViewer):
     """Main viewer class for MuJoCo environments.
 
     This class provides a complete visualization interface for MuJoCo environments,
@@ -39,7 +144,7 @@ class MujocoViewer:
         contact_force: bool = False,
         contact_point: bool = False,
         inertia: bool = False,
-        no_opengl: bool | None = None,
+        max_geom: int = 10000,
     ) -> None:
         """Initialize the MuJoCo viewer.
 
@@ -55,8 +160,7 @@ class MujocoViewer:
             contact_force: Whether to show contact force
             contact_point: Whether to show contact point
             inertia: Whether to show inertia
-            no_opengl: If set, don't use OpenGL for rendering. Must be
-                rendering in offscreen mode.
+            max_geom: Maximum number of geoms to render
         """
         super().__init__()
 
@@ -65,7 +169,6 @@ class MujocoViewer:
         self._time_per_render = 1 / 60.0
         self._loop_count = 0
         self._advance_by_one_step = False
-        self._no_opengl = no_opengl
 
         if data is None:
             data = mujoco.MjData(model)
@@ -78,43 +181,30 @@ class MujocoViewer:
 
         self.is_alive = True
 
-        # Disable OpenGL by default if width and height are provided and render
-        # mode is offscreen. OpenGL is not supported by default for some
-        # headless systems so it is better to disable it when possible.
-        if width is not None and height is not None and self.render_mode == "offscreen":
-            no_opengl = True
+        # Initialize GLFW
+        glfw.init()
 
-        if no_opengl:
-            assert width is not None, "If not using OpenGL, width must be provided."
-            assert height is not None, "If not using OpenGL, height must be provided."
-            assert self.render_mode == "offscreen", "If not using OpenGL, must be rendering in offscreen mode."
-            framebuffer_width, framebuffer_height = width, height
+        # Get window dimensions if not provided.
+        if width is None:
+            width, _ = glfw.get_video_mode(glfw.get_primary_monitor()).size
+        if height is None:
+            _, height = glfw.get_video_mode(glfw.get_primary_monitor()).size
+        assert width is not None and height is not None
 
-        else:
-            # Initialize GLFW
-            glfw.init()
+        # Create window
+        if self.render_mode == "offscreen":
+            glfw.window_hint(glfw.VISIBLE, 0)
+        self.window = glfw.create_window(width, height, title, None, None)
+        glfw.make_context_current(self.window)
+        glfw.swap_interval(1)
 
-            # Get window dimensions if not provided.
-            if width is None:
-                width, _ = glfw.get_video_mode(glfw.get_primary_monitor()).size
-            if height is None:
-                _, height = glfw.get_video_mode(glfw.get_primary_monitor()).size
-            assert width is not None and height is not None
-
-            # Create window
-            if self.render_mode == "offscreen":
-                glfw.window_hint(glfw.VISIBLE, 0)
-            self.window = glfw.create_window(width, height, title, None, None)
-            glfw.make_context_current(self.window)
-            glfw.swap_interval(1)
-
-            # Get framebuffer dimensions
-            framebuffer_width, framebuffer_height = glfw.get_framebuffer_size(self.window)
+        # Get framebuffer dimensions
+        framebuffer_width, framebuffer_height = glfw.get_framebuffer_size(self.window)
 
         # Initialize MuJoCo visualization objects
         self.vopt = mujoco.MjvOption()
         self.cam = mujoco.MjvCamera()
-        self.scn = mujoco.MjvScene(self.model, maxgeom=10000)
+        self.scn = mujoco.MjvScene(self.model, maxgeom=max_geom)
         self.pert = mujoco.MjvPerturb()
         self.ctx = mujoco.MjrContext(self.model, mujoco.mjtFontScale.mjFONTSCALE_150.value)
 
@@ -201,26 +291,7 @@ class MujocoViewer:
     def _handle_quit(self) -> None:
         glfw.set_window_should_close(self.window, True)
 
-    @overload
-    def read_pixels(self, depth: Literal[True], callback: Callback | None = None) -> tuple[np.ndarray, np.ndarray]: ...
-
-    @overload
-    def read_pixels(self, depth: Literal[False] = False, callback: Callback | None = None) -> np.ndarray: ...
-
-    def read_pixels(
-        self,
-        depth: bool = False,
-        callback: Callback | None = None,
-    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
-        """Read pixel data from the scene.
-
-        Args:
-            depth: Whether to also return depth buffer
-            callback: Callback to call after rendering
-
-        Returns:
-            RGB image array, or tuple of (RGB, depth) arrays if depth=True
-        """
+    def read_pixels(self, callback: Callback | None = None) -> np.ndarray:
         if self.render_mode == "window":
             raise NotImplementedError("Use 'render()' in 'window' mode.")
 
@@ -239,18 +310,11 @@ class MujocoViewer:
         mujoco.mjr_render(self.viewport, self.scn, self.ctx)
         shape = (self.viewport.width, self.viewport.height)
 
-        if depth:
-            rgb_img = np.zeros((shape[1], shape[0], 3), dtype=np.uint8)
-            depth_img = np.zeros((shape[1], shape[0], 1), dtype=np.float32)
-            mujoco.mjr_readPixels(rgb_img, depth_img, self.viewport, self.ctx)
-            return np.flipud(rgb_img), np.flipud(depth_img)
-        else:
-            img = np.zeros((shape[1], shape[0], 3), dtype=np.uint8)
-            mujoco.mjr_readPixels(img, None, self.viewport, self.ctx)
-            return np.flipud(img)
+        img = np.zeros((shape[1], shape[0], 3), dtype=np.uint8)
+        mujoco.mjr_readPixels(img, None, self.viewport, self.ctx)
+        return np.flipud(img)
 
     def render(self, callback: Callback | None = None) -> None:
-        """Render a frame of the simulation."""
         if self.render_mode == "offscreen":
             raise NotImplementedError("Use 'read_pixels()' for 'offscreen' mode.")
         if not self.is_alive:
@@ -296,6 +360,5 @@ class MujocoViewer:
     def close(self) -> None:
         """Close the viewer and clean up resources."""
         self.is_alive = False
-        if not self._no_opengl:
-            glfw.terminate()
+        glfw.terminate()
         self.ctx.free()

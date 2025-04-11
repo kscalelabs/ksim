@@ -76,7 +76,7 @@ from ksim.utils.mujoco import (
     get_torque_limits,
     load_model,
 )
-from ksim.viewer import MujocoViewer, RenderMode
+from ksim.viewer import BaseMujocoViewer, DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
@@ -347,6 +347,10 @@ class RLConfig(xax.Config):
         value=(8, 4),
         help="The size of the figure for each plot.",
     )
+    render_with_glfw: bool | None = xax.field(
+        value=None,
+        help="Explicitly toggle GLFW rendering; if not specified, use GLFW when rendering on-screen",
+    )
     render_shadow: bool = xax.field(
         value=False,
         help="If true, render shadows.",
@@ -452,22 +456,35 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
-) -> MujocoViewer:
+) -> BaseMujocoViewer:
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
 
-    viewer = MujocoViewer(
-        mj_model,
-        data=mj_data,
-        mode=mode,
-        height=config.render_height,
-        width=config.render_width,
-        shadow=config.render_shadow,
-        reflection=config.render_reflection,
-        contact_force=config.render_contact_force,
-        contact_point=config.render_contact_point,
-        inertia=config.render_inertia,
-    )
+    if (render_with_glfw := config.render_with_glfw) is None:
+        render_with_glfw = mode == "window"
+
+    viewer: GlfwMujocoViewer | DefaultMujocoViewer
+
+    if render_with_glfw:
+        viewer = GlfwMujocoViewer(
+            mj_model,
+            data=mj_data,
+            mode=mode,
+            height=config.render_height,
+            width=config.render_width,
+            shadow=config.render_shadow,
+            reflection=config.render_reflection,
+            contact_force=config.render_contact_force,
+            contact_point=config.render_contact_point,
+            inertia=config.render_inertia,
+        )
+
+    else:
+        viewer = DefaultMujocoViewer(
+            mj_model,
+            width=config.render_width,
+            height=config.render_height,
+        )
 
     # Sets the viewer camera.
     viewer.cam.distance = config.render_distance
@@ -884,7 +901,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectory: Trajectory,
         markers: Collection[Marker],
-        viewer: MujocoViewer,
+        viewer: GlfwMujocoViewer,
         target_fps: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
@@ -942,7 +959,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         logged_traj: LoggedTrajectory,
         markers: Collection[Marker],
-        viewer: MujocoViewer,
+        viewer: GlfwMujocoViewer,
     ) -> None:
         """Visualizes a single trajectory.
 
