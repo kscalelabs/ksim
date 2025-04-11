@@ -24,7 +24,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
 
-from ksim.actuators import Actuators
+from ksim.actuators import Actuators, StatefulActuators
 from ksim.events import Event
 from ksim.resets import Reset
 from ksim.types import PhysicsModel, PhysicsState, PlannerState
@@ -100,13 +100,13 @@ class MjxEngine(PhysicsEngine):
 
         initial_position = mjx_data.qpos[7:]
         initial_velocity = jnp.zeros_like(initial_position)
-        default_planner = PlannerState(position=initial_position, velocity=initial_velocity)
+        default_planner_state = PlannerState(position=initial_position, velocity=initial_velocity)
 
         return PhysicsState(
             data=mjx_data,
             most_recent_action=default_action,
             event_states=self._reset_events(rng),
-            planner_state=default_planner,
+            planner_state=default_planner_state,
         )
 
     def step(
@@ -154,10 +154,20 @@ class MjxEngine(PhysicsEngine):
                 new_event_states[event.event_name] = new_event_state
 
             rng, ctrl_rng = jax.random.split(rng)
-            new_planner_state, torques = self.actuators.get_ctrl(planner_state, ctrl, data, ctrl_rng)
+
+            if isinstance(self.actuators, StatefulActuators):
+                torques, planner_state = self.actuators.get_stateful_ctrl(
+                    action=ctrl,
+                    physics_data=data,
+                    planner_state=planner_state,
+                    rng=ctrl_rng,
+                )
+            else:
+                torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=ctrl_rng)
+
             data_with_ctrl = data.replace(ctrl=torques)
             new_data = mjx.step(physics_model, data_with_ctrl)
-            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), new_planner_state), None
+            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), planner_state), None
 
         # Runs the model for N steps.
         (mjx_data, *_, event_info, planner_state_final), _ = jax.lax.scan(
@@ -166,7 +176,12 @@ class MjxEngine(PhysicsEngine):
             jax.random.split(rng, phys_steps_per_ctrl_steps),
         )
 
-        return PhysicsState(data=mjx_data, most_recent_action=action, event_states=xax.FrozenDict(event_info), planner_state=planner_state_final)
+        return PhysicsState(
+            data=mjx_data,
+            most_recent_action=action,
+            event_states=xax.FrozenDict(event_info),
+            planner_state=planner_state_final,
+        )
 
 
 class MujocoEngine(PhysicsEngine):
@@ -220,6 +235,7 @@ class MujocoEngine(PhysicsEngine):
         )
 
         event_states = physics_state.event_states
+        planner_state = physics_state.planner_state
 
         for step_num in range(phys_steps_per_ctrl_steps):
             # Randomly apply the action with some latency.
@@ -238,11 +254,26 @@ class MujocoEngine(PhysicsEngine):
                 new_event_states[event.event_name] = new_event_state
 
             event_states = xax.FrozenDict(new_event_states)
-            new_planner_state, torques = self.actuators.get_ctrl(physics_state.planner_state, ctrl, mujoco_data, action_rng)
+
+            if isinstance(self.actuators, StatefulActuators):
+                torques, planner_state = self.actuators.get_stateful_ctrl(
+                    action=ctrl,
+                    physics_data=mujoco_data,
+                    planner_state=planner_state,
+                    rng=action_rng,
+                )
+            else:
+                torques = self.actuators.get_ctrl(action=ctrl, physics_data=mujoco_data, rng=action_rng)
+
             mujoco_data.ctrl[:] = torques
             mujoco.mj_step(physics_model, mujoco_data)
 
-        return PhysicsState(data=mujoco_data, most_recent_action=action, event_states=event_states, planner_state=new_planner_state)
+        return PhysicsState(
+            data=mujoco_data,
+            most_recent_action=action,
+            event_states=event_states,
+            planner_state=planner_state,
+        )
 
 
 def get_physics_engine(
