@@ -102,7 +102,6 @@ def get_body_ids(model: mujoco.MjModel, mappings: tuple[ReferenceMapping, ...]) 
 
 def visualize_reference_points(
     model: mujoco.MjModel,
-    *,
     base_id: int,
     reference_motion: xax.FrozenDict[int, np.ndarray],
 ) -> None:
@@ -154,9 +153,7 @@ def visualize_reference_points(
 
 def visualize_reference_motion(
     model: mujoco.MjModel,
-    *,
-    base_id: int,
-    reference_qpos: xax.FrozenDict[int, np.ndarray],
+    reference_qpos: np.ndarray,
 ) -> None:
     data = mujoco.MjData(model)
     viewer = MujocoViewer(model, data, mode="window", width=1024, height=768)

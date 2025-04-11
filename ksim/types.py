@@ -6,6 +6,7 @@ __all__ = [
     "PhysicsState",
     "Trajectory",
     "Rewards",
+    "Action",
     "Histogram",
     "Metrics",
 ]
@@ -32,6 +33,14 @@ class PhysicsState:
     most_recent_action: Array
     data: PhysicsData
     event_states: xax.FrozenDict[str, PyTree]
+    planner_state: PyTree
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class PlannerState:
+    position: Array
+    velocity: Array
 
 
 @jax.tree_util.register_dataclass
@@ -63,6 +72,15 @@ class Trajectory:
 class Rewards:
     total: Array
     components: xax.FrozenDict[str, Array]
+    carry: xax.FrozenDict[str, PyTree]
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Action:
+    action: Array
+    carry: PyTree = None
+    aux_outputs: PyTree = None
 
 
 @jax.tree_util.register_dataclass

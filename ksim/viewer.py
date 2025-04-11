@@ -25,7 +25,7 @@ class MujocoViewer:
     def __init__(
         self,
         model: mujoco.MjModel,
-        data: mujoco.MjData,
+        data: mujoco.MjData | None = None,
         mode: RenderMode = "window",
         title: str = "ksim",
         width: int | None = None,
@@ -58,6 +58,9 @@ class MujocoViewer:
         self._time_per_render = 1 / 60.0
         self._loop_count = 0
         self._advance_by_one_step = False
+
+        if data is None:
+            data = mujoco.MjData(model)
 
         self.model = model
         self.data = data

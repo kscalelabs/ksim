@@ -9,14 +9,14 @@ __all__ = [
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Generic, Literal, TypeVar
+from typing import Literal
 
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 
-from ksim.types import PhysicsData, PhysicsModel
+from ksim.types import PhysicsData, PhysicsModel, PlannerState
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
 logger = logging.getLogger(__name__)
@@ -48,17 +48,23 @@ class Actuators(ABC):
         return physics_data.ctrl
 
 
-T = TypeVar("T", bound=Actuators)
-
-
-class ActuatorsBuilder(ABC, Generic[T]):
+class StatefulActuators(Actuators):
     @abstractmethod
-    def __call__(
+    def get_stateful_ctrl(
         self,
-        physics_model: PhysicsModel,
-        joint_name_to_metadata: dict[str, JointMetadataOutput],
-    ) -> T:
-        """Builds an observation from a MuJoCo model."""
+        action: Array,
+        physics_data: PhysicsData,
+        planner_state: PlannerState,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, PlannerState]:
+        """Get the control signal from the action vector."""
+
+    @abstractmethod
+    def get_default_state(self, initial_position: Array, initial_velocity: Array) -> PlannerState:
+        """Get the default state for the actuator planner."""
+
+    def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: Array) -> Array:
+        raise NotImplementedError("Stateful actuators should use `get_stateful_ctrl` instead.")
 
 
 class TorqueActuators(Actuators):

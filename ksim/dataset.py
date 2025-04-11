@@ -161,6 +161,7 @@ class TrajectoryDataset(Dataset[tuple[Trajectory, Rewards], tuple[Trajectory, Re
             Rewards(
                 total=arrs["reward"],
                 components=_dict("reward_components"),
+                carry=_dict("reward_carry"),
             ),
         )
 
