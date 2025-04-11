@@ -141,7 +141,7 @@ def get_observation(
 def get_rewards(
     trajectory: Trajectory,
     rewards: Collection[Reward],
-    reward_carry: xax.FrozenDict[str, PyTree],
+    rewards_carry: xax.FrozenDict[str, PyTree],
     ctrl_dt: float,
     clip_min: float | None = None,
     clip_max: float | None = None,
@@ -150,8 +150,10 @@ def get_rewards(
     reward_dict: dict[str, Array] = {}
     next_reward_carry: dict[str, PyTree] = {}
     target_shape = trajectory.done.shape
+
     for reward_generator in rewards:
         reward_name = reward_generator.reward_name
+        reward_carry = rewards_carry[reward_name]
         reward_val, reward_carry = reward_generator(trajectory, reward_carry)
         reward_val = reward_val * reward_generator.scale * ctrl_dt
         if reward_val.shape != trajectory.done.shape:
@@ -1160,7 +1162,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         reward = get_rewards(
             trajectory=trajectory,
             rewards=rollout_constants.rewards,
-            reward_carry=rollout_env_state.reward_carry,
+            rewards_carry=rollout_env_state.reward_carry,
             ctrl_dt=self.config.ctrl_dt,
             clip_min=self.config.reward_clip_min,
             clip_max=self.config.reward_clip_max,
@@ -1364,7 +1366,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 get_rewards(
                     trajectory=trajectory,
                     rewards=rollout_constants.rewards,
-                    reward_carry=rollout_env_state.reward_carry,
+                    rewards_carry=rollout_env_state.reward_carry,
                     ctrl_dt=self.config.ctrl_dt,
                     clip_min=self.config.reward_clip_min,
                     clip_max=self.config.reward_clip_max,
