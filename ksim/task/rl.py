@@ -76,7 +76,7 @@ from ksim.utils.mujoco import (
     get_torque_limits,
     load_model,
 )
-from ksim.viewer import MujocoViewer
+from ksim.viewer import MujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
@@ -444,6 +444,47 @@ class RLConfig(xax.Config):
 
 
 Config = TypeVar("Config", bound=RLConfig)
+
+
+def get_viewer(
+    mj_model: mujoco.MjModel,
+    config: Config,
+    mj_data: mujoco.MjData | None = None,
+    save_path: str | Path | None = None,
+    mode: RenderMode | None = None,
+) -> MujocoViewer:
+    viewer = MujocoViewer(
+        mj_model,
+        data=mj_data,
+        mode=mode if mode is not None else "window" if save_path is None else "offscreen",
+        height=config.render_height,
+        width=config.render_width,
+        shadow=config.render_shadow,
+        reflection=config.render_reflection,
+        contact_force=config.render_contact_force,
+        contact_point=config.render_contact_point,
+        inertia=config.render_inertia,
+    )
+
+    # Sets the viewer camera.
+    viewer.cam.distance = config.render_distance
+    viewer.cam.azimuth = config.render_azimuth
+    viewer.cam.elevation = config.render_elevation
+    viewer.cam.lookat[:] = config.render_lookat
+    if config.render_track_body_id is not None:
+        viewer.cam.trackbodyid = config.render_track_body_id
+        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+
+    configure_scene(
+        viewer.scn,
+        viewer.vopt,
+        shadow=config.render_shadow,
+        contact_force=config.render_contact_force,
+        contact_point=config.render_contact_point,
+        inertia=config.render_inertia,
+    )
+
+    return viewer
 
 
 class RLTask(xax.Task[Config], Generic[Config], ABC):
@@ -859,27 +900,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         num_steps = trajectory.done.shape[0]
         trajectory_list: list[Trajectory] = [jax.tree.map(lambda arr: arr[i], trajectory) for i in range(num_steps)]
 
-        # Builds the camera for viewing the scene.
-        mj_camera = mujoco.MjvCamera()
-        mj_camera.distance = self.config.render_distance
-        mj_camera.azimuth = self.config.render_azimuth
-        mj_camera.elevation = self.config.render_elevation
-        mj_camera.lookat[:] = self.config.render_lookat
-        if self.config.render_track_body_id is not None:
-            mj_camera.trackbodyid = self.config.render_track_body_id
-            mj_camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-
-        if self.config.render_camera_name is not None:
-            mj_camera = self.config.render_camera_name
-
         frame_list: list[np.ndarray] = []
 
         if self.config.render_markers:
             viewer.scn.ngeom = 0
 
         for frame_id, trajectory in enumerate(trajectory_list):
+            # Updates the model with the latest data.
+            data = mujoco.MjData(viewer.model)
             viewer.data.qpos = np.array(trajectory.qpos)
             viewer.data.qvel = np.array(trajectory.qvel)
+            mujoco.mj_forward(viewer.model, data)
+            viewer.data = data
 
             def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                 if self.config.render_markers:
@@ -970,6 +1002,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             viewer=viewer,
             target_fps=self.config.render_fps,
         )
+
         self.logger.log_video(
             key="trajectory",
             value=frames,
@@ -1249,7 +1282,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model, _ = self.load_initial_state(model_rng, load_optimizer=False)
 
             # Loads the Mujoco model and logs some information about it.
-            mj_model: PhysicsModel = self.get_mujoco_model()
+            mj_model = self.get_mujoco_model()
             mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
             self.logger.log_file("mujoco_info.yaml", mujoco_info)
 
@@ -1271,30 +1304,29 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 randomizers=randomizers,
             )
 
-            viewer = MujocoViewer(
-                mj_model,
-                rollout_env_state.physics_state.data,
-                mode="window" if save_path is None else "offscreen",
-                height=self.config.render_height,
-                width=self.config.render_width,
-                shadow=self.config.render_shadow,
-                reflection=self.config.render_reflection,
-                contact_force=self.config.render_contact_force,
-                contact_point=self.config.render_contact_point,
-                inertia=self.config.render_inertia,
+            # Creates the viewer.
+            viewer = get_viewer(
+                mj_model=mj_model,
+                config=self.config,
+                mj_data=rollout_env_state.physics_state.data,
+                save_path=save_path,
             )
-
-            # Sets the viewer camera.
-            viewer.cam.distance = self.config.render_distance
-            viewer.cam.azimuth = self.config.render_azimuth
-            viewer.cam.elevation = self.config.render_elevation
-            viewer.cam.lookat[:] = self.config.render_lookat
-            if self.config.render_track_body_id is not None:
-                viewer.cam.trackbodyid = self.config.render_track_body_id
-                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
             frames: list[np.ndarray] = []
+
+            def reset_mujoco_model(rollout_env_state: RolloutEnvState, rng: PRNGKeyArray) -> RolloutEnvState:
+                rng, carry_rng = jax.random.split(rng)
+                rollout_env_state = RolloutEnvState(
+                    model_carry=self.get_initial_model_carry(carry_rng),
+                    commands=rollout_env_state.commands,
+                    physics_state=rollout_env_state.physics_state,
+                    curriculum_state=rollout_env_state.curriculum_state,
+                    randomization_dict=rollout_env_state.randomization_dict,
+                    rng=rng,
+                )
+                return rollout_env_state
+
             transitions = []
 
             try:
@@ -1305,6 +1337,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         rollout_shared_state=rollout_shared_state,
                     )
                     transitions.append(transition)
+                    rng, rand_rng = jax.random.split(rng)
+
+                    # Resets the Mujoco model if the episode is done.
+                    rollout_env_state = jax.lax.cond(
+                        transition.done,
+                        lambda: reset_mujoco_model(rollout_env_state, rand_rng),
+                        lambda: rollout_env_state,
+                    )
 
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                         for marker in markers:
@@ -1583,35 +1623,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rollout_env_states = self._get_rollout_env_state(rng, rollout_constants, mjx_model, randomizers)
             rollout_shared_state = self._get_rollout_shared_state(mjx_model, model_arr)
 
-            # Creates the renderer.
-            viewer = MujocoViewer(
-                mj_model,
-                mode="offscreen",
-                height=self.config.render_height,
-                width=self.config.render_width,
-                shadow=self.config.render_shadow,
-                reflection=self.config.render_reflection,
-                contact_force=self.config.render_contact_force,
-                contact_point=self.config.render_contact_point,
-                inertia=self.config.render_inertia,
-            )
-
-            viewer.scn.ngeom = 0
-
-            configure_scene(
-                viewer.scn,
-                viewer.vopt,
-                shadow=self.config.render_shadow,
-                contact_force=self.config.render_contact_force,
-                contact_point=self.config.render_contact_point,
-                inertia=self.config.render_inertia,
-            )
-
             # Creates the markers.
             markers = self.get_markers(
                 commands=rollout_constants.commands,
                 observations=rollout_constants.observations,
                 randomizers=randomizers,
+            )
+
+            # Creates the viewer.
+            viewer = get_viewer(
+                mj_model=mj_model,
+                config=self.config,
+                mode="offscreen",
             )
 
             state = self.on_training_start(state)
