@@ -72,6 +72,29 @@ class DefaultMujocoViewer:
         self.ctx = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150.value)
         mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_OFFSCREEN, self.ctx)
 
+    def set_camera(self, id: int | str) -> None:
+        """Set the camera to use."""
+        if isinstance(id, int):
+            if id < -1 or id >= self.model.ncam:
+                raise ValueError(f"Camera ID {id} is out of range [-1, {self.model.ncam}).")
+            # Set up camera
+            self.cam.fixedcamid = id
+            if id == -1:
+                self.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+                mujoco.mjv_defaultFreeCamera(self.model, self.cam)
+            else:
+                self.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+        elif isinstance(id, str):
+            camera_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, id)
+            if camera_id == -1:
+                raise ValueError(f'The camera "{id}" does not exist.')
+            # Set up camera
+            self.cam.fixedcamid = camera_id
+            self.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+        else:
+            raise ValueError(f"Invalid camera ID: {id}")
+
+
     def read_pixels(self, callback: Callback | None = None) -> np.ndarray:
         self._gl_context.make_current()
 
@@ -220,6 +243,28 @@ class GlfwMujocoViewer:
             glfw.set_mouse_button_callback(self.window, self._mouse_button)
             glfw.set_scroll_callback(self.window, self._scroll)
             glfw.set_key_callback(self.window, self._keyboard)
+
+    def set_camera(self, id: int | str) -> None:
+        """Set the camera to use."""
+        if isinstance(id, int):
+            if id < -1 or id >= self.model.ncam:
+                raise ValueError(f"Camera ID {id} is out of range [-1, {self.model.ncam}).")
+            # Set up camera
+            self.cam.fixedcamid = id
+            if id == -1:
+                self.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+                mujoco.mjv_defaultFreeCamera(self.model, self.cam)
+            else:
+                self.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+        elif isinstance(id, str):
+            camera_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, id)
+            if camera_id == -1:
+                raise ValueError(f'The camera "{id}" does not exist.')
+            # Set up camera
+            self.cam.fixedcamid = camera_id
+            self.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+        else:
+            raise ValueError(f"Invalid camera ID: {id}")
 
     def _mouse_move(self, window: glfw._GLFWwindow, xpos: float, ypos: float) -> None:
         """Mouse motion callback."""

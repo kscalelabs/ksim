@@ -497,6 +497,9 @@ def get_viewer(
         viewer.cam.trackbodyid = config.render_track_body_id
         viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
+    if config.render_camera_name is not None:
+        viewer.set_camera(config.render_camera_name)
+
     configure_scene(
         viewer.scn,
         viewer.vopt,
