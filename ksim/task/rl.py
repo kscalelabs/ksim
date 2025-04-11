@@ -924,8 +924,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         for frame_id, trajectory in enumerate(trajectory_list):
             # Updates the model with the latest data.
-            viewer.data.qpos = np.array(trajectory.qpos)
-            viewer.data.qvel = np.array(trajectory.qvel)
+            viewer.data.qpos[:] = np.array(trajectory.qpos)
+            viewer.data.qvel[:] = np.array(trajectory.qvel)
             mujoco.mj_forward(viewer.model, viewer.data)
 
             def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
@@ -1341,14 +1341,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     )
                     transitions.append(transition)
 
+                    # Logs the frames to render.
+                    viewer.data.qpos[:] = np.array(rollout_env_state.physics_state.data.qpos)
+                    viewer.data.qvel[:] = np.array(rollout_env_state.physics_state.data.qvel)
+                    mujoco.mj_forward(viewer.model, viewer.data)
+
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                         for marker in markers:
                             marker(model, data, scene, transition)
 
-                    # Logs the frames to render.
-                    viewer.data.qpos[:] = rollout_env_state.physics_state.data.qpos
-                    viewer.data.qvel[:] = rollout_env_state.physics_state.data.qvel
-                    mujoco.mj_forward(viewer.model, viewer.data)
                     if save_path is None:
                         viewer.render(callback=render_callback)
                     else:
