@@ -270,8 +270,8 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
                 model=mj_model,
                 reference_qpos=np_reference_qpos,
             )
-
-        super().run()
+        else:
+            super().run()
 
 
 if __name__ == "__main__":
@@ -309,6 +309,5 @@ if __name__ == "__main__":
             bvh_scaling_factor=1 / 100,
             mj_base_name="pelvis",
             reference_base_name="CC_Base_Pelvis",
-            visualize_reference_motion=True,
         ),
     )

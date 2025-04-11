@@ -1608,6 +1608,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers = self.get_markers(
                 commands=rollout_constants.commands,
                 observations=rollout_constants.observations,
+                rewards=rollout_constants.rewards,
                 randomizers=randomizers,
             )
 
