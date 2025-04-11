@@ -770,6 +770,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             timestep=next_physics_state.data.time,
             termination_components=terminations,
             aux_outputs=action.aux_outputs,
+            reward_carry=rollout_env_state.reward_carry,
         )
 
         # Conditionally reset on termination.
@@ -1688,8 +1689,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     )
 
                     # Only log trajectory information on validation steps.
-                    # if state.phase == "valid":
-                    self.log_logged_trajectory(logged_traj=logged_traj, markers=markers, viewer=viewer)
+                    if state.phase == "valid":
+                        self.log_logged_trajectory(logged_traj=logged_traj, markers=markers, viewer=viewer)
 
                     if is_first_step:
                         is_first_step = False
