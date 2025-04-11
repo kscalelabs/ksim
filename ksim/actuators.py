@@ -60,7 +60,7 @@ class StatefulActuators(Actuators):
         """Get the control signal from the action vector."""
 
     @abstractmethod
-    def get_default_state(self) -> PlannerState:
+    def get_default_state(self, initial_position: Array, initial_velocity: Array) -> PlannerState:
         """Get the default state for the actuator planner."""
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: Array) -> Array:

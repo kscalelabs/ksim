@@ -100,13 +100,19 @@ class MjxEngine(PhysicsEngine):
 
         initial_position = mjx_data.qpos[7:]
         initial_velocity = jnp.zeros_like(initial_position)
-        default_planner_state = PlannerState(position=initial_position, velocity=initial_velocity)
+
+        # Gets the initial planner state for stateful actuators.
+        planner_state = (
+            self.actuators.get_default_state(initial_position, initial_velocity)
+            if isinstance(self.actuators, StatefulActuators)
+            else None
+        )
 
         return PhysicsState(
             data=mjx_data,
             most_recent_action=default_action,
             event_states=self._reset_events(rng),
-            planner_state=default_planner_state,
+            planner_state=planner_state,
         )
 
     def step(
