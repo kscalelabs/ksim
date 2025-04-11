@@ -240,7 +240,7 @@ class Marker:
         label: str | None = None,
         size: float = 0.025,
         target_name: str | None = None,
-        target_type: TargetType | None = "body",
+        target_type: TargetType = "body",
         update_fn: UpdateFn | None = None,
     ) -> Self:
         return cls(
@@ -263,7 +263,7 @@ class Marker:
         rgba: tuple[float, float, float, float],
         label: str | None = None,
         target_name: str | None = None,
-        target_type: TargetType | None = "body",
+        target_type: TargetType | None = None,
         update_fn: UpdateFn | None = None,
     ) -> Self:
         return cls(

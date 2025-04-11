@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
 import attrs
 import glm
@@ -11,6 +11,8 @@ import jax.numpy as jnp
 import mujoco
 import numpy as np
 import xax
+
+from ksim.viewer import MujocoViewer
 
 try:
     import bvhio
@@ -28,11 +30,13 @@ import ksim
 from ksim.types import PhysicsModel
 from ksim.utils.reference_motion import (
     ReferenceMapping,
-    generate_reference_motion,
     get_local_xpos,
+    get_qpos_reference_motion,
+    get_reference_cartesian_poses,
     get_reference_joint_id,
     local_to_absolute,
     visualize_reference_motion,
+    visualize_reference_points,
 )
 
 from .walking import (
@@ -45,12 +49,6 @@ from .walking import (
 class NaiveVelocityReward(ksim.Reward):
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         return trajectory.qvel[..., 0].clip(max=5.0)
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class MotionAuxOutputs:
-    tracked_pos: xax.FrozenDict[int, Array]
 
 
 @dataclass
@@ -67,6 +65,10 @@ class HumanoidWalkingReferenceMotionTaskConfig(HumanoidWalkingTaskConfig):
         value=1.0,
         help="Scaling factor to ensure the BVH tree matches the Mujoco model.",
     )
+    bvh_offset: tuple[float, float, float] = xax.field(
+        value=(0.0, 0.0, 0.0),
+        help="Offset to ensure the BVH tree matches the Mujoco model.",
+    )
     mj_base_name: str = xax.field(
         value="pelvis",
         help="The Mujoco body name of the base of the humanoid",
@@ -75,9 +77,13 @@ class HumanoidWalkingReferenceMotionTaskConfig(HumanoidWalkingTaskConfig):
         value="CC_Base_Pelvis",
         help="The BVH joint name of the base of the humanoid",
     )
+    visualize_reference_points: bool = xax.field(
+        value=False,
+        help="Whether to visualize the reference points.",
+    )
     visualize_reference_motion: bool = xax.field(
         value=False,
-        help="Whether to visualize the reference motion.",
+        help="Whether to visualize the reference motion after running IK.",
     )
 
 
@@ -100,9 +106,36 @@ HUMANOID_REFERENCE_MAPPINGS = (
 Config = TypeVar("Config", bound=HumanoidWalkingReferenceMotionTaskConfig)
 
 
+def create_tracked_marker_update_fn(
+    body_id: int, mj_base_id: int, tracked_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
+) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
+    """Factory function to create a marker update for the tracked positions."""
+
+    def _actual_update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
+        tracked_pos = tracked_pos_fn(transition)
+        abs_pos = local_to_absolute(transition.xpos, tracked_pos[body_id], mj_base_id)
+        marker.pos = tuple(abs_pos)
+
+    return _actual_update_fn
+
+
+def create_target_marker_update_fn(
+    body_id: int, mj_base_id: int, target_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
+) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
+    """Factory function to create a marker update for the target positions."""
+
+    def _target_update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
+        target_pos = target_pos_fn(transition)
+        abs_pos = local_to_absolute(transition.xpos, target_pos[body_id], mj_base_id)
+        marker.pos = tuple(abs_pos)
+
+    return _target_update_fn
+
+
 @attrs.define(frozen=True, kw_only=True)
-class ReferenceMotionReward(ksim.Reward):
+class CartesianReferenceMotionReward(ksim.Reward):
     reference_motion: xax.FrozenDict[int, xax.HashableArray]
+    mj_base_id: int
     ctrl_dt: float
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
@@ -111,12 +144,18 @@ class ReferenceMotionReward(ksim.Reward):
     def num_frames(self) -> int:
         return list(self.reference_motion.values())[0].array.shape[0]
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def get_tracked_pos(self, trajectory: ksim.Trajectory) -> xax.FrozenDict[int, Array]:
         assert isinstance(trajectory.aux_outputs, MotionAuxOutputs)
+        return trajectory.aux_outputs.tracked_pos
+
+    def get_target_pos(self, trajectory: ksim.Trajectory) -> xax.FrozenDict[int, Array]:
         reference_motion: xax.FrozenDict[int, Array] = jax.tree.map(lambda x: x.array, self.reference_motion)
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
-        target_pos = jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
-        tracked_pos = trajectory.aux_outputs.tracked_pos
+        return jax.tree.map(lambda x: jnp.take(x, step_number, axis=0), reference_motion)
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        target_pos = self.get_target_pos(trajectory)
+        tracked_pos = self.get_tracked_pos(trajectory)
         error = jax.tree.map(lambda target, tracked: xax.get_norm(target - tracked, self.norm), target_pos, tracked_pos)
         mean_error_over_bodies = jax.tree.reduce(jnp.add, error) / len(error)
         mean_error = mean_error_over_bodies.mean(axis=-1)
@@ -127,41 +166,48 @@ class ReferenceMotionReward(ksim.Reward):
         markers = []
 
         # Add markers for reference positions (in blue)
-        for body_id, ref_pos in self.reference_motion.items():
+        for body_id in self.reference_motion.keys():
+
             markers.append(
                 ksim.Marker.sphere(
                     pos=(0.0, 0.0, 0.0),
-                    radius=0.02,
-                    rgba=(0.0, 0.0, 1.0, 0.5),  # Semi-transparent blue
-                    label=f"ref_{body_id}",
-                    target_name=str(body_id),
-                    target_type="body",
+                    radius=0.05,
+                    rgba=(0.0, 0.0, 1.0, 0.5),  # blue = actual
+                    update_fn=create_tracked_marker_update_fn(body_id, self.mj_base_id, self.get_tracked_pos),
                 )
             )
 
-        # Add markers for tracked positions (in red)
-        for body_id, reference_poses in self.reference_motion.items():
-
-            def update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
-                reference_motion = reference_poses.array
-                assert isinstance(reference_motion, Array)
-                step_number = jnp.int32(jnp.round(transition.timestep / self.ctrl_dt)) % self.num_frames
-                reference_local_pos = jnp.take(reference_motion, step_number, axis=0)
-                reference_xpos = local_to_absolute(transition.xpos, reference_local_pos, body_id)
-                marker.pos = tuple(reference_xpos)
-
             markers.append(
                 ksim.Marker.sphere(
                     pos=(0.0, 0.0, 0.0),
-                    radius=0.02,
-                    rgba=(1.0, 0.0, 0.0, 0.5),  # Semi-transparent red
-                    target_name=None,
-                    target_type=None,
-                    update_fn=update_fn,
+                    radius=0.05,
+                    rgba=(1.0, 0.0, 0.0, 0.5),  # red = target
+                    update_fn=create_target_marker_update_fn(body_id, self.mj_base_id, self.get_target_pos),
                 )
             )
 
         return markers
+
+
+@attrs.define(frozen=True, kw_only=True)
+class QposReferenceMotionReward(ksim.Reward):
+    reference_motion: xax.FrozenDict[int, xax.HashableArray]
+    ctrl_dt: float
+    norm: xax.NormType = attrs.field(default="l1")
+    sensitivity: float = attrs.field(default=5.0)
+
+    @property
+    def num_frames(self) -> int:
+        return list(self.reference_motion.values())[0].array.shape[0]
+
+    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+        qpos = trajectory.qpos
+        step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
+        reference_qpos = jnp.take(self.reference_motion.array, step_number, axis=0)
+        error = xax.get_norm(reference_qpos - qpos, self.norm)
+        mean_error = error.mean(axis=-1)
+        reward = jnp.exp(-mean_error * self.sensitivity)
+        return reward
 
 
 class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Config]):
@@ -172,35 +218,10 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             ksim.AngularVelocityPenalty(index="x", scale=-0.01),
             ksim.AngularVelocityPenalty(index="y", scale=-0.01),
             NaiveVelocityReward(scale=0.1),
-            ReferenceMotionReward(reference_motion=self.reference_motion, ctrl_dt=self.config.ctrl_dt, scale=0.1),
+            QposReferenceMotionReward(reference_motion=self.reference_motion, ctrl_dt=self.config.ctrl_dt, scale=0.1),
         ]
 
         return rewards
-
-    def sample_action(
-        self,
-        model: DefaultHumanoidModel,
-        model_carry: None,
-        physics_model: ksim.PhysicsModel,
-        physics_state: ksim.PhysicsState,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
-        rng: PRNGKeyArray,
-    ) -> ksim.Action:
-        action_n = super().sample_action(model, model_carry, physics_model, physics_state, observations, commands, rng)
-
-        # Getting the local cartesian positions for all tracked bodies.
-        tracked_positions: dict[int, Array] = {}
-        for body_id in self.tracked_body_ids:
-            body_pos = get_local_xpos(physics_state.data.xpos, body_id, self.mj_base_id)
-            tracked_positions[body_id] = jnp.array(body_pos)
-
-        return ksim.Action(
-            action=action_n.action,
-            aux_outputs=MotionAuxOutputs(
-                tracked_pos=xax.FrozenDict(tracked_positions),
-            ),
-        )
 
     def run(self) -> None:
         mj_model: PhysicsModel = self.get_mujoco_model()
@@ -213,26 +234,50 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
             root.applyRotation(glm.quat(*quat), bake=True)
 
-        np_reference_motion = generate_reference_motion(
+        np_reference_motion = get_reference_cartesian_poses(
             mappings=HUMANOID_REFERENCE_MAPPINGS,
             model=mj_model,
             root=root,
             reference_base_id=reference_base_id,
             root_callback=rotation_callback,
             scaling_factor=self.config.bvh_scaling_factor,
+            offset=np.array(self.config.bvh_offset),
         )
-        self.reference_motion: xax.FrozenDict[int, xax.HashableArray] = jax.tree.map(
-            lambda x: xax.hashable_array(jnp.array(x)), np_reference_motion
+        reference_qpos = get_qpos_reference_motion(
+            model=mj_model,
+            mj_base_id=self.mj_base_id,
+            bvh_root=root,
+            bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
+            bvh_base_id=reference_base_id,
+            bvh_offset=np.array(self.config.bvh_offset),
+            bvh_root_callback=rotation_callback,
+            bvh_scaling_factor=self.config.bvh_scaling_factor,
+            neutral_qpos=None,
+            neutral_similarity_weight=0.1,
+            temporal_consistency_weight=0.1,
+            n_restarts=3,
+            error_acceptance_threshold=1e-4,
+            ftol=1e-8,
+            xtol=1e-8,
+            max_nfev=2000,
+            verbose=False,
         )
+        self.reference_qpos = xax.FrozenDict(jax.tree.map(lambda x: jnp.array(x), reference_qpos))
         self.tracked_body_ids = tuple(self.reference_motion.keys())
 
-        # if self.config.visualize_reference_motion:
-        #     visualize_reference_motion(
-        #         mj_model,
-        #         base_id=self.mj_base_id,
-        #         reference_motion=np_reference_motion,
-        #     )
-        # else:
+        if self.config.visualize_reference_points:
+            visualize_reference_points(
+                mj_model,
+                base_id=self.mj_base_id,
+                reference_motion=np_reference_motion,
+            )
+        elif self.config.visualize_reference_motion:
+            visualize_reference_motion(
+                mj_model,
+                base_id=self.mj_base_id,
+                reference_qpos=np_reference_motion,
+            )
+
         super().run()
 
 
