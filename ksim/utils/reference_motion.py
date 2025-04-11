@@ -11,7 +11,7 @@ import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from scipy.optimize import least_squares
 
-from ksim.viewer import MujocoViewer
+from ksim.viewer import GlfwMujocoViewer
 
 
 @dataclass
@@ -156,7 +156,7 @@ def visualize_reference_motion(
     reference_qpos: np.ndarray,
 ) -> None:
     data = mujoco.MjData(model)
-    viewer = MujocoViewer(model, data, mode="window", width=1024, height=768)
+    viewer = GlfwMujocoViewer(model, data, mode="window", width=1024, height=768)
 
     # Set some nice camera parameters
     viewer.cam.distance = 3.0
@@ -359,7 +359,7 @@ def solve_multi_body_ik(
     return qpos
 
 
-def get_qpos_reference_motion(
+def get_reference_qpos(
     model: mujoco.MjModel,
     mj_base_id: int,
     bvh_root: BvhioJoint,
