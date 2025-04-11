@@ -134,7 +134,7 @@ class IntVectorCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         ranges = jnp.array(self.ranges)  # (N, 2)
-        return jax.random.randint(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
+        return jax.random.randint(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1] + 1)
 
     def __call__(
         self,
