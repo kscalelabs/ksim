@@ -17,3 +17,4 @@ from .task import *
 from .terminations import *
 from .types import *
 from .utils import *
+from .vis import *

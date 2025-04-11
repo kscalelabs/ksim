@@ -1099,6 +1099,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         commands: Collection[Command],
         observations: Collection[Observation],
+        rewards: Collection[Reward],
         randomizers: Collection[PhysicsRandomizer],
     ) -> Collection[Marker]:
         markers: list[Marker] = []
@@ -1106,6 +1107,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers.extend(command.get_markers())
         for observation in observations:
             markers.extend(observation.get_markers())
+        for reward in rewards:
+            markers.extend(reward.get_markers())
         for randomizer in randomizers:
             markers.extend(randomizer.get_markers())
         return markers
@@ -1298,6 +1301,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers = self.get_markers(
                 commands=rollout_constants.commands,
                 observations=rollout_constants.observations,
+                rewards=rollout_constants.rewards,
                 randomizers=randomizers,
             )
 
@@ -1604,6 +1608,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers = self.get_markers(
                 commands=rollout_constants.commands,
                 observations=rollout_constants.observations,
+                rewards=rollout_constants.rewards,
                 randomizers=randomizers,
             )
 
