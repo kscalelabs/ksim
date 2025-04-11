@@ -908,8 +908,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         for frame_id, trajectory in enumerate(trajectory_list):
             # Updates the model with the latest data.
             data = mujoco.MjData(viewer.model)
-            viewer.data.qpos = np.array(trajectory.qpos)
-            viewer.data.qvel = np.array(trajectory.qvel)
+            data.qpos = np.array(trajectory.qpos)
+            data.qvel = np.array(trajectory.qvel)
             mujoco.mj_forward(viewer.model, data)
             viewer.data = data
 
