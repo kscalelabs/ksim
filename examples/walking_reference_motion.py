@@ -31,6 +31,7 @@ from ksim.utils.reference_motion import (
     generate_reference_motion,
     get_local_xpos,
     get_reference_joint_id,
+    local_to_absolute,
     visualize_reference_motion,
 )
 
@@ -122,6 +123,46 @@ class ReferenceMotionReward(ksim.Reward):
         reward = jnp.exp(-mean_error * self.sensitivity)
         return reward
 
+    def get_markers(self) -> list[ksim.Marker]:
+        markers = []
+
+        # Add markers for reference positions (in blue)
+        for body_id, ref_pos in self.reference_motion.items():
+            markers.append(
+                ksim.Marker.sphere(
+                    pos=(0.0, 0.0, 0.0),
+                    radius=0.02,
+                    rgba=(0.0, 0.0, 1.0, 0.5),  # Semi-transparent blue
+                    label=f"ref_{body_id}",
+                    target_name=str(body_id),
+                    target_type="body",
+                )
+            )
+
+        # Add markers for tracked positions (in red)
+        for body_id, reference_poses in self.reference_motion.items():
+
+            def update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
+                reference_motion = reference_poses.array
+                assert isinstance(reference_motion, Array)
+                step_number = jnp.int32(jnp.round(transition.timestep / self.ctrl_dt)) % self.num_frames
+                reference_local_pos = jnp.take(reference_motion, step_number, axis=0)
+                reference_xpos = local_to_absolute(transition.xpos, reference_local_pos, body_id)
+                marker.pos = tuple(reference_xpos)
+
+            markers.append(
+                ksim.Marker.sphere(
+                    pos=(0.0, 0.0, 0.0),
+                    radius=0.02,
+                    rgba=(1.0, 0.0, 0.0, 0.5),  # Semi-transparent red
+                    target_name=None,
+                    target_type=None,
+                    update_fn=update_fn,
+                )
+            )
+
+        return markers
+
 
 class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -185,14 +226,14 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
         )
         self.tracked_body_ids = tuple(self.reference_motion.keys())
 
-        if self.config.visualize_reference_motion:
-            visualize_reference_motion(
-                mj_model,
-                base_id=self.mj_base_id,
-                reference_motion=np_reference_motion,
-            )
-        else:
-            super().run()
+        # if self.config.visualize_reference_motion:
+        #     visualize_reference_motion(
+        #         mj_model,
+        #         base_id=self.mj_base_id,
+        #         reference_motion=np_reference_motion,
+        #     )
+        # else:
+        super().run()
 
 
 if __name__ == "__main__":
