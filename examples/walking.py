@@ -164,7 +164,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Reward parameters.
     move_forward_command: bool = xax.field(
-        default=False,
+        value=False,
         help="If set, just move forward or stand still instead of using all possible controls",
     )
     linear_velocity_clip_max: float = xax.field(
