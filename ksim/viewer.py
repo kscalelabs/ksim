@@ -1,5 +1,9 @@
 """MuJoCo viewer implementation with interactive visualization capabilities."""
 
+__all__ = [
+    "MujocoViewer",
+]
+
 import time
 from threading import Lock
 from typing import Callable, Literal, get_args, overload
