@@ -283,9 +283,9 @@ def solve_multi_body_ik(
     data: mujoco.MjData,
     mj_base_id: int,
     constrained_jnt_mask: np.ndarray,
-    cartesian_pose: xax.FrozenDict[int, np.ndarray],
+    cartesian_pose: dict[int, np.ndarray],
     neutral_qpos: np.ndarray,
-    prev_qpos: np.ndarray = None,
+    prev_qpos: np.ndarray,
     neutral_similarity_weight: float = 0.1,
     temporal_consistency_weight: float = 0.1,
     n_restarts: int = 3,
@@ -390,6 +390,7 @@ def get_reference_qpos(
         bvh_offset: Helps line up root with mj base
         bvh_root_callback: Modifies the root of the BVH tree (e.g. rotation)
         bvh_scaling_factor: The scaling factor for the reference motion
+        constrained_joint_ids: The indices of the joints to constrain
         neutral_qpos: Helps with optimization, by default the starting qpos
         neutral_similarity_weight: Weight of neutral similarity term
         temporal_consistency_weight: Weight of temporal consistency term

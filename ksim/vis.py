@@ -263,7 +263,7 @@ class Marker:
         rgba: tuple[float, float, float, float],
         label: str | None = None,
         target_name: str | None = None,
-        target_type: TargetType | None = None,
+        target_type: TargetType = "body",
         update_fn: UpdateFn | None = None,
     ) -> Self:
         return cls(

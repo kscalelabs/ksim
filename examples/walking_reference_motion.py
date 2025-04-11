@@ -6,7 +6,6 @@ from typing import Callable, Generic, TypeVar
 
 import attrs
 import glm
-import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
@@ -28,9 +27,9 @@ import ksim
 from ksim.types import PhysicsModel
 from ksim.utils.reference_motion import (
     ReferenceMapping,
-    get_reference_qpos,
     get_reference_cartesian_poses,
     get_reference_joint_id,
+    get_reference_qpos,
     local_to_absolute,
     visualize_reference_motion,
     visualize_reference_points,
