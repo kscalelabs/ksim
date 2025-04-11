@@ -42,6 +42,18 @@ from .walking import (
 )
 
 
+@attrs.define(frozen=True, kw_only=True)
+class FixedForwardVelocityReward(ksim.Reward):
+    target_velocity: float = attrs.field(default=0.5)
+    norm: xax.NormType = attrs.field(default="l2")
+    sensitivity: float = attrs.field(default=5.0)
+
+    def __call__(self, trajectory: ksim.Trajectory, reward_carry: None) -> tuple[Array, None]:
+        difference = xax.get_norm(trajectory.qvel[..., 0] - self.target_velocity, self.norm)
+        reward = jnp.exp(-difference * self.sensitivity)
+        return reward, None
+
+
 @dataclass
 class HumanoidWalkingReferenceMotionTaskConfig(HumanoidWalkingTaskConfig):
     bvh_path: str = xax.field(
@@ -147,13 +159,11 @@ class QposReferenceMotionReward(ksim.Reward):
 class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
-            ksim.BaseHeightRangeReward(z_lower=0.8, z_upper=1.5, dropoff=10.0, scale=0.5),
-            ksim.LinearVelocityPenalty(index="z", scale=-0.01),
-            ksim.AngularVelocityPenalty(index="x", scale=-0.01),
-            ksim.AngularVelocityPenalty(index="y", scale=-0.01),
-            NaiveForwardReward(scale=0.1),
+            ksim.StayAliveReward(scale=1.0),
+            # FixedForwardVelocityReward(target_velocity=1.0, scale=0.1, sensitivity=5.0),
+            NaiveForwardReward(scale=0.1, clip_max=2.0),
             QposReferenceMotionReward(
-                reference_qpos=xax.HashableArray(self.reference_qpos), ctrl_dt=self.config.ctrl_dt, scale=0.1
+                reference_qpos=xax.HashableArray(self.reference_qpos), ctrl_dt=self.config.ctrl_dt, scale=0.5
             ),
         ]
 
