@@ -94,7 +94,6 @@ class DefaultMujocoViewer:
         else:
             raise ValueError(f"Invalid camera ID: {id}")
 
-
     def read_pixels(self, callback: Callback | None = None) -> np.ndarray:
         self._gl_context.make_current()
 
