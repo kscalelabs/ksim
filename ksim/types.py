@@ -34,6 +34,7 @@ class PhysicsState:
     event_states: xax.FrozenDict[str, PyTree]
     planner_state: PyTree
 
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class PlannerState:
