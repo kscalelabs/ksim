@@ -141,20 +141,19 @@ def get_observation(
 def get_rewards(
     trajectory: Trajectory,
     rewards: Collection[Reward],
-    reward_carry: xax.FrozenDict[str, PyTree],
+    rewards_carry: xax.FrozenDict[str, PyTree],
     ctrl_dt: float,
     clip_min: float | None = None,
     clip_max: float | None = None,
 ) -> Rewards:
     """Get the rewards from the physics state."""
-    jax.debug.breakpoint()
     reward_dict: dict[str, Array] = {}
     next_reward_carry: dict[str, PyTree] = {}
     target_shape = trajectory.done.shape
-   
+
     for reward_generator in rewards:
         reward_name = reward_generator.reward_name
-        reward_carry = reward_carry[reward_name]
+        reward_carry = rewards_carry[reward_name]
         reward_val, reward_carry = reward_generator(trajectory, reward_carry)
         reward_val = reward_val * reward_generator.scale * ctrl_dt
         if reward_val.shape != trajectory.done.shape:
@@ -1163,7 +1162,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         reward = get_rewards(
             trajectory=trajectory,
             rewards=rollout_constants.rewards,
-            reward_carry=rollout_env_state.reward_carry,
+            rewards_carry=rollout_env_state.reward_carry,
             ctrl_dt=self.config.ctrl_dt,
             clip_min=self.config.reward_clip_min,
             clip_max=self.config.reward_clip_max,
@@ -1367,7 +1366,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 get_rewards(
                     trajectory=trajectory,
                     rewards=rollout_constants.rewards,
-                    reward_carry=rollout_env_state.reward_carry,
+                    rewards_carry=rollout_env_state.reward_carry,
                     ctrl_dt=self.config.ctrl_dt,
                     clip_min=self.config.reward_clip_min,
                     clip_max=self.config.reward_clip_max,
@@ -1458,7 +1457,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             carry_fn = jax.vmap(self.get_initial_model_carry, in_axes=0)
             command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, 0))
             reward_carry_fn = jax.vmap(get_initial_reward_carry, in_axes=(0, None))
-    
+
             # Gets the initial curriculum state.
             curriculum_state = jax.vmap(rollout_constants.curriculum.get_initial_state, in_axes=0)(
                 jax.random.split(curriculum_rng, self.config.num_envs)
