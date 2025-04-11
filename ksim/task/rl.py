@@ -76,7 +76,7 @@ from ksim.utils.mujoco import (
     get_torque_limits,
     load_model,
 )
-from ksim.viewer import MujocoViewer, RenderMode
+from ksim.viewer import DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
@@ -347,6 +347,10 @@ class RLConfig(xax.Config):
         value=(8, 4),
         help="The size of the figure for each plot.",
     )
+    render_with_glfw: bool | None = xax.field(
+        value=None,
+        help="Explicitly toggle GLFW rendering; if not specified, use GLFW when rendering on-screen",
+    )
     render_shadow: bool = xax.field(
         value=False,
         help="If true, render shadows.",
@@ -368,7 +372,7 @@ class RLConfig(xax.Config):
         help="If true, render inertia.",
     )
     render_height: int = xax.field(
-        value=360,
+        value=320,
         help="The height of the rendered images.",
     )
     render_width: int = xax.field(
@@ -452,19 +456,35 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
-) -> MujocoViewer:
-    viewer = MujocoViewer(
-        mj_model,
-        data=mj_data,
-        mode=mode if mode is not None else "window" if save_path is None else "offscreen",
-        height=config.render_height,
-        width=config.render_width,
-        shadow=config.render_shadow,
-        reflection=config.render_reflection,
-        contact_force=config.render_contact_force,
-        contact_point=config.render_contact_point,
-        inertia=config.render_inertia,
-    )
+) -> GlfwMujocoViewer | DefaultMujocoViewer:
+    if mode is None:
+        mode = "window" if save_path is None else "offscreen"
+
+    if (render_with_glfw := config.render_with_glfw) is None:
+        render_with_glfw = mode == "window"
+
+    viewer: GlfwMujocoViewer | DefaultMujocoViewer
+
+    if render_with_glfw:
+        viewer = GlfwMujocoViewer(
+            mj_model,
+            data=mj_data,
+            mode=mode,
+            height=config.render_height,
+            width=config.render_width,
+            shadow=config.render_shadow,
+            reflection=config.render_reflection,
+            contact_force=config.render_contact_force,
+            contact_point=config.render_contact_point,
+            inertia=config.render_inertia,
+        )
+
+    else:
+        viewer = DefaultMujocoViewer(
+            mj_model,
+            width=config.render_width,
+            height=config.render_height,
+        )
 
     # Sets the viewer camera.
     viewer.cam.distance = config.render_distance
@@ -881,7 +901,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectory: Trajectory,
         markers: Collection[Marker],
-        viewer: MujocoViewer,
+        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
         target_fps: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
@@ -904,18 +924,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         for frame_id, trajectory in enumerate(trajectory_list):
             # Updates the model with the latest data.
-            data = mujoco.MjData(viewer.model)
-            data.qpos = np.array(trajectory.qpos)
-            data.qvel = np.array(trajectory.qvel)
-            mujoco.mj_forward(viewer.model, data)
-            viewer.data = data
+            viewer.data.qpos[:] = np.array(trajectory.qpos)
+            viewer.data.qvel[:] = np.array(trajectory.qvel)
+            mujoco.mj_forward(viewer.model, viewer.data)
 
             def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                 if self.config.render_markers:
                     for marker in markers:
                         marker(model, data, scene, trajectory)
 
-            frame = viewer.read_pixels(depth=False, callback=render_callback)
+            frame = viewer.read_pixels(callback=render_callback)
 
             # Overlays the frame number on the frame.
             frame_img = Image.fromarray(frame)
@@ -939,7 +957,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         logged_traj: LoggedTrajectory,
         markers: Collection[Marker],
-        viewer: MujocoViewer,
+        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
     ) -> None:
         """Visualizes a single trajectory.
 
@@ -1323,16 +1341,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     )
                     transitions.append(transition)
 
+                    # Logs the frames to render.
+                    viewer.data.qpos[:] = np.array(rollout_env_state.physics_state.data.qpos)
+                    viewer.data.qvel[:] = np.array(rollout_env_state.physics_state.data.qvel)
+                    mujoco.mj_forward(viewer.model, viewer.data)
+
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                         for marker in markers:
                             marker(model, data, scene, transition)
 
-                    # Logs the frames to render.
-                    viewer.data = rollout_env_state.physics_state.data
                     if save_path is None:
                         viewer.render(callback=render_callback)
                     else:
-                        frames.append(viewer.read_pixels(depth=False, callback=render_callback))
+                        frames.append(viewer.read_pixels(callback=render_callback))
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")

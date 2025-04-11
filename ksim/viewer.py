@@ -1,8 +1,13 @@
 """MuJoCo viewer implementation with interactive visualization capabilities."""
 
+__all__ = [
+    "DefaultMujocoViewer",
+    "GlfwMujocoViewer",
+]
+
 import time
 from threading import Lock
-from typing import Callable, Literal, get_args, overload
+from typing import Callable, Literal, get_args
 
 import glfw
 import mujoco
@@ -14,7 +19,97 @@ RenderMode = Literal["window", "offscreen"]
 Callback = Callable[[mujoco.MjModel, mujoco.MjData, mujoco.MjvScene], None]
 
 
-class MujocoViewer:
+class DefaultMujocoViewer:
+    """MuJoCo viewer implementation using offscreen OpenGL context."""
+
+    def __init__(
+        self,
+        model: mujoco.MjModel,
+        data: mujoco.MjData | None = None,
+        width: int = 320,
+        height: int = 240,
+        max_geom: int = 10000,
+    ) -> None:
+        """Initialize the default MuJoCo viewer.
+
+        Args:
+            model: MuJoCo model
+            data: MuJoCo data
+            width: Width of the viewer
+            height: Height of the viewer
+            max_geom: Maximum number of geoms to render
+        """
+        super().__init__()
+
+        if data is None:
+            data = mujoco.MjData(model)
+
+        self.model = model
+        self.data = data
+        self.width = width
+        self.height = height
+
+        # Validate framebuffer size
+        if width > model.vis.global_.offwidth or height > model.vis.global_.offheight:
+            raise ValueError(
+                f"Image size ({width}x{height}) exceeds offscreen buffer size "
+                f"({model.vis.global_.offwidth}x{model.vis.global_.offheight}). "
+                "Increase `offwidth`/`offheight` in the XML model."
+            )
+
+        # Offscreen rendering context
+        self._gl_context = mujoco.gl_context.GLContext(width, height)
+        self._gl_context.make_current()
+
+        # MuJoCo scene setup
+        self.scn = mujoco.MjvScene(model, maxgeom=max_geom)
+        self.vopt = mujoco.MjvOption()
+        self.pert = mujoco.MjvPerturb()
+        self.rect = mujoco.MjrRect(0, 0, width, height)
+        self.cam = mujoco.MjvCamera()
+        mujoco.mjv_defaultFreeCamera(model, self.cam)
+
+        self.ctx = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150.value)
+        mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_OFFSCREEN, self.ctx)
+
+    def read_pixels(self, callback: Callback | None = None) -> np.ndarray:
+        self._gl_context.make_current()
+
+        # Update scene.
+        mujoco.mjv_updateScene(
+            self.model,
+            self.data,
+            self.vopt,
+            self.pert,
+            self.cam,
+            mujoco.mjtCatBit.mjCAT_ALL.value,
+            self.scn,
+        )
+
+        if callback is not None:
+            callback(self.model, self.data, self.scn)
+
+        # Render.
+        mujoco.mjr_render(self.rect, self.scn, self.ctx)
+
+        # Read pixels.
+        rgb_array = np.empty((self.height, self.width, 3), dtype=np.uint8)
+        mujoco.mjr_readPixels(rgb_array, None, self.rect, self.ctx)
+        return np.flipud(rgb_array)
+
+    def render(self, callback: Callback | None = None) -> None:
+        raise NotImplementedError("Default viewer does not support rendering.")
+
+    def close(self) -> None:
+        if self._gl_context:
+            self._gl_context.free()
+            self._gl_context = None
+        if self.ctx:
+            self.ctx.free()
+            self.ctx = None
+
+
+class GlfwMujocoViewer:
     """Main viewer class for MuJoCo environments.
 
     This class provides a complete visualization interface for MuJoCo environments,
@@ -35,6 +130,7 @@ class MujocoViewer:
         contact_force: bool = False,
         contact_point: bool = False,
         inertia: bool = False,
+        max_geom: int = 10000,
     ) -> None:
         """Initialize the MuJoCo viewer.
 
@@ -50,6 +146,7 @@ class MujocoViewer:
             contact_force: Whether to show contact force
             contact_point: Whether to show contact point
             inertia: Whether to show inertia
+            max_geom: Maximum number of geoms to render
         """
         super().__init__()
 
@@ -93,7 +190,7 @@ class MujocoViewer:
         # Initialize MuJoCo visualization objects
         self.vopt = mujoco.MjvOption()
         self.cam = mujoco.MjvCamera()
-        self.scn = mujoco.MjvScene(self.model, maxgeom=10000)
+        self.scn = mujoco.MjvScene(self.model, maxgeom=max_geom)
         self.pert = mujoco.MjvPerturb()
         self.ctx = mujoco.MjrContext(self.model, mujoco.mjtFontScale.mjFONTSCALE_150.value)
 
@@ -108,7 +205,7 @@ class MujocoViewer:
         )
 
         # Set up viewport
-        self.viewport = mujoco.MjrRect(0, 0, framebuffer_width, framebuffer_height)
+        self.rect = mujoco.MjrRect(0, 0, framebuffer_width, framebuffer_height)
 
         # Mouse interaction variables
         self._button_left = False
@@ -180,30 +277,11 @@ class MujocoViewer:
     def _handle_quit(self) -> None:
         glfw.set_window_should_close(self.window, True)
 
-    @overload
-    def read_pixels(self, depth: Literal[True], callback: Callback | None = None) -> tuple[np.ndarray, np.ndarray]: ...
-
-    @overload
-    def read_pixels(self, depth: Literal[False] = False, callback: Callback | None = None) -> np.ndarray: ...
-
-    def read_pixels(
-        self,
-        depth: bool = False,
-        callback: Callback | None = None,
-    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
-        """Read pixel data from the scene.
-
-        Args:
-            depth: Whether to also return depth buffer
-            callback: Callback to call after rendering
-
-        Returns:
-            RGB image array, or tuple of (RGB, depth) arrays if depth=True
-        """
+    def read_pixels(self, callback: Callback | None = None) -> np.ndarray:
         if self.render_mode == "window":
             raise NotImplementedError("Use 'render()' in 'window' mode.")
 
-        self.viewport.width, self.viewport.height = glfw.get_framebuffer_size(self.window)
+        # Update scene.
         mujoco.mjv_updateScene(
             self.model,
             self.data,
@@ -213,24 +291,19 @@ class MujocoViewer:
             mujoco.mjtCatBit.mjCAT_ALL.value,
             self.scn,
         )
-        self.scn.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = True
+
         if callback is not None:
             callback(self.model, self.data, self.scn)
-        mujoco.mjr_render(self.viewport, self.scn, self.ctx)
-        shape = glfw.get_framebuffer_size(self.window)
 
-        if depth:
-            rgb_img = np.zeros((shape[1], shape[0], 3), dtype=np.uint8)
-            depth_img = np.zeros((shape[1], shape[0], 1), dtype=np.float32)
-            mujoco.mjr_readPixels(rgb_img, depth_img, self.viewport, self.ctx)
-            return np.flipud(rgb_img), np.flipud(depth_img)
-        else:
-            img = np.zeros((shape[1], shape[0], 3), dtype=np.uint8)
-            mujoco.mjr_readPixels(img, None, self.viewport, self.ctx)
-            return np.flipud(img)
+        # Render.
+        mujoco.mjr_render(self.rect, self.scn, self.ctx)
+
+        # Read pixels.
+        rgb_array = np.empty((self.rect.height, self.rect.width, 3), dtype=np.uint8)
+        mujoco.mjr_readPixels(rgb_array, None, self.rect, self.ctx)
+        return np.flipud(rgb_array)
 
     def render(self, callback: Callback | None = None) -> None:
-        """Render a frame of the simulation."""
         if self.render_mode == "offscreen":
             raise NotImplementedError("Use 'read_pixels()' for 'offscreen' mode.")
         if not self.is_alive:
@@ -242,7 +315,7 @@ class MujocoViewer:
         def update() -> None:
             render_start = time.time()
             width, height = glfw.get_framebuffer_size(self.window)
-            self.viewport.width, self.viewport.height = width, height
+            self.rect.width, self.rect.height = width, height
 
             with self._gui_lock:
                 # Update and render scene
@@ -259,7 +332,7 @@ class MujocoViewer:
                 if callback is not None:
                     callback(self.model, self.data, self.scn)
 
-                mujoco.mjr_render(self.viewport, self.scn, self.ctx)
+                mujoco.mjr_render(self.rect, self.scn, self.ctx)
 
                 glfw.swap_buffers(self.window)
             glfw.poll_events()
