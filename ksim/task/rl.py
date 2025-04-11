@@ -76,7 +76,7 @@ from ksim.utils.mujoco import (
     get_torque_limits,
     load_model,
 )
-from ksim.viewer import BaseMujocoViewer, DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
+from ksim.viewer import DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
@@ -456,7 +456,7 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
-) -> BaseMujocoViewer:
+) -> GlfwMujocoViewer | DefaultMujocoViewer:
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
 
@@ -901,7 +901,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectory: Trajectory,
         markers: Collection[Marker],
-        viewer: GlfwMujocoViewer,
+        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
         target_fps: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
@@ -935,7 +935,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     for marker in markers:
                         marker(model, data, scene, trajectory)
 
-            frame = viewer.read_pixels(depth=False, callback=render_callback)
+            frame = viewer.read_pixels(callback=render_callback)
 
             # Overlays the frame number on the frame.
             frame_img = Image.fromarray(frame)
@@ -959,7 +959,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         logged_traj: LoggedTrajectory,
         markers: Collection[Marker],
-        viewer: GlfwMujocoViewer,
+        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
     ) -> None:
         """Visualizes a single trajectory.
 
@@ -1352,7 +1352,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     if save_path is None:
                         viewer.render(callback=render_callback)
                     else:
-                        frames.append(viewer.read_pixels(depth=False, callback=render_callback))
+                        frames.append(viewer.read_pixels(callback=render_callback))
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")

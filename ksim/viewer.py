@@ -46,6 +46,7 @@ class DefaultMujocoViewer(BaseMujocoViewer):
     def __init__(
         self,
         model: mujoco.MjModel,
+        data: mujoco.MjData | None = None,
         width: int = 320,
         height: int = 240,
         max_geom: int = 10000,
@@ -54,11 +55,18 @@ class DefaultMujocoViewer(BaseMujocoViewer):
 
         Args:
             model: MuJoCo model
+            data: MuJoCo data
             width: Width of the viewer
             height: Height of the viewer
             max_geom: Maximum number of geoms to render
         """
+        super().__init__()
+
+        if data is None:
+            data = mujoco.MjData(model)
+
         self.model = model
+        self.data = data
         self.width = width
         self.height = height
 
@@ -77,6 +85,7 @@ class DefaultMujocoViewer(BaseMujocoViewer):
         # MuJoCo scene setup
         self.scn = mujoco.MjvScene(model, maxgeom=max_geom)
         self.vopt = mujoco.MjvOption()
+        self.pert = mujoco.MjvPerturb()
         self.rect = mujoco.MjrRect(0, 0, width, height)
         self.cam = mujoco.MjvCamera()
         mujoco.mjv_defaultFreeCamera(model, self.cam)
@@ -87,28 +96,26 @@ class DefaultMujocoViewer(BaseMujocoViewer):
     def read_pixels(self, callback: Callback | None = None) -> np.ndarray:
         self._gl_context.make_current()
 
-        # Update scene
+        # Update scene.
         mujoco.mjv_updateScene(
             self.model,
-            mujoco.MjData(self.model),
+            self.data,
             self.vopt,
-            None,
+            self.pert,
             self.cam,
             mujoco.mjtCatBit.mjCAT_ALL.value,
             self.scn,
         )
 
         if callback is not None:
-            data = mujoco.MjData(self.model)
-            callback(self.model, data, self.scn)
+            callback(self.model, self.data, self.scn)
 
-        # Render
+        # Render.
         mujoco.mjr_render(self.rect, self.scn, self.ctx)
 
-        # Read pixels
+        # Read pixels.
         rgb_array = np.empty((self.height, self.width, 3), dtype=np.uint8)
         mujoco.mjr_readPixels(rgb_array, None, self.rect, self.ctx)
-
         return np.flipud(rgb_array)
 
     def render(self, callback: Callback | None = None) -> None:
@@ -219,7 +226,7 @@ class GlfwMujocoViewer(BaseMujocoViewer):
         )
 
         # Set up viewport
-        self.viewport = mujoco.MjrRect(0, 0, framebuffer_width, framebuffer_height)
+        self.rect = mujoco.MjrRect(0, 0, framebuffer_width, framebuffer_height)
 
         # Mouse interaction variables
         self._button_left = False
@@ -295,6 +302,7 @@ class GlfwMujocoViewer(BaseMujocoViewer):
         if self.render_mode == "window":
             raise NotImplementedError("Use 'render()' in 'window' mode.")
 
+        # Update scene.
         mujoco.mjv_updateScene(
             self.model,
             self.data,
@@ -304,15 +312,17 @@ class GlfwMujocoViewer(BaseMujocoViewer):
             mujoco.mjtCatBit.mjCAT_ALL.value,
             self.scn,
         )
-        self.scn.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = True
+
         if callback is not None:
             callback(self.model, self.data, self.scn)
-        mujoco.mjr_render(self.viewport, self.scn, self.ctx)
-        shape = (self.viewport.width, self.viewport.height)
 
-        img = np.zeros((shape[1], shape[0], 3), dtype=np.uint8)
-        mujoco.mjr_readPixels(img, None, self.viewport, self.ctx)
-        return np.flipud(img)
+        # Render.
+        mujoco.mjr_render(self.rect, self.scn, self.ctx)
+
+        # Read pixels.
+        rgb_array = np.empty((self.rect.height, self.rect.width, 3), dtype=np.uint8)
+        mujoco.mjr_readPixels(rgb_array, None, self.rect, self.ctx)
+        return np.flipud(rgb_array)
 
     def render(self, callback: Callback | None = None) -> None:
         if self.render_mode == "offscreen":
@@ -326,7 +336,7 @@ class GlfwMujocoViewer(BaseMujocoViewer):
         def update() -> None:
             render_start = time.time()
             width, height = glfw.get_framebuffer_size(self.window)
-            self.viewport.width, self.viewport.height = width, height
+            self.rect.width, self.rect.height = width, height
 
             with self._gui_lock:
                 # Update and render scene
@@ -343,7 +353,7 @@ class GlfwMujocoViewer(BaseMujocoViewer):
                 if callback is not None:
                     callback(self.model, self.data, self.scn)
 
-                mujoco.mjr_render(self.viewport, self.scn, self.ctx)
+                mujoco.mjr_render(self.rect, self.scn, self.ctx)
 
                 glfw.swap_buffers(self.window)
             glfw.poll_events()
