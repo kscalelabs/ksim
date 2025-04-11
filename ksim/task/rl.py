@@ -1315,18 +1315,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
             frames: list[np.ndarray] = []
 
-            def reset_mujoco_model(rollout_env_state: RolloutEnvState, rng: PRNGKeyArray) -> RolloutEnvState:
-                rng, carry_rng = jax.random.split(rng)
-                rollout_env_state = RolloutEnvState(
-                    model_carry=self.get_initial_model_carry(carry_rng),
-                    commands=rollout_env_state.commands,
-                    physics_state=rollout_env_state.physics_state,
-                    curriculum_state=rollout_env_state.curriculum_state,
-                    randomization_dict=rollout_env_state.randomization_dict,
-                    rng=rng,
-                )
-                return rollout_env_state
-
             transitions = []
 
             try:
@@ -1337,14 +1325,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         rollout_shared_state=rollout_shared_state,
                     )
                     transitions.append(transition)
-                    rng, rand_rng = jax.random.split(rng)
-
-                    # Resets the Mujoco model if the episode is done.
-                    rollout_env_state = jax.lax.cond(
-                        transition.done,
-                        lambda: reset_mujoco_model(rollout_env_state, rand_rng),
-                        lambda: rollout_env_state,
-                    )
 
                     def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
                         for marker in markers:
