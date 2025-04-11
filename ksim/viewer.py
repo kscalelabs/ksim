@@ -1,11 +1,11 @@
 """MuJoCo viewer implementation with interactive visualization capabilities."""
 
 __all__ = [
+    "DefaultMujocoViewer",
     "GlfwMujocoViewer",
 ]
 
 import time
-from abc import ABC, abstractmethod
 from threading import Lock
 from typing import Callable, Literal, get_args
 
@@ -19,28 +19,7 @@ RenderMode = Literal["window", "offscreen"]
 Callback = Callable[[mujoco.MjModel, mujoco.MjData, mujoco.MjvScene], None]
 
 
-class BaseMujocoViewer(ABC):
-    @abstractmethod
-    def read_pixels(self, callback: Callback | None = None) -> np.ndarray:
-        """Renders the current MuJoCo scene to an RGB image array.
-
-        Args:
-            callback: Callback to call after rendering
-
-        Returns:
-            RGB image array
-        """
-
-    @abstractmethod
-    def render(self, callback: Callback | None = None) -> None:
-        """Renders the current MuJoCo scene to the screen.
-
-        Args:
-            callback: Callback to call after rendering
-        """
-
-
-class DefaultMujocoViewer(BaseMujocoViewer):
+class DefaultMujocoViewer:
     """MuJoCo viewer implementation using offscreen OpenGL context."""
 
     def __init__(
@@ -130,7 +109,7 @@ class DefaultMujocoViewer(BaseMujocoViewer):
             self.ctx = None
 
 
-class GlfwMujocoViewer(BaseMujocoViewer):
+class GlfwMujocoViewer:
     """Main viewer class for MuJoCo environments.
 
     This class provides a complete visualization interface for MuJoCo environments,
