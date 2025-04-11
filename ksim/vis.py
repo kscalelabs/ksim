@@ -12,7 +12,13 @@ import mujoco
 import numpy as np
 
 from ksim.types import Trajectory
-from ksim.utils.mujoco import get_body_pose, get_body_pose_by_name, get_geom_pose_by_name, mat_to_quat, quat_to_mat
+from ksim.utils.mujoco import (
+    get_body_pose,
+    get_body_pose_by_name,
+    get_geom_pose_by_name,
+    mat_to_quat,
+    quat_to_mat,
+)
 
 TargetType = Literal["body", "geom", "root"]
 UpdateFn = Callable[["Marker", Trajectory], None]
@@ -235,6 +241,7 @@ class Marker:
         size: float = 0.025,
         target_name: str | None = None,
         target_type: TargetType = "body",
+        update_fn: UpdateFn | None = None,
     ) -> Self:
         return cls(
             geom=mujoco.mjtGeom.mjGEOM_ARROW,
@@ -245,6 +252,7 @@ class Marker:
             label=label,
             target_name=target_name,
             target_type=target_type,
+            update_fn=update_fn,
         )
 
     @classmethod
@@ -256,6 +264,7 @@ class Marker:
         label: str | None = None,
         target_name: str | None = None,
         target_type: TargetType = "body",
+        update_fn: UpdateFn | None = None,
     ) -> Self:
         return cls(
             geom=mujoco.mjtGeom.mjGEOM_SPHERE,
@@ -266,6 +275,7 @@ class Marker:
             label=label,
             target_name=target_name,
             target_type=target_type,
+            update_fn=update_fn,
         )
 
 
