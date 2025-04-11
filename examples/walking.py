@@ -163,12 +163,16 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
     # Reward parameters.
+    move_forward_command: bool = xax.field(
+        value=False,
+        help="If set, just move forward or stand still instead of using all possible controls",
+    )
     linear_velocity_clip_max: float = xax.field(
-        value=5.0,
+        value=1.0,
         help="The maximum value for the linear velocity reward.",
     )
     angular_velocity_clip_max: float = xax.field(
-        value=math.pi / 2,
+        value=math.pi / 8,
         help="The maximum value for the angular velocity reward.",
     )
 
@@ -356,7 +360,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.JoystickCommand(switch_prob=self.config.ctrl_dt / 5),
+            (
+                ksim.JoystickCommand(
+                    ranges=((0, 1),) if self.config.move_forward_command else ((0, 4),),
+                    switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average.
+                )
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -365,6 +374,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.JoystickReward(
                 linear_velocity_clip_max=self.config.linear_velocity_clip_max,
                 angular_velocity_clip_max=self.config.angular_velocity_clip_max,
+                command_name="joystick_command",
                 scale=1.0,
             ),
         ]
