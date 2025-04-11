@@ -58,6 +58,7 @@ class Trajectory:
     success: Array
     timestep: Array
     termination_components: xax.FrozenDict[str, Array]
+    reward_carry: xax.FrozenDict[str, Array]
     aux_outputs: PyTree
 
     def episode_length(self) -> Array:

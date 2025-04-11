@@ -152,12 +152,14 @@ def get_rewards(
     target_shape = trajectory.done.shape
     for reward_generator in rewards:
         reward_name = reward_generator.reward_name
+
         reward_val, reward_carry = reward_generator(trajectory, reward_carry)
         reward_val = reward_val * reward_generator.scale * ctrl_dt
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
         reward_dict[reward_name] = reward_val
         next_reward_carry[reward_name] = reward_carry
+
     total_reward = jax.tree.reduce(jnp.add, list(reward_dict.values()))
     if clip_min is not None:
         total_reward = jnp.maximum(total_reward, clip_min)
@@ -788,6 +790,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             timestep=next_physics_state.data.time,
             termination_components=terminations,
             aux_outputs=action.aux_outputs,
+            reward_carry=rollout_env_state.reward_carry,
         )
 
         # Conditionally reset on termination.
@@ -983,10 +986,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ("🎁 reward images", logged_traj.rewards.components),
             ("🎁 reward images", {"total": logged_traj.rewards.total}),
             ("📈 metrics images", logged_traj.metrics),
+            ("🦙 reward carry images", logged_traj.rewards.carry),
         ):
-            for key, value in arr_dict.items():
-                plt.figure(figsize=self.config.plot_figsize)
 
+            def _plot_value(value: Array) -> None:
+                plt.figure(figsize=self.config.plot_figsize)
                 # Ensures a consistent shape and truncates if necessary.
                 value = value.reshape(value.shape[0], -1)
                 if value.shape[-1] > self.config.max_values_per_plot:
@@ -1009,6 +1013,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                 # Logs the image.
                 self.logger.log_image(key=key, value=img, namespace=namespace)
+
+            for key, value in arr_dict.items():
+                if isinstance(value, xax.FrozenDict):
+                    for _, value_2 in value.items():
+                        _plot_value(value_2)
+                else:
+                    _plot_value(value)
 
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(
