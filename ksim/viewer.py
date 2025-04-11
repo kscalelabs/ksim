@@ -35,6 +35,7 @@ class MujocoViewer:
         contact_force: bool = False,
         contact_point: bool = False,
         inertia: bool = False,
+        no_opengl: bool | None = None,
     ) -> None:
         """Initialize the MuJoCo viewer.
 
@@ -50,6 +51,8 @@ class MujocoViewer:
             contact_force: Whether to show contact force
             contact_point: Whether to show contact point
             inertia: Whether to show inertia
+            no_opengl: If set, don't use OpenGL for rendering. Must be
+                rendering in offscreen mode.
         """
         super().__init__()
 
@@ -58,6 +61,7 @@ class MujocoViewer:
         self._time_per_render = 1 / 60.0
         self._loop_count = 0
         self._advance_by_one_step = False
+        self._no_opengl = no_opengl
 
         if data is None:
             data = mujoco.MjData(model)
@@ -70,25 +74,38 @@ class MujocoViewer:
 
         self.is_alive = True
 
-        # Initialize GLFW
-        glfw.init()
+        # Disable OpenGL by default if width and height are provided and render
+        # mode is offscreen. OpenGL is not supported by default for some
+        # headless systems so it is better to disable it when possible.
+        if width is not None and height is not None and self.render_mode == "offscreen":
+            no_opengl = True
 
-        # Get window dimensions if not provided.
-        if width is None:
-            width, _ = glfw.get_video_mode(glfw.get_primary_monitor()).size
-        if height is None:
-            _, height = glfw.get_video_mode(glfw.get_primary_monitor()).size
-        assert width is not None and height is not None
+        if no_opengl:
+            assert width is not None, "If not using OpenGL, width must be provided."
+            assert height is not None, "If not using OpenGL, height must be provided."
+            assert self.render_mode == "offscreen", "If not using OpenGL, must be rendering in offscreen mode."
+            framebuffer_width, framebuffer_height = width, height
 
-        # Create window
-        if self.render_mode == "offscreen":
-            glfw.window_hint(glfw.VISIBLE, 0)
-        self.window = glfw.create_window(width, height, title, None, None)
-        glfw.make_context_current(self.window)
-        glfw.swap_interval(1)
+        else:
+            # Initialize GLFW
+            glfw.init()
 
-        # Get framebuffer dimensions
-        framebuffer_width, framebuffer_height = glfw.get_framebuffer_size(self.window)
+            # Get window dimensions if not provided.
+            if width is None:
+                width, _ = glfw.get_video_mode(glfw.get_primary_monitor()).size
+            if height is None:
+                _, height = glfw.get_video_mode(glfw.get_primary_monitor()).size
+            assert width is not None and height is not None
+
+            # Create window
+            if self.render_mode == "offscreen":
+                glfw.window_hint(glfw.VISIBLE, 0)
+            self.window = glfw.create_window(width, height, title, None, None)
+            glfw.make_context_current(self.window)
+            glfw.swap_interval(1)
+
+            # Get framebuffer dimensions
+            framebuffer_width, framebuffer_height = glfw.get_framebuffer_size(self.window)
 
         # Initialize MuJoCo visualization objects
         self.vopt = mujoco.MjvOption()
@@ -203,7 +220,6 @@ class MujocoViewer:
         if self.render_mode == "window":
             raise NotImplementedError("Use 'render()' in 'window' mode.")
 
-        self.viewport.width, self.viewport.height = glfw.get_framebuffer_size(self.window)
         mujoco.mjv_updateScene(
             self.model,
             self.data,
@@ -217,7 +233,7 @@ class MujocoViewer:
         if callback is not None:
             callback(self.model, self.data, self.scn)
         mujoco.mjr_render(self.viewport, self.scn, self.ctx)
-        shape = glfw.get_framebuffer_size(self.window)
+        shape = (self.viewport.width, self.viewport.height)
 
         if depth:
             rgb_img = np.zeros((shape[1], shape[0], 3), dtype=np.uint8)
@@ -276,5 +292,6 @@ class MujocoViewer:
     def close(self) -> None:
         """Close the viewer and clean up resources."""
         self.is_alive = False
-        glfw.terminate()
+        if not self._no_opengl:
+            glfw.terminate()
         self.ctx.free()

@@ -453,10 +453,13 @@ def get_viewer(
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
 ) -> MujocoViewer:
+    if mode is None:
+        mode = "window" if save_path is None else "offscreen"
+
     viewer = MujocoViewer(
         mj_model,
         data=mj_data,
-        mode=mode if mode is not None else "window" if save_path is None else "offscreen",
+        mode=mode,
         height=config.render_height,
         width=config.render_width,
         shadow=config.render_shadow,
