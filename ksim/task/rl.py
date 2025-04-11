@@ -1108,7 +1108,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         mean_terminations = trajectories.done.sum(-1).mean()
 
         return {
-            "episode_length": trajectories.episode_length() * self.config.ctrl_dt,
+            "episode_length": trajectories.episode_length(),
             "mean_terminations": mean_terminations,
             **{f"prct/{key}": ((value != 0).sum() / num_terminations) for key, value in kvs},
         }

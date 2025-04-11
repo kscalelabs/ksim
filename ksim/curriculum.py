@@ -111,7 +111,7 @@ class EpisodeLengthCurriculum(Curriculum[Array]):
         prev_state: CurriculumState[Array],
     ) -> CurriculumState[Array]:
         step_size = 1 / self.num_levels
-        episode_length = trajectory.episode_length().mean() * self.dt
+        episode_length = trajectory.episode_length().mean()
         steps = prev_state.state
         level = prev_state.level
         next_steps = (steps - 1).clip(min=0)
