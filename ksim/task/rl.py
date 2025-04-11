@@ -902,9 +902,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         frame_list: list[np.ndarray] = []
 
-        if self.config.render_markers:
-            viewer.scn.ngeom = 0
-
         for frame_id, trajectory in enumerate(trajectory_list):
             # Updates the model with the latest data.
             data = mujoco.MjData(viewer.model)
