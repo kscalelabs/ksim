@@ -190,7 +190,7 @@ def get_reference_cartesian_poses(
     reference_base_id: int,
     root_callback: Callable[[BvhioJoint], None] | None,
     scaling_factor: float = 1.0,
-    offset: np.ndarray | jax.Array = np.array([0.0, 0.0, 0.0]),
+    offset: np.ndarray = np.array([0.0, 0.0, 0.0]),
 ) -> xax.FrozenDict[int, np.ndarray]:
     """Generates the reference motion for the given model and data.
 
@@ -368,7 +368,7 @@ def get_qpos_reference_motion(
     bvh_root: BvhioJoint,
     bvh_to_mujoco_names: tuple[ReferenceMapping, ...],
     bvh_base_id: int,
-    bvh_offset: np.ndarray | Array = np.array([0.0, 0.0, 0.0]),
+    bvh_offset: np.ndarray = np.array([0.0, 0.0, 0.0]),
     bvh_root_callback: Callable[[BvhioJoint], None] | None = None,
     bvh_scaling_factor: float = 1.0,
     constrained_joint_ids: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6),  # maybe need 6???
@@ -406,7 +406,7 @@ def get_qpos_reference_motion(
     Returns:
         Numpy array of shape (time, qpos)
     """
-    cartesian_motion = generate_reference_motion(
+    cartesian_motion = get_reference_cartesian_poses(
         mappings=bvh_to_mujoco_names,
         model=model,
         root=bvh_root,

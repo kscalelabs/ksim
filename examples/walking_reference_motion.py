@@ -12,8 +12,6 @@ import mujoco
 import numpy as np
 import xax
 
-from ksim.viewer import MujocoViewer
-
 try:
     import bvhio
     from bvhio.lib.hierarchy import Joint as BvhioJoint
@@ -23,14 +21,13 @@ except ImportError as e:
     ) from e
 
 
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array
 from scipy.spatial.transform import Rotation as R
 
 import ksim
 from ksim.types import PhysicsModel
 from ksim.utils.reference_motion import (
     ReferenceMapping,
-    get_local_xpos,
     get_qpos_reference_motion,
     get_reference_cartesian_poses,
     get_reference_joint_id,
@@ -39,11 +36,7 @@ from ksim.utils.reference_motion import (
     visualize_reference_points,
 )
 
-from .walking import (
-    DefaultHumanoidModel,
-    HumanoidWalkingTask,
-    HumanoidWalkingTaskConfig,
-)
+from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 
 class NaiveVelocityReward(ksim.Reward):
@@ -191,19 +184,19 @@ class CartesianReferenceMotionReward(ksim.Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class QposReferenceMotionReward(ksim.Reward):
-    reference_motion: xax.FrozenDict[int, xax.HashableArray]
+    reference_qpos: xax.HashableArray
     ctrl_dt: float
     norm: xax.NormType = attrs.field(default="l1")
     sensitivity: float = attrs.field(default=5.0)
 
     @property
     def num_frames(self) -> int:
-        return list(self.reference_motion.values())[0].array.shape[0]
+        return self.reference_qpos.array.shape[0]
 
     def __call__(self, trajectory: ksim.Trajectory) -> Array:
         qpos = trajectory.qpos
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
-        reference_qpos = jnp.take(self.reference_motion.array, step_number, axis=0)
+        reference_qpos = jnp.take(self.reference_qpos, step_number, axis=0)
         error = xax.get_norm(reference_qpos - qpos, self.norm)
         mean_error = error.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
@@ -218,7 +211,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             ksim.AngularVelocityPenalty(index="x", scale=-0.01),
             ksim.AngularVelocityPenalty(index="y", scale=-0.01),
             NaiveVelocityReward(scale=0.1),
-            QposReferenceMotionReward(reference_motion=self.reference_motion, ctrl_dt=self.config.ctrl_dt, scale=0.1),
+            QposReferenceMotionReward(reference_qpos=self.reference_qpos, ctrl_dt=self.config.ctrl_dt, scale=0.1),
         ]
 
         return rewards
@@ -243,7 +236,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             scaling_factor=self.config.bvh_scaling_factor,
             offset=np.array(self.config.bvh_offset),
         )
-        reference_qpos = get_qpos_reference_motion(
+        np_reference_qpos = get_qpos_reference_motion(
             model=mj_model,
             mj_base_id=self.mj_base_id,
             bvh_root=root,
@@ -262,8 +255,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             max_nfev=2000,
             verbose=False,
         )
-        self.reference_qpos = xax.FrozenDict(jax.tree.map(lambda x: jnp.array(x), reference_qpos))
-        self.tracked_body_ids = tuple(self.reference_motion.keys())
+        self.reference_qpos = jnp.array(np_reference_qpos)
 
         if self.config.visualize_reference_points:
             visualize_reference_points(
@@ -275,7 +267,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             visualize_reference_motion(
                 mj_model,
                 base_id=self.mj_base_id,
-                reference_qpos=np_reference_motion,
+                reference_qpos=np_reference_qpos,
             )
 
         super().run()

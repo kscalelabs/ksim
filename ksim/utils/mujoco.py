@@ -28,8 +28,6 @@ __all__ = [
     "get_site_pose_by_name",
     "remove_mujoco_joints_except",
     "add_new_mujoco_body",
-    "export_qpos_trajectory_to_dict",
-    "pickle_qpos_trajectory_dict",
 ]
 
 import logging
@@ -472,51 +470,3 @@ def add_new_mujoco_body(
     parent_body.append(new_body)
 
     return ET.tostring(root, encoding="utf-8").decode("utf-8")
-
-
-def export_qpos_trajectory_to_dict(
-    qpos_trajectory: Array,
-    physics_model: PhysicsModel,
-) -> dict[str, Array]:
-    """Export qpos_trajectory into a dictionary mapping joint names to their position arrays.
-
-    Args:
-        qpos_trajectory: Array of shape [T, N] where T is the number of timesteps and N is the number of qpos
-        physics_model: The physics model containing joint information
-
-    Returns:
-        Dictionary mapping joint names to their position arrays of shape [T, M] where M is the number of DOFs for that joint
-    """
-    qpos_mappings = get_qpos_data_idxs_by_name(physics_model)
-    result = {}
-
-    for joint_name, (start_idx, end_idx) in qpos_mappings.items():
-        if end_idx is None:
-            result[joint_name] = qpos_trajectory[..., start_idx:]
-        else:
-            result[joint_name] = qpos_trajectory[..., start_idx:end_idx]
-
-    return result
-
-
-def pickle_qpos_trajectory_dict(
-    qpos_dict: dict[str, Array],
-    output_path: str | Path,
-) -> None:
-    """Pickle the qpos trajectory dictionary to a file.
-
-    Args:
-        qpos_dict: Dictionary mapping joint names to their position arrays
-        output_path: Path to save the pickled dictionary to
-    """
-    import pickle
-    from pathlib import Path
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Convert jax arrays to numpy arrays for better compatibility
-    numpy_dict = {k: jnp.asarray(v) for k, v in qpos_dict.items()}
-
-    with open(output_path, "wb") as f:
-        pickle.dump(numpy_dict, f)
