@@ -376,7 +376,7 @@ class RLConfig(xax.Config):
         help="The number of training environments to run in parallel.",
     )
     batch_size: int = xax.field(
-        value=1,
+        value=MISSING,
         help="The number of model update batches per trajectory batch. ",
     )
     rollout_length_seconds: float = xax.field(
