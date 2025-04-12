@@ -207,6 +207,8 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             visualize_reference_motion(
                 model=mj_model,
                 reference_qpos=np_reference_qpos,
+                cartesian_motion=np_reference_motion,
+                mj_base_id=self.mj_base_id,
             )
         else:
             super().run()
