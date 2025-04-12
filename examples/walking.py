@@ -223,12 +223,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The body id to track with the render camera.",
     )
 
-    # Checkpointing parameters.
-    export_for_inference: bool = xax.field(
-        value=False,
-        help="Whether to export the model for inference.",
-    )
-
 
 Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 
@@ -562,5 +556,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            # Checkpointing parameters.
+            save_every_n_seconds=60,
         ),
     )
