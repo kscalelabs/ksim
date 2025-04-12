@@ -9,6 +9,7 @@ __all__ = [
     "Action",
     "Histogram",
     "Metrics",
+    "LoggedTrajectory",
 ]
 
 from dataclasses import dataclass
