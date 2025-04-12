@@ -5,6 +5,7 @@ __all__ = [
     "PhysicsModel",
     "PhysicsState",
     "Trajectory",
+    "LoggedTrajectory",
     "Rewards",
     "Action",
     "Histogram",
