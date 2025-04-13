@@ -48,7 +48,8 @@ class PPOVariables:
         "normalize_advantages",
         "use_two_step_td_target",
         "monte_carlo_returns",
-    ]
+    ],
+    jit_level=6,
 )
 def compute_ppo_inputs(
     values_t: Array,
@@ -117,7 +118,7 @@ def compute_ppo_inputs(
     return inputs
 
 
-@xax.jit(static_argnames=["clip_param"])
+@xax.jit(static_argnames=["clip_param"], jit_level=6)
 def clipped_value_loss(
     target_values: Array,
     values: Array,
@@ -131,7 +132,10 @@ def clipped_value_loss(
     return jnp.maximum(error**2, clipped_error**2)
 
 
-@xax.jit(static_argnames=["clip_param", "value_loss_coef", "entropy_coef", "log_clip_value", "use_clipped_value_loss"])
+@xax.jit(
+    static_argnames=["clip_param", "value_loss_coef", "entropy_coef", "log_clip_value", "use_clipped_value_loss"],
+    jit_level=6,
+)
 def compute_ppo_loss(
     ppo_inputs: PPOInputs,
     on_policy_variables: PPOVariables,
@@ -395,7 +399,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 metrics[aux_loss_name] = aux_loss_value
         return metrics
 
-    @xax.jit(static_argnames=["self", "model_static"])
+    @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
     def get_loss_and_metrics(
         self,
         model_arr: PyTree,
@@ -492,7 +496,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return loss.mean(), (metrics, logged_trajectory)
 
-    @xax.jit(static_argnames=["self", "model_static"])
+    @xax.jit(static_argnames=["self", "model_static"], jit_level=3)
     def _get_loss_metrics_and_grads(
         self,
         model_arr: PyTree,
@@ -504,7 +508,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
     ) -> tuple[dict[str, Array], LoggedTrajectory, PyTree]:
         loss_fn = jax.grad(self.get_loss_and_metrics, argnums=0, has_aux=True)
-        loss_fn = xax.jit(static_argnums=[1])(loss_fn)
+        loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
         grads, (metrics, logged_trajectory) = loss_fn(
             model_arr,
             model_static,
@@ -516,7 +520,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
         return metrics, logged_trajectory, grads
 
-    @xax.jit(static_argnames=["self", "model_static", "optimizer"])
+    @xax.jit(static_argnames=["self", "model_static", "optimizer"], jit_level=4)
     def _single_step(
         self,
         model_arr: PyTree,
