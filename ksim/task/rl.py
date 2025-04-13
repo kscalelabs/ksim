@@ -1725,8 +1725,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     if is_first_step:
                         is_first_step = False
-                        elapsed_time = xax.format_timedelta(datetime.timedelta(seconds=timer.elapsed_time), short=True)
-                        logger.log(xax.LOG_STATUS, "First step time: %s", elapsed_time)
+                        logger.log(
+                            xax.LOG_STATUS,
+                            "First step time: %s",
+                            xax.format_timedelta(datetime.timedelta(seconds=timer.elapsed_time), short=True),
+                        )
 
                     self.log_train_metrics(metrics)
                     self.log_state_timers(state)
