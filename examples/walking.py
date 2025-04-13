@@ -530,13 +530,14 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
+        argmax: bool,
     ) -> ksim.Action:
         action_dist_j = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
         )
-        action_j = action_dist_j.sample(seed=rng)
+        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
         return ksim.Action(action=action_j, carry=None, aux_outputs=None)
 
 

@@ -117,6 +117,7 @@ class RolloutConstants:
     rewards: Collection[Reward]
     terminations: Collection[Termination]
     curriculum: Curriculum
+    argmax_action: bool
 
 
 def get_observation(
@@ -283,6 +284,10 @@ class RLConfig(xax.Config):
         value=None,
         help="If provided, save the rendered video to the given path.",
     )
+    run_environment_argmax_action: bool = xax.field(
+        value=True,
+        help="If set, take the argmax action instead of sampling from the action distribution.",
+    )
 
     # Toggle this to collect a dataset.
     collect_dataset: bool = xax.field(
@@ -296,6 +301,10 @@ class RLConfig(xax.Config):
     dataset_save_path: str | None = xax.field(
         value=None,
         help="If provided, save the dataset to the given path.",
+    )
+    collect_dataset_argmax_action: bool = xax.field(
+        value=False,
+        help="If set, get the argmax action, otherwise sample randomly from the model.",
     )
 
     # Logging parameters.
@@ -679,6 +688,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
+        argmax: bool,
     ) -> Action:
         """Gets an action for the current observation.
 
@@ -695,6 +705,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             commands: The current commands.
             model_carry: The model carry from the previous step.
             rng: The random key.
+            argmax: If set, get the argmax action, otherwise sample randomly
+                from the model.
 
         Returns:
             The action to take, the next carry, and any auxiliary outputs.
@@ -755,6 +767,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             observations=observations,
             commands=rollout_env_state.commands,
             rng=act_rng,
+            argmax=rollout_constants.argmax_action,
         )
 
         # Steps the physics engine.
@@ -861,12 +874,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     else round(self.config.run_environment_num_seconds / self.config.ctrl_dt)
                 ),
                 save_path=self.config.run_environment_save_path,
+                argmax_action=self.config.run_environment_argmax_action,
             )
 
         elif self.config.collect_dataset:
             self.collect_dataset(
                 num_batches=self.config.dataset_num_batches,
                 save_path=self.config.dataset_save_path,
+                argmax_action=self.config.collect_dataset_argmax_action,
             )
 
         else:
@@ -1280,6 +1295,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         num_steps: int | None = None,
         save_path: str | Path | None = None,
+        argmax_action: bool = True,
     ) -> None:
         """Provides an easy-to-use interface for debugging environments.
 
@@ -1292,6 +1308,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 provided, run until the user manually terminates the
                 environment visualizer.
             save_path: If provided, save the rendered video to the given path.
+            argmax_action: If set, get the argmax action, otherwise sample
+                randomly from the model.
         """
         if save_path is not None:
             save_path = Path(save_path)
@@ -1316,7 +1334,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # parts in order to use lax.scan, so that `arr` can be a PyTree.
             model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
-            rollout_constants = self._get_rollout_constants(mj_model, model_static)
+            rollout_constants = self._get_rollout_constants(mj_model, model_static, argmax_action)
             rollout_env_state = self._get_rollout_env_state(rng, rollout_constants, mj_model, randomizers)
             rollout_shared_state = self._get_rollout_shared_state(mj_model, model_arr)
 
@@ -1423,7 +1441,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     case _:
                         raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
 
-    def _get_rollout_constants(self, mj_model: PhysicsModel, model_static: PyTree) -> RolloutConstants:
+    def _get_rollout_constants(
+        self,
+        mj_model: PhysicsModel,
+        model_static: PyTree,
+        argmax_action: bool,
+    ) -> RolloutConstants:
         metadata = self.get_mujoco_model_metadata(mj_model)
         engine = self.get_engine(mj_model, metadata)
         observations = self.get_observations(mj_model)
@@ -1440,6 +1463,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rewards=tuple(rewards_terms),
             terminations=tuple(terminations),
             curriculum=curriculum,
+            argmax_action=argmax_action,
         )
 
     def _get_rollout_shared_state(self, mj_model: PhysicsModel, model_arr: PyTree) -> RolloutSharedState:
@@ -1529,6 +1553,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         num_batches: int,
         save_path: str | Path | None = None,
+        argmax_action: bool = False,
     ) -> None:
         """Collects a dataset of state-action pairs by running the environment loop.
 
@@ -1536,6 +1561,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             num_batches: The number of batches to collect at a time.
             save_path: Where to save the dataset; if not specified, will save
                 to the experimental directory.
+            argmax_action: If set, get the argmax action, otherwise sample
+                randomly from the model.
         """
         with self:
             rng = self.prng_key()
@@ -1562,7 +1589,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # parts in order to use lax.scan, so that `arr` can be a PyTree.
             model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
-            rollout_constants = self._get_rollout_constants(mjx_model, model_static)
+            rollout_constants = self._get_rollout_constants(mjx_model, model_static, argmax_action)
             rollout_env_state = self._get_rollout_env_state(rng, rollout_constants, mjx_model, randomizations)
             rollout_shared_state = self._get_rollout_shared_state(mjx_model, model_arr)
 
@@ -1595,7 +1622,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return True
 
         if (n_secs := self.config.log_full_trajectory_every_n_seconds) is not None:
-            elapsed = time.time() - last_log_time
+            elapsed = state.elapsed_time_s.item() - last_log_time
             if elapsed > n_secs:
                 return True
 
@@ -1626,7 +1653,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # parts in order to use lax.scan, so that `arr` can be a PyTree.
             model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
-            rollout_constants = self._get_rollout_constants(mjx_model, model_static)
+            rollout_constants = self._get_rollout_constants(mjx_model, model_static, argmax_action=False)
             rollout_env_states = self._get_rollout_env_state(rng, rollout_constants, mjx_model, randomizers)
             rollout_shared_state = self._get_rollout_shared_state(mjx_model, model_arr)
 
@@ -1671,7 +1698,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # Use a different phase for logging full trajectories.
                     if self.log_full_trajectory(state, is_first_step, last_log_time):
-                        last_log_time = time.time()
+                        last_log_time = state.elapsed_time_s.item()
                         state = state.replace(phase="valid")
                     else:
                         state = state.replace(phase="train")
