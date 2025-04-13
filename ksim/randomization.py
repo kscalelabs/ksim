@@ -7,6 +7,7 @@ __all__ = [
     "ArmatureRandomizer",
     "MassAdditionRandomizer",
     "MassMultiplicationRandomizer",
+    "AllBodiesMassMultiplicationRandomizer",
     "JointDampingRandomizer",
     "JointZeroPositionRandomizer",
 ]
@@ -216,6 +217,24 @@ class MassMultiplicationRandomizer(PhysicsRandomizer):
             scale_lower=scale_lower,
             scale_upper=scale_upper,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AllBodiesMassMultiplicationRandomizer(PhysicsRandomizer):
+    """Randomizes the mass of all bodies."""
+
+    scale_lower: float = attrs.field(default=0.98)
+    scale_upper: float = attrs.field(default=1.02)
+
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
+        random_mass = jax.random.uniform(
+            rng,
+            shape=(model.nbody,),
+            minval=self.scale_lower,
+            maxval=self.scale_upper,
+        )
+        new_body_mass = model.body_mass * random_mass
+        return {"body_mass": new_body_mass}
 
 
 @attrs.define(frozen=True, kw_only=True)
