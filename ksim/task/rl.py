@@ -1595,7 +1595,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return True
 
         if (n_secs := self.config.log_full_trajectory_every_n_seconds) is not None:
-            elapsed = time.time() - last_log_time
+            elapsed = state.elapsed_time_s.item() - last_log_time
             if elapsed > n_secs:
                 return True
 
@@ -1671,7 +1671,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # Use a different phase for logging full trajectories.
                     if self.log_full_trajectory(state, is_first_step, last_log_time):
-                        last_log_time = time.time()
+                        last_log_time = state.elapsed_time_s.item()
                         state = state.replace(phase="valid")
                     else:
                         state = state.replace(phase="train")
