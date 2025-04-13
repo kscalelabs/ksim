@@ -715,7 +715,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             "torque_limits": get_torque_limits(mj_model),
         }
 
-    @xax.jit(static_argnames=["self", "rollout_constants"])
+    @xax.jit(static_argnames=["self", "rollout_constants"], jit_level=3)
     def step_engine(
         self,
         rollout_constants: RolloutConstants,
@@ -1136,7 +1136,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers.extend(randomizer.get_markers())
         return markers
 
-    @xax.jit(static_argnames=["self", "rollout_constants"])
+    @xax.jit(static_argnames=["self", "rollout_constants"], jit_level=2)
     def _single_unroll(
         self,
         rollout_constants: RolloutConstants,
@@ -1158,7 +1158,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return next_rollout_variables, trajectory
 
         # Scans the engine for the desired number of steps.
-        next_rollout_variables, trajectory = jax.lax.scan(
+        next_rollout_variables, trajectory = xax.scan(
             scan_fn,
             rollout_env_state,
             length=self.rollout_length_steps,
@@ -1176,7 +1176,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return trajectory, reward, next_rollout_variables
 
-    @xax.jit(static_argnames=["self", "optimizer", "rollout_constants"])
+    @xax.jit(static_argnames=["self", "optimizer", "rollout_constants"], jit_level=1)
     def _rl_train_loop_step(
         self,
         optimizer: optax.GradientTransformation,
@@ -1703,10 +1703,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
 
                     # Updates the state.
-                    state = state.replace(
-                        num_steps=state.num_steps + self.config.epochs_per_log_step,
-                        num_samples=state.num_samples + self.rollout_num_samples * self.config.epochs_per_log_step,
-                    )
+                    num_steps = self.config.epochs_per_log_step
+                    num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
+                    elapsed_time = timer.elapsed_time
+                    if state.phase == "train":
+                        state = state.replace(
+                            num_steps=state.num_steps + num_steps,
+                            num_samples=state.num_samples + num_samples,
+                            elapsed_time_s=state.elapsed_time_s + elapsed_time,
+                        )
+                    else:
+                        state = state.replace(
+                            num_valid_steps=state.num_valid_steps + num_steps,
+                            num_valid_samples=state.num_valid_samples + num_samples,
+                            elapsed_time_s=state.elapsed_time_s + elapsed_time,
+                        )
 
                     # Only log trajectory information on validation steps.
                     if state.phase == "valid":
@@ -1714,8 +1725,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     if is_first_step:
                         is_first_step = False
-                        elapsed_time = xax.format_timedelta(datetime.timedelta(seconds=timer.elapsed_time), short=True)
-                        logger.log(xax.LOG_STATUS, "First step time: %s", elapsed_time)
+                        logger.log(
+                            xax.LOG_STATUS,
+                            "First step time: %s",
+                            xax.format_timedelta(datetime.timedelta(seconds=timer.elapsed_time), short=True),
+                        )
 
                     self.log_train_metrics(metrics)
                     self.log_state_timers(state)
