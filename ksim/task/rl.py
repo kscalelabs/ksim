@@ -334,6 +334,12 @@ class RLConfig(xax.Config):
         help="The number of seconds to rollout each environment during training.",
     )
 
+    # Validation timing parameters.
+    valid_every_n_seconds: float | None = xax.field(
+        150.0,
+        help="Run validation every N seconds",
+    )
+
     # Rendering parameters.
     max_values_per_plot: int = xax.field(
         value=8,
