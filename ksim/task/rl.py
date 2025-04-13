@@ -16,7 +16,6 @@ import logging
 import signal
 import sys
 import textwrap
-import time
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -333,20 +332,6 @@ class RLConfig(xax.Config):
     rollout_length_seconds: float = xax.field(
         value=MISSING,
         help="The number of seconds to rollout each environment during training.",
-    )
-
-    # Override validation parameters.
-    log_full_trajectory_on_first_step: bool = xax.field(
-        value=False,
-        help="If true, log the full trajectory on the first step.",
-    )
-    log_full_trajectory_every_n_steps: int | None = xax.field(
-        None,
-        help="Log the full trajectory every N steps.",
-    )
-    log_full_trajectory_every_n_seconds: float | None = xax.field(
-        60.0 * 2.5,
-        help="Log the full trajectory every N seconds.",
     )
 
     # Rendering parameters.
@@ -1614,20 +1599,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             logger.info("Saved dataset to %s", save_path)
 
-    def log_full_trajectory(self, state: xax.State, is_first_step: bool, last_log_time: float) -> bool:
-        if is_first_step and self.config.log_full_trajectory_on_first_step:
-            return True
-
-        if (n_steps := self.config.log_full_trajectory_every_n_steps) is not None and state.num_steps % n_steps == 0:
-            return True
-
-        if (n_secs := self.config.log_full_trajectory_every_n_seconds) is not None:
-            elapsed = state.elapsed_time_s.item() - last_log_time
-            if elapsed > n_secs:
-                return True
-
-        return False
-
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
         with self:
@@ -1687,7 +1658,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
 
             is_first_step = True
-            last_log_time = time.time()
 
             # Clean up variables which are not part of the control loop.
             del model_arr, model_static, mjx_model, randomizers
@@ -1697,8 +1667,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     state = self.on_step_start(state)
 
                     # Use a different phase for logging full trajectories.
-                    if self.log_full_trajectory(state, is_first_step, last_log_time):
-                        last_log_time = state.elapsed_time_s.item()
+                    if self.valid_step_timer.is_valid_step(state):
                         state = state.replace(phase="valid")
                     else:
                         state = state.replace(phase="train")
