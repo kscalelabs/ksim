@@ -117,6 +117,7 @@ class RolloutConstants:
     rewards: Collection[Reward]
     terminations: Collection[Termination]
     curriculum: Curriculum
+    argmax_action: bool
 
 
 def get_observation(
@@ -679,6 +680,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
+        argmax: bool,
     ) -> Action:
         """Gets an action for the current observation.
 
@@ -695,6 +697,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             commands: The current commands.
             model_carry: The model carry from the previous step.
             rng: The random key.
+            argmax: If set, get the argmax action, otherwise sample randomly
+                from the model.
 
         Returns:
             The action to take, the next carry, and any auxiliary outputs.
@@ -755,6 +759,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             observations=observations,
             commands=rollout_env_state.commands,
             rng=act_rng,
+            argmax=rollout_constants.argmax_action,
         )
 
         # Steps the physics engine.
@@ -1316,7 +1321,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # parts in order to use lax.scan, so that `arr` can be a PyTree.
             model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
-            rollout_constants = self._get_rollout_constants(mj_model, model_static)
+            rollout_constants = self._get_rollout_constants(mj_model, model_static, argmax_action=True)
             rollout_env_state = self._get_rollout_env_state(rng, rollout_constants, mj_model, randomizers)
             rollout_shared_state = self._get_rollout_shared_state(mj_model, model_arr)
 
@@ -1423,7 +1428,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     case _:
                         raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
 
-    def _get_rollout_constants(self, mj_model: PhysicsModel, model_static: PyTree) -> RolloutConstants:
+    def _get_rollout_constants(
+        self,
+        mj_model: PhysicsModel,
+        model_static: PyTree,
+        argmax_action: bool,
+    ) -> RolloutConstants:
         metadata = self.get_mujoco_model_metadata(mj_model)
         engine = self.get_engine(mj_model, metadata)
         observations = self.get_observations(mj_model)
@@ -1440,6 +1450,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rewards=tuple(rewards_terms),
             terminations=tuple(terminations),
             curriculum=curriculum,
+            argmax_action=argmax_action,
         )
 
     def _get_rollout_shared_state(self, mj_model: PhysicsModel, model_arr: PyTree) -> RolloutSharedState:
@@ -1562,7 +1573,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # parts in order to use lax.scan, so that `arr` can be a PyTree.
             model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
-            rollout_constants = self._get_rollout_constants(mjx_model, model_static)
+            rollout_constants = self._get_rollout_constants(mjx_model, model_static, argmax_action=False)
             rollout_env_state = self._get_rollout_env_state(rng, rollout_constants, mjx_model, randomizations)
             rollout_shared_state = self._get_rollout_shared_state(mjx_model, model_arr)
 
@@ -1626,7 +1637,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # parts in order to use lax.scan, so that `arr` can be a PyTree.
             model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
-            rollout_constants = self._get_rollout_constants(mjx_model, model_static)
+            rollout_constants = self._get_rollout_constants(mjx_model, model_static, argmax_action=False)
             rollout_env_states = self._get_rollout_env_state(rng, rollout_constants, mjx_model, randomizers)
             rollout_shared_state = self._get_rollout_shared_state(mjx_model, model_arr)
 
