@@ -1670,17 +1670,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             try:
                 while not self.is_training_over(state):
-                    state = self.on_step_start(state)
-
-                    # Use a different phase for logging full trajectories.
-                    if self.valid_step_timer.is_valid_step(state):
-                        state = state.replace(phase="valid")
-                    else:
-                        state = state.replace(phase="train")
-
                     # Runs the training loop.
-                    rng, update_rng = jax.random.split(rng)
                     with xax.ContextTimer() as timer:
+                        state = self.on_step_start(state)
+
+                        # Use a different phase for logging full trajectories.
+                        is_valid_step = self.valid_step_timer.is_valid_step(state)
+
+                        rng, update_rng = jax.random.split(rng)
                         (
                             opt_state,
                             metrics,
@@ -1704,44 +1701,47 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             logged_traj = jax.block_until_ready(logged_traj)
                             jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
 
+                        self.log_train_metrics(metrics)
+                        self.log_state_timers(state)
+                        self.write_logs(state)
+
+                        if self.should_checkpoint(state):
+                            model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
+                            self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
+
+                        state = self.on_step_end(state)
+
                     # Updates the state.
                     num_steps = self.config.epochs_per_log_step
                     num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
                     elapsed_time = timer.elapsed_time
-                    if state.phase == "train":
+
+                    if is_valid_step:
+                        state = state.replace(
+                            num_valid_steps=state.num_valid_steps + num_steps,
+                            num_valid_samples=state.num_valid_samples + num_samples,
+                            valid_elapsed_time_s=state.valid_elapsed_time_s + elapsed_time,
+                            phase="valid",
+                        )
+
+                        # Only log trajectory information on validation steps.
+                        self.log_logged_trajectory(logged_traj=logged_traj, markers=markers, viewer=viewer)
+
+                    else:
                         state = state.replace(
                             num_steps=state.num_steps + num_steps,
                             num_samples=state.num_samples + num_samples,
                             elapsed_time_s=state.elapsed_time_s + elapsed_time,
+                            phase="train",
                         )
-                    else:
-                        state = state.replace(
-                            num_valid_steps=state.num_valid_steps + num_steps,
-                            num_valid_samples=state.num_valid_samples + num_samples,
-                            elapsed_time_s=state.elapsed_time_s + elapsed_time,
-                        )
-
-                    # Only log trajectory information on validation steps.
-                    if state.phase == "valid":
-                        self.log_logged_trajectory(logged_traj=logged_traj, markers=markers, viewer=viewer)
 
                     if is_first_step:
                         is_first_step = False
                         logger.log(
                             xax.LOG_STATUS,
                             "First step time: %s",
-                            xax.format_timedelta(datetime.timedelta(seconds=timer.elapsed_time), short=True),
+                            xax.format_timedelta(datetime.timedelta(seconds=elapsed_time), short=True),
                         )
-
-                    self.log_train_metrics(metrics)
-                    self.log_state_timers(state)
-                    self.write_logs(state)
-
-                    if self.should_checkpoint(state):
-                        model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
-                        self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
-
-                    state = self.on_step_end(state)
 
                 # Save the checkpoint when done.
                 model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
