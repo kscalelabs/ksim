@@ -26,24 +26,24 @@ class ReferenceMapping:
 class ReferenceMotionData:
     """Stores reference motion data (qpos and Cartesian poses)."""
 
-    qpos: Array  # Shape: [T, nq]
-    cartesian_poses: xax.FrozenDict[int, Array]  # Dict: body_id -> [T, 3]
+    qpos: xax.HashableArray  # Shape: [T, nq]
+    cartesian_poses: xax.FrozenDict[int, xax.HashableArray]  # Dict: body_id -> [T, 3]
     ctrl_dt: float
 
     @property
     def num_frames(self) -> int:
         """Returns the total number of frames in the reference motion."""
-        return self.qpos.shape[0]
+        return self.qpos.array.shape[0]
 
     def get_qpos_at_step(self, step: int | Array) -> Array:
         """Gets the reference qpos at a specific step (or steps)."""
         frame_index = step % self.num_frames
-        return jnp.take(self.qpos, frame_index, axis=0)
+        return jnp.take(self.qpos.array, frame_index, axis=0)
 
     def get_cartesian_pose_at_step(self, step: int | Array) -> xax.FrozenDict[int, Array]:
         """Gets the reference Cartesian pose at a specific step (or steps)."""
         frame_index = step % self.num_frames
-        return jax.tree.map(lambda x: jnp.take(x, frame_index, axis=0), self.cartesian_poses)
+        return jax.tree.map(lambda hashable_arr: jnp.take(hashable_arr.array, frame_index, axis=0), self.cartesian_poses)
 
     def get_qpos_at_time(self, time: float | Array) -> Array:
         """Gets the reference qpos closest to a specific time."""
@@ -511,11 +511,11 @@ def generate_reference_motion(
         previous_qpos = qpos # Update previous qpos for the next frame
 
     jnp_reference_qpos = jnp.array(qpos_reference_motion)
-    jnp_cartesian_motion = jax.tree.map(jnp.array, np_cartesian_motion)
+    jnp_cartesian_motion = jax.tree.map(lambda arr: xax.HashableArray(arr), np_cartesian_motion)
 
     # 3. Create and return the data object
     return ReferenceMotionData(
-        qpos=jnp_reference_qpos,
+        qpos=xax.HashableArray(jnp_reference_qpos),
         cartesian_poses=jnp_cartesian_motion,
         ctrl_dt=ctrl_dt,
     )
