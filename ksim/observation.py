@@ -415,7 +415,7 @@ class ActPosObservation(Observation):
 
     noise: float = attrs.field(default=0.0)
     joint_name: str = attrs.field(default=None)
-    joint_idx: int = attrs.field(default=0)  # Index in qpos array (after freejoint)
+    joint_idx: int = attrs.field(default=0)
 
     @classmethod
     def create(
