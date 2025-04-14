@@ -154,6 +154,8 @@ def visualize_reference_points(
 def visualize_reference_motion(
     model: mujoco.MjModel,
     reference_qpos: np.ndarray,
+    cartesian_motion: xax.FrozenDict[int, np.ndarray],
+    mj_base_id: int,
 ) -> None:
     data = mujoco.MjData(model)
     viewer = GlfwMujocoViewer(model, data, mode="window", width=1024, height=768)
@@ -163,21 +165,37 @@ def visualize_reference_motion(
     viewer.cam.azimuth = 45.0
     viewer.cam.elevation = -20.0
 
-    def update_data(model: mujoco.MjModel, data: mujoco.MjData) -> None:
+    # Keep the window open until you close it
+    while viewer.is_alive:
         # Calculate which frame we should be on
         frame = int(data.time / model.opt.timestep) % len(reference_qpos)
 
-        # Update the pose
+        # Update the pose from reference qpos
         data.qpos = reference_qpos[frame]
         mujoco.mj_forward(model, data)
+
+        # Clear previous geoms
+        scene = viewer.scn
+        scene.ngeom = 0
+
+        def marker_callback(model: mujoco.MjModel, data: mujoco.MjData, scn: mujoco.MjvScene) -> None:
+            # Add markers for cartesian targets
+            for body_id, target_poses in cartesian_motion.items():
+                target_local_pos = target_poses[frame]
+                target_xpos = local_to_absolute(data.xpos, target_local_pos, mj_base_id)
+                assert isinstance(target_xpos, np.ndarray)
+                _add_reference_marker_to_scene(
+                    scene,
+                    pos=target_xpos,
+                    color=np.array([0, 1, 0, 0.8]),
+                    scale=np.array([0.05, 0.05, 0.05]),
+                    label=f"target_{model.body(body_id).name}",
+                )
 
         # Advance simulation time
         data.time += model.opt.timestep
 
-    # Keep the window open until you close it
-    while viewer.is_alive:
-        update_data(model, data)
-        viewer.render()
+        viewer.render(callback=marker_callback)
 
 
 def get_reference_cartesian_poses(
