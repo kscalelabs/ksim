@@ -461,7 +461,7 @@ def generate_reference_motion(
         A ReferenceMotionData object containing qpos and Cartesian poses.
     """
     # 1. Generate Cartesian Poses
-    cartesian_motion = get_reference_cartesian_poses(
+    np_cartesian_motion = get_reference_cartesian_poses(
         mappings=bvh_to_mujoco_names,
         model=model,
         root=bvh_root,
@@ -470,8 +470,8 @@ def generate_reference_motion(
         scaling_factor=bvh_scaling_factor,
         offset=bvh_offset,
     )
-    total_frames = list(cartesian_motion.values())[0].shape[0]
-    body_ids = list(cartesian_motion.keys())
+    total_frames = list(np_cartesian_motion.values())[0].shape[0]
+    body_ids = list(np_cartesian_motion.keys())
 
     # 2. Solve IK for Qpos
     data = mujoco.MjData(model)
@@ -489,13 +489,13 @@ def generate_reference_motion(
         if bvh_root_callback:
             bvh_root_callback(bvh_root)
 
-        cartesian_pose_at_frame = {body_id: cartesian_motion[body_id][frame] for body_id in body_ids}
+        cartesian_pose_at_frame = {body_id: np_cartesian_motion[body_id][frame] for body_id in body_ids}
         qpos = solve_multi_body_ik(
             data=data,
             model=model,
             mj_base_id=mj_base_id,
             constrained_jnt_mask=constrained_jnt_mask,
-            cartesian_pose=cartesian_pose_at_frame, # Use the frame-specific pose
+            cartesian_pose=cartesian_pose_at_frame,
             neutral_qpos=neutral_qpos,
             prev_qpos=previous_qpos,
             neutral_similarity_weight=neutral_similarity_weight,
@@ -510,11 +510,12 @@ def generate_reference_motion(
         qpos_reference_motion.append(qpos)
         previous_qpos = qpos # Update previous qpos for the next frame
 
-    np_reference_qpos = np.array(qpos_reference_motion)
+    jnp_reference_qpos = jnp.array(qpos_reference_motion)
+    jnp_cartesian_motion = jax.tree.map(jnp.array, np_cartesian_motion)
 
     # 3. Create and return the data object
     return ReferenceMotionData(
-        qpos=np_reference_qpos,
-        cartesian_poses=cartesian_motion,
+        qpos=jnp_reference_qpos,
+        cartesian_poses=jnp_cartesian_motion,
         ctrl_dt=ctrl_dt,
     )
