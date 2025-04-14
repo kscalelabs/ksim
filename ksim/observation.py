@@ -459,7 +459,7 @@ class ActPosObservation(Observation):
     def get_name(self) -> str:
         """Get the name of the observation with joint details."""
         base_name = super().get_name()
-        return f"{base_name}_{self.joint_idx}_{self.joint_name}"
+        return f"{base_name}_{self.joint_name}"
 
     def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
         action_val = state.physics_state.most_recent_action[self.joint_idx]
