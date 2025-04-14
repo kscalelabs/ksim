@@ -22,6 +22,7 @@ __all__ = [
     "FeetOrientationObservation",
     "TimestepObservation",
     "ActPosObservation",
+    "ActVelObservation",
 ]
 
 import functools
@@ -466,3 +467,73 @@ class ActPosObservation(Observation):
         action_val = state.physics_state.most_recent_action[self.joint_idx]
         joint_pos = state.physics_state.data.qpos[7 + self.joint_idx]
         return jnp.array([action_val, joint_pos])
+
+
+@attrs.define(frozen=True)
+class ActVelObservation(Observation):
+    """Observation that returns a specific joint's velocity action and actual velocity.
+
+    This observation is for debugging purposes, to check how well a given joint's velocity
+    is following the corresponding velocity action. It is not intended to be passed to a model
+    or used for training.
+    """
+
+    noise: float = attrs.field(default=0.0)
+    joint_name: str = attrs.field(default=None)
+    joint_idx: int = attrs.field(default=0)
+    action_idx: int = attrs.field(default=0)
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        joint_name: str | None = None,
+        action_index: int | None = None,
+        noise: float = 0.0,
+    ) -> Self:
+        """Create an observation for a specific joint's velocity action and actual velocity.
+
+        At least one of joint_name or action_index must be provided.
+        The other will be inferred from the physics model.
+        """
+        if joint_name is None and action_index is None:
+            raise ValueError("At least one of joint_name or action_index must be provided")
+
+        qpos_mappings = get_qpos_data_idxs_by_name(physics_model)
+        ordered_joints = get_joint_names_in_order(physics_model)
+        ordered_joints = [name for name in ordered_joints if "free" not in name.lower()]
+
+        # Get both joint_idx and joint_name
+        joint_idx = None
+        if action_index is not None:
+            # For velocity actions, the joint index is half of the action index
+            # since the action space is split into positions and velocities
+            joint_idx = action_index % len(ordered_joints)
+            joint_name = ordered_joints[joint_idx]
+        else:
+            if joint_name not in qpos_mappings:
+                available_joints = list(qpos_mappings.keys())
+                raise ValueError(f"Joint name '{joint_name}' not found. Available joints: {available_joints}")
+            start, _ = qpos_mappings[joint_name]
+            joint_idx = start - 7
+
+        # For velocity actions, the action index is in the second half of the action space
+        action_idx = joint_idx + len(ordered_joints)
+
+        return cls(
+            joint_name=joint_name,
+            joint_idx=joint_idx,
+            action_idx=action_idx,
+            noise=noise,
+        )
+
+    def get_name(self) -> str:
+        """Get the name of the observation with joint details."""
+        base_name = super().get_name()
+        return f"{base_name}_{self.joint_name}"
+
+    def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
+        action_val = state.physics_state.most_recent_action[self.action_idx]
+        joint_vel = state.physics_state.data.qvel[6 + self.joint_idx]
+        return jnp.array([action_val, joint_vel])
