@@ -27,6 +27,7 @@ class ReferenceMotionData:
     """Stores reference motion data (qpos and Cartesian poses)."""
 
     qpos: xax.HashableArray  # Shape: [T, nq]
+    qvel: xax.HashableArray  # Shape: [T, nq]
     cartesian_poses: xax.FrozenDict[int, xax.HashableArray]  # Dict: body_id -> [T, 3]
     ctrl_dt: float
 
@@ -40,10 +41,17 @@ class ReferenceMotionData:
         frame_index = step % self.num_frames
         return jnp.take(self.qpos.array, frame_index, axis=0)
 
+    def get_qvel_at_step(self, step: int | Array) -> Array:
+        """Gets the reference qvel at a specific step (or steps)."""
+        frame_index = step % self.num_frames
+        return jnp.take(self.qvel.array, frame_index, axis=0)
+
     def get_cartesian_pose_at_step(self, step: int | Array) -> xax.FrozenDict[int, Array]:
         """Gets the reference Cartesian pose at a specific step (or steps)."""
         frame_index = step % self.num_frames
-        return jax.tree.map(lambda hashable_arr: jnp.take(hashable_arr.array, frame_index, axis=0), self.cartesian_poses)
+        return jax.tree.map(
+            lambda hashable_arr: jnp.take(hashable_arr.array, frame_index, axis=0), self.cartesian_poses
+        )
 
     def get_qpos_at_time(self, time: float | Array) -> Array:
         """Gets the reference qpos closest to a specific time."""
@@ -508,14 +516,22 @@ def generate_reference_motion(
             verbose=verbose,
         )
         qpos_reference_motion.append(qpos)
-        previous_qpos = qpos # Update previous qpos for the next frame
+        previous_qpos = qpos  # Update previous qpos for the next frame
+
+    # 3. Compute qvel
+    qvel_reference_motion = []
+    for frame in range(total_frames - 1):
+        qvel = (qpos_reference_motion[frame + 1] - qpos_reference_motion[frame]) / ctrl_dt
+        qvel_reference_motion.append(qvel)
 
     jnp_reference_qpos = jnp.array(qpos_reference_motion)
     jnp_cartesian_motion = jax.tree.map(lambda arr: xax.HashableArray(arr), np_cartesian_motion)
+    jnp_qvel = jnp.array(qvel_reference_motion)
 
     # 3. Create and return the data object
     return ReferenceMotionData(
         qpos=xax.HashableArray(jnp_reference_qpos),
+        qvel=xax.HashableArray(jnp_qvel),
         cartesian_poses=jnp_cartesian_motion,
         ctrl_dt=ctrl_dt,
     )
