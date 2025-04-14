@@ -21,6 +21,7 @@ __all__ = [
     "FeetPositionObservation",
     "FeetOrientationObservation",
     "TimestepObservation",
+    "ActPosObservation",
 ]
 
 import functools
