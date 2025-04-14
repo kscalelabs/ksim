@@ -469,7 +469,6 @@ class ActPosObservation(Observation):
         return jnp.array([action_val, joint_pos])
 
 
-
 @attrs.define(frozen=True)
 class ActVelObservation(Observation):
     """Observation that returns a specific joint's velocity action and actual velocity.
