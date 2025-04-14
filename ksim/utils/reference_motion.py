@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from typing import Callable
 
 import jax
+import jax.numpy as jnp
 import mujoco
 import numpy as np
 import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
+from jaxtyping import Array
 from scipy.optimize import least_squares
 
 from ksim.viewer import GlfwMujocoViewer
@@ -18,6 +20,48 @@ from ksim.viewer import GlfwMujocoViewer
 class ReferenceMapping:
     reference_joint_name: str
     mj_body_name: str
+
+
+@dataclass(frozen=True)
+class ReferenceMotionData:
+    """Stores reference motion data (qpos and Cartesian poses)."""
+
+    qpos: xax.HashableArray  # Shape: [T, nq]
+    qvel: xax.HashableArray  # Shape: [T, nq]
+    cartesian_poses: xax.FrozenDict[int, xax.HashableArray]  # Dict: body_id -> [T, 3]
+    ctrl_dt: float
+
+    @property
+    def num_frames(self) -> int:
+        """Returns the total number of frames in the reference motion."""
+        return self.qpos.array.shape[0]
+
+    def get_qpos_at_step(self, step: int | Array) -> Array:
+        """Gets the reference qpos at a specific step (or steps)."""
+        frame_index = step % self.num_frames
+        return jnp.take(self.qpos.array, frame_index, axis=0)
+
+    def get_qvel_at_step(self, step: int | Array) -> Array:
+        """Gets the reference qvel at a specific step (or steps)."""
+        frame_index = step % self.num_frames
+        return jnp.take(self.qvel.array, frame_index, axis=0)
+
+    def get_cartesian_pose_at_step(self, step: int | Array) -> xax.FrozenDict[int, Array]:
+        """Gets the reference Cartesian pose at a specific step (or steps)."""
+        frame_index = step % self.num_frames
+        return jax.tree.map(
+            lambda hashable_arr: jnp.take(hashable_arr.array, frame_index, axis=0), self.cartesian_poses
+        )
+
+    def get_qpos_at_time(self, time: float | Array) -> Array:
+        """Gets the reference qpos closest to a specific time."""
+        step = jnp.int32(jnp.round(time / self.ctrl_dt))
+        return self.get_qpos_at_step(step)
+
+    def get_cartesian_pose_at_time(self, time: float | Array) -> xax.FrozenDict[int, Array]:
+        """Gets the reference Cartesian pose closest to a specific time."""
+        step = jnp.int32(jnp.round(time / self.ctrl_dt))
+        return self.get_cartesian_pose_at_step(step)
 
 
 def _add_reference_marker_to_scene(
@@ -377,16 +421,17 @@ def solve_multi_body_ik(
     return qpos
 
 
-def get_reference_qpos(
+def generate_reference_motion(
     model: mujoco.MjModel,
     mj_base_id: int,
     bvh_root: BvhioJoint,
     bvh_to_mujoco_names: tuple[ReferenceMapping, ...],
     bvh_base_id: int,
+    ctrl_dt: float,
     bvh_offset: np.ndarray = np.array([0.0, 0.0, 0.0]),
     bvh_root_callback: Callable[[BvhioJoint], None] | None = None,
     bvh_scaling_factor: float = 1.0,
-    constrained_joint_ids: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6),  # maybe need 6???
+    constrained_joint_ids: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6),
     neutral_qpos: np.ndarray | None = None,
     neutral_similarity_weight: float = 0.1,
     temporal_consistency_weight: float = 0.1,
@@ -396,8 +441,8 @@ def get_reference_qpos(
     xtol: float = 1e-8,
     max_nfev: int = 2000,
     verbose: bool = False,
-) -> np.ndarray:
-    """Generates the reference motion for the given model and data.
+) -> ReferenceMotionData:
+    """Generates reference qpos and cartesian poses from BVH data.
 
     Args:
         model: The Mujoco model
@@ -405,6 +450,7 @@ def get_reference_qpos(
         bvh_root: The root of the BVH tree
         bvh_to_mujoco_names: The mappings of BVH joints to Mujoco bodies
         bvh_base_id: The ID of the reference base (of the BVH file)
+        ctrl_dt: The control timestep, used for time-based lookups.
         bvh_offset: Helps line up root with mj base
         bvh_root_callback: Modifies the root of the BVH tree (e.g. rotation)
         bvh_scaling_factor: The scaling factor for the reference motion
@@ -420,9 +466,10 @@ def get_reference_qpos(
         verbose: Whether to print verbose output
 
     Returns:
-        Numpy array of shape (time, qpos)
+        A ReferenceMotionData object containing qpos and Cartesian poses.
     """
-    cartesian_motion = get_reference_cartesian_poses(
+    # 1. Generate Cartesian Poses
+    np_cartesian_motion = get_reference_cartesian_poses(
         mappings=bvh_to_mujoco_names,
         model=model,
         root=bvh_root,
@@ -431,8 +478,10 @@ def get_reference_qpos(
         scaling_factor=bvh_scaling_factor,
         offset=bvh_offset,
     )
-    total_frames = list(cartesian_motion.values())[0].shape[0]
-    body_ids = list(cartesian_motion.keys())
+    total_frames = list(np_cartesian_motion.values())[0].shape[0]
+    body_ids = list(np_cartesian_motion.keys())
+
+    # 2. Solve IK for Qpos
     data = mujoco.MjData(model)
     constrained_jnt_mask = np.zeros(data.qpos.shape, dtype=bool)
     constrained_jnt_mask[np.array(constrained_joint_ids)] = True
@@ -443,17 +492,18 @@ def get_reference_qpos(
 
     qpos_reference_motion = []
     for frame in range(total_frames):
+        # Reload pose for consistency if callback modifies it in place
         bvh_root.loadPose(frame)
         if bvh_root_callback:
             bvh_root_callback(bvh_root)
 
-        cartesian_pose = {body_id: cartesian_motion[body_id][frame] for body_id in body_ids}
+        cartesian_pose_at_frame = {body_id: np_cartesian_motion[body_id][frame] for body_id in body_ids}
         qpos = solve_multi_body_ik(
             data=data,
             model=model,
             mj_base_id=mj_base_id,
             constrained_jnt_mask=constrained_jnt_mask,
-            cartesian_pose=cartesian_pose,
+            cartesian_pose=cartesian_pose_at_frame,
             neutral_qpos=neutral_qpos,
             prev_qpos=previous_qpos,
             neutral_similarity_weight=neutral_similarity_weight,
@@ -466,6 +516,22 @@ def get_reference_qpos(
             verbose=verbose,
         )
         qpos_reference_motion.append(qpos)
-        previous_qpos = qpos
+        previous_qpos = qpos  # Update previous qpos for the next frame
 
-    return np.array(qpos_reference_motion)
+    # 3. Compute qvel
+    qvel_reference_motion = []
+    for frame in range(total_frames - 1):
+        qvel = (qpos_reference_motion[frame + 1] - qpos_reference_motion[frame]) / ctrl_dt
+        qvel_reference_motion.append(qvel)
+
+    jnp_reference_qpos = jnp.array(qpos_reference_motion)
+    jnp_cartesian_motion = jax.tree.map(lambda arr: xax.HashableArray(arr), np_cartesian_motion)
+    jnp_qvel = jnp.array(qvel_reference_motion)
+
+    # 3. Create and return the data object
+    return ReferenceMotionData(
+        qpos=xax.HashableArray(jnp_reference_qpos),
+        qvel=xax.HashableArray(jnp_qvel),
+        cartesian_poses=jnp_cartesian_motion,
+        ctrl_dt=ctrl_dt,
+    )

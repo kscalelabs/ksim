@@ -6,6 +6,7 @@ from typing import Callable, Generic, TypeVar
 
 import attrs
 import glm
+import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
@@ -27,9 +28,8 @@ import ksim
 from ksim.types import PhysicsModel
 from ksim.utils.reference_motion import (
     ReferenceMapping,
-    get_reference_cartesian_poses,
+    generate_reference_motion,
     get_reference_joint_id,
-    get_reference_qpos,
     local_to_absolute,
     visualize_reference_motion,
     visualize_reference_points,
@@ -150,7 +150,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             ksim.StayAliveReward(scale=1.0),
             NaiveForwardReward(scale=0.1, clip_max=2.0),
             QposReferenceMotionReward(
-                reference_qpos=xax.HashableArray(self.reference_qpos), ctrl_dt=self.config.ctrl_dt, scale=0.5
+                reference_qpos=self.reference_motion.qpos, ctrl_dt=self.config.ctrl_dt, scale=0.5
             ),
         ]
 
@@ -167,16 +167,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
             root.applyRotation(glm.quat(*quat), bake=True)
 
-        np_reference_motion = get_reference_cartesian_poses(
-            mappings=HUMANOID_REFERENCE_MAPPINGS,
-            model=mj_model,
-            root=root,
-            reference_base_id=reference_base_id,
-            root_callback=rotation_callback,
-            scaling_factor=self.config.bvh_scaling_factor,
-            offset=np.array(self.config.bvh_offset),
-        )
-        np_reference_qpos = get_reference_qpos(
+        reference_motion = generate_reference_motion(
             model=mj_model,
             mj_base_id=self.mj_base_id,
             bvh_root=root,
@@ -185,6 +176,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             bvh_offset=np.array(self.config.bvh_offset),
             bvh_root_callback=rotation_callback,
             bvh_scaling_factor=self.config.bvh_scaling_factor,
+            ctrl_dt=self.config.ctrl_dt,
             neutral_qpos=None,
             neutral_similarity_weight=0.1,
             temporal_consistency_weight=0.1,
@@ -195,19 +187,20 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             max_nfev=2000,
             verbose=False,
         )
-        self.reference_qpos = jnp.array(np_reference_qpos)
+        self.reference_motion = reference_motion
+        np_cartesian_motion = jax.tree.map(np.asarray, self.reference_motion.cartesian_poses)
 
         if self.config.visualize_reference_points:
             visualize_reference_points(
                 model=mj_model,
                 base_id=self.mj_base_id,
-                reference_motion=np_reference_motion,
+                reference_motion=np_cartesian_motion,
             )
         elif self.config.visualize_reference_motion:
             visualize_reference_motion(
                 model=mj_model,
-                reference_qpos=np_reference_qpos,
-                cartesian_motion=np_reference_motion,
+                reference_qpos=np.asarray(self.reference_motion.qpos),
+                cartesian_motion=np_cartesian_motion,
                 mj_base_id=self.mj_base_id,
             )
         else:
