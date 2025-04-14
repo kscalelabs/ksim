@@ -39,6 +39,8 @@ from ksim.utils.mujoco import (
     geoms_colliding,
     get_body_data_idx_from_name,
     get_geom_data_idx_from_name,
+    get_joint_names_in_order,
+    get_qpos_data_idxs_by_name,
     get_sensor_data_idxs_by_name,
 )
 from ksim.vis import Marker
@@ -401,3 +403,65 @@ class TimestepObservation(Observation):
         if not isinstance(time, Array):
             time = jnp.array(time)
         return time.reshape(1)
+
+
+@attrs.define(frozen=True)
+class ActPosObservation(Observation):
+    """Observation that returns a specific joint's action and position.
+
+    This observation is for debugging purposes, to check how well a given joint is following
+    the corresponding action. It is not intended to be passed to a model or used for training.
+    """
+
+    noise: float = attrs.field(default=0.0)
+    joint_name: str = attrs.field(default=None)
+    joint_idx: int = attrs.field(default=0)  # Index in qpos array (after freejoint)
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        joint_name: str | None = None,
+        action_index: int | None = None,
+        noise: float = 0.0,
+    ) -> Self:
+        """Create an observation for a specific joint's action and position.
+
+        At least one of joint_name or action_index must be provided.
+        The other will be inferred from the physics model.
+        """
+        if joint_name is None and action_index is None:
+            raise ValueError("At least one of joint_name or action_index must be provided")
+
+        qpos_mappings = get_qpos_data_idxs_by_name(physics_model)
+        ordered_joints = get_joint_names_in_order(physics_model)
+        ordered_joints = [name for name in ordered_joints if "free" not in name.lower()]
+
+        # Get both joint_idx and joint_name
+        joint_idx = None
+        if action_index is not None:
+            joint_idx = action_index
+            joint_name = ordered_joints[joint_idx]
+        else:
+            if joint_name not in qpos_mappings:
+                available_joints = list(qpos_mappings.keys())
+                raise ValueError(f"Joint name '{joint_name}' not found. Available joints: {available_joints}")
+            start, _ = qpos_mappings[joint_name]
+            joint_idx = start - 7
+
+        return cls(
+            joint_name=joint_name,
+            joint_idx=joint_idx,
+            noise=noise,
+        )
+
+    def get_name(self) -> str:
+        """Get the name of the observation with joint details."""
+        base_name = super().get_name()
+        return f"{base_name}_{self.joint_idx}_{self.joint_name}"
+
+    def observe(self, state: ObservationState, rng: PRNGKeyArray) -> Array:
+        action_val = state.physics_state.most_recent_action[self.joint_idx]
+        joint_pos = state.physics_state.data.qpos[7 + self.joint_idx]
+        return jnp.array([action_val, joint_pos])
