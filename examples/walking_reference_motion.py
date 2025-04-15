@@ -145,6 +145,9 @@ class QposReferenceMotionReward(ksim.Reward):
 
 
 class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Config]):
+
+    reference_qpos: Array
+
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
             ksim.StayAliveReward(scale=1.0),
@@ -160,7 +163,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
         mj_model: PhysicsModel = self.get_mujoco_model()
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
         reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
-        self.mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
+        mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
 
         def rotation_callback(root: BvhioJoint) -> None:
             euler_rotation = np.array(self.config.rotate_bvh_euler)
@@ -178,7 +181,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
         )
         np_reference_qpos = get_reference_qpos(
             model=mj_model,
-            mj_base_id=self.mj_base_id,
+            mj_base_id=mj_base_id,
             bvh_root=root,
             bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
             bvh_base_id=reference_base_id,
@@ -200,7 +203,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
         if self.config.visualize_reference_points:
             visualize_reference_points(
                 model=mj_model,
-                base_id=self.mj_base_id,
+                base_id=mj_base_id,
                 reference_motion=np_reference_motion,
             )
         elif self.config.visualize_reference_motion:
@@ -208,7 +211,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
                 model=mj_model,
                 reference_qpos=np_reference_qpos,
                 cartesian_motion=np_reference_motion,
-                mj_base_id=self.mj_base_id,
+                mj_base_id=mj_base_id,
             )
         else:
             super().run()

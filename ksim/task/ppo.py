@@ -359,7 +359,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 metrics[aux_loss_name] = aux_loss_value.mean()
         return metrics
 
-    def get_logged_trajectory_metrics(
+    def _get_logged_trajectory_metrics(
         self,
         ppo_inputs: PPOInputs,
         loss_t: Array,
@@ -400,7 +400,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         return metrics
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
-    def get_loss_and_metrics(
+    def _get_loss_and_metrics(
         self,
         model_arr: PyTree,
         model_static: PyTree,
@@ -467,7 +467,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 off_policy_variables=off_policy_variables,
             )
 
-            logged_traj_metrics = self.get_logged_trajectory_metrics(
+            logged_traj_metrics = self._get_logged_trajectory_metrics(
                 loss_t=loss_t,
                 ppo_inputs=ppo_inputs,
                 on_policy_variables=on_policy_variables,
@@ -497,7 +497,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         return loss.mean(), (metrics, logged_trajectory)
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=3)
-    def _get_loss_metrics_and_grads(
+    def _get_metrics_and_grads(
         self,
         model_arr: PyTree,
         model_static: PyTree,
@@ -507,7 +507,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[dict[str, Array], LoggedTrajectory, PyTree]:
-        loss_fn = jax.grad(self.get_loss_and_metrics, argnums=0, has_aux=True)
+        loss_fn = jax.grad(self._get_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
         grads, (metrics, logged_trajectory) = loss_fn(
             model_arr,
@@ -533,7 +533,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array], LoggedTrajectory]:
-        ppo_metrics, logged_trajectory, grads = self._get_loss_metrics_and_grads(
+        ppo_metrics, logged_trajectory, grads = self._get_metrics_and_grads(
             model_arr=model_arr,
             model_static=model_static,
             trajectories=trajectories,

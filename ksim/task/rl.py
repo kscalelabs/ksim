@@ -141,7 +141,6 @@ def get_observation(
 
 def get_rewards(
     trajectory: Trajectory,
-    rollout_shared_state: RolloutSharedState,
     rewards: Collection[Reward],
     rewards_carry: xax.FrozenDict[str, PyTree],
     rollout_length_steps: int,
@@ -156,7 +155,7 @@ def get_rewards(
     for reward_generator in rewards:
         reward_name = reward_generator.reward_name
         reward_carry = rewards_carry[reward_name]
-        reward_val, reward_carry = reward_generator(trajectory, reward_carry, rollout_shared_state.model_arr)
+        reward_val, reward_carry = reward_generator(trajectory, reward_carry)
         reward_val = reward_val * reward_generator.scale / rollout_length_steps
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
@@ -1175,7 +1174,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Gets the rewards.
         reward = get_rewards(
             trajectory=trajectory,
-            rollout_shared_state=rollout_shared_state,
             rewards=rollout_constants.rewards,
             rewards_carry=rollout_env_state.reward_carry,
             rollout_length_steps=self.rollout_length_steps,
