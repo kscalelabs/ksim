@@ -1,6 +1,7 @@
 """Example walking task using Adversarial Motion Priors."""
 
-from dataclasses import dataclass
+from abc import abstractmethod
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Generic, Literal, TypeVar
 
@@ -49,7 +50,7 @@ from .walking import (
 )
 
 
-@jax.tree_util.register_pytree_node_class
+@jax.tree_util.register_dataclass
 @dataclass
 class Motion:
     """A fixed-length window of motion history, including current frame.
@@ -65,19 +66,6 @@ class Motion:
 
     qpos_frames: Array
     # TODO: experiment with adding xpos...
-
-
-@jax.tree_util.register_pytree_node_class
-@dataclass
-class AMPAuxOutputs:
-    """Auxiliary outputs generated during on-policy rollout.
-
-    This lives inside the trajectory object directly because the on-policy
-    discriminator outputs get incorporated via the standard reward API.
-    """
-
-    discriminator_logits: Array
-    motion: Motion
 
 
 class DefaultHumanoidDiscriminator(eqx.Module):
@@ -105,8 +93,8 @@ class DefaultHumanoidDiscriminator(eqx.Module):
             activation=jax.nn.relu,
         )
 
-    def forward(self, motion: Motion) -> Array:
-        return self.mlp(motion.qpos_frames)
+    def forward(self, x: Array) -> Array:
+        return self.mlp(x)
 
 
 class DefaultHumanoidAMPModel(eqx.Module):
@@ -167,6 +155,10 @@ class HumanoidWalkingAMPTaskConfig(HumanoidWalkingTaskConfig):
         value="pelvis",
         help="The Mujoco body name of the base of the humanoid",
     )
+    constrained_joint_ids: tuple[int, ...] = xax.field(
+        value=(0, 1, 2, 3, 4, 5, 6),
+        help="The indices of the joints to constrain. By default, freejoints.",
+    )
     reference_base_name: str = xax.field(
         value="CC_Base_Pelvis",
         help="The BVH joint name of the base of the humanoid",
@@ -212,102 +204,54 @@ class AMPReward(ksim.Reward):
         trajectory: ksim.Trajectory,
         _: None,
     ) -> tuple[Array, None]:
-        assert isinstance(trajectory.aux_outputs, AMPAuxOutputs)
-        discriminator_values = jax.nn.sigmoid(trajectory.aux_outputs.discriminator_logits)
+        """Reward for the discriminator."""
+        if trajectory.aux_outputs is None or "_discriminator_logits" not in trajectory.aux_outputs:
+            raise ValueError("_discriminator_logits is set by the AMPTask. Make sure you subclass AMPTask.")
+        discriminator_values = jax.nn.sigmoid(trajectory.aux_outputs["_discriminator_logits"])
         reward = 1 - discriminator_values
         return reward, None
 
 
-class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
-    """Humanoid walking task with adversarial motion prior.
-
-    NOTE: this is WIP until it trains efficiently. Should be moved into the core
-    library once it's stable. The user will eventually decide what core RL
-    algorithm to subclass, and this class simply adds a discriminator.
-    """
+class AMPTask(ksim.RLTask[Config], Generic[Config]):
+    """Adversarial Motion Prior task."""
 
     reference_motions: Motion
 
-    def get_optimizer(self) -> optax.GradientTransformation:
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            (
-                optax.adam(self.config.learning_rate)
-                if self.config.adam_weight_decay == 0.0
-                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
-            ),
-        )
-        # TODO: explore different optimizer for discriminator (use mask fn)
+    @abstractmethod
+    def initial_motion_history(self) -> Motion:
+        """Initial motion history (e.g. zeros, random, etc.)."""
+        ...
 
-        return optimizer
-
-    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        rewards = [
-            ksim.StayAliveReward(scale=1.0),
-            NaiveForwardReward(scale=0.1, clip_max=2.0),
-            AMPReward(scale=0.1),
-        ]
-
-        return rewards
-
-    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidAMPModel:
-        return DefaultHumanoidAMPModel(
-            key,
-            hidden_size=self.config.hidden_size,
-            depth=self.config.depth,
-            num_mixtures=self.config.num_mixtures,
-            num_frames=self.config.discriminator_num_frames,
-        )
-
-    def sample_action(
+    @abstractmethod
+    def run_discriminator(
         self,
-        model: DefaultHumanoidAMPModel,
-        model_carry: Motion,
-        physics_model: ksim.PhysicsModel,
-        physics_state: ksim.PhysicsState,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
-        rng: PRNGKeyArray,
-        argmax: bool,
-    ) -> ksim.Action:
-        action_dist_j = self.run_actor(
-            model=model.actor,
-            observations=observations,
-            commands=commands,
-        )
-        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
+        model: PyTree,
+        motion: Motion,
+    ) -> Array:
+        """Gets discriminator logit for the provided motion.
 
-        motion = jax.tree.map(lambda x: x[1:], model_carry)
-        motion = Motion(jnp.concatenate([motion.qpos_frames, physics_state.data.qpos[None]], axis=0))
-        discriminator_logits = model.discriminator.forward(motion)
+        Args:
+            model: The model to use.
+            motion: The motion to get the discriminator logit for.
 
-        amp_aux_outputs = AMPAuxOutputs(
-            discriminator_logits=discriminator_logits,
-            motion=motion,
-        )
-
-        return ksim.Action(action=action_j, carry=motion, aux_outputs=amp_aux_outputs)
-
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> Motion:
-        return self._get_initial_motion_carry()
-
-    def _get_initial_motion_carry(self) -> Motion:
-        return Motion(jnp.zeros((self.config.discriminator_num_frames, NUM_JOINTS)))
+        Returns:
+            The discriminator logit.
+        """
+        ...
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
     def _get_discriminator_loss_and_metrics(
         self,
         model_arr: PyTree,
         model_static: PyTree,
-        rollout_motion: Motion,
-        reference_motion: Motion,
+        rollout_motions: Motion,
+        reference_motions: Motion,
     ) -> tuple[Array, xax.FrozenDict[str, Array]]:
         """Adds the discriminator loss to the super's loss and metrics."""
 
         model = eqx.combine(model_arr, model_static)
-        assert isinstance(model, DefaultHumanoidAMPModel)
-        fake_logits = jax.vmap(model.discriminator.forward)(rollout_motion)
-        real_logits = jax.vmap(model.discriminator.forward)(reference_motion)
+        fake_logits = jax.vmap(self.run_discriminator, in_axes=(None, 0))(model, rollout_motions)
+        real_logits = jax.vmap(self.run_discriminator, in_axes=(None, 0))(model, reference_motions)
 
         # Compute hinge loss for both real and fake samples
         fake_loss = jnp.mean(jnp.maximum(0.0, 1.0 + fake_logits))  # Want fake samples <= -1
@@ -331,18 +275,71 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
         self,
         model_arr: PyTree,
         model_static: PyTree,
-        rollout_motion: Motion,
-        reference_motion: Motion,
+        rollout_motions: Motion,
+        reference_motions: Motion,
     ) -> tuple[Array, xax.FrozenDict[str, Array]]:
+        """Gets the discriminator metrics and gradients."""
         loss_fn = jax.grad(self._get_discriminator_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
         grads, metrics = loss_fn(
             model_arr,
             model_static,
-            rollout_motion,
-            reference_motion,
+            rollout_motions,
+            reference_motions,
         )
         return metrics, grads
+
+    def _get_rollout_motions(self, trajectory: ksim.Trajectory) -> Motion:
+        """Gets the rollout motions from the trajectory."""
+
+        def build_motion(carry: Motion, transition: ksim.Trajectory) -> tuple[Motion, Motion]:
+            # Shifts the motion history by one frame.
+            next_motion = Motion(
+                qpos_frames=jnp.concatenate(
+                    [carry.qpos_frames[1:], transition.qpos[None, ~self.constrained_jnt_mask]], axis=0
+                )
+            )
+            next_motion = jax.lax.cond(
+                transition.done,
+                lambda: self.initial_motion_history(),
+                lambda: next_motion,
+            )
+            return next_motion, next_motion
+
+        _, rollout_motions = jax.lax.scan(build_motion, self.initial_motion_history(), trajectory)
+        return rollout_motions
+
+    def _get_reference_motions(self, reference_qpos: Array) -> Motion:
+        """Gets the reference motions from the reference qpos."""
+
+        def build_motion(carry: Motion, qpos: Array) -> tuple[Motion, Motion]:
+            next_motion = Motion(
+                qpos_frames=jnp.concatenate([carry.qpos_frames[1:], qpos[None, ~self.constrained_jnt_mask]], axis=0)
+            )
+            return next_motion, next_motion
+
+        _, reference_motions = jax.lax.scan(build_motion, self.initial_motion_history(), reference_qpos)
+        return reference_motions
+
+    def calculate_rewards(
+        self,
+        trajectory: ksim.Trajectory,
+        rollout_env_state: ksim.RolloutEnvState,
+        rollout_shared_state: ksim.RolloutSharedState,
+        rollout_constants: ksim.RolloutConstants,
+    ) -> ksim.Rewards:
+        """Overriding to add AMP-specific variables to the aux_outputs bus."""
+        model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
+        rollout_motions = self._get_rollout_motions(trajectory)
+        on_policy_discriminator_logits = jax.vmap(self.run_discriminator, in_axes=(None, 0))(model, rollout_motions)
+        aux_outputs = {"_discriminator_logits": on_policy_discriminator_logits, "_rollout_motions": rollout_motions}
+        if trajectory.aux_outputs is None:
+            aux_outputs = xax.FrozenDict(aux_outputs)
+        else:
+            aux_outputs = dict(trajectory.aux_outputs) | aux_outputs
+        trajectory = replace(trajectory, aux_outputs=aux_outputs)
+
+        return super().calculate_rewards(trajectory, rollout_env_state, rollout_shared_state, rollout_constants)
 
     def update_model(
         self,
@@ -355,6 +352,22 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
         rollout_constants: ksim.RolloutConstants,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, PyTree, xax.FrozenDict[str, Array], ksim.LoggedTrajectory]:
+        """Updates the model using the AMP task.
+
+        Args:
+            optimizer: The optimizer to use.
+            opt_state: The optimizer state.
+            trajectories: The trajectories to update the model on. (num_envs, num_steps, leaf_dim)
+            rewards: The rewards for the trajectories. (num_envs, num_steps)
+            rollout_env_states: The environment variables inputs into the rollout.
+            rollout_shared_state: The shared state inputs into the rollout.
+            rollout_constants: The constant inputs into the rollout.
+            rng: A random seed.
+
+        Returns:
+            A tuple containing the updated parameters, optimizer state, next
+            model carry, metrics, and the single trajectory to log.
+        """
         super_model_arr, super_opt_state, super_model_carry, super_metrics, super_logged_traj = super().update_model(
             optimizer,
             opt_state,
@@ -365,32 +378,50 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
             rollout_constants,
             rng,
         )
-
         rng_sample, rng_train = jax.random.split(rng)
+        assert trajectories.aux_outputs is not None
+        reference_motions = trajectories.aux_outputs["_rollout_motions"]
+
+        # Randomly sample rollout and reference, randomly zero out reference.
         rollout_indices = jnp.arange(trajectories.done.shape[0]).reshape(self.num_batches, self.batch_size)
-        # Randomly sample reference motion indices with replacement
         reference_indices = jax.random.randint(
             rng_sample,
             shape=(self.num_batches, self.batch_size),
             minval=0,
             maxval=self.reference_motions.qpos_frames.shape[0],
         )
-        indices_by_batch = (rollout_indices, reference_indices)
+
+        # During discriminator training, the motions at the start of the rollout
+        # will begin mid-episode. For abstraction, we reset the motion history
+        # at the start of each rollout as opposed to forcing the user to store
+        # the motion history in the carry term. As such, we must match
+        # the mid-episode reset distribution in the reference.
+        rng_reset, rng_uniform = jax.random.split(rng_sample)
+        reset_probability = (self.config.discriminator_num_frames - 1) / self.rollout_length_steps
+        do_reset = jax.random.bernoulli(rng_reset, p=reset_probability, shape=(self.num_batches, self.batch_size))
+        num_frames_to_reset = jax.random.randint(
+            rng_uniform,
+            shape=(self.num_batches, self.batch_size),
+            minval=1,
+            maxval=self.config.discriminator_num_frames - 1,
+        )
+        num_frames_to_reset = jnp.where(do_reset, num_frames_to_reset, 0)
+        indices_by_batch = (rollout_indices, reference_indices, num_frames_to_reset)
 
         def update_discriminator_in_batch(
-            carry_training_state: tuple[PyTree, optax.OptState, PRNGKeyArray], batch_indices: tuple[Array, Array]
+            carry_training_state: tuple[PyTree, optax.OptState, PRNGKeyArray], batch_indices: tuple[Array, Array, Array]
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], xax.FrozenDict[str, Array]]:
-            assert isinstance(trajectories.aux_outputs, AMPAuxOutputs)
-            rollout_batch_indices, reference_batch_indices = batch_indices
+            rollout_batch_indices, reference_batch_indices, num_frames_to_reset = batch_indices
             model_arr, opt_state, rng = carry_training_state
-            reference_motion_batch = jax.tree.map(lambda x: x[reference_batch_indices], self.reference_motions)
-            rollout_motion_batch = jax.tree.map(lambda x: x[rollout_batch_indices], trajectories.aux_outputs.motion)
+            rollout_motions_batch = jax.tree.map(lambda x: x[rollout_batch_indices], reference_motions)
+            reference_motions_batch = jax.tree.map(lambda x: x[reference_batch_indices], self.reference_motions)
+            # TODO: actually add in reset logic here
 
             disc_metrics, disc_grads = self._get_discriminator_metrics_and_grads(
                 model_arr=model_arr,
                 model_static=rollout_constants.model_static,
-                rollout_motion=rollout_motion_batch,
-                reference_motion=reference_motion_batch,
+                rollout_motions=rollout_motions_batch,
+                reference_motions=reference_motions_batch,
             )
 
             new_model_arr, new_opt_state, grad_metrics = self.apply_gradients_with_clipping(
@@ -422,10 +453,21 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
 
         metrics = xax.FrozenDict(dict(super_metrics) | dict(discriminator_metrics))
 
+        # TODO: update super_logged_traj with discriminator metrics
         return model_arr, opt_state, super_model_carry, metrics, super_logged_traj
+
+    def _validate_amp_rewards(self, physics_model: ksim.PhysicsModel) -> None:
+        rewards = self.get_rewards(physics_model)
+        has_amp_reward = False
+        for reward in rewards:
+            if isinstance(reward, AMPReward):
+                has_amp_reward = True
+                break
+        assert has_amp_reward, "AMPReward must be in the rewards list"
 
     def run(self) -> None:
         mj_model: PhysicsModel = self.get_mujoco_model()
+        self._validate_amp_rewards(mj_model)
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
         reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
         mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
@@ -453,6 +495,7 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
             bvh_offset=np.array(self.config.bvh_offset),
             bvh_root_callback=rotation_callback,
             bvh_scaling_factor=self.config.bvh_scaling_factor,
+            constrained_joint_ids=self.config.constrained_joint_ids,
             neutral_qpos=None,
             neutral_similarity_weight=0.1,
             temporal_consistency_weight=0.1,
@@ -463,17 +506,11 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
             max_nfev=2000,
             verbose=False,
         )
+        constrained_jnt_mask = np.zeros(np_reference_qpos[0].shape, dtype=bool)
+        constrained_jnt_mask[np.array(self.config.constrained_joint_ids)] = True
+        self.constrained_jnt_mask = constrained_jnt_mask
         reference_qpos = jnp.array(np_reference_qpos)
-
-        # Getting the reference motion from the reference qpos.
-        def build_reference_motion(motion: Motion, qpos: Array) -> tuple[Motion, Motion]:
-            motion = jax.tree.map(lambda x: x[1:], motion)
-            motion = Motion(jnp.concatenate([motion.qpos_frames, qpos[None]], axis=0))
-            return motion, motion
-
-        _, self.reference_motions = jax.lax.scan(
-            build_reference_motion, self._get_initial_motion_carry(), reference_qpos
-        )
+        self.reference_motions = self._get_reference_motions(reference_qpos)
 
         if self.config.visualize_reference_points:
             visualize_reference_points(
@@ -490,6 +527,51 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
             )
         else:
             super().run()
+
+
+class HumanoidWalkingAMPTask(HumanoidWalkingTask[HumanoidWalkingAMPTaskConfig], AMPTask[HumanoidWalkingAMPTaskConfig]):
+    """Humanoid walking task with adversarial motion prior.
+
+    This class combines the standard humanoid walking task with AMP (Adversarial Motion Prior)
+    functionality to enable learning from reference motions.
+    """
+
+    def get_optimizer(self) -> optax.GradientTransformation:
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            (
+                optax.adam(self.config.learning_rate)
+                if self.config.adam_weight_decay == 0.0
+                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
+            ),
+        )
+        # TODO: explore different optimizer for discriminator (use mask fn)
+
+        return optimizer
+
+    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidAMPModel:
+        return DefaultHumanoidAMPModel(
+            key,
+            hidden_size=self.config.hidden_size,
+            depth=self.config.depth,
+            num_mixtures=self.config.num_mixtures,
+            num_frames=self.config.discriminator_num_frames,
+        )
+
+    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
+        rewards = [
+            ksim.StayAliveReward(scale=1.0),
+            NaiveForwardReward(scale=0.1, clip_max=2.0),
+            AMPReward(scale=0.1),
+        ]
+        return rewards
+
+    def run_discriminator(self, model: DefaultHumanoidAMPModel, motion: Motion) -> Array:
+        x_qpos = motion.qpos_frames.reshape(-1)
+        return model.discriminator.forward(x_qpos).squeeze()
+
+    def initial_motion_history(self) -> Motion:
+        return Motion(qpos_frames=jnp.zeros((self.config.discriminator_num_frames, NUM_JOINTS)))
 
 
 if __name__ == "__main__":
