@@ -175,6 +175,14 @@ class HumanoidWalkingAMPTaskConfig(HumanoidWalkingTaskConfig):
         value=10,
         help="The number of frames to use for the discriminator.",
     )
+    num_discriminator_passes: int = xax.field(
+        value=1,
+        help="The number of times to pass the discriminator.",
+    )
+    w_gp: float = xax.field(
+        value=10.0,
+        help="Gradient penalty coefficient for discriminator (WGAN-GP style).",
+    )
 
 
 HUMANOID_REFERENCE_MAPPINGS = (
@@ -204,11 +212,16 @@ class AMPReward(ksim.Reward):
         trajectory: ksim.Trajectory,
         _: None,
     ) -> tuple[Array, None]:
-        """Reward for the discriminator."""
+        """Reward for the discriminator using LSGAN objective."""
         if trajectory.aux_outputs is None or "_discriminator_logits" not in trajectory.aux_outputs:
             raise ValueError("_discriminator_logits is set by the AMPTask. Make sure you subclass AMPTask.")
-        discriminator_values = jax.nn.sigmoid(trajectory.aux_outputs["_discriminator_logits"])
-        reward = 1 - discriminator_values
+
+        # With the hinge loss, positive values are real, negative are fake.
+        # discriminator_values = jax.nn.sigmoid(trajectory.aux_outputs["_discriminator_logits"])
+        # return discriminator_values, None
+        # LSGAN-based reward: r = max(0, 1 - 0.25 * (D(s, s') - 1)^2)
+        logits = trajectory.aux_outputs["_discriminator_logits"]
+        reward = jnp.maximum(0.0, 1.0 - 0.25 * jnp.square(logits - 1.0))
         return reward, None
 
 
@@ -247,16 +260,30 @@ class AMPTask(ksim.RLTask[Config], Generic[Config]):
         rollout_motions: Motion,
         reference_motions: Motion,
     ) -> tuple[Array, xax.FrozenDict[str, Array]]:
-        """Adds the discriminator loss to the super's loss and metrics."""
-
+        """Adds the discriminator loss to the super's loss and metrics using LSGAN objective."""
         model = eqx.combine(model_arr, model_static)
-        fake_logits = jax.vmap(self.run_discriminator, in_axes=(None, 0))(model, rollout_motions)
-        real_logits = jax.vmap(self.run_discriminator, in_axes=(None, 0))(model, reference_motions)
+
+        # Vmapping over batch size and trajectory length.
+        fake_logits = jax.vmap(jax.vmap(self.run_discriminator, in_axes=(None, 0)), in_axes=(None, 0))(
+            model, rollout_motions
+        )
+        real_logits = jax.vmap(jax.vmap(self.run_discriminator, in_axes=(None, 0)), in_axes=(None, 0))(
+            model, reference_motions
+        )
 
         # Compute hinge loss for both real and fake samples
-        fake_loss = jnp.mean(jnp.maximum(0.0, 1.0 + fake_logits))  # Want fake samples <= -1
-        real_loss = jnp.mean(jnp.maximum(0.0, 1.0 - real_logits))  # Want real samples >= 1
-        discriminator_loss = fake_loss + real_loss
+        # fake_loss = jnp.mean(jnp.maximum(0.0, 1.0 + fake_logits))  # Want fake samples <= -1
+        # real_loss = jnp.mean(jnp.maximum(0.0, 1.0 - real_logits))  # Want real samples >= 1
+        # discriminator_loss = fake_loss + real_loss
+
+        # LSGAN loss:
+        #   real_loss = mean((D(real) - 1)^2)
+        #   fake_loss = mean((D(fake) + 1)^2)
+        #   discriminator_loss = real_loss + fake_loss
+        real_loss = jnp.mean(jnp.square(real_logits - 1.0))
+        fake_loss = jnp.mean(jnp.square(fake_logits + 1.0))
+        discriminator_loss = real_loss + fake_loss
+        # TODO: add in gradient clipping
 
         metrics = xax.FrozenDict(
             {
@@ -321,14 +348,14 @@ class AMPTask(ksim.RLTask[Config], Generic[Config]):
         _, reference_motions = jax.lax.scan(build_motion, self.initial_motion_history(), reference_qpos)
         return reference_motions
 
-    def calculate_rewards(
+    def post_rollout_update(
         self,
         trajectory: ksim.Trajectory,
         rollout_env_state: ksim.RolloutEnvState,
         rollout_shared_state: ksim.RolloutSharedState,
         rollout_constants: ksim.RolloutConstants,
-    ) -> ksim.Rewards:
-        """Overriding to add AMP-specific variables to the aux_outputs bus."""
+    ) -> tuple[ksim.Trajectory, ksim.RolloutEnvState, ksim.RolloutSharedState]:
+        """Adding AMP-specific variables to the aux_outputs bus."""
         model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
         rollout_motions = self._get_rollout_motions(trajectory)
         on_policy_discriminator_logits = jax.vmap(self.run_discriminator, in_axes=(None, 0))(model, rollout_motions)
@@ -337,9 +364,9 @@ class AMPTask(ksim.RLTask[Config], Generic[Config]):
             aux_outputs = xax.FrozenDict(aux_outputs)
         else:
             aux_outputs = dict(trajectory.aux_outputs) | aux_outputs
-        trajectory = replace(trajectory, aux_outputs=aux_outputs)
 
-        return super().calculate_rewards(trajectory, rollout_env_state, rollout_shared_state, rollout_constants)
+        trajectory = replace(trajectory, aux_outputs=aux_outputs)
+        return trajectory, rollout_env_state, rollout_shared_state
 
     def update_model(
         self,
@@ -380,13 +407,13 @@ class AMPTask(ksim.RLTask[Config], Generic[Config]):
         )
         rng_sample, rng_train = jax.random.split(rng)
         assert trajectories.aux_outputs is not None
-        reference_motions = trajectories.aux_outputs["_rollout_motions"]
+        rollout_motions = trajectories.aux_outputs["_rollout_motions"]
 
         # Randomly sample rollout and reference, randomly zero out reference.
         rollout_indices = jnp.arange(trajectories.done.shape[0]).reshape(self.num_batches, self.batch_size)
         reference_indices = jax.random.randint(
             rng_sample,
-            shape=(self.num_batches, self.batch_size),
+            shape=(self.num_batches, self.batch_size, self.rollout_length_steps),
             minval=0,
             maxval=self.reference_motions.qpos_frames.shape[0],
         )
@@ -398,10 +425,12 @@ class AMPTask(ksim.RLTask[Config], Generic[Config]):
         # the mid-episode reset distribution in the reference.
         rng_reset, rng_uniform = jax.random.split(rng_sample)
         reset_probability = (self.config.discriminator_num_frames - 1) / self.rollout_length_steps
-        do_reset = jax.random.bernoulli(rng_reset, p=reset_probability, shape=(self.num_batches, self.batch_size))
+        do_reset = jax.random.bernoulli(
+            rng_reset, p=reset_probability, shape=(self.num_batches, self.batch_size, self.rollout_length_steps)
+        )
         num_frames_to_reset = jax.random.randint(
             rng_uniform,
-            shape=(self.num_batches, self.batch_size),
+            shape=(self.num_batches, self.batch_size, self.rollout_length_steps),
             minval=1,
             maxval=self.config.discriminator_num_frames - 1,
         )
@@ -413,8 +442,13 @@ class AMPTask(ksim.RLTask[Config], Generic[Config]):
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], xax.FrozenDict[str, Array]]:
             rollout_batch_indices, reference_batch_indices, num_frames_to_reset = batch_indices
             model_arr, opt_state, rng = carry_training_state
-            rollout_motions_batch = jax.tree.map(lambda x: x[rollout_batch_indices], reference_motions)
-            reference_motions_batch = jax.tree.map(lambda x: x[reference_batch_indices], self.reference_motions)
+            rollout_motions_batch = jax.tree.map(lambda x: x[rollout_batch_indices], rollout_motions)
+            reference_motions_batch = jax.tree.map(
+                lambda x: x[reference_batch_indices.reshape(-1)].reshape(
+                    self.batch_size, self.rollout_length_steps, *x.shape[1:]
+                ),
+                self.reference_motions,
+            )
             # TODO: actually add in reset logic here
 
             disc_metrics, disc_grads = self._get_discriminator_metrics_and_grads(
@@ -448,7 +482,7 @@ class AMPTask(ksim.RLTask[Config], Generic[Config]):
         (model_arr, opt_state, _), discriminator_metrics = jax.lax.scan(
             update_discriminator_accross_batches,
             (super_model_arr, super_opt_state, rng_train),
-            length=self.config.num_passes,
+            length=self.config.num_discriminator_passes,
         )
 
         metrics = xax.FrozenDict(dict(super_metrics) | dict(discriminator_metrics))
@@ -529,7 +563,7 @@ class AMPTask(ksim.RLTask[Config], Generic[Config]):
             super().run()
 
 
-class HumanoidWalkingAMPTask(HumanoidWalkingTask[HumanoidWalkingAMPTaskConfig], AMPTask[HumanoidWalkingAMPTaskConfig]):
+class HumanoidWalkingAMPTask(AMPTask[HumanoidWalkingAMPTaskConfig], HumanoidWalkingTask[HumanoidWalkingAMPTaskConfig]):
     """Humanoid walking task with adversarial motion prior.
 
     This class combines the standard humanoid walking task with AMP (Adversarial Motion Prior)
