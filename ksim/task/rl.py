@@ -1213,6 +1213,33 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers.extend(randomizer.get_markers())
         return markers
 
+    def calculate_rewards(
+        self,
+        trajectory: Trajectory,
+        rollout_env_state: RolloutEnvState,
+        rollout_shared_state: RolloutSharedState,
+        rollout_constants: RolloutConstants,
+    ) -> Rewards:
+        """Calculates the rewards for the given trajectory.
+
+        Args:
+            trajectory: The trajectory to calculate the rewards for.
+            rollout_env_state: The environment state.
+            rollout_shared_state: The shared state.
+            rollout_constants: The constants.
+
+        Returns:
+            The rewards for the given trajectory.
+        """
+        return get_rewards(
+            trajectory=trajectory,
+            rewards=rollout_constants.rewards,
+            rewards_carry=rollout_env_state.reward_carry,
+            rollout_length_steps=self.rollout_length_steps,
+            clip_min=self.config.reward_clip_min,
+            clip_max=self.config.reward_clip_max,
+        )
+
     @xax.jit(static_argnames=["self", "rollout_constants"], jit_level=2)
     def _single_unroll(
         self,
@@ -1242,13 +1269,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Gets the rewards.
-        reward = get_rewards(
+        reward = self.calculate_rewards(
             trajectory=trajectory,
-            rewards=rollout_constants.rewards,
-            rewards_carry=rollout_env_state.reward_carry,
-            rollout_length_steps=self.rollout_length_steps,
-            clip_min=self.config.reward_clip_min,
-            clip_max=self.config.reward_clip_max,
+            rollout_env_state=rollout_env_state,
+            rollout_shared_state=rollout_shared_state,
+            rollout_constants=rollout_constants,
         )
 
         return trajectory, reward, next_rollout_variables
