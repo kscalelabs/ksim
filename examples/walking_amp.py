@@ -35,7 +35,6 @@ from ksim.utils.reference_motion import (
     get_reference_cartesian_poses,
     get_reference_joint_id,
     get_reference_qpos,
-    local_to_absolute,
     visualize_reference_motion,
     visualize_reference_points,
 )
@@ -50,8 +49,39 @@ from .walking import (
 )
 
 
+@jax.tree_util.register_pytree_node_class
+@dataclass
+class Motion:
+    """A fixed-length window of motion history, including current frame.
+
+    This is used as a carry term when rolling out such that historical frames
+    are available to the discriminator.
+
+    Naming convention by leaf dimension:
+    - `motion_frame`: (num_joints,)
+    - `motion`: (num_frames, num_joints)
+    - `motions`: (num batches or rollout length, num_frames, num_joints)
+    """
+
+    qpos_frames: Array
+    # TODO: experiment with adding xpos...
+
+
+@jax.tree_util.register_pytree_node_class
+@dataclass
+class AMPAuxOutputs:
+    """Auxiliary outputs generated during on-policy rollout.
+
+    This lives inside the trajectory object directly because the on-policy
+    discriminator outputs get incorporated via the standard reward API.
+    """
+
+    discriminator_logits: Array
+    motion: Motion
+
+
 class DefaultHumanoidDiscriminator(eqx.Module):
-    """Discriminator for the walking task, returns a logit"""
+    """Discriminator for the walking task, returns logit."""
 
     mlp: eqx.nn.MLP
 
@@ -75,8 +105,8 @@ class DefaultHumanoidDiscriminator(eqx.Module):
             activation=jax.nn.relu,
         )
 
-    def forward(self, obs_n: Array) -> Array:
-        return self.mlp(obs_n)
+    def forward(self, motion: Motion) -> Array:
+        return self.mlp(motion.qpos_frames)
 
 
 class DefaultHumanoidAMPModel(eqx.Module):
@@ -153,10 +183,6 @@ class HumanoidWalkingAMPTaskConfig(HumanoidWalkingTaskConfig):
         value=10,
         help="The number of frames to use for the discriminator.",
     )
-    discriminator_imputation_strategy: Literal["zero", "repeat"] = xax.field(
-        value="repeat",
-        help="The imputation strategy to use for the discriminator.",
-    )
 
 
 HUMANOID_REFERENCE_MAPPINGS = (
@@ -178,95 +204,43 @@ HUMANOID_REFERENCE_MAPPINGS = (
 Config = TypeVar("Config", bound=HumanoidWalkingAMPTaskConfig)
 
 
-def create_tracked_marker_update_fn(
-    body_id: int, mj_base_id: int, tracked_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
-) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
-    """Factory function to create a marker update for the tracked positions."""
-
-    def _actual_update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
-        tracked_pos = tracked_pos_fn(transition)
-        abs_pos = local_to_absolute(transition.xpos, tracked_pos[body_id], mj_base_id)
-        marker.pos = tuple(abs_pos)
-
-    return _actual_update_fn
-
-
-def create_target_marker_update_fn(
-    body_id: int, mj_base_id: int, target_pos_fn: Callable[[ksim.Trajectory], xax.FrozenDict[int, Array]]
-) -> Callable[[ksim.Marker, ksim.Trajectory], None]:
-    """Factory function to create a marker update for the target positions."""
-
-    def _target_update_fn(marker: ksim.Marker, transition: ksim.Trajectory) -> None:
-        target_pos = target_pos_fn(transition)
-        abs_pos = local_to_absolute(transition.xpos, target_pos[body_id], mj_base_id)
-        marker.pos = tuple(abs_pos)
-
-    return _target_update_fn
-
-
-# @attrs.define(frozen=True, kw_only=True)
-# class AMPRewardCarry:
-#     qpos_history: Array
-#     did_prev_reset: Array
-
-
-@jax.tree_util.register_pytree_node_class
-@dataclass
-class AMPAuxOutputs:
-    discriminator_values: Array
-
-
-@jax.tree_util.register_pytree_node_class
-@dataclass
-class AMPModelCarry:
-    qpos_history: Array
-    did_prev_reset: Array
-
-
 @attrs.define(frozen=True, kw_only=True)
 class AMPReward(ksim.Reward):
-
-    # def get_discriminator_input_sequence(
-    #     self, trajectory: ksim.Trajectory, initial_carry: AMPRewardCarry
-    # ) -> tuple[Array, AMPRewardCarry]:
-    #     chex.assert_shape(initial_carry.qpos_history, (self.discriminator_seq_len - 1, trajectory.qpos.shape[1]))
-
-    #     def scan_fn(carry: AMPRewardCarry, transition: ksim.Trajectory) -> tuple[AMPRewardCarry, Array]:
-    #         qpos_history = carry.qpos_history
-
-    #         # Handling resets with imputation strategy
-    #         if self.imputation_strategy == "zero":
-    #             reset_history = jnp.zeros_like(qpos_history)
-    #         elif self.imputation_strategy == "repeat":
-    #             reset_history = jnp.tile(transition.qpos, self.discriminator_seq_len - 1)
-    #         else:
-    #             raise ValueError(f"Invalid imputation strategy: {self.imputation_strategy}")
-    #         qpos_history = jnp.where(carry.did_prev_reset, reset_history, qpos_history)
-
-    #         discriminator_input = jnp.concatenate([qpos_history, transition.qpos[None]], axis=0)
-    #         next_history = discriminator_input[1:]  # input len - 1
-    #         return AMPRewardCarry(qpos_history=next_history, did_prev_reset=transition.done), discriminator_input
-
-    #     final_carry, discriminator_input = jax.lax.scan(scan_fn, initial_carry, trajectory)
-    #     return discriminator_input, final_carry
-
-    # def intial_carry(self, rng: PRNGKeyArray) -> AMPRewardCarry:
-    #     # Initializing history with zeros since it will be overwritten anyways
-    #     qpos_history = jnp.zeros((self.discriminator_seq_len - 1, self.reference_qpos.array.shape[1]))
-    #     return AMPRewardCarry(qpos_history=qpos_history, did_prev_reset=jnp.array(True))
 
     def __call__(
         self,
         trajectory: ksim.Trajectory,
-        carry: None,
+        _: None,
     ) -> tuple[Array, None]:
-        # All discriminator values should be between 0 and 1
-        discriminator_values = trajectory.aux_outputs.discriminator_values
+        assert isinstance(trajectory.aux_outputs, AMPAuxOutputs)
+        discriminator_values = jax.nn.sigmoid(trajectory.aux_outputs.discriminator_logits)
         reward = 1 - discriminator_values
         return reward, None
 
 
 class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
+    """Humanoid walking task with adversarial motion prior.
+
+    NOTE: this is WIP until it trains efficiently. Should be moved into the core
+    library once it's stable. The user will eventually decide what core RL
+    algorithm to subclass, and this class simply adds a discriminator.
+    """
+
+    reference_motions: Motion
+
+    def get_optimizer(self) -> optax.GradientTransformation:
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            (
+                optax.adam(self.config.learning_rate)
+                if self.config.adam_weight_decay == 0.0
+                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
+            ),
+        )
+        # TODO: explore different optimizer for discriminator (use mask fn)
+
+        return optimizer
+
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
             ksim.StayAliveReward(scale=1.0),
@@ -288,53 +262,100 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: DefaultHumanoidAMPModel,
-        model_carry: None,
+        model_carry: Motion,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
+        argmax: bool,
     ) -> ksim.Action:
         action_dist_j = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
         )
-        action_j = action_dist_j.sample(seed=rng)
+        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
 
-        # TODO: add the discriminator values here...
+        qpos_history = model_carry.qpos_frames
+        motion = Motion(jnp.concatenate([qpos_history, physics_state.data.qpos[None]], axis=0))
+        discriminator_logits = model.discriminator.forward(motion)
 
-        return ksim.Action(action=action_j, carry=None, aux_outputs=None)
-
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> AMPModelCarry:
-        return AMPModelCarry(
-            qpos_history=jnp.zeros((self.config.discriminator_num_frames - 1, self.reference_qpos.shape[1])),
-            did_prev_reset=jnp.array(True),
+        amp_aux_outputs = AMPAuxOutputs(
+            discriminator_logits=discriminator_logits,
+            motion=motion,
         )
 
-    def get_discriminator_inputs(self, trajectory: ksim.Trajectory) -> Array:
-        chex.assert_shape(initial_carry.qpos_history, (self.discriminator_seq_len - 1, trajectory.qpos.shape[1]))
+        next_model_carry = Motion(qpos_frames=jnp.concatenate([qpos_history, physics_state.data.qpos[None]], axis=0))
 
-        def scan_fn(carry: AMPModelCarry, transition: ksim.Trajectory) -> tuple[AMPModelCarry, Array]:
-            qpos_history = carry.qpos_history
+        return ksim.Action(action=action_j, carry=next_model_carry, aux_outputs=amp_aux_outputs)
 
-            # Handling resets with imputation strategy
-            if self.imputation_strategy == "zero":
-                reset_history = jnp.zeros_like(qpos_history)
-            elif self.imputation_strategy == "repeat":
-                reset_history = jnp.tile(transition.qpos, self.discriminator_seq_len - 1)
-            else:
-                raise ValueError(f"Invalid imputation strategy: {self.imputation_strategy}")
-            qpos_history = jnp.where(carry.did_prev_reset, reset_history, qpos_history)
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> Motion:
+        return self._get_initial_motion_carry()
 
-            discriminator_input = jnp.concatenate([qpos_history, transition.qpos[None]], axis=0)
-            next_history = discriminator_input[1:]  # input len - 1
-            return AMPRewardCarry(qpos_history=next_history, did_prev_reset=transition.done), discriminator_input
+    def _get_initial_motion_carry(self) -> Motion:
+        return Motion(jnp.zeros_like(self.reference_motions.qpos_frames[0]))
 
-        final_carry, discriminator_input = jax.lax.scan(scan_fn, initial_carry, trajectory)
-        return discriminator_input, final_carry
+    def _get_reference_motion(self, reference_qpos: Array) -> Motion:
+        """Scans reference motion (e.g. qpos) to include contiguous history."""
 
-    @abstractmethod
+        def scan_history(motion_history: Array, motion: Array) -> tuple[Array, Array]:
+            motion_history = jnp.concatenate([motion_history, motion[None]], axis=0)
+            return motion_history, motion_history
+
+        _, reference_motion = jax.lax.scan(scan_history, self._get_initial_motion_carry(), reference_qpos)
+        return Motion(reference_motion)
+
+    @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
+    def _get_discriminator_loss_and_metrics(
+        self,
+        model_arr: PyTree,
+        model_static: PyTree,
+        rollout_motion: Motion,
+        reference_motion: Motion,
+    ) -> tuple[Array, xax.FrozenDict[str, Array]]:
+        """Adds the discriminator loss to the super's loss and metrics."""
+
+        model = eqx.combine(model_arr, model_static)
+        assert isinstance(model, DefaultHumanoidAMPModel)
+        fake_logits = jax.vmap(model.discriminator.forward)(rollout_motion)
+        real_logits = jax.vmap(model.discriminator.forward)(reference_motion)
+
+        # Compute hinge loss for both real and fake samples
+        fake_loss = jnp.mean(jnp.maximum(0.0, 1.0 + fake_logits))  # Want fake samples <= -1
+        real_loss = jnp.mean(jnp.maximum(0.0, 1.0 - real_logits))  # Want real samples >= 1
+        discriminator_loss = fake_loss + real_loss
+
+        metrics = xax.FrozenDict(
+            {
+                "discriminator_loss": discriminator_loss,
+                "discriminator_fake_loss": fake_loss,
+                "discriminator_real_loss": real_loss,
+                "discriminator_fake": fake_logits,
+                "discriminator_real": real_logits,
+            }
+        )
+
+        return discriminator_loss, metrics
+
+    @xax.jit(static_argnames=["self", "model_static"], jit_level=3)
+    def _get_discriminator_metrics_and_grads(
+        self,
+        model_arr: PyTree,
+        model_static: PyTree,
+        rollout_motion: Motion,
+        reference_motion: Motion,
+    ) -> tuple[Array, xax.FrozenDict[str, Array]]:
+        loss_fn = jax.grad(self._get_discriminator_loss_and_metrics, argnums=0, has_aux=True)
+        loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
+        grads, metrics = loss_fn(
+            model_arr,
+            model_static,
+            rollout_motion,
+            reference_motion,
+        )
+        return metrics, grads
+
     def update_model(
         self,
         optimizer: optax.GradientTransformation,
@@ -346,6 +367,9 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
         rollout_constants: ksim.RolloutConstants,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, PyTree, xax.FrozenDict[str, Array], ksim.LoggedTrajectory]:
+        rollout_indices = jnp.arange(trajectories.done.shape[0])  # (num_envs)
+        rollout_indices_by_batch = rollout_indices.reshape(self.num_batches, self.batch_size)
+
         model_arr, opt_state, next_model_carry, train_metrics, logged_traj = super().update_model(
             optimizer,
             opt_state,
@@ -357,12 +381,45 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
             rng,
         )
 
-        discriminator_inputs = self.get_discriminator_inputs(trajectories)
+        def update_discriminator_in_batch(
+            carry_training_state: tuple[PyTree, optax.OptState, PRNGKeyArray], batch_indices: tuple[Array, Array]
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], xax.FrozenDict[str, Array]]:
+            assert isinstance(trajectories.aux_outputs, AMPAuxOutputs)
+            rollout_batch_indices, reference_batch_indices = batch_indices
+            model_arr, opt_state, rng = carry_training_state
+            reference_motion_batch = self.reference_motions[reference_batch_indices]
+            rollout_motion_batch = Motion(trajectories.aux_outputs.motion[rollout_batch_indices])
 
-        # TODO: reformat this into some scannable loop with minibatching and epochs...
-        model = eqx.combine(model_arr, rollout_constants.model_static)
-        assert isinstance(model, DefaultHumanoidAMPModel)
-        discriminator_values = ...
+            disc_metrics, disc_grads = self._get_discriminator_metrics_and_grads(
+                model_arr=model_arr,
+                model_static=rollout_constants.model_static,
+                rollout_motion=rollout_motion_batch,
+                reference_motion=reference_motion_batch,
+            )
+
+            new_model_arr, new_opt_state, grad_metrics = self.apply_gradients_with_clipping(
+                model_arr=model_arr,
+                grads=disc_grads,
+                optimizer=optimizer,
+                opt_state=opt_state,
+            )
+
+            metrics = xax.FrozenDict(dict(disc_metrics) | dict(grad_metrics))
+
+            return (new_model_arr, new_opt_state, rng), metrics
+
+        def update_discriminator_accross_batches(
+            carry_training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
+            _: None,
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], tuple[xax.FrozenDict[str, Array]]]:
+            carry_training_state, (metrics, trajs_for_logging) = jax.lax.scan(
+                update_discriminator_in_batch, carry_training_state, indices_by_batch
+            )
+
+            # Each batch saves one trajectory for logging, get the last.
+            traj_for_logging = jax.tree.map(lambda x: x[-1], trajs_for_logging)
+
+            return carry_training_state, (metrics, traj_for_logging)
 
         return model_arr, opt_state, next_model_carry, train_metrics, logged_traj
 
@@ -370,7 +427,7 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
         mj_model: PhysicsModel = self.get_mujoco_model()
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
         reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
-        self.mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
+        mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
 
         def rotation_callback(root: BvhioJoint) -> None:
             euler_rotation = np.array(self.config.rotate_bvh_euler)
@@ -388,7 +445,7 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
         )
         np_reference_qpos = get_reference_qpos(
             model=mj_model,
-            mj_base_id=self.mj_base_id,
+            mj_base_id=mj_base_id,
             bvh_root=root,
             bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
             bvh_base_id=reference_base_id,
@@ -405,18 +462,21 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
             max_nfev=2000,
             verbose=False,
         )
-        self.reference_qpos = jnp.array(np_reference_qpos)
+        reference_qpos = jnp.array(np_reference_qpos)
+        self.reference_motions = self._get_reference_motion(reference_qpos)
 
         if self.config.visualize_reference_points:
             visualize_reference_points(
                 model=mj_model,
-                base_id=self.mj_base_id,
+                base_id=mj_base_id,
                 reference_motion=np_reference_motion,
             )
         elif self.config.visualize_reference_motion:
             visualize_reference_motion(
                 model=mj_model,
                 reference_qpos=np_reference_qpos,
+                cartesian_motion=np_reference_motion,
+                mj_base_id=mj_base_id,
             )
         else:
             super().run()
