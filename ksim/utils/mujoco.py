@@ -457,7 +457,7 @@ def add_new_mujoco_body(
         visual_geom = ET.Element(
             "geom",
             {
-                "name": "visual",
+                "name": f"{new_body_name}_visual",
                 "type": "sphere",
                 "class": "visual",
                 "size": f"{visual_geom_size[0]} {visual_geom_size[1]} {visual_geom_size[2]}",
