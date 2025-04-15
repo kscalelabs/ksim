@@ -1213,32 +1213,30 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers.extend(randomizer.get_markers())
         return markers
 
-    def calculate_rewards(
+    def post_rollout_update(
         self,
         trajectory: Trajectory,
         rollout_env_state: RolloutEnvState,
         rollout_shared_state: RolloutSharedState,
         rollout_constants: RolloutConstants,
-    ) -> Rewards:
-        """Calculates the rewards for the given trajectory.
+    ) -> tuple[Trajectory, RolloutEnvState, RolloutSharedState]:
+        """Provides means of updating necessary variables after the rollout.
+
+        This is useful for core library algorithms that need to update the
+        trajectory, environment state, and shared state after the rollout for
+        calculating rewards, custom updates to state, etc.
 
         Args:
-            trajectory: The trajectory to calculate the rewards for.
+            trajectory: The trajectory to update.
             rollout_env_state: The environment state.
             rollout_shared_state: The shared state.
             rollout_constants: The constants.
 
         Returns:
-            The rewards for the given trajectory.
+            A tuple containing the updated trajectory, environment state, and
+            shared state.
         """
-        return get_rewards(
-            trajectory=trajectory,
-            rewards=rollout_constants.rewards,
-            rewards_carry=rollout_env_state.reward_carry,
-            rollout_length_steps=self.rollout_length_steps,
-            clip_min=self.config.reward_clip_min,
-            clip_max=self.config.reward_clip_max,
-        )
+        return trajectory, rollout_env_state, rollout_shared_state
 
     @xax.jit(static_argnames=["self", "rollout_constants"], jit_level=2)
     def _single_unroll(
@@ -1268,12 +1266,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             length=self.rollout_length_steps,
         )
 
-        # Gets the rewards.
-        reward = self.calculate_rewards(
+        # Updates the trajectory, environment state, and shared state.
+        trajectory, rollout_env_state, rollout_shared_state = self.post_rollout_update(
             trajectory=trajectory,
             rollout_env_state=rollout_env_state,
             rollout_shared_state=rollout_shared_state,
             rollout_constants=rollout_constants,
+        )
+
+        # Gets the rewards.
+        reward = get_rewards(
+            trajectory=trajectory,
+            rewards=rollout_constants.rewards,
+            rewards_carry=rollout_env_state.reward_carry,
+            rollout_length_steps=self.rollout_length_steps,
+            clip_min=self.config.reward_clip_min,
+            clip_max=self.config.reward_clip_max,
         )
 
         return trajectory, reward, next_rollout_variables
