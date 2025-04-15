@@ -46,6 +46,14 @@ class PlannerState:
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class Trajectory:
+    """Stackable structure of transitions.
+
+    Naming convention by dimension:
+    - `transition`: (leaf dim,)
+    - `trajectory`: (time, leaf dim)
+    - `trajectories`: (num envs or batch size, time, leaf dim)
+    """
+
     qpos: Array
     qvel: Array
     xpos: Array
