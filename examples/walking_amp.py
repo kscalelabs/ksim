@@ -277,8 +277,8 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
         )
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
 
-        qpos_history = model_carry.qpos_frames
-        motion = Motion(jnp.concatenate([qpos_history, physics_state.data.qpos[None]], axis=0))
+        motion = jax.tree.map(lambda x: x[1:], model_carry)
+        motion = Motion(jnp.concatenate([motion.qpos_frames, physics_state.data.qpos[None]], axis=0))
         discriminator_logits = model.discriminator.forward(motion)
 
         amp_aux_outputs = AMPAuxOutputs(
@@ -286,25 +286,13 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
             motion=motion,
         )
 
-        next_model_carry = Motion(qpos_frames=jnp.concatenate([qpos_history, physics_state.data.qpos[None]], axis=0))
-
-        return ksim.Action(action=action_j, carry=next_model_carry, aux_outputs=amp_aux_outputs)
+        return ksim.Action(action=action_j, carry=motion, aux_outputs=amp_aux_outputs)
 
     def get_initial_model_carry(self, rng: PRNGKeyArray) -> Motion:
         return self._get_initial_motion_carry()
 
     def _get_initial_motion_carry(self) -> Motion:
-        return Motion(jnp.zeros_like(self.reference_motions.qpos_frames[0]))
-
-    def _get_reference_motion(self, reference_qpos: Array) -> Motion:
-        """Scans reference motion (e.g. qpos) to include contiguous history."""
-
-        def scan_history(motion_history: Array, motion: Array) -> tuple[Array, Array]:
-            motion_history = jnp.concatenate([motion_history, motion[None]], axis=0)
-            return motion_history, motion_history
-
-        _, reference_motion = jax.lax.scan(scan_history, self._get_initial_motion_carry(), reference_qpos)
-        return Motion(reference_motion)
+        return Motion(jnp.zeros((self.config.discriminator_num_frames, NUM_JOINTS)))
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
     def _get_discriminator_loss_and_metrics(
@@ -367,10 +355,7 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
         rollout_constants: ksim.RolloutConstants,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, PyTree, xax.FrozenDict[str, Array], ksim.LoggedTrajectory]:
-        rollout_indices = jnp.arange(trajectories.done.shape[0])  # (num_envs)
-        rollout_indices_by_batch = rollout_indices.reshape(self.num_batches, self.batch_size)
-
-        model_arr, opt_state, next_model_carry, train_metrics, logged_traj = super().update_model(
+        super_model_arr, super_opt_state, super_model_carry, super_metrics, super_logged_traj = super().update_model(
             optimizer,
             opt_state,
             trajectories,
@@ -381,14 +366,25 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
             rng,
         )
 
+        rng_sample, rng_train = jax.random.split(rng)
+        rollout_indices = jnp.arange(trajectories.done.shape[0]).reshape(self.num_batches, self.batch_size)
+        # Randomly sample reference motion indices with replacement
+        reference_indices = jax.random.randint(
+            rng_sample,
+            shape=(self.num_batches, self.batch_size),
+            minval=0,
+            maxval=self.reference_motions.qpos_frames.shape[0],
+        )
+        indices_by_batch = (rollout_indices, reference_indices)
+
         def update_discriminator_in_batch(
             carry_training_state: tuple[PyTree, optax.OptState, PRNGKeyArray], batch_indices: tuple[Array, Array]
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], xax.FrozenDict[str, Array]]:
             assert isinstance(trajectories.aux_outputs, AMPAuxOutputs)
             rollout_batch_indices, reference_batch_indices = batch_indices
             model_arr, opt_state, rng = carry_training_state
-            reference_motion_batch = self.reference_motions[reference_batch_indices]
-            rollout_motion_batch = Motion(trajectories.aux_outputs.motion[rollout_batch_indices])
+            reference_motion_batch = jax.tree.map(lambda x: x[reference_batch_indices], self.reference_motions)
+            rollout_motion_batch = jax.tree.map(lambda x: x[rollout_batch_indices], trajectories.aux_outputs.motion)
 
             disc_metrics, disc_grads = self._get_discriminator_metrics_and_grads(
                 model_arr=model_arr,
@@ -411,17 +407,22 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
         def update_discriminator_accross_batches(
             carry_training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
-        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], tuple[xax.FrozenDict[str, Array]]]:
-            carry_training_state, (metrics, trajs_for_logging) = jax.lax.scan(
+        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], xax.FrozenDict[str, Array]]:
+            carry_training_state, metrics = jax.lax.scan(
                 update_discriminator_in_batch, carry_training_state, indices_by_batch
             )
 
-            # Each batch saves one trajectory for logging, get the last.
-            traj_for_logging = jax.tree.map(lambda x: x[-1], trajs_for_logging)
+            return carry_training_state, metrics
 
-            return carry_training_state, (metrics, traj_for_logging)
+        (model_arr, opt_state, _), discriminator_metrics = jax.lax.scan(
+            update_discriminator_accross_batches,
+            (super_model_arr, super_opt_state, rng_train),
+            length=self.config.num_passes,
+        )
 
-        return model_arr, opt_state, next_model_carry, train_metrics, logged_traj
+        metrics = xax.FrozenDict(dict(super_metrics) | dict(discriminator_metrics))
+
+        return model_arr, opt_state, super_model_carry, metrics, super_logged_traj
 
     def run(self) -> None:
         mj_model: PhysicsModel = self.get_mujoco_model()
@@ -434,7 +435,7 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
             quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
             root.applyRotation(glm.quat(*quat), bake=True)
 
-        np_reference_motion = get_reference_cartesian_poses(
+        np_reference_cartesian_poses = get_reference_cartesian_poses(
             mappings=HUMANOID_REFERENCE_MAPPINGS,
             model=mj_model,
             root=root,
@@ -463,19 +464,28 @@ class HumanoidWalkingAMPTask(HumanoidWalkingTask[Config], Generic[Config]):
             verbose=False,
         )
         reference_qpos = jnp.array(np_reference_qpos)
-        self.reference_motions = self._get_reference_motion(reference_qpos)
+
+        # Getting the reference motion from the reference qpos.
+        def build_reference_motion(motion: Motion, qpos: Array) -> tuple[Motion, Motion]:
+            motion = jax.tree.map(lambda x: x[1:], motion)
+            motion = Motion(jnp.concatenate([motion.qpos_frames, qpos[None]], axis=0))
+            return motion, motion
+
+        _, self.reference_motions = jax.lax.scan(
+            build_reference_motion, self._get_initial_motion_carry(), reference_qpos
+        )
 
         if self.config.visualize_reference_points:
             visualize_reference_points(
                 model=mj_model,
                 base_id=mj_base_id,
-                reference_motion=np_reference_motion,
+                reference_motion=np_reference_cartesian_poses,
             )
         elif self.config.visualize_reference_motion:
             visualize_reference_motion(
                 model=mj_model,
                 reference_qpos=np_reference_qpos,
-                cartesian_motion=np_reference_motion,
+                cartesian_motion=np_reference_cartesian_poses,
                 mj_base_id=mj_base_id,
             )
         else:
