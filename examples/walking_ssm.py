@@ -221,7 +221,7 @@ class SSM(eqx.Module):
         output_size: int,
         hidden_size: int,
         num_layers: int,
-        block_type: Literal["diagonal", "full_rank"] = "full_rank",
+        block_type: Literal["diagonal", "full_rank"] = "diagonal",
         skip_connections: bool = False,
         discretize: bool = False,
         *,
@@ -288,6 +288,8 @@ class DefaultHumanoidSSMActor(eqx.Module):
         var_scale: float,
         hidden_size: int,
         depth: int,
+        block_type: Literal["diagonal", "full_rank"] = "diagonal",
+        discretize: bool = False,
     ) -> None:
         # Project input to hidden size
         self.ssm = SSM(
@@ -295,6 +297,8 @@ class DefaultHumanoidSSMActor(eqx.Module):
             output_size=num_outputs * 2,
             hidden_size=hidden_size,
             num_layers=depth,
+            block_type=block_type,
+            discretize=discretize,
             key=key,
         )
 
@@ -329,6 +333,8 @@ class DefaultHumanoidSSMCritic(eqx.Module):
         num_inputs: int,
         hidden_size: int,
         depth: int,
+        block_type: Literal["diagonal", "full_rank"] = "diagonal",
+        discretize: bool = False,
     ) -> None:
         num_outputs = 1
 
@@ -338,6 +344,8 @@ class DefaultHumanoidSSMCritic(eqx.Module):
             output_size=num_outputs,
             hidden_size=hidden_size,
             num_layers=depth,
+            block_type=block_type,
+            discretize=discretize,
             key=key,
         )
 
@@ -360,6 +368,8 @@ class DefaultHumanoidSSMModel(eqx.Module):
         num_joints: int,
         hidden_size: int,
         depth: int,
+        block_type: Literal["diagonal", "full_rank"] = "diagonal",
+        discretize: bool = False,
     ) -> None:
         self.actor = DefaultHumanoidSSMActor(
             key,
@@ -370,18 +380,29 @@ class DefaultHumanoidSSMModel(eqx.Module):
             var_scale=0.5,
             hidden_size=hidden_size,
             depth=depth,
+            block_type=block_type,
+            discretize=discretize,
         )
         self.critic = DefaultHumanoidSSMCritic(
             key,
             num_inputs=num_inputs,
             hidden_size=hidden_size,
             depth=depth,
+            block_type=block_type,
+            discretize=discretize,
         )
 
 
 @dataclass
 class HumanoidWalkingSSMTaskConfig(HumanoidWalkingTaskConfig):
-    pass
+    block_type: Literal["diagonal", "full_rank"] = xax.field(
+        value="diagonal",
+        help="The type of SSM block to use.",
+    )
+    discretize: bool = xax.field(
+        value=False,
+        help="Whether to discretize the SSM blocks.",
+    )
 
 
 Config = TypeVar("Config", bound=HumanoidWalkingSSMTaskConfig)
@@ -397,6 +418,8 @@ class HumanoidWalkingSSMTask(HumanoidWalkingTask[Config], Generic[Config]):
             max_std=1.0,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
+            block_type=self.config.block_type,
+            discretize=self.config.discretize,
         )
 
     def run_actor(
@@ -572,6 +595,10 @@ if __name__ == "__main__":
     #   python -m examples.walking_SSM run_environment=True
     HumanoidWalkingSSMTask.launch(
         HumanoidWalkingSSMTaskConfig(
+            block_type="full_rank",
+            discretize=True,
+            hidden_size=512,
+            depth=2,
             # Training parameters.
             num_envs=2048,
             batch_size=256,
