@@ -1262,7 +1262,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 # be incorrect.
                 commands=next_rollout_env_states.commands,
                 physics_state=next_rollout_env_states.physics_state,
-                randomization_dict=rollout_env_states.randomization_dict,
+                randomization_dict=next_rollout_env_states.randomization_dict,
                 model_carry=next_model_carry,
                 reward_carry=next_reward_carry,
                 curriculum_state=curriculum_state,
