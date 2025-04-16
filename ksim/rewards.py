@@ -532,7 +532,7 @@ class FeetNoContactReward(Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class PositionTrackingReward(Reward):
-    """Rewards the closeness of the body to the target position more for the longer it has been doing so."""
+    """RewardState the closeness of the body to the target position more for the longer it has been doing so."""
 
     tracked_body_idx: int = attrs.field()
     base_body_idx: int = attrs.field()

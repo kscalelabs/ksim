@@ -5,7 +5,7 @@ __all__ = [
     "PhysicsModel",
     "PhysicsState",
     "Trajectory",
-    "Rewards",
+    "RewardState",
     "Action",
     "Histogram",
     "Metrics",
@@ -77,7 +77,7 @@ class Trajectory:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class Rewards:
+class RewardState:
     total: Array
     components: xax.FrozenDict[str, Array]
     carry: xax.FrozenDict[str, PyTree]
@@ -116,5 +116,5 @@ class Metrics:
 @dataclass(frozen=True)
 class LoggedTrajectory:
     trajectory: Trajectory
-    rewards: Rewards
+    rewards: RewardState
     metrics: xax.FrozenDict[str, Array]
