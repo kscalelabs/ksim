@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Callable, Generic, TypeVar
 
 import attrs
-import glm
 import jax
 import jax.numpy as jnp
 import mujoco
@@ -14,6 +13,7 @@ import xax
 
 try:
     import bvhio
+    import glm
     from bvhio.lib.hierarchy import Joint as BvhioJoint
 except ImportError as e:
     raise ImportError(
@@ -148,10 +148,10 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
             ksim.StayAliveReward(scale=1.0),
-            NaiveForwardReward(scale=0.1, clip_max=2.0),
             QposReferenceMotionReward(
                 reference_qpos=self.reference_motion.qpos, ctrl_dt=self.config.ctrl_dt, scale=0.5
             ),
+            NaiveForwardReward(scale=1.0),
         ]
 
         return rewards
