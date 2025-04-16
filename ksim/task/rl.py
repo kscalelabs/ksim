@@ -130,13 +130,13 @@ def get_observation(
     """Get the observation and carry from the physics state."""
     observation_dict: dict[str, Array] = {}
     next_obs_carry: dict[str, PyTree] = {}
-    observation_state = ObservationInput(
-        commands=rollout_env_state.commands,
-        physics_state=rollout_env_state.physics_state,
-        obs_carry=obs_carry,
-    )
     for observation in observations:
         rng, obs_rng, carry_rng = jax.random.split(rng, 3)
+        observation_state = ObservationInput(
+            commands=rollout_env_state.commands,
+            physics_state=rollout_env_state.physics_state,
+            obs_carry=obs_carry[observation.observation_name],
+        )
         observation_value = observation(observation_state, curriculum_level, obs_rng)
         observation_dict[observation.observation_name] = observation_value
         next_obs_carry[observation.observation_name] = observation.update_carry(observation_state, carry_rng)
