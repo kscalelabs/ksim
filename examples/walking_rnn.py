@@ -18,6 +18,7 @@ from .walking import (
     NUM_JOINTS,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
+    NaiveForwardReward,
 )
 
 

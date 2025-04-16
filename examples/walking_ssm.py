@@ -19,6 +19,7 @@ from .walking import (
     NUM_JOINTS,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
+    NaiveForwardReward,
 )
 
 
@@ -220,7 +221,7 @@ class SSM(eqx.Module):
         output_size: int,
         hidden_size: int,
         num_layers: int,
-        block_type: Literal["diagonal", "full_rank"] = "diagonal",
+        block_type: Literal["diagonal", "full_rank"] = "full_rank",
         skip_connections: bool = False,
         discretize: bool = False,
         *,
