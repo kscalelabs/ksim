@@ -1543,6 +1543,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 reward_carry=reward_carry_fn(
                     jax.random.split(reward_rng, self.config.num_envs), rollout_constants.rewards
                 ),
+                obs_carry=get_initial_obs_carry(rng=carry_rng, observations=rollout_constants.observations),
                 curriculum_state=curriculum_state,
                 rng=jax.random.split(rollout_rng, self.config.num_envs),
             )
@@ -1571,6 +1572,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 randomization_dict=randomization_dict,
                 model_carry=self.get_initial_model_carry(carry_rng),
                 reward_carry=get_initial_reward_carry(reward_rng, rollout_constants.rewards),
+                obs_carry=get_initial_obs_carry(rng=carry_rng, observations=rollout_constants.observations),
                 curriculum_state=curriculum_state,
                 rng=rollout_rng,
             )
