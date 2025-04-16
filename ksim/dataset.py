@@ -18,7 +18,7 @@ import xax
 from dpshdl.dataset import Dataset
 from jaxtyping import Array
 
-from ksim.types import Rewards, Trajectory
+from ksim.types import RewardState, Trajectory
 
 T = TypeVar("T")
 
@@ -58,7 +58,7 @@ class TrajectoryDatasetWriter:
             self.fp.flush()
             self.fp = None
 
-    def write(self, trajectory: Trajectory, rewards: Rewards) -> None:
+    def write(self, trajectory: Trajectory, rewards: RewardState) -> None:
         if self.index >= self.num_samples:
             raise ValueError("Dataset is full")
 
@@ -103,7 +103,7 @@ class TrajectoryDatasetWriter:
 
 
 @dataclass
-class TrajectoryDataset(Dataset[tuple[Trajectory, Rewards], tuple[Trajectory, Rewards]]):
+class TrajectoryDataset(Dataset[tuple[Trajectory, RewardState], tuple[Trajectory, RewardState]]):
     def __init__(
         self,
         path: str | Path,
@@ -128,7 +128,7 @@ class TrajectoryDataset(Dataset[tuple[Trajectory, Rewards], tuple[Trajectory, Re
         # Sets the current index.
         self.index = self.rng.randint(0, self.meta["num_samples"] - 1)
 
-    def next(self) -> tuple[Trajectory, Rewards]:
+    def next(self) -> tuple[Trajectory, RewardState]:
         sample = jnp.array(self.ds[self.index])
         self.index = self.rng.randint(0, self.meta["num_samples"] - 1)
 
@@ -158,7 +158,7 @@ class TrajectoryDataset(Dataset[tuple[Trajectory, Rewards], tuple[Trajectory, Re
                 termination_components=_dict("termination_components"),
                 aux_outputs=_dict("aux_outputs"),
             ),
-            Rewards(
+            RewardState(
                 total=arrs["reward"],
                 components=_dict("reward_components"),
                 carry=_dict("reward_carry"),
