@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Callable, Generic, TypeVar
 
 import attrs
+import distrax
 import glm
 import jax
 import jax.numpy as jnp
@@ -21,11 +22,11 @@ except ImportError as e:
     ) from e
 
 
-from jaxtyping import Array
+from jaxtyping import Array, PRNGKeyArray
 from scipy.spatial.transform import Rotation as R
 
 import ksim
-from ksim.types import PhysicsModel
+from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.reference_motion import (
     ReferenceMapping,
     generate_reference_motion,
@@ -36,10 +37,16 @@ from ksim.utils.reference_motion import (
 )
 
 from .walking import (
+    NUM_JOINTS,
+    DefaultHumanoidActor,
+    DefaultHumanoidCritic,
+    DefaultHumanoidModel,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
     NaiveForwardReward,
 )
+
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6 + NUM_JOINTS
 
 
 @dataclass
@@ -125,6 +132,8 @@ def create_target_marker_update_fn(
 
 @attrs.define(frozen=True, kw_only=True)
 class QposReferenceMotionReward(ksim.Reward):
+    """Reward for tracking the reference qpos."""
+
     reference_qpos: xax.HashableArray
     ctrl_dt: float
     norm: xax.NormType = attrs.field(default="l1")
@@ -144,6 +153,28 @@ class QposReferenceMotionReward(ksim.Reward):
         return reward, None
 
 
+@attrs.define(frozen=True, kw_only=True)
+class QposReferenceMotionCommand(ksim.Command):
+    """Passes the reference qpos to the model."""
+
+    reference_qpos: xax.HashableArray
+    ctrl_dt: float
+
+    @property
+    def num_frames(self) -> int:
+        return self.reference_qpos.array.shape[0]
+
+    def initial_command(self, physics_data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        step_number = jnp.int32(jnp.round(physics_data.time / self.ctrl_dt)) % self.num_frames
+        reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)[-NUM_JOINTS:]
+        return reference_qpos
+
+    def __call__(
+        self, prev_command: Array, physics_data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> Array:
+        return self.initial_command(physics_data, curriculum_level, rng)
+
+
 class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
@@ -155,6 +186,115 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
         ]
 
         return rewards
+
+    def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
+        return [
+            QposReferenceMotionCommand(reference_qpos=self.reference_motion.qpos, ctrl_dt=self.config.ctrl_dt),
+            ksim.JoystickCommand(
+                ranges=((0, 1),) if self.config.move_forward_command else ((0, 4),),
+                switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average.
+            ),
+        ]
+
+    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
+        return DefaultHumanoidModel(
+            key,
+            num_inputs=NUM_INPUTS,
+            num_joints=NUM_JOINTS,
+            hidden_size=self.config.hidden_size,
+            depth=self.config.depth,
+            num_mixtures=self.config.num_mixtures,
+        )
+
+    def run_actor(
+        self,
+        model: DefaultHumanoidActor,
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
+    ) -> distrax.Distribution:
+        timestep_1 = observations["timestep_observation"]
+        dh_joint_pos_j = observations["joint_position_observation"]
+        dh_joint_vel_j = observations["joint_velocity_observation"]
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        act_frc_obs_n = observations["actuator_force_observation"]
+        base_pos_3 = observations["base_position_observation"]
+        base_quat_4 = observations["base_orientation_observation"]
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        joystick_cmd_1 = commands["joystick_command"]
+        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
+        reference_qpos_n = commands["qpos_reference_motion_command"]
+
+        obs_n = jnp.concatenate(
+            [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
+                dh_joint_pos_j,  # NUM_JOINTS
+                dh_joint_vel_j / 10.0,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3 / 50.0,  # 3
+                imu_gyro_3 / 3.0,  # 3
+                act_frc_obs_n / 100.0,  # NUM_JOINTS
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                joystick_cmd_ohe_6,  # 6
+                reference_qpos_n,  # NUM_JOINTS
+            ],
+            axis=-1,
+        )
+
+        return model.forward(obs_n)
+
+    def run_critic(
+        self,
+        model: DefaultHumanoidCritic,
+        observations: xax.FrozenDict[str, Array],
+        commands: xax.FrozenDict[str, Array],
+    ) -> Array:
+        timestep_1 = observations["timestep_observation"]
+        dh_joint_pos_j = observations["joint_position_observation"]
+        dh_joint_vel_j = observations["joint_velocity_observation"]
+        com_inertia_n = observations["center_of_mass_inertia_observation"]
+        com_vel_n = observations["center_of_mass_velocity_observation"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        act_frc_obs_n = observations["actuator_force_observation"]
+        base_pos_3 = observations["base_position_observation"]
+        base_quat_4 = observations["base_orientation_observation"]
+        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
+        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        joystick_cmd_1 = commands["joystick_command"]
+        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
+        reference_qpos_n = commands["qpos_reference_motion_command"]
+
+        obs_n = jnp.concatenate(
+            [
+                jnp.cos(timestep_1),  # 1
+                jnp.sin(timestep_1),  # 1
+                dh_joint_pos_j,  # NUM_JOINTS
+                dh_joint_vel_j / 10.0,  # NUM_JOINTS
+                com_inertia_n,  # 160
+                com_vel_n,  # 96
+                imu_acc_3 / 50.0,  # 3
+                imu_gyro_3 / 3.0,  # 3
+                act_frc_obs_n / 100.0,  # NUM_JOINTS
+                base_pos_3,  # 3
+                base_quat_4,  # 4
+                lin_vel_obs_3,  # 3
+                ang_vel_obs_3,  # 3
+                joystick_cmd_ohe_6,  # 6
+                reference_qpos_n,  # NUM_JOINTS
+            ],
+            axis=-1,
+        )
+
+        return model.forward(obs_n)
 
     def run(self) -> None:
         mj_model: PhysicsModel = self.get_mujoco_model()

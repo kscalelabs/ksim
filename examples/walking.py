@@ -36,6 +36,7 @@ class DefaultHumanoidActor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
+    num_joints: int = eqx.static_field()
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
@@ -44,7 +45,8 @@ class DefaultHumanoidActor(eqx.Module):
     def __init__(
         self,
         key: PRNGKeyArray,
-        *,
+        num_inputs: int,
+        num_joints: int,
         min_std: float,
         max_std: float,
         var_scale: float,
@@ -52,12 +54,9 @@ class DefaultHumanoidActor(eqx.Module):
         depth: int,
         num_mixtures: int,
     ) -> None:
-        num_inputs = NUM_INPUTS
-        num_outputs = NUM_JOINTS
-
         self.mlp = eqx.nn.MLP(
             in_size=num_inputs,
-            out_size=num_outputs * 3 * num_mixtures,
+            out_size=num_joints * 3 * num_mixtures,
             width_size=hidden_size,
             depth=depth,
             key=key,
@@ -67,15 +66,16 @@ class DefaultHumanoidActor(eqx.Module):
         self.max_std = max_std
         self.var_scale = var_scale
         self.num_mixtures = num_mixtures
+        self.num_joints = num_joints
 
     def forward(self, obs_n: Array) -> distrax.Distribution:
         prediction_n = self.mlp(obs_n)
 
         # Splits the predictions into means, standard deviations, and logits.
-        slice_len = NUM_JOINTS * self.num_mixtures
-        mean_nm = prediction_n[:slice_len].reshape(NUM_JOINTS, self.num_mixtures)
-        std_nm = prediction_n[slice_len : slice_len * 2].reshape(NUM_JOINTS, self.num_mixtures)
-        logits_nm = prediction_n[slice_len * 2 :].reshape(NUM_JOINTS, self.num_mixtures)
+        slice_len = self.num_joints * self.num_mixtures
+        mean_nm = prediction_n[:slice_len].reshape(self.num_joints, self.num_mixtures)
+        std_nm = prediction_n[slice_len : slice_len * 2].reshape(self.num_joints, self.num_mixtures)
+        logits_nm = prediction_n[slice_len * 2 :].reshape(self.num_joints, self.num_mixtures)
 
         # Softplus and clip to ensure positive standard deviations.
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
@@ -96,16 +96,13 @@ class DefaultHumanoidCritic(eqx.Module):
     def __init__(
         self,
         key: PRNGKeyArray,
-        *,
+        num_inputs: int,
         hidden_size: int,
         depth: int,
     ) -> None:
-        num_inputs = NUM_INPUTS
-        num_outputs = 1
-
         self.mlp = eqx.nn.MLP(
             in_size=num_inputs,
-            out_size=num_outputs,
+            out_size=1,
             width_size=hidden_size,
             depth=depth,
             key=key,
@@ -123,13 +120,16 @@ class DefaultHumanoidModel(eqx.Module):
     def __init__(
         self,
         key: PRNGKeyArray,
-        *,
+        num_inputs: int,
+        num_joints: int,
         hidden_size: int,
         depth: int,
         num_mixtures: int,
     ) -> None:
         self.actor = DefaultHumanoidActor(
-            key,
+            key=key,
+            num_inputs=num_inputs,
+            num_joints=num_joints,
             min_std=0.01,
             max_std=1.0,
             var_scale=0.5,
@@ -138,7 +138,8 @@ class DefaultHumanoidModel(eqx.Module):
             num_mixtures=num_mixtures,
         )
         self.critic = DefaultHumanoidCritic(
-            key,
+            key=key,
+            num_inputs=num_inputs,
             hidden_size=hidden_size,
             depth=depth,
         )
@@ -360,11 +361,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            (
-                ksim.JoystickCommand(
-                    ranges=((0, 1),) if self.config.move_forward_command else ((0, 4),),
-                    switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average.
-                )
+            ksim.JoystickCommand(
+                ranges=((0, 1),) if self.config.move_forward_command else ((0, 4),),
+                switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average.
             ),
         ]
 
@@ -400,6 +399,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(
             key,
+            num_inputs=NUM_INPUTS,
+            num_joints=NUM_JOINTS,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
             num_mixtures=self.config.num_mixtures,
