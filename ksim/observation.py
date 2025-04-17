@@ -119,7 +119,6 @@ class Observation(ABC):
         """Initialize the carry for the observation.
 
         Args:
-            state: The state of the observation
             rng: A PRNGKeyArray to use for the noise
         """
         return None

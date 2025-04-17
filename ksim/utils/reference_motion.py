@@ -1,5 +1,12 @@
 """Reference motion utilities."""
 
+__all__ = [
+    "ReferenceMapping",
+    "ReferenceMotionData",
+    "generate_reference_motion",
+    "visualize_reference_motion",
+]
+
 import time
 from dataclasses import dataclass
 from typing import Callable
