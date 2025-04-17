@@ -180,11 +180,13 @@ class LinearVelocityReward(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
+    clip_min: float | None = attrs.field(default=None)
+    clip_max: float | None = attrs.field(default=None)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         dim = cartesian_index_to_dim(self.index)
-        lin_vel = trajectory.qvel[..., dim]
+        lin_vel = trajectory.qvel[..., dim].clip(self.clip_min, self.clip_max)
         return xax.get_norm(lin_vel, self.norm)
 
     def get_name(self) -> str:
@@ -205,11 +207,13 @@ class AngularVelocityReward(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
+    clip_min: float | None = attrs.field(default=None)
+    clip_max: float | None = attrs.field(default=None)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         dim = cartesian_index_to_dim(self.index) + 3
-        ang_vel = trajectory.qvel[..., dim]
+        ang_vel = trajectory.qvel[..., dim].clip(self.clip_min, self.clip_max)
         return xax.get_norm(ang_vel, self.norm)
 
     def get_name(self) -> str:
