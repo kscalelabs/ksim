@@ -5,7 +5,10 @@ __all__ = [
     "norm_to_reward",
     "Reward",
     "StayAliveReward",
+    "LinearVelocityReward",
     "LinearVelocityPenalty",
+    "NaiveForwardReward",
+    "AngularVelocityReward",
     "AngularVelocityPenalty",
     "JointVelocityPenalty",
     "BaseHeightReward",
@@ -173,7 +176,7 @@ class StayAliveReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class LinearVelocityPenalty(Reward):
+class LinearVelocityReward(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
@@ -189,7 +192,16 @@ class LinearVelocityPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class AngularVelocityPenalty(Reward):
+class LinearVelocityPenalty(LinearVelocityReward): ...
+
+
+@attrs.define(frozen=True, kw_only=True)
+class NaiveForwardReward(LinearVelocityReward):
+    index: CartesianIndex = attrs.field(default="x", validator=dimension_index_validator)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AngularVelocityReward(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
@@ -202,6 +214,10 @@ class AngularVelocityPenalty(Reward):
 
     def get_name(self) -> str:
         return f"{self.index}_{super().get_name()}"
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AngularVelocityPenalty(AngularVelocityReward): ...
 
 
 @attrs.define(frozen=True, kw_only=True)
