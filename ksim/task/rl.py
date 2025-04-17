@@ -1412,7 +1412,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
             if len(transitions) > 0:
-                trajectory = jax.tree_map(lambda *xs: jnp.stack(xs), *transitions)
+                trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
 
                 get_rewards(
                     trajectory=trajectory,
