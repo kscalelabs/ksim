@@ -256,7 +256,11 @@ def get_physics_randomizers(
     for name, count in Counter([k for d in all_randomizations.values() for k in d.keys()]).items():
         if count > 1:
             name_to_keys = {k: set(v.keys()) for k, v in all_randomizations.items()}
-            raise ValueError(f"Found duplicate randomization keys: {name}. Randomizations: {name_to_keys}")
+            logger.warning(
+                "Found duplicate randomizatiofn keys: %s. Randomizations: %s",
+                name,
+                name_to_keys,
+            )
     return xax.FrozenDict({k: v for d in all_randomizations.values() for k, v in d.items()})
 
 
