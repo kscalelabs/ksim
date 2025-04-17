@@ -1444,7 +1444,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         try:
                             with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
                                 for frame in frames:
-                                    writer.append_data(frame)  # type: ignore[attr-defined]
+                                    writer.append_data(frame)
 
                         except Exception as e:
                             raise RuntimeError(

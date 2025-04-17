@@ -44,7 +44,7 @@ module = [
     "scipy.*",
     "bvhio.*",
     "glm.*",
-    "imageio.v2.*",
+    "imageio.*",
 ]
 ignore_missing_imports = true
 
