@@ -1412,7 +1412,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
             if len(transitions) > 0:
-                trajectory = jax.tree_map(lambda *xs: jnp.stack(xs), *transitions)
+                trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
 
                 get_rewards(
                     trajectory=trajectory,
@@ -1444,7 +1444,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         try:
                             with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
                                 for frame in frames:
-                                    writer.append_data(frame)  # type: ignore[attr-defined]
+                                    writer.append_data(frame)
 
                         except Exception as e:
                             raise RuntimeError(
