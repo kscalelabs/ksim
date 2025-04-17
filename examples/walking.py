@@ -153,6 +153,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
     # Reward parameters.
+    naive_forward_reward: bool = xax.field(
+        value=False,
+        help="If set, use the naive forward reward instead of the joystick reward.",
+    )
     move_forward_command: bool = xax.field(
         value=False,
         help="If set, just move forward or stand still instead of using all possible controls",
