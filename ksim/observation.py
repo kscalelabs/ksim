@@ -15,6 +15,7 @@ __all__ = [
     "SensorObservation",
     "BaseLinearAccelerationObservation",
     "BaseAngularAccelerationObservation",
+    "ProjectedGravityObservation",
     "ActuatorAccelerationObservation",
     "ContactObservation",
     "FeetContactObservation",
@@ -32,6 +33,7 @@ from typing import Collection, Literal, Self
 
 import attrs
 import jax
+import numpy as np
 import xax
 from jax import numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
@@ -82,12 +84,14 @@ class Observation(ABC):
     noise_type: NoiseType = attrs.field(default="gaussian")
 
     @abstractmethod
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         """Gets the observation from the state.
 
         Args:
             state: The inputs from which the obseravtion can be extracted.
             rng: A PRNGKeyArray to use for the noise
+            curriculum_level: The current curriculum level, a scalar between
+                zero and one.
 
         Returns:
             The observation
@@ -95,7 +99,7 @@ class Observation(ABC):
 
     def __call__(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         obs_rng, noise_rng = jax.random.split(rng)
-        raw_observation = self.observe(state, obs_rng)
+        raw_observation = self.observe(state, obs_rng, curriculum_level)
         return self.add_noise(raw_observation, curriculum_level, noise_rng)
 
     def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
@@ -144,28 +148,28 @@ class Observation(ABC):
 
 @attrs.define(frozen=True, kw_only=True)
 class BasePositionObservation(Observation):
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         qpos = state.physics_state.data.qpos[0:3]  # (3,)
         return qpos
 
 
 @attrs.define(frozen=True, kw_only=True)
 class BaseOrientationObservation(Observation):
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         qpos = state.physics_state.data.qpos[3:7]  # (4,)
         return qpos
 
 
 @attrs.define(frozen=True, kw_only=True)
 class BaseLinearVelocityObservation(Observation):
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         qvel = state.physics_state.data.qvel[0:3]  # (3,)
         return qvel
 
 
 @attrs.define(frozen=True, kw_only=True)
 class BaseAngularVelocityObservation(Observation):
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         qvel = state.physics_state.data.qvel[3:6]  # (3,)
         return qvel
 
@@ -174,7 +178,7 @@ class BaseAngularVelocityObservation(Observation):
 class JointPositionObservation(Observation):
     freejoint_first: bool = attrs.field(default=True)
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         if self.freejoint_first:
             return state.physics_state.data.qpos[7:]  # (N,)
         else:
@@ -185,7 +189,7 @@ class JointPositionObservation(Observation):
 class JointVelocityObservation(Observation):
     freejoint_first: bool = attrs.field(default=True)
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         if self.freejoint_first:
             return state.physics_state.data.qvel[6:]  # (N,)
         else:
@@ -194,7 +198,7 @@ class JointVelocityObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class CenterOfMassInertiaObservation(Observation):
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         # Skip the first entry (world body) and flatten
         cinert = state.physics_state.data.cinert[1:].ravel()  # Shape will be (nbody-1, 10)
         return cinert
@@ -202,7 +206,7 @@ class CenterOfMassInertiaObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class CenterOfMassVelocityObservation(Observation):
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         # Skip the first entry (world body) and flatten
         cvel = state.physics_state.data.cvel[1:].ravel()  # Shape will be (nbody-1, 6)
         return cvel
@@ -210,7 +214,7 @@ class CenterOfMassVelocityObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class ActuatorForceObservation(Observation):
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         return state.physics_state.data.actuator_force  # Shape will be (nu,)
 
 
@@ -251,7 +255,7 @@ class SensorObservation(Observation):
     def get_name(self) -> str:
         return f"{super().get_name()}_{self.sensor_name}"
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         start, end = self.sensor_idx_range
         sensor_data = state.physics_state.data.sensordata[start:end].ravel()
         return sensor_data
@@ -259,21 +263,72 @@ class SensorObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class BaseLinearAccelerationObservation(Observation):
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         return state.physics_state.data.qacc[0:3]
 
 
 @attrs.define(frozen=True, kw_only=True)
 class BaseAngularAccelerationObservation(Observation):
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         return state.physics_state.data.qacc[3:6]
 
 
 @attrs.define(frozen=True, kw_only=True)
 class ProjectedGravityObservation(Observation):
-    lag: float = attrs.field(default=0.0)  # Simulates Kalman filter lag
+    acc_noise: float = attrs.field(default=0.0)
+    gyro_noise: float = attrs.field(default=0.0)
+    acc_idx_range: tuple[int, int | None] = attrs.field()
+    gyro_idx_range: tuple[int, int | None] = attrs.field()
+    gravity: tuple[float, float, float] = attrs.field()
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        acc_name: str,
+        gyro_name: str,
+        acc_noise: float = 0.0,
+        gyro_noise: float = 0.0,
+    ) -> Self:
+        """Create a projected gravity observation from a physics model.
+
+        Args:
+            physics_model: MuJoCo physics model
+            acc_name: Name of accelerometer sensor
+            gyro_name: Name of gyroscope sensor
+            acc_noise: Amount of noise to add to accelerometer
+            gyro_noise: Amount of noise to add to gyroscope
+        """
+        sensor_name_to_idx_range = get_sensor_data_idxs_by_name(physics_model)
+        for sensor_name in [acc_name, gyro_name]:
+            if sensor_name not in sensor_name_to_idx_range:
+                options = "\n".join(sorted(sensor_name_to_idx_range.keys()))
+                raise ValueError(f"{sensor_name} not found in model. Available:\n{options}")
+
+        # Gets the gravity vector from the physics model.
+        gx, gy, gz = np.array(physics_model.opt.gravity).flatten().tolist()
+
+        return cls(
+            acc_noise=acc_noise,
+            gyro_noise=gyro_noise,
+            acc_idx_range=sensor_name_to_idx_range[acc_name],
+            gyro_idx_range=sensor_name_to_idx_range[gyro_name],
+            gravity=(gx, gy, gz),
+        )
+
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
+        acc_start, acc_end = self.acc_idx_range
+        gyro_start, gyro_end = self.gyro_idx_range
+        acc_data = state.physics_state.data.sensordata[acc_start:acc_end].ravel()
+        gyro_data = state.physics_state.data.sensordata[gyro_start:gyro_end].ravel()
+
+        acc_rng, gyro_rng = jax.random.split(rng)
+        acc_data = add_noise(acc_data, acc_rng, "gaussian", self.acc_noise, curriculum_level)
+        gyro_data = add_noise(gyro_data, gyro_rng, "gaussian", self.gyro_noise, curriculum_level)
+
+        # TODO: Make observations stateful so that we can implement this as a
+        # Kalman filter, matching the real IMU reading.
         raise NotImplementedError("Not implemented")
 
 
@@ -281,7 +336,7 @@ class ProjectedGravityObservation(Observation):
 class ActuatorAccelerationObservation(Observation):
     freejoint_first: bool = attrs.field(default=True)
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         if self.freejoint_first:
             return state.physics_state.data.qacc[6:]
         else:
@@ -312,7 +367,7 @@ class ContactObservation(Observation):
             contact_group=contact_group,
         )
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         geom_idxs = jnp.array(self.geom_idxs)
         contact = geoms_colliding(state.physics_state.data, geom_idxs, geom_idxs).any(axis=-1)
         return contact
@@ -358,7 +413,7 @@ class FeetContactObservation(Observation):
             noise=noise,
         )
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         foot_left = jnp.array(self.foot_left)
         foot_right = jnp.array(self.foot_right)
         floor = jnp.array(self.floor_geom)
@@ -389,7 +444,7 @@ class FeetPositionObservation(Observation):
             noise=noise,
         )
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         foot_left_pos = state.physics_state.data.xpos[self.foot_left]
         foot_right_pos = state.physics_state.data.xpos[self.foot_right]
         return jnp.stack([foot_left_pos, foot_right_pos], axis=-2)
@@ -417,7 +472,7 @@ class FeetOrientationObservation(Observation):
             noise=noise,
         )
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         foot_left_quat = state.physics_state.data.xquat[self.foot_left]
         foot_right_quat = state.physics_state.data.xquat[self.foot_right]
         return jnp.stack([foot_left_quat, foot_right_quat], axis=-2)
@@ -427,7 +482,7 @@ class FeetOrientationObservation(Observation):
 class TimestepObservation(Observation):
     """Returns the current timestep in the episode."""
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         time = state.physics_state.data.time
         if not isinstance(time, Array):
             time = jnp.array(time)
@@ -490,7 +545,7 @@ class ActPosObservation(Observation):
         base_name = super().get_name()
         return f"{base_name}_{self.joint_name}"
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         action_val = state.physics_state.most_recent_action[self.joint_idx]
         joint_pos = state.physics_state.data.qpos[7 + self.joint_idx]
         return jnp.array([action_val, joint_pos])
@@ -560,7 +615,7 @@ class ActVelObservation(Observation):
         base_name = super().get_name()
         return f"{base_name}_{self.joint_name}"
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
         action_val = state.physics_state.most_recent_action[self.action_idx]
         joint_vel = state.physics_state.data.qvel[6 + self.joint_idx]
         return jnp.array([action_val, joint_vel])
