@@ -77,7 +77,10 @@ class StaticFrictionRandomizer(PhysicsRandomizer):
 
 @attrs.define(frozen=True, kw_only=True)
 class FloorFrictionRandomizer(PhysicsRandomizer):
-    """Randomizes the floor friction."""
+    """Randomizes the floor friction.
+
+    If the contact pairs are listed explicitly, this is overwritten by pair_friction.
+    """
 
     floor_geom_id: int = attrs.field()
     scale_lower: float = attrs.field(default=0.4)
@@ -234,6 +237,7 @@ class AllBodiesMassMultiplicationRandomizer(PhysicsRandomizer):
             maxval=self.scale_upper,
         )
         new_body_mass = model.body_mass * random_mass
+
         return {"body_mass": new_body_mass}
 
 
