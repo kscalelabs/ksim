@@ -144,14 +144,6 @@ def get_observation(
     return xax.FrozenDict(observation_dict), xax.FrozenDict(next_obs_carry)
 
 
-def get_initial_obs_carry(
-    rng: PRNGKeyArray,
-    observations: Collection[Observation],
-) -> xax.FrozenDict[str, PyTree]:
-    """Get the initial observation carry."""
-    return xax.FrozenDict({observation.observation_name: observation.init_carry(rng) for observation in observations})
-
-
 def get_rewards(
     trajectory: Trajectory,
     rewards: Collection[Reward],
@@ -183,6 +175,14 @@ def get_rewards(
     return RewardState(
         total=total_reward, components=xax.FrozenDict(reward_dict), carry=xax.FrozenDict(next_reward_carry)
     )
+
+
+def get_initial_obs_carry(
+    rng: PRNGKeyArray,
+    observations: Collection[Observation],
+) -> xax.FrozenDict[str, PyTree]:
+    """Get the initial observation carry."""
+    return xax.FrozenDict({observation.observation_name: observation.init_carry(rng) for observation in observations})
 
 
 def get_initial_reward_carry(
@@ -1514,6 +1514,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             carry_fn = jax.vmap(self.get_initial_model_carry, in_axes=0)
             command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, 0))
             reward_carry_fn = jax.vmap(get_initial_reward_carry, in_axes=(0, None))
+            obs_carry_fn = jax.vmap(get_initial_obs_carry, in_axes=(0, None))
 
             # Gets the initial curriculum state.
             curriculum_state = jax.vmap(rollout_constants.curriculum.get_initial_state, in_axes=0)(
@@ -1543,7 +1544,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 reward_carry=reward_carry_fn(
                     jax.random.split(reward_rng, self.config.num_envs), rollout_constants.rewards
                 ),
-                obs_carry=get_initial_obs_carry(rng=carry_rng, observations=rollout_constants.observations),
+                obs_carry=obs_carry_fn(
+                    jax.random.split(carry_rng, self.config.num_envs), rollout_constants.observations
+                ),
                 curriculum_state=curriculum_state,
                 rng=jax.random.split(rollout_rng, self.config.num_envs),
             )

@@ -395,9 +395,6 @@ class ProjectedGravityObservation(Observation):
         # Normalize the gravity vector
         x_new = x_new / jnp.linalg.norm(x_new)
 
-        # Update the carry with new state
-        state.obs_carry = (x_new, P_new)
-
         return x_new
 
 
