@@ -5,7 +5,9 @@ To train this task, first you should train a walking policy using the vanilla
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 
+import equinox as eqx
 import xax
 from jaxtyping import PRNGKeyArray
 from omegaconf import MISSING
@@ -22,6 +24,7 @@ class TeacherStudentModel(DefaultHumanoidModel):
         self,
         key: PRNGKeyArray,
         *,
+        ckpt_path: str | Path,
         hidden_size: int,
         depth: int,
         num_mixtures: int,
@@ -33,11 +36,21 @@ class TeacherStudentModel(DefaultHumanoidModel):
             num_mixtures=num_mixtures,
         )
 
-        self.teacher = DefaultHumanoidModel(
+        ckpt_path = Path(ckpt_path)
+        config = xax.load_ckpt(ckpt_path, part="config")
+
+        model_spec = eqx.filter_eval_shape(
+            DefaultHumanoidModel,
             key=key,
-            hidden_size=hidden_size,
-            depth=depth,
-            num_mixtures=num_mixtures,
+            hidden_size=config.hidden_size,
+            depth=config.depth,
+            num_mixtures=config.num_mixtures,
+        )
+
+        self.teacher = xax.load_ckpt(
+            ckpt_path,
+            part="model",
+            model_template=model_spec,
         )
 
 
