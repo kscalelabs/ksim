@@ -130,7 +130,7 @@ class QposReferenceMotionReward(ksim.Reward):
     def num_frames(self) -> int:
         return self.reference_qpos.array.shape[0]
 
-    def get_reward(self, trajectory: ksim.Trajectory, _: None) -> Array:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos = trajectory.qpos
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
