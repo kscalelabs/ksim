@@ -57,7 +57,7 @@ class TeacherStudentModel(DefaultHumanoidModel):
 
 
 @dataclass
-class HumanoidWalkingTeacherStudentTaskConfig(HumanoidWalkingTaskConfig):
+class HumanoidWalkingTeacherStudentTaskConfig(HumanoidWalkingTaskConfig, ksim.TeacherStudentConfig):
     ckpt_path: str = xax.field(
         value=MISSING,
         help="Path to the checkpoint to load the teacher policy from.",
