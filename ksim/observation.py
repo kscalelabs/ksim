@@ -270,6 +270,14 @@ class BaseAngularAccelerationObservation(Observation):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class ProjectedGravityObservation(Observation):
+    lag: float = attrs.field(default=0.0)  # Simulates Kalman filter lag
+
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray) -> Array:
+        raise NotImplementedError("Not implemented")
+
+
+@attrs.define(frozen=True, kw_only=True)
 class ActuatorAccelerationObservation(Observation):
     freejoint_first: bool = attrs.field(default=True)
 
