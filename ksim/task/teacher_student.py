@@ -69,6 +69,21 @@ class TeacherStudentTask(RLTask[Config], Generic[Config], ABC):
             The PPO variables and the next carry for the model.
         """
 
+    @xax.jit(static_argnames=["self", "model_static", "optimizer"], jit_level=4)
+    def _single_step(
+        self,
+        model_arr: PyTree,
+        model_static: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: optax.OptState,
+        trajectories: Trajectory,
+        rewards: RewardState,
+        init_carry: PyTree,
+        on_policy_variables: TeacherStudentVariables,
+        rng: PRNGKeyArray,
+    ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array], LoggedTrajectory]:
+        raise NotImplementedError
+
     def update_model(
         self,
         optimizer: optax.GradientTransformation,
@@ -103,7 +118,7 @@ class TeacherStudentTask(RLTask[Config], Generic[Config], ABC):
         model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
 
         on_policy_rngs = jax.random.split(rng, self.config.num_envs)
-        on_policy_variables, _ = jax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0))(
+        on_policy_variables, _ = jax.vmap(self.get_teacher_student_variables, in_axes=(None, 0, 0, 0))(
             model, trajectories, rollout_env_states.model_carry, on_policy_rngs
         )  # (num_envs, num_steps, ppo_vars)
 
@@ -160,7 +175,7 @@ class TeacherStudentTask(RLTask[Config], Generic[Config], ABC):
         logged_traj = jax.tree.map(lambda x: x[-1], trajs_for_logging)
 
         # Getting the next model carry using the updated model.
-        # Yes, this does recompute the PPO variables, but the impact is small.
+        # Yes, this does recompute the teacher-student variables, but the impact is small.
         off_policy_rngs = jax.random.split(rng, self.config.num_envs)
         _, next_model_carrys = jax.vmap(self.get_teacher_student_variables, in_axes=(None, 0, 0, 0))(
             model, trajectories, rollout_env_states.model_carry, off_policy_rngs
