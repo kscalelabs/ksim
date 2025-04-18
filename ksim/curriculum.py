@@ -20,7 +20,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
-from ksim.types import Rewards, Trajectory
+from ksim.types import RewardState, Trajectory
 
 T = TypeVar("T")
 
@@ -43,7 +43,7 @@ class Curriculum(ABC, Generic[T]):
     def __call__(
         self,
         trajectory: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         training_state: xax.State,
         prev_state: CurriculumState[T],
     ) -> CurriculumState[T]: ...
@@ -61,7 +61,7 @@ class ConstantCurriculum(Curriculum[None]):
     def __call__(
         self,
         trajectory: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         training_state: xax.State,
         prev_state: CurriculumState[None],
     ) -> CurriculumState[None]:
@@ -81,7 +81,7 @@ class LinearCurriculum(Curriculum[None]):
     def __call__(
         self,
         trajectory: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         training_state: xax.State,
         prev_state: CurriculumState[None],
     ) -> CurriculumState[None]:
@@ -106,7 +106,7 @@ class EpisodeLengthCurriculum(Curriculum[Array]):
     def __call__(
         self,
         trajectory: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         training_state: xax.State,
         prev_state: CurriculumState[Array],
     ) -> CurriculumState[Array]:
@@ -137,7 +137,7 @@ class DistanceFromOriginCurriculum(Curriculum[None]):
     def __call__(
         self,
         trajectory: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         training_state: xax.State,
         prev_state: CurriculumState[None],
     ) -> CurriculumState[None]:
@@ -169,7 +169,7 @@ class RewardLevelCurriculum(Curriculum[Array]):
     def __call__(
         self,
         trajectory: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         training_state: xax.State,
         prev_state: CurriculumState[Array],
     ) -> CurriculumState[Array]:
@@ -221,7 +221,7 @@ class StepWhenSaturated(Curriculum[Array]):
     def __call__(
         self,
         trajectory: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         training_state: xax.State,
         prev_state: CurriculumState[Array],
     ) -> CurriculumState[Array]:

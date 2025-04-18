@@ -20,7 +20,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.task.rl import RLConfig, RLTask, RolloutConstants, RolloutEnvState, RolloutSharedState
-from ksim.types import LoggedTrajectory, Rewards, Trajectory
+from ksim.types import LoggedTrajectory, RewardState, Trajectory
 
 
 @jax.tree_util.register_dataclass
@@ -405,7 +405,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model_arr: PyTree,
         model_static: PyTree,
         trajectories: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         init_carry: PyTree,
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
@@ -429,7 +429,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         def loss_and_metrics_fn(
             trajectory: Trajectory,
-            rewards: Rewards,
+            rewards: RewardState,
             init_model_carry: PyTree,
             on_policy_variables: PPOVariables,
             rng: PRNGKeyArray,
@@ -502,7 +502,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         model_arr: PyTree,
         model_static: PyTree,
         trajectories: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         init_carry: PyTree,
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
@@ -528,7 +528,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         trajectories: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         init_carry: PyTree,
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
@@ -557,7 +557,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         trajectories: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         rollout_env_states: RolloutEnvState,
         rollout_shared_state: RolloutSharedState,
         rollout_constants: RolloutConstants,

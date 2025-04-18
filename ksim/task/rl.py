@@ -52,7 +52,7 @@ from ksim.engine import (
     get_physics_engine,
 )
 from ksim.events import Event
-from ksim.observation import Observation, ObservationState
+from ksim.observation import Observation, ObservationInput
 from ksim.randomization import PhysicsRandomizer
 from ksim.resets import Reset
 from ksim.rewards import Reward
@@ -65,7 +65,7 @@ from ksim.types import (
     PhysicsData,
     PhysicsModel,
     PhysicsState,
-    Rewards,
+    RewardState,
     Trajectory,
 )
 from ksim.utils.mujoco import (
@@ -91,6 +91,7 @@ class RolloutEnvState:
     randomization_dict: xax.FrozenDict[str, Array]
     model_carry: PyTree
     reward_carry: xax.FrozenDict[str, Array]
+    obs_carry: xax.FrozenDict[str, PyTree]
     curriculum_state: CurriculumState
     rng: PRNGKeyArray
 
@@ -122,20 +123,33 @@ class RolloutConstants:
 def get_observation(
     rollout_env_state: RolloutEnvState,
     observations: Collection[Observation],
+    obs_carry: PyTree,
     curriculum_level: Array,
     rng: PRNGKeyArray,
-) -> xax.FrozenDict[str, Array]:
-    """Get the observation from the physics state."""
+) -> tuple[xax.FrozenDict[str, Array], xax.FrozenDict[str, PyTree]]:
+    """Get the observation and carry from the physics state."""
     observation_dict: dict[str, Array] = {}
-    observation_state = ObservationState(
-        commands=rollout_env_state.commands,
-        physics_state=rollout_env_state.physics_state,
-    )
+    next_obs_carry: dict[str, PyTree] = {}
     for observation in observations:
-        rng, obs_rng = jax.random.split(rng)
+        rng, obs_rng, carry_rng = jax.random.split(rng, 3)
+        observation_state = ObservationInput(
+            commands=rollout_env_state.commands,
+            physics_state=rollout_env_state.physics_state,
+            obs_carry=obs_carry[observation.observation_name],
+        )
         observation_value = observation(observation_state, curriculum_level, obs_rng)
         observation_dict[observation.observation_name] = observation_value
-    return xax.FrozenDict(observation_dict)
+        next_obs_carry[observation.observation_name] = observation.update_carry(observation_state, carry_rng)
+        rng = jax.random.split(rng)[1]
+    return xax.FrozenDict(observation_dict), xax.FrozenDict(next_obs_carry)
+
+
+def get_initial_obs_carry(
+    rng: PRNGKeyArray,
+    observations: Collection[Observation],
+) -> xax.FrozenDict[str, PyTree]:
+    """Get the initial observation carry."""
+    return xax.FrozenDict({observation.observation_name: observation.init_carry(rng) for observation in observations})
 
 
 def get_rewards(
@@ -145,7 +159,7 @@ def get_rewards(
     rollout_length_steps: int,
     clip_min: float | None = None,
     clip_max: float | None = None,
-) -> Rewards:
+) -> RewardState:
     """Get the rewards from the physics state."""
     reward_dict: dict[str, Array] = {}
     next_reward_carry: dict[str, PyTree] = {}
@@ -166,7 +180,9 @@ def get_rewards(
     if clip_max is not None:
         total_reward = jnp.minimum(total_reward, clip_max)
 
-    return Rewards(total=total_reward, components=xax.FrozenDict(reward_dict), carry=xax.FrozenDict(next_reward_carry))
+    return RewardState(
+        total=total_reward, components=xax.FrozenDict(reward_dict), carry=xax.FrozenDict(next_reward_carry)
+    )
 
 
 def get_initial_reward_carry(
@@ -742,9 +758,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
 
         # Gets the observations from the physics state.
-        observations = get_observation(
+        observations, next_obs_carry = get_observation(
             rollout_env_state=rollout_env_state,
             observations=rollout_constants.observations,
+            obs_carry=rollout_env_state.obs_carry,
             curriculum_level=rollout_env_state.curriculum_state.level,
             rng=obs_rng,
         )
@@ -817,6 +834,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ),
         )
 
+        next_obs_carry = jax.lax.cond(
+            terminated,
+            lambda: get_initial_obs_carry(rng=carry_rng, observations=rollout_constants.observations),
+            lambda: next_obs_carry,
+        )
+
         next_physics_state = jax.lax.cond(
             terminated,
             lambda: rollout_constants.engine.reset(
@@ -827,7 +850,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             lambda: next_physics_state,
         )
 
-        next_carry = jax.lax.cond(
+        next_model_carry = jax.lax.cond(
             terminated,
             lambda: self.get_initial_model_carry(carry_rng),
             lambda: action.carry,
@@ -838,8 +861,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             commands=next_commands,
             physics_state=next_physics_state,
             randomization_dict=rollout_env_state.randomization_dict,
-            model_carry=next_carry,
+            model_carry=next_model_carry,
             reward_carry=rollout_env_state.reward_carry,
+            obs_carry=next_obs_carry,
             curriculum_state=rollout_env_state.curriculum_state,
             rng=rng,
         )
@@ -1052,7 +1076,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         trajectories: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         rollout_env_states: RolloutEnvState,
         rollout_shared_state: RolloutSharedState,
         rollout_constants: RolloutConstants,
@@ -1102,7 +1126,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mean=arr.mean(),
         )
 
-    def get_reward_metrics(self, trajectories: Trajectory, rewards: Rewards) -> dict[str, Array]:
+    def get_reward_metrics(self, trajectories: Trajectory, rewards: RewardState) -> dict[str, Array]:
         """Gets the reward metrics.
 
         Args:
@@ -1158,7 +1182,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rollout_constants: RolloutConstants,
         rollout_env_state: RolloutEnvState,
         rollout_shared_state: RolloutSharedState,
-    ) -> tuple[Trajectory, Rewards, RolloutEnvState]:
+    ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
         # Applies randomizations to the model.
         rollout_shared_state = RolloutSharedState(
             physics_model=rollout_shared_state.physics_model.tree_replace(rollout_env_state.randomization_dict),
@@ -1262,9 +1286,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 # be incorrect.
                 commands=next_rollout_env_states.commands,
                 physics_state=next_rollout_env_states.physics_state,
-                randomization_dict=rollout_env_states.randomization_dict,
+                randomization_dict=next_rollout_env_states.randomization_dict,
                 model_carry=next_model_carry,
                 reward_carry=next_reward_carry,
+                obs_carry=next_rollout_env_states.obs_carry,
                 curriculum_state=curriculum_state,
                 rng=next_rollout_env_states.rng,
             )
@@ -1387,7 +1412,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
             if len(transitions) > 0:
-                trajectory = jax.tree_map(lambda *xs: jnp.stack(xs), *transitions)
+                trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
 
                 get_rewards(
                     trajectory=trajectory,
@@ -1419,7 +1444,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         try:
                             with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
                                 for frame in frames:
-                                    writer.append_data(frame)  # type: ignore[attr-defined]
+                                    writer.append_data(frame)
 
                         except Exception as e:
                             raise RuntimeError(
@@ -1518,6 +1543,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 reward_carry=reward_carry_fn(
                     jax.random.split(reward_rng, self.config.num_envs), rollout_constants.rewards
                 ),
+                obs_carry=get_initial_obs_carry(rng=carry_rng, observations=rollout_constants.observations),
                 curriculum_state=curriculum_state,
                 rng=jax.random.split(rollout_rng, self.config.num_envs),
             )
@@ -1546,6 +1572,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 randomization_dict=randomization_dict,
                 model_carry=self.get_initial_model_carry(carry_rng),
                 reward_carry=get_initial_reward_carry(reward_rng, rollout_constants.rewards),
+                obs_carry=get_initial_obs_carry(rng=carry_rng, observations=rollout_constants.observations),
                 curriculum_state=curriculum_state,
                 rng=rollout_rng,
             )
@@ -1599,7 +1626,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             @xax.jit()
             def get_batch(
                 rollout_env_state: RolloutEnvState,
-            ) -> tuple[Trajectory, Rewards, RolloutEnvState]:
+            ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
                 vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(None, 0, None))
                 return vmapped_unroll(rollout_constants, rollout_env_state, rollout_shared_state)
 
