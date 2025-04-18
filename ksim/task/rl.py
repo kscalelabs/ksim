@@ -55,7 +55,7 @@ from ksim.events import Event
 from ksim.observation import Observation, ObservationInput, StatefulObservation
 from ksim.randomization import PhysicsRandomizer
 from ksim.resets import Reset
-from ksim.rewards import Reward
+from ksim.rewards import Reward, StatefulReward
 from ksim.terminations import Termination
 from ksim.types import (
     Action,
@@ -131,19 +131,22 @@ def get_observation(
     observation_dict: dict[str, Array] = {}
     next_obs_carry: dict[str, PyTree] = {}
     for observation in observations:
-        rng, obs_rng = jax.random.split(rng)
+        rng, obs_rng, noise_rng = jax.random.split(rng, 3)
         observation_state = ObservationInput(
             commands=rollout_env_state.commands,
             physics_state=rollout_env_state.physics_state,
             obs_carry=obs_carry[observation.observation_name],
         )
 
+        # Calls the observation function.
         if isinstance(observation, StatefulObservation):
-            observation_value, new_carry = observation(observation_state, curriculum_level, obs_rng)
+            observation_val, new_carry = observation.observe_stateful(observation_state, curriculum_level, obs_rng)
         else:
-            observation_value = observation(observation_state, curriculum_level, obs_rng)
-            new_carry = None
-        observation_dict[observation.observation_name] = observation_value
+            observation_val = observation.observe(observation_state, curriculum_level, obs_rng)
+            new_carry = observation_state.obs_carry
+        observation_val = observation.add_noise(observation_val, curriculum_level, noise_rng)
+
+        observation_dict[observation.observation_name] = observation_val
         next_obs_carry[observation.observation_name] = new_carry
         rng = jax.random.split(rng)[1]
 
@@ -163,15 +166,21 @@ def get_rewards(
     next_reward_carry: dict[str, PyTree] = {}
     target_shape = trajectory.done.shape
 
-    for reward_generator in rewards:
-        reward_name = reward_generator.reward_name
+    for reward in rewards:
+        reward_name = reward.reward_name
         reward_carry = rewards_carry[reward_name]
-        reward_val, reward_carry = reward_generator(trajectory, reward_carry)
-        reward_val = reward_val * reward_generator.scale / rollout_length_steps
+
+        if isinstance(reward, StatefulReward):
+            reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
+        else:
+            reward_val = reward.get_reward(trajectory)
+
+        reward_val = reward_val * reward.scale / rollout_length_steps
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
         reward_dict[reward_name] = reward_val
         next_reward_carry[reward_name] = reward_carry
+
     total_reward = jax.tree.reduce(jnp.add, list(reward_dict.values()))
     if clip_min is not None:
         total_reward = jnp.maximum(total_reward, clip_min)
@@ -190,12 +199,11 @@ def get_initial_obs_carry(
     observations: Collection[Observation],
 ) -> xax.FrozenDict[str, PyTree]:
     """Get the initial observation carry."""
+    rngs = jax.random.split(rng, len(observations))
     return xax.FrozenDict(
         {
-            observation.observation_name: (
-                observation.init_carry(rng) if isinstance(observation, StatefulObservation) else None
-            )
-            for observation in observations
+            obs.observation_name: (obs.initial_carry(rng) if isinstance(obs, StatefulObservation) else None)
+            for obs, rng in zip(observations, rngs)
         }
     )
 
@@ -203,10 +211,15 @@ def get_initial_obs_carry(
 def get_initial_reward_carry(
     rng: PRNGKeyArray,
     rewards: Collection[Reward],
-) -> xax.FrozenDict[str, Array]:
+) -> xax.FrozenDict[str, PyTree]:
     """Get the initial reward carry."""
     rngs = jax.random.split(rng, len(rewards))
-    return xax.FrozenDict({reward.reward_name: reward.initial_carry(rng) for reward, rng in zip(rewards, rngs)})
+    return xax.FrozenDict(
+        {
+            reward.reward_name: reward.initial_carry(rng) if isinstance(reward, StatefulReward) else None
+            for reward, rng in zip(rewards, rngs)
+        }
+    )
 
 
 def get_terminations(

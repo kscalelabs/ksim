@@ -35,11 +35,7 @@ from ksim.utils.reference_motion import (
     visualize_reference_points,
 )
 
-from .walking import (
-    HumanoidWalkingTask,
-    HumanoidWalkingTaskConfig,
-    NaiveForwardReward,
-)
+from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig, NaiveForwardReward
 
 
 @dataclass
@@ -134,14 +130,14 @@ class QposReferenceMotionReward(ksim.Reward):
     def num_frames(self) -> int:
         return self.reference_qpos.array.shape[0]
 
-    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory, _: None) -> Array:
         qpos = trajectory.qpos
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
         error = xax.get_norm(reference_qpos - qpos, self.norm)
         mean_error = error.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
-        return reward, None
+        return reward
 
 
 class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Config]):
