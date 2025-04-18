@@ -101,6 +101,7 @@ class Observation(ABC):
     def __call__(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         obs_rng, noise_rng = jax.random.split(rng)
         raw_observation = self.observe(state, obs_rng, curriculum_level)
+        assert isinstance(raw_observation, Array), "Observation should return an array"
         return self.add_noise(raw_observation, curriculum_level, noise_rng)
 
     def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
@@ -171,7 +172,7 @@ class StatefulObservation(Observation):
         rng: PRNGKeyArray,
     ) -> tuple[Array, PyTree]:
         obs_rng, noise_rng = jax.random.split(rng)
-        output = self.observe(state, obs_rng, curriculum_level)
+        output = self.observe_stateful(state, obs_rng, curriculum_level)
         assert isinstance(output, tuple) and len(output) == 2, "StatefulObservation should return (obs, new_state)"
         raw_observation, next_state = output
         return self.add_noise(raw_observation, curriculum_level, noise_rng), next_state
