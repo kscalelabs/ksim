@@ -937,8 +937,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         super().log_model_size(model)
 
         if hasattr(model, "actor") and hasattr(model, "critic"):
-            actor_params = xax.task.mixins.train.get_param_count(model.actor)
-            critic_params = xax.task.mixins.train.get_param_count(model.critic)
+            actor_params = xax.get_param_count(model.actor)
+            critic_params = xax.get_param_count(model.critic)
             logger.info("  - Actor size: %d parameters", actor_params)
             logger.info("  - Critic size: %d parameters", critic_params)
 
@@ -1654,7 +1654,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Gets the model and optimizer variables.
             rng, model_rng = jax.random.split(rng)
             model, optimizer, opt_state, state = self.load_initial_state(model_rng, load_optimizer=True)
-            self.log_model_size(model)
 
             # Loads the Mujoco model and logs some information about it.
             mj_model: PhysicsModel = self.get_mujoco_model()
