@@ -133,8 +133,16 @@ class Observation(ABC):
 class StatefulObservation(Observation):
     """Defines an observation that uses a carry to store some continuous state."""
 
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
+        raise NotImplementedError("StatefulObservation should use `observe_stateful` instead.")
+
     @abstractmethod
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> tuple[Array, PyTree]:
+    def observe_stateful(
+        self,
+        state: ObservationInput,
+        rng: PRNGKeyArray,
+        curriculum_level: Array,
+    ) -> tuple[Array, PyTree]:
         """Gets the observation from the state.
 
         Args:
@@ -156,7 +164,12 @@ class StatefulObservation(Observation):
             rng: A PRNGKeyArray to use for the noise
         """
 
-    def __call__(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> tuple[Array, PyTree]:
+    def __call__(  # type: ignore[override]
+        self,
+        state: ObservationInput,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, PyTree]:
         obs_rng, noise_rng = jax.random.split(rng)
         output = self.observe(state, obs_rng, curriculum_level)
         assert isinstance(output, tuple) and len(output) == 2, "StatefulObservation should return (obs, new_state)"
@@ -298,12 +311,12 @@ class ProjectedGravityObservation(StatefulObservation):
     acc_idx_range: tuple[int, int | None] = attrs.field()
     gyro_idx_range: tuple[int, int | None] = attrs.field()
     gravity: tuple[float, float, float] = attrs.field()
+    dt: float = attrs.field()
 
     # Kalman filter parameters
     process_noise: float = attrs.field(default=0.01)  # Process noise covariance
     acc_covariance: float = attrs.field(default=0.1)  # Accelerometer measurement noise covariance
     gyro_covariance: float = attrs.field(default=0.01)  # Gyroscope measurement noise covariance
-    dt: float = attrs.field(default=0.002)  # Time step (default 2ms for 500Hz IMU)
 
     @classmethod
     def create(
@@ -347,11 +360,11 @@ class ProjectedGravityObservation(StatefulObservation):
             gyro_noise=gyro_noise,
             acc_idx_range=sensor_name_to_idx_range[acc_name],
             gyro_idx_range=sensor_name_to_idx_range[gyro_name],
-            gravity=(gx, gy, gz),
+            gravity=(float(gx), float(gy), float(gz)),
+            dt=ctrl_dt,
             process_noise=process_noise,
             acc_covariance=acc_covariance,
             gyro_covariance=gyro_covariance,
-            dt=ctrl_dt,
         )
 
     def init_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
@@ -365,7 +378,12 @@ class ProjectedGravityObservation(StatefulObservation):
         P = jnp.eye(3) * 10.0
         return (x, P)
 
-    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> Array:
+    def observe_stateful(
+        self,
+        state: ObservationInput,
+        rng: PRNGKeyArray,
+        curriculum_level: Array,
+    ) -> tuple[Array, tuple[Array, Array]]:
         """Update the Kalman filter with new IMU measurements and return projected gravity.
 
         The Kalman filter estimates the gravity vector in the body frame using:
