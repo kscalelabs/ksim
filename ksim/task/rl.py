@@ -52,7 +52,7 @@ from ksim.engine import (
     get_physics_engine,
 )
 from ksim.events import Event
-from ksim.observation import Observation, ObservationInput
+from ksim.observation import Observation, ObservationInput, StatefulObservation
 from ksim.randomization import PhysicsRandomizer
 from ksim.resets import Reset
 from ksim.rewards import Reward
@@ -131,16 +131,22 @@ def get_observation(
     observation_dict: dict[str, Array] = {}
     next_obs_carry: dict[str, PyTree] = {}
     for observation in observations:
-        rng, obs_rng, carry_rng = jax.random.split(rng, 3)
+        rng, obs_rng = jax.random.split(rng)
         observation_state = ObservationInput(
             commands=rollout_env_state.commands,
             physics_state=rollout_env_state.physics_state,
             obs_carry=obs_carry[observation.observation_name],
         )
-        observation_value = observation(observation_state, curriculum_level, obs_rng)
+
+        if isinstance(observation, StatefulObservation):
+            observation_value, new_carry = observation(observation_state, curriculum_level, obs_rng)
+        else:
+            observation_value = observation(observation_state, curriculum_level, obs_rng)
+            new_carry = None
         observation_dict[observation.observation_name] = observation_value
-        next_obs_carry[observation.observation_name] = observation.update_carry(observation_state, carry_rng)
+        next_obs_carry[observation.observation_name] = new_carry
         rng = jax.random.split(rng)[1]
+
     return xax.FrozenDict(observation_dict), xax.FrozenDict(next_obs_carry)
 
 
@@ -173,7 +179,9 @@ def get_rewards(
         total_reward = jnp.minimum(total_reward, clip_max)
 
     return RewardState(
-        total=total_reward, components=xax.FrozenDict(reward_dict), carry=xax.FrozenDict(next_reward_carry)
+        total=total_reward,
+        components=xax.FrozenDict(reward_dict),
+        carry=xax.FrozenDict(next_reward_carry),
     )
 
 
@@ -182,7 +190,14 @@ def get_initial_obs_carry(
     observations: Collection[Observation],
 ) -> xax.FrozenDict[str, PyTree]:
     """Get the initial observation carry."""
-    return xax.FrozenDict({observation.observation_name: observation.init_carry(rng) for observation in observations})
+    return xax.FrozenDict(
+        {
+            observation.observation_name: (
+                observation.init_carry(rng) if isinstance(observation, StatefulObservation) else None
+            )
+            for observation in observations
+        }
+    )
 
 
 def get_initial_reward_carry(

@@ -3,6 +3,7 @@
 __all__ = [
     "ObservationInput",
     "Observation",
+    "StatefulObservation",
     "BasePositionObservation",
     "BaseOrientationObservation",
     "BaseLinearVelocityObservation",
@@ -119,24 +120,6 @@ class Observation(ABC):
     def get_markers(self) -> Collection[Marker]:
         return []
 
-    def init_carry(self, rng: PRNGKeyArray) -> PyTree:
-        """Initialize the carry for the observation.
-
-        Args:
-            state: The state of the observation
-            rng: A PRNGKeyArray to use for the noise
-        """
-        return None
-
-    def update_carry(self, state: ObservationInput, rng: PRNGKeyArray) -> PyTree:
-        """Update the carry for the observation.
-
-        Args:
-            state: The state of the observation
-            rng: A PRNGKeyArray to use for the noise
-        """
-        return state.obs_carry
-
     def get_name(self) -> str:
         """Get the name of the observation."""
         return xax.camelcase_to_snakecase(self.__class__.__name__)
@@ -144,6 +127,41 @@ class Observation(ABC):
     @functools.cached_property
     def observation_name(self) -> str:
         return self.get_name()
+
+
+@attrs.define(frozen=True, kw_only=True)
+class StatefulObservation(Observation):
+    """Defines an observation that uses a carry to store some continuous state."""
+
+    @abstractmethod
+    def observe(self, state: ObservationInput, rng: PRNGKeyArray, curriculum_level: Array) -> tuple[Array, PyTree]:
+        """Gets the observation from the state.
+
+        Args:
+            state: The inputs from which the obseravtion can be extracted.
+            rng: A PRNGKeyArray to use for the noise
+            curriculum_level: The current curriculum level, a scalar between
+                zero and one.
+
+        Returns:
+            The observation and the next carry.
+        """
+
+    @abstractmethod
+    def init_carry(self, rng: PRNGKeyArray) -> PyTree:
+        """Initialize the carry for the observation.
+
+        Args:
+            state: The state of the observation
+            rng: A PRNGKeyArray to use for the noise
+        """
+
+    def __call__(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> tuple[Array, PyTree]:
+        obs_rng, noise_rng = jax.random.split(rng)
+        output = self.observe(state, obs_rng, curriculum_level)
+        assert isinstance(output, tuple) and len(output) == 2, "StatefulObservation should return (obs, new_state)"
+        raw_observation, next_state = output
+        return self.add_noise(raw_observation, curriculum_level, noise_rng), next_state
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -274,7 +292,7 @@ class BaseAngularAccelerationObservation(Observation):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class ProjectedGravityObservation(Observation):
+class ProjectedGravityObservation(StatefulObservation):
     acc_noise: float = attrs.field(default=0.0)
     gyro_noise: float = attrs.field(default=0.0)
     acc_idx_range: tuple[int, int | None] = attrs.field()
@@ -307,6 +325,7 @@ class ProjectedGravityObservation(Observation):
             physics_model: MuJoCo physics model
             acc_name: Name of accelerometer sensor
             gyro_name: Name of gyroscope sensor
+            ctrl_dt: Time step for IMU updates
             acc_noise: Amount of noise to add to accelerometer
             gyro_noise: Amount of noise to add to gyroscope
             process_noise: Process noise covariance for Kalman filter
@@ -395,7 +414,7 @@ class ProjectedGravityObservation(Observation):
         # Normalize the gravity vector
         x_new = x_new / jnp.linalg.norm(x_new)
 
-        return x_new
+        return x_new, (x_new, P_new)
 
 
 @attrs.define(frozen=True, kw_only=True)
