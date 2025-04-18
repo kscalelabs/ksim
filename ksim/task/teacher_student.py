@@ -19,11 +19,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.task.rl import RLConfig, RLTask, RolloutConstants, RolloutEnvState, RolloutSharedState
-from ksim.types import (
-    LoggedTrajectory,
-    Rewards,
-    Trajectory,
-)
+from ksim.types import LoggedTrajectory, Rewards, Trajectory
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +50,13 @@ class TeacherStudentTask(RLTask[Config], Generic[Config], ABC):
     """Base class for reinforcement learning tasks."""
 
     @abstractmethod
-    def get_ppo_variables(
+    def get_teacher_student_variables(
         self,
         model: PyTree,
         trajectory: Trajectory,
         model_carry: PyTree,
         rng: PRNGKeyArray,
-    ) -> tuple[PPOVariables, PyTree]:
+    ) -> tuple[TeacherStudentVariables, PyTree]:
         """Gets the variables required for computing PPO loss.
 
         Args:
