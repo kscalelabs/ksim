@@ -19,7 +19,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.task.rl import RLConfig, RLTask, RolloutConstants, RolloutEnvState, RolloutSharedState
-from ksim.types import LoggedTrajectory, Rewards, Trajectory
+from ksim.types import LoggedTrajectory, RewardState, Trajectory
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class TeacherStudentTask(RLTask[Config], Generic[Config], ABC):
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         trajectories: Trajectory,
-        rewards: Rewards,
+        rewards: RewardState,
         rollout_env_states: RolloutEnvState,
         rollout_shared_state: RolloutSharedState,
         rollout_constants: RolloutConstants,
@@ -162,7 +162,7 @@ class TeacherStudentTask(RLTask[Config], Generic[Config], ABC):
         # Getting the next model carry using the updated model.
         # Yes, this does recompute the PPO variables, but the impact is small.
         off_policy_rngs = jax.random.split(rng, self.config.num_envs)
-        _, next_model_carrys = jax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0))(
+        _, next_model_carrys = jax.vmap(self.get_teacher_student_variables, in_axes=(None, 0, 0, 0))(
             model, trajectories, rollout_env_states.model_carry, off_policy_rngs
         )
 

@@ -37,8 +37,9 @@ class TeacherStudentModel(DefaultHumanoidModel):
         )
 
         ckpt_path = Path(ckpt_path)
-        config = xax.load_ckpt(ckpt_path, part="config")
 
+        # Loads the model spec using the checkpoint config.
+        config = xax.load_ckpt(ckpt_path, part="config")
         model_spec = eqx.filter_eval_shape(
             DefaultHumanoidModel,
             key=key,
@@ -47,6 +48,7 @@ class TeacherStudentModel(DefaultHumanoidModel):
             num_mixtures=config.num_mixtures,
         )
 
+        # Loads the checkpoint model weights using the model spec.
         self.teacher = xax.load_ckpt(
             ckpt_path,
             part="model",
@@ -69,6 +71,7 @@ class HumanoidWalkingTeacherStudentTask(
     def get_model(self, key: PRNGKeyArray) -> TeacherStudentModel:
         return TeacherStudentModel(
             key,
+            ckpt_path=self.config.ckpt_path,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
             num_mixtures=self.config.num_mixtures,
