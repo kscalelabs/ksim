@@ -19,7 +19,7 @@ class UpwardReward(ksim.Reward):
 
     velocity_clip: float = attrs.field(default=10.0)
 
-    def __call__(self, trajectory: ksim.Trajectory) -> Array:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         # Just try to maximize the velocity in the Z direction.
         z_delta = jnp.clip(trajectory.qvel[..., 2], 0, self.velocity_clip)
         return z_delta

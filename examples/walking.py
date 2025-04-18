@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
 
-import attrs
 import distrax
 import equinox as eqx
 import jax
@@ -22,14 +21,6 @@ import ksim
 NUM_JOINTS = 21
 
 NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
-
-
-@attrs.define(frozen=True, kw_only=True)
-class NaiveForwardReward(ksim.Reward):
-    clip_max: float = attrs.field(default=5.0)
-
-    def __call__(self, trajectory: ksim.Trajectory, reward_carry: None) -> tuple[Array, None]:
-        return trajectory.qvel[..., 0].clip(max=self.clip_max), None
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -336,6 +327,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.BaseAngularVelocityObservation(),
             ksim.BaseLinearAccelerationObservation(),
             ksim.BaseAngularAccelerationObservation(),
+            ksim.ProjectedGravityObservation.create(
+                physics_model=physics_model,
+                acc_name="imu_acc",
+                gyro_name="imu_gyro",
+                ctrl_dt=self.config.ctrl_dt,
+            ),
             ksim.ActuatorAccelerationObservation(),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),

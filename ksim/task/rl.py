@@ -52,10 +52,10 @@ from ksim.engine import (
     get_physics_engine,
 )
 from ksim.events import Event
-from ksim.observation import Observation, ObservationInput
+from ksim.observation import Observation, ObservationInput, StatefulObservation
 from ksim.randomization import PhysicsRandomizer
 from ksim.resets import Reset
-from ksim.rewards import Reward
+from ksim.rewards import Reward, StatefulReward
 from ksim.terminations import Termination
 from ksim.types import (
     Action,
@@ -131,25 +131,26 @@ def get_observation(
     observation_dict: dict[str, Array] = {}
     next_obs_carry: dict[str, PyTree] = {}
     for observation in observations:
-        rng, obs_rng, carry_rng = jax.random.split(rng, 3)
+        rng, obs_rng, noise_rng = jax.random.split(rng, 3)
         observation_state = ObservationInput(
             commands=rollout_env_state.commands,
             physics_state=rollout_env_state.physics_state,
             obs_carry=obs_carry[observation.observation_name],
         )
-        observation_value = observation(observation_state, curriculum_level, obs_rng)
-        observation_dict[observation.observation_name] = observation_value
-        next_obs_carry[observation.observation_name] = observation.update_carry(observation_state, carry_rng)
+
+        # Calls the observation function.
+        if isinstance(observation, StatefulObservation):
+            observation_val, new_carry = observation.observe_stateful(observation_state, curriculum_level, obs_rng)
+        else:
+            observation_val = observation.observe(observation_state, curriculum_level, obs_rng)
+            new_carry = observation_state.obs_carry
+        observation_val = observation.add_noise(observation_val, curriculum_level, noise_rng)
+
+        observation_dict[observation.observation_name] = observation_val
+        next_obs_carry[observation.observation_name] = new_carry
         rng = jax.random.split(rng)[1]
+
     return xax.FrozenDict(observation_dict), xax.FrozenDict(next_obs_carry)
-
-
-def get_initial_obs_carry(
-    rng: PRNGKeyArray,
-    observations: Collection[Observation],
-) -> xax.FrozenDict[str, PyTree]:
-    """Get the initial observation carry."""
-    return xax.FrozenDict({observation.observation_name: observation.init_carry(rng) for observation in observations})
 
 
 def get_rewards(
@@ -165,15 +166,21 @@ def get_rewards(
     next_reward_carry: dict[str, PyTree] = {}
     target_shape = trajectory.done.shape
 
-    for reward_generator in rewards:
-        reward_name = reward_generator.reward_name
+    for reward in rewards:
+        reward_name = reward.reward_name
         reward_carry = rewards_carry[reward_name]
-        reward_val, reward_carry = reward_generator(trajectory, reward_carry)
-        reward_val = reward_val * reward_generator.scale / rollout_length_steps
+
+        if isinstance(reward, StatefulReward):
+            reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
+        else:
+            reward_val = reward.get_reward(trajectory)
+
+        reward_val = reward_val * reward.scale / rollout_length_steps
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
         reward_dict[reward_name] = reward_val
         next_reward_carry[reward_name] = reward_carry
+
     total_reward = jax.tree.reduce(jnp.add, list(reward_dict.values()))
     if clip_min is not None:
         total_reward = jnp.maximum(total_reward, clip_min)
@@ -181,17 +188,38 @@ def get_rewards(
         total_reward = jnp.minimum(total_reward, clip_max)
 
     return RewardState(
-        total=total_reward, components=xax.FrozenDict(reward_dict), carry=xax.FrozenDict(next_reward_carry)
+        total=total_reward,
+        components=xax.FrozenDict(reward_dict),
+        carry=xax.FrozenDict(next_reward_carry),
+    )
+
+
+def get_initial_obs_carry(
+    rng: PRNGKeyArray,
+    observations: Collection[Observation],
+) -> xax.FrozenDict[str, PyTree]:
+    """Get the initial observation carry."""
+    rngs = jax.random.split(rng, len(observations))
+    return xax.FrozenDict(
+        {
+            obs.observation_name: (obs.initial_carry(rng) if isinstance(obs, StatefulObservation) else None)
+            for obs, rng in zip(observations, rngs)
+        }
     )
 
 
 def get_initial_reward_carry(
     rng: PRNGKeyArray,
     rewards: Collection[Reward],
-) -> xax.FrozenDict[str, Array]:
+) -> xax.FrozenDict[str, PyTree]:
     """Get the initial reward carry."""
     rngs = jax.random.split(rng, len(rewards))
-    return xax.FrozenDict({reward.reward_name: reward.initial_carry(rng) for reward, rng in zip(rewards, rngs)})
+    return xax.FrozenDict(
+        {
+            reward.reward_name: reward.initial_carry(rng) if isinstance(reward, StatefulReward) else None
+            for reward, rng in zip(rewards, rngs)
+        }
+    )
 
 
 def get_terminations(
@@ -1514,6 +1542,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             carry_fn = jax.vmap(self.get_initial_model_carry, in_axes=0)
             command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, 0))
             reward_carry_fn = jax.vmap(get_initial_reward_carry, in_axes=(0, None))
+            obs_carry_fn = jax.vmap(get_initial_obs_carry, in_axes=(0, None))
 
             # Gets the initial curriculum state.
             curriculum_state = jax.vmap(rollout_constants.curriculum.get_initial_state, in_axes=0)(
@@ -1543,7 +1572,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 reward_carry=reward_carry_fn(
                     jax.random.split(reward_rng, self.config.num_envs), rollout_constants.rewards
                 ),
-                obs_carry=get_initial_obs_carry(rng=carry_rng, observations=rollout_constants.observations),
+                obs_carry=obs_carry_fn(
+                    jax.random.split(carry_rng, self.config.num_envs), rollout_constants.observations
+                ),
                 curriculum_state=curriculum_state,
                 rng=jax.random.split(rollout_rng, self.config.num_envs),
             )
