@@ -21,15 +21,6 @@ from .walking import (
 )
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-    values: Array
-    actor_carry: Array
-    critic_carry: Array
-
-
 class DefaultHumanoidRNNActor(eqx.Module):
     """RNN-based actor for the walking task."""
 
