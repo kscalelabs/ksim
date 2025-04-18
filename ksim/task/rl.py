@@ -961,14 +961,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         self.logger.log_scalar(key, value.mean(), namespace=namespace, secondary=secondary)
 
     def log_model_size(self, model: PyTree) -> None:
-        """Logs the size of the model.
+        """Logs the size of the model."""
+        super().log_model_size(model)
 
-        Args:
-            model: The model to log the size of.
-        """
-        leaves, _ = jax.tree.flatten(model)
-        num_params = sum(x.size for x in leaves if isinstance(x, jnp.ndarray))
-        logger.info("Model size: %d parameters", num_params)
+        if hasattr(model, "actor") and hasattr(model, "critic"):
+            actor_params = xax.get_param_count(model.actor)
+            critic_params = xax.get_param_count(model.critic)
+            logger.info("  - Actor size: %d parameters", actor_params)
+            logger.info("  - Critic size: %d parameters", critic_params)
 
     def render_trajectory_video(
         self,
@@ -1685,7 +1685,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Gets the model and optimizer variables.
             rng, model_rng = jax.random.split(rng)
             model, optimizer, opt_state, state = self.load_initial_state(model_rng, load_optimizer=True)
-            self.log_model_size(model)
 
             # Loads the Mujoco model and logs some information about it.
             mj_model: PhysicsModel = self.get_mujoco_model()
