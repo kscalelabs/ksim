@@ -154,6 +154,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
     # Reward parameters.
+    naive_forward_reward: bool = xax.field(
+        value=False,
+        help="If set, use the naive forward reward instead of the joystick reward.",
+    )
     move_forward_command: bool = xax.field(
         value=False,
         help="If set, just move forward or stand still instead of using all possible controls",
@@ -221,12 +225,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     render_track_body_id: int | None = xax.field(
         value=0,
         help="The body id to track with the render camera.",
-    )
-
-    # Checkpointing parameters.
-    export_for_inference: bool = xax.field(
-        value=False,
-        help="Whether to export the model for inference.",
     )
 
 
@@ -366,15 +364,28 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
+        rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(scale=1.0),
-            ksim.JoystickReward(
-                linear_velocity_clip_max=self.config.linear_velocity_clip_max,
-                angular_velocity_clip_max=self.config.angular_velocity_clip_max,
-                command_name="joystick_command",
-                scale=1.0,
-            ),
         ]
+
+        if self.config.naive_forward_reward:
+            rewards += [
+                ksim.NaiveForwardReward(
+                    scale=1.0,
+                ),
+            ]
+
+        else:
+            rewards += [
+                ksim.JoystickReward(
+                    linear_velocity_clip_max=self.config.linear_velocity_clip_max,
+                    angular_velocity_clip_max=self.config.angular_velocity_clip_max,
+                    command_name="joystick_command",
+                    scale=1.0,
+                ),
+            ]
+
+        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
@@ -562,5 +573,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             max_action_latency=0.0,
             min_action_latency=0.0,
+            # Checkpointing parameters.
+            save_every_n_seconds=60,
         ),
     )

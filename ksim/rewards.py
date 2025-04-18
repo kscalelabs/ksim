@@ -5,7 +5,10 @@ __all__ = [
     "norm_to_reward",
     "Reward",
     "StayAliveReward",
+    "LinearVelocityReward",
     "LinearVelocityPenalty",
+    "NaiveForwardReward",
+    "AngularVelocityReward",
     "AngularVelocityPenalty",
     "JointVelocityPenalty",
     "BaseHeightReward",
@@ -173,15 +176,17 @@ class StayAliveReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class LinearVelocityPenalty(Reward):
+class LinearVelocityReward(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
+    clip_min: float | None = attrs.field(default=None)
+    clip_max: float | None = attrs.field(default=None)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         dim = cartesian_index_to_dim(self.index)
-        lin_vel = trajectory.qvel[..., dim]
+        lin_vel = trajectory.qvel[..., dim].clip(self.clip_min, self.clip_max)
         return xax.get_norm(lin_vel, self.norm)
 
     def get_name(self) -> str:
@@ -189,19 +194,34 @@ class LinearVelocityPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class AngularVelocityPenalty(Reward):
+class LinearVelocityPenalty(LinearVelocityReward): ...
+
+
+@attrs.define(frozen=True, kw_only=True)
+class NaiveForwardReward(LinearVelocityReward):
+    index: CartesianIndex = attrs.field(default="x", validator=dimension_index_validator)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AngularVelocityReward(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
+    clip_min: float | None = attrs.field(default=None)
+    clip_max: float | None = attrs.field(default=None)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         dim = cartesian_index_to_dim(self.index) + 3
-        ang_vel = trajectory.qvel[..., dim]
+        ang_vel = trajectory.qvel[..., dim].clip(self.clip_min, self.clip_max)
         return xax.get_norm(ang_vel, self.norm)
 
     def get_name(self) -> str:
         return f"{self.index}_{super().get_name()}"
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AngularVelocityPenalty(AngularVelocityReward): ...
 
 
 @attrs.define(frozen=True, kw_only=True)
