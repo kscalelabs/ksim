@@ -35,7 +35,7 @@ from ksim.utils.reference_motion import (
     visualize_reference_points,
 )
 
-from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig, NaiveForwardReward
+from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 
 @dataclass
@@ -147,7 +147,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
             QposReferenceMotionReward(
                 reference_qpos=self.reference_motion.qpos, ctrl_dt=self.config.ctrl_dt, scale=0.5
             ),
-            NaiveForwardReward(scale=1.0),
+            # ksim.NaiveForwardReward(scale=1.0),
         ]
 
         return rewards

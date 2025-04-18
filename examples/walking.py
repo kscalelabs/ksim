@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
 
-import attrs
 import distrax
 import equinox as eqx
 import jax
