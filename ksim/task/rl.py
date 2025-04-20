@@ -476,8 +476,8 @@ class RLConfig(xax.Config):
         value=8,
         help="Maximum number of CG / Newton linesearch iterations",
     )
-    solver: mjx.SolverType = xax.field(
-        value=mjx.SolverType.NEWTON,
+    solver: str = xax.field(
+        value="newton",
         help="The constraint solver algorithm to use",
     )
     disable_euler_damping: bool = xax.field(
@@ -603,14 +603,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         def _set_opt(name: str, value: Any) -> None:  # noqa: ANN401
             model_val = getattr(mj_model.opt, name)
             if model_val != value:
-                logger.warning("Model %s %s is different from user-specified %s %s", name, model_val, name, value)
+                logger.warning("User-specified %s %s is different from model %s %s", name, value, name, model_val)
                 setattr(mj_model.opt, name, value)
+
+        solver = getattr(mjx.SolverType, self.config.solver.upper(), None)
+        if solver is None:
+            raise ValueError(f"Invalid solver type: {self.config.solver}")
 
         _set_opt("timestep", self.config.dt)
         _set_opt("iterations", self.config.iterations)
         _set_opt("ls_iterations", self.config.ls_iterations)
         _set_opt("integrator", mjx.IntegratorType.EULER)
-        _set_opt("solver", self.config.solver)
+        _set_opt("solver", solver)
 
         if self.config.disable_euler_damping:
             mj_model.opt.disableflags = mj_model.opt.disableflags | mjx.DisableBit.EULERDAMP
