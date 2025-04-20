@@ -1,3 +1,4 @@
+# mypy: disable-error-code="override"
 """Example walking task using Adversarial Motion Priors."""
 
 from abc import abstractmethod
@@ -7,7 +8,6 @@ from typing import Generic, TypeVar
 
 import attrs
 import equinox as eqx
-import glm
 import jax
 import jax.numpy as jnp
 import mujoco
@@ -18,6 +18,7 @@ from jaxtyping import PRNGKeyArray
 
 try:
     import bvhio
+    import glm
     from bvhio.lib.hierarchy import Joint as BvhioJoint
 except ImportError as e:
     raise ImportError(
@@ -45,7 +46,6 @@ from .walking import (
     DefaultHumanoidCritic,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
-    NaiveForwardReward,
 )
 
 
@@ -594,7 +594,7 @@ class HumanoidWalkingAMPTask(AMPTask[HumanoidWalkingAMPTaskConfig], HumanoidWalk
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
             ksim.StayAliveReward(scale=1.0),
-            NaiveForwardReward(scale=0.1, clip_max=2.0),
+            ksim.NaiveForwardReward(scale=0.1, clip_max=2.0),
             AMPReward(scale=0.1),
         ]
         return rewards
