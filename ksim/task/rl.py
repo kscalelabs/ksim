@@ -203,7 +203,7 @@ def get_initial_obs_carry(
     return xax.FrozenDict(
         {
             obs.observation_name: (obs.initial_carry(rng) if isinstance(obs, StatefulObservation) else None)
-            for obs, rng in zip(observations, rngs)
+            for obs, rng in zip(observations, rngs, strict=True)
         }
     )
 
@@ -217,7 +217,7 @@ def get_initial_reward_carry(
     return xax.FrozenDict(
         {
             reward.reward_name: reward.initial_carry(rng) if isinstance(reward, StatefulReward) else None
-            for reward, rng in zip(rewards, rngs)
+            for reward, rng in zip(rewards, rngs, strict=True)
         }
     )
 
@@ -991,20 +991,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         chex.assert_shape(trajectory.done, (None,))
         num_steps = trajectory.done.shape[0]
-        trajectory_list: list[Trajectory] = [jax.tree.map(lambda arr: arr[i], trajectory) for i in range(num_steps)]
+
+        trajectory_list: list[Trajectory] = [
+            jax.tree.map(lambda arr, i=i: arr[i], trajectory) for i in range(num_steps)
+        ]
 
         frame_list: list[np.ndarray] = []
 
-        for frame_id, trajectory in enumerate(trajectory_list):
+        for frame_id, sub_trajectory in enumerate(trajectory_list):
             # Updates the model with the latest data.
-            viewer.data.qpos[:] = np.array(trajectory.qpos)
-            viewer.data.qvel[:] = np.array(trajectory.qvel)
+            viewer.data.qpos[:] = np.array(sub_trajectory.qpos)
+            viewer.data.qvel[:] = np.array(sub_trajectory.qvel)
             mujoco.mj_forward(viewer.model, viewer.data)
 
-            def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
+            def render_callback(
+                model: mujoco.MjModel,
+                data: mujoco.MjData,
+                scene: mujoco.MjvScene,
+                traj: Trajectory = sub_trajectory,
+            ) -> None:
                 if self.config.render_markers:
                     for marker in markers:
-                        marker(model, data, scene, trajectory)
+                        marker(model, data, scene, traj)
 
             frame = viewer.read_pixels(callback=render_callback)
 
@@ -1427,9 +1435,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     viewer.data.qvel[:] = np.array(rollout_env_state.physics_state.data.qvel)
                     mujoco.mj_forward(viewer.model, viewer.data)
 
-                    def render_callback(model: mujoco.MjModel, data: mujoco.MjData, scene: mujoco.MjvScene) -> None:
-                        for marker in markers:
-                            marker(model, data, scene, transition)
+                    def render_callback(
+                        model: mujoco.MjModel,
+                        data: mujoco.MjData,
+                        scene: mujoco.MjvScene,
+                        traj: Trajectory = transition,
+                    ) -> None:
+                        if self.config.render_markers:
+                            for marker in markers:
+                                marker(model, data, scene, traj)
 
                     if save_path is None:
                         viewer.render(callback=render_callback)
@@ -1461,13 +1475,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         try:
                             import imageio.v2 as imageio
 
-                        except ImportError:
+                        except ImportError as err:
                             raise RuntimeError(
                                 "Failed to save video - note that saving .mp4 videos with imageio usually "
                                 "requires the FFMPEG backend, which can be installed using `pip install "
                                 "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
                                 "your system."
-                            )
+                            ) from err
 
                         try:
                             with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
@@ -1667,8 +1681,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # Splits trajectories and rewards into a list of `batch_size` samples.
                     for i in range(0, len(trajectories.done), self.batch_size):
-                        trajectory = jax.tree.map(lambda x: x[i], trajectories)
-                        reward = jax.tree.map(lambda x: x[i], rewards)
+                        trajectory = jax.tree.map(lambda x, index=i: x[index], trajectories)
+                        reward = jax.tree.map(lambda x, index=i: x[index], rewards)
                         writer.write(trajectory, reward)
 
             logger.info("Saved dataset to %s", save_path)

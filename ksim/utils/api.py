@@ -30,8 +30,8 @@ async def get_mujoco_model_path(model_name: str, cache: bool = True) -> str | Pa
 
     try:
         mjcf_path = next(urdf_dir.glob("*.mjcf"))
-    except StopIteration:
-        raise ValueError(f"No MJCF file found for {model_name} (in {urdf_dir})")
+    except StopIteration as err:
+        raise ValueError(f"No MJCF file found for {model_name} (in {urdf_dir})") from err
 
     return mjcf_path
 
@@ -44,7 +44,7 @@ async def get_mujoco_model_metadata(model_name: str, cache: bool = True) -> Robo
             raise ValueError(f"Model {model_name} does not exist")
         metadata_path = directory / "metadata.json"
 
-    except ValueError:
+    except ValueError as err:
         metadata_path = get_robots_dir() / model_name / "metadata.json"
 
         # Downloads and caches the metadata if it doesn't exist.
@@ -52,7 +52,7 @@ async def get_mujoco_model_metadata(model_name: str, cache: bool = True) -> Robo
             async with K() as api:
                 robot_class = await api.get_robot_class(model_name)
                 if (metadata := robot_class.metadata) is None:
-                    raise ValueError(f"No metadata found for {model_name}")
+                    raise ValueError(f"No metadata found for {model_name}") from err
 
             metadata_path.parent.mkdir(parents=True, exist_ok=True)
             with open(metadata_path, "w") as f:

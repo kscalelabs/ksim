@@ -59,7 +59,7 @@ target-version = "py310"
 
 [tool.ruff.lint]
 
-select = ["ANN", "D", "E", "F", "G", "I", "N", "PGH", "PLC", "PLE", "PLR", "PLW", "W"]
+select = ["ANN", "B", "D", "E", "F", "G", "I", "N", "PGH", "PLC", "PLE", "PLR", "PLW", "W"]
 
 ignore = [
     "D101", "D102", "D103", "D104", "D105", "D106", "D107",
