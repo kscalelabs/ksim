@@ -71,16 +71,6 @@ class SSMBlock(BaseSSMBlock):
         h = a_mat @ h + b_mat.T @ x
         return h
 
-    def forward_sequence(self, x_seq: Array) -> Array:
-        def step(h: Array, x: Array) -> tuple[Array, Array]:
-            h = self.forward(h, x)
-            return h, h
-
-        a_mat = self.get_a_mat(x_seq)
-        h_0 = jnp.zeros(a_mat.shape[0])
-        _, h_seq = jax.lax.scan(step, h_0, x_seq)
-        return h_seq
-
 
 class DiagSSMBlock(BaseSSMBlock):
     a_diag: Array
@@ -103,77 +93,6 @@ class DiagSSMBlock(BaseSSMBlock):
         b_mat = self.get_b_mat(x)
         h = a_diag * h + b_mat.T @ x
         return h
-
-    def forward_sequence(self, x_seq: Array, *, use_conv: bool = True, recursive_kernel_calc: bool = False) -> Array:
-        """Performas a potentially parallelized forward pass across time."""
-        if use_conv:
-            return self._forward_sequence_conv(x_seq, recursive_kernel_calc=recursive_kernel_calc)
-        else:
-            return self._forward_sequence_scan(x_seq)
-
-    def _get_kernel(self, x_seq: Array, length: int) -> Array:
-        """Returns the kernel with time as the final dimension."""
-        exponents = jnp.arange(length)
-        a_diag = self.get_a_mat(x_seq)
-        kernel = jnp.power(a_diag[:, None], exponents)  # (H, T)
-        kernel = kernel[:, None, :]  # (H, 1, T)
-        return kernel
-
-    def _get_kernel_recursive(self, x_seq: Array, length: int) -> Array:
-        """Returns the kernel with time as the final dimension."""
-        assert length % 2 == 0, "Length must be even."
-        a_diag = self.get_a_mat(x_seq)
-
-        def helper(length: int) -> tuple[Array, Array]:
-            """Returns the kernel and the sqrt of the diagonal."""
-            if length == 1:
-                return jnp.ones_like(a_diag)[:, None], a_diag[:, None]
-
-            half_length = length // 2
-            kernel_half, a_half = helper(half_length)
-            kernel = jnp.concatenate([kernel_half, a_half * kernel_half], axis=-1)
-            return kernel, a_half * a_half
-
-        kernel, a_diag = helper(length)
-        return kernel[:, None, :]  # (H, 1, L)
-
-    def _forward_sequence_conv(self, x_seq: Array, *, recursive_kernel_calc: bool = False) -> Array:
-        """Convolves x (T, H) across time using the kernel."""
-        seq_len, hidden_size = x_seq.shape
-        b_mat = self.get_b_mat(x_seq)
-
-        s = b_mat.T @ x_seq.T  # (H, T)
-        s_padded = jnp.pad(s, ((0, 0), (seq_len - 1, 0)))[None, :, :]  # (1, H, 2T-1)
-
-        if recursive_kernel_calc:
-            kernel = self._get_kernel_recursive(x_seq, seq_len)
-        else:
-            kernel = self._get_kernel(x_seq, seq_len)
-
-        kernel_flipped = jnp.flip(kernel, axis=-1)  # (H, 1, L)
-
-        conv_out = jax.lax.conv_general_dilated(
-            s_padded,
-            kernel_flipped,
-            window_strides=(1,),
-            padding="VALID",
-            dimension_numbers=("NCT", "OIT", "NCT"),  # convolving over time
-            feature_group_count=hidden_size,
-        )
-        conv_out = conv_out[0].T  # (T, H)
-        return conv_out
-
-    def _forward_sequence_scan(self, x_seq: Array) -> Array:
-        """Naively forward across time."""
-
-        def step(h: Array, x: Array) -> tuple[Array, Array]:
-            h = self.forward(h, x)
-            return h, h
-
-        a_diag = self.get_a_mat(x_seq)
-        h_0 = jnp.zeros(a_diag.shape[0])
-        _, h_seq = jax.lax.scan(step, h_0, x_seq)
-        return h_seq
 
 
 class DiscreteDiagSSMBlock(DiagSSMBlock):
@@ -205,6 +124,49 @@ class DiscreteDiagSSMBlock(DiagSSMBlock):
 
         b_discrete = delta_a_inv * (exp_a_diag - 1) * delta_b_mat
         return b_discrete
+
+
+class DPLRSSMBlock(BaseSSMBlock):
+    a_diag: Array
+    p_vec: Array
+    q_vec: Array
+    b_mat: Array
+    delta: Array
+
+    def __init__(
+        self,
+        hidden_size: int,
+        *,
+        key: PRNGKeyArray,
+        init_delta: float = 0.1,
+        init_scale: float = 10.0,
+        rank: int = 1,
+    ) -> None:
+        k1, k2, k3, k4 = jax.random.split(key, 4)
+        self.delta = jnp.array(init_delta)
+        self.a_diag = jax.random.uniform(k1, (hidden_size,), minval=-1.0, maxval=0.0) * init_scale
+        self.p_vec = glorot(k2, (hidden_size, rank))
+        self.q_vec = glorot(k3, (hidden_size, rank))
+        self.b_mat = glorot(k4, (hidden_size, hidden_size))
+
+    def get_a_mat(self, x: Array) -> Array:
+        """Construct discretized A matrix: diag(a_diag) + P Q^T, exponentiated."""
+        A = jnp.diag(self.a_diag) + self.p_vec @ self.q_vec.T
+        A_disc = jax.scipy.linalg.expm(self.delta * A)
+        return A_disc
+
+    def get_b_mat(self, x: Array) -> Array:
+        """Discretize B using: ∫ exp(A τ) dτ B ≈ A^{-1}(exp(A Δ) - I) B"""
+        A = jnp.diag(self.a_diag) + self.p_vec @ self.q_vec.T
+        expA = jax.scipy.linalg.expm(self.delta * A)
+        A_inv = jnp.linalg.pinv(A)
+        B_disc = A_inv @ (expA - jnp.eye(A.shape[0])) @ self.b_mat
+        return B_disc
+
+    def forward(self, h: Array, x: Array) -> Array:
+        A = self.get_a_mat(x)
+        B = self.get_b_mat(x)
+        return A @ h + B @ x
 
 
 class SSM(eqx.Module):
