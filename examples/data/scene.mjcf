@@ -163,7 +163,7 @@
           </body>
         </body>
       </body>
-      <site name="imu_site" />
+      <site name="imu" />
     </body>
   </worldbody>
 
@@ -201,10 +201,21 @@
   </actuator>
 
   <sensor>
-    <accelerometer name="imu_acc" site="imu_site" />
-    <gyro name="imu_gyro" site="imu_site" />
-    <framelinacc name="imu_linacc" objtype="body" objname="torso" />
-    <frameangvel name="imu_angvel" objtype="body" objname="torso" />
+    <gyro site="imu" name="imu_gyro"/>
+    <velocimeter site="imu" name="local_linvel"/>
+    <accelerometer site="imu" name="imu_acc"/>
+    <framezaxis objtype="site" objname="imu" name="upvector"/>
+    <framexaxis objtype="site" objname="imu" name="forwardvector"/>
+    <framelinvel objtype="site" objname="imu" name="global_linvel"/>
+    <frameangvel objtype="site" objname="imu" name="global_angvel"/>
+    <framepos objtype="site" objname="imu" name="position"/>
+    <framequat objtype="site" objname="imu" name="orientation"/>
+    <framelinvel objtype="site" objname="right_foot" name="right_foot_global_linvel"/>
+    <framelinvel objtype="site" objname="left_foot" name="left_foot_global_linvel"/>
+    <framexaxis objtype="site" objname="left_foot" name="left_foot_upvector"/>
+    <framexaxis objtype="site" objname="right_foot" name="right_foot_upvector"/>
+    <framepos objtype="site" objname="left_foot" name="left_foot_pos"/>
+    <framepos objtype="site" objname="right_foot" name="right_foot_pos"/>
   </sensor>
 
   <keyframe>
