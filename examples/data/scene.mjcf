@@ -201,8 +201,10 @@
   </actuator>
 
   <sensor>
-    <accelerometer name="imu_acc" site="imu_site" noise="0.01" />
-    <gyro name="imu_gyro" site="imu_site" noise="0.01" />
+    <accelerometer name="imu_acc" site="imu_site" />
+    <gyro name="imu_gyro" site="imu_site" />
+    <framelinacc name="imu_linacc" site="imu_site" />
+    <frameangvel name="imu_angvel" site="imu_site" />
   </sensor>
 
   <keyframe>
