@@ -645,7 +645,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             resets=self.get_resets(physics_model),
             events=self.get_events(physics_model),
             actuators=self.get_actuators(physics_model, metadata),
-            dt=physics_model.opt.timestep,
+            dt=float(physics_model.opt.timestep.item()),
             ctrl_dt=self.config.ctrl_dt,
             min_action_latency=self.config.min_action_latency,
             max_action_latency=self.config.max_action_latency,
