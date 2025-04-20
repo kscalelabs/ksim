@@ -203,8 +203,8 @@
   <sensor>
     <accelerometer name="imu_acc" site="imu_site" />
     <gyro name="imu_gyro" site="imu_site" />
-    <framelinacc name="imu_linacc" site="imu_site" />
-    <frameangvel name="imu_angvel" site="imu_site" />
+    <framelinacc name="imu_linacc" objtype="body" objname="torso" />
+    <frameangvel name="imu_angvel" objtype="body" objname="torso" />
   </sensor>
 
   <keyframe>
