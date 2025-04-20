@@ -9,6 +9,7 @@ __all__ = [
     "Action",
     "Histogram",
     "Metrics",
+    "LoggedTrajectory",
 ]
 
 from dataclasses import dataclass
@@ -66,7 +67,7 @@ class Trajectory:
     success: Array
     timestep: Array
     termination_components: xax.FrozenDict[str, Array]
-    aux_outputs: PyTree
+    aux_outputs: xax.FrozenDict[str, PyTree] | None
 
     def episode_length(self) -> Array:
         done_mask = self.done.at[..., -1].set(True)
@@ -87,8 +88,8 @@ class RewardState:
 @dataclass(frozen=True)
 class Action:
     action: Array
-    carry: PyTree = None
-    aux_outputs: PyTree = None
+    carry: PyTree | None = None
+    aux_outputs: xax.FrozenDict[str, PyTree] | None = None
 
 
 @jax.tree_util.register_dataclass

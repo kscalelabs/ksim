@@ -4,6 +4,7 @@ __all__ = [
     "RLConfig",
     "RLTask",
     "RolloutConstants",
+    "RolloutSharedState",
     "RolloutEnvState",
 ]
 
@@ -174,8 +175,8 @@ def get_rewards(
             reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
         else:
             reward_val = reward.get_reward(trajectory)
-
         reward_val = reward_val * reward.scale / rollout_length_steps
+
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
         reward_dict[reward_name] = reward_val
@@ -1212,6 +1213,31 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers.extend(randomizer.get_markers())
         return markers
 
+    def post_rollout_update(
+        self,
+        trajectory: Trajectory,
+        rollout_env_state: RolloutEnvState,
+        rollout_shared_state: RolloutSharedState,
+        rollout_constants: RolloutConstants,
+    ) -> tuple[Trajectory, RolloutEnvState, RolloutSharedState]:
+        """Provides means of updating necessary variables after the rollout.
+
+        This is useful for core library algorithms that need to update the
+        trajectory, environment state, and shared state after the rollout for
+        calculating rewards, custom updates to state, etc.
+
+        Args:
+            trajectory: The trajectory to update.
+            rollout_env_state: The environment state.
+            rollout_shared_state: The shared state.
+            rollout_constants: The constants.
+
+        Returns:
+            A tuple containing the updated trajectory, environment state, and
+            shared state.
+        """
+        return trajectory, rollout_env_state, rollout_shared_state
+
     @xax.jit(static_argnames=["self", "rollout_constants"], jit_level=2)
     def _single_unroll(
         self,
@@ -1238,6 +1264,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             scan_fn,
             rollout_env_state,
             length=self.rollout_length_steps,
+        )
+
+        # Updates the trajectory, environment state, and shared state.
+        trajectory, rollout_env_state, rollout_shared_state = self.post_rollout_update(
+            trajectory=trajectory,
+            rollout_env_state=rollout_env_state,
+            rollout_shared_state=rollout_shared_state,
+            rollout_constants=rollout_constants,
         )
 
         # Gets the rewards.
