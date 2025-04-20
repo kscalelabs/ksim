@@ -126,7 +126,7 @@ def local_to_absolute(
 
 
 def get_reference_joint_id(root: BvhioJoint, reference_joint_name: str) -> int:
-    for joint, index, depth in root.layout():
+    for joint, index, _ in root.layout():
         if joint.Name == reference_joint_name:
             return index
     raise ValueError(f"Joint {reference_joint_name} not found")
@@ -222,14 +222,19 @@ def visualize_reference_motion(
         scene = viewer.scn
         scene.ngeom = 0
 
-        def marker_callback(model: mujoco.MjModel, data: mujoco.MjData, scn: mujoco.MjvScene) -> None:
+        def marker_callback(
+            model: mujoco.MjModel,
+            data: mujoco.MjData,
+            scn: mujoco.MjvScene,
+            frame_id: int = frame,
+        ) -> None:
             # Add markers for cartesian targets
             for body_id, target_poses in cartesian_motion.items():
-                target_local_pos = target_poses[frame]
+                target_local_pos = target_poses[frame_id]
                 target_xpos = local_to_absolute(data.xpos, target_local_pos, mj_base_id)
                 assert isinstance(target_xpos, np.ndarray)
                 _add_reference_marker_to_scene(
-                    scene,
+                    scn,
                     pos=target_xpos,
                     color=np.array([0, 1, 0, 0.8]),
                     scale=np.array([0.05, 0.05, 0.05]),
@@ -249,7 +254,7 @@ def get_reference_cartesian_poses(
     reference_base_id: int,
     root_callback: Callable[[BvhioJoint], None] | None,
     scaling_factor: float = 1.0,
-    offset: np.ndarray = np.array([0.0, 0.0, 0.0]),
+    offset: np.ndarray | None = None,
 ) -> xax.FrozenDict[int, np.ndarray]:
     """Generates the reference motion for the given model and data.
 
@@ -266,6 +271,9 @@ def get_reference_cartesian_poses(
         A tuple of tuples, where each tuple contains a Mujoco body ID and the target positions.
         The result will be of shape [T, 3].
     """
+    if offset is None:
+        offset = np.array([0.0, 0.0, 0.0])
+
     reference_joint_ids = get_reference_joint_ids(root, mappings)
     body_ids = get_body_ids(model, mappings)
 
@@ -280,7 +288,7 @@ def get_reference_cartesian_poses(
         if root_callback:
             root_callback(root)
 
-        for body_id, reference_joint_id in zip(body_ids, reference_joint_ids):
+        for body_id, reference_joint_id in zip(body_ids, reference_joint_ids, strict=False):
             ref_pos = get_local_reference_pos(root, reference_joint_id, reference_base_id, scaling_factor)
             reference_motion[body_id][frame] = ref_pos + offset
 
@@ -428,7 +436,7 @@ def generate_reference_motion(
     bvh_to_mujoco_names: tuple[ReferenceMapping, ...],
     bvh_base_id: int,
     ctrl_dt: float,
-    bvh_offset: np.ndarray = np.array([0.0, 0.0, 0.0]),
+    bvh_offset: np.ndarray | None = None,
     bvh_root_callback: Callable[[BvhioJoint], None] | None = None,
     bvh_scaling_factor: float = 1.0,
     constrained_joint_ids: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6),
@@ -468,6 +476,9 @@ def generate_reference_motion(
     Returns:
         A ReferenceMotionData object containing qpos and Cartesian poses.
     """
+    if bvh_offset is None:
+        bvh_offset = np.array([0.0, 0.0, 0.0])
+
     # 1. Generate Cartesian Poses
     np_cartesian_motion = get_reference_cartesian_poses(
         mappings=bvh_to_mujoco_names,

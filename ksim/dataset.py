@@ -134,7 +134,7 @@ class TrajectoryDataset(Dataset[tuple[Trajectory, RewardState], tuple[Trajectory
 
         arrs: dict[str, Array] = {}
         offset = 0
-        for name, shape in zip(self.meta["names"], self.meta["shapes"]):
+        for name, shape in zip(self.meta["names"], self.meta["shapes"], strict=True):
             nelem = np.prod(shape)
             arrs[name] = sample[offset : offset + nelem].reshape(shape)
             offset += nelem

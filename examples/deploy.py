@@ -99,7 +99,7 @@ async def reset(kos: pykos.KOS) -> None:
         quat={"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
         joints=[
             {"name": actuator.joint_name, "pos": pos}
-            for actuator, pos in zip(ACTUATOR_LIST, [0.0] * len(ACTUATOR_LIST))
+            for actuator, pos in zip(ACTUATOR_LIST, [0.0] * len(ACTUATOR_LIST), strict=True)
         ],
     )
 
@@ -168,7 +168,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
                 time.sleep(2)
 
         if attempts == 5:
-            raise RuntimeError("Failed to connect to KOS-Sim")
+            raise RuntimeError("Failed to connect to KOS-Sim") from e
 
     await configure_actuators(kos)
     await reset(kos)
@@ -202,7 +202,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
                 logger.info("Loop overran by %s seconds", time.time() - target_time)
 
             target_time += DT
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as err:
         logger.info("Exiting...")
         if no_render:
             save_path = await kos.process_manager.stop_kclip("deployment")
@@ -211,7 +211,7 @@ async def main(model_path: str, ip: str, no_render: bool, episode_length: int) -
         if cleanup_fn:
             cleanup_fn()
 
-        raise KeyboardInterrupt
+        raise KeyboardInterrupt from err
 
     logger.info("Episode finished!")
 
