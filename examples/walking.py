@@ -14,7 +14,6 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from mujoco import mjx
 
 import ksim
 
@@ -253,18 +252,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
-
-        mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 4
-        mj_model.opt.ls_iterations = 8
-        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
-
-        # Observed NaNs in qpos with Newton solver...
-        # mj_model.opt.solver = mjx.SolverType.NEWTON
-
-        return mj_model
+        return mujoco.MjModel.from_xml_path(mjcf_path)
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
         return ksim.get_joint_metadata(
@@ -573,6 +561,8 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
+            iterations=4,
+            ls_iterations=8,
             max_action_latency=0.0,
             min_action_latency=0.0,
         ),
