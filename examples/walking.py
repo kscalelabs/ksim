@@ -559,7 +559,7 @@ if __name__ == "__main__":
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.004,
             ctrl_dt=0.02,
             iterations=4,
             ls_iterations=8,
