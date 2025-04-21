@@ -444,12 +444,20 @@ class RLConfig(xax.Config):
         help="If true, render inertia.",
     )
     render_height: int = xax.field(
-        value=320,
+        value=240,
         help="The height of the rendered images.",
     )
     render_width: int = xax.field(
-        value=480,
+        value=360,
         help="The width of the rendered images.",
+    )
+    valid_render_height: int = xax.field(
+        value=480,
+        help="The height of the rendered images during the validation phase.",
+    )
+    valid_render_width: int = xax.field(
+        value=640,
+        help="The height of the rendered images during the validation phase.",
     )
     render_length_seconds: float | None = xax.field(
         value=5.0,
@@ -468,7 +476,7 @@ class RLConfig(xax.Config):
         help="If set, the render camera will track the body with this ID.",
     )
     render_distance: float = xax.field(
-        value=5.0,
+        value=2.5,
         help="The distance of the camera from the target.",
     )
     render_azimuth: float = xax.field(
@@ -544,6 +552,7 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
+    is_train: bool = False,
 ) -> GlfwMujocoViewer | DefaultMujocoViewer:
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
@@ -558,8 +567,8 @@ def get_viewer(
             mj_model,
             data=mj_data,
             mode=mode,
-            height=config.render_height,
-            width=config.render_width,
+            width=config.render_width if is_train else config.valid_render_width,
+            height=config.render_height if is_train else config.valid_render_height,
             shadow=config.render_shadow,
             reflection=config.render_reflection,
             contact_force=config.render_contact_force,
@@ -570,8 +579,8 @@ def get_viewer(
     else:
         viewer = DefaultMujocoViewer(
             mj_model,
-            width=config.render_width,
-            height=config.render_height,
+            width=config.render_width if is_train else config.valid_render_width,
+            height=config.render_height if is_train else config.valid_render_height,
         )
 
     # Sets the viewer camera.
@@ -1856,10 +1865,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             # Creates the viewer.
-            viewer = get_viewer(
+            train_viewer = get_viewer(
                 mj_model=mj_model,
                 config=self.config,
                 mode="offscreen",
+                is_train=True,
+            )
+            valid_viewer = get_viewer(
+                mj_model=mj_model,
+                config=self.config,
+                mode="offscreen",
+                is_train=False,
             )
 
             state = self.on_training_start(state)
@@ -1952,7 +1968,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             )
 
                         if render_step:
-                            self._log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
+                            self._log_logged_trajectory_video(
+                                logged_traj=logged_traj,
+                                markers=markers,
+                                viewer=valid_viewer if valid_step else train_viewer,
+                            )
 
                         self.write_logs(state)
 
