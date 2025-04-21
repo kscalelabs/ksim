@@ -1963,7 +1963,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         )
                     else:
                         state = state.replace(
-                            elapsed_time_s=state.elapsed_time_s + elapsed_time
+                            elapsed_time_s=state.elapsed_time_s + elapsed_time,
                         )
 
                     if is_first_step:
