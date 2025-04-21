@@ -17,13 +17,14 @@ import logging
 import signal
 import sys
 import textwrap
+import time
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Collection, Generic, TypeVar
+from typing import Any, Callable, Collection, Generic, TypeVar
 
 import chex
 import equinox as eqx
@@ -324,13 +325,17 @@ class RLConfig(xax.Config):
         value=None,
         help="If provided, run the environment loop for the given number of seconds.",
     )
-    run_environment_save_path: str | None = xax.field(
-        value=None,
-        help="If provided, save the rendered video to the given path.",
+    run_environment_save_renders: bool = xax.field(
+        value=False,
+        help="If set, save the renders to the experiment directory.",
     )
     run_environment_argmax_action: bool = xax.field(
         value=True,
         help="If set, take the argmax action instead of sampling from the action distribution.",
+    )
+    run_environment_save_video: bool = xax.field(
+        value=False,
+        help="If set, render the environment as a video instead of a GIF.",
     )
 
     # Toggle this to collect a dataset.
@@ -984,7 +989,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     if self.config.run_environment_num_seconds is None
                     else round(self.config.run_environment_num_seconds / self.config.ctrl_dt)
                 ),
-                save_path=self.config.run_environment_save_path,
+                save_renders=self.config.run_environment_save_renders,
                 argmax_action=self.config.run_environment_argmax_action,
             )
 
@@ -1092,14 +1097,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return np.stack(frame_list, axis=0), fps
 
-    def log_logged_trajectory_graphs(self, logged_traj: LoggedTrajectory) -> None:
+    def _log_logged_trajectory_graphs(
+        self,
+        logged_traj: LoggedTrajectory,
+        log_callback: Callable[[str, Image.Image, str], None],
+    ) -> None:
         """Visualizes a single trajectory.
 
         Args:
             logged_traj: The single trajectory to log.
-            markers: The markers to visualize.
-            viewer: The Mujoco viewer to render the scene with.
-            name: The name of the trajectory being logged.
+            log_callback: A callable function to run to log a given image.
         """
         # Clips the trajectory to the desired length.
         if self.config.render_length_seconds is not None:
@@ -1142,14 +1149,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 img = Image.open(buf)
 
                 # Logs the image.
-                self.logger.log_image(key=key, value=img, namespace=namespace)
+                # self.logger.log_image(key=key, value=img, namespace=namespace)
+                log_callback(key, img, namespace)
 
-    def log_logged_trajectory_video(
+    def _log_logged_trajectory_video(
         self,
         logged_traj: LoggedTrajectory,
         markers: Collection[Marker],
         viewer: GlfwMujocoViewer | DefaultMujocoViewer,
     ) -> None:
+        """Visualizes a single trajectory.
+
+        Args:
+            logged_traj: The single trajectory to log.
+            markers: The markers to visualize.
+            viewer: The Mujoco viewer to render the scene with.
+        """
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(
             trajectory=logged_traj.trajectory,
@@ -1448,7 +1463,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run_environment(
         self,
         num_steps: int | None = None,
-        save_path: str | Path | None = None,
+        save_renders: bool = False,
         argmax_action: bool = True,
     ) -> None:
         """Provides an easy-to-use interface for debugging environments.
@@ -1461,13 +1476,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             num_steps: The number of steps to run the environment for. If not
                 provided, run until the user manually terminates the
                 environment visualizer.
-            save_path: If provided, save the rendered video to the given path.
+            save_renders: If provided, save the rendered video to the given path.
             argmax_action: If set, get the argmax action, otherwise sample
                 randomly from the model.
         """
+        save_path = self.exp_dir / "renders" / f"render_{time.time()}" if save_renders else None
         if save_path is not None:
-            save_path = Path(save_path)
-            save_path.parent.mkdir(parents=True, exist_ok=True)
+            save_path.mkdir(parents=True, exist_ok=True)
 
         with self, jax.disable_jit():
             rng = self.prng_key()
@@ -1546,24 +1561,35 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
-            if len(transitions) > 0:
-                trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
+            if len(transitions) == 0:
+                raise RuntimeError("Trajectory is empty!")
 
-                get_rewards(
-                    trajectory=trajectory,
-                    rewards=rollout_constants.rewards,
-                    rewards_carry=rollout_env_state.reward_carry,
-                    rollout_length_steps=self.rollout_length_steps,
-                    clip_min=self.config.reward_clip_min,
-                    clip_max=self.config.reward_clip_max,
-                )
+            trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
 
-                # TODO: some nice visualizer of rewards...
+            reward_state = get_rewards(
+                trajectory=trajectory,
+                rewards=rollout_constants.rewards,
+                rewards_carry=rollout_env_state.reward_carry,
+                rollout_length_steps=self.rollout_length_steps,
+                clip_min=self.config.reward_clip_min,
+                clip_max=self.config.reward_clip_max,
+            )
 
             if save_path is not None:
+                self._log_logged_trajectory_graphs(
+                    logged_traj=LoggedTrajectory(
+                        trajectory=trajectory,
+                        rewards=reward_state,
+                        metrics=xax.FrozenDict({}),
+                    ),
+                    log_callback=lambda name, value, _: value.save(save_path / f"{name}.png"),
+                )
+
                 fps = round(1 / self.config.ctrl_dt)
 
-                match save_path.suffix.lower():
+                vid_save_path = save_path / ("render.mp4" if self.config.run_environment_save_video else "render.gif")
+
+                match vid_save_path.suffix.lower():
                     case ".mp4":
                         try:
                             import imageio.v2 as imageio
@@ -1577,7 +1603,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             ) from err
 
                         try:
-                            with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
+                            with imageio.get_writer(vid_save_path, mode="I", fps=fps) as writer:
                                 for frame in frames:
                                     writer.append_data(frame)
 
@@ -1592,7 +1618,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     case ".gif":
                         images = [Image.fromarray(frame) for frame in frames]
                         images[0].save(
-                            save_path,
+                            vid_save_path,
                             save_all=True,
                             append_images=images[1:],
                             duration=int(1000 / fps),
@@ -1600,7 +1626,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         )
 
                     case _:
-                        raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
+                        raise ValueError(f"Unsupported file extension: {vid_save_path.suffix}. Expected .mp4 or .gif")
+
+                logger.log(xax.LOG_STATUS, "Rendered trajectory visuals to %s", save_path)
 
     def _get_rollout_constants(
         self,
@@ -1907,8 +1935,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         )
 
                         # Only log trajectory information on validation steps.
-                        self.log_logged_trajectory_graphs(logged_traj=logged_traj)
-                        self.log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
+                        self._log_logged_trajectory_graphs(
+                            logged_traj=logged_traj,
+                            log_callback=lambda key, value, namespace: self.logger.log_image(
+                                key=key, value=value, namespace=namespace
+                            ),
+                        )
+                        self._log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
 
                     else:
                         state = state.replace(
@@ -1919,7 +1952,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         )
 
                         if self.render_traj_step_timer(state):
-                            self.log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
+                            self._log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
 
                     if is_first_step:
                         is_first_step = False
