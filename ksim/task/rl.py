@@ -469,7 +469,7 @@ class RLConfig(xax.Config):
         help="The time step of the physics loop.",
     )
     iterations: int = xax.field(
-        value=8,
+        value=4,
         help="Number of main solver iterations",
     )
     ls_iterations: int = xax.field(
