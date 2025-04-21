@@ -383,13 +383,13 @@ if __name__ == "__main__":
             # Training parameters.
             num_envs=2048,
             batch_size=256,
-            num_passes=4,
+            num_passes=2,
             epochs_per_log_step=1,
-            rollout_length_seconds=10.0,
+            rollout_length_seconds=8.0,
             # Simulation parameters.
-            dt=0.004,
+            dt=0.005,
             ctrl_dt=0.02,
-            iterations=4,
+            iterations=8,
             ls_iterations=8,
             max_action_latency=0.01,
         ),
