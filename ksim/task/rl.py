@@ -1914,7 +1914,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             phase="train",
                         )
 
-                        if self.render_traj_step_timer.is_valid_step(state):
+                        if self.render_traj_step_timer(state):
                             self.log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
 
                     if is_first_step:
