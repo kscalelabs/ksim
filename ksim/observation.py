@@ -342,7 +342,7 @@ class ProjectedGravityObservation(StatefulObservation):
         state: ObservationInput,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array]:
+    ) -> tuple[Array, tuple[Array, Array]]:
         framequat_start, framequat_end = self.framequat_idx_range
         framequat_data = state.physics_state.data.sensordata[framequat_start:framequat_end].ravel()
 

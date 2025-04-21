@@ -374,6 +374,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 command_name="joystick_command",
                 scale=1.0,
             ),
+            ksim.AngularVelocityPenalty(index="x", scale=-0.001),
+            ksim.AngularVelocityPenalty(index="y", scale=-0.001),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
