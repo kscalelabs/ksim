@@ -21,5 +21,9 @@ mujoco
 mujoco-mjx
 # mujoco-scenes
 
+# Priors
+bvhio
+pyglm
+
 # Deployment
 pykos
