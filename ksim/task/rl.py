@@ -1941,21 +1941,25 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             )
 
                             full_size_render = state.num_valid_steps.item() % self.config.render_full_every_n_steps == 0
-
-                            # Log everything on validation steps.
-                            self._log_logged_trajectory_video(
-                                logged_traj=logged_traj,
-                                markers=markers,
-                                viewer=full_viewer if full_size_render else small_viewer,
-                                key="trajectory" if full_size_render else "trajectory_small",
-                            )
-
                             if full_size_render:
+                                self._log_logged_trajectory_video(
+                                    logged_traj=logged_traj,
+                                    markers=markers,
+                                    viewer=full_viewer,
+                                    key="trajectory",
+                                )
                                 self._log_logged_trajectory_graphs(
                                     logged_traj=logged_traj,
                                     log_callback=lambda key, value, namespace: self.logger.log_image(
                                         key=key, value=value, namespace=namespace
                                     ),
+                                )
+                            else:
+                                self._log_logged_trajectory_video(
+                                    logged_traj=logged_traj,
+                                    markers=markers,
+                                    viewer=small_viewer,
+                                    key="trajectory_small",
                                 )
 
                         else:
