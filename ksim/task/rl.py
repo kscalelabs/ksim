@@ -432,11 +432,11 @@ class RLConfig(xax.Config):
         help="If true, render inertia.",
     )
     render_height_small: int = xax.field(
-        value=240,
+        value=160,
         help="The height of the rendered images.",
     )
     render_width_small: int = xax.field(
-        value=360,
+        value=240,
         help="The width of the rendered images.",
     )
     render_height: int = xax.field(
