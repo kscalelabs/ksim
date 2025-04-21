@@ -122,6 +122,14 @@ class RolloutConstants:
     argmax_action: bool
 
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class _RLTrainLoopCarry:
+    opt_state: optax.OptState
+    rollout_env_states: RolloutEnvState
+    rollout_shared_state: RolloutSharedState
+
+
 def get_observation(
     rollout_env_state: RolloutEnvState,
     observations: Collection[Observation],
@@ -376,7 +384,7 @@ class RLConfig(xax.Config):
         help="The number of training environments to run in parallel.",
     )
     batch_size: int = xax.field(
-        value=MISSING,
+        value=1,
         help="The number of model update batches per trajectory batch. ",
     )
     rollout_length_seconds: float = xax.field(
@@ -1362,43 +1370,37 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @xax.jit(static_argnames=["self", "optimizer", "rollout_constants"], jit_level=1)
     def _rl_train_loop_step(
         self,
+        carry: _RLTrainLoopCarry,
         optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
         rollout_constants: RolloutConstants,
-        rollout_env_states: RolloutEnvState,
-        rollout_shared_state: RolloutSharedState,
         state: xax.State,
         rng: PRNGKeyArray,
-    ) -> tuple[optax.OptState, Metrics, RolloutEnvState, RolloutSharedState, LoggedTrajectory]:
+    ) -> tuple[_RLTrainLoopCarry, Metrics, LoggedTrajectory]:
         """Runs a single step of the RL training loop."""
 
         def single_step_fn(
-            carry: tuple[optax.OptState, RolloutEnvState, RolloutSharedState],
+            carry_i: _RLTrainLoopCarry,
             rng: PRNGKeyArray,
-        ) -> tuple[
-            tuple[optax.OptState, RolloutEnvState, RolloutSharedState],
-            tuple[Metrics, LoggedTrajectory],
-        ]:
-            opt_state, rollout_env_states, rollout_shared_state = carry
-
+        ) -> tuple[_RLTrainLoopCarry, tuple[Metrics, LoggedTrajectory]]:
             # Rolls out a new trajectory.
             vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(None, 0, None))
             trajectories, rewards, next_rollout_env_states = vmapped_unroll(
                 rollout_constants,
-                rollout_env_states,
-                rollout_shared_state,
+                carry_i.rollout_env_states,
+                carry_i.rollout_shared_state,
             )
+
             # The reward carry is updated every rollout using the last episode.
             next_reward_carry = rewards.carry
 
             # Runs update on the previous trajectory.
             model_arr, opt_state, next_model_carry, train_metrics, logged_traj = self.update_model(
                 optimizer=optimizer,
-                opt_state=opt_state,
+                opt_state=carry_i.opt_state,
                 trajectories=trajectories,
                 rewards=rewards,
-                rollout_env_states=rollout_env_states,
-                rollout_shared_state=rollout_shared_state,
+                rollout_env_states=carry_i.rollout_env_states,
+                rollout_shared_state=carry_i.rollout_shared_state,
                 rollout_constants=rollout_constants,
                 rng=rng,
             )
@@ -1408,7 +1410,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 train=train_metrics,
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
-                curriculum_level=rollout_env_states.curriculum_state.level,
+                curriculum_level=carry_i.rollout_env_states.curriculum_state.level,
             )
 
             # Steps the curriculum.
@@ -1416,39 +1418,37 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 trajectory=trajectories,
                 rewards=rewards,
                 training_state=state,
-                prev_state=rollout_env_states.curriculum_state,
+                prev_state=carry_i.rollout_env_states.curriculum_state,
             )
 
-            # Constructs the final rollout variables.
-            next_rollout_env_states = RolloutEnvState(
-                # For the next rollout, we use the model carry from the output
-                # of the model update instead of the output of the rollout.
-                # This was shown to work slightly better in practice - for an
-                # RNN model, for example, after updating the model, the model
-                # carry will be new and the previous rollout's model carry will
-                # be incorrect.
-                commands=next_rollout_env_states.commands,
-                physics_state=next_rollout_env_states.physics_state,
-                randomization_dict=next_rollout_env_states.randomization_dict,
-                model_carry=next_model_carry,
-                reward_carry=next_reward_carry,
-                obs_carry=next_rollout_env_states.obs_carry,
-                curriculum_state=curriculum_state,
-                rng=next_rollout_env_states.rng,
+            next_carry = _RLTrainLoopCarry(
+                opt_state=opt_state,
+                rollout_env_states=RolloutEnvState(
+                    # For the next rollout, we use the model carry from the
+                    # output of the model update instead of the output of the
+                    # rollout. This was shown to work slightly better in
+                    # practice - for an  RNN model, for example, after updating
+                    # the model, the model carry will be new and the previous
+                    # rollout's model carry will be incorrect.
+                    commands=next_rollout_env_states.commands,
+                    physics_state=next_rollout_env_states.physics_state,
+                    randomization_dict=next_rollout_env_states.randomization_dict,
+                    model_carry=next_model_carry,
+                    reward_carry=next_reward_carry,
+                    obs_carry=next_rollout_env_states.obs_carry,
+                    curriculum_state=curriculum_state,
+                    rng=next_rollout_env_states.rng,
+                ),
+                rollout_shared_state=RolloutSharedState(
+                    model_arr=model_arr,
+                    physics_model=carry_i.rollout_shared_state.physics_model,
+                ),
             )
 
-            next_rollout_shared_state = RolloutSharedState(
-                model_arr=model_arr,
-                physics_model=rollout_shared_state.physics_model,
-            )
+            return next_carry, (metrics, logged_traj)
 
-            return (opt_state, next_rollout_env_states, next_rollout_shared_state), (metrics, logged_traj)
-
-        (opt_state, rollout_env_states, rollout_shared_state), (metrics, logged_traj) = jax.lax.scan(
-            single_step_fn,
-            (opt_state, rollout_env_states, rollout_shared_state),
-            jax.random.split(rng, self.config.epochs_per_log_step),
-        )
+        rngs = jax.random.split(rng, self.config.epochs_per_log_step)
+        carry, (metrics, logged_traj) = jax.lax.scan(single_step_fn, carry, rngs)
 
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x, metrics)
@@ -1456,9 +1456,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Only get final trajectory and rewards.
         logged_traj = jax.tree.map(lambda arr: arr[-1], logged_traj)
 
-        # Metrics, final_trajectories, final_rewards batch dim of epochs.
-        # Rollout variables has batch dim of num_envs and are used next rollout.
-        return opt_state, metrics, rollout_env_states, rollout_shared_state, logged_traj
+        return carry, metrics, logged_traj
 
     def run_environment(
         self,
@@ -1489,7 +1487,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.set_loggers()
 
             rng, model_rng = jax.random.split(rng)
-            model, _ = self.load_initial_state(model_rng, load_optimizer=False)
+            models, _ = self.load_initial_state(model_rng, load_optimizer=False)
+
+            # Always use the first model for rollouts. This means we can support
+            # multi-model checkpoints, such as teacher-student or AMP models.
+            if len(models) < 1:
+                raise ValueError("No models found in checkpoint")
+            model = models[0]
 
             # Loads the Mujoco model and logs some information about it.
             mj_model = self.get_mujoco_model()
@@ -1766,7 +1770,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 Thread(target=self.log_state, daemon=True).start()
 
             rng, model_rng = jax.random.split(rng)
-            model, state = self.load_initial_state(model_rng, load_optimizer=False)
+            models, state = self.load_initial_state(model_rng, load_optimizer=False)
+
+            # Always use the first model for rollouts. This means we can support
+            # multi-model checkpoints, such as teacher-student or AMP models.
+            if len(models) < 1:
+                raise ValueError("No models found in checkpoint")
+            model = models[0]
 
             if save_path is None:
                 save_path = self.exp_dir / f"dataset_{state.num_steps}.npz"
@@ -1820,11 +1830,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Gets the model and optimizer variables.
             rng, model_rng = jax.random.split(rng)
-            model, optimizer, opt_state, state = self.load_initial_state(model_rng, load_optimizer=True)
+            models, optimizers, opt_states, state = self.load_initial_state(model_rng, load_optimizer=True)
+
+            if len(models) != 1 or len(optimizers) != 1 or len(opt_states) != 1:
+                raise ValueError(
+                    "RL training expects a single model, optimizer and optimizer state. "
+                    f"Found {len(models)} models, {len(optimizers)} optimizers and {len(opt_states)} optimizer states."
+                )
+            model = models[0]
+            optimizer = optimizers[0]
+            opt_state = opt_states[0]
 
             # Logs model and optimizer information.
             logger.log(xax.LOG_PING, "Model size: %s parameters", f"{xax.get_pytree_param_count(model):,}")
-            logger.log(xax.LOG_PING, "Optimizer size: %s parameters", f"{xax.get_pytree_param_count(model):,}")
+            logger.log(xax.LOG_PING, "Optimizer size: %s parameters", f"{xax.get_pytree_param_count(optimizer):,}")
 
             # Loads the Mujoco model and logs some information about it.
             mj_model: PhysicsModel = self.get_mujoco_model()
@@ -1841,8 +1860,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             model_arr, model_static = eqx.partition(model, self.model_partition_fn)
 
             rollout_constants = self._get_rollout_constants(mjx_model, model_static, argmax_action=False)
-            rollout_env_states = self._get_rollout_env_state(rng, rollout_constants, mjx_model, randomizers)
-            rollout_shared_state = self._get_rollout_shared_state(mjx_model, model_arr)
+
+            carry = _RLTrainLoopCarry(
+                opt_state=opt_state,
+                rollout_env_states=self._get_rollout_env_state(rng, rollout_constants, mjx_model, randomizers),
+                rollout_shared_state=self._get_rollout_shared_state(mjx_model, model_arr),
+            )
 
             # Creates the markers.
             markers = self.get_markers(
@@ -1868,22 +1891,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             state = self.on_training_start(state)
 
+            def _save() -> None:
+                model = eqx.combine(carry.rollout_shared_state.model_arr, rollout_constants.model_static)
+                self.save_checkpoint(models=[model], optimizers=[optimizer], opt_states=[carry.opt_state], state=state)
+
             def on_exit() -> None:
-                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
-                self.save_checkpoint(
-                    model=model,
-                    optimizer=optimizer,
-                    opt_state=opt_state,
-                    state=state,
-                )
+                _save()
 
             # Handle user-defined interrupts during the training loop.
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
 
-            is_first_step = True
-
             # Clean up variables which are not part of the control loop.
             del model_arr, model_static, mjx_model, randomizers
+
+            is_first_step = True
 
             try:
                 while not self.is_training_over(state):
@@ -1898,26 +1919,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         state = self.on_step_start(state)
 
                         rng, update_rng = jax.random.split(rng)
-                        (
-                            opt_state,
-                            metrics,
-                            rollout_env_states,
-                            rollout_shared_state,
-                            logged_traj,
-                        ) = self._rl_train_loop_step(
+                        carry, metrics, logged_traj = self._rl_train_loop_step(
+                            carry=carry,
                             optimizer=optimizer,
-                            opt_state=opt_state,
                             rollout_constants=rollout_constants,
-                            rollout_env_states=rollout_env_states,
-                            rollout_shared_state=rollout_shared_state,
                             state=state,
                             rng=update_rng,
                         )
 
                         if self.config.profile_memory:
-                            opt_state = jax.block_until_ready(opt_state)
-                            rollout_env_states = jax.block_until_ready(rollout_env_states)
-                            rollout_shared_state = jax.block_until_ready(rollout_shared_state)
+                            carry = jax.block_until_ready(carry)
+                            metrics = jax.block_until_ready(metrics)
                             logged_traj = jax.block_until_ready(logged_traj)
                             jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
 
@@ -1925,8 +1937,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         self.log_state_timers(state)
 
                         if self.should_checkpoint(state):
-                            model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
-                            self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
+                            _save()
 
                         state = self.on_step_end(state)
 
@@ -1990,16 +2001,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         )
 
                 # Save the checkpoint when done.
-                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
-                self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
+                _save()
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
                     msg = f"Finished training after {state.num_steps}steps and {state.num_samples} samples"
                     xax.show_info(msg, important=True)
-
-                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
-                self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
+                _save()
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 if xax.is_master():
@@ -2009,9 +2017,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
-
-                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
-                self.save_checkpoint(model=model, optimizer=optimizer, opt_state=opt_state, state=state)
+                _save()
 
             finally:
                 state = self.on_training_end(state)
