@@ -505,6 +505,10 @@ class RLConfig(xax.Config):
         value="newton",
         help="The constraint solver algorithm to use",
     )
+    integrator: str = xax.field(
+        value="implicitfast",
+        help="The integrator algorithm to use",
+    )
     disable_euler_damping: bool = xax.field(
         value=True,
         help="If set, disable Euler damping - this is a performance improvement",
@@ -640,10 +644,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if solver is None:
             raise ValueError(f"Invalid solver type: {self.config.solver}")
 
+        integrator = getattr(mjx.IntegratorType, self.config.integrator.upper(), None)
+        if integrator is None:
+            raise ValueError(f"Invalid integrator type: {self.config.integrator}")
+
         _set_opt("timestep", self.config.dt)
         _set_opt("iterations", self.config.iterations)
         _set_opt("ls_iterations", self.config.ls_iterations)
-        _set_opt("integrator", mjx.IntegratorType.EULER)
+        _set_opt("integrator", integrator)
         _set_opt("solver", solver)
 
         if self.config.disable_euler_damping:

@@ -389,7 +389,7 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
-            iterations=8,
+            iterations=4,
             ls_iterations=8,
             max_action_latency=0.01,
         ),
