@@ -117,6 +117,13 @@ class MjxEngine(PhysicsEngine):
         )
 
     @xax.jit(static_argnames=["self"])
+    def _physics_step(self, physics_model: mjx.Model, data_with_ctrl: mjx.Data) -> mjx.Data:
+        # Just performs the MJX step, but wraps it in it's own JIT which can be
+        # cached to prevent heavy recompilation every time the rewards or
+        # events change.
+        return mjx.step(physics_model, data_with_ctrl)
+
+    @xax.jit(static_argnames=["self"])
     def step(
         self,
         action: Array,
@@ -174,7 +181,7 @@ class MjxEngine(PhysicsEngine):
                 torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=ctrl_rng)
 
             data_with_ctrl = data.replace(ctrl=torques)
-            new_data = mjx.step(physics_model, data_with_ctrl)
+            new_data = self._physics_step(physics_model, data_with_ctrl)
             return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), planner_state), None
 
         # Runs the model for N steps.
