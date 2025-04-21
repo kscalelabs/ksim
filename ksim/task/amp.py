@@ -6,8 +6,16 @@ __all__ = [
     "AMPReward",
 ]
 
+import bdb
+import datetime
+import logging
+import signal
+import sys
+import textwrap
+import traceback
 from abc import abstractmethod
 from dataclasses import dataclass, replace as dataclass_replace
+from threading import Thread
 from typing import Generic, TypeVar
 
 import attrs
@@ -18,13 +26,32 @@ import jax.numpy as jnp
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from omegaconf import DictConfig, OmegaConf
 
 from ksim.rewards import Reward
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.task.rl import RolloutConstants, RolloutEnvState, RolloutSharedState
-from ksim.types import LoggedTrajectory, RewardState, Trajectory
+from ksim.task.rl import RolloutConstants, RolloutEnvState, RolloutSharedState, get_viewer
+from ksim.types import LoggedTrajectory, Metrics, PhysicsModel, RewardState, Trajectory
 
 DISCRIMINATOR_OUTPUT_KEY = "_discriminator_output"
+
+logger = logging.getLogger(__name__)
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class DiscriminatorSharedState:
+    """Variables used across all environments."""
+
+    model_arr: PyTree
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class DiscriminatorConstants:
+    """Constants for the rollout loop."""
+
+    model_static: PyTree
 
 
 @jax.tree_util.register_dataclass
@@ -75,6 +102,32 @@ class AMPTask(PPOTask[Config], Generic[Config]):
     This task extends PPO to include adversarial training with a discriminator
     that tries to distinguish between real motion data and policy-generated motion.
     """
+
+    @abstractmethod
+    def get_policy_model(self, key: PRNGKeyArray) -> PyTree:
+        """Returns the policy model."""
+
+    @abstractmethod
+    def get_discriminator_model(self, key: PRNGKeyArray) -> PyTree:
+        """Returns the discriminator model."""
+
+    def get_model(self, key: PRNGKeyArray) -> tuple[PyTree, PyTree]:
+        policy_key, discriminator_key = jax.random.split(key)
+        return self.get_policy_model(policy_key), self.get_discriminator_model(discriminator_key)
+
+    @abstractmethod
+    def get_policy_optimizer(self) -> optax.GradientTransformation:
+        """Returns the optimizer for the policy model."""
+
+    @abstractmethod
+    def get_discriminator_optimizer(self) -> optax.GradientTransformation:
+        """Returns the optimizer for the discriminator model."""
+
+    def get_optimizer(self) -> tuple[optax.GradientTransformation, optax.GradientTransformation]:
+        return (
+            self.get_policy_optimizer(),
+            self.get_discriminator_optimizer(),
+        )
 
     @abstractmethod
     def get_real_motions(self) -> PyTree:
@@ -159,30 +212,44 @@ class AMPTask(PPOTask[Config], Generic[Config]):
 
         return transition, next_rollout_env_state
 
-    def update_model(
+    def update_model_with_discriminator(
         self,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
+        pol_optimizer: optax.GradientTransformation,
+        pol_opt_state: optax.OptState,
+        disc_optimizer: optax.GradientTransformation,
+        disc_opt_state: optax.OptState,
         trajectories: Trajectory,
         rewards: RewardState,
         rollout_env_states: RolloutEnvState,
         rollout_shared_state: RolloutSharedState,
         rollout_constants: RolloutConstants,
+        disc_rollout_constants: DiscriminatorConstants,
+        disc_rollout_shared_state: DiscriminatorSharedState,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, PyTree, xax.FrozenDict[str, Array], LoggedTrajectory]:
+    ) -> tuple[
+        tuple[PyTree, optax.OptState],
+        tuple[PyTree, optax.OptState],
+        PyTree,
+        xax.FrozenDict[str, Array],
+        LoggedTrajectory,
+    ]:
         """Runs PPO updates on a given set of trajectory batches, with AMP updates as well.
 
         This extends the PPO update to include adversarial training with the
         discriminator, and applies a few additional checks.
 
         Args:
-            optimizer: The optimizer to use.
-            opt_state: The optimizer state.
+            pol_optimizer: The optimizer to use for the policy model.
+            pol_opt_state: The optimizer state for the policy model.
+            disc_optimizer: The optimizer to use for the discriminator model.
+            disc_opt_state: The optimizer state for the discriminator model.
             trajectories: The trajectories to update the model on. (num_envs, num_steps, leaf_dim)
             rewards: The rewards for the trajectories. (num_envs, num_steps)
             rollout_env_states: The environment variables inputs into the rollout.
             rollout_shared_state: The shared state inputs into the rollout.
             rollout_constants: The constant inputs into the rollout.
+            disc_rollout_constants: The constant inputs into the discriminator rollout.
+            disc_rollout_shared_state: The shared state inputs into the discriminator rollout.
             rng: A random seed.
 
         Returns:
@@ -193,9 +260,9 @@ class AMPTask(PPOTask[Config], Generic[Config]):
             raise ValueError("AMPReward is missing! Make sure to add it to your `get_rewards` function!")
 
         # Applies PPO updates.
-        model_arr, opt_state, next_model_carrys, metrics, logged_traj = super().update_model(
-            optimizer=optimizer,
-            opt_state=opt_state,
+        pol_model_arr, pol_opt_state, next_model_carrys, metrics, logged_traj = self.update_model(
+            optimizer=pol_optimizer,
+            opt_state=pol_opt_state,
             trajectories=trajectories,
             rewards=rewards,
             rollout_env_states=rollout_env_states,
@@ -209,11 +276,370 @@ class AMPTask(PPOTask[Config], Generic[Config]):
         fake_motions = jax.vmap(self.trajectory_to_motion, in_axes=0)(trajectories)
         chex.assert_trees_all_equal_sizes(real_motions, fake_motions)
 
-        carry_training_state = (rollout_shared_state.model_arr, opt_state, rng)
+        carry_training_state = (disc_rollout_shared_state.model_arr, disc_opt_state, rng)
 
         # Applies gradient updates across all batches num_discriminator_passes times.
         carry_training_state, (metrics, trajs_for_logging) = jax.lax.scan(
             update_model_across_batches, carry_training_state, length=self.config.num_discriminator_updates
         )
 
-        return model_arr, opt_state, next_model_carrys, metrics, logged_traj
+        return (pol_model_arr, pol_opt_state), (disc_model_arr, disc_opt_state), next_model_carrys, metrics, logged_traj
+
+    def _get_discriminator_rollout_constants(self, disc_model_static: PyTree) -> DiscriminatorConstants:
+        return DiscriminatorConstants(
+            model_static=disc_model_static,
+        )
+
+    def _get_discriminator_rollout_shared_state(self, disc_model_arr: PyTree) -> DiscriminatorSharedState:
+        return DiscriminatorSharedState(
+            model_arr=disc_model_arr,
+        )
+
+    @xax.jit(static_argnames=["self", "optimizer", "rollout_constants"], jit_level=1)
+    def _amp_train_loop_step(
+        self,
+        pol_optimizer: optax.GradientTransformation,
+        pol_opt_state: optax.OptState,
+        disc_optimizer: optax.GradientTransformation,
+        disc_opt_state: optax.OptState,
+        rollout_constants: RolloutConstants,
+        rollout_env_states: RolloutEnvState,
+        rollout_shared_state: RolloutSharedState,
+        state: xax.State,
+        rng: PRNGKeyArray,
+    ) -> tuple[optax.OptState, Metrics, RolloutEnvState, RolloutSharedState, LoggedTrajectory]:
+        """Runs a single step of the RL training loop."""
+
+        def single_step_fn(
+            carry: tuple[optax.OptState, RolloutEnvState, RolloutSharedState],
+            rng: PRNGKeyArray,
+        ) -> tuple[
+            tuple[optax.OptState, RolloutEnvState, RolloutSharedState],
+            tuple[Metrics, LoggedTrajectory],
+        ]:
+            opt_state, rollout_env_states, rollout_shared_state = carry
+
+            # Rolls out a new trajectory.
+            vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(None, 0, None))
+            trajectories, rewards, next_rollout_env_states = vmapped_unroll(
+                rollout_constants,
+                rollout_env_states,
+                rollout_shared_state,
+            )
+
+            # The reward carry is updated every rollout using the last episode.
+            next_reward_carry = rewards.carry
+
+            # Runs update on the previous trajectory.
+            model_arr, opt_state, next_model_carry, train_metrics, logged_traj = self.update_model(
+                optimizer=optimizer,
+                opt_state=opt_state,
+                trajectories=trajectories,
+                rewards=rewards,
+                rollout_env_states=rollout_env_states,
+                rollout_shared_state=rollout_shared_state,
+                rollout_constants=rollout_constants,
+                rng=rng,
+            )
+
+            # Store all the metrics to log.
+            metrics = Metrics(
+                train=train_metrics,
+                reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
+                termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
+                curriculum_level=rollout_env_states.curriculum_state.level,
+            )
+
+            # Steps the curriculum.
+            curriculum_state = rollout_constants.curriculum(
+                trajectory=trajectories,
+                rewards=rewards,
+                training_state=state,
+                prev_state=rollout_env_states.curriculum_state,
+            )
+
+            # Constructs the final rollout variables.
+            next_rollout_env_states = RolloutEnvState(
+                # For the next rollout, we use the model carry from the output
+                # of the model update instead of the output of the rollout.
+                # This was shown to work slightly better in practice - for an
+                # RNN model, for example, after updating the model, the model
+                # carry will be new and the previous rollout's model carry will
+                # be incorrect.
+                commands=next_rollout_env_states.commands,
+                physics_state=next_rollout_env_states.physics_state,
+                randomization_dict=next_rollout_env_states.randomization_dict,
+                model_carry=next_model_carry,
+                reward_carry=next_reward_carry,
+                obs_carry=next_rollout_env_states.obs_carry,
+                curriculum_state=curriculum_state,
+                rng=next_rollout_env_states.rng,
+            )
+
+            next_rollout_shared_state = RolloutSharedState(
+                model_arr=model_arr,
+                physics_model=rollout_shared_state.physics_model,
+            )
+
+            return (opt_state, next_rollout_env_states, next_rollout_shared_state), (metrics, logged_traj)
+
+        (opt_state, rollout_env_states, rollout_shared_state), (metrics, logged_traj) = jax.lax.scan(
+            single_step_fn,
+            (opt_state, rollout_env_states, rollout_shared_state),
+            jax.random.split(rng, self.config.epochs_per_log_step),
+        )
+
+        # Convert any array with more than one element to a histogram.
+        metrics = jax.tree.map(lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x, metrics)
+
+        # Only get final trajectory and rewards.
+        logged_traj = jax.tree.map(lambda arr: arr[-1], logged_traj)
+
+        # Metrics, final_trajectories, final_rewards batch dim of epochs.
+        # Rollout variables has batch dim of num_envs and are used next rollout.
+        return opt_state, metrics, rollout_env_states, rollout_shared_state, logged_traj
+
+    def run_training(self) -> None:
+        """Wraps the training loop to include discriminator models."""
+        with self:
+            rng = self.prng_key()
+            self.set_loggers()
+
+            if xax.is_master():
+                Thread(target=self.log_state, daemon=True).start()
+
+            # Gets the model and optimizer variables.
+            rng, model_rng = jax.random.split(rng)
+            models, optimizers, opt_states, state = self.load_initial_state(model_rng, load_optimizer=True)
+
+            if len(models) != 2 or len(optimizers) != 2 or len(opt_states) != 2:
+                raise ValueError(
+                    "AMP training expects two models, two optimizers and two optimizer states. "
+                    "The first model should be the policy model, and the second model should be the discriminator. "
+                    f"Found {len(models)} models, {len(optimizers)} optimizers and {len(opt_states)} optimizer states."
+                )
+            pol_model, disc_model = models
+            pol_optimizer, disc_optimizer = optimizers
+            pol_opt_state, disc_opt_state = opt_states
+
+            # Logs model and optimizer information.
+            logger.log(
+                xax.LOG_PING,
+                "Policy model size: %s parameters",
+                f"{xax.get_pytree_param_count(pol_model):,}",
+            )
+            logger.log(
+                xax.LOG_PING,
+                "Discriminator model size: %s parameters",
+                f"{xax.get_pytree_param_count(disc_model):,}",
+            )
+            logger.log(
+                xax.LOG_PING,
+                "Policy optimizer size: %s parameters",
+                f"{xax.get_pytree_param_count(pol_optimizer):,}",
+            )
+            logger.log(
+                xax.LOG_PING,
+                "Discriminator optimizer size: %s parameters",
+                f"{xax.get_pytree_param_count(disc_optimizer):,}",
+            )
+
+            # Loads the Mujoco model and logs some information about it.
+            mj_model: PhysicsModel = self.get_mujoco_model()
+            mj_model = self.set_mujoco_model_opts(mj_model)
+            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
+            self.logger.log_file("mujoco_info.yaml", mujoco_info)
+
+            # Loads the MJX model, and initializes the loop variables.
+            mjx_model = self.get_mjx_model(mj_model)
+            randomizers = self.get_physics_randomizers(mjx_model)
+
+            # JAX requires that we partition the model into mutable and static
+            # parts in order to use lax.scan, so that `arr` can be a PyTree.
+            pol_model_arr, pol_model_static = eqx.partition(pol_model, self.model_partition_fn)
+            disc_model_arr, disc_model_static = eqx.partition(disc_model, self.model_partition_fn)
+
+            rollout_constants = self._get_rollout_constants(mjx_model, pol_model_static, argmax_action=False)
+            rollout_env_states = self._get_rollout_env_state(rng, rollout_constants, mjx_model, randomizers)
+            rollout_shared_state = self._get_rollout_shared_state(mjx_model, pol_model_arr)
+
+            disc_rollout_constants = self._get_discriminator_rollout_constants(disc_model_static)
+            disc_rollout_shared_state = self._get_discriminator_rollout_shared_state(disc_model_arr)
+
+            # Creates the markers.
+            markers = self.get_markers(
+                commands=rollout_constants.commands,
+                observations=rollout_constants.observations,
+                rewards=rollout_constants.rewards,
+                randomizers=randomizers,
+            )
+
+            # Creates the viewer.
+            small_viewer = get_viewer(
+                mj_model=mj_model,
+                config=self.config,
+                mode="offscreen",
+                is_small=True,
+            )
+            full_viewer = get_viewer(
+                mj_model=mj_model,
+                config=self.config,
+                mode="offscreen",
+                is_small=False,
+            )
+
+            state = self.on_training_start(state)
+
+            def on_exit() -> None:
+                pol_model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
+                disc_model = eqx.combine(disc_rollout_shared_state.model_arr, disc_rollout_constants.model_static)
+                self.save_checkpoint(
+                    models=[pol_model, disc_model],
+                    optimizers=[pol_optimizer, disc_optimizer],
+                    opt_states=[pol_opt_state, disc_opt_state],
+                    state=state,
+                )
+
+            # Handle user-defined interrupts during the training loop.
+            self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
+
+            # Clean up variables which are not part of the control loop.
+            del pol_model_arr, pol_model_static, disc_model_arr, disc_model_static, mjx_model, randomizers
+
+            is_first_step = True
+
+            try:
+                while not self.is_training_over(state):
+                    # Runs the training loop.
+                    with xax.ContextTimer() as timer:
+                        valid_step = self.valid_step_timer(state)
+
+                        state = state.replace(
+                            phase="valid" if valid_step else "train",
+                        )
+
+                        state = self.on_step_start(state)
+
+                        rng, update_rng = jax.random.split(rng)
+                        (
+                            opt_state,
+                            metrics,
+                            rollout_env_states,
+                            rollout_shared_state,
+                            logged_traj,
+                        ) = self._rl_train_loop_step(
+                            optimizer=optimizer,
+                            opt_state=opt_state,
+                            rollout_constants=rollout_constants,
+                            rollout_env_states=rollout_env_states,
+                            rollout_shared_state=rollout_shared_state,
+                            state=state,
+                            rng=update_rng,
+                        )
+
+                        if self.config.profile_memory:
+                            opt_state = jax.block_until_ready(opt_state)
+                            rollout_env_states = jax.block_until_ready(rollout_env_states)
+                            rollout_shared_state = jax.block_until_ready(rollout_shared_state)
+                            logged_traj = jax.block_until_ready(logged_traj)
+                            jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
+
+                        self.log_train_metrics(metrics)
+                        self.log_state_timers(state)
+
+                        if self.should_checkpoint(state):
+                            model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
+                            self.save_checkpoint(
+                                models=[model],
+                                optimizers=[optimizer],
+                                opt_states=[opt_state],
+                                state=state,
+                            )
+
+                        state = self.on_step_end(state)
+
+                        # Updates the step and sample counts.
+                        num_steps = self.config.epochs_per_log_step
+                        num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
+
+                        if valid_step:
+                            state = state.replace(
+                                num_valid_steps=state.num_valid_steps + num_steps,
+                                num_valid_samples=state.num_valid_samples + num_samples,
+                            )
+
+                            full_size_render = state.num_valid_steps.item() % self.config.render_full_every_n_steps == 0
+                            if full_size_render:
+                                self._log_logged_trajectory_video(
+                                    logged_traj=logged_traj,
+                                    markers=markers,
+                                    viewer=full_viewer,
+                                    key="trajectory",
+                                )
+                                self._log_logged_trajectory_graphs(
+                                    logged_traj=logged_traj,
+                                    log_callback=lambda key, value, namespace: self.logger.log_image(
+                                        key=key, value=value, namespace=namespace
+                                    ),
+                                )
+                            else:
+                                self._log_logged_trajectory_video(
+                                    logged_traj=logged_traj,
+                                    markers=markers,
+                                    viewer=small_viewer,
+                                    key="trajectory_small",
+                                )
+
+                        else:
+                            state = state.replace(
+                                num_steps=state.num_steps + num_steps,
+                                num_samples=state.num_samples + num_samples,
+                            )
+
+                        self.write_logs(state)
+
+                    # Update  state with the elapsed time.
+                    elapsed_time = timer.elapsed_time
+                    if valid_step:
+                        state = state.replace(
+                            valid_elapsed_time_s=state.valid_elapsed_time_s + elapsed_time,
+                        )
+                    else:
+                        state = state.replace(
+                            elapsed_time_s=state.elapsed_time_s + elapsed_time,
+                        )
+
+                    if is_first_step:
+                        is_first_step = False
+                        logger.log(
+                            xax.LOG_STATUS,
+                            "First step time: %s",
+                            xax.format_timedelta(datetime.timedelta(seconds=elapsed_time), short=True),
+                        )
+
+                # Save the checkpoint when done.
+                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
+                self.save_checkpoint(models=[model], optimizers=[optimizer], opt_states=[opt_state], state=state)
+
+            except xax.TrainingFinishedError:
+                if xax.is_master():
+                    msg = f"Finished training after {state.num_steps}steps and {state.num_samples} samples"
+                    xax.show_info(msg, important=True)
+
+                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
+                self.save_checkpoint(models=[model], optimizers=[optimizer], opt_states=[opt_state], state=state)
+
+            except (KeyboardInterrupt, bdb.BdbQuit):
+                if xax.is_master():
+                    xax.show_info("Interrupted training", important=True)
+
+            except BaseException:
+                exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
+                sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
+                sys.stdout.flush()
+
+                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
+                self.save_checkpoint(models=[model], optimizers=[optimizer], opt_states=[opt_state], state=state)
+
+            finally:
+                state = self.on_training_end(state)
