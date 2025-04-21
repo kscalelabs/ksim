@@ -19,7 +19,7 @@ import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -416,8 +416,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        proj_grav_3 = observations["projected_gravity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
         base_pos_3 = observations["base_position_observation"]
         base_quat_4 = observations["base_orientation_observation"]
@@ -434,8 +435,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
                 com_vel_n,  # 96
-                imu_acc_3 / 50.0,  # 3
-                imu_gyro_3 / 3.0,  # 3
+                proj_grav_3,  # 3
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
                 base_pos_3,  # 3
                 base_quat_4,  # 4
@@ -459,8 +459,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        proj_grav_3 = observations["projected_gravity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
         base_pos_3 = observations["base_position_observation"]
         base_quat_4 = observations["base_orientation_observation"]
@@ -477,8 +478,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
                 com_vel_n,  # 96
-                imu_acc_3 / 50.0,  # 3
-                imu_gyro_3 / 3.0,  # 3
+                proj_grav_3,  # 3
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
                 base_pos_3,  # 3
                 base_quat_4,  # 4
