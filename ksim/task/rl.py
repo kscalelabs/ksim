@@ -381,8 +381,24 @@ class RLConfig(xax.Config):
 
     # Validation timing parameters.
     valid_every_n_seconds: float | None = xax.field(
-        150.0,
-        help="Run validation every N seconds",
+        value=60.0 * 30.0,
+        help="Run full validation (render trajectory and all graphs) every N seconds",
+    )
+    render_traj_every_n_steps: int | None = xax.field(
+        value=None,
+        help="Render the trajectory (without associated graphs) every N seconds",
+    )
+    render_traj_first_n_steps: int = xax.field(
+        value=0,
+        help="Render the trajectory (without associated graphs) for the first N steps",
+    )
+    render_traj_every_n_seconds: float | None = xax.field(
+        value=150.0,
+        help="Render the trajectory (without associated graphs) every N seconds",
+    )
+    render_traj_first_n_seconds: float | None = xax.field(
+        value=None,
+        help="Render the trajectory (without associated graphs) for the first N seconds",
     )
 
     # Rendering parameters.
@@ -575,6 +591,8 @@ def get_viewer(
 
 class RLTask(xax.Task[Config], Generic[Config], ABC):
     """Base class for reinforcement learning tasks."""
+
+    render_traj_step_timer: xax.ValidStepTimer
 
     def __init__(self, config: Config) -> None:
         super().__init__(config)
@@ -1063,11 +1081,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return np.stack(frame_list, axis=0), fps
 
-    def log_logged_trajectory(
+    def log_logged_trajectory_graphs(
         self,
-        logged_traj: LoggedTrajectory,
-        markers: Collection[Marker],
-        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
+        logged_traj: LoggedTrajectory
     ) -> None:
         """Visualizes a single trajectory.
 
@@ -1120,6 +1136,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 # Logs the image.
                 self.logger.log_image(key=key, value=img, namespace=namespace)
 
+    def log_logged_trajectory_video(
+        self,
+        logged_traj: LoggedTrajectory,
+        markers: Collection[Marker],
+        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
+    ) -> None:
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(
             trajectory=logged_traj.trajectory,
@@ -1877,7 +1899,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         )
 
                         # Only log trajectory information on validation steps.
-                        self.log_logged_trajectory(logged_traj=logged_traj, markers=markers, viewer=viewer)
+                        self.log_logged_trajectory_graphs(logged_traj=logged_traj)
+                        self.log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
 
                     else:
                         state = state.replace(
@@ -1886,6 +1909,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             elapsed_time_s=state.elapsed_time_s + elapsed_time,
                             phase="train",
                         )
+
+                        if self.render_traj_step_timer.is_valid_step(state):
+                            self.log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
 
                     if is_first_step:
                         is_first_step = False
