@@ -141,7 +141,6 @@ class QposReferenceMotionReward(ksim.Reward):
 
 
 class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Config]):
-
     reference_qpos: Array
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:

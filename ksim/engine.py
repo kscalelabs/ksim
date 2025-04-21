@@ -297,8 +297,8 @@ def get_physics_engine(
         raise RuntimeError(f"`{min_action_latency=}` cannot be greater than `{ctrl_dt=}`")
     if max_action_latency > ctrl_dt:
         logger.warning("`max_action_latency=%f` is greater than `ctrl_dt=%f`", max_action_latency, ctrl_dt)
-    if (ctrl_dt - (ctrl_dt // dt) * dt) > 1e-6:
-        logger.warning("`ctrl_dt=%f` is not a multiple of `dt=%f`", ctrl_dt, dt)
+    if (remainder := (ctrl_dt - round(ctrl_dt / dt) * dt)) > 1e-6:
+        logger.warning("`ctrl_dt=%f` is not a multiple of `dt=%f` (remainder=%f)", ctrl_dt, dt, remainder)
 
     # Converts to steps.
     min_action_latency_step = max(round(min_action_latency / dt), 0)

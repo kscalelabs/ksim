@@ -289,133 +289,68 @@ class BaseAngularAccelerationObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class ProjectedGravityObservation(StatefulObservation):
-    acc_noise: float = attrs.field(default=0.0)
-    gyro_noise: float = attrs.field(default=0.0)
-    acc_idx_range: tuple[int, int | None] = attrs.field()
-    gyro_idx_range: tuple[int, int | None] = attrs.field()
+    framequat_idx_range: tuple[int, int | None] = attrs.field()
     gravity: tuple[float, float, float] = attrs.field()
-    dt: float = attrs.field()
-
-    # Kalman filter parameters
-    process_noise: float = attrs.field(default=0.01)  # Process noise covariance
-    acc_covariance: float = attrs.field(default=0.1)  # Accelerometer measurement noise covariance
-    gyro_covariance: float = attrs.field(default=0.01)  # Gyroscope measurement noise covariance
+    lag: float = attrs.field(
+        default=0.0,
+        validator=attrs.validators.and_(attrs.validators.ge(0.0), attrs.validators.lt(1.0)),
+    )
 
     @classmethod
     def create(
         cls,
         *,
         physics_model: PhysicsModel,
-        acc_name: str,
-        gyro_name: str,
-        ctrl_dt: float,
-        acc_noise: float = 0.0,
-        gyro_noise: float = 0.0,
-        process_noise: float = 0.01,
-        acc_covariance: float = 0.1,
-        gyro_covariance: float = 0.01,
+        framequat_name: str,
+        lag: float = 0.0,
+        noise: float = 0.0,
     ) -> Self:
         """Create a projected gravity observation from a physics model.
 
         Args:
             physics_model: MuJoCo physics model
-            acc_name: Name of accelerometer sensor
-            gyro_name: Name of gyroscope sensor
-            ctrl_dt: Time step for IMU updates
-            acc_noise: Amount of noise to add to accelerometer
-            gyro_noise: Amount of noise to add to gyroscope
-            process_noise: Process noise covariance for Kalman filter
-            acc_covariance: Accelerometer measurement noise covariance
-            gyro_covariance: Gyroscope measurement noise covariance
-            dt: Time step for IMU updates
+            framequat_name: The name of the framequat sensor
+            lag: The EMA factor to use
+            noise: The observation noise
         """
         sensor_name_to_idx_range = get_sensor_data_idxs_by_name(physics_model)
-        for sensor_name in [acc_name, gyro_name]:
-            if sensor_name not in sensor_name_to_idx_range:
-                options = "\n".join(sorted(sensor_name_to_idx_range.keys()))
-                raise ValueError(f"{sensor_name} not found in model. Available:\n{options}")
+        if framequat_name not in sensor_name_to_idx_range:
+            options = "\n".join(sorted(sensor_name_to_idx_range.keys()))
+            raise ValueError(f"{framequat_name} not found in model. Available:\n{options}")
 
-        # Gets the gravity vector from the physics model.
         gx, gy, gz = np.array(physics_model.opt.gravity).flatten().tolist()
 
         return cls(
-            acc_noise=acc_noise,
-            gyro_noise=gyro_noise,
-            acc_idx_range=sensor_name_to_idx_range[acc_name],
-            gyro_idx_range=sensor_name_to_idx_range[gyro_name],
+            framequat_idx_range=sensor_name_to_idx_range[framequat_name],
             gravity=(float(gx), float(gy), float(gz)),
-            dt=ctrl_dt,
-            process_noise=process_noise,
-            acc_covariance=acc_covariance,
-            gyro_covariance=gyro_covariance,
+            lag=lag,
+            noise=noise,
         )
 
-    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        """Initialize the Kalman filter state.
-
-        Returns:
-            A 3x1 state vector (projected gravity in body frame), and a
-            3x3 error covariance matrix
-        """
-        x = jnp.array(self.gravity)
-        P = jnp.eye(3) * 10.0
-        return (x, P)
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros((3,))
 
     def observe_stateful(
         self,
         state: ObservationInput,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, tuple[Array, Array]]:
-        """Update the Kalman filter with new IMU measurements and return projected gravity.
+    ) -> tuple[Array, Array]:
+        framequat_start, framequat_end = self.framequat_idx_range
+        framequat_data = state.physics_state.data.sensordata[framequat_start:framequat_end].ravel()
 
-        The Kalman filter estimates the gravity vector in the body frame using:
-        - State: Projected gravity vector (3x1)
-        - Process model: Gravity vector rotates with body
-        - Measurement model: Accelerometer measures gravity + acceleration
-        """
-        acc_start, acc_end = self.acc_idx_range
-        gyro_start, gyro_end = self.gyro_idx_range
-        acc_data = state.physics_state.data.sensordata[acc_start:acc_end].ravel()
-        gyro_data = state.physics_state.data.sensordata[gyro_start:gyro_end].ravel()
+        # Orients the gravity vector according to the quaternion.
+        gravity = jnp.array(self.gravity)
+        proj_gravity = xax.rotate_vector_by_quat(gravity, framequat_data)
 
-        # Add noise to measurements
-        acc_rng, gyro_rng = jax.random.split(rng)
-        acc_data = add_noise(acc_data, acc_rng, "gaussian", self.acc_noise, curriculum_level)
-        gyro_data = add_noise(gyro_data, gyro_rng, "gaussian", self.gyro_noise, curriculum_level)
+        # Add noise to gravity vector measurement.
+        proj_gravity = add_noise(proj_gravity, rng, "gaussian", self.noise, curriculum_level)
 
         # Get current Kalman filter state
-        x, P = state.obs_carry
+        x = state.obs_carry
+        x = x * self.lag + proj_gravity * (1 - self.lag)
 
-        # Process model: Gravity vector rotates with body
-        # F = I + dt * [w]x where [w]x is the skew-symmetric matrix of angular velocity
-        w = gyro_data
-        wx = jnp.array([[0, -w[2], w[1]], [w[2], 0, -w[0]], [-w[1], w[0], 0]])
-        F = jnp.eye(3) + self.dt * wx
-
-        # Process noise covariance
-        Q = jnp.eye(3) * self.process_noise
-
-        # Measurement model: Accelerometer measures gravity + acceleration
-        # For simplicity, assume acceleration is zero-mean noise
-        H = jnp.eye(3)
-        R = jnp.eye(3) * self.acc_covariance
-
-        # Kalman filter prediction step
-        x_pred = F @ x
-        P_pred = F @ P @ F.T + Q
-
-        # Kalman filter update step
-        y = acc_data - x_pred  # Innovation
-        S = H @ P_pred @ H.T + R
-        K = P_pred @ H.T @ jnp.linalg.inv(S)  # Kalman gain
-        x_new = x_pred + K @ y
-        P_new = (jnp.eye(3) - K @ H) @ P_pred
-
-        # Normalize the gravity vector
-        x_new = x_new / jnp.linalg.norm(x_new)
-
-        return x_new, (x_new, P_new)
+        return x, x
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -449,8 +384,8 @@ class ContactObservation(Observation):
         geom_idxs = [get_geom_data_idx_from_name(physics_model, name) for name in geom_names]
         return cls(
             geom_idxs=tuple(geom_idxs),
-            noise=noise,
             contact_group=contact_group,
+            noise=noise,
         )
 
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:

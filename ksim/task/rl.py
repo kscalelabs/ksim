@@ -468,6 +468,22 @@ class RLConfig(xax.Config):
         value=0.005,
         help="The time step of the physics loop.",
     )
+    iterations: int = xax.field(
+        value=8,
+        help="Number of main solver iterations",
+    )
+    ls_iterations: int = xax.field(
+        value=8,
+        help="Maximum number of CG / Newton linesearch iterations",
+    )
+    solver: str = xax.field(
+        value="newton",
+        help="The constraint solver algorithm to use",
+    )
+    disable_euler_damping: bool = xax.field(
+        value=True,
+        help="If set, disable Euler damping - this is a performance improvement",
+    )
     min_action_latency: float = xax.field(
         value=0.0,
         help="The minimum latency of the action.",
@@ -583,6 +599,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @abstractmethod
     def get_mujoco_model(self) -> mujoco.MjModel: ...
 
+    def set_mujoco_model_opts(self, mj_model: mujoco.MjModel) -> mujoco.MjModel:
+        def _set_opt(name: str, value: Any) -> None:  # noqa: ANN401
+            model_val = getattr(mj_model.opt, name)
+            if model_val != value:
+                logger.warning("User-specified %s %s is different from model %s %s", name, value, name, model_val)
+                setattr(mj_model.opt, name, value)
+
+        solver = getattr(mjx.SolverType, self.config.solver.upper(), None)
+        if solver is None:
+            raise ValueError(f"Invalid solver type: {self.config.solver}")
+
+        _set_opt("timestep", self.config.dt)
+        _set_opt("iterations", self.config.iterations)
+        _set_opt("ls_iterations", self.config.ls_iterations)
+        _set_opt("integrator", mjx.IntegratorType.EULER)
+        _set_opt("solver", solver)
+
+        if self.config.disable_euler_damping:
+            mj_model.opt.disableflags = mj_model.opt.disableflags | mjx.DisableBit.EULERDAMP
+
+        return mj_model
+
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
         return get_joint_metadata(mj_model)
 
@@ -607,7 +645,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             resets=self.get_resets(physics_model),
             events=self.get_events(physics_model),
             actuators=self.get_actuators(physics_model, metadata),
-            dt=self.config.dt,
+            dt=float(physics_model.opt.timestep.item()),
             ctrl_dt=self.config.ctrl_dt,
             min_action_latency=self.config.min_action_latency,
             max_action_latency=self.config.max_action_latency,
@@ -960,16 +998,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         self.logger.log_scalar(key, value.mean, namespace=namespace, secondary=secondary)
                     else:
                         self.logger.log_scalar(key, value.mean(), namespace=namespace, secondary=secondary)
-
-    def log_model_size(self, model: PyTree) -> None:
-        """Logs the size of the model.
-
-        Args:
-            model: The model to log the size of.
-        """
-        leaves, _ = jax.tree.flatten(model)
-        num_params = sum(x.size for x in leaves if isinstance(x, jnp.ndarray))
-        logger.info("Model size: %d parameters", num_params)
 
     def render_trajectory_video(
         self,
@@ -1420,6 +1448,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Loads the Mujoco model and logs some information about it.
             mj_model = self.get_mujoco_model()
+            mj_model = self.set_mujoco_model_opts(mj_model)
             mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
             self.logger.log_file("mujoco_info.yaml", mujoco_info)
 
@@ -1686,6 +1715,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Loads the Mujoco model and logs some information about it.
             mj_model: PhysicsModel = self.get_mujoco_model()
+            mj_model = self.set_mujoco_model_opts(mj_model)
             mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
             self.logger.log_file("mujoco_info.yaml", mujoco_info)
 
@@ -1733,10 +1763,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Gets the model and optimizer variables.
             rng, model_rng = jax.random.split(rng)
             model, optimizer, opt_state, state = self.load_initial_state(model_rng, load_optimizer=True)
-            self.log_model_size(model)
+
+            # Logs model and optimizer information.
+            logger.log(xax.LOG_PING, "Model size: %s parameters", f"{xax.get_pytree_param_count(model):,}")
+            logger.log(xax.LOG_PING, "Optimizer size: %s parameters", f"{xax.get_pytree_param_count(model):,}")
 
             # Loads the Mujoco model and logs some information about it.
             mj_model: PhysicsModel = self.get_mujoco_model()
+            mj_model = self.set_mujoco_model_opts(mj_model)
             mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
             self.logger.log_file("mujoco_info.yaml", mujoco_info)
 

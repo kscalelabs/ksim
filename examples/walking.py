@@ -14,7 +14,6 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from mujoco import mjx
 
 import ksim
 
@@ -253,18 +252,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
-
-        mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 4
-        mj_model.opt.ls_iterations = 8
-        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
-
-        # Observed NaNs in qpos with Newton solver...
-        # mj_model.opt.solver = mjx.SolverType.NEWTON
-
-        return mj_model
+        return mujoco.MjModel.from_xml_path(mjcf_path)
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
         return ksim.get_joint_metadata(
@@ -329,13 +317,25 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.BaseAngularAccelerationObservation(),
             ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
-                acc_name="imu_acc",
-                gyro_name="imu_gyro",
-                ctrl_dt=self.config.ctrl_dt,
+                framequat_name="orientation",
+                lag=0.1,
             ),
             ksim.ActuatorAccelerationObservation(),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="local_linvel"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="forwardvector"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_linvel"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_angvel"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="position"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="orientation"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_global_linvel"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_global_linvel"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_upvector"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_upvector"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_pos"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_pos"),
             ksim.FeetContactObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names=["foot1_left", "foot2_left"],
@@ -558,8 +558,10 @@ if __name__ == "__main__":
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.004,
             ctrl_dt=0.02,
+            iterations=4,
+            ls_iterations=8,
             max_action_latency=0.0,
             min_action_latency=0.0,
         ),

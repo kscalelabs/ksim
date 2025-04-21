@@ -11,7 +11,6 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from mujoco import mjx
 
 import ksim
 from ksim.utils.mujoco import remove_mujoco_joints_except
@@ -43,15 +42,7 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         mj_model_joint_removed = remove_mujoco_joints_except(
             mjcf_path, ["shoulder1_right", "shoulder2_right", "elbow_right"]
         )
-        mj_model = mujoco.MjModel.from_xml_string(mj_model_joint_removed)
-
-        mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
-        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
-
-        return mj_model
+        return mujoco.MjModel.from_xml_string(mj_model_joint_removed)
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidRNNModel:
         return DefaultHumanoidRNNModel(
@@ -255,6 +246,8 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
+            iterations=6,
+            ls_iterations=6,
             max_action_latency=0.0,
             min_action_latency=0.0,
             rollout_length_seconds=4.0,
