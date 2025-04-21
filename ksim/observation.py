@@ -291,9 +291,14 @@ class BaseAngularAccelerationObservation(Observation):
 class ProjectedGravityObservation(StatefulObservation):
     framequat_idx_range: tuple[int, int | None] = attrs.field()
     gravity: tuple[float, float, float] = attrs.field()
-    lag: float = attrs.field(
-        default=0.0,
-        validator=attrs.validators.and_(attrs.validators.ge(0.0), attrs.validators.lt(1.0)),
+    lag_range: tuple[float, float] = attrs.field(
+        default=(0.01, 0.1),
+        validator=attrs.validators.deep_iterable(
+            attrs.validators.and_(
+                attrs.validators.ge(0.0),
+                attrs.validators.lt(1.0),
+            ),
+        ),
     )
 
     @classmethod
@@ -302,7 +307,7 @@ class ProjectedGravityObservation(StatefulObservation):
         *,
         physics_model: PhysicsModel,
         framequat_name: str,
-        lag: float = 0.0,
+        lag_range: tuple[float, float] = (0.01, 0.1),
         noise: float = 0.0,
     ) -> Self:
         """Create a projected gravity observation from a physics model.
@@ -310,7 +315,8 @@ class ProjectedGravityObservation(StatefulObservation):
         Args:
             physics_model: MuJoCo physics model
             framequat_name: The name of the framequat sensor
-            lag: The EMA factor to use
+            lag_range: The range of EMA factors to use, to approximate the
+                variation in the amount of smoothing of the Kalman filter.
             noise: The observation noise
         """
         sensor_name_to_idx_range = get_sensor_data_idxs_by_name(physics_model)
@@ -323,12 +329,13 @@ class ProjectedGravityObservation(StatefulObservation):
         return cls(
             framequat_idx_range=sensor_name_to_idx_range[framequat_name],
             gravity=(float(gx), float(gy), float(gz)),
-            lag=lag,
+            lag_range=lag_range,
             noise=noise,
         )
 
-    def initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros((3,))
+    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        minval, maxval = self.lag_range
+        return jnp.zeros((3,)), jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
 
     def observe_stateful(
         self,
@@ -347,10 +354,10 @@ class ProjectedGravityObservation(StatefulObservation):
         proj_gravity = add_noise(proj_gravity, rng, "gaussian", self.noise, curriculum_level)
 
         # Get current Kalman filter state
-        x = state.obs_carry
-        x = x * self.lag + proj_gravity * (1 - self.lag)
+        x, lag = state.obs_carry
+        x = x * lag + proj_gravity * (1 - lag)
 
-        return x, x
+        return x, (x, lag)
 
 
 @attrs.define(frozen=True, kw_only=True)
