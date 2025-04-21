@@ -87,6 +87,7 @@ class PhysicsEngine(eqx.Module, ABC):
 class MjxEngine(PhysicsEngine):
     """Defines an engine for MJX models."""
 
+    @xax.jit(static_argnames=["self"])
     def reset(self, physics_model: mjx.Model, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsState:
         mjx_data = mjx.make_data(physics_model)
 
@@ -115,6 +116,7 @@ class MjxEngine(PhysicsEngine):
             planner_state=planner_state,
         )
 
+    @xax.jit(static_argnames=["self"])
     def step(
         self,
         action: Array,

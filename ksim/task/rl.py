@@ -597,6 +597,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def __init__(self, config: Config) -> None:
         super().__init__(config)
 
+        self.render_traj_step_timer = xax.ValidStepTimer(
+            valid_every_n_steps=self.config.render_traj_every_n_steps,
+            valid_first_n_steps=self.config.render_traj_first_n_steps,
+            valid_every_n_seconds=self.config.render_traj_every_n_seconds,
+            valid_first_n_seconds=self.config.render_traj_first_n_seconds,
+        )
+
         # Using this Matplotlib backend since it is non-interactive.
         matplotlib.use("agg")
 
@@ -1081,10 +1088,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return np.stack(frame_list, axis=0), fps
 
-    def log_logged_trajectory_graphs(
-        self,
-        logged_traj: LoggedTrajectory
-    ) -> None:
+    def log_logged_trajectory_graphs(self, logged_traj: LoggedTrajectory) -> None:
         """Visualizes a single trajectory.
 
         Args:
