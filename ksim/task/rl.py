@@ -384,6 +384,10 @@ class RLConfig(xax.Config):
         value=60.0 * 30.0,
         help="Run full validation (render trajectory and all graphs) every N seconds",
     )
+    valid_first_n_seconds: float | None = xax.field(
+        value=None,
+        help="Run first validation after N seconds",
+    )
     render_traj_every_n_steps: int | None = xax.field(
         value=None,
         help="Render the trajectory (without associated graphs) every N seconds",
@@ -1853,7 +1857,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         state = self.on_step_start(state)
 
                         # Use a different phase for logging full trajectories.
-                        is_valid_step = self.valid_step_timer.is_valid_step(state)
+                        is_valid_step = self.valid_step_timer(state)
 
                         rng, update_rng = jax.random.split(rng)
                         (
