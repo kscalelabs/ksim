@@ -13,10 +13,10 @@ import signal
 import sys
 import textwrap
 import traceback
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace as dataclass_replace
 from threading import Thread
-from typing import Generic, TypeVar
+from typing import Generic, Sequence, TypeVar
 
 import attrs
 import chex
@@ -107,7 +107,7 @@ class AMPReward(Reward):
         return reward
 
 
-class AMPTask(PPOTask[Config], Generic[Config]):
+class AMPTask(PPOTask[Config], Generic[Config], ABC):
     """Adversarial Motion Prior task.
 
     This task extends PPO to include adversarial training with a discriminator
@@ -122,7 +122,7 @@ class AMPTask(PPOTask[Config], Generic[Config]):
     def get_discriminator_model(self, key: PRNGKeyArray) -> PyTree:
         """Returns the discriminator model."""
 
-    def get_model(self, key: PRNGKeyArray) -> tuple[PyTree, PyTree]:
+    def get_model(self, key: PRNGKeyArray) -> PyTree | Sequence[PyTree]:
         policy_key, discriminator_key = jax.random.split(key)
         return self.get_policy_model(policy_key), self.get_discriminator_model(discriminator_key)
 
