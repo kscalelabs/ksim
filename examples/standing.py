@@ -43,7 +43,6 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
-            min_action_latency=0.0,
+            max_action_latency=0.01,
         ),
     )
