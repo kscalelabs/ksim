@@ -644,3 +644,59 @@ class JoystickReward(Reward):
             ),
         )
         return reward
+
+
+@attrs.define(frozen=True, kw_only=True)
+class QposReferenceMotionReward(ksim.Reward):
+    reference_qpos: xax.HashableArray
+    ctrl_dt: float
+    norm: xax.NormType = attrs.field(default="l1")
+    sensitivity: float = attrs.field(default=5.0)
+
+    @property
+    def num_frames(self) -> int:
+        return self.reference_qpos.array.shape[0]
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        qpos = trajectory.qpos
+        step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
+        reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
+        error = xax.get_norm(reference_qpos - qpos, self.norm)
+        mean_error = error.mean(axis=-1)
+        reward = jnp.exp(-mean_error * self.sensitivity)
+        return reward
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ReferenceMotionReward(ksim.Reward):
+    reference_motion: xax.HashableArray
+    ctrl_dt: float
+    norm: xax.NormType = attrs.field(default="l1")
+    sensitivity: float = attrs.field(default=5.0)
+    observation_name: str = attrs.field(default="qpos")
+
+    @property
+    def num_frames(self) -> int:
+        return self.reference_motion.array.shape[0]
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        observed_motion = trajectory.obs[self.observation_name]
+        step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
+        reference_motion = jnp.take(self.reference_motion.array, step_number, axis=0)
+        error = xax.get_norm(reference_motion - qpos, self.norm)
+        mean_error = error.mean(axis=-1)
+        reward = jnp.exp(-mean_error * self.sensitivity)
+        return reward
+
+
+@attrs.define(frozen=True, kw_only=True)
+class TimeWarpedReferenceMotionReward(ksim.Reward):
+    reference_motion: xax.HashableArray
+    ctrl_dt: float
+    sensitivity: float = attrs.field(default=5.0)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        observed_motion = trajectory.obs[self.observation_name]
+        distance = xax.dtw(observed_motion, self.reference_motion.array)
+        reward = jnp.exp(-distance * self.sensitivity)
+        return reward

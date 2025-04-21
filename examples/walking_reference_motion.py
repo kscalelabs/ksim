@@ -1,4 +1,4 @@
-"""Walking default humanoid task with reference gait tracking."""
+"""Basic walking task with reference motion tracking."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -117,27 +117,6 @@ def create_target_marker_update_fn(
         marker.pos = tuple(abs_pos)
 
     return _target_update_fn
-
-
-@attrs.define(frozen=True, kw_only=True)
-class QposReferenceMotionReward(ksim.Reward):
-    reference_qpos: xax.HashableArray
-    ctrl_dt: float
-    norm: xax.NormType = attrs.field(default="l1")
-    sensitivity: float = attrs.field(default=5.0)
-
-    @property
-    def num_frames(self) -> int:
-        return self.reference_qpos.array.shape[0]
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        qpos = trajectory.qpos
-        step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
-        reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
-        error = xax.get_norm(reference_qpos - qpos, self.norm)
-        mean_error = error.mean(axis=-1)
-        reward = jnp.exp(-mean_error * self.sensitivity)
-        return reward
 
 
 class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Config]):
