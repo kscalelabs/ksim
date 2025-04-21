@@ -386,28 +386,16 @@ class RLConfig(xax.Config):
 
     # Validation timing parameters.
     valid_every_n_seconds: float | None = xax.field(
-        value=60.0 * 30.0,
+        value=150.0,
         help="Run full validation (render trajectory and all graphs) every N seconds",
     )
     valid_first_n_seconds: float | None = xax.field(
         value=None,
         help="Run first validation after N seconds",
     )
-    render_traj_every_n_steps: int | None = xax.field(
-        value=None,
+    render_large_traj_every_n_steps: int = xax.field(
+        value=12,
         help="Render the trajectory (without associated graphs) every N seconds",
-    )
-    render_traj_first_n_steps: int = xax.field(
-        value=0,
-        help="Render the trajectory (without associated graphs) for the first N steps",
-    )
-    render_traj_every_n_seconds: float | None = xax.field(
-        value=150.0,
-        help="Render the trajectory (without associated graphs) every N seconds",
-    )
-    render_traj_first_n_seconds: float | None = xax.field(
-        value=None,
-        help="Render the trajectory (without associated graphs) for the first N seconds",
     )
 
     # Rendering parameters.
@@ -443,19 +431,19 @@ class RLConfig(xax.Config):
         value=False,
         help="If true, render inertia.",
     )
-    render_height: int = xax.field(
+    render_height_small: int = xax.field(
         value=240,
         help="The height of the rendered images.",
     )
-    render_width: int = xax.field(
+    render_width_small: int = xax.field(
         value=360,
         help="The width of the rendered images.",
     )
-    valid_render_height: int = xax.field(
+    render_height: int = xax.field(
         value=480,
         help="The height of the rendered images during the validation phase.",
     )
-    valid_render_width: int = xax.field(
+    render_width: int = xax.field(
         value=640,
         help="The height of the rendered images during the validation phase.",
     )
@@ -552,7 +540,7 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
-    is_train: bool = False,
+    is_small: bool = False,
 ) -> GlfwMujocoViewer | DefaultMujocoViewer:
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
@@ -567,8 +555,8 @@ def get_viewer(
             mj_model,
             data=mj_data,
             mode=mode,
-            width=config.render_width if is_train else config.valid_render_width,
-            height=config.render_height if is_train else config.valid_render_height,
+            width=config.render_width_small if is_small else config.render_width,
+            height=config.render_height_small if is_small else config.render_height,
             shadow=config.render_shadow,
             reflection=config.render_reflection,
             contact_force=config.render_contact_force,
@@ -579,8 +567,8 @@ def get_viewer(
     else:
         viewer = DefaultMujocoViewer(
             mj_model,
-            width=config.render_width if is_train else config.valid_render_width,
-            height=config.render_height if is_train else config.valid_render_height,
+            width=config.render_width_small if is_small else config.render_width,
+            height=config.render_height_small if is_small else config.render_height,
         )
 
     # Sets the viewer camera.
@@ -610,17 +598,8 @@ def get_viewer(
 class RLTask(xax.Task[Config], Generic[Config], ABC):
     """Base class for reinforcement learning tasks."""
 
-    render_traj_step_timer: xax.ValidStepTimer
-
     def __init__(self, config: Config) -> None:
         super().__init__(config)
-
-        self.render_traj_step_timer = xax.ValidStepTimer(
-            valid_every_n_steps=self.config.render_traj_every_n_steps,
-            valid_first_n_steps=self.config.render_traj_first_n_steps,
-            valid_every_n_seconds=self.config.render_traj_every_n_seconds,
-            valid_first_n_seconds=self.config.render_traj_first_n_seconds,
-        )
 
         # Using this Matplotlib backend since it is non-interactive.
         matplotlib.use("agg")
@@ -1172,6 +1151,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         logged_traj: LoggedTrajectory,
         markers: Collection[Marker],
         viewer: GlfwMujocoViewer | DefaultMujocoViewer,
+        key: str,
     ) -> None:
         """Visualizes a single trajectory.
 
@@ -1179,6 +1159,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             logged_traj: The single trajectory to log.
             markers: The markers to visualize.
             viewer: The Mujoco viewer to render the scene with.
+            key: The logging key to use.
         """
         # Clips the trajectory to the desired length.
         if self.config.render_length_seconds is not None:
@@ -1193,7 +1174,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         self.logger.log_video(
-            key="trajectory",
+            key=key,
             value=frames,
             fps=round(fps / self.config.render_slowdown),
             namespace="➡️ trajectory images",
@@ -1872,17 +1853,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             # Creates the viewer.
-            train_viewer = get_viewer(
+            small_viewer = get_viewer(
                 mj_model=mj_model,
                 config=self.config,
                 mode="offscreen",
-                is_train=True,
+                is_small=True,
             )
-            valid_viewer = get_viewer(
+            full_viewer = get_viewer(
                 mj_model=mj_model,
                 config=self.config,
                 mode="offscreen",
-                is_train=False,
+                is_small=False,
             )
 
             state = self.on_training_start(state)
@@ -1909,7 +1890,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     # Runs the training loop.
                     with xax.ContextTimer() as timer:
                         valid_step = self.valid_step_timer(state)
-                        render_step = self.render_traj_step_timer(state) or valid_step
+                        full_size_render = state.num_valid_steps % self.config.render_large_traj_every_n_steps == 0
 
                         state = state.replace(
                             phase="valid" if valid_step else "train",
@@ -1961,24 +1942,25 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             )
 
                             # Log everything on validation steps.
-                            self._log_logged_trajectory_graphs(
+                            self._log_logged_trajectory_video(
                                 logged_traj=logged_traj,
-                                log_callback=lambda key, value, namespace: self.logger.log_image(
-                                    key=key, value=value, namespace=namespace
-                                ),
+                                markers=markers,
+                                viewer=full_viewer if full_size_render else small_viewer,
+                                key="trajectory" if full_size_render else "trajectory_small",
                             )
+
+                            if full_size_render:
+                                self._log_logged_trajectory_graphs(
+                                    logged_traj=logged_traj,
+                                    log_callback=lambda key, value, namespace: self.logger.log_image(
+                                        key=key, value=value, namespace=namespace
+                                    ),
+                                )
 
                         else:
                             state = state.replace(
                                 num_steps=state.num_steps + num_steps,
                                 num_samples=state.num_samples + num_samples,
-                            )
-
-                        if render_step:
-                            self._log_logged_trajectory_video(
-                                logged_traj=logged_traj,
-                                markers=markers,
-                                viewer=valid_viewer if valid_step else train_viewer,
                             )
 
                         self.write_logs(state)
