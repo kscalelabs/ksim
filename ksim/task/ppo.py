@@ -1,4 +1,4 @@
-"""Defines a standard task interface for training a policy."""
+"""Defines a task for training a policy using PPO."""
 
 __all__ = [
     "PPOConfig",
@@ -619,7 +619,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             return (model_arr, opt_state, rng), (metrics, logged_traj)
 
         # Applies N steps of gradient updates.
-        def update_model_accross_batches(
+        def update_model_across_batches(
             carry_training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
             _: None,
         ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
@@ -634,9 +634,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         carry_training_state = (rollout_shared_state.model_arr, opt_state, rng)
 
-        # Applies gradient update accross all batches num_passes times.
+        # Applies gradient update across all batches num_passes times.
         carry_training_state, (metrics, trajs_for_logging) = jax.lax.scan(
-            update_model_accross_batches, carry_training_state, length=self.config.num_passes
+            update_model_across_batches, carry_training_state, length=self.config.num_passes
         )
 
         # Get the last logged trajectory accross all full dataset passes.
