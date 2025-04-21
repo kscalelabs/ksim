@@ -393,7 +393,7 @@ class RLConfig(xax.Config):
         value=None,
         help="Run first validation after N seconds",
     )
-    render_large_traj_every_n_steps: int = xax.field(
+    render_full_every_n_steps: int = xax.field(
         value=12,
         help="Render the trajectory (without associated graphs) every N seconds",
     )
@@ -1890,7 +1890,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     # Runs the training loop.
                     with xax.ContextTimer() as timer:
                         valid_step = self.valid_step_timer(state)
-                        full_size_render = state.num_valid_steps % self.config.render_large_traj_every_n_steps == 0
 
                         state = state.replace(
                             phase="valid" if valid_step else "train",
@@ -1940,6 +1939,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 num_valid_steps=state.num_valid_steps + num_steps,
                                 num_valid_samples=state.num_valid_samples + num_samples,
                             )
+
+                            full_size_render = state.num_valid_steps.item() % self.config.render_full_every_n_steps == 0
 
                             # Log everything on validation steps.
                             self._log_logged_trajectory_video(
