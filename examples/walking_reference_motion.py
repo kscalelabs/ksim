@@ -26,7 +26,7 @@ from scipy.spatial.transform import Rotation as R
 
 import ksim
 from ksim.types import PhysicsModel
-from ksim.utils.reference_motion import (
+from ksim.utils.priors import (
     ReferenceMapping,
     generate_reference_motion,
     get_reference_joint_id,

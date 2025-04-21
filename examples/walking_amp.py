@@ -1,12 +1,10 @@
 # mypy: disable-error-code="override"
 """Example walking task using Adversarial Motion Priors."""
 
-from abc import abstractmethod
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Generic, TypeVar
 
-import attrs
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -31,11 +29,10 @@ from scipy.spatial.transform import Rotation as R
 
 import ksim
 from ksim.types import PhysicsModel
-from ksim.utils.reference_motion import (
+from ksim.utils.priors import (
     ReferenceMapping,
     get_reference_cartesian_poses,
     get_reference_joint_id,
-    get_reference_qpos,
     visualize_reference_motion,
     visualize_reference_points,
 )
@@ -203,53 +200,10 @@ HUMANOID_REFERENCE_MAPPINGS = (
 Config = TypeVar("Config", bound=HumanoidWalkingAMPTaskConfig)
 
 
-@attrs.define(frozen=True, kw_only=True)
-class AMPReward(ksim.Reward):
-
-    def __call__(
-        self,
-        trajectory: ksim.Trajectory,
-        _: None,
-    ) -> tuple[Array, None]:
-        """Reward for the discriminator using LSGAN objective."""
-        if trajectory.aux_outputs is None or "_discriminator_logits" not in trajectory.aux_outputs:
-            raise ValueError("_discriminator_logits is set by the AMPTask. Make sure you subclass AMPTask.")
-
-        # With the hinge loss, positive values are real, negative are fake.
-        # discriminator_values = jax.nn.sigmoid(trajectory.aux_outputs["_discriminator_logits"])
-        # return discriminator_values, None
-        # LSGAN-based reward: r = max(0, 1 - 0.25 * (D(s, s') - 1)^2)
-        logits = trajectory.aux_outputs["_discriminator_logits"]
-        reward = jnp.maximum(0.0, 1.0 - 0.25 * jnp.square(logits - 1.0))
-        return reward, None
-
-
 class AMPTask(ksim.RLTask[Config], Generic[Config]):
     """Adversarial Motion Prior task."""
 
     reference_motions: Motion
-
-    @abstractmethod
-    def initial_motion_history(self) -> Motion:
-        """Initial motion history (e.g. zeros, random, etc.)."""
-        ...
-
-    @abstractmethod
-    def run_discriminator(
-        self,
-        model: PyTree,
-        motion: Motion,
-    ) -> Array:
-        """Gets discriminator logit for the provided motion.
-
-        Args:
-            model: The model to use.
-            motion: The motion to get the discriminator logit for.
-
-        Returns:
-            The discriminator logit.
-        """
-        ...
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
     def _get_discriminator_loss_and_metrics(
