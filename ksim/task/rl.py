@@ -1920,7 +1920,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         self.log_train_metrics(metrics)
                         self.log_state_timers(state)
-                        self.write_logs(state)
 
                         if self.should_checkpoint(state):
                             model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
@@ -1954,6 +1953,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         if render_step:
                             self._log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
+
+                        self.write_logs(state)
 
                     # Update  state with the elapsed time.
                     elapsed_time = timer.elapsed_time
