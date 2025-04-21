@@ -490,15 +490,15 @@ class RLConfig(xax.Config):
         help="The time step of the control loop.",
     )
     dt: float = xax.field(
-        value=0.005,
+        value=0.004,
         help="The time step of the physics loop.",
     )
     iterations: int = xax.field(
-        value=4,
+        value=MISSING,
         help="Number of main solver iterations",
     )
     ls_iterations: int = xax.field(
-        value=8,
+        value=MISSING,
         help="Maximum number of CG / Newton linesearch iterations",
     )
     solver: str = xax.field(
@@ -508,10 +508,6 @@ class RLConfig(xax.Config):
     disable_euler_damping: bool = xax.field(
         value=True,
         help="If set, disable Euler damping - this is a performance improvement",
-    )
-    min_action_latency: float = xax.field(
-        value=0.0,
-        help="The minimum latency of the action.",
     )
     max_action_latency: float = xax.field(
         value=0.0,
@@ -681,7 +677,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             actuators=self.get_actuators(physics_model, metadata),
             dt=float(physics_model.opt.timestep.item()),
             ctrl_dt=self.config.ctrl_dt,
-            min_action_latency=self.config.min_action_latency,
             max_action_latency=self.config.max_action_latency,
         )
 
