@@ -464,7 +464,7 @@ class RLConfig(xax.Config):
         help="If set, the render camera will track the body with this ID.",
     )
     render_distance: float = xax.field(
-        value=2.5,
+        value=3.5,
         help="The distance of the camera from the target.",
     )
     render_azimuth: float = xax.field(
@@ -472,7 +472,7 @@ class RLConfig(xax.Config):
         help="The azimuth of the render camera.",
     )
     render_elevation: float = xax.field(
-        value=-30.0,
+        value=-10.0,
         help="The elevation of the render camera.",
     )
     render_lookat: list[float] = xax.field(
