@@ -1109,6 +1109,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return np.stack(frame_list, axis=0), fps
 
+    def _crop_to_length(self, logged_traj: LoggedTrajectory, length: float) -> LoggedTrajectory:
+        render_frames = round(length / self.config.ctrl_dt)
+        return jax.tree.map(lambda arr: arr[:render_frames], logged_traj)
+
     def _log_logged_trajectory_graphs(
         self,
         logged_traj: LoggedTrajectory,
@@ -1122,8 +1126,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
         # Clips the trajectory to the desired length.
         if self.config.render_length_seconds is not None:
-            render_frames = round(self.config.render_length_seconds / self.config.ctrl_dt)
-            logged_traj = jax.tree.map(lambda arr: arr[:render_frames], logged_traj)
+            logged_traj = self._crop_to_length(logged_traj, self.config.render_length_seconds)
 
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Emojis are used in order to prevent conflicts with user-specified namespaces.
@@ -1177,6 +1180,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers: The markers to visualize.
             viewer: The Mujoco viewer to render the scene with.
         """
+        # Clips the trajectory to the desired length.
+        if self.config.render_length_seconds is not None:
+            logged_traj = self._crop_to_length(logged_traj, self.config.render_length_seconds)
+
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(
             trajectory=logged_traj.trajectory,
