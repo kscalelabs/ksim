@@ -1883,12 +1883,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             try:
                 while not self.is_training_over(state):
+                    valid_step = self.valid_step_timer(state)
+                    render_step = self.render_traj_step_timer(state) or valid_step
+
+                    state = state.replace(
+                        phase="valid" if valid_step else "train",
+                    )
+
                     # Runs the training loop.
                     with xax.ContextTimer() as timer:
                         state = self.on_step_start(state)
-
-                        # Use a different phase for logging full trajectories.
-                        is_valid_step = self.valid_step_timer(state)
 
                         rng, update_rng = jax.random.split(rng)
                         (
@@ -1929,33 +1933,30 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
                     elapsed_time = timer.elapsed_time
 
-                    if is_valid_step:
+                    if valid_step:
                         state = state.replace(
                             num_valid_steps=state.num_valid_steps + num_steps,
                             num_valid_samples=state.num_valid_samples + num_samples,
                             valid_elapsed_time_s=state.valid_elapsed_time_s + elapsed_time,
-                            phase="valid",
                         )
 
-                        # Only log trajectory information on validation steps.
+                        # Log everything on validation steps.
                         self._log_logged_trajectory_graphs(
                             logged_traj=logged_traj,
                             log_callback=lambda key, value, namespace: self.logger.log_image(
                                 key=key, value=value, namespace=namespace
                             ),
                         )
-                        self._log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
 
                     else:
                         state = state.replace(
                             num_steps=state.num_steps + num_steps,
                             num_samples=state.num_samples + num_samples,
                             elapsed_time_s=state.elapsed_time_s + elapsed_time,
-                            phase="train",
                         )
 
-                        if self.render_traj_step_timer(state):
-                            self._log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
+                    if render_step:
+                        self._log_logged_trajectory_video(logged_traj=logged_traj, markers=markers, viewer=viewer)
 
                     if is_first_step:
                         is_first_step = False
