@@ -115,7 +115,6 @@ class MjxEngine(PhysicsEngine):
             planner_state=planner_state,
             action_latency=jax.random.uniform(
                 latency_rng,
-                shape=(1,),
                 minval=0,
                 maxval=self.max_action_latency_step * curriculum_level.astype(float),
             )
@@ -222,7 +221,6 @@ class MujocoEngine(PhysicsEngine):
             planner_state=default_planner,
             action_latency=jax.random.uniform(
                 latency_rng,
-                shape=(1,),
                 minval=0,
                 maxval=self.max_action_latency_step * curriculum_level.astype(float),
             )
