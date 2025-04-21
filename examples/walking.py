@@ -561,7 +561,7 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.004,
             ctrl_dt=0.02,
-            iterations=3,
+            iterations=4,
             ls_iterations=8,
             max_action_latency=0.01,
         ),

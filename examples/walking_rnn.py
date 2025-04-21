@@ -387,9 +387,9 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=10.0,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.004,
             ctrl_dt=0.02,
-            iterations=3,
+            iterations=4,
             ls_iterations=8,
             max_action_latency=0.01,
         ),

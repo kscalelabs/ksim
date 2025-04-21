@@ -637,7 +637,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         def _set_opt(name: str, value: Any) -> None:  # noqa: ANN401
             model_val = getattr(mj_model.opt, name)
             if model_val != value:
-                logger.warning("User-specified %s %s is different from model %s %s", name, value, name, model_val)
+                logger.debug("User-specified %s %s is different from model %s %s", name, value, name, model_val)
                 setattr(mj_model.opt, name, value)
 
         solver = getattr(mjx.SolverType, self.config.solver.upper(), None)
