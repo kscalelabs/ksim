@@ -113,12 +113,14 @@ class MjxEngine(PhysicsEngine):
             most_recent_action=default_action,
             event_states=self._reset_events(rng),
             planner_state=planner_state,
-            action_latency=jax.random.randint(
+            action_latency=jax.random.uniform(
                 latency_rng,
                 shape=(1,),
                 minval=0,
-                maxval=(self.max_action_latency_step * curriculum_level),
-            ),
+                maxval=self.max_action_latency_step * curriculum_level.astype(float),
+            )
+            .round()
+            .astype(int),
         )
 
     @xax.jit(static_argnames=["self"])
@@ -218,12 +220,14 @@ class MujocoEngine(PhysicsEngine):
             most_recent_action=default_action,
             event_states=self._reset_events(rng),
             planner_state=default_planner,
-            action_latency=jax.random.randint(
+            action_latency=jax.random.uniform(
                 latency_rng,
                 shape=(1,),
                 minval=0,
-                maxval=(self.max_action_latency_step * curriculum_level),
-            ),
+                maxval=self.max_action_latency_step * curriculum_level.astype(float),
+            )
+            .round()
+            .astype(int),
         )
 
     def step(
