@@ -549,7 +549,7 @@ class HumanoidWalkingAMPTask(AMPTask[HumanoidWalkingAMPTaskConfig], HumanoidWalk
         rewards = [
             ksim.StayAliveReward(scale=1.0),
             ksim.NaiveForwardReward(scale=0.1, clip_max=2.0),
-            AMPReward(scale=0.1),
+            ksim.AMPReward(scale=0.1),
         ]
         return rewards
 

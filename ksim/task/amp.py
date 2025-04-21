@@ -44,6 +44,7 @@ class DiscriminatorSharedState:
     """Variables used across all environments."""
 
     model_arr: PyTree
+    real_motions: PyTree
 
 
 @jax.tree_util.register_dataclass
@@ -52,6 +53,16 @@ class DiscriminatorConstants:
     """Constants for the rollout loop."""
 
     model_static: PyTree
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class _AMPTrainLoopCarry:
+    pol_opt_state: optax.OptState
+    rollout_env_states: RolloutEnvState
+    rollout_shared_state: RolloutSharedState
+    disc_opt_state: optax.OptState
+    disc_shared_state: DiscriminatorSharedState
 
 
 @jax.tree_util.register_dataclass
@@ -223,13 +234,12 @@ class AMPTask(PPOTask[Config], Generic[Config]):
         rollout_env_states: RolloutEnvState,
         rollout_shared_state: RolloutSharedState,
         rollout_constants: RolloutConstants,
-        disc_rollout_constants: DiscriminatorConstants,
-        disc_rollout_shared_state: DiscriminatorSharedState,
+        disc_constants: DiscriminatorConstants,
+        disc_shared_state: DiscriminatorSharedState,
         rng: PRNGKeyArray,
     ) -> tuple[
+        tuple[PyTree, optax.OptState, PyTree],
         tuple[PyTree, optax.OptState],
-        tuple[PyTree, optax.OptState],
-        PyTree,
         xax.FrozenDict[str, Array],
         LoggedTrajectory,
     ]:
@@ -248,8 +258,8 @@ class AMPTask(PPOTask[Config], Generic[Config]):
             rollout_env_states: The environment variables inputs into the rollout.
             rollout_shared_state: The shared state inputs into the rollout.
             rollout_constants: The constant inputs into the rollout.
-            disc_rollout_constants: The constant inputs into the discriminator rollout.
-            disc_rollout_shared_state: The shared state inputs into the discriminator rollout.
+            disc_constants: The constant inputs into the discriminator rollout.
+            disc_shared_state: The shared state inputs into the discriminator rollout.
             rng: A random seed.
 
         Returns:
@@ -259,8 +269,10 @@ class AMPTask(PPOTask[Config], Generic[Config]):
         if all(not isinstance(reward, AMPReward) for reward in rollout_constants.rewards):
             raise ValueError("AMPReward is missing! Make sure to add it to your `get_rewards` function!")
 
+        pol_rng, disc_rng = jax.random.split(rng)
+
         # Applies PPO updates.
-        pol_model_arr, pol_opt_state, next_model_carrys, metrics, logged_traj = self.update_model(
+        pol_model_arr, pol_opt_state, pol_next_model_carry, metrics, logged_traj = self.update_model(
             optimizer=pol_optimizer,
             opt_state=pol_opt_state,
             trajectories=trajectories,
@@ -268,77 +280,95 @@ class AMPTask(PPOTask[Config], Generic[Config]):
             rollout_env_states=rollout_env_states,
             rollout_shared_state=rollout_shared_state,
             rollout_constants=rollout_constants,
-            rng=rng,
+            rng=pol_rng,
         )
 
         # Gets the real and fake motions.
-        real_motions = self.get_real_motions()
         fake_motions = jax.vmap(self.trajectory_to_motion, in_axes=0)(trajectories)
-        chex.assert_trees_all_equal_sizes(real_motions, fake_motions)
+        chex.assert_trees_all_equal_sizes(disc_shared_state.real_motions, fake_motions)
 
-        carry_training_state = (disc_rollout_shared_state.model_arr, disc_opt_state, rng)
+        carry_training_state = (disc_shared_state.model_arr, disc_opt_state, disc_rng)
 
         # Applies gradient updates across all batches num_discriminator_passes times.
         carry_training_state, (metrics, trajs_for_logging) = jax.lax.scan(
             update_model_across_batches, carry_training_state, length=self.config.num_discriminator_updates
         )
 
-        return (pol_model_arr, pol_opt_state), (disc_model_arr, disc_opt_state), next_model_carrys, metrics, logged_traj
+        disc_model_arr, disc_opt_state, _ = carry_training_state
+
+        return (
+            (pol_model_arr, pol_opt_state, pol_next_model_carry),
+            (disc_model_arr, disc_opt_state),
+            metrics,
+            logged_traj,
+        )
 
     def _get_discriminator_rollout_constants(self, disc_model_static: PyTree) -> DiscriminatorConstants:
         return DiscriminatorConstants(
             model_static=disc_model_static,
         )
 
-    def _get_discriminator_rollout_shared_state(self, disc_model_arr: PyTree) -> DiscriminatorSharedState:
+    def _get_discriminator_shared_state(self, disc_model_arr: PyTree) -> DiscriminatorSharedState:
         return DiscriminatorSharedState(
             model_arr=disc_model_arr,
+            real_motions=self.get_real_motions(),
         )
 
-    @xax.jit(static_argnames=["self", "optimizer", "rollout_constants"], jit_level=1)
+    @xax.jit(
+        static_argnames=[
+            "self",
+            "pol_optimizer",
+            "disc_optimizer",
+            "rollout_constants",
+            "disc_constants",
+        ],
+        jit_level=1,
+    )
     def _amp_train_loop_step(
         self,
+        carry: _AMPTrainLoopCarry,
         pol_optimizer: optax.GradientTransformation,
-        pol_opt_state: optax.OptState,
         disc_optimizer: optax.GradientTransformation,
-        disc_opt_state: optax.OptState,
         rollout_constants: RolloutConstants,
-        rollout_env_states: RolloutEnvState,
-        rollout_shared_state: RolloutSharedState,
+        disc_constants: DiscriminatorConstants,
         state: xax.State,
         rng: PRNGKeyArray,
-    ) -> tuple[optax.OptState, Metrics, RolloutEnvState, RolloutSharedState, LoggedTrajectory]:
+    ) -> tuple[_AMPTrainLoopCarry, Metrics, LoggedTrajectory]:
         """Runs a single step of the RL training loop."""
 
         def single_step_fn(
-            carry: tuple[optax.OptState, RolloutEnvState, RolloutSharedState],
+            carry_i: _AMPTrainLoopCarry,
             rng: PRNGKeyArray,
-        ) -> tuple[
-            tuple[optax.OptState, RolloutEnvState, RolloutSharedState],
-            tuple[Metrics, LoggedTrajectory],
-        ]:
-            opt_state, rollout_env_states, rollout_shared_state = carry
-
+        ) -> tuple[_AMPTrainLoopCarry, tuple[Metrics, LoggedTrajectory]]:
             # Rolls out a new trajectory.
             vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(None, 0, None))
             trajectories, rewards, next_rollout_env_states = vmapped_unroll(
                 rollout_constants,
-                rollout_env_states,
-                rollout_shared_state,
+                carry_i.rollout_env_states,
+                carry_i.rollout_shared_state,
             )
 
             # The reward carry is updated every rollout using the last episode.
             next_reward_carry = rewards.carry
 
             # Runs update on the previous trajectory.
-            model_arr, opt_state, next_model_carry, train_metrics, logged_traj = self.update_model(
-                optimizer=optimizer,
-                opt_state=opt_state,
+            (
+                (pol_model_arr, pol_opt_state, pol_next_model_carry),
+                (disc_model_arr, disc_opt_state),
+                train_metrics,
+                logged_traj,
+            ) = self.update_model_with_discriminator(
+                pol_optimizer=pol_optimizer,
+                pol_opt_state=carry_i.pol_opt_state,
+                disc_optimizer=disc_optimizer,
+                disc_opt_state=carry_i.disc_opt_state,
                 trajectories=trajectories,
                 rewards=rewards,
-                rollout_env_states=rollout_env_states,
-                rollout_shared_state=rollout_shared_state,
+                rollout_env_states=carry_i.rollout_env_states,
+                rollout_shared_state=carry_i.rollout_shared_state,
                 rollout_constants=rollout_constants,
+                disc_constants=disc_constants,
+                disc_shared_state=carry_i.disc_shared_state,
                 rng=rng,
             )
 
@@ -347,7 +377,7 @@ class AMPTask(PPOTask[Config], Generic[Config]):
                 train=train_metrics,
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
-                curriculum_level=rollout_env_states.curriculum_state.level,
+                curriculum_level=carry_i.rollout_env_states.curriculum_state.level,
             )
 
             # Steps the curriculum.
@@ -355,39 +385,37 @@ class AMPTask(PPOTask[Config], Generic[Config]):
                 trajectory=trajectories,
                 rewards=rewards,
                 training_state=state,
-                prev_state=rollout_env_states.curriculum_state,
+                prev_state=carry_i.rollout_env_states.curriculum_state,
             )
 
-            # Constructs the final rollout variables.
-            next_rollout_env_states = RolloutEnvState(
-                # For the next rollout, we use the model carry from the output
-                # of the model update instead of the output of the rollout.
-                # This was shown to work slightly better in practice - for an
-                # RNN model, for example, after updating the model, the model
-                # carry will be new and the previous rollout's model carry will
-                # be incorrect.
-                commands=next_rollout_env_states.commands,
-                physics_state=next_rollout_env_states.physics_state,
-                randomization_dict=next_rollout_env_states.randomization_dict,
-                model_carry=next_model_carry,
-                reward_carry=next_reward_carry,
-                obs_carry=next_rollout_env_states.obs_carry,
-                curriculum_state=curriculum_state,
-                rng=next_rollout_env_states.rng,
+            next_carry = _AMPTrainLoopCarry(
+                pol_opt_state=pol_opt_state,
+                rollout_env_states=RolloutEnvState(
+                    commands=next_rollout_env_states.commands,
+                    physics_state=next_rollout_env_states.physics_state,
+                    randomization_dict=next_rollout_env_states.randomization_dict,
+                    model_carry=pol_next_model_carry,
+                    reward_carry=next_reward_carry,
+                    obs_carry=next_rollout_env_states.obs_carry,
+                    curriculum_state=curriculum_state,
+                    rng=next_rollout_env_states.rng,
+                ),
+                rollout_shared_state=RolloutSharedState(
+                    model_arr=pol_model_arr,
+                    physics_model=carry_i.rollout_shared_state.physics_model,
+                ),
+                disc_opt_state=disc_opt_state,
+                disc_shared_state=DiscriminatorSharedState(
+                    model_arr=disc_model_arr,
+                    real_motions=carry_i.disc_shared_state.real_motions,
+                ),
             )
 
-            next_rollout_shared_state = RolloutSharedState(
-                model_arr=model_arr,
-                physics_model=rollout_shared_state.physics_model,
-            )
+            return next_carry, (metrics, logged_traj)
 
-            return (opt_state, next_rollout_env_states, next_rollout_shared_state), (metrics, logged_traj)
-
-        (opt_state, rollout_env_states, rollout_shared_state), (metrics, logged_traj) = jax.lax.scan(
-            single_step_fn,
-            (opt_state, rollout_env_states, rollout_shared_state),
-            jax.random.split(rng, self.config.epochs_per_log_step),
-        )
+        # Runs the single step function over the inputs.
+        rngs = jax.random.split(rng, self.config.epochs_per_log_step)
+        carry, (metrics, logged_traj) = jax.lax.scan(single_step_fn, carry, rngs)
 
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x, metrics)
@@ -395,9 +423,7 @@ class AMPTask(PPOTask[Config], Generic[Config]):
         # Only get final trajectory and rewards.
         logged_traj = jax.tree.map(lambda arr: arr[-1], logged_traj)
 
-        # Metrics, final_trajectories, final_rewards batch dim of epochs.
-        # Rollout variables has batch dim of num_envs and are used next rollout.
-        return opt_state, metrics, rollout_env_states, rollout_shared_state, logged_traj
+        return carry, metrics, logged_traj
 
     def run_training(self) -> None:
         """Wraps the training loop to include discriminator models."""
@@ -460,11 +486,15 @@ class AMPTask(PPOTask[Config], Generic[Config]):
             disc_model_arr, disc_model_static = eqx.partition(disc_model, self.model_partition_fn)
 
             rollout_constants = self._get_rollout_constants(mjx_model, pol_model_static, argmax_action=False)
-            rollout_env_states = self._get_rollout_env_state(rng, rollout_constants, mjx_model, randomizers)
-            rollout_shared_state = self._get_rollout_shared_state(mjx_model, pol_model_arr)
+            disc_constants = self._get_discriminator_rollout_constants(disc_model_static)
 
-            disc_rollout_constants = self._get_discriminator_rollout_constants(disc_model_static)
-            disc_rollout_shared_state = self._get_discriminator_rollout_shared_state(disc_model_arr)
+            carry = _AMPTrainLoopCarry(
+                pol_opt_state=pol_opt_state,
+                rollout_env_states=self._get_rollout_env_state(rng, rollout_constants, mjx_model, randomizers),
+                rollout_shared_state=self._get_rollout_shared_state(mjx_model, pol_model_arr),
+                disc_opt_state=disc_opt_state,
+                disc_shared_state=self._get_discriminator_shared_state(disc_model_arr),
+            )
 
             # Creates the markers.
             markers = self.get_markers(
@@ -490,15 +520,18 @@ class AMPTask(PPOTask[Config], Generic[Config]):
 
             state = self.on_training_start(state)
 
-            def on_exit() -> None:
-                pol_model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
-                disc_model = eqx.combine(disc_rollout_shared_state.model_arr, disc_rollout_constants.model_static)
+            def _save() -> None:
+                pol_model = eqx.combine(carry.rollout_shared_state.model_arr, rollout_constants.model_static)
+                disc_model = eqx.combine(carry.disc_shared_state.model_arr, disc_constants.model_static)
                 self.save_checkpoint(
                     models=[pol_model, disc_model],
                     optimizers=[pol_optimizer, disc_optimizer],
                     opt_states=[pol_opt_state, disc_opt_state],
                     state=state,
                 )
+
+            def on_exit() -> None:
+                _save()
 
             # Handle user-defined interrupts during the training loop.
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
@@ -521,26 +554,19 @@ class AMPTask(PPOTask[Config], Generic[Config]):
                         state = self.on_step_start(state)
 
                         rng, update_rng = jax.random.split(rng)
-                        (
-                            opt_state,
-                            metrics,
-                            rollout_env_states,
-                            rollout_shared_state,
-                            logged_traj,
-                        ) = self._rl_train_loop_step(
-                            optimizer=optimizer,
-                            opt_state=opt_state,
+                        carry, metrics, logged_traj = self._amp_train_loop_step(
+                            carry=carry,
+                            pol_optimizer=pol_optimizer,
+                            disc_optimizer=disc_optimizer,
                             rollout_constants=rollout_constants,
-                            rollout_env_states=rollout_env_states,
-                            rollout_shared_state=rollout_shared_state,
+                            disc_constants=disc_constants,
                             state=state,
                             rng=update_rng,
                         )
 
                         if self.config.profile_memory:
-                            opt_state = jax.block_until_ready(opt_state)
-                            rollout_env_states = jax.block_until_ready(rollout_env_states)
-                            rollout_shared_state = jax.block_until_ready(rollout_shared_state)
+                            carry = jax.block_until_ready(carry)
+                            metrics = jax.block_until_ready(metrics)
                             logged_traj = jax.block_until_ready(logged_traj)
                             jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
 
@@ -548,13 +574,7 @@ class AMPTask(PPOTask[Config], Generic[Config]):
                         self.log_state_timers(state)
 
                         if self.should_checkpoint(state):
-                            model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
-                            self.save_checkpoint(
-                                models=[model],
-                                optimizers=[optimizer],
-                                opt_states=[opt_state],
-                                state=state,
-                            )
+                            _save()
 
                         state = self.on_step_end(state)
 
@@ -618,16 +638,13 @@ class AMPTask(PPOTask[Config], Generic[Config]):
                         )
 
                 # Save the checkpoint when done.
-                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
-                self.save_checkpoint(models=[model], optimizers=[optimizer], opt_states=[opt_state], state=state)
+                _save()
 
             except xax.TrainingFinishedError:
                 if xax.is_master():
                     msg = f"Finished training after {state.num_steps}steps and {state.num_samples} samples"
                     xax.show_info(msg, important=True)
-
-                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
-                self.save_checkpoint(models=[model], optimizers=[optimizer], opt_states=[opt_state], state=state)
+                _save()
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 if xax.is_master():
@@ -637,9 +654,7 @@ class AMPTask(PPOTask[Config], Generic[Config]):
                 exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
                 sys.stdout.write(f"Caught exception during training loop:\n\n{exception_tb}\n")
                 sys.stdout.flush()
-
-                model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
-                self.save_checkpoint(models=[model], optimizers=[optimizer], opt_states=[opt_state], state=state)
+                _save()
 
             finally:
                 state = self.on_training_end(state)
