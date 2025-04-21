@@ -17,13 +17,14 @@ import logging
 import signal
 import sys
 import textwrap
+import time
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Collection, Generic, TypeVar
+from typing import Any, Callable, Collection, Generic, TypeVar
 
 import chex
 import equinox as eqx
@@ -324,13 +325,17 @@ class RLConfig(xax.Config):
         value=None,
         help="If provided, run the environment loop for the given number of seconds.",
     )
-    run_environment_save_path: str | None = xax.field(
-        value=None,
-        help="If provided, save the rendered video to the given path.",
+    run_environment_save_renders: bool = xax.field(
+        value=False,
+        help="If set, save the renders to the experiment directory.",
     )
     run_environment_argmax_action: bool = xax.field(
         value=True,
         help="If set, take the argmax action instead of sampling from the action distribution.",
+    )
+    run_environment_save_video: bool = xax.field(
+        value=False,
+        help="If set, render the environment as a video instead of a GIF.",
     )
 
     # Toggle this to collect a dataset.
@@ -381,8 +386,16 @@ class RLConfig(xax.Config):
 
     # Validation timing parameters.
     valid_every_n_seconds: float | None = xax.field(
-        150.0,
-        help="Run validation every N seconds",
+        value=150.0,
+        help="Run full validation (render trajectory and all graphs) every N seconds",
+    )
+    valid_first_n_seconds: float | None = xax.field(
+        value=None,
+        help="Run first validation after N seconds",
+    )
+    render_full_every_n_steps: int = xax.field(
+        value=12,
+        help="Render the trajectory (without associated graphs) every N seconds",
     )
 
     # Rendering parameters.
@@ -418,13 +431,21 @@ class RLConfig(xax.Config):
         value=False,
         help="If true, render inertia.",
     )
-    render_height: int = xax.field(
-        value=320,
+    render_height_small: int = xax.field(
+        value=240,
         help="The height of the rendered images.",
     )
-    render_width: int = xax.field(
-        value=480,
+    render_width_small: int = xax.field(
+        value=360,
         help="The width of the rendered images.",
+    )
+    render_height: int = xax.field(
+        value=480,
+        help="The height of the rendered images during the validation phase.",
+    )
+    render_width: int = xax.field(
+        value=640,
+        help="The height of the rendered images during the validation phase.",
     )
     render_length_seconds: float | None = xax.field(
         value=5.0,
@@ -443,7 +464,7 @@ class RLConfig(xax.Config):
         help="If set, the render camera will track the body with this ID.",
     )
     render_distance: float = xax.field(
-        value=5.0,
+        value=3.5,
         help="The distance of the camera from the target.",
     )
     render_azimuth: float = xax.field(
@@ -451,7 +472,7 @@ class RLConfig(xax.Config):
         help="The azimuth of the render camera.",
     )
     render_elevation: float = xax.field(
-        value=-30.0,
+        value=-10.0,
         help="The elevation of the render camera.",
     )
     render_lookat: list[float] = xax.field(
@@ -465,28 +486,28 @@ class RLConfig(xax.Config):
         help="The time step of the control loop.",
     )
     dt: float = xax.field(
-        value=0.005,
+        value=0.004,
         help="The time step of the physics loop.",
     )
     iterations: int = xax.field(
-        value=8,
+        value=MISSING,
         help="Number of main solver iterations",
     )
     ls_iterations: int = xax.field(
-        value=8,
+        value=MISSING,
         help="Maximum number of CG / Newton linesearch iterations",
     )
     solver: str = xax.field(
         value="newton",
         help="The constraint solver algorithm to use",
     )
+    integrator: str = xax.field(
+        value="implicitfast",
+        help="The integrator algorithm to use",
+    )
     disable_euler_damping: bool = xax.field(
         value=True,
         help="If set, disable Euler damping - this is a performance improvement",
-    )
-    min_action_latency: float = xax.field(
-        value=0.0,
-        help="The minimum latency of the action.",
     )
     max_action_latency: float = xax.field(
         value=0.0,
@@ -519,6 +540,7 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
+    is_small: bool = False,
 ) -> GlfwMujocoViewer | DefaultMujocoViewer:
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
@@ -533,8 +555,8 @@ def get_viewer(
             mj_model,
             data=mj_data,
             mode=mode,
-            height=config.render_height,
-            width=config.render_width,
+            width=config.render_width_small if is_small else config.render_width,
+            height=config.render_height_small if is_small else config.render_height,
             shadow=config.render_shadow,
             reflection=config.render_reflection,
             contact_force=config.render_contact_force,
@@ -545,8 +567,8 @@ def get_viewer(
     else:
         viewer = DefaultMujocoViewer(
             mj_model,
-            width=config.render_width,
-            height=config.render_height,
+            width=config.render_width_small if is_small else config.render_width,
+            height=config.render_height_small if is_small else config.render_height,
         )
 
     # Sets the viewer camera.
@@ -603,17 +625,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         def _set_opt(name: str, value: Any) -> None:  # noqa: ANN401
             model_val = getattr(mj_model.opt, name)
             if model_val != value:
-                logger.warning("User-specified %s %s is different from model %s %s", name, value, name, model_val)
+                logger.debug("User-specified %s %s is different from model %s %s", name, value, name, model_val)
                 setattr(mj_model.opt, name, value)
 
         solver = getattr(mjx.SolverType, self.config.solver.upper(), None)
         if solver is None:
             raise ValueError(f"Invalid solver type: {self.config.solver}")
 
+        integrator = getattr(mjx.IntegratorType, self.config.integrator.upper(), None)
+        if integrator is None:
+            raise ValueError(f"Invalid integrator type: {self.config.integrator}")
+
         _set_opt("timestep", self.config.dt)
         _set_opt("iterations", self.config.iterations)
         _set_opt("ls_iterations", self.config.ls_iterations)
-        _set_opt("integrator", mjx.IntegratorType.EULER)
+        _set_opt("integrator", integrator)
         _set_opt("solver", solver)
 
         if self.config.disable_euler_damping:
@@ -647,7 +673,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             actuators=self.get_actuators(physics_model, metadata),
             dt=float(physics_model.opt.timestep.item()),
             ctrl_dt=self.config.ctrl_dt,
-            min_action_latency=self.config.min_action_latency,
             max_action_latency=self.config.max_action_latency,
         )
 
@@ -955,7 +980,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     if self.config.run_environment_num_seconds is None
                     else round(self.config.run_environment_num_seconds / self.config.ctrl_dt)
                 ),
-                save_path=self.config.run_environment_save_path,
+                save_renders=self.config.run_environment_save_renders,
                 argmax_action=self.config.run_environment_argmax_action,
             )
 
@@ -1063,24 +1088,24 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return np.stack(frame_list, axis=0), fps
 
-    def log_logged_trajectory(
+    def _crop_to_length(self, logged_traj: LoggedTrajectory, length: float) -> LoggedTrajectory:
+        render_frames = round(length / self.config.ctrl_dt)
+        return jax.tree.map(lambda arr: arr[:render_frames], logged_traj)
+
+    def _log_logged_trajectory_graphs(
         self,
         logged_traj: LoggedTrajectory,
-        markers: Collection[Marker],
-        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
+        log_callback: Callable[[str, Image.Image, str], None],
     ) -> None:
         """Visualizes a single trajectory.
 
         Args:
             logged_traj: The single trajectory to log.
-            markers: The markers to visualize.
-            viewer: The Mujoco viewer to render the scene with.
-            name: The name of the trajectory being logged.
+            log_callback: A callable function to run to log a given image.
         """
         # Clips the trajectory to the desired length.
         if self.config.render_length_seconds is not None:
-            render_frames = round(self.config.render_length_seconds / self.config.ctrl_dt)
-            logged_traj = jax.tree.map(lambda arr: arr[:render_frames], logged_traj)
+            logged_traj = self._crop_to_length(logged_traj, self.config.render_length_seconds)
 
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Emojis are used in order to prevent conflicts with user-specified namespaces.
@@ -1118,7 +1143,27 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 img = Image.open(buf)
 
                 # Logs the image.
-                self.logger.log_image(key=key, value=img, namespace=namespace)
+                # self.logger.log_image(key=key, value=img, namespace=namespace)
+                log_callback(key, img, namespace)
+
+    def _log_logged_trajectory_video(
+        self,
+        logged_traj: LoggedTrajectory,
+        markers: Collection[Marker],
+        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
+        key: str,
+    ) -> None:
+        """Visualizes a single trajectory.
+
+        Args:
+            logged_traj: The single trajectory to log.
+            markers: The markers to visualize.
+            viewer: The Mujoco viewer to render the scene with.
+            key: The logging key to use.
+        """
+        # Clips the trajectory to the desired length.
+        if self.config.render_length_seconds is not None:
+            logged_traj = self._crop_to_length(logged_traj, self.config.render_length_seconds)
 
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(
@@ -1129,7 +1174,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         self.logger.log_video(
-            key="trajectory",
+            key=key,
             value=frames,
             fps=round(fps / self.config.render_slowdown),
             namespace="➡️ trajectory images",
@@ -1418,7 +1463,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def run_environment(
         self,
         num_steps: int | None = None,
-        save_path: str | Path | None = None,
+        save_renders: bool = False,
         argmax_action: bool = True,
     ) -> None:
         """Provides an easy-to-use interface for debugging environments.
@@ -1431,13 +1476,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             num_steps: The number of steps to run the environment for. If not
                 provided, run until the user manually terminates the
                 environment visualizer.
-            save_path: If provided, save the rendered video to the given path.
+            save_renders: If provided, save the rendered video to the given path.
             argmax_action: If set, get the argmax action, otherwise sample
                 randomly from the model.
         """
+        save_path = self.exp_dir / "renders" / f"render_{time.time()}" if save_renders else None
         if save_path is not None:
-            save_path = Path(save_path)
-            save_path.parent.mkdir(parents=True, exist_ok=True)
+            save_path.mkdir(parents=True, exist_ok=True)
 
         with self, jax.disable_jit():
             rng = self.prng_key()
@@ -1516,24 +1561,35 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
-            if len(transitions) > 0:
-                trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
+            if len(transitions) == 0:
+                raise RuntimeError("Trajectory is empty!")
 
-                get_rewards(
-                    trajectory=trajectory,
-                    rewards=rollout_constants.rewards,
-                    rewards_carry=rollout_env_state.reward_carry,
-                    rollout_length_steps=self.rollout_length_steps,
-                    clip_min=self.config.reward_clip_min,
-                    clip_max=self.config.reward_clip_max,
-                )
+            trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
 
-                # TODO: some nice visualizer of rewards...
+            reward_state = get_rewards(
+                trajectory=trajectory,
+                rewards=rollout_constants.rewards,
+                rewards_carry=rollout_env_state.reward_carry,
+                rollout_length_steps=self.rollout_length_steps,
+                clip_min=self.config.reward_clip_min,
+                clip_max=self.config.reward_clip_max,
+            )
 
             if save_path is not None:
+                self._log_logged_trajectory_graphs(
+                    logged_traj=LoggedTrajectory(
+                        trajectory=trajectory,
+                        rewards=reward_state,
+                        metrics=xax.FrozenDict({}),
+                    ),
+                    log_callback=lambda name, value, _: value.save(save_path / f"{name}.png"),
+                )
+
                 fps = round(1 / self.config.ctrl_dt)
 
-                match save_path.suffix.lower():
+                vid_save_path = save_path / ("render.mp4" if self.config.run_environment_save_video else "render.gif")
+
+                match vid_save_path.suffix.lower():
                     case ".mp4":
                         try:
                             import imageio.v2 as imageio
@@ -1547,7 +1603,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             ) from err
 
                         try:
-                            with imageio.get_writer(save_path, mode="I", fps=fps) as writer:
+                            with imageio.get_writer(vid_save_path, mode="I", fps=fps) as writer:
                                 for frame in frames:
                                     writer.append_data(frame)
 
@@ -1562,7 +1618,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     case ".gif":
                         images = [Image.fromarray(frame) for frame in frames]
                         images[0].save(
-                            save_path,
+                            vid_save_path,
                             save_all=True,
                             append_images=images[1:],
                             duration=int(1000 / fps),
@@ -1570,7 +1626,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         )
 
                     case _:
-                        raise ValueError(f"Unsupported file extension: {save_path.suffix}. Expected .mp4 or .gif")
+                        raise ValueError(f"Unsupported file extension: {vid_save_path.suffix}. Expected .mp4 or .gif")
+
+                logger.log(xax.LOG_STATUS, "Rendered trajectory visuals to %s", save_path)
 
     def _get_rollout_constants(
         self,
@@ -1795,10 +1853,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             # Creates the viewer.
-            viewer = get_viewer(
+            small_viewer = get_viewer(
                 mj_model=mj_model,
                 config=self.config,
                 mode="offscreen",
+                is_small=True,
+            )
+            full_viewer = get_viewer(
+                mj_model=mj_model,
+                config=self.config,
+                mode="offscreen",
+                is_small=False,
             )
 
             state = self.on_training_start(state)
@@ -1824,10 +1889,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 while not self.is_training_over(state):
                     # Runs the training loop.
                     with xax.ContextTimer() as timer:
-                        state = self.on_step_start(state)
+                        valid_step = self.valid_step_timer(state)
 
-                        # Use a different phase for logging full trajectories.
-                        is_valid_step = self.valid_step_timer.is_valid_step(state)
+                        state = state.replace(
+                            phase="valid" if valid_step else "train",
+                        )
+
+                        state = self.on_step_start(state)
 
                         rng, update_rng = jax.random.split(rng)
                         (
@@ -1855,7 +1923,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         self.log_train_metrics(metrics)
                         self.log_state_timers(state)
-                        self.write_logs(state)
 
                         if self.should_checkpoint(state):
                             model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
@@ -1863,28 +1930,55 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         state = self.on_step_end(state)
 
-                    # Updates the state.
-                    num_steps = self.config.epochs_per_log_step
-                    num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
+                        # Updates the step and sample counts.
+                        num_steps = self.config.epochs_per_log_step
+                        num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
+
+                        if valid_step:
+                            state = state.replace(
+                                num_valid_steps=state.num_valid_steps + num_steps,
+                                num_valid_samples=state.num_valid_samples + num_samples,
+                            )
+
+                            full_size_render = state.num_valid_steps.item() % self.config.render_full_every_n_steps == 0
+                            if full_size_render:
+                                self._log_logged_trajectory_video(
+                                    logged_traj=logged_traj,
+                                    markers=markers,
+                                    viewer=full_viewer,
+                                    key="trajectory",
+                                )
+                                self._log_logged_trajectory_graphs(
+                                    logged_traj=logged_traj,
+                                    log_callback=lambda key, value, namespace: self.logger.log_image(
+                                        key=key, value=value, namespace=namespace
+                                    ),
+                                )
+                            else:
+                                self._log_logged_trajectory_video(
+                                    logged_traj=logged_traj,
+                                    markers=markers,
+                                    viewer=small_viewer,
+                                    key="trajectory_small",
+                                )
+
+                        else:
+                            state = state.replace(
+                                num_steps=state.num_steps + num_steps,
+                                num_samples=state.num_samples + num_samples,
+                            )
+
+                        self.write_logs(state)
+
+                    # Update  state with the elapsed time.
                     elapsed_time = timer.elapsed_time
-
-                    if is_valid_step:
+                    if valid_step:
                         state = state.replace(
-                            num_valid_steps=state.num_valid_steps + num_steps,
-                            num_valid_samples=state.num_valid_samples + num_samples,
                             valid_elapsed_time_s=state.valid_elapsed_time_s + elapsed_time,
-                            phase="valid",
                         )
-
-                        # Only log trajectory information on validation steps.
-                        self.log_logged_trajectory(logged_traj=logged_traj, markers=markers, viewer=viewer)
-
                     else:
                         state = state.replace(
-                            num_steps=state.num_steps + num_steps,
-                            num_samples=state.num_samples + num_samples,
                             elapsed_time_s=state.elapsed_time_s + elapsed_time,
-                            phase="train",
                         )
 
                     if is_first_step:

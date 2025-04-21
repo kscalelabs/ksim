@@ -219,8 +219,9 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        proj_grav_3 = observations["projected_gravity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
         base_pos_3 = observations["base_position_observation"]
         base_quat_4 = observations["base_orientation_observation"]
@@ -237,8 +238,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
                 com_vel_n,  # 96
-                imu_acc_3 / 50.0,  # 3
-                imu_gyro_3 / 3.0,  # 3
+                proj_grav_3,  # 3
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
                 base_pos_3,  # 3
                 base_quat_4,  # 4
@@ -263,8 +263,9 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        proj_grav_3 = observations["projected_gravity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
         base_pos_3 = observations["base_position_observation"]
         base_quat_4 = observations["base_orientation_observation"]
@@ -281,8 +282,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
                 com_vel_n,  # 96
-                imu_acc_3 / 50.0,  # 3
-                imu_gyro_3 / 3.0,  # 3
+                proj_grav_3,  # 3
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
                 base_pos_3,  # 3
                 base_quat_4,  # 4
@@ -383,13 +383,14 @@ if __name__ == "__main__":
             # Training parameters.
             num_envs=2048,
             batch_size=256,
-            num_passes=4,
+            num_passes=2,
             epochs_per_log_step=1,
-            rollout_length_seconds=10.0,
+            rollout_length_seconds=8.0,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
-            min_action_latency=0.0,
+            iterations=8,
+            ls_iterations=8,
+            max_action_latency=0.01,
         ),
     )

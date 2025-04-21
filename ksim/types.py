@@ -35,6 +35,7 @@ class PhysicsState:
     data: PhysicsData
     event_states: xax.FrozenDict[str, PyTree]
     planner_state: PyTree
+    action_latency: Array
 
 
 @jax.tree_util.register_dataclass
