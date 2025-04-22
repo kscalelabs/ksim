@@ -27,7 +27,7 @@ from mujoco import mjx
 from ksim.actuators import Actuators, StatefulActuators
 from ksim.events import Event
 from ksim.resets import Reset
-from ksim.types import ActuatorState, PhysicsModel, PhysicsState
+from ksim.types import PhysicsModel, PhysicsState
 
 logger = logging.getLogger(__name__)
 
@@ -96,14 +96,9 @@ class MjxEngine(PhysicsEngine):
         assert isinstance(mjx_data, mjx.Data)
         default_action = self.actuators.get_default_action(mjx_data)
 
-        initial_position = mjx_data.qpos[7:]
-        initial_velocity = jnp.zeros_like(initial_position)
-
         # Gets the initial actuator state for stateful actuators.
         actuator_state = (
-            self.actuators.get_default_state(initial_position, initial_velocity)
-            if isinstance(self.actuators, StatefulActuators)
-            else None
+            self.actuators.get_initial_state(mjx_data) if isinstance(self.actuators, StatefulActuators) else None
         )
 
         rng, latency_rng = jax.random.split(rng)
@@ -143,9 +138,9 @@ class MjxEngine(PhysicsEngine):
         prev_action = physics_state.most_recent_action
 
         def move_physics(
-            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], ActuatorState],
+            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree],
             rng: PRNGKeyArray,
-        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], ActuatorState], None]:
+        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree], None]:
             data, step_num, event_states, actuator_state = carry
 
             # Randomly apply the action with some latency.
@@ -208,9 +203,9 @@ class MujocoEngine(PhysicsEngine):
 
         mujoco.mj_forward(physics_model, mujoco_data)
         default_action = self.actuators.get_default_action(mujoco_data)
-        initial_position = mujoco_data.qpos[7:]
-        initial_velocity = jnp.zeros_like(initial_position)
-        default_actuator_state = ActuatorState(position=initial_position, velocity=initial_velocity)
+        actuator_state = (
+            self.actuators.get_initial_state(mujoco_data) if isinstance(self.actuators, StatefulActuators) else None
+        )
 
         rng, latency_rng = jax.random.split(rng)
 
@@ -218,7 +213,7 @@ class MujocoEngine(PhysicsEngine):
             data=mujoco_data,
             most_recent_action=default_action,
             event_states=self._reset_events(rng),
-            actuator_state=default_actuator_state,
+            actuator_state=actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
                 minval=0,
