@@ -16,7 +16,7 @@ import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace as dataclass_replace
 from threading import Thread
-from typing import Generic, Sequence, TypeVar
+from typing import Generic, TypeVar
 
 import attrs
 import chex
@@ -30,7 +30,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from ksim.rewards import Reward
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.task.rl import RolloutConstants, RolloutEnvState, RolloutSharedState, get_viewer
+from ksim.task.rl import RolloutConstants, RolloutEnvState, RolloutSharedState, _RLTrainLoopCarry, get_viewer
 from ksim.types import LoggedTrajectory, Metrics, PhysicsModel, RewardState, Trajectory
 
 DISCRIMINATOR_OUTPUT_KEY = "_discriminator_output"
@@ -40,29 +40,33 @@ logger = logging.getLogger(__name__)
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class DiscriminatorSharedState:
+class DiscriminatorEnvState(RolloutEnvState):
+    pass
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class DiscriminatorSharedState(RolloutSharedState):
     """Variables used across all environments."""
 
-    model_arr: PyTree
+    disc_model_arr: PyTree
     real_motions: PyTree
 
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class DiscriminatorConstants:
+class DiscriminatorConstants(RolloutConstants):
     """Constants for the rollout loop."""
 
-    model_static: PyTree
+    disc_model_static: PyTree
 
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class _AMPTrainLoopCarry:
-    pol_opt_state: optax.OptState
-    rollout_env_states: RolloutEnvState
-    rollout_shared_state: RolloutSharedState
+class _AMPTrainLoopCarry(_RLTrainLoopCarry):
+    rollout_env_states: DiscriminatorEnvState
+    rollout_shared_state: DiscriminatorSharedState
     disc_opt_state: optax.OptState
-    disc_shared_state: DiscriminatorSharedState
 
 
 @jax.tree_util.register_dataclass
@@ -199,9 +203,9 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
     @xax.jit(static_argnames=["self", "rollout_constants"], jit_level=3)
     def step_engine(
         self,
-        rollout_constants: RolloutConstants,
-        rollout_env_state: RolloutEnvState,
-        rollout_shared_state: RolloutSharedState,
+        rollout_constants: DiscriminatorConstants,
+        rollout_env_state: DiscriminatorEnvState,
+        rollout_shared_state: DiscriminatorSharedState,
     ) -> tuple[Trajectory, RolloutEnvState]:
         transition, next_rollout_env_state = super().step_engine(
             rollout_constants=rollout_constants,
@@ -210,7 +214,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         )
 
         # Recombines the mutable and static parts of the model.
-        model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
+        model = eqx.combine(rollout_shared_state.disc_model_arr, rollout_constants.disc_model_static)
 
         # Runs the discriminator on the trajectory.
         motion = self.trajectory_to_motion(transition)
@@ -225,17 +229,16 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
     def update_model_with_discriminator(
         self,
+        *,
         pol_optimizer: optax.GradientTransformation,
         pol_opt_state: optax.OptState,
         disc_optimizer: optax.GradientTransformation,
         disc_opt_state: optax.OptState,
         trajectories: Trajectory,
         rewards: RewardState,
-        rollout_env_states: RolloutEnvState,
-        rollout_shared_state: RolloutSharedState,
-        rollout_constants: RolloutConstants,
-        disc_constants: DiscriminatorConstants,
-        disc_shared_state: DiscriminatorSharedState,
+        rollout_env_states: DiscriminatorEnvState,
+        rollout_shared_state: DiscriminatorSharedState,
+        rollout_constants: DiscriminatorConstants,
         rng: PRNGKeyArray,
     ) -> tuple[
         tuple[PyTree, optax.OptState, PyTree],
@@ -258,8 +261,6 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             rollout_env_states: The environment variables inputs into the rollout.
             rollout_shared_state: The shared state inputs into the rollout.
             rollout_constants: The constant inputs into the rollout.
-            disc_constants: The constant inputs into the discriminator rollout.
-            disc_shared_state: The shared state inputs into the discriminator rollout.
             rng: A random seed.
 
         Returns:
@@ -285,9 +286,9 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         # Gets the real and fake motions.
         fake_motions = jax.vmap(self.trajectory_to_motion, in_axes=0)(trajectories)
-        chex.assert_trees_all_equal_sizes(disc_shared_state.real_motions, fake_motions)
+        chex.assert_trees_all_equal_sizes(rollout_shared_state.real_motions, fake_motions)
 
-        carry_training_state = (disc_shared_state.model_arr, disc_opt_state, disc_rng)
+        carry_training_state = (rollout_shared_state.disc_model_arr, disc_opt_state, disc_rng)
 
         # Applies gradient updates across all batches num_discriminator_passes times.
         carry_training_state, (metrics, trajs_for_logging) = jax.lax.scan(
@@ -303,24 +304,12 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             logged_traj,
         )
 
-    def _get_discriminator_rollout_constants(self, disc_model_static: PyTree) -> DiscriminatorConstants:
-        return DiscriminatorConstants(
-            model_static=disc_model_static,
-        )
-
-    def _get_discriminator_shared_state(self, disc_model_arr: PyTree) -> DiscriminatorSharedState:
-        return DiscriminatorSharedState(
-            model_arr=disc_model_arr,
-            real_motions=self.get_real_motions(),
-        )
-
     @xax.jit(
         static_argnames=[
             "self",
             "pol_optimizer",
             "disc_optimizer",
             "rollout_constants",
-            "disc_constants",
         ],
         jit_level=1,
     )
@@ -329,8 +318,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         carry: _AMPTrainLoopCarry,
         pol_optimizer: optax.GradientTransformation,
         disc_optimizer: optax.GradientTransformation,
-        rollout_constants: RolloutConstants,
-        disc_constants: DiscriminatorConstants,
+        rollout_constants: DiscriminatorConstants,
         state: xax.State,
         rng: PRNGKeyArray,
     ) -> tuple[_AMPTrainLoopCarry, Metrics, LoggedTrajectory]:
@@ -359,7 +347,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
                 logged_traj,
             ) = self.update_model_with_discriminator(
                 pol_optimizer=pol_optimizer,
-                pol_opt_state=carry_i.pol_opt_state,
+                pol_opt_state=carry_i.opt_state,
                 disc_optimizer=disc_optimizer,
                 disc_opt_state=carry_i.disc_opt_state,
                 trajectories=trajectories,
@@ -367,8 +355,6 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
                 rollout_env_states=carry_i.rollout_env_states,
                 rollout_shared_state=carry_i.rollout_shared_state,
                 rollout_constants=rollout_constants,
-                disc_constants=disc_constants,
-                disc_shared_state=carry_i.disc_shared_state,
                 rng=rng,
             )
 
@@ -389,8 +375,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             )
 
             next_carry = _AMPTrainLoopCarry(
-                pol_opt_state=pol_opt_state,
-                rollout_env_states=RolloutEnvState(
+                opt_state=pol_opt_state,
+                rollout_env_states=DiscriminatorEnvState(
                     commands=next_rollout_env_states.commands,
                     physics_state=next_rollout_env_states.physics_state,
                     randomization_dict=next_rollout_env_states.randomization_dict,
@@ -400,15 +386,13 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
                     curriculum_state=curriculum_state,
                     rng=next_rollout_env_states.rng,
                 ),
-                rollout_shared_state=RolloutSharedState(
+                rollout_shared_state=DiscriminatorSharedState(
                     model_arr=pol_model_arr,
                     physics_model=carry_i.rollout_shared_state.physics_model,
+                    real_motions=carry_i.rollout_shared_state.real_motions,
+                    disc_model_arr=disc_model_arr,
                 ),
                 disc_opt_state=disc_opt_state,
-                disc_shared_state=DiscriminatorSharedState(
-                    model_arr=disc_model_arr,
-                    real_motions=carry_i.disc_shared_state.real_motions,
-                ),
             )
 
             return next_carry, (metrics, logged_traj)
@@ -485,15 +469,27 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             pol_model_arr, pol_model_static = eqx.partition(pol_model, self.model_partition_fn)
             disc_model_arr, disc_model_static = eqx.partition(disc_model, self.model_partition_fn)
 
-            rollout_constants = self._get_rollout_constants(mjx_model, pol_model_static, argmax_action=False)
-            disc_constants = self._get_discriminator_rollout_constants(disc_model_static)
+            rollout_constants = self._get_discriminator_constants(
+                mj_model=mjx_model,
+                pol_model_static=pol_model_static,
+                disc_model_static=disc_model_static,
+                argmax_action=False,
+            )
 
             carry = _AMPTrainLoopCarry(
-                pol_opt_state=pol_opt_state,
-                rollout_env_states=self._get_rollout_env_state(rng, rollout_constants, mjx_model, randomizers),
-                rollout_shared_state=self._get_rollout_shared_state(mjx_model, pol_model_arr),
+                opt_state=pol_opt_state,
+                rollout_env_states=self._get_discriminator_env_state(
+                    rng=rng,
+                    rollout_constants=rollout_constants,
+                    mj_model=mjx_model,
+                    randomizers=randomizers,
+                ),
+                rollout_shared_state=self._get_discriminator_shared_state(
+                    mj_model=mjx_model,
+                    pol_model_arr=pol_model_arr,
+                    disc_model_arr=disc_model_arr,
+                ),
                 disc_opt_state=disc_opt_state,
-                disc_shared_state=self._get_discriminator_shared_state(disc_model_arr),
             )
 
             # Creates the markers.
@@ -522,7 +518,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
             def _save() -> None:
                 pol_model = eqx.combine(carry.rollout_shared_state.model_arr, rollout_constants.model_static)
-                disc_model = eqx.combine(carry.disc_shared_state.model_arr, disc_constants.model_static)
+                disc_model = eqx.combine(carry.rollout_shared_state.disc_model_arr, rollout_constants.disc_model_static)
                 self.save_checkpoint(
                     models=[pol_model, disc_model],
                     optimizers=[pol_optimizer, disc_optimizer],
@@ -559,7 +555,6 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
                             pol_optimizer=pol_optimizer,
                             disc_optimizer=disc_optimizer,
                             rollout_constants=rollout_constants,
-                            disc_constants=disc_constants,
                             state=state,
                             rng=update_rng,
                         )

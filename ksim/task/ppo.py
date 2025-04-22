@@ -19,7 +19,7 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.task.rl import RLConfig, RLTask, RolloutConstants, RolloutEnvState, RolloutSharedState
+from ksim.task.rl import RLConfig, RLTask, TConstants, TEnvState, TSharedState
 from ksim.types import LoggedTrajectory, RewardState, Trajectory
 
 
@@ -296,7 +296,11 @@ class PPOConfig(RLConfig):
 Config = TypeVar("Config", bound=PPOConfig)
 
 
-class PPOTask(RLTask[Config], Generic[Config], ABC):
+class PPOTask(
+    RLTask[Config, TConstants, TSharedState, TEnvState],
+    Generic[Config, TConstants, TSharedState, TEnvState],
+    ABC,
+):
     """Base class for PPO tasks."""
 
     @abstractmethod
@@ -554,13 +558,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
     def update_model(
         self,
+        *,
         optimizer: optax.GradientTransformation,
         opt_state: optax.OptState,
         trajectories: Trajectory,
         rewards: RewardState,
-        rollout_env_states: RolloutEnvState,
-        rollout_shared_state: RolloutSharedState,
-        rollout_constants: RolloutConstants,
+        rollout_env_states: TEnvState,
+        rollout_shared_state: TSharedState,
+        rollout_constants: TConstants,
         rng: PRNGKeyArray,
     ) -> tuple[PyTree, optax.OptState, PyTree, xax.FrozenDict[str, Array], LoggedTrajectory]:
         """Runs PPO updates on a given set of trajectory batches.

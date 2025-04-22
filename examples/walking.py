@@ -69,12 +69,7 @@ class DefaultHumanoidActor(eqx.Module):
 
         # Softplus and clip to ensure positive standard deviations.
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
-
-        dist_n = distrax.MixtureSameFamily(
-            mixture_distribution=distrax.Categorical(logits=logits_nm),
-            components_distribution=distrax.Normal(mean_nm, std_nm),
-        )
-
+        dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
         return dist_n
 
 
