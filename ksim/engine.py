@@ -27,7 +27,7 @@ from mujoco import mjx
 from ksim.actuators import Actuators, StatefulActuators
 from ksim.events import Event
 from ksim.resets import Reset
-from ksim.types import PhysicsModel, PhysicsState, PlannerState
+from ksim.types import PhysicsModel, PhysicsState, ActuatorState
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +99,8 @@ class MjxEngine(PhysicsEngine):
         initial_position = mjx_data.qpos[7:]
         initial_velocity = jnp.zeros_like(initial_position)
 
-        # Gets the initial planner state for stateful actuators.
-        planner_state = (
+        # Gets the initial actuator state for stateful actuators.
+        actuator_state = (
             self.actuators.get_default_state(initial_position, initial_velocity)
             if isinstance(self.actuators, StatefulActuators)
             else None
@@ -112,7 +112,7 @@ class MjxEngine(PhysicsEngine):
             data=mjx_data,
             most_recent_action=default_action,
             event_states=self._reset_events(rng),
-            planner_state=planner_state,
+            actuator_state=actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
                 minval=0,
@@ -143,10 +143,10 @@ class MjxEngine(PhysicsEngine):
         prev_action = physics_state.most_recent_action
 
         def move_physics(
-            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PlannerState],
+            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], ActuatorState],
             rng: PRNGKeyArray,
-        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PlannerState], None]:
-            data, step_num, event_states, planner_state = carry
+        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], ActuatorState], None]:
+            data, step_num, event_states, actuator_state = carry
 
             # Randomly apply the action with some latency.
             ctrl = jax.lax.select(step_num >= physics_state.action_latency, action, prev_action)
@@ -167,10 +167,10 @@ class MjxEngine(PhysicsEngine):
             rng, ctrl_rng = jax.random.split(rng)
 
             if isinstance(self.actuators, StatefulActuators):
-                torques, planner_state = self.actuators.get_stateful_ctrl(
+                torques, actuator_state = self.actuators.get_stateful_ctrl(
                     action=ctrl,
                     physics_data=data,
-                    planner_state=planner_state,
+                    actuator_state=actuator_state,
                     rng=ctrl_rng,
                 )
             else:
@@ -178,12 +178,12 @@ class MjxEngine(PhysicsEngine):
 
             data_with_ctrl = data.replace(ctrl=torques)
             new_data = self._physics_step(physics_model, data_with_ctrl)
-            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), planner_state), None
+            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state), None
 
         # Runs the model for N steps.
-        (mjx_data, *_, event_info, planner_state_final), _ = jax.lax.scan(
+        (mjx_data, *_, event_info, actuator_state_final), _ = jax.lax.scan(
             move_physics,
-            (mjx_data, jnp.array(0.0), physics_state.event_states, physics_state.planner_state),
+            (mjx_data, jnp.array(0.0), physics_state.event_states, physics_state.actuator_state),
             jax.random.split(rng, phys_steps_per_ctrl_steps),
         )
 
@@ -191,7 +191,7 @@ class MjxEngine(PhysicsEngine):
             data=mjx_data,
             most_recent_action=action,
             event_states=xax.FrozenDict(event_info),
-            planner_state=planner_state_final,
+            actuator_state=actuator_state_final,
             action_latency=physics_state.action_latency,
         )
 
@@ -210,7 +210,7 @@ class MujocoEngine(PhysicsEngine):
         default_action = self.actuators.get_default_action(mujoco_data)
         initial_position = mujoco_data.qpos[7:]
         initial_velocity = jnp.zeros_like(initial_position)
-        default_planner = PlannerState(position=initial_position, velocity=initial_velocity)
+        default_actuator_state = ActuatorState(position=initial_position, velocity=initial_velocity)
 
         rng, latency_rng = jax.random.split(rng)
 
@@ -218,7 +218,7 @@ class MujocoEngine(PhysicsEngine):
             data=mujoco_data,
             most_recent_action=default_action,
             event_states=self._reset_events(rng),
-            planner_state=default_planner,
+            actuator_state=default_actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
                 minval=0,
@@ -246,7 +246,7 @@ class MujocoEngine(PhysicsEngine):
         prev_action = physics_state.most_recent_action
 
         event_states = physics_state.event_states
-        planner_state = physics_state.planner_state
+        actuator_state = physics_state.actuator_state
 
         for step_num in range(phys_steps_per_ctrl_steps):
             # Randomly apply the action with some latency.
@@ -267,10 +267,10 @@ class MujocoEngine(PhysicsEngine):
             event_states = xax.FrozenDict(new_event_states)
 
             if isinstance(self.actuators, StatefulActuators):
-                torques, planner_state = self.actuators.get_stateful_ctrl(
+                torques, actuator_state = self.actuators.get_stateful_ctrl(
                     action=ctrl,
                     physics_data=mujoco_data,
-                    planner_state=planner_state,
+                    actuator_state=actuator_state,
                     rng=rng,
                 )
             else:
@@ -283,7 +283,7 @@ class MujocoEngine(PhysicsEngine):
             data=mujoco_data,
             most_recent_action=action,
             event_states=event_states,
-            planner_state=planner_state,
+            actuator_state=actuator_state,
             action_latency=physics_state.action_latency,
         )
 
