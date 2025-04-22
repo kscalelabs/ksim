@@ -291,7 +291,11 @@ def update_data_field(data: mujoco.MjData | mjx.Data, name: str, new_value: Arra
         The updated mujoco.MjData or mjx.Data object.
     """
     if isinstance(data, mujoco.MjData):
-        getattr(data, name)[:] = new_value
+        val = getattr(data, name)
+        if isinstance(val, float):
+            setattr(data, name, new_value)
+        else:
+            val[:] = new_value
     else:
         data = data.replace(**{name: new_value})
     return data

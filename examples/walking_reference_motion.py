@@ -4,9 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Generic, TypeVar
 
-import attrs
 import jax
-import jax.numpy as jnp
 import mujoco
 import numpy as np
 import xax
@@ -25,10 +23,12 @@ from jaxtyping import Array
 from scipy.spatial.transform import Rotation as R
 
 import ksim
-from ksim.types import PhysicsModel
-from ksim.utils.reference_motion import (
+from ksim.reference_motion import (
     ReferenceMapping,
     generate_reference_motion,
+)
+from ksim.types import PhysicsModel
+from ksim.utils.motion_prior_utils import (
     get_reference_joint_id,
     local_to_absolute,
     visualize_reference_motion,
@@ -125,10 +125,19 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
             ksim.StayAliveReward(scale=1.0),
-            QposReferenceMotionReward(
-                reference_qpos=self.reference_motion.qpos, ctrl_dt=self.config.ctrl_dt, scale=0.5
+            ksim.ReferenceMotionReward(
+                observation_name="joint_position_observation",
+                reference_motion=self.reference_motion.qpos,
+                ctrl_dt=self.config.ctrl_dt,
+                scale=0.5,
             ),
-            # ksim.NaiveForwardReward(scale=1.0),
+            # ksim.ReferenceMotionReward(
+            #     observation_name="joint_velocity_observation",
+            #     reference_motion=self.reference_motion.qvel,
+            #     ctrl_dt=self.config.ctrl_dt,
+            #     scale=0.5,
+            # ),
+            ksim.NaiveForwardReward(scale=1.0),
         ]
 
         return rewards

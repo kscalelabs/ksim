@@ -23,9 +23,9 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
+from ksim.reference_motion import ReferenceMotionData
 from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import update_data_field
-from ksim.utils.reference_motion import ReferenceMotionData
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +264,7 @@ class InitialMotionStateReset(Reset):
             new_qvel = jnp.concatenate([data.qvel[:6], qvel[7:]])
             data = update_data_field(data, "qvel", new_qvel)
 
-        # NOTE - simplification due to the current reference motion data structure
-        # data = update_data_field(data, "time", frame_index * self.reference_motion.ctrl_dt)
+        # jax.debug.breakpoint()
+        # NOTE - a simplification due to the current reference motion data structure
+        data = update_data_field(data, "time", frame_index * self.reference_motion.ctrl_dt)
         return data

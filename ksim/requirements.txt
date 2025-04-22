@@ -16,6 +16,10 @@ optax
 scipy
 xax
 
+# Priors
+bvhio
+pyglm
+
 # Mujoco
 mujoco
 mujoco-mjx

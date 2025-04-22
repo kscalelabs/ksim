@@ -7,10 +7,10 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
+import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array
 
-from ksim.utils import xax
 from ksim.utils.motion_prior_utils import (
     get_body_id,
     get_local_reference_pos,
@@ -32,11 +32,10 @@ class ReferenceMotionData:
     qpos: xax.HashableArray  # Shape: [T, nq]
     qvel: xax.HashableArray  # Shape: [T, nq]
     cartesian_poses: xax.FrozenDict[int, xax.HashableArray]  # Dict: body_id -> [T, 3]
+    ctrl_dt: float
 
     qroot: Optional[xax.HashableArray] = None  # Shape: [T, 3]
     qroot_vel: Optional[xax.HashableArray] = None  # Shape: [T, 3]
-
-    ctrl_dt: float
 
     @property
     def num_frames(self) -> int:
