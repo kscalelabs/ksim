@@ -27,7 +27,7 @@ from mujoco import mjx
 from ksim.actuators import Actuators, StatefulActuators
 from ksim.events import Event
 from ksim.resets import Reset
-from ksim.types import PhysicsModel, PhysicsState, ActuatorState
+from ksim.types import ActuatorState, PhysicsModel, PhysicsState
 
 logger = logging.getLogger(__name__)
 

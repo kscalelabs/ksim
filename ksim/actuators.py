@@ -17,7 +17,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
 
-from ksim.types import PhysicsData, PhysicsModel, ActuatorState
+from ksim.types import ActuatorState, PhysicsData, PhysicsModel
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
 logger = logging.getLogger(__name__)
