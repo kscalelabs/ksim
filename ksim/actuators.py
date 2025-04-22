@@ -2,6 +2,7 @@
 
 __all__ = [
     "Actuators",
+    "StatefulActuators",
     "TorqueActuators",
     "MITPositionActuators",
     "MITPositionVelocityActuators",
@@ -13,10 +14,10 @@ from typing import Literal
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 
-from ksim.types import PhysicsData, PhysicsModel, PlannerState
+from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
 logger = logging.getLogger(__name__)
@@ -54,14 +55,14 @@ class StatefulActuators(Actuators):
         self,
         action: Array,
         physics_data: PhysicsData,
-        planner_state: PlannerState,
+        actuator_state: PyTree,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, PlannerState]:
+    ) -> tuple[Array, PyTree]:
         """Get the control signal from the action vector."""
 
     @abstractmethod
-    def get_default_state(self, initial_position: Array, initial_velocity: Array) -> PlannerState:
-        """Get the default state for the actuator planner."""
+    def get_initial_state(self, physics_data: PhysicsData) -> PyTree:
+        """Get the initial state for the actuator."""
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: Array) -> Array:
         raise NotImplementedError("Stateful actuators should use `get_stateful_ctrl` instead.")

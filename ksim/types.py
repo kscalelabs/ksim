@@ -34,15 +34,8 @@ class PhysicsState:
     most_recent_action: Array
     data: PhysicsData
     event_states: xax.FrozenDict[str, PyTree]
-    planner_state: PyTree
+    actuator_state: PyTree
     action_latency: Array
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class PlannerState:
-    position: Array
-    velocity: Array
 
 
 @jax.tree_util.register_dataclass
