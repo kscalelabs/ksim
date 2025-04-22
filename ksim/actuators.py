@@ -61,7 +61,7 @@ class StatefulActuators(Actuators):
         """Get the control signal from the action vector."""
 
     @abstractmethod
-    def get_initial_state(self, physics_data: PhysicsData) -> PyTree:
+    def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> PyTree:
         """Get the initial state for the actuator."""
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: Array) -> Array:
