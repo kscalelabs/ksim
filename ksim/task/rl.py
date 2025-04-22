@@ -605,15 +605,15 @@ TEnvState = TypeVar("TEnvState", bound=RolloutEnvState)
 @dataclass(frozen=True)
 class _RLTrainLoopConstants(Generic[TConstants]):
     optimizer: Sequence[optax.GradientTransformation]
-    rollout_constants: TConstants
+    constants: TConstants
 
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class _RLTrainLoopCarry(Generic[TEnvState, TSharedState]):
     opt_state: Sequence[optax.OptState]
-    rollout_env_states: TEnvState
-    rollout_shared_state: TSharedState
+    env_states: TEnvState
+    shared_state: TSharedState
 
 
 class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvState], ABC):
@@ -847,64 +847,64 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
             "torque_limits": get_torque_limits(mj_model),
         }
 
-    @xax.jit(static_argnames=["self", "rollout_constants"], jit_level=3)
+    @xax.jit(static_argnames=["self", "constants"], jit_level=3)
     def step_engine(
         self,
-        rollout_constants: TConstants,
-        rollout_env_state: TEnvState,
-        rollout_shared_state: TSharedState,
+        constants: TConstants,
+        env_states: TEnvState,
+        shared_state: TSharedState,
     ) -> tuple[Trajectory, TEnvState]:
         """Runs a single step of the physics engine.
 
         Args:
-            physics_model: The physics model.
-            rollout_constants: The constants for the engine.
-            rollout_env_state: The environment variables for the engine.
-            rollout_shared_state: The control variables for the engine.
+            constants: The constants for the engine.
+            env_states: The environment variables for the engine.
+            shared_state: The control variables for the engine.
 
         Returns:
             A tuple containing the trajectory and the next engine variables.
         """
-        rng, obs_rng, cmd_rng, act_rng, reset_rng, carry_rng, physics_rng = jax.random.split(rollout_env_state.rng, 7)
+        rng = env_states.rng
+        rng, obs_rng, cmd_rng, act_rng, reset_rng, carry_rng, physics_rng = jax.random.split(rng, 7)
 
         # Recombines the mutable and static parts of the model.
-        model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
+        model = eqx.combine(shared_state.model_arr, constants.model_static)
 
         # Gets the observations from the physics state.
         observations, next_obs_carry = get_observation(
-            rollout_env_state=rollout_env_state,
-            observations=rollout_constants.observations,
-            obs_carry=rollout_env_state.obs_carry,
-            curriculum_level=rollout_env_state.curriculum_state.level,
+            rollout_env_state=env_states,
+            observations=constants.observations,
+            obs_carry=env_states.obs_carry,
+            curriculum_level=env_states.curriculum_state.level,
             rng=obs_rng,
         )
 
         # Samples an action from the model.
         action = self.sample_action(
             model=model,
-            model_carry=rollout_env_state.model_carry,
-            physics_model=rollout_shared_state.physics_model,
-            physics_state=rollout_env_state.physics_state,
+            model_carry=env_states.model_carry,
+            physics_model=shared_state.physics_model,
+            physics_state=env_states.physics_state,
             observations=observations,
-            commands=rollout_env_state.commands,
+            commands=env_states.commands,
             rng=act_rng,
-            argmax=rollout_constants.argmax_action,
+            argmax=constants.argmax_action,
         )
 
         # Steps the physics engine.
-        next_physics_state: PhysicsState = rollout_constants.engine.step(
+        next_physics_state: PhysicsState = constants.engine.step(
             action=action.action,
-            physics_model=rollout_shared_state.physics_model,
-            physics_state=rollout_env_state.physics_state,
-            curriculum_level=rollout_env_state.curriculum_state.level,
+            physics_model=shared_state.physics_model,
+            physics_state=env_states.physics_state,
+            curriculum_level=env_states.curriculum_state.level,
             rng=physics_rng,
         )
 
         # Gets termination components and a single termination boolean.
         terminations = get_terminations(
             physics_state=next_physics_state,
-            terminations=rollout_constants.terminations,
-            curriculum_level=rollout_env_state.curriculum_state.level,
+            terminations=constants.terminations,
+            curriculum_level=env_states.curriculum_state.level,
         )
 
         # Convert ternary terminations to binary arrays.
@@ -919,7 +919,7 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
             xpos=jnp.array(next_physics_state.data.xpos),
             xquat=jnp.array(next_physics_state.data.xquat),
             obs=observations,
-            command=rollout_env_state.commands,
+            command=env_states.commands,
             event_state=next_physics_state.event_states,
             action=action.action,
             done=terminated,
@@ -935,29 +935,29 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
             lambda: get_initial_commands(
                 rng=cmd_rng,
                 physics_data=next_physics_state.data,
-                commands=rollout_constants.commands,
-                curriculum_level=rollout_env_state.curriculum_state.level,
+                commands=constants.commands,
+                curriculum_level=env_states.curriculum_state.level,
             ),
             lambda: get_commands(
-                prev_commands=rollout_env_state.commands,
+                prev_commands=env_states.commands,
                 physics_state=next_physics_state,
                 rng=cmd_rng,
-                commands=rollout_constants.commands,
-                curriculum_level=rollout_env_state.curriculum_state.level,
+                commands=constants.commands,
+                curriculum_level=env_states.curriculum_state.level,
             ),
         )
 
         next_obs_carry = jax.lax.cond(
             terminated,
-            lambda: get_initial_obs_carry(rng=carry_rng, observations=rollout_constants.observations),
+            lambda: get_initial_obs_carry(rng=carry_rng, observations=constants.observations),
             lambda: next_obs_carry,
         )
 
         next_physics_state = jax.lax.cond(
             terminated,
-            lambda: rollout_constants.engine.reset(
-                rollout_shared_state.physics_model,
-                rollout_env_state.curriculum_state.level,
+            lambda: constants.engine.reset(
+                shared_state.physics_model,
+                env_states.curriculum_state.level,
                 reset_rng,
             ),
             lambda: next_physics_state,
@@ -971,7 +971,7 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
 
         # Gets the variables for the next step.
         next_rollout_env_state = dataclass_replace(
-            rollout_env_state,
+            env_states,
             commands=next_commands,
             physics_state=next_physics_state,
             model_carry=next_model_carry,
@@ -1203,35 +1203,32 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
     def update_model(
         self,
         *,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
+        constants: _RLTrainLoopConstants[TConstants],
+        carry: _RLTrainLoopCarry[TEnvState, TSharedState],
         trajectories: Trajectory,
         rewards: RewardState,
-        rollout_env_states: TEnvState,
-        rollout_shared_state: TSharedState,
-        rollout_constants: TConstants,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, PyTree, xax.FrozenDict[str, Array], LoggedTrajectory]:
+    ) -> tuple[
+        _RLTrainLoopCarry[TEnvState, TSharedState],
+        xax.FrozenDict[str, Array],
+        LoggedTrajectory,
+    ]:
         """Updates the model on the given trajectory.
 
         This function should be implemented according to the specific RL method
         that we are using.
 
         Args:
-            optimizer: The optimizer to use.
-            opt_state: The optimizer state.
+            constants: The constants to use for the rollout.
+            carry: The carry to use for the rollout.
             trajectories: The trajectories to update the model on.
             rewards: The rewards to update the model on.
-            rollout_env_states: The environment variables to use for the rollout.
-            rollout_shared_state: The shared state to use for the rollout.
-            rollout_constants: The constants to use for the rollout.
             rng: The random seed.
 
         Returns:
-            A tuple containing the updated model, optimizer state, next model
-            carry, metrics to log, and the single trajectory to log. If a metric
-            has a single element it is logged as a scalar, otherwise it is
-            logged as a histogram.
+            A tuple containing the next carry, metrics to log, and the single
+            trajectory to log. If a metric has a single element it is logged as
+            a scalar, otherwise it is logged as a histogram.
         """
 
     def get_histogram(self, arr: Array, bins: int = 100) -> Histogram:
@@ -1303,45 +1300,51 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
             markers.extend(reward.get_markers())
         return markers
 
-    @xax.jit(static_argnames=["self", "rollout_constants"], jit_level=2)
+    @xax.jit(static_argnames=["self", "constants"], jit_level=2)
     def _single_unroll(
         self,
-        rollout_constants: TConstants,
-        rollout_env_state: TEnvState,
-        rollout_shared_state: TSharedState,
+        constants: TConstants,
+        env_state: TEnvState,
+        shared_state: TSharedState,
     ) -> tuple[Trajectory, RewardState, TEnvState]:
         # Applies randomizations to the model.
-        rollout_shared_state = dataclass_replace(
-            rollout_shared_state,
-            physics_model=rollout_shared_state.physics_model.tree_replace(rollout_env_state.randomization_dict),
+        shared_state = dataclass_replace(
+            shared_state,
+            physics_model=shared_state.physics_model.tree_replace(env_state.randomization_dict),
         )
 
-        def scan_fn(carry: TEnvState, _: None) -> tuple[TEnvState, Trajectory]:
-            trajectory, next_rollout_variables = self.step_engine(
-                rollout_constants=rollout_constants,
-                rollout_env_state=carry,
-                rollout_shared_state=rollout_shared_state,
+        def scan_fn(env_state: TEnvState, _: None) -> tuple[TEnvState, Trajectory]:
+            trajectory, env_state = self.step_engine(
+                constants=constants,
+                env_states=env_state,
+                shared_state=shared_state,
             )
-            return next_rollout_variables, trajectory
+            return env_state, trajectory
 
         # Scans the engine for the desired number of steps.
-        next_rollout_variables, trajectory = xax.scan(
+        env_state, trajectory = xax.scan(
             scan_fn,
-            rollout_env_state,
+            env_state,
             length=self.rollout_length_steps,
         )
 
         # Gets the rewards.
         reward = get_rewards(
             trajectory=trajectory,
-            rewards=rollout_constants.rewards,
-            rewards_carry=rollout_env_state.reward_carry,
+            rewards=constants.rewards,
+            rewards_carry=env_state.reward_carry,
             rollout_length_steps=self.rollout_length_steps,
             clip_min=self.config.reward_clip_min,
             clip_max=self.config.reward_clip_max,
         )
 
-        return trajectory, reward, next_rollout_variables
+        # Updates the reward carry in the environment state.
+        env_state = dataclass_replace(
+            env_state,
+            reward_carry=reward.carry,
+        )
+
+        return trajectory, reward, env_state
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=1)
     def _rl_train_loop_step(
@@ -1359,21 +1362,21 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
         ) -> tuple[_RLTrainLoopCarry[TEnvState, TSharedState], tuple[Metrics, LoggedTrajectory]]:
             # Rolls out a new trajectory.
             vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(None, 0, None))
-            trajectories, rewards, next_rollout_env_states = vmapped_unroll(
-                constants.rollout_constants,
-                carry_i.rollout_env_states,
-                carry_i.rollout_shared_state,
+            trajectories, rewards, env_state = vmapped_unroll(
+                constants.constants,
+                carry_i.env_states,
+                carry_i.shared_state,
             )
 
+            # Updates the carry with the new environment state.
+            carry_i = dataclass_replace(carry_i, env_states=env_state)
+
             # Runs update on the previous trajectory.
-            model_arr, opt_state, next_model_carry, train_metrics, logged_traj = self.update_model(
-                optimizer=constants.optimizer[0],
-                opt_state=carry_i.opt_state[0],
+            carry_i, train_metrics, logged_traj = self.update_model(
+                constants=constants,
+                carry=carry_i,
                 trajectories=trajectories,
                 rewards=rewards,
-                rollout_env_states=carry_i.rollout_env_states,
-                rollout_shared_state=carry_i.rollout_shared_state,
-                rollout_constants=constants.rollout_constants,
                 rng=rng,
             )
 
@@ -1382,42 +1385,26 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
                 train=train_metrics,
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
-                curriculum_level=carry_i.rollout_env_states.curriculum_state.level,
+                curriculum_level=carry_i.env_states.curriculum_state.level,
             )
 
             # Steps the curriculum.
-            curriculum_state = constants.rollout_constants.curriculum(
+            curriculum_state = constants.constants.curriculum(
                 trajectory=trajectories,
                 rewards=rewards,
                 training_state=state,
-                prev_state=carry_i.rollout_env_states.curriculum_state,
+                prev_state=carry_i.env_states.curriculum_state,
             )
 
-            # For the next rollout, we use the model carry from the
-            # output of the model update instead of the output of the
-            # rollout. This was shown to work slightly better in
-            # practice - for an  RNN model, for example, after updating
-            # the model, the model carry will be new and the previous
-            # rollout's model carry will be incorrect.
-            rollout_env_state = dataclass_replace(
-                next_rollout_env_states,
-                model_carry=next_model_carry,
-                reward_carry=rewards.carry,
-                curriculum_state=curriculum_state,
+            carry_i = dataclass_replace(
+                carry_i,
+                env_states=dataclass_replace(
+                    carry_i.env_states,
+                    curriculum_state=curriculum_state,
+                ),
             )
 
-            rollout_shared_state = dataclass_replace(
-                carry_i.rollout_shared_state,
-                model_arr=model_arr,
-            )
-
-            next_carry = _RLTrainLoopCarry(
-                opt_state=[opt_state],
-                rollout_env_states=rollout_env_state,
-                rollout_shared_state=rollout_shared_state,
-            )
-
-            return next_carry, (metrics, logged_traj)
+            return carry_i, (metrics, logged_traj)
 
         rngs = jax.random.split(rng, self.config.epochs_per_log_step)
         carry, (metrics, logged_traj) = jax.lax.scan(single_step_fn, carry, rngs)
@@ -1479,34 +1466,34 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
             # Initializes the control loop variables.
             randomizers = self.get_physics_randomizers(mj_model)
 
-            rollout_constants = self._get_constants(
+            constants = self._get_constants(
                 mj_model=mj_model,
                 model_statics=model_statics,
                 argmax_action=argmax_action,
             )
-            rollout_env_state = self._get_env_state(
+            env_states = self._get_env_state(
                 rng=rng,
-                rollout_constants=rollout_constants,
+                rollout_constants=constants,
                 mj_model=mj_model,
                 randomizers=randomizers,
             )
-            rollout_shared_state = self._get_shared_state(
+            shared_state = self._get_shared_state(
                 mj_model=mj_model,
                 model_arrs=model_arrs,
             )
 
             # Creates the markers.
             markers = self.get_markers(
-                commands=rollout_constants.commands,
-                observations=rollout_constants.observations,
-                rewards=rollout_constants.rewards,
+                commands=constants.commands,
+                observations=constants.observations,
+                rewards=constants.rewards,
             )
 
             # Creates the viewer.
             viewer = get_viewer(
                 mj_model=mj_model,
                 config=self.config,
-                mj_data=rollout_env_state.physics_state.data,
+                mj_data=env_states.physics_state.data,
                 save_path=save_path,
             )
 
@@ -1517,16 +1504,16 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
 
             try:
                 for _ in iterator:
-                    transition, rollout_env_state = self.step_engine(
-                        rollout_constants=rollout_constants,
-                        rollout_env_state=rollout_env_state,
-                        rollout_shared_state=rollout_shared_state,
+                    transition, env_states = self.step_engine(
+                        constants=constants,
+                        env_states=env_states,
+                        shared_state=shared_state,
                     )
                     transitions.append(transition)
 
                     # Logs the frames to render.
-                    viewer.data.qpos[:] = np.array(rollout_env_state.physics_state.data.qpos)
-                    viewer.data.qvel[:] = np.array(rollout_env_state.physics_state.data.qvel)
+                    viewer.data.qpos[:] = np.array(env_states.physics_state.data.qpos)
+                    viewer.data.qvel[:] = np.array(env_states.physics_state.data.qvel)
                     mujoco.mj_forward(viewer.model, viewer.data)
 
                     def render_callback(
@@ -1554,8 +1541,8 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
 
             reward_state = get_rewards(
                 trajectory=trajectory,
-                rewards=rollout_constants.rewards,
-                rewards_carry=rollout_env_state.reward_carry,
+                rewards=constants.rewards,
+                rewards_carry=env_states.reward_carry,
                 rollout_length_steps=self.rollout_length_steps,
                 clip_min=self.config.reward_clip_min,
                 clip_max=self.config.reward_clip_max,
@@ -1645,9 +1632,6 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
             argmax_action=argmax_action,
         )
 
-        return self._rollout_constants_to_constants(rollout_constants)
-
-    def _rollout_constants_to_constants(self, rollout_constants: RolloutConstants) -> TConstants:
         return cast(TConstants, rollout_constants)  # Can override this in subclasses.
 
     def _get_shared_state(self, *, mj_model: PhysicsModel, model_arrs: Sequence[PyTree]) -> TSharedState:
@@ -1659,9 +1643,6 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
             model_arr=model_arrs[0],
         )
 
-        return self._rollout_shared_state_to_shared_state(rollout_shared_state)
-
-    def _rollout_shared_state_to_shared_state(self, rollout_shared_state: RolloutSharedState) -> TSharedState:
         return cast(TSharedState, rollout_shared_state)  # Can override this in subclasses.
 
     def _get_env_state(
@@ -1747,9 +1728,6 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
                 rng=rollout_rng,
             )
 
-        return self._rollout_env_state_to_env_state(rollout_env_state)
-
-    def _rollout_env_state_to_env_state(self, rollout_env_state: RolloutEnvState) -> TEnvState:
         return cast(TEnvState, rollout_env_state)  # Can override this in subclasses.
 
     def collect_dataset(
@@ -1845,12 +1823,10 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
         models, optimizers, opt_states, state = self.load_initial_state(model_rng, load_optimizer=True)
 
         # Logs model and optimizer information.
-        for i, (model, opt_state) in enumerate(zip(models, opt_states, strict=True), 1):
+        for i, model in enumerate(models, 1):
             suffix = f" {i}" if len(models) > 1 else ""
             model_size = xax.get_pytree_param_count(model)
-            opt_state_size = xax.get_pytree_param_count(opt_state)
             logger.log(xax.LOG_PING, "Model%s size: %s parameters", suffix, f"{model_size:,}")
-            logger.log(xax.LOG_PING, "Optimizer%s state size: %s parameters", suffix, f"{opt_state_size:,}")
 
         # Partitions the models into mutable and static parts.
         model_arrs, model_statics = (
@@ -1867,7 +1843,7 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
 
         constants = _RLTrainLoopConstants(
             optimizer=optimizers,
-            rollout_constants=self._get_constants(
+            constants=self._get_constants(
                 mj_model=mjx_model,
                 model_statics=model_statics,
                 argmax_action=False,
@@ -1876,13 +1852,13 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
 
         carry = _RLTrainLoopCarry(
             opt_state=opt_states,
-            rollout_env_states=self._get_env_state(
+            env_states=self._get_env_state(
                 rng=rng,
-                rollout_constants=constants.rollout_constants,
+                rollout_constants=constants.constants,
                 mj_model=mjx_model,
                 randomizers=randomizers,
             ),
-            rollout_shared_state=self._get_shared_state(
+            shared_state=self._get_shared_state(
                 mj_model=mjx_model,
                 model_arrs=model_arrs,
             ),
@@ -1896,7 +1872,7 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
         carry: _RLTrainLoopCarry[TEnvState, TSharedState],
         state: xax.State,
     ) -> None:
-        model = eqx.combine(carry.rollout_shared_state.model_arr, constants.rollout_constants.model_static)
+        model = eqx.combine(carry.shared_state.model_arr, constants.constants.model_static)
         self.save_checkpoint(models=[model], optimizers=constants.optimizer, opt_states=carry.opt_state, state=state)
 
     def run_training(self) -> None:
@@ -1918,9 +1894,9 @@ class RLTask(xax.Task[Config], Generic[Config, TConstants, TSharedState, TEnvSta
 
             # Creates the markers.
             markers = self.get_markers(
-                commands=constants.rollout_constants.commands,
-                observations=constants.rollout_constants.observations,
-                rewards=constants.rollout_constants.rewards,
+                commands=constants.constants.commands,
+                observations=constants.constants.observations,
+                rewards=constants.constants.rewards,
             )
 
             # Creates the viewer.

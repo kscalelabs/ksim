@@ -8,18 +8,17 @@ __all__ = [
 ]
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 from typing import Generic, Mapping, TypeVar
 
 import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.task.rl import RLConfig, RLTask, TConstants, TEnvState, TSharedState
+from ksim.task.rl import RLConfig, RLTask, TConstants, TEnvState, TSharedState, _RLTrainLoopCarry, _RLTrainLoopConstants
 from ksim.types import LoggedTrajectory, RewardState, Trajectory
 
 
@@ -524,25 +523,28 @@ class PPOTask(
         )
         return metrics, logged_trajectory, grads
 
-    @xax.jit(static_argnames=["self", "model_static", "optimizer"], jit_level=4)
+    @xax.jit(static_argnames=["self", "constants"], jit_level=4)
     def _single_step(
         self,
-        model_arr: PyTree,
-        model_static: PyTree,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
         trajectories: Trajectory,
         rewards: RewardState,
-        init_carry: PyTree,
+        constants: _RLTrainLoopConstants[TConstants],
+        carry: _RLTrainLoopCarry[TEnvState, TSharedState],
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, xax.FrozenDict[str, Array], LoggedTrajectory]:
+    ) -> tuple[_RLTrainLoopCarry[TEnvState, TSharedState], xax.FrozenDict[str, Array], LoggedTrajectory]:
+        # Gets the policy model and optimizer.
+        model_arr = carry.shared_state.model_arr[0]
+        model_static = constants.constants.model_static[0]
+        optimizer = constants.optimizer[0]
+        opt_state = carry.opt_state[0]
+
         ppo_metrics, logged_trajectory, grads = self._get_metrics_and_grads(
             model_arr=model_arr,
             model_static=model_static,
             trajectories=trajectories,
             rewards=rewards,
-            init_carry=init_carry,
+            init_carry=carry.env_states.model_carry,
             on_policy_variables=on_policy_variables,
             rng=rng,
         )
@@ -554,105 +556,114 @@ class PPOTask(
             opt_state=opt_state,
         )
 
-        return new_model_arr, new_opt_state, xax.FrozenDict(dict(ppo_metrics) | dict(grad_metrics)), logged_trajectory
+        # Updates the carry with the new model and optimizer states.
+        carry = dataclass_replace(
+            carry,
+            shared_state=dataclass_replace(
+                carry.shared_state,
+                model_arr=new_model_arr,
+            ),
+            opt_state=new_opt_state,
+        )
+
+        return carry, xax.FrozenDict(dict(ppo_metrics) | dict(grad_metrics)), logged_trajectory
 
     def update_model(
         self,
         *,
-        optimizer: optax.GradientTransformation,
-        opt_state: optax.OptState,
+        constants: _RLTrainLoopConstants[TConstants],
+        carry: _RLTrainLoopCarry[TEnvState, TSharedState],
         trajectories: Trajectory,
         rewards: RewardState,
-        rollout_env_states: TEnvState,
-        rollout_shared_state: TSharedState,
-        rollout_constants: TConstants,
         rng: PRNGKeyArray,
-    ) -> tuple[PyTree, optax.OptState, PyTree, xax.FrozenDict[str, Array], LoggedTrajectory]:
-        """Runs PPO updates on a given set of trajectory batches.
-
-        Args:
-            optimizer: The optimizer to use.
-            opt_state: The optimizer state.
-            trajectories: The trajectories to update the model on. (num_envs, num_steps, leaf_dim)
-            rewards: The rewards for the trajectories. (num_envs, num_steps)
-            rollout_env_states: The environment variables inputs into the rollout.
-            rollout_shared_state: The shared state inputs into the rollout.
-            rollout_constants: The constant inputs into the rollout.
-            rng: A random seed.
-
-        Returns:
-            A tuple containing the updated parameters, optimizer state, next
-            model carry, metrics, and the single trajectory to log.
-        """
+    ) -> tuple[
+        _RLTrainLoopCarry[TEnvState, TSharedState],
+        xax.FrozenDict[str, Array],
+        LoggedTrajectory,
+    ]:
         # We preserve rollout ordering and split batches by envs.
         indices = jnp.arange(trajectories.done.shape[0])  # (num_envs)
         indices_by_batch = indices.reshape(self.num_batches, self.batch_size)  # (num_batches, rollouts per batch)
 
-        model = eqx.combine(rollout_shared_state.model_arr, rollout_constants.model_static)
+        # Gets the policy model.
+        policy_model_arr = carry.shared_state.model_arr[0]
+        policy_model_static = constants.constants.model_static[0]
+        policy_model = eqx.combine(policy_model_arr, policy_model_static)
 
+        # Runs the policy model on the trajectory to get the PPO variables.
         on_policy_rngs = jax.random.split(rng, self.config.num_envs)
         on_policy_variables, _ = jax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0))(
-            model, trajectories, rollout_env_states.model_carry, on_policy_rngs
+            policy_model, trajectories, carry.env_states.model_carry, on_policy_rngs
         )  # (num_envs, num_steps, ppo_vars)
 
         # Loops over the trajectory batches and applies gradient updates.
         def update_model_in_batch(
-            carry_training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
-            batch_indices: Array,
-        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
-            model_arr, opt_state, rng = carry_training_state
+            carry: _RLTrainLoopCarry[TEnvState, TSharedState],
+            xs: tuple[Array, PRNGKeyArray],
+        ) -> tuple[_RLTrainLoopCarry[TEnvState, TSharedState], tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
+            batch_indices, rng = xs
             rng, batch_rng = jax.random.split(rng)
 
             # Gets the current batch of trajectories and rewards.
             trajectory_batch = jax.tree.map(lambda x: x[batch_indices], trajectories)
             reward_batch = jax.tree.map(lambda x: x[batch_indices], rewards)
-            carry_batch = jax.tree.map(lambda x: x[batch_indices], rollout_env_states.model_carry)
+            env_states_batch = jax.tree.map(lambda x: x[batch_indices], carry.env_states)
             on_policy_variables_batch = jax.tree.map(lambda x: x[batch_indices], on_policy_variables)
 
-            model_arr, opt_state, metrics, logged_traj = self._single_step(
-                model_arr=model_arr,
-                model_static=rollout_constants.model_static,
-                optimizer=optimizer,
-                opt_state=opt_state,
+            carry, metrics, logged_traj = self._single_step(
                 trajectories=trajectory_batch,
                 rewards=reward_batch,
-                init_carry=carry_batch,
+                constants=constants,
+                carry=dataclass_replace(carry, env_states=env_states_batch),
                 on_policy_variables=on_policy_variables_batch,
                 rng=batch_rng,
             )
 
-            return (model_arr, opt_state, rng), (metrics, logged_traj)
+            return carry, (metrics, logged_traj)
 
         # Applies N steps of gradient updates.
         def update_model_across_batches(
-            carry_training_state: tuple[PyTree, optax.OptState, PRNGKeyArray],
+            carry: _RLTrainLoopCarry[TEnvState, TSharedState],
             _: None,
-        ) -> tuple[tuple[PyTree, optax.OptState, PRNGKeyArray], tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
-            carry_training_state, (metrics, trajs_for_logging) = jax.lax.scan(
-                update_model_in_batch, carry_training_state, indices_by_batch
+        ) -> tuple[_RLTrainLoopCarry[TEnvState, TSharedState], tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
+            carry, (metrics, trajs_for_logging) = jax.lax.scan(
+                update_model_in_batch,
+                carry,
+                (indices_by_batch, jax.random.split(rng, self.num_batches)),
             )
 
             # Each batch saves one trajectory for logging, get the last.
             traj_for_logging = jax.tree.map(lambda x: x[-1], trajs_for_logging)
 
-            return carry_training_state, (metrics, traj_for_logging)
-
-        carry_training_state = (rollout_shared_state.model_arr, opt_state, rng)
+            return carry, (metrics, traj_for_logging)
 
         # Applies gradient update across all batches num_passes times.
-        carry_training_state, (metrics, trajs_for_logging) = jax.lax.scan(
-            update_model_across_batches, carry_training_state, length=self.config.num_passes
+        carry, (metrics, trajs_for_logging) = jax.lax.scan(
+            update_model_across_batches,
+            carry,
+            length=self.config.num_passes,
         )
 
         # Get the last logged trajectory accross all full dataset passes.
         logged_traj = jax.tree.map(lambda x: x[-1], trajs_for_logging)
 
-        # Getting the next model carry using the updated model.
-        # Yes, this does recompute the PPO variables, but the impact is small.
+        # For the next rollout, we use the model carry from the output of the
+        # model update instead of the output of the rollout. This was shown to
+        # work slightly better in practice - for an  RNN model, for example,
+        # after updating the model, the model carry will be new and the
+        # previous rollout's model carry will be incorrect. This does perform
+        # some additional computation, but the impact is small.
         off_policy_rngs = jax.random.split(rng, self.config.num_envs)
         _, next_model_carrys = jax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0))(
-            model, trajectories, rollout_env_states.model_carry, off_policy_rngs
+            policy_model, trajectories, carry.env_states.model_carry, off_policy_rngs
         )
 
-        model_arr, opt_state, _ = carry_training_state
-        return model_arr, opt_state, next_model_carrys, metrics, logged_traj
+        carry = dataclass_replace(
+            carry,
+            env_states=dataclass_replace(
+                carry.env_states,
+                model_carry=next_model_carrys,
+            ),
+        )
+
+        return carry, metrics, logged_traj
