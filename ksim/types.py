@@ -6,7 +6,7 @@ __all__ = [
     "PhysicsState",
     "Trajectory",
     "RewardState",
-    "ActuatorState",
+    "PyTree",
     "Action",
     "Histogram",
     "Metrics",
@@ -37,13 +37,6 @@ class PhysicsState:
     event_states: xax.FrozenDict[str, PyTree]
     actuator_state: PyTree
     action_latency: Array
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class ActuatorState:
-    position: Array
-    velocity: Array
 
 
 @jax.tree_util.register_dataclass
