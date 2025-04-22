@@ -98,7 +98,7 @@ class MjxEngine(PhysicsEngine):
 
         # Gets the initial actuator state for stateful actuators.
         actuator_state = (
-            self.actuators.get_initial_state(mjx_data) if isinstance(self.actuators, StatefulActuators) else None
+            self.actuators.get_initial_state(mjx_data, rng) if isinstance(self.actuators, StatefulActuators) else None
         )
 
         rng, latency_rng = jax.random.split(rng)
@@ -204,7 +204,9 @@ class MujocoEngine(PhysicsEngine):
         mujoco.mj_forward(physics_model, mujoco_data)
         default_action = self.actuators.get_default_action(mujoco_data)
         actuator_state = (
-            self.actuators.get_initial_state(mujoco_data) if isinstance(self.actuators, StatefulActuators) else None
+            self.actuators.get_initial_state(mujoco_data, rng)
+            if isinstance(self.actuators, StatefulActuators)
+            else None
         )
 
         rng, latency_rng = jax.random.split(rng)
