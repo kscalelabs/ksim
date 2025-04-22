@@ -6,6 +6,7 @@ __all__ = [
     "RolloutConstants",
     "RolloutSharedState",
     "RolloutEnvState",
+    "JointMetadataOutput",
 ]
 
 import bdb

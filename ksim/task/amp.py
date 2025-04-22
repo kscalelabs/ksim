@@ -75,7 +75,7 @@ class AMPConfig(PPOConfig):
         value=1,
         help="The number of times to pass the discriminator.",
     )
-    w_gp: float = xax.field(
+    wasserstein_gradient_penalty: float = xax.field(
         value=10.0,
         help="Gradient penalty coefficient for discriminator (WGAN-GP style).",
     )
@@ -122,7 +122,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
     def get_discriminator_model(self, key: PRNGKeyArray) -> PyTree:
         """Returns the discriminator model."""
 
-    def get_model(self, key: PRNGKeyArray) -> PyTree | Sequence[PyTree]:
+    def get_model(self, key: PRNGKeyArray) -> tuple[PyTree, PyTree]:
         policy_key, discriminator_key = jax.random.split(key)
         return self.get_policy_model(policy_key), self.get_discriminator_model(discriminator_key)
 

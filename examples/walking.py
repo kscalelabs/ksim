@@ -232,11 +232,6 @@ Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 
 class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
-        """Builds the optimizer.
-
-        This provides a reasonable default optimizer for training PPO models,
-        but can be overridden by subclasses who want to do something different.
-        """
         optimizer = optax.chain(
             optax.clip_by_global_norm(self.config.max_grad_norm),
             (
@@ -248,7 +243,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
         return optimizer
 
-    def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
+    def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         return mujoco.MjModel.from_xml_path(mjcf_path)
 

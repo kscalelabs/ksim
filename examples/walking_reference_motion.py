@@ -27,7 +27,7 @@ from scipy.spatial.transform import Rotation as R
 import ksim
 from ksim.types import PhysicsModel
 from ksim.utils.priors import (
-    ReferenceMapping,
+    MotionReferenceMapping,
     generate_reference_motion,
     get_reference_joint_id,
     local_to_absolute,
@@ -75,18 +75,18 @@ class HumanoidWalkingReferenceMotionTaskConfig(HumanoidWalkingTaskConfig):
 
 
 HUMANOID_REFERENCE_MAPPINGS = (
-    ReferenceMapping("CC_Base_L_ThighTwist01", "thigh_left"),  # hip
-    ReferenceMapping("CC_Base_L_CalfTwist01", "shin_left"),  # knee
-    ReferenceMapping("CC_Base_L_Foot", "foot_left"),  # foot
-    ReferenceMapping("CC_Base_L_UpperarmTwist01", "upper_arm_left"),  # shoulder
-    ReferenceMapping("CC_Base_L_ForearmTwist01", "lower_arm_left"),  # elbow
-    ReferenceMapping("CC_Base_L_Hand", "hand_left"),  # hand
-    ReferenceMapping("CC_Base_R_ThighTwist01", "thigh_right"),  # hip
-    ReferenceMapping("CC_Base_R_CalfTwist01", "shin_right"),  # knee
-    ReferenceMapping("CC_Base_R_Foot", "foot_right"),  # foot
-    ReferenceMapping("CC_Base_R_UpperarmTwist01", "upper_arm_right"),  # shoulder
-    ReferenceMapping("CC_Base_R_ForearmTwist01", "lower_arm_right"),  # elbow
-    ReferenceMapping("CC_Base_R_Hand", "hand_right"),  # hand
+    MotionReferenceMapping("CC_Base_L_ThighTwist01", "thigh_left"),  # hip
+    MotionReferenceMapping("CC_Base_L_CalfTwist01", "shin_left"),  # knee
+    MotionReferenceMapping("CC_Base_L_Foot", "foot_left"),  # foot
+    MotionReferenceMapping("CC_Base_L_UpperarmTwist01", "upper_arm_left"),  # shoulder
+    MotionReferenceMapping("CC_Base_L_ForearmTwist01", "lower_arm_left"),  # elbow
+    MotionReferenceMapping("CC_Base_L_Hand", "hand_left"),  # hand
+    MotionReferenceMapping("CC_Base_R_ThighTwist01", "thigh_right"),  # hip
+    MotionReferenceMapping("CC_Base_R_CalfTwist01", "shin_right"),  # knee
+    MotionReferenceMapping("CC_Base_R_Foot", "foot_right"),  # foot
+    MotionReferenceMapping("CC_Base_R_UpperarmTwist01", "upper_arm_right"),  # shoulder
+    MotionReferenceMapping("CC_Base_R_ForearmTwist01", "lower_arm_right"),  # elbow
+    MotionReferenceMapping("CC_Base_R_Hand", "hand_right"),  # hand
 )
 
 
