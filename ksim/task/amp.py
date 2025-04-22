@@ -21,43 +21,12 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.rewards import Reward
 from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.task.rl import RolloutConstants, RolloutEnvState, RolloutSharedState, _RLTrainLoopCarry
+from ksim.task.rl import RolloutConstants, RolloutEnvState, RolloutSharedState
 from ksim.types import Trajectory
 
 DISCRIMINATOR_OUTPUT_KEY = "_discriminator_output"
 
 logger = logging.getLogger(__name__)
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class DiscriminatorEnvState(RolloutEnvState):
-    pass
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class DiscriminatorSharedState(RolloutSharedState):
-    """Variables used across all environments."""
-
-    disc_model_arr: PyTree
-    real_motions: PyTree
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class DiscriminatorConstants(RolloutConstants):
-    """Constants for the rollout loop."""
-
-    disc_model_static: PyTree
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class _AMPTrainLoopCarry(_RLTrainLoopCarry):
-    rollout_env_states: DiscriminatorEnvState
-    rollout_shared_state: DiscriminatorSharedState
-    disc_opt_state: optax.OptState
 
 
 @jax.tree_util.register_dataclass
@@ -194,10 +163,10 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
     @xax.jit(static_argnames=["self", "constants"], jit_level=3)
     def step_engine(
         self,
-        constants: DiscriminatorConstants,
-        env_states: DiscriminatorEnvState,
-        shared_state: DiscriminatorSharedState,
-    ) -> tuple[Trajectory, DiscriminatorEnvState]:
+        constants: RolloutConstants,
+        env_states: RolloutEnvState,
+        shared_state: RolloutSharedState,
+    ) -> tuple[Trajectory, RolloutEnvState]:
         transition, next_env_state = super().step_engine(
             constants=constants,
             env_states=env_states,
@@ -205,11 +174,13 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         )
 
         # Recombines the mutable and static parts of the discriminator model.
-        model = eqx.combine(shared_state.disc_model_arr, constants.disc_model_static)
+        disc_model_arr = shared_state.model_arrs[1]
+        disc_model_static = constants.model_statics[1]
+        disc_model = eqx.combine(disc_model_arr, disc_model_static)
 
         # Runs the discriminator on the trajectory.
         motion = self.trajectory_to_motion(transition)
-        discriminator_logits = self.call_discriminator(model, motion)
+        discriminator_logits = self.call_discriminator(disc_model, motion)
 
         # Adds the discriminator output to the auxiliary outputs.
         aux_outputs = transition.aux_outputs.unfreeze() if transition.aux_outputs else {}

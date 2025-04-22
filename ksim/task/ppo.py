@@ -18,7 +18,12 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.task.rl import RLConfig, RLTask, TConstants, TEnvState, TSharedState, _RLTrainLoopCarry, _RLTrainLoopConstants
+from ksim.task.rl import (
+    RLConfig,
+    RLLoopCarry,
+    RLLoopConstants,
+    RLTask,
+)
 from ksim.types import LoggedTrajectory, RewardState, Trajectory
 
 
@@ -295,11 +300,7 @@ class PPOConfig(RLConfig):
 Config = TypeVar("Config", bound=PPOConfig)
 
 
-class PPOTask(
-    RLTask[Config, TConstants, TSharedState, TEnvState],
-    Generic[Config, TConstants, TSharedState, TEnvState],
-    ABC,
-):
+class PPOTask(RLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
 
     @abstractmethod
@@ -528,14 +529,14 @@ class PPOTask(
         self,
         trajectories: Trajectory,
         rewards: RewardState,
-        constants: _RLTrainLoopConstants[TConstants],
-        carry: _RLTrainLoopCarry[TEnvState, TSharedState],
+        constants: RLLoopConstants,
+        carry: RLLoopCarry,
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
-    ) -> tuple[_RLTrainLoopCarry[TEnvState, TSharedState], xax.FrozenDict[str, Array], LoggedTrajectory]:
+    ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
         # Gets the policy model and optimizer.
-        model_arr = carry.shared_state.model_arr[0]
-        model_static = constants.constants.model_static[0]
+        model_arr = carry.shared_state.model_arrs[0]
+        model_static = constants.constants.model_statics[0]
         optimizer = constants.optimizer[0]
         opt_state = carry.opt_state[0]
 
@@ -561,7 +562,7 @@ class PPOTask(
             carry,
             shared_state=dataclass_replace(
                 carry.shared_state,
-                model_arr=new_model_arr,
+                model_arrs=new_model_arr,
             ),
             opt_state=new_opt_state,
         )
@@ -571,13 +572,13 @@ class PPOTask(
     def update_model(
         self,
         *,
-        constants: _RLTrainLoopConstants[TConstants],
-        carry: _RLTrainLoopCarry[TEnvState, TSharedState],
+        constants: RLLoopConstants,
+        carry: RLLoopCarry,
         trajectories: Trajectory,
         rewards: RewardState,
         rng: PRNGKeyArray,
     ) -> tuple[
-        _RLTrainLoopCarry[TEnvState, TSharedState],
+        RLLoopCarry,
         xax.FrozenDict[str, Array],
         LoggedTrajectory,
     ]:
@@ -586,8 +587,8 @@ class PPOTask(
         indices_by_batch = indices.reshape(self.num_batches, self.batch_size)  # (num_batches, rollouts per batch)
 
         # Gets the policy model.
-        policy_model_arr = carry.shared_state.model_arr[0]
-        policy_model_static = constants.constants.model_static[0]
+        policy_model_arr = carry.shared_state.model_arrs[0]
+        policy_model_static = constants.constants.model_statics[0]
         policy_model = eqx.combine(policy_model_arr, policy_model_static)
 
         # Runs the policy model on the trajectory to get the PPO variables.
@@ -598,9 +599,9 @@ class PPOTask(
 
         # Loops over the trajectory batches and applies gradient updates.
         def update_model_in_batch(
-            carry: _RLTrainLoopCarry[TEnvState, TSharedState],
+            carry: RLLoopCarry,
             xs: tuple[Array, PRNGKeyArray],
-        ) -> tuple[_RLTrainLoopCarry[TEnvState, TSharedState], tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
+        ) -> tuple[RLLoopCarry, tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
             batch_indices, rng = xs
             rng, batch_rng = jax.random.split(rng)
 
@@ -623,9 +624,9 @@ class PPOTask(
 
         # Applies N steps of gradient updates.
         def update_model_across_batches(
-            carry: _RLTrainLoopCarry[TEnvState, TSharedState],
+            carry: RLLoopCarry,
             _: None,
-        ) -> tuple[_RLTrainLoopCarry[TEnvState, TSharedState], tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
+        ) -> tuple[RLLoopCarry, tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
             carry, (metrics, trajs_for_logging) = jax.lax.scan(
                 update_model_in_batch,
                 carry,
