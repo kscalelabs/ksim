@@ -6,7 +6,6 @@ __all__ = [
     "PhysicsState",
     "Trajectory",
     "RewardState",
-    "PyTree",
     "Action",
     "Histogram",
     "Metrics",

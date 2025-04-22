@@ -27,7 +27,7 @@ from mujoco import mjx
 from ksim.actuators import Actuators, StatefulActuators
 from ksim.events import Event
 from ksim.resets import Reset
-from ksim.types import PyTree, PhysicsModel, PhysicsState
+from ksim.types import PhysicsModel, PhysicsState
 
 logger = logging.getLogger(__name__)
 
@@ -203,9 +203,9 @@ class MujocoEngine(PhysicsEngine):
 
         mujoco.mj_forward(physics_model, mujoco_data)
         default_action = self.actuators.get_default_action(mujoco_data)
-        initial_position = mujoco_data.qpos[7:]
-        initial_velocity = jnp.zeros_like(initial_position)
-        default_actuator_state = PyTree(position=initial_position, velocity=initial_velocity)
+        actuator_state = (
+            self.actuators.get_initial_state(mujoco_data) if isinstance(self.actuators, StatefulActuators) else None
+        )
 
         rng, latency_rng = jax.random.split(rng)
 
@@ -213,7 +213,7 @@ class MujocoEngine(PhysicsEngine):
             data=mujoco_data,
             most_recent_action=default_action,
             event_states=self._reset_events(rng),
-            actuator_state=default_actuator_state,
+            actuator_state=actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
                 minval=0,
