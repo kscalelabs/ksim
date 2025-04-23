@@ -266,11 +266,11 @@ class DefaultHumanoidDiscriminator(eqx.Module):
 class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
     # Policy parameters.
     hidden_size: int = xax.field(
-        value=128,
+        value=64,
         help="The hidden size for the MLPs.",
     )
     depth: int = xax.field(
-        value=5,
+        value=3,
         help="The depth for the MLPs.",
     )
 
