@@ -150,59 +150,64 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
         ]
 
     def run(self) -> None:
-        mj_model: PhysicsModel = self.get_mujoco_model()
-        root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
-        reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
-        mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
+        if self.config.default_reference_motion:
+            mj_model: PhysicsModel = self.get_mujoco_model()
+            root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
+            reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
+            mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
 
-        def rotation_callback(root: BvhioJoint) -> None:
-            euler_rotation = np.array(self.config.rotate_bvh_euler)
-            quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
-            root.applyRotation(glm.quat(*quat), bake=True)
+            def rotation_callback(root: BvhioJoint) -> None:
+                euler_rotation = np.array(self.config.rotate_bvh_euler)
+                quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
+                root.applyRotation(glm.quat(*quat), bake=True)
 
-        reference_motion = generate_reference_motion(
-            model=mj_model,
-            mj_base_id=mj_base_id,
-            bvh_root=root,
-            bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
-            bvh_base_id=reference_base_id,
-            bvh_offset=np.array(self.config.bvh_offset),
-            bvh_root_callback=rotation_callback,
-            bvh_scaling_factor=self.config.bvh_scaling_factor,
-            ctrl_dt=self.config.ctrl_dt,
-            neutral_qpos=None,
-            neutral_similarity_weight=0.1,
-            temporal_consistency_weight=0.1,
-            n_restarts=3,
-            error_acceptance_threshold=1e-4,
-            ftol=1e-8,
-            xtol=1e-8,
-            max_nfev=2000,
-            verbose=False,
-        )
-        self.reference_motion = reference_motion
-        np_cartesian_motion = jax.tree.map(np.asarray, self.reference_motion.cartesian_poses)
-
-        if self.config.visualize_reference_points:
-            visualize_reference_points(
+            reference_motion = generate_reference_motion(
                 model=mj_model,
-                base_id=mj_base_id,
-                reference_motion=np_cartesian_motion,
-            )
-        elif self.config.visualize_reference_motion:
-            visualize_reference_motion(
-                model=mj_model,
-                reference_qpos=np.asarray(self.reference_motion.qpos),
-                cartesian_motion=np_cartesian_motion,
                 mj_base_id=mj_base_id,
+                bvh_root=root,
+                bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
+                bvh_base_id=reference_base_id,
+                bvh_offset=np.array(self.config.bvh_offset),
+                bvh_root_callback=rotation_callback,
+                bvh_scaling_factor=self.config.bvh_scaling_factor,
+                ctrl_dt=self.config.ctrl_dt,
+                neutral_qpos=None,
+                neutral_similarity_weight=0.1,
+                temporal_consistency_weight=0.1,
+                n_restarts=3,
+                error_acceptance_threshold=1e-4,
+                ftol=1e-8,
+                xtol=1e-8,
+                max_nfev=2000,
+                verbose=False,
             )
+            self.reference_motion = reference_motion
+            np_cartesian_motion = jax.tree.map(np.asarray, self.reference_motion.cartesian_poses)
+
+            if self.config.visualize_reference_points:
+                visualize_reference_points(
+                    model=mj_model,
+                    base_id=mj_base_id,
+                    reference_motion=np_cartesian_motion,
+                )
+            elif self.config.visualize_reference_motion:
+                visualize_reference_motion(
+                    model=mj_model,
+                    reference_qpos=np.asarray(self.reference_motion.qpos),
+                    cartesian_motion=np_cartesian_motion,
+                    mj_base_id=mj_base_id,
+                )
+            else:
+                super().run()
+
         else:
-            super().run()
+            # Handle one motion for debugging purposes
+            self.reference_motion = ksim.TrajectoryDataset(self.config.dataset_path).next()
 
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.walking_reference_motion
+    #   python -m examples.walking_reference_motion disable_multiprocessing=True
     # To visualize the environment, use the following command:
     #   python -m examples.walking_reference_motion run_environment=True
     # On MacOS or other devices with less memory, you can change the number
@@ -217,7 +222,7 @@ if __name__ == "__main__":
             iterations=8,
             ls_iterations=8,
             epochs_per_log_step=1,
-            valid_every_n_steps=10,
+            valid_every_n_seconds=500,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
@@ -236,5 +241,6 @@ if __name__ == "__main__":
             bvh_scaling_factor=1 / 100,
             mj_base_name="pelvis",
             reference_base_name="CC_Base_Pelvis",
+            default_reference_motion=True,
         ),
     )
