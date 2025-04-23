@@ -4,7 +4,7 @@
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Generic, TypeVar
 
 import bvhio
 import distrax
@@ -153,7 +153,7 @@ class DefaultHumanoidModel(eqx.Module):
 class DefaultHumanoidDiscriminator(eqx.Module):
     """Discriminator for the walking task, returns logit."""
 
-    layers: list[Callable[[Array], Array]]
+    mlp: eqx.nn.MLP
 
     def __init__(
         self,
@@ -161,46 +161,20 @@ class DefaultHumanoidDiscriminator(eqx.Module):
         *,
         hidden_size: int,
         depth: int,
-        num_frames: int,
     ) -> None:
         num_inputs = NUM_JOINTS
+        num_outputs = 1
 
-        layers: list[Callable[[Array], Array]] = []
-        for _ in range(depth):
-            key, subkey = jax.random.split(key)
-            layers += [
-                eqx.nn.Conv1d(
-                    in_channels=num_inputs,
-                    out_channels=hidden_size,
-                    kernel_size=num_frames,
-                    # We left-pad the input so that the discriminator output
-                    # at time T can be reasonably interpretted as the logit
-                    # for the motion from time T - N to T. In other words, we
-                    # this means that all the reward for time T will be based
-                    # on the motion from the previous N frames.
-                    padding=[(num_frames - 1, 0)],
-                    key=subkey,
-                ),
-                jax.nn.relu,
-            ]
-            num_inputs = hidden_size
-
-        layers += [
-            eqx.nn.Conv1d(
-                in_channels=num_inputs,
-                out_channels=1,
-                kernel_size=1,
-                key=key,
-            )
-        ]
-
-        self.layers = layers
+        self.mlp = eqx.nn.MLP(
+            in_size=num_inputs,
+            out_size=num_outputs,
+            width_size=hidden_size,
+            depth=depth,
+            key=key,
+        )
 
     def forward(self, x: Array) -> Array:
-        x_nt = x.transpose(1, 0)
-        for layer in self.layers:
-            x_nt = layer(x_nt)
-        return x_nt.squeeze(0)
+        return self.mlp(x)
 
 
 @dataclass
@@ -227,10 +201,6 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
     discriminator_depth: int = xax.field(
         value=5,
         help="The depth for the discriminator.",
-    )
-    discriminator_num_frames: int = xax.field(
-        value=10,
-        help="The number of frames to use for the discriminator.",
     )
 
     # Optimizer parameters.
@@ -453,7 +423,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.AMPReward(scale=1.0),
+            ksim.AMPReward(temp=10.0, scale=1.0),
             ksim.StayAliveReward(scale=1.0),
             ksim.NaiveForwardReward(clip_max=2.0, scale=1.0),
         ]
@@ -492,7 +462,6 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             key,
             hidden_size=self.config.discriminator_hidden_size,
             depth=self.config.discriminator_depth,
-            num_frames=self.config.discriminator_num_frames,
         )
 
     def get_policy_optimizer(self) -> optax.GradientTransformation:
@@ -515,7 +484,8 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         return optimizer
 
     def call_discriminator(self, model: DefaultHumanoidDiscriminator, motion: Array) -> Array:
-        return model.forward(motion)
+        # return model.forward(motion)
+        return jax.vmap(model.forward)(motion).squeeze(-1)
 
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
