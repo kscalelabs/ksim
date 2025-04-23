@@ -25,7 +25,7 @@ from collections import Counter
 from dataclasses import dataclass, replace as dataclass_replace
 from pathlib import Path
 from threading import Thread
-from typing import Any, Callable, Collection, Generic, Sequence, TypeVar
+from typing import Any, Callable, Collection, Generic, TypeVar
 
 import chex
 import equinox as eqx
@@ -105,7 +105,7 @@ class RolloutSharedState:
     """Variables used across all environments."""
 
     physics_model: PhysicsModel
-    model_arrs: Sequence[PyTree]
+    model_arrs: tuple[PyTree, ...]
 
 
 @jax.tree_util.register_dataclass
@@ -113,7 +113,7 @@ class RolloutSharedState:
 class RolloutConstants:
     """Constants for the rollout loop."""
 
-    model_statics: Sequence[PyTree]
+    model_statics: tuple[PyTree, ...]
     engine: PhysicsEngine
     observations: Collection[Observation]
     commands: Collection[Command]
@@ -599,14 +599,14 @@ def get_viewer(
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class RLLoopConstants:
-    optimizer: Sequence[optax.GradientTransformation]
+    optimizer: tuple[optax.GradientTransformation, ...]
     constants: RolloutConstants
 
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class RLLoopCarry:
-    opt_state: Sequence[optax.OptState]
+    opt_state: tuple[optax.OptState, ...]
     env_states: RolloutEnvState
     shared_state: RolloutSharedState
 
@@ -1447,7 +1447,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Partitions the models into mutable and static parts.
             model_arrs, model_statics = (
-                list(models)
+                tuple(models)
                 for models in zip(
                     *(eqx.partition(model, self.model_partition_fn) for model in models),
                     strict=True,
@@ -1604,7 +1604,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         *,
         mj_model: PhysicsModel,
-        model_statics: Sequence[PyTree],
+        model_statics: tuple[PyTree, ...],
         argmax_action: bool,
     ) -> RolloutConstants:
         if len(model_statics) < 1:
@@ -1619,7 +1619,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         curriculum = self.get_curriculum(mj_model)
 
         return RolloutConstants(
-            model_statics=model_statics[0],
+            model_statics=model_statics,
             engine=engine,
             observations=tuple(observations),
             commands=tuple(commands),
@@ -1629,13 +1629,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             argmax_action=argmax_action,
         )
 
-    def _get_shared_state(self, *, mj_model: PhysicsModel, model_arrs: Sequence[PyTree]) -> RolloutSharedState:
+    def _get_shared_state(self, *, mj_model: PhysicsModel, model_arrs: tuple[PyTree, ...]) -> RolloutSharedState:
         if len(model_arrs) < 1:
             raise ValueError("No models found")
 
         return RolloutSharedState(
             physics_model=mj_model,
-            model_arrs=model_arrs[0],
+            model_arrs=model_arrs,
         )
 
     def _get_env_state(
@@ -1748,7 +1748,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Partitions the models into mutable and static parts.
             model_arrs, model_statics = (
-                list(models)
+                tuple(models)
                 for models in zip(
                     *(eqx.partition(model, self.model_partition_fn) for model in models),
                     strict=True,
@@ -1814,14 +1814,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         models, optimizers, opt_states, state = self.load_initial_state(model_rng, load_optimizer=True)
 
         # Logs model and optimizer information.
-        for i, model in enumerate(models, 1):
+        for i, (model, opt_state) in enumerate(zip(models, opt_states, strict=True), 1):
             suffix = f" {i}" if len(models) > 1 else ""
             model_size = xax.get_pytree_param_count(model)
+            opt_state_size = xax.get_pytree_param_count(opt_state)
             logger.log(xax.LOG_PING, "Model%s size: %s parameters", suffix, f"{model_size:,}")
+            logger.log(xax.LOG_PING, "Optimizer%s size: %s parameters", suffix, f"{opt_state_size:,}")
 
         # Partitions the models into mutable and static parts.
         model_arrs, model_statics = (
-            list(models)
+            tuple(models)
             for models in zip(
                 *(eqx.partition(model, self.model_partition_fn) for model in models),
                 strict=True,
@@ -1833,7 +1835,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         randomizers = self.get_physics_randomizers(mjx_model)
 
         constants = RLLoopConstants(
-            optimizer=optimizers,
+            optimizer=tuple(optimizers),
             constants=self._get_constants(
                 mj_model=mjx_model,
                 model_statics=model_statics,
@@ -1842,7 +1844,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         carry = RLLoopCarry(
-            opt_state=opt_states,
+            opt_state=tuple(opt_states),
             env_states=self._get_env_state(
                 rng=rng,
                 rollout_constants=constants.constants,

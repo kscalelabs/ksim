@@ -562,9 +562,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             carry,
             shared_state=dataclass_replace(
                 carry.shared_state,
-                model_arrs=new_model_arr,
+                model_arrs=xax.tuple_insert(carry.shared_state.model_arrs, 0, new_model_arr),
             ),
-            opt_state=new_opt_state,
+            opt_state=xax.tuple_insert(carry.opt_state, 0, new_opt_state),
         )
 
         return carry, xax.FrozenDict(dict(ppo_metrics) | dict(grad_metrics)), logged_trajectory
@@ -611,13 +611,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             env_states_batch = jax.tree.map(lambda x: x[batch_indices], carry.env_states)
             on_policy_variables_batch = jax.tree.map(lambda x: x[batch_indices], on_policy_variables)
 
-            carry, metrics, logged_traj = self._single_step(
+            next_carry, metrics, logged_traj = self._single_step(
                 trajectories=trajectory_batch,
                 rewards=reward_batch,
                 constants=constants,
                 carry=dataclass_replace(carry, env_states=env_states_batch),
                 on_policy_variables=on_policy_variables_batch,
                 rng=batch_rng,
+            )
+
+            # Update the carry's shared states.
+            carry = dataclass_replace(
+                carry,
+                opt_state=next_carry.opt_state,
+                shared_state=next_carry.shared_state,
             )
 
             return carry, (metrics, logged_traj)
