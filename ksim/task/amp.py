@@ -320,11 +320,21 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         return env_state, trajectory
 
-    def get_disc_losses(
-        self,
-        real_disc_logits: Array,
-        sim_disc_logits: Array,
-    ) -> tuple[Array, Array]:
+    def get_disc_losses(self, real_disc_logits: Array, sim_disc_logits: Array) -> tuple[Array, Array]:
+        """Converts the discriminator logits to losses.
+
+        Downstream classes can implement their own logic here. However, the
+        AMPReward converts the logits directly to a reward, so if you change
+        the output range, then you should be mindful of changing the reward
+        as well.
+
+        Args:
+            real_disc_logits: The discriminator logits for the real motions.
+            sim_disc_logits: The discriminator logits for the simulated motions.
+
+        Returns:
+            A tuple containing the real and simulated discriminator losses.
+        """
         real_disc_loss = xax.get_norm(real_disc_logits - 1.0, "l2").mean()
         sim_disc_loss = xax.get_norm(sim_disc_logits, "l2").mean()
         return real_disc_loss, sim_disc_loss
