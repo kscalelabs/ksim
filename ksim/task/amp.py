@@ -366,9 +366,12 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         sim_rng = jax.random.split(sim_rng, sim_motions.shape[0])
 
         # Computes the discriminator loss.
-        discriminator_fn = jax.vmap(self.call_discriminator, in_axes=(None, 0, None, 0))
-        real_disc_logits = discriminator_fn(model, real_motions, curriculum_level, real_rng)
-        sim_disc_logits = discriminator_fn(model, sim_motions, curriculum_level, sim_rng)
+        real_disc_logits = jax.vmap(self.call_discriminator, in_axes=(None, 0, None, 0))(
+            model, real_motions, curriculum_level.mean(), real_rng
+        )
+        sim_disc_logits = jax.vmap(self.call_discriminator, in_axes=(None, 0, 0, 0))(
+            model, sim_motions, curriculum_level, sim_rng
+        )
         real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
 
         disc_loss = real_disc_loss + sim_disc_loss
@@ -428,7 +431,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             model_static=model_static,
             trajectories=trajectories,
             real_motions=carry.shared_state.aux_values[REAL_MOTIONS_KEY],
-            curriculum_level=carry.env_states.curriculum_state.level.mean(),
+            curriculum_level=carry.env_states.curriculum_state.level,
             rng=disc_rng,
         )
 
