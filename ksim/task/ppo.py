@@ -404,7 +404,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         return metrics
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
-    def _get_loss_and_metrics(
+    def _get_ppo_loss_and_metrics(
         self,
         model_arr: PyTree,
         model_static: PyTree,
@@ -501,7 +501,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         return loss.mean(), (metrics, logged_trajectory)
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=3)
-    def _get_metrics_and_grads(
+    def _get_ppo_metrics_and_grads(
         self,
         model_arr: PyTree,
         model_static: PyTree,
@@ -511,7 +511,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[dict[str, Array], LoggedTrajectory, PyTree]:
-        loss_fn = jax.grad(self._get_loss_and_metrics, argnums=0, has_aux=True)
+        loss_fn = jax.grad(self._get_ppo_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
         grads, (metrics, logged_trajectory) = loss_fn(
             model_arr,
@@ -540,7 +540,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         optimizer = constants.optimizer[0]
         opt_state = carry.opt_state[0]
 
-        ppo_metrics, logged_trajectory, grads = self._get_metrics_and_grads(
+        # Computes the metrics and PPO gradients.
+        ppo_metrics, logged_trajectory, grads = self._get_ppo_metrics_and_grads(
             model_arr=model_arr,
             model_static=model_static,
             trajectories=trajectories,
@@ -550,6 +551,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rng=rng,
         )
 
+        # Applies the gradients with clipping.
         new_model_arr, new_opt_state, grad_metrics = self.apply_gradients_with_clipping(
             model_arr=model_arr,
             grads=grads,
@@ -567,7 +569,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             opt_state=xax.tuple_insert(carry.opt_state, 0, new_opt_state),
         )
 
-        return carry, xax.FrozenDict(dict(ppo_metrics) | dict(grad_metrics)), logged_trajectory
+        # Gets the metrics dictionary.
+        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(ppo_metrics | grad_metrics)
+
+        return carry, metrics, logged_trajectory
 
     def update_model(
         self,

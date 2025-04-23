@@ -20,8 +20,16 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.rewards import Reward
-from ksim.task.ppo import PPOConfig, PPOTask
-from ksim.task.rl import RolloutConstants, RolloutEnvState, RolloutSharedState
+from ksim.task.ppo import PPOConfig, PPOTask, PPOVariables
+from ksim.task.rl import (
+    LoggedTrajectory,
+    RewardState,
+    RLLoopCarry,
+    RLLoopConstants,
+    RolloutConstants,
+    RolloutEnvState,
+    RolloutSharedState,
+)
 from ksim.types import Trajectory
 
 DISCRIMINATOR_OUTPUT_KEY = "_discriminator_output"
@@ -38,14 +46,6 @@ class AMPConfig(PPOConfig):
     num_discriminator_updates: int = xax.field(
         value=1,
         help="The number of times to pass the discriminator.",
-    )
-    wasserstein_gradient_penalty: float = xax.field(
-        value=10.0,
-        help="Gradient penalty coefficient for discriminator (WGAN-GP style).",
-    )
-    discriminator_learning_rate: float = xax.field(
-        value=1e-4,
-        help="Learning rate for the discriminator.",
     )
 
 
@@ -188,3 +188,140 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         transition = dataclass_replace(transition, aux_outputs=xax.FrozenDict(aux_outputs))
 
         return transition, next_env_state
+
+    @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
+    def _get_amp_disc_loss_and_metrics(
+        self,
+        model_arr: PyTree,
+        model_static: PyTree,
+        trajectories: Trajectory,
+    ) -> tuple[Array, xax.FrozenDict[str, Array]]:
+        """Computes the PPO loss and additional metrics.
+
+        Args:
+            model_arr: The mutable part of the model to optimize.
+            model_static: The static part of the model to optimize.
+            trajectories: The batch of trajectories to compute the loss and metrics for.
+            rewards: The rewards for the trajectories.
+            init_carry: The initial carry for the model.
+            on_policy_variables: The PPO variables from the on-policy rollout.
+            rng: A random seed.
+
+        Returns:
+            A tuple containing the loss value as a scalar, a dictionary of
+            metrics to log, and the single trajectory to log.
+        """
+        model = eqx.combine(model_arr, model_static)
+
+        real_motions = self.get_real_motions()
+        sim_motions = self.trajectory_to_motion(trajectories)
+
+        # Computes the discriminator loss.
+        real_disc_logits = self.call_discriminator(model, real_motions)
+        sim_disc_logits = self.call_discriminator(model, sim_motions)
+
+        # Computes the discriminator loss, using LSGAN.
+        real_disc_loss = 0.5 * jnp.mean(jnp.square(real_disc_logits - 1.0))
+        sim_disc_loss = 0.5 * jnp.mean(jnp.square(sim_disc_logits))
+
+        disc_loss = real_disc_loss + sim_disc_loss
+
+        disc_metrics = {
+            "real_logits": real_disc_logits,
+            "sim_logits": sim_disc_logits,
+        }
+
+        return disc_loss, xax.FrozenDict(disc_metrics)
+
+    @xax.jit(static_argnames=["self", "model_static"], jit_level=3)
+    def _get_disc_metrics_and_grads(
+        self,
+        model_arr: PyTree,
+        model_static: PyTree,
+        trajectories: Trajectory,
+    ) -> tuple[dict[str, Array], PyTree]:
+        loss_fn = jax.grad(self._get_amp_disc_loss_and_metrics, argnums=0, has_aux=True)
+        loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
+        grads, metrics = loss_fn(model_arr, model_static, trajectories)
+        return metrics, grads
+
+    @xax.jit(static_argnames=["self", "constants"], jit_level=4)
+    def _single_step(
+        self,
+        trajectories: Trajectory,
+        rewards: RewardState,
+        constants: RLLoopConstants,
+        carry: RLLoopCarry,
+        on_policy_variables: PPOVariables,
+        rng: PRNGKeyArray,
+    ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
+        carry, metrics, logged_traj = super()._single_step(
+            trajectories=trajectories,
+            rewards=rewards,
+            constants=constants,
+            carry=carry,
+            on_policy_variables=on_policy_variables,
+            rng=rng,
+        )
+
+        # Gets the discriminator model and optimizer.
+        model_arr = carry.shared_state.model_arrs[1]
+        model_static = constants.constants.model_statics[1]
+        optimizer = constants.optimizer[1]
+        opt_state = carry.opt_state[1]
+
+        # Computes the metrics and PPO gradients.
+        disc_metrics, grads = self._get_disc_metrics_and_grads(
+            model_arr=model_arr,
+            model_static=model_static,
+            trajectories=trajectories,
+        )
+
+        # Applies the gradients with clipping.
+        new_model_arr, new_opt_state, disc_grad_metrics = self.apply_gradients_with_clipping(
+            model_arr=model_arr,
+            grads=grads,
+            optimizer=optimizer,
+            opt_state=opt_state,
+        )
+
+        # Updates the carry with the new model and optimizer states.
+        carry = dataclass_replace(
+            carry,
+            shared_state=dataclass_replace(
+                carry.shared_state,
+                model_arrs=xax.tuple_insert(carry.shared_state.model_arrs, 1, new_model_arr),
+            ),
+            opt_state=xax.tuple_insert(carry.opt_state, 1, new_opt_state),
+        )
+
+        # Gets the metrics dictionary.
+        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(metrics.unfreeze() | disc_metrics | disc_grad_metrics)
+
+        return carry, metrics, logged_traj
+
+    @abstractmethod
+    def update_model(
+        self,
+        *,
+        constants: RLLoopConstants,
+        carry: RLLoopCarry,
+        trajectories: Trajectory,
+        rewards: RewardState,
+        rng: PRNGKeyArray,
+    ) -> tuple[
+        RLLoopCarry,
+        xax.FrozenDict[str, Array],
+        LoggedTrajectory,
+    ]:
+        # Checks that AMPReward is used.
+        if not any(isinstance(r, AMPReward) for r in constants.constants.rewards):
+            raise ValueError("AMPReward is not used! This is required for AMP training.")
+
+        return super().update_model(
+            constants=constants,
+            carry=carry,
+            trajectories=trajectories,
+            rewards=rewards,
+            rng=rng,
+        )
