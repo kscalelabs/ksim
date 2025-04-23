@@ -88,6 +88,37 @@ def get_body_ids(model: mujoco.MjModel, mappings: tuple[ReferenceMapping, ...]) 
     return tuple([get_body_id(model, mapping.mj_body_name) for mapping in mappings])
 
 
+def compute_qvel(qpos: Array, ctrl_dt: float, freejoint: bool = False) -> Array:
+    """Compute finite-difference qvel from qpos."""
+    qvel_reference_motion = []
+    total_frames = qpos.shape[0]
+
+    for frame in range(total_frames - 1):
+        if freejoint:
+            free_joint_pos = qpos[:, :3]
+            free_joint_quat = qpos[:, 3:7]
+
+            free_joint_quat_scalar_last = free_joint_quat[..., [1, 2, 3, 0]]
+            free_joint_rotvec = xax.rotvec_from_quat(free_joint_quat_scalar_last)
+
+            free_joint_vel = (free_joint_pos[1:] - free_joint_pos[:-1]) / ctrl_dt
+            free_joint_vel_rot = (free_joint_rotvec[1:] - free_joint_rotvec[:-1]) / ctrl_dt
+
+            free_joint_pos = free_joint_pos[1:-1]
+            free_joint_quat = free_joint_quat[1:-1]
+
+            joint_pos = qpos[:, 7:]
+            joints_vel = (joint_pos[1:] - joint_pos[:-1]) / ctrl_dt
+            joint_pos = joint_pos[1:-1]
+
+            free_joint_qvel = np.concatenate([free_joint_vel, free_joint_vel_rot], axis=1)
+            qvel_reference_motion.append(np.concatenate([free_joint_qvel, joints_vel], axis=1))
+        else:
+            qvel = (qpos[frame + 1] - qpos[frame]) / ctrl_dt
+            qvel_reference_motion.append(qvel)
+    return qvel_reference_motion
+
+
 def generate_reference_motion(
     model: mujoco.MjModel,
     mj_base_id: int,
@@ -189,10 +220,7 @@ def generate_reference_motion(
         previous_qpos = qpos  # Update previous qpos for the next frame
 
     # 3. Compute qvel
-    qvel_reference_motion = []
-    for frame in range(total_frames - 1):
-        qvel = (qpos_reference_motion[frame + 1] - qpos_reference_motion[frame]) / ctrl_dt
-        qvel_reference_motion.append(qvel)
+    qvel_reference_motion = compute_qvel(qpos_reference_motion, ctrl_dt, freejoint=False)
 
     jnp_reference_qpos = jnp.array(qpos_reference_motion)
     jnp_cartesian_motion = jax.tree.map(lambda arr: xax.HashableArray(arr), np_cartesian_motion)

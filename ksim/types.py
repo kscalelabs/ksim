@@ -70,17 +70,13 @@ class Trajectory:
         return episode_length
 
 
+@jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class MotionTrajectory(Trajectory):
-    obs: xax.FrozenDict[str, PyTree] = xax.FrozenDict()
-    command: xax.FrozenDict[str, PyTree] = xax.FrozenDict()
-    event_state: xax.FrozenDict[str, Array] = xax.FrozenDict()
-    action: Array = jnp.zeros((0,))
-    done: Array = jnp.zeros((0,), bool)
-    success: Array = jnp.zeros((0,), bool)
-    timestep: Array = jnp.zeros((0,))
-    termination_components: xax.FrozenDict[str, Array] = xax.FrozenDict()
-    aux_outputs: None = None
+class MotionTrajectory:
+    qpos: Array
+    qvel: Array
+    xpos: Array | None = None
+    xquat: Array | None = None
 
 
 @jax.tree_util.register_dataclass
