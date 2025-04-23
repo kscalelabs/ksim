@@ -62,10 +62,10 @@ class AMPConfig(PPOConfig):
         help="If true, the motion will be looped.",
     )
 
-    # Discriminator parameters
-    num_discriminator_updates: int = xax.field(
-        value=1,
-        help="The number of times to pass the discriminator.",
+    # Discriminator parameters.
+    use_mse_loss: bool = xax.field(
+        value=False,
+        help="If true, use MSE loss for the discriminator, otherwise use cross-entropy.",
     )
 
 
@@ -312,6 +312,19 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         return trajectory
 
+    def get_disc_losses(
+        self,
+        real_disc_logits: Array,
+        sim_disc_logits: Array,
+    ) -> tuple[Array, Array]:
+        if self.config.use_mse_loss:
+            real_disc_loss = 0.5 * jnp.mean(jnp.square(real_disc_logits - 1.0))
+            sim_disc_loss = 0.5 * jnp.mean(jnp.square(sim_disc_logits))
+        else:
+            real_disc_loss = -jnp.mean(jax.nn.log_sigmoid(real_disc_logits))
+            sim_disc_loss = -jnp.mean(jax.nn.log_sigmoid(-sim_disc_logits))
+        return real_disc_loss, sim_disc_loss
+
     @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
     def _get_amp_disc_loss_and_metrics(
         self,
@@ -339,10 +352,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         # Computes the discriminator loss.
         real_disc_logits = jax.vmap(self.call_discriminator, in_axes=(None, 0))(model, real_motions)
         sim_disc_logits = jax.vmap(self.call_discriminator, in_axes=(None, 0))(model, sim_motions)
-
-        # Computes the discriminator loss, using LSGAN.
-        real_disc_loss = 0.5 * jnp.mean(jnp.square(real_disc_logits - 1.0))
-        sim_disc_loss = 0.5 * jnp.mean(jnp.square(sim_disc_logits))
+        real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
 
         disc_loss = real_disc_loss + sim_disc_loss
 
