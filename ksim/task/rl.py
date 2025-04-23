@@ -1299,6 +1299,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             markers.extend(reward.get_markers())
         return markers
 
+    def postprocess_trajectory(
+        self,
+        constants: RolloutConstants,
+        env_states: RolloutEnvState,
+        shared_state: RolloutSharedState,
+        trajectory: Trajectory,
+    ) -> Trajectory:
+        return trajectory
+
     @xax.jit(static_argnames=["self", "constants"], jit_level=2)
     def _single_unroll(
         self,
@@ -1325,6 +1334,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             scan_fn,
             env_state,
             length=self.rollout_length_steps,
+        )
+
+        # Post-processes the trajectory.
+        trajectory = self.postprocess_trajectory(
+            constants=constants,
+            env_states=env_state,
+            shared_state=shared_state,
+            trajectory=trajectory,
         )
 
         # Gets the rewards.

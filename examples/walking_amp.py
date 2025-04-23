@@ -197,9 +197,10 @@ class DefaultHumanoidDiscriminator(eqx.Module):
         self.layers = layers
 
     def forward(self, x: Array) -> Array:
+        x_nt = x.transpose(1, 0)
         for layer in self.layers:
-            x = layer(x)
-        return x
+            x_nt = layer(x_nt)
+        return x_nt.squeeze(0)
 
 
 @dataclass
@@ -559,7 +560,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         return optimizer
 
     def call_discriminator(self, model: DefaultHumanoidDiscriminator, motion: Array) -> Array:
-        return model.forward(motion[..., None]).squeeze(-1)
+        return model.forward(motion)
 
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)

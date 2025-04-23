@@ -83,7 +83,7 @@ class AMPReward(Reward):
                 "which populates the auxiliary output for you."
             )
 
-        discriminator_logits = trajectory.aux_outputs[DISCRIMINATOR_OUTPUT_KEY].squeeze(-1)
+        discriminator_logits = trajectory.aux_outputs[DISCRIMINATOR_OUTPUT_KEY]
         reward = jax.nn.sigmoid(discriminator_logits)
         return reward
 
@@ -281,17 +281,18 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         )
         return shared_state
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=3)
-    def step_engine(
+    def postprocess_trajectory(
         self,
         constants: RolloutConstants,
         env_states: RolloutEnvState,
         shared_state: RolloutSharedState,
-    ) -> tuple[Trajectory, RolloutEnvState]:
-        transition, next_env_state = super().step_engine(
+        trajectory: Trajectory,
+    ) -> Trajectory:
+        trajectory = super().postprocess_trajectory(
             constants=constants,
             env_states=env_states,
             shared_state=shared_state,
+            trajectory=trajectory,
         )
 
         # Recombines the mutable and static parts of the discriminator model.
@@ -300,16 +301,16 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         disc_model = eqx.combine(disc_model_arr, disc_model_static)
 
         # Runs the discriminator on the trajectory.
-        motion = self.trajectory_to_motion(transition)
+        motion = self.trajectory_to_motion(trajectory)
         discriminator_logits = self.call_discriminator(disc_model, motion)
-        chex.assert_shape(discriminator_logits, (1,))
+        chex.assert_equal_shape([discriminator_logits, trajectory.done])
 
         # Adds the discriminator output to the auxiliary outputs.
-        aux_outputs = transition.aux_outputs.unfreeze() if transition.aux_outputs else {}
+        aux_outputs = trajectory.aux_outputs.unfreeze() if trajectory.aux_outputs else {}
         aux_outputs[DISCRIMINATOR_OUTPUT_KEY] = discriminator_logits
-        transition = dataclass_replace(transition, aux_outputs=xax.FrozenDict(aux_outputs))
+        trajectory = dataclass_replace(trajectory, aux_outputs=xax.FrozenDict(aux_outputs))
 
-        return transition, next_env_state
+        return trajectory
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
     def _get_amp_disc_loss_and_metrics(
@@ -359,7 +360,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
-    ) -> tuple[dict[str, Array], PyTree]:
+    ) -> tuple[xax.FrozenDict[str, Array], PyTree]:
         loss_fn = jax.grad(self._get_amp_disc_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
         grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions)
@@ -417,7 +418,9 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         )
 
         # Gets the metrics dictionary.
-        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(metrics.unfreeze() | disc_metrics | disc_grad_metrics)
+        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(
+            metrics.unfreeze() | disc_metrics.unfreeze() | disc_grad_metrics
+        )
 
         return carry, metrics, logged_traj
 
