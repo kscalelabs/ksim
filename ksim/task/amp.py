@@ -344,7 +344,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         sim_disc_logits = jax.vmap(self.call_discriminator, in_axes=(None, 0))(model, sim_motions)
         real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
 
-        disc_loss = real_disc_loss.mean() + sim_disc_loss.mean()
+        disc_loss = real_disc_loss + sim_disc_loss
 
         disc_metrics = {
             "real_logits": real_disc_logits,
