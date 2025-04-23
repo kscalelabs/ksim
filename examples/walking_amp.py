@@ -526,7 +526,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         # simulated motions. We decrease the noise as we increase the curriculum
         # since we are likely increasing the curriculum because the policy is
         # learning the correct motion.
-        motion = motion + jax.random.normal(rng, motion.shape) * 0.1 * (1.0 - curriculum_level) + 1e-3
+        motion = motion + jax.random.normal(rng, motion.shape) * (1.0 - curriculum_level) + 1e-3
         return model.forward(motion)
 
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
