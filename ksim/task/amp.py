@@ -70,6 +70,8 @@ Config = TypeVar("Config", bound=AMPConfig)
 class AMPReward(Reward):
     """Reward based on discriminator output for AMP training."""
 
+    temp: float = attrs.field(default=1.0, validator=attrs.validators.gt(0.0))
+
     def get_reward(self, trajectory: Trajectory) -> Array:
         if trajectory.aux_outputs is None or DISCRIMINATOR_OUTPUT_KEY not in trajectory.aux_outputs:
             raise ValueError(
@@ -78,7 +80,7 @@ class AMPReward(Reward):
             )
 
         discriminator_logits = trajectory.aux_outputs[DISCRIMINATOR_OUTPUT_KEY]
-        reward = jax.nn.sigmoid(discriminator_logits)
+        reward = jax.nn.sigmoid(discriminator_logits / self.temp)
         return reward
 
 
