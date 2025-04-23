@@ -8,6 +8,12 @@ __all__ = [
     "local_to_absolute",
     "get_reference_joint_id",
     "get_body_id",
+    "get_reference_joint_ids",
+    "get_body_ids",
+    "visualize_reference_points",
+    "visualize_reference_motion",
+    "get_reference_cartesian_poses",
+    "generate_reference_motion",
 ]
 
 import time

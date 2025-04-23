@@ -6,18 +6,26 @@ __all__ = [
     "AMPReward",
 ]
 
+import bdb
+import itertools
 import logging
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace as dataclass_replace
-from typing import Generic, TypeVar
+from typing import Generic, Iterable, TypeVar
 
 import attrs
+import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import mujoco
+import numpy as np
 import optax
+import tqdm
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from omegaconf import DictConfig, OmegaConf
 
 from ksim.rewards import Reward
 from ksim.task.ppo import PPOConfig, PPOTask, PPOVariables
@@ -29,10 +37,12 @@ from ksim.task.rl import (
     RolloutConstants,
     RolloutEnvState,
     RolloutSharedState,
+    get_viewer,
 )
-from ksim.types import Trajectory
+from ksim.types import PhysicsModel, Trajectory
 
 DISCRIMINATOR_OUTPUT_KEY = "_discriminator_output"
+REAL_MOTIONS_KEY = "_real_motions"
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +51,16 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AMPConfig(PPOConfig):
     """Configuration for Adversarial Motion Prior training."""
+
+    # Toggle this to visualize the motion on the robot.
+    run_motion_viewer: bool = xax.field(
+        value=False,
+        help="If true, the motion will be visualized on the robot.",
+    )
+    run_motion_viewer_loop: bool = xax.field(
+        value=True,
+        help="If true, the motion will be looped.",
+    )
 
     # Discriminator parameters
     num_discriminator_updates: int = xax.field(
@@ -63,11 +83,8 @@ class AMPReward(Reward):
                 "which populates the auxiliary output for you."
             )
 
-        discriminator_logits = trajectory.aux_outputs[DISCRIMINATOR_OUTPUT_KEY]
-
-        # LSGAN-based reward: r = max(0, 1 - 0.25 * (D(s, s') - 1)^2)
-        reward = jnp.maximum(0.0, 1.0 - 0.25 * jnp.square(discriminator_logits - 1.0))
-
+        discriminator_logits = trajectory.aux_outputs[DISCRIMINATOR_OUTPUT_KEY].squeeze(-1)
+        reward = jax.nn.sigmoid(discriminator_logits)
         return reward
 
 
@@ -77,6 +94,84 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
     This task extends PPO to include adversarial training with a discriminator
     that tries to distinguish between real motion data and policy-generated motion.
     """
+
+    def run(self) -> None:
+        if self.config.run_motion_viewer:
+            self.run_motion_viewer(
+                num_steps=(
+                    None
+                    if self.config.run_viewer_num_seconds is None
+                    else round(self.config.run_viewer_num_seconds / self.config.ctrl_dt)
+                ),
+                save_renders=self.config.run_viewer_save_renders,
+                loop=self.config.run_motion_viewer_loop,
+            )
+
+        else:
+            super().run()
+
+    def run_motion_viewer(
+        self,
+        num_steps: int | None,
+        save_renders: bool = False,
+        loop: bool = True,
+    ) -> None:
+        """Provides an easy-to-use interface for viewing motions on the robot.
+
+        This function cycles through the set of provided motions, rendering
+        them on the robot model.
+
+        Args:
+            num_steps: The number of steps to run the environment for. If not
+                provided, run until the user manually terminates the
+                environment visualizer.
+            save_renders: If provided, save the rendered video to the given path.
+            loop: If true, loop through the motions.
+        """
+        save_path = self.exp_dir / "renders" / f"render_{time.time()}" if save_renders else None
+        if save_path is not None:
+            save_path.mkdir(parents=True, exist_ok=True)
+
+        with self, jax.disable_jit():
+            self.set_loggers()
+
+            # Loads the Mujoco model and logs some information about it.
+            mj_model = self.get_mujoco_model()
+            mj_model = self.set_mujoco_model_opts(mj_model)
+            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
+            self.logger.log_file("mujoco_info.yaml", mujoco_info)
+
+            # Creates the viewer.
+            viewer = get_viewer(mj_model=mj_model, config=self.config, save_path=save_path)
+
+            # Gets the real motions and converts them to qpos arrays.
+            real_motions = self.get_real_motions(mj_model)
+            qpos = self.motion_to_qpos(real_motions)
+            chex.assert_shape(qpos, (None, None, mj_model.nq))
+            qpos = qpos.reshape(-1, qpos.shape[-1])
+
+            iterator: Iterable[int] = tqdm.trange(qpos.shape[0] if num_steps is None else min(num_steps, qpos.shape[0]))
+            frames: list[np.ndarray] = []
+
+            if loop:
+                iterator = itertools.cycle(iterator)
+
+            try:
+                for i in iterator:
+                    # Logs the frames to render.
+                    viewer.data.qpos[:] = np.array(qpos[i])
+                    mujoco.mj_forward(viewer.model, viewer.data)
+
+                    if save_path is None:
+                        viewer.render()
+                    else:
+                        frames.append(viewer.read_pixels())
+
+            except (KeyboardInterrupt, bdb.BdbQuit):
+                logger.info("Keyboard interrupt, exiting environment loop")
+
+            if save_path is not None:
+                self._save_viewer_video(frames, save_path)
 
     @abstractmethod
     def get_policy_model(self, key: PRNGKeyArray) -> PyTree:
@@ -105,10 +200,13 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         )
 
     @abstractmethod
-    def get_real_motions(self) -> PyTree:
+    def get_real_motions(self, mj_model: mujoco.MjModel) -> PyTree:
         """Loads the set of real motions.
 
         This should load N real motions into memory.
+
+        Args:
+            mj_model: The Mujoco model to load the motions from.
 
         Returns:
             The motions as a PyTree, most likely an array with shape (B, T, N).
@@ -133,7 +231,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         """Converts a trajectory to a motion.
 
         Args:
-            trajectory: The trajectory to convert (with no batch dimension)
+            trajectory: The trajectory to convert (with batch dimension)
 
         Returns:
             The motion derived from the trajectory, for example, something like
@@ -148,10 +246,10 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         for visualization purposes.
 
         Args:
-            motion: The motion, without the batch dimension.
+            motion: The full motion, including the batch dimension.
 
         Returns:
-            The `qpos` array, with shape (T, N).
+            The `qpos` array, with shape (B, T, N).
         """
         raise NotImplementedError(
             "`motion_to_qpos(motion: PyTree) -> Array` is not implemented, so "
@@ -159,6 +257,29 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             "this function in your downstream class, depending on how you are "
             "representing your motions."
         )
+
+    def _get_shared_state(
+        self,
+        *,
+        mj_model: mujoco.MjModel,
+        physics_model: PhysicsModel,
+        model_arrs: tuple[PyTree, ...],
+    ) -> RolloutSharedState:
+        shared_state = super()._get_shared_state(
+            mj_model=mj_model,
+            physics_model=physics_model,
+            model_arrs=model_arrs,
+        )
+        shared_state = dataclass_replace(
+            shared_state,
+            aux_values=xax.FrozenDict(
+                shared_state.aux_values.unfreeze()
+                | {
+                    REAL_MOTIONS_KEY: self.get_real_motions(mj_model),
+                }
+            ),
+        )
+        return shared_state
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=3)
     def step_engine(
@@ -181,6 +302,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         # Runs the discriminator on the trajectory.
         motion = self.trajectory_to_motion(transition)
         discriminator_logits = self.call_discriminator(disc_model, motion)
+        chex.assert_shape(discriminator_logits, (1,))
 
         # Adds the discriminator output to the auxiliary outputs.
         aux_outputs = transition.aux_outputs.unfreeze() if transition.aux_outputs else {}
@@ -195,17 +317,15 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_arr: PyTree,
         model_static: PyTree,
         trajectories: Trajectory,
+        real_motions: PyTree,
     ) -> tuple[Array, xax.FrozenDict[str, Array]]:
         """Computes the PPO loss and additional metrics.
 
         Args:
-            model_arr: The mutable part of the model to optimize.
-            model_static: The static part of the model to optimize.
-            trajectories: The batch of trajectories to compute the loss and metrics for.
-            rewards: The rewards for the trajectories.
-            init_carry: The initial carry for the model.
-            on_policy_variables: The PPO variables from the on-policy rollout.
-            rng: A random seed.
+            model_arr: The array part of the discriminator model.
+            model_static: The static part of the discriminator model.
+            trajectories: The trajectories to compute the loss on.
+            real_motions: The real motions to compute the loss on.
 
         Returns:
             A tuple containing the loss value as a scalar, a dictionary of
@@ -213,7 +333,6 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         """
         model = eqx.combine(model_arr, model_static)
 
-        real_motions = self.get_real_motions()
         sim_motions = self.trajectory_to_motion(trajectories)
 
         # Computes the discriminator loss.
@@ -239,10 +358,11 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_arr: PyTree,
         model_static: PyTree,
         trajectories: Trajectory,
+        real_motions: PyTree,
     ) -> tuple[dict[str, Array], PyTree]:
         loss_fn = jax.grad(self._get_amp_disc_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
-        grads, metrics = loss_fn(model_arr, model_static, trajectories)
+        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions)
         return metrics, grads
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=4)
@@ -275,6 +395,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             model_arr=model_arr,
             model_static=model_static,
             trajectories=trajectories,
+            real_motions=carry.shared_state.aux_values[REAL_MOTIONS_KEY],
         )
 
         # Applies the gradients with clipping.

@@ -106,6 +106,7 @@ class RolloutSharedState:
 
     physics_model: PhysicsModel
     model_arrs: tuple[PyTree, ...]
+    aux_values: xax.FrozenDict[str, PyTree]
 
 
 @jax.tree_util.register_dataclass
@@ -121,6 +122,7 @@ class RolloutConstants:
     terminations: Collection[Termination]
     curriculum: Curriculum
     argmax_action: bool
+    aux_constants: xax.FrozenDict[str, PyTree]
 
 
 def get_observation(
@@ -318,23 +320,23 @@ def apply_randomizations(
 @dataclass
 class RLConfig(xax.Config):
     # Toggle this to run the environment viewer loop.
-    run_environment: bool = xax.field(
+    run_model_viewer: bool = xax.field(
         value=False,
         help="Instead of dropping into the training loop, run the environment loop.",
     )
-    run_environment_num_seconds: float | None = xax.field(
-        value=None,
-        help="If provided, run the environment loop for the given number of seconds.",
-    )
-    run_environment_save_renders: bool = xax.field(
-        value=False,
-        help="If set, save the renders to the experiment directory.",
-    )
-    run_environment_argmax_action: bool = xax.field(
+    run_model_viewer_argmax_action: bool = xax.field(
         value=True,
         help="If set, take the argmax action instead of sampling from the action distribution.",
     )
-    run_environment_save_video: bool = xax.field(
+    run_viewer_num_seconds: float | None = xax.field(
+        value=None,
+        help="If provided, run the environment loop for the given number of seconds.",
+    )
+    run_viewer_save_renders: bool = xax.field(
+        value=False,
+        help="If set, save the renders to the experiment directory.",
+    )
+    run_viewer_save_video: bool = xax.field(
         value=False,
         help="If set, render the environment as a video instead of a GIF.",
     )
@@ -989,15 +991,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
-        if self.config.run_environment:
-            self.run_environment(
+        if self.config.run_model_viewer:
+            self.run_model_viewer(
                 num_steps=(
                     None
-                    if self.config.run_environment_num_seconds is None
-                    else round(self.config.run_environment_num_seconds / self.config.ctrl_dt)
+                    if self.config.run_viewer_num_seconds is None
+                    else round(self.config.run_viewer_num_seconds / self.config.ctrl_dt)
                 ),
-                save_renders=self.config.run_environment_save_renders,
-                argmax_action=self.config.run_environment_argmax_action,
+                save_renders=self.config.run_viewer_save_renders,
+                argmax_action=self.config.run_model_viewer_argmax_action,
             )
 
         elif self.config.collect_dataset:
@@ -1414,7 +1416,35 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return carry, metrics, logged_traj
 
-    def run_environment(
+    def run_environment_step(
+        self,
+        constants: RolloutConstants,
+        env_states: RolloutEnvState,
+        shared_state: RolloutSharedState,
+    ) -> tuple[Array, Array, tuple[Trajectory, RolloutEnvState] | None]:
+        """Runs a single step of the environment.
+
+        Args:
+            constants: The constants
+            env_states: The environment states
+            shared_state: The shared state
+
+        Returns:
+            A tuple containing the qpos, qvel, and optionally the
+            transition and env_states.
+        """
+        transition, env_states = self.step_engine(
+            constants=constants,
+            env_states=env_states,
+            shared_state=shared_state,
+        )
+
+        qpos = env_states.physics_state.data.qpos
+        qvel = env_states.physics_state.data.qvel
+
+        return qpos, qvel, (transition, env_states)
+
+    def run_model_viewer(
         self,
         num_steps: int | None = None,
         save_renders: bool = False,
@@ -1442,6 +1472,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng = self.prng_key()
             self.set_loggers()
 
+            # Loads the Mujoco model and logs some information about it.
+            mj_model = self.get_mujoco_model()
+            mj_model = self.set_mujoco_model_opts(mj_model)
+            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
+            self.logger.log_file("mujoco_info.yaml", mujoco_info)
+
+            randomizers = self.get_physics_randomizers(mj_model)
+
             rng, model_rng = jax.random.split(rng)
             models, _ = self.load_initial_state(model_rng, load_optimizer=False)
 
@@ -1454,17 +1492,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
             )
 
-            # Loads the Mujoco model and logs some information about it.
-            mj_model = self.get_mujoco_model()
-            mj_model = self.set_mujoco_model_opts(mj_model)
-            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
-            self.logger.log_file("mujoco_info.yaml", mujoco_info)
-
-            # Initializes the control loop variables.
-            randomizers = self.get_physics_randomizers(mj_model)
-
             constants = self._get_constants(
                 mj_model=mj_model,
+                physics_model=mj_model,
                 model_statics=model_statics,
                 argmax_action=argmax_action,
             )
@@ -1472,10 +1502,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng=rng,
                 rollout_constants=constants,
                 mj_model=mj_model,
+                physics_model=mj_model,
                 randomizers=randomizers,
             )
             shared_state = self._get_shared_state(
                 mj_model=mj_model,
+                physics_model=mj_model,
                 model_arrs=model_arrs,
             )
 
@@ -1532,7 +1564,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
             if len(transitions) == 0:
-                raise RuntimeError("Trajectory is empty!")
+                logger.warning("Trajectory is empty!")
+                return
 
             trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
 
@@ -1555,55 +1588,58 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     log_callback=lambda name, value, _: value.save(save_path / f"{name}.png"),
                 )
 
-                fps = round(1 / self.config.ctrl_dt)
+                self._save_viewer_video(frames, save_path)
 
-                vid_save_path = save_path / ("render.mp4" if self.config.run_environment_save_video else "render.gif")
+    def _save_viewer_video(self, frames: list[np.ndarray], save_path: Path) -> None:
+        fps = round(1 / self.config.ctrl_dt)
+        vid_save_path = save_path / ("render.mp4" if self.config.run_viewer_save_video else "render.gif")
 
-                match vid_save_path.suffix.lower():
-                    case ".mp4":
-                        try:
-                            import imageio.v2 as imageio
+        match vid_save_path.suffix.lower():
+            case ".mp4":
+                try:
+                    import imageio.v2 as imageio
 
-                        except ImportError as err:
-                            raise RuntimeError(
-                                "Failed to save video - note that saving .mp4 videos with imageio usually "
-                                "requires the FFMPEG backend, which can be installed using `pip install "
-                                "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
-                                "your system."
-                            ) from err
+                except ImportError as err:
+                    raise RuntimeError(
+                        "Failed to save video - note that saving .mp4 videos with imageio usually "
+                        "requires the FFMPEG backend, which can be installed using `pip install "
+                        "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
+                        "your system."
+                    ) from err
 
-                        try:
-                            with imageio.get_writer(vid_save_path, mode="I", fps=fps) as writer:
-                                for frame in frames:
-                                    writer.append_data(frame)
+                try:
+                    with imageio.get_writer(vid_save_path, mode="I", fps=fps) as writer:
+                        for frame in frames:
+                            writer.append_data(frame)
 
-                        except Exception as e:
-                            raise RuntimeError(
-                                "Failed to save video - note that saving .mp4 videos with imageio usually "
-                                "requires the FFMPEG backend, which can be installed using `pip install "
-                                "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
-                                "your system."
-                            ) from e
+                except Exception as e:
+                    raise RuntimeError(
+                        "Failed to save video - note that saving .mp4 videos with imageio usually "
+                        "requires the FFMPEG backend, which can be installed using `pip install "
+                        "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
+                        "your system."
+                    ) from e
 
-                    case ".gif":
-                        images = [Image.fromarray(frame) for frame in frames]
-                        images[0].save(
-                            vid_save_path,
-                            save_all=True,
-                            append_images=images[1:],
-                            duration=int(1000 / fps),
-                            loop=0,
-                        )
+            case ".gif":
+                images = [Image.fromarray(frame) for frame in frames]
+                images[0].save(
+                    vid_save_path,
+                    save_all=True,
+                    append_images=images[1:],
+                    duration=int(1000 / fps),
+                    loop=0,
+                )
 
-                    case _:
-                        raise ValueError(f"Unsupported file extension: {vid_save_path.suffix}. Expected .mp4 or .gif")
+            case _:
+                raise ValueError(f"Unsupported file extension: {vid_save_path.suffix}. Expected .mp4 or .gif")
 
-                logger.log(xax.LOG_STATUS, "Rendered trajectory visuals to %s", save_path)
+        logger.log(xax.LOG_STATUS, "Rendered trajectory visuals to %s", save_path)
 
     def _get_constants(
         self,
         *,
-        mj_model: PhysicsModel,
+        mj_model: mujoco.MjModel,
+        physics_model: PhysicsModel,
         model_statics: tuple[PyTree, ...],
         argmax_action: bool,
     ) -> RolloutConstants:
@@ -1611,12 +1647,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             raise ValueError("No models found")
 
         metadata = self.get_mujoco_model_metadata(mj_model)
-        engine = self.get_engine(mj_model, metadata)
-        observations = self.get_observations(mj_model)
-        commands = self.get_commands(mj_model)
-        rewards_terms = self.get_rewards(mj_model)
-        terminations = self.get_terminations(mj_model)
-        curriculum = self.get_curriculum(mj_model)
+        engine = self.get_engine(physics_model, metadata)
+        observations = self.get_observations(physics_model)
+        commands = self.get_commands(physics_model)
+        rewards_terms = self.get_rewards(physics_model)
+        terminations = self.get_terminations(physics_model)
+        curriculum = self.get_curriculum(physics_model)
 
         return RolloutConstants(
             model_statics=model_statics,
@@ -1627,15 +1663,23 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             terminations=tuple(terminations),
             curriculum=curriculum,
             argmax_action=argmax_action,
+            aux_constants=xax.FrozenDict({}),
         )
 
-    def _get_shared_state(self, *, mj_model: PhysicsModel, model_arrs: tuple[PyTree, ...]) -> RolloutSharedState:
+    def _get_shared_state(
+        self,
+        *,
+        mj_model: mujoco.MjModel,
+        physics_model: PhysicsModel,
+        model_arrs: tuple[PyTree, ...],
+    ) -> RolloutSharedState:
         if len(model_arrs) < 1:
             raise ValueError("No models found")
 
         return RolloutSharedState(
-            physics_model=mj_model,
+            physics_model=physics_model,
             model_arrs=model_arrs,
+            aux_values=xax.FrozenDict({}),
         )
 
     def _get_env_state(
@@ -1643,14 +1687,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         *,
         rng: PRNGKeyArray,
         rollout_constants: RolloutConstants,
-        mj_model: PhysicsModel,
+        mj_model: mujoco.MjModel,
+        physics_model: PhysicsModel,
         randomizers: Collection[PhysicsRandomizer],
     ) -> RolloutEnvState:
         rng, carry_rng, command_rng, rand_rng, rollout_rng, curriculum_rng, reward_rng = jax.random.split(rng, 7)
 
         # Vectorize across N environments for MJX models, use single model for Mujoco.
         # TODO (for a later refactor): just one code path and vmap on the outside.
-        if isinstance(mj_model, mjx.Model):
+        if isinstance(physics_model, mjx.Model):
             # Defines the vectorized initialization functions.
             carry_fn = jax.vmap(self.get_initial_model_carry, in_axes=0)
             command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, 0))
@@ -1665,7 +1710,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Gets the per-environment randomizations.
             randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, None, 0, 0))
             randomization_dict, physics_state = randomization_fn(
-                mj_model,
+                physics_model,
                 rollout_constants.engine,
                 randomizers,
                 curriculum_state.level,
@@ -1698,7 +1743,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Gets the environment randomizations.
             randomization_dict, physics_state = apply_randomizations(
-                mj_model,
+                physics_model,
                 rollout_constants.engine,
                 randomizers,
                 curriculum_state.level,
@@ -1743,6 +1788,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             if xax.is_master():
                 Thread(target=self.log_state, daemon=True).start()
 
+            # Loads the Mujoco model and logs some information about it.
+            mj_model: PhysicsModel = self.get_mujoco_model()
+            mj_model = self.set_mujoco_model_opts(mj_model)
+            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
+            self.logger.log_file("mujoco_info.yaml", mujoco_info)
+
+            mjx_model = self.get_mjx_model(mj_model)
+            randomizations = self.get_physics_randomizers(mjx_model)
+
             rng, model_rng = jax.random.split(rng)
             models, state = self.load_initial_state(model_rng, load_optimizer=False)
 
@@ -1758,28 +1812,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             if save_path is None:
                 save_path = self.exp_dir / f"dataset_{state.num_steps}.npz"
 
-            # Loads the Mujoco model and logs some information about it.
-            mj_model: PhysicsModel = self.get_mujoco_model()
-            mj_model = self.set_mujoco_model_opts(mj_model)
-            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
-            self.logger.log_file("mujoco_info.yaml", mujoco_info)
-
-            mjx_model = self.get_mjx_model(mj_model)
-            randomizations = self.get_physics_randomizers(mjx_model)
-
             rollout_constants = self._get_constants(
-                mj_model=mjx_model,
+                mj_model=mj_model,
+                physics_model=mjx_model,
                 model_statics=model_statics,
                 argmax_action=argmax_action,
             )
             rollout_env_state = self._get_env_state(
                 rng=rng,
                 rollout_constants=rollout_constants,
-                mj_model=mjx_model,
+                mj_model=mj_model,
+                physics_model=mjx_model,
                 randomizers=randomizations,
             )
             rollout_shared_state = self._get_shared_state(
-                mj_model=mjx_model,
+                mj_model=mj_model,
+                physics_model=mjx_model,
                 model_arrs=model_arrs,
             )
 
@@ -1837,7 +1885,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         constants = RLLoopConstants(
             optimizer=tuple(optimizers),
             constants=self._get_constants(
-                mj_model=mjx_model,
+                mj_model=mj_model,
+                physics_model=mjx_model,
                 model_statics=model_statics,
                 argmax_action=False,
             ),
@@ -1848,11 +1897,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             env_states=self._get_env_state(
                 rng=rng,
                 rollout_constants=constants.constants,
-                mj_model=mjx_model,
+                mj_model=mj_model,
+                physics_model=mjx_model,
                 randomizers=randomizers,
             ),
             shared_state=self._get_shared_state(
-                mj_model=mjx_model,
+                mj_model=mj_model,
+                physics_model=mjx_model,
                 model_arrs=model_arrs,
             ),
         )

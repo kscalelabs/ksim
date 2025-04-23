@@ -510,7 +510,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         init_carry: PyTree,
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
-    ) -> tuple[dict[str, Array], LoggedTrajectory, PyTree]:
+    ) -> tuple[xax.FrozenDict[str, Array], LoggedTrajectory, PyTree]:
         loss_fn = jax.grad(self._get_ppo_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
         grads, (metrics, logged_trajectory) = loss_fn(
@@ -570,7 +570,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         # Gets the metrics dictionary.
-        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(ppo_metrics | grad_metrics)
+        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(ppo_metrics.unfreeze() | grad_metrics)
 
         return carry, metrics, logged_trajectory
 
