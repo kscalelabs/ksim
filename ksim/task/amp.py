@@ -18,7 +18,6 @@ import attrs
 import chex
 import equinox as eqx
 import jax
-import jax.numpy as jnp
 import mujoco
 import numpy as np
 import optax
@@ -77,9 +76,7 @@ class AMPReward(Reward):
                 "which populates the auxiliary output for you."
             )
 
-        discriminator_logits = trajectory.aux_outputs[DISCRIMINATOR_OUTPUT_KEY]
-        reward = jax.nn.sigmoid(discriminator_logits)
-        return reward
+        return trajectory.aux_outputs[DISCRIMINATOR_OUTPUT_KEY]
 
 
 class AMPTask(PPOTask[Config], Generic[Config], ABC):
@@ -328,8 +325,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         real_disc_logits: Array,
         sim_disc_logits: Array,
     ) -> tuple[Array, Array]:
-        real_disc_loss = -jnp.mean(jax.nn.log_sigmoid(real_disc_logits))
-        sim_disc_loss = -jnp.mean(jax.nn.log_sigmoid(-sim_disc_logits))
+        real_disc_loss = xax.get_norm(real_disc_logits - 1.0, "l2").mean()
+        sim_disc_loss = xax.get_norm(sim_disc_logits, "l2").mean()
         return real_disc_loss, sim_disc_loss
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
