@@ -428,7 +428,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             model_static=model_static,
             trajectories=trajectories,
             real_motions=carry.shared_state.aux_values[REAL_MOTIONS_KEY],
-            curriculum_level=carry.env_states.curriculum_state.level,
+            curriculum_level=carry.env_states.curriculum_state.level.mean(),
             rng=disc_rng,
         )
 
