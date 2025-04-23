@@ -37,7 +37,7 @@ Config = TypeVar("Config", bound=HumanoidPseudoIKTaskConfig)
 
 
 class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
-    def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
+    def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         mj_model_joint_removed = remove_mujoco_joints_except(
             mjcf_path, ["shoulder1_right", "shoulder2_right", "elbow_right"]

@@ -1,5 +1,21 @@
 """Reference motion utilities."""
 
+__all__ = [
+    "MotionReferenceMapping",
+    "MotionReferenceMotionData",
+    "get_local_xpos",
+    "get_local_reference_pos",
+    "local_to_absolute",
+    "get_reference_joint_id",
+    "get_body_id",
+    "get_reference_joint_ids",
+    "get_body_ids",
+    "visualize_reference_points",
+    "visualize_reference_motion",
+    "get_reference_cartesian_poses",
+    "generate_reference_motion",
+]
+
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -17,13 +33,13 @@ from ksim.viewer import GlfwMujocoViewer
 
 
 @dataclass
-class ReferenceMapping:
+class MotionReferenceMapping:
     reference_joint_name: str
     mj_body_name: str
 
 
 @dataclass(frozen=True)
-class ReferenceMotionData:
+class MotionReferenceMotionData:
     """Stores reference motion data (qpos and Cartesian poses)."""
 
     qpos: xax.HashableArray  # Shape: [T, nq]
@@ -136,11 +152,11 @@ def get_body_id(model: mujoco.MjModel, mj_body_name: str) -> int:
     return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, mj_body_name)
 
 
-def get_reference_joint_ids(root: BvhioJoint, mappings: tuple[ReferenceMapping, ...]) -> tuple[int, ...]:
+def get_reference_joint_ids(root: BvhioJoint, mappings: tuple[MotionReferenceMapping, ...]) -> tuple[int, ...]:
     return tuple([get_reference_joint_id(root, mapping.reference_joint_name) for mapping in mappings])
 
 
-def get_body_ids(model: mujoco.MjModel, mappings: tuple[ReferenceMapping, ...]) -> tuple[int, ...]:
+def get_body_ids(model: mujoco.MjModel, mappings: tuple[MotionReferenceMapping, ...]) -> tuple[int, ...]:
     return tuple([get_body_id(model, mapping.mj_body_name) for mapping in mappings])
 
 
@@ -248,7 +264,7 @@ def visualize_reference_motion(
 
 
 def get_reference_cartesian_poses(
-    mappings: tuple[ReferenceMapping, ...],
+    mappings: tuple[MotionReferenceMapping, ...],
     model: mujoco.MjModel,
     root: BvhioJoint,
     reference_base_id: int,
@@ -433,7 +449,7 @@ def generate_reference_motion(
     model: mujoco.MjModel,
     mj_base_id: int,
     bvh_root: BvhioJoint,
-    bvh_to_mujoco_names: tuple[ReferenceMapping, ...],
+    bvh_to_mujoco_names: tuple[MotionReferenceMapping, ...],
     bvh_base_id: int,
     ctrl_dt: float,
     bvh_offset: np.ndarray | None = None,
@@ -449,7 +465,7 @@ def generate_reference_motion(
     xtol: float = 1e-8,
     max_nfev: int = 2000,
     verbose: bool = False,
-) -> ReferenceMotionData:
+) -> MotionReferenceMotionData:
     """Generates reference qpos and cartesian poses from BVH data.
 
     Args:
@@ -540,7 +556,7 @@ def generate_reference_motion(
     jnp_qvel = jnp.array(qvel_reference_motion)
 
     # 3. Create and return the data object
-    return ReferenceMotionData(
+    return MotionReferenceMotionData(
         qpos=xax.HashableArray(jnp_reference_qpos),
         qvel=xax.HashableArray(jnp_qvel),
         cartesian_poses=jnp_cartesian_motion,

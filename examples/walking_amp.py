@@ -1,25 +1,46 @@
-"""Defines simple task for training a walking policy for the default humanoid."""
+# mypy: disable-error-code="override"
+"""Example walking task using Adversarial Motion Priors."""
 
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
+import bvhio
 import distrax
 import equinox as eqx
+import glm
 import jax
 import jax.numpy as jnp
 import mujoco
+import numpy as np
 import optax
 import xax
+from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
-from kscale.web.gen.api import JointMetadataOutput
+from scipy.spatial.transform import Rotation as R
 
 import ksim
 
 NUM_JOINTS = 21
 
 NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
+
+
+HUMANOID_REFERENCE_MAPPINGS = (
+    ksim.MotionReferenceMapping("CC_Base_L_ThighTwist01", "thigh_left"),  # hip
+    ksim.MotionReferenceMapping("CC_Base_L_CalfTwist01", "shin_left"),  # knee
+    ksim.MotionReferenceMapping("CC_Base_L_Foot", "foot_left"),  # foot
+    ksim.MotionReferenceMapping("CC_Base_L_UpperarmTwist01", "upper_arm_left"),  # shoulder
+    ksim.MotionReferenceMapping("CC_Base_L_ForearmTwist01", "lower_arm_left"),  # elbow
+    ksim.MotionReferenceMapping("CC_Base_L_Hand", "hand_left"),  # hand
+    ksim.MotionReferenceMapping("CC_Base_R_ThighTwist01", "thigh_right"),  # hip
+    ksim.MotionReferenceMapping("CC_Base_R_CalfTwist01", "shin_right"),  # knee
+    ksim.MotionReferenceMapping("CC_Base_R_Foot", "foot_right"),  # foot
+    ksim.MotionReferenceMapping("CC_Base_R_UpperarmTwist01", "upper_arm_right"),  # shoulder
+    ksim.MotionReferenceMapping("CC_Base_R_ForearmTwist01", "lower_arm_right"),  # elbow
+    ksim.MotionReferenceMapping("CC_Base_R_Hand", "hand_right"),  # hand
+)
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -129,11 +150,62 @@ class DefaultHumanoidModel(eqx.Module):
         )
 
 
-@dataclass
-class HumanoidWalkingTaskConfig(ksim.PPOConfig):
-    """Config for the humanoid walking task."""
+class DefaultHumanoidDiscriminator(eqx.Module):
+    """Discriminator for the walking task, returns logit."""
 
-    # Model parameters.
+    layers: list[Callable[[Array], Array]]
+
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        hidden_size: int,
+        depth: int,
+        num_frames: int,
+    ) -> None:
+        num_inputs = NUM_JOINTS
+
+        layers: list[Callable[[Array], Array]] = []
+        for _ in range(depth):
+            key, subkey = jax.random.split(key)
+            layers += [
+                eqx.nn.Conv1d(
+                    in_channels=num_inputs,
+                    out_channels=hidden_size,
+                    kernel_size=num_frames,
+                    # We left-pad the input so that the discriminator output
+                    # at time T can be reasonably interpretted as the logit
+                    # for the motion from time T - N to T. In other words, we
+                    # this means that all the reward for time T will be based
+                    # on the motion from the previous N frames.
+                    padding=[(num_frames - 1, 0)],
+                    key=subkey,
+                ),
+                jax.nn.relu,
+            ]
+            num_inputs = hidden_size
+
+        layers += [
+            eqx.nn.Conv1d(
+                in_channels=num_inputs,
+                out_channels=1,
+                kernel_size=1,
+                key=key,
+            )
+        ]
+
+        self.layers = layers
+
+    def forward(self, x: Array) -> Array:
+        x_nt = x.transpose(1, 0)
+        for layer in self.layers:
+            x_nt = layer(x_nt)
+        return x_nt.squeeze(0)
+
+
+@dataclass
+class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
+    # Policy parameters.
     hidden_size: int = xax.field(
         value=128,
         help="The hidden size for the MLPs.",
@@ -145,6 +217,20 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     num_mixtures: int = xax.field(
         value=5,
         help="The number of mixtures for the actor.",
+    )
+
+    # Disciminator parameters.
+    discriminator_hidden_size: int = xax.field(
+        value=128,
+        help="The hidden size for the discriminator.",
+    )
+    discriminator_depth: int = xax.field(
+        value=5,
+        help="The depth for the discriminator.",
+    )
+    discriminator_num_frames: int = xax.field(
+        value=10,
+        help="The number of frames to use for the discriminator.",
     )
 
     # Reward parameters.
@@ -177,6 +263,14 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     adam_weight_decay: float = xax.field(
         value=0.0,
         help="Weight decay for the Adam optimizer.",
+    )
+    max_discriminator_grad_norm: float = xax.field(
+        value=2.0,
+        help="Maximum gradient norm for clipping.",
+    )
+    discriminator_learning_rate: float = xax.field(
+        value=1e-3,
+        help="Learning rate for the discriminator.",
     )
 
     # Mujoco parameters.
@@ -221,28 +315,58 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The body id to track with the render camera.",
     )
 
+    # Refernece motion parameters.
+    bvh_path: str = xax.field(
+        value=str(Path(__file__).parent / "data" / "walk_normal_dh.bvh"),
+        help="The path to the BVH file.",
+    )
+    rotate_bvh_euler: tuple[float, float, float] = xax.field(
+        value=(0, 0, 0),
+        help="Optional rotation to ensure the BVH tree matches the Mujoco model.",
+    )
+    bvh_scaling_factor: float = xax.field(
+        value=1.0,
+        help="Scaling factor to ensure the BVH tree matches the Mujoco model.",
+    )
+    bvh_offset: tuple[float, float, float] = xax.field(
+        value=(0.0, 0.0, 0.0),
+        help="Offset to ensure the BVH tree matches the Mujoco model.",
+    )
+    mj_base_name: str = xax.field(
+        value="pelvis",
+        help="The Mujoco body name of the base of the humanoid",
+    )
+    constrained_joint_ids: tuple[int, ...] = xax.field(
+        value=(0, 1, 2, 3, 4, 5, 6),
+        help="The indices of the joints to constrain. By default, freejoints.",
+    )
+    reference_base_name: str = xax.field(
+        value="CC_Base_Pelvis",
+        help="The BVH joint name of the base of the humanoid",
+    )
 
-Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
+    # Visualization parameters.
+    visualize_reference_points: bool = xax.field(
+        value=False,
+        help="Whether to visualize the reference points.",
+    )
+    visualize_reference_motion: bool = xax.field(
+        value=False,
+        help="Whether to visualize the reference motion after running IK.",
+    )
 
 
-class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
-    def get_optimizer(self) -> optax.GradientTransformation:
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            (
-                optax.adam(self.config.learning_rate)
-                if self.config.adam_weight_decay == 0.0
-                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
-            ),
-        )
+Config = TypeVar("Config", bound=HumanoidWalkingAMPTaskConfig)
 
-        return optimizer
+
+class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
+    """Adversarial Motion Prior task."""
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         return mujoco.MjModel.from_xml_path(mjcf_path)
 
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, ksim.JointMetadataOutput]:
         return ksim.get_joint_metadata(
             mj_model,
             kp=self.config.kp,
@@ -254,7 +378,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_actuators(
         self,
         physics_model: ksim.PhysicsModel,
-        metadata: dict[str, JointMetadataOutput] | None = None,
+        metadata: dict[str, ksim.JointMetadataOutput] | None = None,
     ) -> ksim.Actuators:
         assert metadata is not None, "Metadata is required"
         return ksim.MITPositionActuators(
@@ -354,6 +478,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
+            ksim.AMPReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
             ksim.AngularVelocityPenalty(index="x", scale=-0.001),
             ksim.AngularVelocityPenalty(index="y", scale=-0.001),
@@ -396,7 +521,10 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             dt=self.config.ctrl_dt,
         )
 
-    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
+        return None
+
+    def get_policy_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(
             key,
             hidden_size=self.config.hidden_size,
@@ -404,8 +532,76 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             num_mixtures=self.config.num_mixtures,
         )
 
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
-        return None
+    def get_discriminator_model(self, key: PRNGKeyArray) -> DefaultHumanoidDiscriminator:
+        return DefaultHumanoidDiscriminator(
+            key,
+            hidden_size=self.config.discriminator_hidden_size,
+            depth=self.config.discriminator_depth,
+            num_frames=self.config.discriminator_num_frames,
+        )
+
+    def get_policy_optimizer(self) -> optax.GradientTransformation:
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            (
+                optax.adam(self.config.learning_rate)
+                if self.config.adam_weight_decay == 0.0
+                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
+            ),
+        )
+
+        return optimizer
+
+    def get_discriminator_optimizer(self) -> optax.GradientTransformation:
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(self.config.max_discriminator_grad_norm),
+            optax.adam(self.config.discriminator_learning_rate),
+        )
+        return optimizer
+
+    def call_discriminator(self, model: DefaultHumanoidDiscriminator, motion: Array) -> Array:
+        return model.forward(motion)
+
+    def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
+        root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
+        reference_base_id = ksim.get_reference_joint_id(root, self.config.reference_base_name)
+        mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
+
+        def rotation_callback(root: BvhioJoint) -> None:
+            euler_rotation = np.array(self.config.rotate_bvh_euler)
+            quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
+            root.applyRotation(glm.quat(*quat), bake=True)
+
+        reference_motion = ksim.generate_reference_motion(
+            model=mj_model,
+            mj_base_id=mj_base_id,
+            bvh_root=root,
+            bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
+            bvh_base_id=reference_base_id,
+            bvh_offset=np.array(self.config.bvh_offset),
+            bvh_root_callback=rotation_callback,
+            bvh_scaling_factor=self.config.bvh_scaling_factor,
+            ctrl_dt=self.config.ctrl_dt,
+            neutral_qpos=None,
+            neutral_similarity_weight=0.1,
+            temporal_consistency_weight=0.1,
+            n_restarts=3,
+            error_acceptance_threshold=1e-4,
+            ftol=1e-8,
+            xtol=1e-8,
+            max_nfev=2000,
+            verbose=False,
+        )
+
+        return jnp.array(reference_motion.qpos.array[None, ..., 7:])  # Remove the root joint.
+
+    def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
+        return trajectory.qpos[..., 7:]  # Remove the root joint.
+
+    def motion_to_qpos(self, motion: Array) -> Array:
+        qpos_init = jnp.array([0.0, 0.0, 1.5, 1.0, 0.0, 0.0, 0.0])
+        qpos_init = jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 7))
+        return jnp.concatenate([jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 7)), motion], axis=-1)
 
     def run_actor(
         self,
@@ -542,30 +738,38 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.walking
+    #   python -m examples.walking_reference_motion
     # To visualize the environment, use the following command:
-    #   python -m examples.walking run_environment=True
+    #   python -m examples.walking_reference_motion run_environment=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking num_envs=8 rollouts_per_batch=4
-    HumanoidWalkingTask.launch(
-        HumanoidWalkingTaskConfig(
-            # Training parameters.
+    #   python -m examples.walking_reference_motion num_envs=8 num_batches=2
+    HumanoidWalkingAMPTask.launch(
+        HumanoidWalkingAMPTaskConfig(
             num_envs=2048,
             batch_size=256,
-            num_passes=2,
+            num_passes=10,
             epochs_per_log_step=1,
-            rollout_length_seconds=8.0,
-            # Logging parameters.
-            # log_full_trajectory_every_n_seconds=60,
+            valid_every_n_steps=10,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
             iterations=8,
             ls_iterations=8,
             max_action_latency=0.01,
-            # Checkpointing parameters.
-            save_every_n_seconds=60,
+            rollout_length_seconds=8.0,
+            # PPO parameters
+            gamma=0.97,
+            lam=0.95,
+            entropy_coef=0.001,
+            learning_rate=3e-4,
+            clip_param=0.3,
+            max_grad_norm=1.0,
+            # Gait matching parameters.
+            rotate_bvh_euler=(0, np.pi / 2, 0),
+            bvh_scaling_factor=1 / 100,
+            mj_base_name="pelvis",
+            reference_base_name="CC_Base_Pelvis",
         ),
     )
