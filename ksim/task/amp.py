@@ -70,8 +70,6 @@ Config = TypeVar("Config", bound=AMPConfig)
 class AMPReward(Reward):
     """Reward based on discriminator output for AMP training."""
 
-    temp: float = attrs.field(default=1.0, validator=attrs.validators.gt(0.0))
-
     def get_reward(self, trajectory: Trajectory) -> Array:
         if trajectory.aux_outputs is None or DISCRIMINATOR_OUTPUT_KEY not in trajectory.aux_outputs:
             raise ValueError(
@@ -80,7 +78,7 @@ class AMPReward(Reward):
             )
 
         discriminator_logits = trajectory.aux_outputs[DISCRIMINATOR_OUTPUT_KEY]
-        reward = jax.nn.sigmoid(discriminator_logits / self.temp)
+        reward = jnp.maximum(0.0, 1.0 - 0.25 * (1 - discriminator_logits) ** 2)
         return reward
 
 
@@ -313,8 +311,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         real_disc_logits: Array,
         sim_disc_logits: Array,
     ) -> tuple[Array, Array]:
-        real_disc_loss = -jnp.mean(jax.nn.log_sigmoid(real_disc_logits))
-        sim_disc_loss = -jnp.mean(jax.nn.log_sigmoid(-sim_disc_logits))
+        real_disc_loss = jnp.mean((real_disc_logits - 1) ** 2)
+        sim_disc_loss = jnp.mean((sim_disc_logits + 1) ** 2)
         return real_disc_loss, sim_disc_loss
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
