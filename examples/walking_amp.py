@@ -518,15 +518,14 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             verbose=False,
         )
 
-        return jnp.array(reference_motion.qpos.array[None, ..., 7:])  # Remove the root joint.
+        return jnp.array(reference_motion.qpos.array[None, ..., 3:])  # Remove the root joint absolute coordinates.
 
     def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qpos[..., 7:]  # Remove the root joint.
+        return trajectory.qpos[..., 3:]  # Remove the root joint absolute coordinates.
 
     def motion_to_qpos(self, motion: Array) -> Array:
-        qpos_init = jnp.array([0.0, 0.0, 1.5, 1.0, 0.0, 0.0, 0.0])
-        qpos_init = jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 7))
-        return jnp.concatenate([jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 7)), motion], axis=-1)
+        qpos_init = jnp.array([0.0, 0.0, 1.5])
+        return jnp.concatenate([jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 3)), motion], axis=-1)
 
     def run_actor(
         self,
