@@ -136,7 +136,7 @@ class DefaultHumanoidModel(eqx.Module):
     ) -> None:
         self.actor = DefaultHumanoidActor(
             key,
-            min_std=0.01,
+            min_std=1e-6,
             max_std=1.0,
             var_scale=0.5,
             hidden_size=hidden_size,
@@ -181,25 +181,25 @@ class DefaultHumanoidDiscriminator(eqx.Module):
 class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
     # Policy parameters.
     hidden_size: int = xax.field(
-        value=128,
+        value=512,
         help="The hidden size for the MLPs.",
     )
     depth: int = xax.field(
-        value=5,
+        value=2,
         help="The depth for the MLPs.",
     )
     num_mixtures: int = xax.field(
-        value=5,
+        value=3,
         help="The number of mixtures for the actor.",
     )
 
     # Disciminator parameters.
     discriminator_hidden_size: int = xax.field(
-        value=128,
+        value=512,
         help="The hidden size for the discriminator.",
     )
     discriminator_depth: int = xax.field(
-        value=5,
+        value=2,
         help="The depth for the discriminator.",
     )
 
