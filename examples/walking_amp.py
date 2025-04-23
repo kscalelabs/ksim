@@ -43,14 +43,142 @@ HUMANOID_REFERENCE_MAPPINGS = (
 )
 
 
-class DefaultHumanoidActor(eqx.Module):
-    """Actor for the walking task."""
+class DefaultHumanoidRNNActor(eqx.Module):
+    """RNN-based actor for the walking task."""
 
-    mlp: eqx.nn.MLP
+    input_proj: eqx.nn.Linear
+    rnns: tuple[eqx.nn.GRUCell, ...]
+    output_proj: eqx.nn.Linear
+    num_inputs: int = eqx.static_field()
+    num_outputs: int = eqx.static_field()
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
-    num_mixtures: int = eqx.static_field()
+
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        num_inputs: int,
+        num_outputs: int,
+        min_std: float,
+        max_std: float,
+        var_scale: float,
+        hidden_size: int,
+        depth: int,
+    ) -> None:
+        # Project input to hidden size
+        key, input_proj_key = jax.random.split(key)
+        self.input_proj = eqx.nn.Linear(
+            in_features=num_inputs,
+            out_features=hidden_size,
+            key=input_proj_key,
+        )
+
+        # Create RNN layer
+        key, rnn_key = jax.random.split(key)
+        self.rnns = tuple(
+            [
+                eqx.nn.GRUCell(
+                    input_size=hidden_size,
+                    hidden_size=hidden_size,
+                    key=rnn_key,
+                )
+                for _ in range(depth)
+            ]
+        )
+
+        # Project to output
+        self.output_proj = eqx.nn.Linear(
+            in_features=hidden_size,
+            out_features=num_outputs * 2,
+            key=key,
+        )
+
+        self.num_inputs = num_inputs
+        self.num_outputs = num_outputs
+        self.min_std = min_std
+        self.max_std = max_std
+        self.var_scale = var_scale
+
+    def forward(self, obs_n: Array, carry: Array) -> tuple[distrax.Distribution, Array]:
+        x_n = self.input_proj(obs_n)
+        out_carries = []
+        for i, rnn in enumerate(self.rnns):
+            x_n = rnn(x_n, carry[i])
+            out_carries.append(x_n)
+        out_n = self.output_proj(x_n)
+
+        # Converts the output to a distribution.
+        mean_n = out_n[..., : self.num_outputs]
+        std_n = out_n[..., self.num_outputs :]
+
+        # Softplus and clip to ensure positive standard deviations.
+        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
+
+        dist_n = distrax.Normal(mean_n, std_n)
+        return dist_n, jnp.stack(out_carries, axis=0)
+
+
+class DefaultHumanoidRNNCritic(eqx.Module):
+    """RNN-based critic for the walking task."""
+
+    input_proj: eqx.nn.Linear
+    rnns: tuple[eqx.nn.GRUCell, ...]
+    output_proj: eqx.nn.Linear
+
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        num_inputs: int,
+        hidden_size: int,
+        depth: int,
+    ) -> None:
+        num_outputs = 1
+
+        # Project input to hidden size
+        key, input_proj_key = jax.random.split(key)
+        self.input_proj = eqx.nn.Linear(
+            in_features=num_inputs,
+            out_features=hidden_size,
+            key=input_proj_key,
+        )
+
+        # Create RNN layer
+        key, rnn_key = jax.random.split(key)
+        self.rnns = tuple(
+            [
+                eqx.nn.GRUCell(
+                    input_size=hidden_size,
+                    hidden_size=hidden_size,
+                    key=rnn_key,
+                )
+                for _ in range(depth)
+            ]
+        )
+
+        # Project to output
+        self.output_proj = eqx.nn.Linear(
+            in_features=hidden_size,
+            out_features=num_outputs,
+            key=key,
+        )
+
+    def forward(self, obs_n: Array, carry: Array) -> tuple[Array, Array]:
+        x_n = self.input_proj(obs_n)
+        out_carries = []
+        for i, rnn in enumerate(self.rnns):
+            x_n = rnn(x_n, carry[i])
+            out_carries.append(x_n)
+        out_n = self.output_proj(x_n)
+
+        return out_n, jnp.stack(out_carries, axis=0)
+
+
+class DefaultHumanoidRNNModel(eqx.Module):
+    actor: DefaultHumanoidRNNActor
+    critic: DefaultHumanoidRNNCritic
 
     def __init__(
         self,
@@ -58,93 +186,24 @@ class DefaultHumanoidActor(eqx.Module):
         *,
         min_std: float,
         max_std: float,
-        var_scale: float,
-        hidden_size: int,
-        depth: int,
-        num_mixtures: int,
-    ) -> None:
-        num_inputs = NUM_INPUTS
-        num_outputs = NUM_JOINTS
-
-        self.mlp = eqx.nn.MLP(
-            in_size=num_inputs,
-            out_size=num_outputs * 3 * num_mixtures,
-            width_size=hidden_size,
-            depth=depth,
-            key=key,
-            activation=jax.nn.relu,
-        )
-        self.min_std = min_std
-        self.max_std = max_std
-        self.var_scale = var_scale
-        self.num_mixtures = num_mixtures
-
-    def forward(self, obs_n: Array) -> distrax.Distribution:
-        prediction_n = self.mlp(obs_n)
-
-        # Splits the predictions into means, standard deviations, and logits.
-        slice_len = NUM_JOINTS * self.num_mixtures
-        mean_nm = prediction_n[:slice_len].reshape(NUM_JOINTS, self.num_mixtures)
-        std_nm = prediction_n[slice_len : slice_len * 2].reshape(NUM_JOINTS, self.num_mixtures)
-        logits_nm = prediction_n[slice_len * 2 :].reshape(NUM_JOINTS, self.num_mixtures)
-
-        # Softplus and clip to ensure positive standard deviations.
-        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
-        dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
-        return dist_n
-
-
-class DefaultHumanoidCritic(eqx.Module):
-    """Critic for the walking task."""
-
-    mlp: eqx.nn.MLP
-
-    def __init__(
-        self,
-        key: PRNGKeyArray,
-        *,
+        num_inputs: int,
+        num_joints: int,
         hidden_size: int,
         depth: int,
     ) -> None:
-        num_inputs = NUM_INPUTS
-        num_outputs = 1
-
-        self.mlp = eqx.nn.MLP(
-            in_size=num_inputs,
-            out_size=num_outputs,
-            width_size=hidden_size,
-            depth=depth,
-            key=key,
-            activation=jax.nn.relu,
-        )
-
-    def forward(self, obs_n: Array) -> Array:
-        return self.mlp(obs_n)
-
-
-class DefaultHumanoidModel(eqx.Module):
-    actor: DefaultHumanoidActor
-    critic: DefaultHumanoidCritic
-
-    def __init__(
-        self,
-        key: PRNGKeyArray,
-        *,
-        hidden_size: int,
-        depth: int,
-        num_mixtures: int,
-    ) -> None:
-        self.actor = DefaultHumanoidActor(
+        self.actor = DefaultHumanoidRNNActor(
             key,
-            min_std=0.01,
-            max_std=1.0,
+            num_inputs=num_inputs,
+            num_outputs=num_joints,
+            min_std=min_std,
+            max_std=max_std,
             var_scale=0.5,
             hidden_size=hidden_size,
             depth=depth,
-            num_mixtures=num_mixtures,
         )
-        self.critic = DefaultHumanoidCritic(
+        self.critic = DefaultHumanoidRNNCritic(
             key,
+            num_inputs=num_inputs,
             hidden_size=hidden_size,
             depth=depth,
         )
@@ -213,10 +272,6 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
     depth: int = xax.field(
         value=5,
         help="The depth for the MLPs.",
-    )
-    num_mixtures: int = xax.field(
-        value=5,
-        help="The number of mixtures for the actor.",
     )
 
     # Disciminator parameters.
@@ -453,7 +508,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.AMPReward(scale=1.0),
+            ksim.AMPReward(scale=500.0),
             ksim.StayAliveReward(scale=1.0),
             ksim.NaiveForwardReward(clip_max=2.0, scale=1.0),
         ]
@@ -476,15 +531,15 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             dt=self.config.ctrl_dt,
         )
 
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
-        return None
-
-    def get_policy_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
-        return DefaultHumanoidModel(
+    def get_policy_model(self, key: PRNGKeyArray) -> DefaultHumanoidRNNModel:
+        return DefaultHumanoidRNNModel(
             key,
+            num_inputs=NUM_INPUTS,
+            num_joints=NUM_JOINTS,
+            min_std=0.01,
+            max_std=1.0,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
-            num_mixtures=self.config.num_mixtures,
         )
 
     def get_discriminator_model(self, key: PRNGKeyArray) -> DefaultHumanoidDiscriminator:
@@ -572,10 +627,11 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def run_actor(
         self,
-        model: DefaultHumanoidActor,
+        model: DefaultHumanoidRNNActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-    ) -> distrax.Distribution:
+        carry: Array,
+    ) -> tuple[distrax.Distribution, Array]:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
@@ -608,14 +664,15 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             axis=-1,
         )
 
-        return model.forward(obs_n)
+        return model.forward(obs_n, carry)
 
     def run_critic(
         self,
-        model: DefaultHumanoidCritic,
+        model: DefaultHumanoidRNNCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-    ) -> Array:
+        carry: Array,
+    ) -> tuple[Array, Array]:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
@@ -648,39 +705,60 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             axis=-1,
         )
 
-        return model.forward(obs_n)
+        return model.forward(obs_n, carry)
 
     def get_ppo_variables(
         self,
-        model: DefaultHumanoidModel,
+        model: DefaultHumanoidRNNModel,
         trajectory: ksim.Trajectory,
-        model_carry: None,
+        model_carry: tuple[Array, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[ksim.PPOVariables, None]:
-        # Vectorize over the time dimensions.
-        def get_log_prob(transition: ksim.Trajectory) -> Array:
-            action_dist_tj = self.run_actor(model.actor, transition.obs, transition.command)
-            log_probs_tj = action_dist_tj.log_prob(transition.action)
-            assert isinstance(log_probs_tj, Array)
-            return log_probs_tj
+    ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
+        def scan_fn(
+            actor_critic_carry: tuple[Array, Array], transition: ksim.Trajectory
+        ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
+            actor_carry, critic_carry = actor_critic_carry
+            actor_dist, next_actor_carry = self.run_actor(
+                model=model.actor,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=actor_carry,
+            )
+            log_probs = actor_dist.log_prob(transition.action)
+            assert isinstance(log_probs, Array)
+            value, next_critic_carry = self.run_critic(
+                model=model.critic,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=critic_carry,
+            )
 
-        log_probs_tj = jax.vmap(get_log_prob)(trajectory)
-        assert isinstance(log_probs_tj, Array)
+            transition_ppo_variables = ksim.PPOVariables(
+                log_probs=log_probs,
+                values=value.squeeze(-1),
+            )
 
-        # Vectorize over the time dimensions.
-        values_tj = jax.vmap(self.run_critic, in_axes=(None, 0, 0))(model.critic, trajectory.obs, trajectory.command)
+            initial_carry = self.get_initial_model_carry(rng)
+            next_carry = jax.tree.map(
+                lambda x, y: jnp.where(transition.done, x, y), initial_carry, (next_actor_carry, next_critic_carry)
+            )
 
-        ppo_variables = ksim.PPOVariables(
-            log_probs=log_probs_tj,
-            values=values_tj.squeeze(-1),
+            return next_carry, transition_ppo_variables
+
+        next_model_carry, ppo_variables = jax.lax.scan(scan_fn, model_carry, trajectory)
+
+        return ppo_variables, next_model_carry
+
+    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return (
+            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
         )
-
-        return ppo_variables, None
 
     def sample_action(
         self,
-        model: DefaultHumanoidModel,
-        model_carry: None,
+        model: DefaultHumanoidRNNModel,
+        model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
@@ -688,13 +766,23 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
-        action_dist_j = self.run_actor(
+        actor_carry_in, critic_carry_in = model_carry
+
+        # Runs the actor model to get the action distribution.
+        action_dist_j, actor_carry = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
+            carry=actor_carry_in,
         )
+
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
-        return ksim.Action(action=action_j, carry=None, aux_outputs=None)
+
+        return ksim.Action(
+            action=action_j,
+            carry=(actor_carry, critic_carry_in),
+            aux_outputs=None,
+        )
 
 
 if __name__ == "__main__":
