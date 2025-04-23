@@ -207,13 +207,21 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def call_discriminator(self, model: PyTree, motion: PyTree) -> Array:
+    def call_discriminator(
+        self,
+        model: PyTree,
+        motion: PyTree,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
         """Calls the discriminator on a given motion.
 
         Args:
             model: The model returned by `get_model`
             motion: The motion in question, either the real motion from the
                 dataset or a motion derived from a trajectory.
+            curriculum_level: The current curriculum level.
+            rng: The random number generator to use for the call.
 
         Returns:
             The discriminator logits, as an array with with shape (T). We
@@ -278,16 +286,18 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
     def postprocess_trajectory(
         self,
         constants: RolloutConstants,
-        env_states: RolloutEnvState,
+        env_state: RolloutEnvState,
         shared_state: RolloutSharedState,
         trajectory: Trajectory,
-    ) -> Trajectory:
-        trajectory = super().postprocess_trajectory(
+    ) -> tuple[RolloutEnvState, Trajectory]:
+        env_state, trajectory = super().postprocess_trajectory(
             constants=constants,
-            env_states=env_states,
+            env_state=env_state,
             shared_state=shared_state,
             trajectory=trajectory,
         )
+
+        rng, disc_rng = jax.random.split(env_state.rng)
 
         # Recombines the mutable and static parts of the discriminator model.
         disc_model_arr = shared_state.model_arrs[1]
@@ -296,7 +306,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         # Runs the discriminator on the trajectory.
         motion = self.trajectory_to_motion(trajectory)
-        discriminator_logits = self.call_discriminator(disc_model, motion)
+        discriminator_logits = self.call_discriminator(disc_model, motion, disc_rng)
         chex.assert_equal_shape([discriminator_logits, trajectory.done])
 
         # Adds the discriminator output to the auxiliary outputs.
@@ -304,7 +314,9 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         aux_outputs[DISCRIMINATOR_OUTPUT_KEY] = discriminator_logits
         trajectory = dataclass_replace(trajectory, aux_outputs=xax.FrozenDict(aux_outputs))
 
-        return trajectory
+        env_state = dataclass_replace(env_state, rng=rng)
+
+        return env_state, trajectory
 
     def get_disc_losses(
         self,
@@ -322,6 +334,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
     ) -> tuple[Array, xax.FrozenDict[str, Array]]:
         """Computes the PPO loss and additional metrics.
 
@@ -330,6 +344,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             model_static: The static part of the discriminator model.
             trajectories: The trajectories to compute the loss on.
             real_motions: The real motions to compute the loss on.
+            curriculum_level: The current curriculum level.
+            rng: The random number generator to use for the call.
 
         Returns:
             A tuple containing the loss value as a scalar, a dictionary of
@@ -339,9 +355,15 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         sim_motions = self.trajectory_to_motion(trajectories)
 
+        # Gets the random keys for the discriminator and generator.
+        real_rng, sim_rng = jax.random.split(rng)
+        real_rng = jax.random.split(real_rng, real_motions.shape[0])
+        sim_rng = jax.random.split(sim_rng, sim_motions.shape[0])
+
         # Computes the discriminator loss.
-        real_disc_logits = jax.vmap(self.call_discriminator, in_axes=(None, 0))(model, real_motions)
-        sim_disc_logits = jax.vmap(self.call_discriminator, in_axes=(None, 0))(model, sim_motions)
+        discriminator_fn = jax.vmap(self.call_discriminator, in_axes=(None, 0, None, 0))
+        real_disc_logits = discriminator_fn(model, real_motions, curriculum_level, real_rng)
+        sim_disc_logits = discriminator_fn(model, sim_motions, curriculum_level, sim_rng)
         real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
 
         disc_loss = real_disc_loss + sim_disc_loss
@@ -360,10 +382,11 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
+        rng: PRNGKeyArray,
     ) -> tuple[xax.FrozenDict[str, Array], PyTree]:
         loss_fn = jax.grad(self._get_amp_disc_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
-        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions)
+        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions, rng)
         return metrics, grads
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=4)
@@ -376,13 +399,15 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
+        ppo_rng, disc_rng = jax.random.split(rng)
+
         carry, metrics, logged_traj = super()._single_step(
             trajectories=trajectories,
             rewards=rewards,
             constants=constants,
             carry=carry,
             on_policy_variables=on_policy_variables,
-            rng=rng,
+            rng=ppo_rng,
         )
 
         # Gets the discriminator model and optimizer.
@@ -397,6 +422,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             model_static=model_static,
             trajectories=trajectories,
             real_motions=carry.shared_state.aux_values[REAL_MOTIONS_KEY],
+            rng=disc_rng,
         )
 
         # Applies the gradients with clipping.

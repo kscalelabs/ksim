@@ -1302,11 +1302,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def postprocess_trajectory(
         self,
         constants: RolloutConstants,
-        env_states: RolloutEnvState,
+        env_state: RolloutEnvState,
         shared_state: RolloutSharedState,
         trajectory: Trajectory,
-    ) -> Trajectory:
-        return trajectory
+    ) -> tuple[RolloutEnvState, Trajectory]:
+        return env_state, trajectory
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=2)
     def _single_unroll(
@@ -1337,9 +1337,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Post-processes the trajectory.
-        trajectory = self.postprocess_trajectory(
+        env_state, trajectory = self.postprocess_trajectory(
             constants=constants,
-            env_states=env_state,
+            env_state=env_state,
             shared_state=shared_state,
             trajectory=trajectory,
         )

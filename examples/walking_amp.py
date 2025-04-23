@@ -514,7 +514,19 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         )
         return optimizer
 
-    def call_discriminator(self, model: DefaultHumanoidDiscriminator, motion: Array) -> Array:
+    def call_discriminator(
+        self,
+        model: DefaultHumanoidDiscriminator,
+        motion: Array,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        # Adds some noise to the motion to prevent the discriminator from
+        # learning some very precise decision boundary between the real and
+        # simulated motions. We decrease the noise as we increase the curriculum
+        # since we are likely increasing the curriculum because the policy is
+        # learning the correct motion.
+        motion = motion + jax.random.normal(rng, motion.shape) * 0.1 * (1.0 - curriculum_level) + 1e-3
         return model.forward(motion)
 
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
