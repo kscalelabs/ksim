@@ -259,6 +259,14 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
         value=0.0,
         help="Weight decay for the Adam optimizer.",
     )
+    max_discriminator_grad_norm: float = xax.field(
+        value=2.0,
+        help="Maximum gradient norm for clipping.",
+    )
+    discriminator_learning_rate: float = xax.field(
+        value=1e-3,
+        help="Learning rate for the discriminator.",
+    )
 
     # Mujoco parameters.
     kp: float = xax.field(
@@ -540,22 +548,19 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_discriminator_optimizer(self) -> optax.GradientTransformation:
         optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
+            optax.clip_by_global_norm(self.config.max_discriminator_grad_norm),
             optax.adam(self.config.discriminator_learning_rate),
         )
         return optimizer
 
     def call_discriminator(self, model: DefaultHumanoidDiscriminator, motion: Array) -> Array:
-        breakpoint()
-        model.forward(motion[..., None])
-        raise NotImplementedError
+        return model.forward(motion[..., None]).squeeze(-1)
 
     def get_real_motions(self) -> Array:
-        breakpoint()
         raise NotImplementedError
 
     def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qpos
+        return trajectory.qpos[..., 7:]  # Remove the root joint.
 
     def run_actor(
         self,

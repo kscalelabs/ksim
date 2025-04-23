@@ -300,7 +300,6 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         return carry, metrics, logged_traj
 
-    @abstractmethod
     def update_model(
         self,
         *,
