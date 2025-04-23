@@ -162,7 +162,7 @@ class DefaultHumanoidDiscriminator(eqx.Module):
         hidden_size: int,
         depth: int,
     ) -> None:
-        num_inputs = NUM_JOINTS
+        num_inputs = NUM_JOINTS + 4
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
