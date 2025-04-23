@@ -336,8 +336,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         sim_motions = self.trajectory_to_motion(trajectories)
 
         # Computes the discriminator loss.
-        real_disc_logits = self.call_discriminator(model, real_motions)
-        sim_disc_logits = self.call_discriminator(model, sim_motions)
+        real_disc_logits = jax.vmap(self.call_discriminator, in_axes=(None, 0))(model, real_motions)
+        sim_disc_logits = jax.vmap(self.call_discriminator, in_axes=(None, 0))(model, sim_motions)
 
         # Computes the discriminator loss, using LSGAN.
         real_disc_loss = 0.5 * jnp.mean(jnp.square(real_disc_logits - 1.0))
