@@ -508,7 +508,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.AMPReward(scale=500.0),
+            ksim.AMPReward(scale=1.0, divisor=1000.0),
             ksim.StayAliveReward(scale=1.0),
             ksim.NaiveForwardReward(clip_max=2.0, scale=1.0),
         ]
