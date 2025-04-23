@@ -485,7 +485,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def call_discriminator(self, model: DefaultHumanoidDiscriminator, motion: Array) -> Array:
         # return model.forward(motion)
-        return jax.vmap(model.forward)(motion)
+        return jax.vmap(model.forward)(motion).squeeze(-1)
 
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
