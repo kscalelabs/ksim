@@ -387,11 +387,12 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
+        curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> tuple[xax.FrozenDict[str, Array], PyTree]:
         loss_fn = jax.grad(self._get_amp_disc_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
-        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions, rng)
+        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions, curriculum_level, rng)
         return metrics, grads
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=4)
@@ -427,6 +428,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             model_static=model_static,
             trajectories=trajectories,
             real_motions=carry.shared_state.aux_values[REAL_MOTIONS_KEY],
+            curriculum_level=carry.env_states.curriculum_state.level,
             rng=disc_rng,
         )
 
