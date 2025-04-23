@@ -62,12 +62,6 @@ class AMPConfig(PPOConfig):
         help="If true, the motion will be looped.",
     )
 
-    # Discriminator parameters.
-    use_mse_loss: bool = xax.field(
-        value=False,
-        help="If true, use MSE loss for the discriminator, otherwise use cross-entropy.",
-    )
-
 
 Config = TypeVar("Config", bound=AMPConfig)
 
@@ -317,12 +311,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         real_disc_logits: Array,
         sim_disc_logits: Array,
     ) -> tuple[Array, Array]:
-        if self.config.use_mse_loss:
-            real_disc_loss = 0.5 * jnp.mean(jnp.square(real_disc_logits - 1.0))
-            sim_disc_loss = 0.5 * jnp.mean(jnp.square(sim_disc_logits))
-        else:
-            real_disc_loss = -jnp.mean(jax.nn.log_sigmoid(real_disc_logits))
-            sim_disc_loss = -jnp.mean(jax.nn.log_sigmoid(-sim_disc_logits))
+        real_disc_loss = -jnp.mean(jax.nn.log_sigmoid(real_disc_logits))
+        sim_disc_loss = -jnp.mean(jax.nn.log_sigmoid(-sim_disc_logits))
         return real_disc_loss, sim_disc_loss
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
