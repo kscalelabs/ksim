@@ -306,7 +306,12 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         # Runs the discriminator on the trajectory.
         motion = self.trajectory_to_motion(trajectory)
-        discriminator_logits = self.call_discriminator(disc_model, motion, disc_rng)
+        discriminator_logits = self.call_discriminator(
+            disc_model,
+            motion,
+            env_state.curriculum_state.level,
+            disc_rng,
+        )
         chex.assert_equal_shape([discriminator_logits, trajectory.done])
 
         # Adds the discriminator output to the auxiliary outputs.
