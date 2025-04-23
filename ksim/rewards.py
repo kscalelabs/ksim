@@ -164,12 +164,16 @@ class StayAliveReward(Reward):
     """
 
     balance: float = attrs.field(default=10.0)
-    success_reward: float = attrs.field(default=0.0)
+    success_reward: float | None = attrs.field(default=None)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         reward = jnp.where(
             trajectory.done,
-            jnp.where(trajectory.success, self.success_reward, -1.0),
+            jnp.where(
+                trajectory.success,
+                1.0 / self.balance if self.success_reward is None else self.success_reward,
+                -1.0,
+            ),
             1.0 / self.balance,
         )
         return reward
