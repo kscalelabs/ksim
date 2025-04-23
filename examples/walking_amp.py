@@ -24,7 +24,7 @@ import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3
 
 
 HUMANOID_REFERENCE_MAPPINGS = (
@@ -231,24 +231,6 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
     discriminator_num_frames: int = xax.field(
         value=10,
         help="The number of frames to use for the discriminator.",
-    )
-
-    # Reward parameters.
-    move_forward_command: bool = xax.field(
-        value=False,
-        help="If set, just move forward or stand still instead of using all possible controls",
-    )
-    linear_velocity_clip_max: float = xax.field(
-        value=1.0,
-        help="The maximum value for the linear velocity reward.",
-    )
-    angular_velocity_clip_max: float = xax.field(
-        value=math.pi / 8,
-        help="The maximum value for the angular velocity reward.",
-    )
-    naive_forward_reward: bool = xax.field(
-        value=False,
-        help="If set, use the naive forward reward instead of the joystick reward.",
     )
 
     # Optimizer parameters.
@@ -467,41 +449,14 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
-        return [
-            (
-                ksim.JoystickCommand(
-                    ranges=((0, 1),) if self.config.move_forward_command else ((0, 4),),
-                    switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average.
-                )
-            ),
-        ]
+        return []
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        rewards: list[ksim.Reward] = [
+        return [
             ksim.AMPReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
-            ksim.AngularVelocityPenalty(index="x", scale=-0.001),
-            ksim.AngularVelocityPenalty(index="y", scale=-0.001),
+            ksim.NaiveForwardReward(clip_max=2.0, scale=1.0),
         ]
-
-        if self.config.naive_forward_reward:
-            rewards += [
-                ksim.NaiveForwardReward(
-                    scale=1.0,
-                ),
-            ]
-
-        else:
-            rewards += [
-                ksim.JoystickReward(
-                    linear_velocity_clip_max=self.config.linear_velocity_clip_max,
-                    angular_velocity_clip_max=self.config.angular_velocity_clip_max,
-                    command_name="joystick_command",
-                    scale=1.0,
-                ),
-            ]
-
-        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
@@ -622,8 +577,6 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_1 = commands["joystick_command"]
-        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
 
         obs_n = jnp.concatenate(
             [
@@ -639,7 +592,6 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_6,  # 6
             ],
             axis=-1,
         )
@@ -665,8 +617,6 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_1 = commands["joystick_command"]
-        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
 
         obs_n = jnp.concatenate(
             [
@@ -682,7 +632,6 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_6,  # 6
             ],
             axis=-1,
         )
