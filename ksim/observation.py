@@ -348,7 +348,7 @@ class ProjectedGravityObservation(StatefulObservation):
 
         # Orients the gravity vector according to the quaternion.
         gravity = jnp.array(self.gravity)
-        proj_gravity = xax.rotate_vector_by_quat(gravity, framequat_data)
+        proj_gravity = xax.rotate_vector_by_quat(gravity, framequat_data, inverse=True)
 
         # Add noise to gravity vector measurement.
         proj_gravity = add_noise(proj_gravity, rng, "gaussian", self.noise, curriculum_level)
