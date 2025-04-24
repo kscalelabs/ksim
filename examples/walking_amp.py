@@ -257,10 +257,6 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
         value=2,
         help="The depth for the MLPs.",
     )
-    num_mixtures: int = xax.field(
-        value=3,
-        help="The number of mixtures for the actor.",
-    )
 
     # Disciminator parameters.
     discriminator_hidden_size: int = xax.field(
