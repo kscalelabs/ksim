@@ -2106,10 +2106,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 state = self.on_training_end(state)
 
 
-class MinibatchedRLTask(RLTask[Config], Generic[Config], ABC):
-    """Many RL algorithms utilize off-policy minibatch updates to train the
-    model post-rollout. This class provides a base class for these algorithms.
-    """
+class MinibatchedRLConfig(RLConfig):
+    """Configuration for minibatched RL tasks."""
+
+    num_passes: int = xax.field(
+        value=1,
+        help="The number of off-policy udpates over the set of trajectories",
+    )
+
+
+MinibatchedConfig = TypeVar("MinibatchedConfig", bound=MinibatchedRLConfig)
+
+
+class MinibatchedRLTask(RLTask[MinibatchedConfig], Generic[MinibatchedConfig], ABC):
+    """Base class for algorithms which perform off-policy minibatch updates."""
 
     @abstractmethod
     def single_train_step(
