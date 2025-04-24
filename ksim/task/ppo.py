@@ -637,7 +637,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         ) -> tuple[RLLoopCarry, tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
             shuffle_rng, batch_rng = jax.random.split(rng)
 
-            # We preserve rollout ordering and split batches by envs.
+            # Shuffle the indices so that minibatch updates are different.
             indices = jnp.arange(trajectories.done.shape[0])  # (num_envs)
             indices = jax.random.permutation(shuffle_rng, indices, independent=False)
             indices_by_batch = indices.reshape(self.num_batches, self.batch_size)  # (num_batches, rollouts per batch)
