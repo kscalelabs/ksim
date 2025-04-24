@@ -492,6 +492,10 @@ class RLConfig(xax.Config):
         value=0.004,
         help="The time step of the physics loop.",
     )
+    tolerance: float = xax.field(
+        value=1e-10,
+        help="The tolerance of the solver.",
+    )
     iterations: int = xax.field(
         value=MISSING,
         help="Number of main solver iterations",
@@ -658,6 +662,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         _set_opt("iterations", self.config.iterations)
         _set_opt("ls_iterations", self.config.ls_iterations)
         _set_opt("integrator", integrator)
+        _set_opt("tolerance", self.config.tolerance)
         _set_opt("solver", solver)
 
         if self.config.disable_euler_damping:
