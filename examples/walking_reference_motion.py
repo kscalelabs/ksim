@@ -209,16 +209,18 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.walking_reference_motion
     # To visualize the environment, use the following command:
-    #   python -m examples.walking_reference_motion run_environment=True
+    #   python -m examples.walking_reference_motion run_model_viewer=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking_reference_motion num_envs=8 num_batches=2
+    #   python -m examples.walking_reference_motion num_envs=2 batch_size=1
     HumanoidWalkingReferenceMotionTask.launch(
         HumanoidWalkingReferenceMotionTaskConfig(
             num_envs=2048,
             batch_size=256,
             num_passes=10,
+            iterations=8,
+            ls_iterations=8,
             epochs_per_log_step=1,
             valid_every_n_steps=10,
             # Simulation parameters.

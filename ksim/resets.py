@@ -3,6 +3,7 @@
 __all__ = [
     "Reset",
     "HFieldXYPositionReset",
+    "InitialMotionStateReset",
     "PlaneXYPositionReset",
     "RandomJointPositionReset",
     "RandomJointVelocityReset",
@@ -24,6 +25,7 @@ from mujoco import mjx
 
 from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import update_data_field
+from ksim.utils.priors import MotionReferenceData
 
 logger = logging.getLogger(__name__)
 
@@ -239,3 +241,28 @@ def get_xy_position_reset(
             y_range=y_range,
             robot_base_height=robot_base_height,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class InitialMotionStateReset(Reset):
+    """Resets the initial state to the one from the motion bank."""
+
+    reference_motion: MotionReferenceData
+    freejoint: bool = attrs.field(default=False)
+
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
+        frame_index = jax.random.randint(rng, (1,), 0, self.reference_motion.num_frames)[0]
+        qpos = self.reference_motion.get_qpos_at_step(frame_index)
+        qvel = self.reference_motion.get_qvel_at_step(frame_index)
+
+        if self.freejoint:
+            data = update_data_field(data, "qpos", qpos)
+            data = update_data_field(data, "qvel", qvel)
+        else:
+            new_qpos = jnp.concatenate([data.qpos[:7], qpos[7:]])
+            data = update_data_field(data, "qpos", new_qpos)
+            new_qvel = jnp.concatenate([data.qvel[:6], qvel[7:]])
+            data = update_data_field(data, "qvel", new_qvel)
+
+        data = update_data_field(data, "time", frame_index * self.reference_motion.ctrl_dt)
+        return data
