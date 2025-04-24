@@ -2,7 +2,7 @@
 
 __all__ = [
     "MotionReferenceMapping",
-    "MotionReferenceMotionData",
+    "MotionReferenceData",
     "get_local_xpos",
     "get_local_reference_pos",
     "local_to_absolute",
@@ -39,7 +39,7 @@ class MotionReferenceMapping:
 
 
 @dataclass(frozen=True)
-class MotionReferenceMotionData:
+class MotionReferenceData:
     """Stores reference motion data (qpos and Cartesian poses)."""
 
     qpos: xax.HashableArray  # Shape: [T, nq]
@@ -465,7 +465,7 @@ def generate_reference_motion(
     xtol: float = 1e-8,
     max_nfev: int = 2000,
     verbose: bool = False,
-) -> MotionReferenceMotionData:
+) -> MotionReferenceData:
     """Generates reference qpos and cartesian poses from BVH data.
 
     Args:
@@ -556,7 +556,7 @@ def generate_reference_motion(
     jnp_qvel = jnp.array(qvel_reference_motion)
 
     # 3. Create and return the data object
-    return MotionReferenceMotionData(
+    return MotionReferenceData(
         qpos=xax.HashableArray(jnp_reference_qpos),
         qvel=xax.HashableArray(jnp_qvel),
         cartesian_poses=jnp_cartesian_motion,

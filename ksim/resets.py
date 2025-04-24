@@ -25,7 +25,7 @@ from mujoco import mjx
 
 from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import update_data_field
-from ksim.utils.reference_motion import ReferenceMotionData
+from ksim.utils.priors import MotionReferenceData
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +247,7 @@ def get_xy_position_reset(
 class InitialMotionStateReset(Reset):
     """Resets the initial state to one from the motion bank."""
 
-    reference_motion: ReferenceMotionData
+    reference_motion: MotionReferenceData
     freejoint: bool = attrs.field(default=False)
 
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
@@ -264,6 +264,5 @@ class InitialMotionStateReset(Reset):
             new_qvel = jnp.concatenate([data.qvel[:6], qvel[7:]])
             data = update_data_field(data, "qvel", new_qvel)
 
-        # NOTE - simplification due to the current reference motion data structure
-        # data = update_data_field(data, "time", frame_index * self.reference_motion.ctrl_dt)
+        data = update_data_field(data, "time", frame_index * self.reference_motion.ctrl_dt)
         return data
