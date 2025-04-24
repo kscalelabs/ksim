@@ -303,7 +303,8 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
         def scan_fn(
-            actor_critic_carry: tuple[Array, Array], transition: ksim.Trajectory
+            actor_critic_carry: tuple[Array, Array],
+            transition: ksim.Trajectory,
         ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
             actor_carry, critic_carry = actor_critic_carry
             actor_dist, next_actor_carry = self.run_actor(
@@ -326,9 +327,10 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
                 values=value.squeeze(-1),
             )
 
-            initial_carry = self.get_initial_model_carry(rng)
-            next_carry = jax.tree.map(
-                lambda x, y: jnp.where(transition.done, x, y), initial_carry, (next_actor_carry, next_critic_carry)
+            next_carry = jax.lax.cond(
+                transition.done,
+                lambda: self.get_initial_model_carry(rng),
+                lambda: (next_actor_carry, next_critic_carry),
             )
 
             return next_carry, transition_ppo_variables
@@ -387,10 +389,10 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.002,
             ctrl_dt=0.02,
-            iterations=8,
-            ls_iterations=8,
+            iterations=3,
+            ls_iterations=5,
             max_action_latency=0.01,
         ),
     )
