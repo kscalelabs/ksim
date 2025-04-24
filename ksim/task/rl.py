@@ -974,7 +974,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Gets the variables for the next step.
-        next_rollout_env_state = dataclass_replace(
+        next_env_state = dataclass_replace(
             env_states,
             commands=next_commands,
             physics_state=next_physics_state,
@@ -983,7 +983,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-        return transition, next_rollout_env_state
+        return transition, next_env_state
 
     def get_dataset(self, phase: xax.Phase) -> Dataset:
         raise NotImplementedError("RL tasks do not require datasets, since trajectory histories are stored in-memory.")

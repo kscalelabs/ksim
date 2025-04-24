@@ -327,10 +327,10 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
                 values=value.squeeze(-1),
             )
 
-            next_carry = jax.lax.cond(
-                transition.done,
-                lambda: self.get_initial_model_carry(rng),
-                lambda: (next_actor_carry, next_critic_carry),
+            next_carry = jax.tree.map(
+                lambda x, y: jnp.where(transition.done, x, y),
+                self.get_initial_model_carry(rng),
+                (next_actor_carry, next_critic_carry),
             )
 
             return next_carry, transition_ppo_variables
