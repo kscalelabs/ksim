@@ -425,7 +425,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         return [
             ksim.AMPReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
-            ksim.NaiveForwardReward(clip_max=2.0, scale=1.0),
+            ksim.NaiveForwardReward(clip_max=1.0, scale=1.0),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
