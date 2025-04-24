@@ -154,13 +154,6 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
 
         return rewards
 
-    def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
-        return [
-            ksim.InitialMotionStateReset(
-                reference_motion=self.reference_motion,
-            )
-        ]
-
     def run(self) -> None:
         mj_model: PhysicsModel = self.get_mujoco_model()
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)

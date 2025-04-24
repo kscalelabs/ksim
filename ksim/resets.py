@@ -245,7 +245,7 @@ def get_xy_position_reset(
 
 @attrs.define(frozen=True, kw_only=True)
 class InitialMotionStateReset(Reset):
-    """Resets the initial state to one from the motion bank."""
+    """Resets the initial state to the one from the motion bank."""
 
     reference_motion: MotionReferenceData
     freejoint: bool = attrs.field(default=False)
