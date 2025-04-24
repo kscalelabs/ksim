@@ -368,7 +368,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         return metrics, grads
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=4)
-    def _single_step(
+    def single_train_step(
         self,
         trajectories: Trajectory,
         rewards: RewardState,
@@ -377,7 +377,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
-        carry, metrics, logged_traj = super()._single_step(
+        carry, metrics, logged_traj = super().single_train_step(
             trajectories=trajectories,
             rewards=rewards,
             constants=constants,
