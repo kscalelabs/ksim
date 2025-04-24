@@ -489,19 +489,19 @@ class RLConfig(xax.Config):
         help="The time step of the control loop.",
     )
     dt: float = xax.field(
-        value=0.004,
+        value=0.002,
         help="The time step of the physics loop.",
     )
     tolerance: float = xax.field(
-        value=1e-10,
+        value=1e-8,
         help="The tolerance of the solver.",
     )
     iterations: int = xax.field(
-        value=MISSING,
+        value=3,
         help="Number of main solver iterations",
     )
     ls_iterations: int = xax.field(
-        value=MISSING,
+        value=5,
         help="Maximum number of CG / Newton linesearch iterations",
     )
     solver: str = xax.field(
@@ -509,7 +509,7 @@ class RLConfig(xax.Config):
         help="The constraint solver algorithm to use",
     )
     integrator: str = xax.field(
-        value="implicitfast",
+        value="euler",
         help="The integrator algorithm to use",
     )
     disable_euler_damping: bool = xax.field(
