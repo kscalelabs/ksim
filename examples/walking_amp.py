@@ -136,7 +136,7 @@ class DefaultHumanoidModel(eqx.Module):
     ) -> None:
         self.actor = DefaultHumanoidActor(
             key,
-            min_std=0.01,
+            min_std=1e-6,
             max_std=1.0,
             var_scale=0.5,
             hidden_size=hidden_size,
@@ -162,7 +162,7 @@ class DefaultHumanoidDiscriminator(eqx.Module):
         hidden_size: int,
         depth: int,
     ) -> None:
-        num_inputs = NUM_JOINTS
+        num_inputs = NUM_JOINTS + 4
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -181,25 +181,25 @@ class DefaultHumanoidDiscriminator(eqx.Module):
 class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
     # Policy parameters.
     hidden_size: int = xax.field(
-        value=128,
+        value=512,
         help="The hidden size for the MLPs.",
     )
     depth: int = xax.field(
-        value=5,
+        value=2,
         help="The depth for the MLPs.",
     )
     num_mixtures: int = xax.field(
-        value=5,
+        value=3,
         help="The number of mixtures for the actor.",
     )
 
     # Disciminator parameters.
     discriminator_hidden_size: int = xax.field(
-        value=128,
+        value=512,
         help="The hidden size for the discriminator.",
     )
     discriminator_depth: int = xax.field(
-        value=5,
+        value=2,
         help="The depth for the discriminator.",
     )
 
@@ -518,15 +518,14 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             verbose=False,
         )
 
-        return jnp.array(reference_motion.qpos.array[None, ..., 7:])  # Remove the root joint.
+        return jnp.array(reference_motion.qpos.array[None, ..., 3:])  # Remove the root joint absolute coordinates.
 
     def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qpos[..., 7:]  # Remove the root joint.
+        return trajectory.qpos[..., 3:]  # Remove the root joint absolute coordinates.
 
     def motion_to_qpos(self, motion: Array) -> Array:
-        qpos_init = jnp.array([0.0, 0.0, 1.5, 1.0, 0.0, 0.0, 0.0])
-        qpos_init = jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 7))
-        return jnp.concatenate([jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 7)), motion], axis=-1)
+        qpos_init = jnp.array([0.0, 0.0, 1.5])
+        return jnp.concatenate([jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 3)), motion], axis=-1)
 
     def run_actor(
         self,
