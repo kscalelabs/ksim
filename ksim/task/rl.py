@@ -1389,9 +1389,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 carry_i.shared_state,
             )
 
-            # Updates the carry with the new environment state.
-            carry_i = dataclass_replace(carry_i, env_states=env_state)
-
             # Runs update on the previous trajectory.
             carry_i, train_metrics, logged_traj = self.update_model(
                 constants=constants,
@@ -1417,10 +1414,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 prev_state=carry_i.env_states.curriculum_state,
             )
 
+            # Update the environment states *after* doing the model update -
+            # the model needs to be updated using the same environment states
+            # that were used to generate the trajectory.
             carry_i = dataclass_replace(
                 carry_i,
                 env_states=dataclass_replace(
-                    carry_i.env_states,
+                    env_state,
                     curriculum_state=curriculum_state,
                 ),
             )
