@@ -14,7 +14,7 @@ __all__ = [
 
 import functools
 from abc import ABC, abstractmethod
-from typing import Collection, Self
+from typing import Self
 
 import attrs
 import jax
@@ -24,7 +24,6 @@ from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsModel
 from ksim.utils.mujoco import get_body_data_idx_by_name, get_geom_data_idx_by_name, slice_update
-from ksim.vis import Marker
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -34,9 +33,6 @@ class PhysicsRandomizer(ABC):
     @abstractmethod
     def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
         """Randomize the model for a single environment."""
-
-    def get_markers(self) -> Collection[Marker]:
-        return []
 
     def get_name(self) -> str:
         """Get the name of the observation."""
