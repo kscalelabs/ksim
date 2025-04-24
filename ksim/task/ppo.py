@@ -660,6 +660,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # Get the last logged trajectory accross all full dataset passes.
         logged_traj = jax.tree.map(lambda x: x[-1], trajs_for_logging)
 
+        # Gets the policy model, using the latest model parameters.
+        policy_model_arr = carry.shared_state.model_arrs[0]
+        policy_model_static = constants.constants.model_statics[0]
+        policy_model = eqx.combine(policy_model_arr, policy_model_static)
+
         # For the next rollout, we use the model carry from the output of the
         # model update instead of the output of the rollout. This was shown to
         # work slightly better in practice - for an  RNN model, for example,
