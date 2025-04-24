@@ -29,7 +29,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.standing
     # To visualize the environment, use the following command:
-    #   python -m examples.standing run_environment=True
+    #   python -m examples.standing run_model_viewer=True
     HumanoidStandingTask.launch(
         HumanoidStandingTaskConfig(
             # Training parameters.

@@ -47,7 +47,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.jumping
     # To visualize the environment, use the following command:
-    #   python -m examples.jumping run_environment=True
+    #   python -m examples.jumping run_model_viewer=True
     HumanoidJumpingTask.launch(
         HumanoidJumpingTaskConfig(
             num_envs=2048,
