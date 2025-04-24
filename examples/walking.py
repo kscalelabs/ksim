@@ -226,18 +226,6 @@ Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 
 
 class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
-    def get_optimizer(self) -> optax.GradientTransformation:
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            (
-                optax.adam(self.config.learning_rate)
-                if self.config.adam_weight_decay == 0.0
-                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
-            ),
-        )
-
-        return optimizer
-
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         return mujoco.MjModel.from_xml_path(mjcf_path)
@@ -396,6 +384,18 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             dt=self.config.ctrl_dt,
         )
 
+    def get_optimizer(self) -> optax.GradientTransformation:
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(self.config.max_grad_norm),
+            (
+                optax.adam(self.config.learning_rate)
+                if self.config.adam_weight_decay == 0.0
+                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
+            ),
+        )
+
+        return optimizer
+
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(
             key,
@@ -418,8 +418,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
-        # imu_acc_3 = observations["sensor_observation_imu_acc"]
-        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         proj_grav_3 = observations["projected_gravity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
         base_pos_3 = observations["base_position_observation"]
@@ -461,8 +461,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
-        # imu_acc_3 = observations["sensor_observation_imu_acc"]
-        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         proj_grav_3 = observations["projected_gravity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
         base_pos_3 = observations["base_position_observation"]

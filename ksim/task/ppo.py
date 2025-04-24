@@ -8,7 +8,8 @@ __all__ = [
 ]
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, replace as dataclass_replace
+from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from typing import Generic, Mapping, TypeVar
 
 import chex
@@ -18,12 +19,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.task.rl import (
-    RLConfig,
-    RLLoopCarry,
-    RLLoopConstants,
-    RLTask,
-)
+from ksim.task.rl import MinibatchedRLTask, RLConfig, RLLoopCarry, RLLoopConstants
 from ksim.types import LoggedTrajectory, RewardState, Trajectory
 
 
@@ -300,28 +296,8 @@ class PPOConfig(RLConfig):
 Config = TypeVar("Config", bound=PPOConfig)
 
 
-class PPOTask(RLTask[Config], Generic[Config], ABC):
+class PPOTask(MinibatchedRLTask[Config], Generic[Config], ABC):
     """Base class for PPO tasks."""
-
-    @abstractmethod
-    def get_ppo_variables(
-        self,
-        model: PyTree,
-        trajectory: Trajectory,
-        model_carry: PyTree,
-        rng: PRNGKeyArray,
-    ) -> tuple[PPOVariables, PyTree]:
-        """Gets the variables required for computing PPO loss.
-
-        Args:
-            model: The user-provided model.
-            trajectory: The trajectory to get PPO variables for.
-            model_carry: The model carry from the previous rollout.
-            rng: A random seed.
-
-        Returns:
-            The PPO variables and the next carry for the model.
-        """
 
     def get_ppo_metrics(
         self,
@@ -439,7 +415,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rng: PRNGKeyArray,
         ) -> tuple[Array, xax.FrozenDict[str, Array], LoggedTrajectory]:
             rng, rng2 = jax.random.split(rng)
-            off_policy_variables, _ = self.get_ppo_variables(model, trajectory, init_model_carry, rng2)
+            off_policy_variables, _ = self.get_training_variables(model, trajectory, init_model_carry, rng2)
+            assert isinstance(off_policy_variables, PPOVariables)
 
             ppo_inputs = compute_ppo_inputs(
                 values_t=jax.lax.stop_gradient(off_policy_variables.values),
@@ -525,7 +502,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         return metrics, logged_trajectory, grads
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=4)
-    def _single_step(
+    def single_train_step(
         self,
         trajectories: Trajectory,
         rewards: RewardState,
@@ -573,110 +550,3 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(ppo_metrics.unfreeze() | grad_metrics)
 
         return carry, metrics, logged_trajectory
-
-    def update_model(
-        self,
-        *,
-        constants: RLLoopConstants,
-        carry: RLLoopCarry,
-        trajectories: Trajectory,
-        rewards: RewardState,
-        rng: PRNGKeyArray,
-    ) -> tuple[
-        RLLoopCarry,
-        xax.FrozenDict[str, Array],
-        LoggedTrajectory,
-    ]:
-        # We preserve rollout ordering and split batches by envs.
-        indices = jnp.arange(trajectories.done.shape[0])  # (num_envs)
-        indices_by_batch = indices.reshape(self.num_batches, self.batch_size)  # (num_batches, rollouts per batch)
-
-        # Gets the policy model.
-        policy_model_arr = carry.shared_state.model_arrs[0]
-        policy_model_static = constants.constants.model_statics[0]
-        policy_model = eqx.combine(policy_model_arr, policy_model_static)
-
-        # Runs the policy model on the trajectory to get the PPO variables.
-        on_policy_rngs = jax.random.split(rng, self.config.num_envs)
-        on_policy_variables, _ = jax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0))(
-            policy_model, trajectories, carry.env_states.model_carry, on_policy_rngs
-        )  # (num_envs, num_steps, ppo_vars)
-
-        # Loops over the trajectory batches and applies gradient updates.
-        def update_model_in_batch(
-            carry: RLLoopCarry,
-            xs: tuple[Array, PRNGKeyArray],
-        ) -> tuple[RLLoopCarry, tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
-            batch_indices, rng = xs
-            rng, batch_rng = jax.random.split(rng)
-
-            # Gets the current batch of trajectories and rewards.
-            trajectory_batch = jax.tree.map(lambda x: x[batch_indices], trajectories)
-            reward_batch = jax.tree.map(lambda x: x[batch_indices], rewards)
-            env_states_batch = jax.tree.map(lambda x: x[batch_indices], carry.env_states)
-            on_policy_variables_batch = jax.tree.map(lambda x: x[batch_indices], on_policy_variables)
-
-            next_carry, metrics, logged_traj = self._single_step(
-                trajectories=trajectory_batch,
-                rewards=reward_batch,
-                constants=constants,
-                carry=dataclass_replace(carry, env_states=env_states_batch),
-                on_policy_variables=on_policy_variables_batch,
-                rng=batch_rng,
-            )
-
-            # Update the carry's shared states.
-            carry = dataclass_replace(
-                carry,
-                opt_state=next_carry.opt_state,
-                shared_state=next_carry.shared_state,
-            )
-
-            return carry, (metrics, logged_traj)
-
-        # Applies N steps of gradient updates.
-        def update_model_across_batches(
-            carry: RLLoopCarry,
-            _: None,
-        ) -> tuple[RLLoopCarry, tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
-            carry, (metrics, trajs_for_logging) = jax.lax.scan(
-                update_model_in_batch,
-                carry,
-                (indices_by_batch, jax.random.split(rng, self.num_batches)),
-            )
-
-            # Each batch saves one trajectory for logging, get the last.
-            traj_for_logging = jax.tree.map(lambda x: x[-1], trajs_for_logging)
-
-            return carry, (metrics, traj_for_logging)
-
-        # Applies gradient update across all batches num_passes times.
-        carry, (metrics, trajs_for_logging) = jax.lax.scan(
-            update_model_across_batches,
-            carry,
-            length=self.config.num_passes,
-        )
-
-        # Get the last logged trajectory accross all full dataset passes.
-        logged_traj = jax.tree.map(lambda x: x[-1], trajs_for_logging)
-
-        # For the next rollout, we use the model carry from the output of the
-        # model update instead of the output of the rollout. This was shown to
-        # work slightly better in practice - for an  RNN model, for example,
-        # after updating the model, the model carry will be new and the
-        # previous rollout's model carry will be incorrect. This does perform
-        # some additional computation, but the impact is small.
-        off_policy_rngs = jax.random.split(rng, self.config.num_envs)
-        _, next_model_carrys = jax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0))(
-            policy_model, trajectories, carry.env_states.model_carry, off_policy_rngs
-        )
-
-        carry = dataclass_replace(
-            carry,
-            env_states=dataclass_replace(
-                carry.env_states,
-                model_carry=next_model_carrys,
-            ),
-        )
-
-        return carry, metrics, logged_traj
