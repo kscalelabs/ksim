@@ -592,7 +592,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
     def call_discriminator(self, model: DefaultHumanoidDiscriminator, motion: Array) -> Array:
         return model.forward(motion).squeeze()
 
-    def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
+    def create_reference_motion(self, mj_model: mujoco.MjModel) -> ksim.MotionReferenceData:
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
         reference_base_id = ksim.get_reference_joint_id(root, self.config.reference_base_name)
         mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
@@ -623,7 +623,10 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             verbose=False,
         )
 
-        return jnp.array(reference_motion.qpos.array[None, ..., 7:])  # Remove the root joint absolute coordinates.
+        return reference_motion
+
+    def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
+        return jnp.array(self.reference_motion.qpos.array[None, ..., 7:])  # Remove the root joint absolute coordinates.
 
     def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
         return trajectory.qpos[..., 7:]  # Remove the root joint absolute coordinates.
