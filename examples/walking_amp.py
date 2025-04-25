@@ -244,7 +244,7 @@ class DefaultHumanoidDiscriminator(eqx.Module):
                     # for the motion from time T - N to T. In other words, we
                     # this means that all the reward for time T will be based
                     # on the motion from the previous N frames.
-                    padding=[(num_frames - 1, 0)],
+                    padding=[(num_frames - 1, 0)] if i == 0 else [(0, 0)],
                     key=subkey,
                 ),
                 jax.nn.relu,
