@@ -41,6 +41,8 @@ from ksim.task.rl import (
 )
 from ksim.types import PhysicsModel, Trajectory
 
+from ksim.utils.priors import MotionReferenceData
+
 DISCRIMINATOR_OUTPUT_KEY = "_discriminator_output"
 REAL_MOTIONS_KEY = "_real_motions"
 
@@ -88,6 +90,14 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
     This task extends PPO to include adversarial training with a discriminator
     that tries to distinguish between real motion data and policy-generated motion.
     """
+    reference_motion_data: MotionReferenceData
+
+
+    def __init__(self, config: Config) -> None:
+        super().__init__(config)
+
+        self.reference_motion = self.create_reference_motion(self.get_mujoco_model())
+
 
     def run(self) -> None:
         if self.config.run_motion_viewer:
@@ -166,6 +176,10 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
             if save_path is not None:
                 self._save_viewer_video(frames, save_path)
+
+    @abstractmethod
+    def create_reference_motion(self, mj_model: mujoco.MjModel) -> MotionReferenceData:
+        """Creates the reference motion."""
 
     @abstractmethod
     def get_policy_model(self, key: PRNGKeyArray) -> PyTree:
