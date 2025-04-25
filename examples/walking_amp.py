@@ -6,19 +6,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Generic, TypeVar
 
-import bvhio
 import distrax
 import equinox as eqx
-import glm
 import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
 import optax
 import xax
-from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
-from scipy.spatial.transform import Rotation as R
 
 import ksim
 
@@ -414,6 +410,10 @@ Config = TypeVar("Config", bound=HumanoidWalkingAMPTaskConfig)
 class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
     """Adversarial Motion Prior task."""
 
+    def __init__(self, config: Config) -> None:
+        super().__init__(config)
+        self.reference_motion = ksim.MotionReferenceData.load(self.config.reference_motion_path)
+
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         return mujoco.MjModel.from_xml_path(mjcf_path)
@@ -598,11 +598,11 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
         reference_motion = ksim.MotionReferenceData.load(self.config.reference_motion_path)
-        cartesian_poses = jax.tree.map(lambda x: np.asarray(x.array), reference_motion.cartesian_poses)
-        return jnp.array(self.reference_motion.qpos.array[None, ..., 7:])  # Remove the root joint absolute coordinates.
+        # cartesian_poses = jax.tree.map(lambda x: np.asarray(x.array), reference_motion.cartesian_poses)
+        return jnp.array(reference_motion.qpos.array[None, ..., 7:])  # Remove the root joint absolute coordinates.
 
     def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
-        xpos = trajectory.xpos
+        # xpos = trajectory.xpos
         qpos = trajectory.qpos[..., 7:]
         return qpos
 

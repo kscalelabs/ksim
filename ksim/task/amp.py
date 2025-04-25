@@ -40,7 +40,6 @@ from ksim.task.rl import (
     get_viewer,
 )
 from ksim.types import PhysicsModel, Trajectory
-from ksim.utils.priors import MotionReferenceData
 
 DISCRIMINATOR_OUTPUT_KEY = "_discriminator_output"
 REAL_MOTIONS_KEY = "_real_motions"
@@ -89,6 +88,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
     This task extends PPO to include adversarial training with a discriminator
     that tries to distinguish between real motion data and policy-generated motion.
     """
+
     def run(self) -> None:
         if self.config.run_motion_viewer:
             self.run_motion_viewer(

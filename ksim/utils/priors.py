@@ -16,10 +16,11 @@ __all__ = [
     "generate_reference_motion",
 ]
 
+import logging
 import time
 from dataclasses import dataclass
-from typing import Callable, Self
 from pathlib import Path
+from typing import Callable, Self
 
 import jax
 import jax.numpy as jnp
@@ -31,6 +32,8 @@ from jaxtyping import Array
 from scipy.optimize import least_squares
 
 from ksim.viewer import GlfwMujocoViewer
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -89,7 +92,7 @@ class MotionReferenceData:
         pose_arrays = [pose.array for pose in self.cartesian_poses.values()]
 
         pose_arrays_np = [np.asarray(arr) for arr in pose_arrays]
-        cartesian_poses_stacked = np.stack(pose_arrays_np, axis=0) # Shape [num_bodies, T, 3]
+        cartesian_poses_stacked = np.stack(pose_arrays_np, axis=0)  # Shape [num_bodies, T, 3]
 
         np.savez(
             save_path,
@@ -99,7 +102,7 @@ class MotionReferenceData:
             cartesian_poses_stacked=cartesian_poses_stacked,
             ctrl_dt=np.array(self.ctrl_dt),
         )
-        print(f"Saved reference motion data to {save_path}")
+        logger.info("Saved reference motion data to %s", save_path)
 
     @classmethod
     def load(cls, path: str | Path) -> Self:
@@ -108,7 +111,7 @@ class MotionReferenceData:
         if not load_path.exists():
             raise FileNotFoundError(f"Reference motion file not found: {load_path}")
 
-        print(f"Loading reference motion data from {load_path}")
+        logger.info("Loading reference motion data from %s", load_path)
         data = np.load(load_path)
 
         qpos = xax.HashableArray(jnp.array(data["qpos"]))
@@ -118,10 +121,12 @@ class MotionReferenceData:
         # Reconstruct cartesian poses dictionary
         body_ids = data["cartesian_pose_body_ids"]
         cartesian_poses_stacked = data["cartesian_poses_stacked"]
-        cartesian_poses = xax.FrozenDict({
-            int(body_id): xax.HashableArray(jnp.array(cartesian_poses_stacked[i]))
-            for i, body_id in enumerate(body_ids)
-        })
+        cartesian_poses: xax.FrozenDict[int, xax.HashableArray] = xax.FrozenDict(
+            {
+                int(body_id): xax.HashableArray(jnp.array(cartesian_poses_stacked[i]))
+                for i, body_id in enumerate(body_ids)
+            }
+        )
 
         return cls(
             qpos=qpos,
