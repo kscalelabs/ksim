@@ -90,7 +90,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
     that tries to distinguish between real motion data and policy-generated motion.
     """
 
-    reference_motion_data: MotionReferenceData
+    reference_motion: MotionReferenceData
 
     def __init__(self, config: Config) -> None:
         super().__init__(config)
