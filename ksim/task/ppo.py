@@ -587,10 +587,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         xax.FrozenDict[str, Array],
         LoggedTrajectory,
     ]:
-        # We preserve rollout ordering and split batches by envs.
-        indices = jnp.arange(trajectories.done.shape[0])  # (num_envs)
-        indices_by_batch = indices.reshape(self.num_batches, self.batch_size)  # (num_batches, rollouts per batch)
-
         # Gets the policy model.
         policy_model_arr = carry.shared_state.model_arrs[0]
         policy_model_static = constants.constants.model_statics[0]
@@ -637,12 +633,19 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         # Applies N steps of gradient updates.
         def update_model_across_batches(
             carry: RLLoopCarry,
-            _: None,
+            rng: PRNGKeyArray,
         ) -> tuple[RLLoopCarry, tuple[xax.FrozenDict[str, Array], LoggedTrajectory]]:
+            shuffle_rng, batch_rng = jax.random.split(rng)
+
+            # Shuffle the indices so that minibatch updates are different.
+            indices = jnp.arange(trajectories.done.shape[0])  # (num_envs)
+            indices = jax.random.permutation(shuffle_rng, indices, independent=False)
+            indices_by_batch = indices.reshape(self.num_batches, self.batch_size)  # (num_batches, rollouts per batch)
+
             carry, (metrics, trajs_for_logging) = jax.lax.scan(
                 update_model_in_batch,
                 carry,
-                (indices_by_batch, jax.random.split(rng, self.num_batches)),
+                (indices_by_batch, jax.random.split(batch_rng, self.num_batches)),
             )
 
             # Each batch saves one trajectory for logging, get the last.
@@ -654,29 +657,35 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         carry, (metrics, trajs_for_logging) = jax.lax.scan(
             update_model_across_batches,
             carry,
-            length=self.config.num_passes,
+            xs=jax.random.split(rng, self.config.num_passes),
         )
 
         # Get the last logged trajectory accross all full dataset passes.
         logged_traj = jax.tree.map(lambda x: x[-1], trajs_for_logging)
 
-        # For the next rollout, we use the model carry from the output of the
-        # model update instead of the output of the rollout. This was shown to
-        # work slightly better in practice - for an  RNN model, for example,
-        # after updating the model, the model carry will be new and the
-        # previous rollout's model carry will be incorrect. This does perform
-        # some additional computation, but the impact is small.
-        off_policy_rngs = jax.random.split(rng, self.config.num_envs)
-        _, next_model_carrys = jax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0))(
-            policy_model, trajectories, carry.env_states.model_carry, off_policy_rngs
-        )
+        if carry.env_states.model_carry is not None:
+            # Gets the policy model, using the latest model parameters.
+            policy_model_arr = carry.shared_state.model_arrs[0]
+            policy_model_static = constants.constants.model_statics[0]
+            policy_model = eqx.combine(policy_model_arr, policy_model_static)
 
-        carry = dataclass_replace(
-            carry,
-            env_states=dataclass_replace(
-                carry.env_states,
-                model_carry=next_model_carrys,
-            ),
-        )
+            # For the next rollout, we use the model carry from the output of the
+            # model update instead of the output of the rollout. This was shown to
+            # work slightly better in practice - for an  RNN model, for example,
+            # after updating the model, the model carry will be new and the
+            # previous rollout's model carry will be incorrect. This does perform
+            # some additional computation, but the impact is small.
+            off_policy_rngs = jax.random.split(rng, self.config.num_envs)
+            _, next_model_carrys = jax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0))(
+                policy_model, trajectories, carry.env_states.model_carry, off_policy_rngs
+            )
+
+            carry = dataclass_replace(
+                carry,
+                env_states=dataclass_replace(
+                    carry.env_states,
+                    model_carry=next_model_carrys,
+                ),
+            )
 
         return carry, metrics, logged_traj

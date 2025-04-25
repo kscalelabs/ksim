@@ -560,10 +560,10 @@ if __name__ == "__main__":
             # Logging parameters.
             # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.002,
             ctrl_dt=0.02,
-            iterations=8,
-            ls_iterations=8,
+            iterations=3,
+            ls_iterations=5,
             max_action_latency=0.01,
             # Checkpointing parameters.
             save_every_n_seconds=60,

@@ -770,10 +770,10 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             valid_every_n_steps=10,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.002,
             ctrl_dt=0.02,
-            iterations=8,
-            ls_iterations=8,
+            iterations=3,
+            ls_iterations=5,
             max_action_latency=0.01,
             rollout_length_seconds=8.0,
             # PPO parameters

@@ -489,7 +489,7 @@ class RLConfig(xax.Config):
         help="The time step of the control loop.",
     )
     dt: float = xax.field(
-        value=0.004,
+        value=0.002,
         help="The time step of the physics loop.",
     )
     tolerance: float = xax.field(
@@ -974,7 +974,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Gets the variables for the next step.
-        next_rollout_env_state = dataclass_replace(
+        next_env_state = dataclass_replace(
             env_states,
             commands=next_commands,
             physics_state=next_physics_state,
@@ -983,7 +983,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-        return transition, next_rollout_env_state
+        return transition, next_env_state
 
     def get_dataset(self, phase: xax.Phase) -> Dataset:
         raise NotImplementedError("RL tasks do not require datasets, since trajectory histories are stored in-memory.")
@@ -1389,9 +1389,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 carry_i.shared_state,
             )
 
-            # Updates the carry with the new environment state.
-            carry_i = dataclass_replace(carry_i, env_states=env_state)
-
             # Runs update on the previous trajectory.
             carry_i, train_metrics, logged_traj = self.update_model(
                 constants=constants,
@@ -1417,10 +1414,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 prev_state=carry_i.env_states.curriculum_state,
             )
 
+            # Update the environment states *after* doing the model update -
+            # the model needs to be updated using the same environment states
+            # that were used to generate the trajectory.
             carry_i = dataclass_replace(
                 carry_i,
                 env_states=dataclass_replace(
-                    carry_i.env_states,
+                    env_state,
                     curriculum_state=curriculum_state,
                 ),
             )
