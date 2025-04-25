@@ -232,13 +232,13 @@ class DefaultHumanoidDiscriminator(eqx.Module):
         num_outputs = 1
 
         layers: list[Callable[[Array], Array]] = []
-        for _ in range(depth):
+        for i in range(depth):
             key, subkey = jax.random.split(key)
             layers += [
                 eqx.nn.Conv1d(
                     in_channels=num_inputs,
                     out_channels=hidden_size,
-                    kernel_size=num_frames,
+                    kernel_size=num_frames if i == 0 else 1,
                     # We left-pad the input so that the discriminator output
                     # at time T can be reasonably interpretted as the logit
                     # for the motion from time T - N to T. In other words, we
