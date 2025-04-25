@@ -770,7 +770,7 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             valid_every_n_steps=10,
             # Simulation parameters.
-            dt=0.002,
+            dt=0.005,
             ctrl_dt=0.02,
             iterations=3,
             ls_iterations=5,
