@@ -521,8 +521,8 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         return [
             ksim.AMPReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
-            ksim.AngularVelocityPenalty(index="x", scale=-0.5),
-            ksim.AngularVelocityPenalty(index="y", scale=-0.5),
+            ksim.AngularVelocityPenalty(index="x", scale=-0.01),
+            ksim.AngularVelocityPenalty(index="y", scale=-0.01),
             ksim.NaiveForwardReward(clip_max=1.0, scale=1.0),
         ]
 
