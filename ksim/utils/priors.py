@@ -30,8 +30,11 @@ import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array
 from scipy.optimize import least_squares
+from omegaconf import OmegaConf, ListConfig
+from omegaconf.errors import MissingMandatoryValue # For error handling
 
 from ksim.viewer import GlfwMujocoViewer
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -618,3 +621,134 @@ def generate_reference_motion(
         cartesian_poses=jnp_cartesian_motion,
         ctrl_dt=ctrl_dt,
     )
+
+
+def main() -> None:
+    import bvhio
+
+    defaults = OmegaConf.create({
+        "config": None,
+        # --- Paths ---
+        "model_path": "???",
+        "bvh_path": "???",
+        "output_path": "???",
+        # --- Names ---
+        "mj_base_name": "???",
+        "bvh_base_name": "???",
+        # --- Mappings ---
+        "mappings": "???",
+        # --- Parameters ---
+        "ctrl_dt": "???",
+        "bvh_offset": [0.0, 0.0, 0.0],
+        "bvh_scaling_factor": 1.0,
+        "constrained_joint_ids": [0, 1, 2, 3, 4, 5, 6],
+        # --- IK Parameters ---
+        "ik_params": {
+            "neutral_similarity_weight": 0.1,
+            "temporal_consistency_weight": 0.1,
+            "n_restarts": 5,
+            "error_acceptance_threshold": 1.0e-4,
+            "ftol": 1.0e-8,
+            "xtol": 1.0e-8,
+            "max_nfev": 2000,
+        },
+        # --- Flags ---
+        "verbose": False,
+        "show_progress": False,
+    })
+
+    cli_conf = OmegaConf.from_cli()
+
+    file_conf = OmegaConf.create()
+    if cli_conf.get("config"):
+        config_path = Path(cli_conf.config)
+        if config_path.is_file():
+            logger.info(f"Loading configuration from: {config_path}")
+            try:
+                file_conf = OmegaConf.load(config_path)
+            except Exception as e:
+                logger.error(f"Error loading config file '{config_path}': {e}")
+                exit(1)
+        else:
+            logger.warning(f"Config file specified but not found: {config_path}")
+            cli_conf.pop("config")
+    elif "config" in cli_conf:
+        cli_conf.pop("config")
+
+    cfg = OmegaConf.merge(defaults, file_conf, cli_conf)
+
+    try:
+        OmegaConf.resolve(cfg)
+        assert isinstance(cfg.mappings, ListConfig), "Config error: 'mappings' must be a list of strings."
+        assert all(isinstance(m, str) and ':' in m for m in cfg.mappings), \
+               "Config error: All 'mappings' must be strings in 'BvhJointName:MjBodyName' format."
+        assert isinstance(cfg.bvh_offset, ListConfig) and len(cfg.bvh_offset) == 3, \
+               "Config error: 'bvh_offset' must be a list of 3 floats."
+
+    except MissingMandatoryValue as e:
+        logger.error(f"Missing required configuration value: {e}")
+        logger.error("Please provide it via command line (e.g., model_path=...) or in a config file.")
+        exit(1)
+    except AssertionError as e:
+         logger.error(e)
+         exit(1)
+    except Exception as e:
+        logger.error(f"Configuration Error: {e}")
+        exit(1)
+
+    logger.info("Final configuration:\n%s", OmegaConf.to_yaml(cfg))
+
+    try:
+         parsed_mappings_list = []
+         for mapping_str in cfg.mappings:
+             parts = mapping_str.split(":")
+             if len(parts) != 2:
+                  raise ValueError(f"Invalid mapping format: '{mapping_str}'. Use 'BvhJointName:MjBodyName'.")
+             parsed_mappings_list.append(MotionReferenceMapping(reference_joint_name=parts[0], mj_body_name=parts[1]))
+         parsed_mappings: tuple[MotionReferenceMapping, ...] = tuple(parsed_mappings_list)
+    except ValueError as e:
+         logger.error(f"Configuration Error: {e}")
+         exit(1)
+
+
+    logger.info("Loading MuJoCo model from %s", cfg.model_path)
+    model = mujoco.MjModel.from_xml_path(cfg.model_path)
+
+    logger.info("Loading BVH file from %s", cfg.bvh_path)
+    bvh_root = bvhio.readAsHierarchy(cfg.bvh_path)
+    
+    constrained_joint_ids = tuple(cfg.constrained_joint_ids)
+
+    mj_base_id = get_body_id(model, cfg.mj_base_name)
+    bvh_base_id = get_reference_joint_id(bvh_root, cfg.bvh_base_name)
+
+    logger.info("Generating reference motion...")
+    output_dir = Path(cfg.output_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    reference_data = generate_reference_motion(
+        model=model,
+        mj_base_id=mj_base_id,
+        bvh_root=bvh_root,
+        bvh_to_mujoco_names=parsed_mappings,
+        bvh_base_id=bvh_base_id,
+        ctrl_dt=cfg.ctrl_dt,
+        bvh_offset=np.array(cfg.bvh_offset),
+        bvh_root_callback=None,
+        bvh_scaling_factor=cfg.bvh_scaling_factor,
+        constrained_joint_ids=constrained_joint_ids,
+        neutral_qpos=None,
+        neutral_similarity_weight=cfg.ik_params.neutral_similarity_weight,
+        temporal_consistency_weight=cfg.ik_params.temporal_consistency_weight,
+        n_restarts=cfg.ik_params.n_restarts,
+        error_acceptance_threshold=cfg.ik_params.error_acceptance_threshold,
+        ftol=cfg.ik_params.ftol,
+        xtol=cfg.ik_params.xtol,
+        max_nfev=cfg.ik_params.max_nfev,
+        verbose=cfg.verbose,
+    )
+
+    logger.info(f"Saving reference motion data to {cfg.output_path}")
+    reference_data.save(cfg.output_path)
+
+    logger.info("Done.")
