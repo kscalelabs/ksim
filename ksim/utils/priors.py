@@ -18,7 +18,8 @@ __all__ = [
 
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Self
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -78,6 +79,56 @@ class MotionReferenceData:
         """Gets the reference Cartesian pose closest to a specific time."""
         step = jnp.int32(jnp.round(time / self.ctrl_dt))
         return self.get_cartesian_pose_at_step(step)
+
+    def save(self, path: str | Path) -> None:
+        """Saves the MotionReferenceData to a .npz file."""
+        save_path = Path(path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        body_ids = np.array(list(self.cartesian_poses.keys()))
+        pose_arrays = [pose.array for pose in self.cartesian_poses.values()]
+
+        pose_arrays_np = [np.asarray(arr) for arr in pose_arrays]
+        cartesian_poses_stacked = np.stack(pose_arrays_np, axis=0) # Shape [num_bodies, T, 3]
+
+        np.savez(
+            save_path,
+            qpos=np.asarray(self.qpos.array),
+            qvel=np.asarray(self.qvel.array),
+            cartesian_pose_body_ids=body_ids,
+            cartesian_poses_stacked=cartesian_poses_stacked,
+            ctrl_dt=np.array(self.ctrl_dt),
+        )
+        print(f"Saved reference motion data to {save_path}")
+
+    @classmethod
+    def load(cls, path: str | Path) -> Self:
+        """Loads MotionReferenceData from a .npz file."""
+        load_path = Path(path)
+        if not load_path.exists():
+            raise FileNotFoundError(f"Reference motion file not found: {load_path}")
+
+        print(f"Loading reference motion data from {load_path}")
+        data = np.load(load_path)
+
+        qpos = xax.HashableArray(jnp.array(data["qpos"]))
+        qvel = xax.HashableArray(jnp.array(data["qvel"]))
+        ctrl_dt = float(data["ctrl_dt"].item())
+
+        # Reconstruct cartesian poses dictionary
+        body_ids = data["cartesian_pose_body_ids"]
+        cartesian_poses_stacked = data["cartesian_poses_stacked"]
+        cartesian_poses = xax.FrozenDict({
+            int(body_id): xax.HashableArray(jnp.array(cartesian_poses_stacked[i]))
+            for i, body_id in enumerate(body_ids)
+        })
+
+        return cls(
+            qpos=qpos,
+            qvel=qvel,
+            cartesian_poses=cartesian_poses,
+            ctrl_dt=ctrl_dt,
+        )
 
 
 def _add_reference_marker_to_scene(
