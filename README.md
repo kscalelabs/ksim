@@ -1,6 +1,8 @@
 # ksim
 
-KSim is a modular JAX-based framework that lets you train policies across parallel environments. This guide will get you started with training a humanoid-like embodiment to walk in MJX.
+Welcome to `ksim`, a modular and robust framework for training policies in simulation.
+
+<Image align="center" src="https://files.readme.io/42bf70f3cd26469792fe6474ee855580257f6e12aa1c0368196bf32b353adce5-individualImage.gif" />
 
 For more details, see the [documentation](https://docs.kscale.dev/docs/ksim).
 
