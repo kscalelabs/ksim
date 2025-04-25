@@ -163,6 +163,7 @@ def get_rewards(
     rewards: Collection[Reward],
     rewards_carry: xax.FrozenDict[str, PyTree],
     rollout_length_steps: int,
+    curriculum_level: Array,
     clip_min: float | None = None,
     clip_max: float | None = None,
 ) -> RewardState:
@@ -180,6 +181,8 @@ def get_rewards(
         else:
             reward_val = reward.get_reward(trajectory)
         reward_val = reward_val * reward.scale / rollout_length_steps
+        if reward.scale_by_curriculum:
+            reward_val = reward_val * curriculum_level
 
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
@@ -1355,6 +1358,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rewards=constants.rewards,
             rewards_carry=env_state.reward_carry,
             rollout_length_steps=self.rollout_length_steps,
+            curriculum_level=env_state.curriculum_state.level,
             clip_min=self.config.reward_clip_min,
             clip_max=self.config.reward_clip_max,
         )
@@ -1596,6 +1600,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rewards=constants.rewards,
                 rewards_carry=env_states.reward_carry,
                 rollout_length_steps=self.rollout_length_steps,
+                curriculum_level=env_states.curriculum_state.level,
                 clip_min=self.config.reward_clip_min,
                 clip_max=self.config.reward_clip_max,
             )

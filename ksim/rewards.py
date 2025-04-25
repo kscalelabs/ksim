@@ -95,6 +95,7 @@ class Reward(ABC):
     """Base class for defining reward functions."""
 
     scale: float = attrs.field(validator=reward_scale_validator)
+    scale_by_curriculum: bool = attrs.field(default=False)
 
     @abstractmethod
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -570,6 +571,7 @@ class PositionTrackingReward(Reward):
         temp: float = 1.0,
         monotonic_fn: MonotonicFn = "inv",
         scale: float = 1.0,
+        scale_by_curriculum: bool = False,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
         base_body_idx = get_body_data_idx_from_name(model, base_body_name)
@@ -580,6 +582,7 @@ class PositionTrackingReward(Reward):
             command_name=command_name,
             body_name=tracked_body_name,
             scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
             temp=temp,
             monotonic_fn=monotonic_fn,
         )
