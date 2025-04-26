@@ -532,7 +532,7 @@ class RLConfig(xax.Config):
         help="The contact solver impedance parameters.",
     )
     solref: tuple[float, ...] | None = xax.field(
-        value=(0.02, 1.0),
+        value=(0.01, 1.0),
         help="The contact solver relaxation parameters.",
     )
     friction: tuple[float, ...] | None = xax.field(
