@@ -361,7 +361,7 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
 
     # Refernece motion parameters.
     reference_motion_path: str = xax.field(
-        value=str(Path(__file__).parent / "data" / "reference_motion.npz"),
+        value=str(Path(__file__).parent / "data" / "humanoid_amp_walk_ref.npz"),
         help="The path to the reference motion file.",
     )
     bvh_path: str = xax.field(
@@ -607,8 +607,8 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         return qpos
 
     def motion_to_qpos(self, motion: Array) -> Array:
-        qpos_init = jnp.array([0.0, 0.0, 1.5])
-        return jnp.concatenate([jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 3)), motion], axis=-1)
+        qpos_init = jnp.array([0.0, 0.0, 1.5, 1.0, 0.0, 0.0, 0.0])
+        return jnp.concatenate([jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 7)), motion], axis=-1)
 
     def run_actor(
         self,

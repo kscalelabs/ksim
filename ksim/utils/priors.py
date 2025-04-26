@@ -622,6 +622,28 @@ def generate_reference_motion(
         ctrl_dt=ctrl_dt,
     )
 
+def vis_entry_point() -> None:
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Visualize reference motion from a config file")
+    parser.add_argument("motion", type=str, help="Path to the configuration file")
+    parser.add_argument("--model", type=str, required=True, help="Path to the Mujoco model")
+    parser.add_argument("--base_name", type=str, default="pelvis", help="Name of the Mujoco base")
+    args = parser.parse_args()
+
+    reference_data = MotionReferenceData.load(args.motion)
+    model = mujoco.MjModel.from_xml_path(args.model)
+    mj_base_id = get_body_id(model, args.base_name)
+
+    np_cartesian_motion = jax.tree.map(lambda x: np.asarray(x.array), reference_data.cartesian_poses)
+
+    visualize_reference_motion(
+        model=model,
+        reference_qpos=reference_data.qpos.array,
+        cartesian_motion=np_cartesian_motion,
+        mj_base_id=mj_base_id,
+    )
+
 
 def main() -> None:
     import bvhio
