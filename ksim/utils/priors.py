@@ -647,6 +647,8 @@ def vis_entry_point() -> None:
 
 def main() -> None:
     import bvhio
+    from scipy.spatial.transform import Rotation as R
+    import glm
 
     defaults = OmegaConf.create({
         "config": None,
@@ -662,6 +664,7 @@ def main() -> None:
         # --- Parameters ---
         "ctrl_dt": "???",
         "bvh_offset": [0.0, 0.0, 0.0],
+        "rotate_bvh_euler": [0.0, 0.0, 0.0],
         "bvh_scaling_factor": 1.0,
         "constrained_joint_ids": [0, 1, 2, 3, 4, 5, 6],
         # --- IK Parameters ---
@@ -748,6 +751,11 @@ def main() -> None:
     output_dir = Path(cfg.output_path).parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    def rotation_callback(root: BvhioJoint) -> None:
+        euler_rotation = np.array(cfg.rotate_bvh_euler)
+        quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
+        root.applyRotation(glm.quat(*quat), bake=True)
+
     reference_data = generate_reference_motion(
         model=model,
         mj_base_id=mj_base_id,
@@ -756,7 +764,7 @@ def main() -> None:
         bvh_base_id=bvh_base_id,
         ctrl_dt=cfg.ctrl_dt,
         bvh_offset=np.array(cfg.bvh_offset),
-        bvh_root_callback=None,
+        bvh_root_callback=rotation_callback,
         bvh_scaling_factor=cfg.bvh_scaling_factor,
         constrained_joint_ids=constrained_joint_ids,
         neutral_qpos=None,
