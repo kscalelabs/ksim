@@ -36,9 +36,11 @@ setup(
     install_requires=requirements,
     extras_require={"dev": requirements_dev},
     packages=find_packages(),
-    # entry_points={
-    #     "console_scripts": [
-    #         "ksim.cli:main",
-    #     ],
-    # },
+    entry_points={
+        "console_scripts": [
+            # "ksim.cli:main",
+            "ksim-generate-reference=ksim.utils.priors:main",
+            "ksim-visualize-reference=ksim.utils.priors:vis_entry_point",
+        ],
+    },
 )

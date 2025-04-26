@@ -21,3 +21,19 @@ pip install -e '.'  # To install your local copy
 ```bash
 python -m examples.walking
 ```
+
+## Creating reference motion data
+
+To create reference motion data, run the following command (from the root directory):
+
+```
+ksim-generate-reference --config examples/data/walk_normal.yaml
+```
+
+This will generate a `humanoid_amp_walk_ref.npz` file in the `examples/data` directory.
+
+To visualize the reference motion, run the following command:
+
+```
+ksim-visualize-reference examples/data/humanoid_amp_walk_ref.npz --model examples/data/scene.mjcf
+```

@@ -6,19 +6,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Generic, TypeVar
 
-import bvhio
 import distrax
 import equinox as eqx
-import glm
 import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
 import optax
 import xax
-from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array, PRNGKeyArray
-from scipy.spatial.transform import Rotation as R
 
 import ksim
 
@@ -364,6 +360,10 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
     )
 
     # Refernece motion parameters.
+    reference_motion_path: str = xax.field(
+        value=str(Path(__file__).parent / "data" / "humanoid_amp_walk_ref.npz"),
+        help="The path to the reference motion file.",
+    )
     bvh_path: str = xax.field(
         value=str(Path(__file__).parent / "data" / "walk_normal_dh.bvh"),
         help="The path to the BVH file.",
@@ -409,6 +409,10 @@ Config = TypeVar("Config", bound=HumanoidWalkingAMPTaskConfig)
 
 class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
     """Adversarial Motion Prior task."""
+
+    def __init__(self, config: Config) -> None:
+        super().__init__(config)
+        self.reference_motion = ksim.MotionReferenceData.load(self.config.reference_motion_path)
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
@@ -593,44 +597,18 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         return model.forward(motion).squeeze()
 
     def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
-        root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
-        reference_base_id = ksim.get_reference_joint_id(root, self.config.reference_base_name)
-        mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
-
-        def rotation_callback(root: BvhioJoint) -> None:
-            euler_rotation = np.array(self.config.rotate_bvh_euler)
-            quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
-            root.applyRotation(glm.quat(*quat), bake=True)
-
-        reference_motion = ksim.generate_reference_motion(
-            model=mj_model,
-            mj_base_id=mj_base_id,
-            bvh_root=root,
-            bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
-            bvh_base_id=reference_base_id,
-            bvh_offset=np.array(self.config.bvh_offset),
-            bvh_root_callback=rotation_callback,
-            bvh_scaling_factor=self.config.bvh_scaling_factor,
-            ctrl_dt=self.config.ctrl_dt,
-            neutral_qpos=None,
-            neutral_similarity_weight=0.1,
-            temporal_consistency_weight=0.1,
-            n_restarts=3,
-            error_acceptance_threshold=1e-4,
-            ftol=1e-8,
-            xtol=1e-8,
-            max_nfev=2000,
-            verbose=False,
-        )
-
+        reference_motion = ksim.MotionReferenceData.load(self.config.reference_motion_path)
+        # cartesian_poses = jax.tree.map(lambda x: np.asarray(x.array), reference_motion.cartesian_poses)
         return jnp.array(reference_motion.qpos.array[None, ..., 7:])  # Remove the root joint absolute coordinates.
 
     def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
-        return trajectory.qpos[..., 7:]  # Remove the root joint absolute coordinates.
+        # xpos = trajectory.xpos
+        qpos = trajectory.qpos[..., 7:]
+        return qpos
 
     def motion_to_qpos(self, motion: Array) -> Array:
-        qpos_init = jnp.array([0.0, 0.0, 1.5])
-        return jnp.concatenate([jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 3)), motion], axis=-1)
+        qpos_init = jnp.array([0.0, 0.0, 1.5, 1.0, 0.0, 0.0, 0.0])
+        return jnp.concatenate([jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 7)), motion], axis=-1)
 
     def run_actor(
         self,
