@@ -18,7 +18,7 @@ from kscale.web.utils import get_robots_dir, should_refresh_file
 logger = logging.getLogger(__name__)
 
 
-async def get_mujoco_model_path(model_name: str, cache: bool = True) -> str | Path:
+async def get_mujoco_model_path(model_name: str, cache: bool = True, name: str | None = None) -> str | Path:
     """Downloads and caches the model URDF if it doesn't exists in a local directory."""
     try:
         urdf_dir = Path(model_name)
@@ -28,10 +28,15 @@ async def get_mujoco_model_path(model_name: str, cache: bool = True) -> str | Pa
         async with K() as api:
             urdf_dir = await api.download_and_extract_urdf(model_name, cache=cache)
 
-    try:
-        mjcf_path = next(urdf_dir.glob("*.mjcf"))
-    except StopIteration as err:
-        raise ValueError(f"No MJCF file found for {model_name} (in {urdf_dir})") from err
+    if name is None:
+        try:
+            mjcf_path = next(urdf_dir.glob("*.mjcf"))
+        except StopIteration as err:
+            raise ValueError(f"No MJCF file found for {model_name} (in {urdf_dir})") from err
+    else:
+        mjcf_path = urdf_dir / f"{name}.mjcf"
+        if not mjcf_path.exists():
+            raise ValueError(f"MJCF file {name} does not exist for {model_name} (in {urdf_dir})")
 
     return mjcf_path
 
