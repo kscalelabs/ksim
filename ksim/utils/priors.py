@@ -31,7 +31,7 @@ import numpy as np
 import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array
-from omegaconf import MISSING, ListConfig, OmegaConf
+from omegaconf import MISSING, DictConfig, ListConfig, OmegaConf
 from omegaconf.errors import ConfigKeyError, MissingMandatoryValue
 from scipy.optimize import least_squares
 
@@ -639,7 +639,7 @@ def vis_entry_point() -> None:
 
     visualize_reference_motion(
         model=model,
-        reference_qpos=reference_data.qpos.array,
+        reference_qpos=np.asarray(reference_data.qpos.array),
         cartesian_motion=np_cartesian_motion,
         mj_base_id=mj_base_id,
     )
@@ -805,7 +805,7 @@ class ReferenceMotionGeneratorConfig:
             sys.exit(1)
 
         try:
-            OmegaConf.resolve(cfg)
+            OmegaConf.resolve(cast(DictConfig, cfg))
             assert isinstance(cfg.mappings, ListConfig), "Config error: 'mappings' must be a list of strings."
             mapping_msg = "Config error: All 'mappings' must be strings in 'BvhJointName:MjBodyName' format."
             assert all(isinstance(m, str) and ":" in m for m in cfg.mappings), mapping_msg
