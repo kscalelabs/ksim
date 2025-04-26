@@ -24,6 +24,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Self, Sequence, cast
 
+import bvhio
+import colorlogging
+import glm
 import jax
 import jax.numpy as jnp
 import mujoco
@@ -34,6 +37,7 @@ from jaxtyping import Array
 from omegaconf import MISSING, DictConfig, ListConfig, OmegaConf
 from omegaconf.errors import ConfigKeyError, MissingMandatoryValue
 from scipy.optimize import least_squares
+from scipy.spatial.transform import Rotation as R
 
 from ksim.viewer import GlfwMujocoViewer
 
@@ -184,7 +188,7 @@ def get_local_xpos(xpos: np.ndarray | jax.Array, body_id: int, base_id: int) -> 
 
 
 def get_local_reference_pos(
-    root: BvhioJoint, reference_id: int, reference_base_id: int, scaling_factor: float = 1.0
+    root: BvhioJoint, reference_id: int, reference_base_id: int, scaling_factor: float = 1.0,
 ) -> np.ndarray | jax.Array:
     """Gets the cartesian pos of a reference joint w.r.t. the base (e.g. pelvis)."""
     layout = root.layout()
@@ -831,13 +835,6 @@ class ReferenceMotionGeneratorConfig:
 
 
 def main() -> None:
-    import sys  # Import sys to access command line args
-
-    import bvhio
-    import colorlogging
-    import glm
-    from scipy.spatial.transform import Rotation as R
-
     colorlogging.configure(level=logging.INFO)
 
     cfg = ReferenceMotionGeneratorConfig.from_cli_args(sys.argv[1:])
@@ -902,3 +899,7 @@ def main() -> None:
     reference_data.save(cfg.output_path)
 
     logger.info("Done.")
+
+
+if __name__ == "__main__":
+    main()
