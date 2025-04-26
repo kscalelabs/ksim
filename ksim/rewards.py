@@ -597,29 +597,17 @@ class PositionTrackingReward(Reward):
 class UprightReward(Reward):
     """Reward for staying upright."""
 
-    gravity: tuple[float, float, float] = attrs.field()
+    observation_name: str = attrs.field(default="projected_gravity_observation")
+    index: CartesianIndex = attrs.field(default="z", validator=dimension_index_validator)
+    inverted: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        body_quat = trajectory.xquat[..., 0, :]
-        chex.assert_shape(body_quat, (..., 4))
-        gravity = jnp.array(self.gravity)
-        gravity = xax.rotate_vector_by_quat(gravity, body_quat, inverse=True)
-        return gravity[..., 2]
-
-    @classmethod
-    def create(
-        cls,
-        physics_model: PhysicsModel,
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
-    ) -> Self:
-        gx, gy, gz = np.array(physics_model.opt.gravity).flatten().tolist()
-
-        return cls(
-            gravity=(gx, gy, gz),
-            scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
-        )
+        dim = cartesian_index_to_dim(self.index)
+        obs = trajectory.obs[self.observation_name]
+        reward = obs[..., dim]
+        if self.inverted:
+            reward = -reward
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
