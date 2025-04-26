@@ -606,7 +606,7 @@ class UprightReward(Reward):
         reward = obs[..., dim]
         if self.inverted:
             reward = -reward
-        reward = reward - jnp.abs(obs).mean(axis=-1)
+        reward = reward * 2 - jnp.abs(obs).mean(axis=-1)
         return reward
 
 
