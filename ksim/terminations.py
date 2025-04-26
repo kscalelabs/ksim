@@ -77,7 +77,7 @@ class RollTooGreatTermination(Termination):
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         quat = state.qpos[3:7]
-        roll = jnp.arctan2(2 * (quat[0] * quat[1] + quat[2] * quat[3]), 1 - 2 * (quat[1]**2 + quat[2]**2))
+        roll = jnp.arctan2(2 * (quat[0] * quat[1] + quat[2] * quat[3]), 1 - 2 * (quat[1] ** 2 + quat[2] ** 2))
         return jnp.where(jnp.abs(roll) > self.max_roll, -1, 0)
 
 
