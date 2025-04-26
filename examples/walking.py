@@ -355,8 +355,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(scale=1.0),
-            ksim.AngularVelocityPenalty(index="x", scale=-0.001),
-            ksim.AngularVelocityPenalty(index="y", scale=-0.001),
+            ksim.UprightReward.create(physics_model=physics_model, scale=1.0),
         ]
 
         if self.config.naive_forward_reward:
@@ -558,7 +557,8 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
             # Logging parameters.
-            # log_full_trajectory_every_n_seconds=60,
+            valid_first_n_steps=1,
+            render_full_every_n_steps=1,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,

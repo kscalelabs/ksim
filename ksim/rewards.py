@@ -24,6 +24,7 @@ __all__ = [
     "FeetFlatReward",
     "FeetNoContactReward",
     "PositionTrackingReward",
+    "UprightReward",
     "JoystickReward",
 ]
 
@@ -36,6 +37,7 @@ import attrs
 import chex
 import jax
 import jax.numpy as jnp
+import numpy as np
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
@@ -589,6 +591,35 @@ class PositionTrackingReward(Reward):
 
     def get_name(self) -> str:
         return f"{self.body_name}_{super().get_name()}"
+
+
+@attrs.define(frozen=True, kw_only=True)
+class UprightReward(Reward):
+    """Reward for staying upright."""
+
+    gravity: tuple[float, float, float] = attrs.field()
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        body_quat = trajectory.xquat[..., 0, :]
+        chex.assert_shape(body_quat, (..., 4))
+        gravity = jnp.array(self.gravity)
+        gravity = xax.rotate_vector_by_quat(gravity, body_quat, inverse=True)
+        return gravity[..., 2]
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        scale: float = 1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        gx, gy, gz = np.array(physics_model.opt.gravity).flatten().tolist()
+
+        return cls(
+            gravity=(gx, gy, gz),
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
