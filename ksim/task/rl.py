@@ -524,7 +524,7 @@ class RLConfig(xax.Config):
         help="The ratio of the constraint solver.",
     )
     contact_margin: float | None = xax.field(
-        value=0.0005,
+        value=None,
         help="The contact solver margin.",
     )
     solimp: tuple[float, ...] | None = xax.field(
