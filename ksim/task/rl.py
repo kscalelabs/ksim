@@ -528,15 +528,15 @@ class RLConfig(xax.Config):
         help="The contact solver margin.",
     )
     solimp: tuple[float, ...] | None = xax.field(
-        value=(0.9, 0.95, 0.001),
+        value=None,
         help="The contact solver impedance parameters.",
     )
     solref: tuple[float, ...] | None = xax.field(
-        value=(0.01, 1.0),
+        value=None,
         help="The contact solver relaxation parameters.",
     )
     friction: tuple[float, ...] | None = xax.field(
-        value=(1.0, 1.0, 0.005),
+        value=None,
         help="The contact solver friction parameters.",
     )
     disable_euler_damping: bool = xax.field(
