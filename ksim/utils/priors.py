@@ -647,36 +647,128 @@ def vis_entry_point() -> None:
 
 @dataclass
 class IKParams:
-    neutral_similarity_weight: float = field(default=0.1, metadata={"help": "Weight of neutral similarity term"})
-    temporal_consistency_weight: float = field(default=0.1, metadata={"help": "Weight of temporal consistency term"})
-    n_restarts: int = field(default=5, metadata={"help": "Number of random restarts to try"})
-    error_acceptance_threshold: float = field(default=1e-4, metadata={"help": "The threshold for the error"})
-    ftol: float = field(default=1e-8, metadata={"help": "The tolerance for the function value"})
-    xtol: float = field(default=1e-8, metadata={"help": "The tolerance for the solution"})
-    max_nfev: int = field(default=2000, metadata={"help": "The maximum number of function evaluations"})
+    neutral_similarity_weight: float = field(
+        default=0.1,
+        metadata={
+            "help": "Weight of neutral similarity term",
+        },
+    )
+    temporal_consistency_weight: float = field(
+        default=0.1,
+        metadata={
+            "help": "Weight of temporal consistency term",
+        },
+    )
+    n_restarts: int = field(
+        default=5,
+        metadata={
+            "help": "Number of random restarts to try",
+        },
+    )
+    error_acceptance_threshold: float = field(
+        default=1e-4,
+        metadata={
+            "help": "The threshold for the error",
+        },
+    )
+    ftol: float = field(
+        default=1e-8,
+        metadata={
+            "help": "The tolerance for the function value",
+        },
+    )
+    xtol: float = field(
+        default=1e-8,
+        metadata={
+            "help": "The tolerance for the solution",
+        },
+    )
+    max_nfev: int = field(
+        default=2000,
+        metadata={
+            "help": "The maximum number of function evaluations",
+        },
+    )
 
 
 @dataclass
 class ReferenceMotionGeneratorConfig:
-    model_path: str = field(default=MISSING, metadata={"help": "Path to the Mujoco model"})
-    bvh_path: str = field(default=MISSING, metadata={"help": "Path to the BVH file"})
-    output_path: str = field(default=MISSING, metadata={"help": "Path to the output file"})
-    mj_base_name: str = field(default=MISSING, metadata={"help": "Name of the Mujoco base"})
-    bvh_base_name: str = field(default=MISSING, metadata={"help": "Name of the BVH base"})
+    model_path: str = field(
+        default=MISSING,
+        metadata={
+            "help": "Path to the Mujoco model",
+        },
+    )
+    bvh_path: str = field(
+        default=MISSING,
+        metadata={
+            "help": "Path to the BVH file",
+        },
+    )
+    output_path: str = field(
+        default=MISSING,
+        metadata={
+            "help": "Path to the output file",
+        },
+    )
+    mj_base_name: str = field(
+        default=MISSING,
+        metadata={
+            "help": "Name of the Mujoco base",
+        },
+    )
+    bvh_base_name: str = field(
+        default=MISSING,
+        metadata={
+            "help": "Name of the BVH base",
+        },
+    )
     mappings: list[str] = field(
-        default_factory=list, metadata={"help": "List of mappings in 'BvhJointName:MjBodyName' format"}
+        default_factory=list,
+        metadata={
+            "help": "List of mappings in 'BvhJointName:MjBodyName' format",
+        },
     )
-    ctrl_dt: float = field(default=0.02, metadata={"help": "The control timestep"})
-    bvh_offset: list[float] = field(default_factory=lambda: [0, 0, 0], metadata={"help": "Offset of the BVH root"})
+    ctrl_dt: float = field(
+        default=0.02,
+        metadata={
+            "help": "The control timestep",
+        },
+    )
+    bvh_offset: list[float] = field(
+        default_factory=lambda: [0, 0, 0],
+        metadata={
+            "help": "Offset of the BVH root",
+        },
+    )
     rotate_bvh_euler: list[float] = field(
-        default_factory=lambda: [0, 0, 0], metadata={"help": "Euler angles to rotate the BVH root"}
+        default_factory=lambda: [0, 0, 0],
+        metadata={
+            "help": "Euler angles to rotate the BVH root",
+        },
     )
-    bvh_scaling_factor: float = field(default=1.0, metadata={"help": "Scaling factor for the reference motion"})
+    bvh_scaling_factor: float = field(
+        default=1.0,
+        metadata={
+            "help": "Scaling factor for the reference motion",
+        },
+    )
     constrained_joint_ids: list[int] = field(
-        default_factory=lambda: [0, 1, 2, 3, 4, 5, 6], metadata={"help": "Indices of the constrained joints"}
+        default_factory=lambda: [0, 1, 2, 3, 4, 5, 6],
+        metadata={
+            "help": "Indices of the constrained joints",
+        },
     )
-    ik_params: IKParams = field(default_factory=IKParams)
-    verbose: bool = field(default=False, metadata={"help": "Whether to print verbose output"})
+    ik_params: IKParams = field(
+        default_factory=IKParams,
+        metadata={
+            "help": "IK parameters",
+        },
+    )
+    verbose: bool = field(
+        default=False,
+        metadata={"help": "Whether to print verbose output"},
+    )
 
     @classmethod
     def from_cli_args(cls, args: Sequence[str] | None = None) -> Self:
