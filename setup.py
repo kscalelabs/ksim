@@ -27,7 +27,7 @@ version: str = version_re.group(1)
 setup(
     name="ksim",
     version=version,
-    description="The ksim project",
+    description="A modular and easy-to-use framework for training policies in simulation.",
     author="K-Scale Labs",
     url="https://github.com/kscalelabs/ksim",
     long_description=long_description,
