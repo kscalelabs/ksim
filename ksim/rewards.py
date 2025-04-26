@@ -37,7 +37,6 @@ import attrs
 import chex
 import jax
 import jax.numpy as jnp
-import numpy as np
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
@@ -607,6 +606,7 @@ class UprightReward(Reward):
         reward = obs[..., dim]
         if self.inverted:
             reward = -reward
+        reward = reward - obs.mean(axis=-1)
         return reward
 
 
