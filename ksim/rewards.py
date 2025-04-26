@@ -603,7 +603,7 @@ class UprightReward(Reward):
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         dim = cartesian_index_to_dim(self.index)
-        obs = trajectory.obs[self.observation_name]
+        obs = trajectory.obs[self.observation_name] / 9.81
         reward = obs[..., dim]
         if self.inverted:
             reward = -reward
