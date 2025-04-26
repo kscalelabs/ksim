@@ -2075,11 +2075,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
 
                         if valid_step:
-                            state = state.replace(
-                                num_valid_steps=state.num_valid_steps + num_steps,
-                                num_valid_samples=state.num_valid_samples + num_samples,
-                            )
-
                             full_size_render = state.num_valid_steps.item() % self.config.render_full_every_n_steps == 0
                             if full_size_render:
                                 self._log_logged_trajectory_video(
@@ -2101,6 +2096,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                     viewer=small_viewer,
                                     key="trajectory_small",
                                 )
+                            state = state.replace(
+                                num_valid_steps=state.num_valid_steps + num_steps,
+                                num_valid_samples=state.num_valid_samples + num_samples,
+                            )
 
                         else:
                             state = state.replace(
