@@ -28,6 +28,7 @@ refs/
 *.mp4
 *.gif
 run_*/
+*.npz
 
 # KOS-Sim
 .kos-sim/
