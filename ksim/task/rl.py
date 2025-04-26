@@ -523,22 +523,6 @@ class RLConfig(xax.Config):
         value=1.0,
         help="The ratio of the constraint solver.",
     )
-    contact_margin: float | None = xax.field(
-        value=None,
-        help="The contact solver margin.",
-    )
-    solimp: tuple[float, ...] | None = xax.field(
-        value=None,
-        help="The contact solver impedance parameters.",
-    )
-    solref: tuple[float, ...] | None = xax.field(
-        value=None,
-        help="The contact solver relaxation parameters.",
-    )
-    friction: tuple[float, ...] | None = xax.field(
-        value=None,
-        help="The contact solver friction parameters.",
-    )
     disable_euler_damping: bool = xax.field(
         value=True,
         help="If set, disable Euler damping - this is a performance improvement",
@@ -697,17 +681,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         _set_opt("solver", solver)
         _set_opt("cone", cone_type)
         _set_opt("impratio", self.config.impratio)
-
-        # For each geometry in the model, set the contact solver parameters.
-        for geom_idx in range(mj_model.ngeom):
-            if self.config.contact_margin is not None:
-                mj_model.geom_margin[geom_idx] = self.config.contact_margin
-            if self.config.solref is not None:
-                mj_model.geom_solref[geom_idx][: len(self.config.solref)] = self.config.solref
-            if self.config.solimp is not None:
-                mj_model.geom_solimp[geom_idx][: len(self.config.solimp)] = self.config.solimp
-            if self.config.friction is not None:
-                mj_model.geom_friction[geom_idx][: len(self.config.friction)] = self.config.friction
 
         if self.config.disable_euler_damping:
             mj_model.opt.disableflags = mj_model.opt.disableflags | mjx.DisableBit.EULERDAMP
