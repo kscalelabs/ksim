@@ -78,7 +78,7 @@ class AMPReward(Reward):
             )
 
         discriminator_logits = trajectory.aux_outputs[DISCRIMINATOR_OUTPUT_KEY]
-        reward = jnp.maximum(0.0, 1.0 - 0.25 * (1 - discriminator_logits) ** 2)
+        reward = discriminator_logits + 1.0
         return reward
 
 
