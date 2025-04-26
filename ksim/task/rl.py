@@ -703,11 +703,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             if self.config.contact_margin is not None:
                 mj_model.geom_margin[geom_idx] = self.config.contact_margin
             if self.config.solref is not None:
-                mj_model.geom_solref[geom_idx][:len(self.config.solref)] = self.config.solref
+                mj_model.geom_solref[geom_idx][: len(self.config.solref)] = self.config.solref
             if self.config.solimp is not None:
-                mj_model.geom_solimp[geom_idx][:len(self.config.solimp)] = self.config.solimp
+                mj_model.geom_solimp[geom_idx][: len(self.config.solimp)] = self.config.solimp
             if self.config.friction is not None:
-                mj_model.geom_friction[geom_idx][:len(self.config.friction)] = self.config.friction
+                mj_model.geom_friction[geom_idx][: len(self.config.friction)] = self.config.friction
 
         if self.config.disable_euler_damping:
             mj_model.opt.disableflags = mj_model.opt.disableflags | mjx.DisableBit.EULERDAMP
