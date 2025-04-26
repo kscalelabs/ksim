@@ -16,11 +16,13 @@ __all__ = [
     "generate_reference_motion",
 ]
 
+import argparse
 import logging
+import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Self
+from typing import Callable, Self, Sequence, cast
 
 import jax
 import jax.numpy as jnp
@@ -29,12 +31,11 @@ import numpy as np
 import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array
+from omegaconf import MISSING, ListConfig, OmegaConf
+from omegaconf.errors import ConfigKeyError, MissingMandatoryValue
 from scipy.optimize import least_squares
-from omegaconf import OmegaConf, ListConfig
-from omegaconf.errors import MissingMandatoryValue # For error handling
 
 from ksim.viewer import GlfwMujocoViewer
-from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -622,9 +623,8 @@ def generate_reference_motion(
         ctrl_dt=ctrl_dt,
     )
 
+
 def vis_entry_point() -> None:
-    import argparse
-    
     parser = argparse.ArgumentParser(description="Visualize reference motion from a config file")
     parser.add_argument("motion", type=str, help="Path to the configuration file")
     parser.add_argument("--model", type=str, required=True, help="Path to the Mujoco model")
@@ -645,103 +645,131 @@ def vis_entry_point() -> None:
     )
 
 
+@dataclass
+class IKParams:
+    neutral_similarity_weight: float = field(default=0.1, metadata={"help": "Weight of neutral similarity term"})
+    temporal_consistency_weight: float = field(default=0.1, metadata={"help": "Weight of temporal consistency term"})
+    n_restarts: int = field(default=5, metadata={"help": "Number of random restarts to try"})
+    error_acceptance_threshold: float = field(default=1e-4, metadata={"help": "The threshold for the error"})
+    ftol: float = field(default=1e-8, metadata={"help": "The tolerance for the function value"})
+    xtol: float = field(default=1e-8, metadata={"help": "The tolerance for the solution"})
+    max_nfev: int = field(default=2000, metadata={"help": "The maximum number of function evaluations"})
+
+
+@dataclass
+class ReferenceMotionGeneratorConfig:
+    model_path: str = field(default=MISSING, metadata={"help": "Path to the Mujoco model"})
+    bvh_path: str = field(default=MISSING, metadata={"help": "Path to the BVH file"})
+    output_path: str = field(default=MISSING, metadata={"help": "Path to the output file"})
+    mj_base_name: str = field(default=MISSING, metadata={"help": "Name of the Mujoco base"})
+    bvh_base_name: str = field(default=MISSING, metadata={"help": "Name of the BVH base"})
+    mappings: list[str] = field(
+        default_factory=list, metadata={"help": "List of mappings in 'BvhJointName:MjBodyName' format"}
+    )
+    ctrl_dt: float = field(default=0.02, metadata={"help": "The control timestep"})
+    bvh_offset: list[float] = field(default_factory=lambda: [0, 0, 0], metadata={"help": "Offset of the BVH root"})
+    rotate_bvh_euler: list[float] = field(
+        default_factory=lambda: [0, 0, 0], metadata={"help": "Euler angles to rotate the BVH root"}
+    )
+    bvh_scaling_factor: float = field(default=1.0, metadata={"help": "Scaling factor for the reference motion"})
+    constrained_joint_ids: list[int] = field(
+        default_factory=lambda: [0, 1, 2, 3, 4, 5, 6], metadata={"help": "Indices of the constrained joints"}
+    )
+    ik_params: IKParams = field(default_factory=IKParams)
+    verbose: bool = field(default=False, metadata={"help": "Whether to print verbose output"})
+
+    @classmethod
+    def from_cli_args(cls, args: Sequence[str] | None = None) -> Self:
+        """Parses configuration from command line arguments and optional config file."""
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument("-f", "--config", type=Path, default=None, help="Path to the configuration file.")
+        parsed_args, remaining_args = parser.parse_known_args(args)
+        config_path: Path | None = parsed_args.config
+
+        cfg = cast(Self, OmegaConf.structured(cls))
+
+        if config_path is not None:
+            if config_path.is_file():
+                logger.info("Loading configuration from: %s", config_path)
+                try:
+                    file_conf = OmegaConf.load(config_path)
+                    cfg = cast(Self, OmegaConf.merge(cfg, file_conf))
+                except Exception as e:
+                    logger.error("Error loading config file '%s': %s", config_path, e)
+                    sys.exit(1)
+            else:
+                logger.warning("Config file specified but not found: %s", config_path)
+
+        try:
+            cli_conf = OmegaConf.from_cli(remaining_args)
+            cfg = cast(Self, OmegaConf.merge(cfg, cli_conf))
+        except ConfigKeyError as e:
+            logger.error(
+                "Invalid command line config override: %s. Check if the key exists in the configuration structure.", e
+            )
+            sys.exit(1)
+        except Exception as e:
+            logger.error("Error parsing command line arguments: %s", e)
+            sys.exit(1)
+
+        try:
+            OmegaConf.resolve(cfg)
+            assert isinstance(cfg.mappings, ListConfig), "Config error: 'mappings' must be a list of strings."
+            mapping_msg = "Config error: All 'mappings' must be strings in 'BvhJointName:MjBodyName' format."
+            assert all(isinstance(m, str) and ":" in m for m in cfg.mappings), mapping_msg
+            bvh_offset_msg = "Config error: 'bvh_offset' must be a list of 3 floats."
+            assert isinstance(cfg.bvh_offset, ListConfig) and len(cfg.bvh_offset) == 3, bvh_offset_msg
+            rotate_bvh_euler_msg = "Config error: 'rotate_bvh_euler' must be a list of 3 floats."
+            assert isinstance(cfg.rotate_bvh_euler, ListConfig) and len(cfg.rotate_bvh_euler) == 3, rotate_bvh_euler_msg
+            constrained_joint_ids_msg = "Config error: 'constrained_joint_ids' must be a list of integers."
+            assert isinstance(cfg.constrained_joint_ids, ListConfig), constrained_joint_ids_msg
+
+        except MissingMandatoryValue as e:
+            logger.error("Missing required configuration value: %s", e)
+            logger.error("Please provide it via command line (e.g., model_path=...) or in a config file.")
+            sys.exit(1)
+        except AssertionError as e:
+            logger.error(e)
+            sys.exit(1)
+        except Exception as e:
+            logger.error("Configuration Error: %s", e)
+            sys.exit(1)
+
+        return cfg
+
+
 def main() -> None:
+    import sys  # Import sys to access command line args
+
     import bvhio
-    from scipy.spatial.transform import Rotation as R
+    import colorlogging
     import glm
+    from scipy.spatial.transform import Rotation as R
 
-    defaults = OmegaConf.create({
-        "config": None,
-        # --- Paths ---
-        "model_path": "???",
-        "bvh_path": "???",
-        "output_path": "???",
-        # --- Names ---
-        "mj_base_name": "???",
-        "bvh_base_name": "???",
-        # --- Mappings ---
-        "mappings": "???",
-        # --- Parameters ---
-        "ctrl_dt": "???",
-        "bvh_offset": [0.0, 0.0, 0.0],
-        "rotate_bvh_euler": [0.0, 0.0, 0.0],
-        "bvh_scaling_factor": 1.0,
-        "constrained_joint_ids": [0, 1, 2, 3, 4, 5, 6],
-        # --- IK Parameters ---
-        "ik_params": {
-            "neutral_similarity_weight": 0.1,
-            "temporal_consistency_weight": 0.1,
-            "n_restarts": 5,
-            "error_acceptance_threshold": 1.0e-4,
-            "ftol": 1.0e-8,
-            "xtol": 1.0e-8,
-            "max_nfev": 2000,
-        },
-        # --- Flags ---
-        "verbose": False,
-        "show_progress": False,
-    })
+    colorlogging.configure(level=logging.INFO)
 
-    cli_conf = OmegaConf.from_cli()
-
-    file_conf = OmegaConf.create()
-    if cli_conf.get("config"):
-        config_path = Path(cli_conf.config)
-        if config_path.is_file():
-            logger.info(f"Loading configuration from: {config_path}")
-            try:
-                file_conf = OmegaConf.load(config_path)
-            except Exception as e:
-                logger.error(f"Error loading config file '{config_path}': {e}")
-                exit(1)
-        else:
-            logger.warning(f"Config file specified but not found: {config_path}")
-            cli_conf.pop("config")
-    elif "config" in cli_conf:
-        cli_conf.pop("config")
-
-    cfg = OmegaConf.merge(defaults, file_conf, cli_conf)
-
-    try:
-        OmegaConf.resolve(cfg)
-        assert isinstance(cfg.mappings, ListConfig), "Config error: 'mappings' must be a list of strings."
-        assert all(isinstance(m, str) and ':' in m for m in cfg.mappings), \
-               "Config error: All 'mappings' must be strings in 'BvhJointName:MjBodyName' format."
-        assert isinstance(cfg.bvh_offset, ListConfig) and len(cfg.bvh_offset) == 3, \
-               "Config error: 'bvh_offset' must be a list of 3 floats."
-
-    except MissingMandatoryValue as e:
-        logger.error(f"Missing required configuration value: {e}")
-        logger.error("Please provide it via command line (e.g., model_path=...) or in a config file.")
-        exit(1)
-    except AssertionError as e:
-         logger.error(e)
-         exit(1)
-    except Exception as e:
-        logger.error(f"Configuration Error: {e}")
-        exit(1)
+    cfg = ReferenceMotionGeneratorConfig.from_cli_args(sys.argv[1:])
 
     logger.info("Final configuration:\n%s", OmegaConf.to_yaml(cfg))
 
     try:
-         parsed_mappings_list = []
-         for mapping_str in cfg.mappings:
-             parts = mapping_str.split(":")
-             if len(parts) != 2:
-                  raise ValueError(f"Invalid mapping format: '{mapping_str}'. Use 'BvhJointName:MjBodyName'.")
-             parsed_mappings_list.append(MotionReferenceMapping(reference_joint_name=parts[0], mj_body_name=parts[1]))
-         parsed_mappings: tuple[MotionReferenceMapping, ...] = tuple(parsed_mappings_list)
+        parsed_mappings_list = []
+        for mapping_str in cfg.mappings:
+            parts = mapping_str.split(":")
+            if len(parts) != 2:
+                raise ValueError("Invalid mapping format: '%s'. Use 'BvhJointName:MjBodyName'.", mapping_str)
+            parsed_mappings_list.append(MotionReferenceMapping(reference_joint_name=parts[0], mj_body_name=parts[1]))
+        parsed_mappings: tuple[MotionReferenceMapping, ...] = tuple(parsed_mappings_list)
     except ValueError as e:
-         logger.error(f"Configuration Error: {e}")
-         exit(1)
-
+        logger.error("Configuration Error: %s", e)
+        sys.exit(1)
 
     logger.info("Loading MuJoCo model from %s", cfg.model_path)
     model = mujoco.MjModel.from_xml_path(cfg.model_path)
 
     logger.info("Loading BVH file from %s", cfg.bvh_path)
     bvh_root = bvhio.readAsHierarchy(cfg.bvh_path)
-    
+
     constrained_joint_ids = tuple(cfg.constrained_joint_ids)
 
     mj_base_id = get_body_id(model, cfg.mj_base_name)
@@ -778,7 +806,7 @@ def main() -> None:
         verbose=cfg.verbose,
     )
 
-    logger.info(f"Saving reference motion data to {cfg.output_path}")
+    logger.info("Saving reference motion data to %s", cfg.output_path)
     reference_data.save(cfg.output_path)
 
     logger.info("Done.")

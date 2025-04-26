@@ -36,4 +36,3 @@ ik_params:
   max_nfev: 2000
 
 verbose: false
-show_progress: true
