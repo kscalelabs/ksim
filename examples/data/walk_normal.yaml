@@ -1,6 +1,6 @@
-model_path: "data/scene.mjcf"
-bvh_path: "data/walk_normal_dh.bvh"
-output_path: "data/humanoid_amp_walk_ref.npz"
+model_path: "examples/data/scene.mjcf"
+bvh_path: "examples/data/walk_normal_dh.bvh"
+output_path: "examples/data/humanoid_amp_walk_ref.npz"
 
 mj_base_name: "pelvis"
 bvh_base_name: "CC_Base_Pelvis"

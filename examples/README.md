@@ -26,3 +26,19 @@ To map the actorcore motion to default_humanoid update offsets (after converting
 - Base_L/R_Hand: add 5.5 in the -X offset
 - Base_L/R_Calf: subtract 7 in the -Z offset
 - Base_L/R_Foot: subtract 7.5 in the -Z offset
+
+## Creating reference motion data
+
+To create reference motion data, run the following command (from the root directory):
+
+```
+ksim-generate-reference --config examples/data/walk_normal.yaml
+```
+
+This will generate a `humanoid_amp_walk_ref.npz` file in the `examples/data` directory.
+
+To visualize the reference motion, run the following command:
+
+```
+ksim-visualize-reference examples/data/humanoid_amp_walk_ref.npz --model examples/data/scene.mjcf
+```
