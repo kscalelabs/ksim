@@ -1944,7 +1944,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         state: xax.State,
     ) -> None:
         model = eqx.combine(carry.shared_state.model_arrs, constants.constants.model_statics)
-        self.save_checkpoint(models=[model], optimizers=constants.optimizer, opt_states=carry.opt_state, state=state)
+        self.save_checkpoint(models=list(model), optimizers=constants.optimizer, opt_states=carry.opt_state, state=state)
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
