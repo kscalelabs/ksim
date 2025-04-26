@@ -527,17 +527,17 @@ class RLConfig(xax.Config):
         value=0.0005,
         help="The contact solver margin.",
     )
-    solimp: tuple[float, float, float, float, float] | None = xax.field(
-        value=(0.9, 0.95, 0.001, 0.5, 2.0),
-        help="The contact solver parameters.",
+    solimp: tuple[float, ...] | None = xax.field(
+        value=(0.9, 0.95, 0.001),
+        help="The contact solver impedance parameters.",
     )
-    solref: tuple[float, float] | None = xax.field(
+    solref: tuple[float, ...] | None = xax.field(
         value=(0.02, 1.0),
-        help="The contact solver parameters.",
+        help="The contact solver relaxation parameters.",
     )
-    friction: tuple[float, float, float, float, float] | None = xax.field(
-        value=(1.0, 1.0, 0.005, 0.0001, 0.0001),
-        help="The contact solver parameters; two tangential, one torsional, two rolling.",
+    friction: tuple[float, ...] | None = xax.field(
+        value=(1.0, 1.0, 0.005),
+        help="The contact solver friction parameters.",
     )
     disable_euler_damping: bool = xax.field(
         value=True,
@@ -703,11 +703,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             if self.config.contact_margin is not None:
                 mj_model.geom_margin[geom_idx] = self.config.contact_margin
             if self.config.solref is not None:
-                mj_model.geom_solref[geom_idx][:] = self.config.solref
+                mj_model.geom_solref[geom_idx][:len(self.config.solref)] = self.config.solref
             if self.config.solimp is not None:
-                mj_model.geom_solimp[geom_idx][:] = self.config.solimp
+                mj_model.geom_solimp[geom_idx][:len(self.config.solimp)] = self.config.solimp
             if self.config.friction is not None:
-                mj_model.geom_friction[geom_idx][:] = self.config.friction
+                mj_model.geom_friction[geom_idx][:len(self.config.friction)] = self.config.friction
 
         if self.config.disable_euler_damping:
             mj_model.opt.disableflags = mj_model.opt.disableflags | mjx.DisableBit.EULERDAMP
