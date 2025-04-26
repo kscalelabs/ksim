@@ -317,24 +317,6 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
         help="Learning rate for the discriminator.",
     )
 
-    # Mujoco parameters.
-    kp: float = xax.field(
-        value=1.0,
-        help="The Kp for the actuators",
-    )
-    kd: float = xax.field(
-        value=0.1,
-        help="The Kd for the actuators",
-    )
-    armature: float = xax.field(
-        value=1e-2,
-        help="A value representing the effective inertia of the actuator armature",
-    )
-    friction: float = xax.field(
-        value=1e-6,
-        help="The dynamic friction loss for the actuator",
-    )
-
     # Curriculum parameters.
     num_curriculum_levels: int = xax.field(
         value=10,
@@ -419,13 +401,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         return mujoco.MjModel.from_xml_path(mjcf_path)
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, ksim.JointMetadataOutput]:
-        return ksim.get_joint_metadata(
-            mj_model,
-            kp=self.config.kp,
-            kd=self.config.kd,
-            armature=self.config.armature,
-            friction=self.config.friction,
-        )
+        return ksim.get_joint_metadata(mj_model, kp=1.0, kd=0.1, armature=1e-2, friction=1e-6)
 
     def get_actuators(
         self,

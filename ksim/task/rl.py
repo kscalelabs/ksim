@@ -515,6 +515,30 @@ class RLConfig(xax.Config):
         value="implicitfast",
         help="The integrator algorithm to use",
     )
+    cone_type: str = xax.field(
+        value="pyramidal",
+        help="The type of contact friction cone to use for the constraint solver.",
+    )
+    impratio: float = xax.field(
+        value=1.0,
+        help="The ratio of the constraint solver.",
+    )
+    contact_margin: float | None = xax.field(
+        value=0.0005,
+        help="The contact solver margin.",
+    )
+    solimp: tuple[float, float, float, float, float] | None = xax.field(
+        value=(0.9, 0.95, 0.001, 0.5, 2.0),
+        help="The contact solver parameters.",
+    )
+    solref: tuple[float, float] | None = xax.field(
+        value=(0.02, 1.0),
+        help="The contact solver parameters.",
+    )
+    friction: tuple[float, float, float, float, float] | None = xax.field(
+        value=(1.0, 1.0, 0.005, 0.0001, 0.0001),
+        help="The contact solver parameters; two tangential, one torsional, two rolling.",
+    )
     disable_euler_damping: bool = xax.field(
         value=True,
         help="If set, disable Euler damping - this is a performance improvement",
@@ -661,12 +685,29 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if integrator is None:
             raise ValueError(f"Invalid integrator type: {self.config.integrator}")
 
+        cone_type = getattr(mjx.ConeType, self.config.cone_type.upper(), None)
+        if cone_type is None:
+            raise ValueError(f"Invalid cone type: {self.config.cone_type}")
+
         _set_opt("timestep", self.config.dt)
         _set_opt("iterations", self.config.iterations)
         _set_opt("ls_iterations", self.config.ls_iterations)
         _set_opt("integrator", integrator)
         _set_opt("tolerance", self.config.tolerance)
         _set_opt("solver", solver)
+        _set_opt("cone", cone_type)
+        _set_opt("impratio", self.config.impratio)
+
+        # For each geometry in the model, set the contact solver parameters.
+        for geom_idx in range(mj_model.ngeom):
+            if self.config.contact_margin is not None:
+                mj_model.geom_margin[geom_idx] = self.config.contact_margin
+            if self.config.solref is not None:
+                mj_model.geom_solref[geom_idx][:] = self.config.solref
+            if self.config.solimp is not None:
+                mj_model.geom_solimp[geom_idx][:] = self.config.solimp
+            if self.config.friction is not None:
+                mj_model.geom_friction[geom_idx][:] = self.config.friction
 
         if self.config.disable_euler_damping:
             mj_model.opt.disableflags = mj_model.opt.disableflags | mjx.DisableBit.EULERDAMP
