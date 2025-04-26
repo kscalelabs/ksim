@@ -188,7 +188,10 @@ def get_local_xpos(xpos: np.ndarray | jax.Array, body_id: int, base_id: int) -> 
 
 
 def get_local_reference_pos(
-    root: BvhioJoint, reference_id: int, reference_base_id: int, scaling_factor: float = 1.0,
+    root: BvhioJoint,
+    reference_id: int,
+    reference_base_id: int,
+    scaling_factor: float = 1.0,
 ) -> np.ndarray | jax.Array:
     """Gets the cartesian pos of a reference joint w.r.t. the base (e.g. pelvis)."""
     layout = root.layout()
