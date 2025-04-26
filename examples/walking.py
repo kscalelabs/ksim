@@ -380,8 +380,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
-            ksim.PitchTooGreatTermination(max_pitch=math.pi / 3),
-            ksim.RollTooGreatTermination(max_roll=math.pi / 3),
+            ksim.PitchTooGreatTermination(max_pitch=math.radians(30)),
+            ksim.RollTooGreatTermination(max_roll=math.radians(30)),
             ksim.FastAccelerationTermination(),
             ksim.FarFromOriginTermination(max_dist=10.0),
         ]
