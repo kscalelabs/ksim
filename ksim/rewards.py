@@ -24,6 +24,7 @@ __all__ = [
     "FeetFlatReward",
     "FeetNoContactReward",
     "PositionTrackingReward",
+    "UprightReward",
     "JoystickReward",
 ]
 
@@ -589,6 +590,24 @@ class PositionTrackingReward(Reward):
 
     def get_name(self) -> str:
         return f"{self.body_name}_{super().get_name()}"
+
+
+@attrs.define(frozen=True, kw_only=True)
+class UprightReward(Reward):
+    """Reward for staying upright."""
+
+    observation_name: str = attrs.field(default="projected_gravity_observation")
+    index: CartesianIndex = attrs.field(default="z", validator=dimension_index_validator)
+    inverted: bool = attrs.field(default=True)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        dim = cartesian_index_to_dim(self.index)
+        obs = trajectory.obs[self.observation_name] / 9.81
+        reward = obs[..., dim]
+        if self.inverted:
+            reward = -reward
+        reward = reward - obs.abs().mean(axis=-1)
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
