@@ -661,10 +661,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if integrator is None:
             raise ValueError(f"Invalid integrator type: {self.config.integrator}")
 
-        cone_type = getattr(mjx.ConeType, self.config.cone_type.upper(), None)
-        if cone_type is None:
-            raise ValueError(f"Invalid cone type: {self.config.cone_type}")
-
         _set_opt("timestep", self.config.dt)
         _set_opt("iterations", self.config.iterations)
         _set_opt("ls_iterations", self.config.ls_iterations)
