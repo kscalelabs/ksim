@@ -355,7 +355,7 @@ class ActuatorJerkPenalty(Reward):
         # We multiply by ctrl_dt instead of dividing because we want the scale
         # for the penalty to be roughly the same magnitude as a velocity
         # penalty.
-        jerk = (acc - prev_acc) * self.ctrl_dt
+        jerk = (acc - prev_acc) * self.ctrl_dt * self.ctrl_dt
         reward = xax.get_norm(jerk, self.norm).mean(axis=-1).squeeze(0)
         return reward
 
