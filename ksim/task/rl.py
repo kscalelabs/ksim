@@ -516,7 +516,7 @@ class RLConfig(xax.Config):
         help="The integrator algorithm to use",
     )
     cone_type: str = xax.field(
-        value="pyramidal",
+        value="elliptic",
         help="The type of contact friction cone to use for the constraint solver.",
     )
     impratio: float = xax.field(
