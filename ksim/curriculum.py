@@ -86,8 +86,8 @@ class LinearCurriculum(Curriculum[None]):
         training_state: xax.State,
         prev_state: CurriculumState[None],
     ) -> CurriculumState[None]:
-        level = self.min_level + (training_state.num_steps // self.step_every_n_epochs) * self.step_size
-        level = jnp.clip(level, 0.0, 1.0)
+        level = (training_state.num_steps // self.step_every_n_epochs) * self.step_size
+        level = jnp.clip(level, self.min_level, 1.0)
         return CurriculumState(level=level, state=None)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
@@ -120,10 +120,8 @@ class EpisodeLengthCurriculum(Curriculum[Array]):
         can_step = next_steps == 0
         should_inc = (episode_length > self.increase_threshold) & can_step
         should_dec = (episode_length < self.decrease_threshold) & can_step
-        next_level = self.min_level + jnp.where(
-            should_inc, level + step_size, jnp.where(should_dec, level - step_size, level)
-        )
-        next_level = jnp.clip(next_level, 0.0, 1.0)
+        next_level = jnp.where(should_inc, level + step_size, jnp.where(should_dec, level - step_size, level))
+        next_level = jnp.clip(next_level, self.min_level, 1.0)
         next_steps = jnp.where(should_inc | should_dec, self.min_level_steps, next_steps)
         return CurriculumState(level=next_level, state=next_steps)
 
@@ -147,8 +145,8 @@ class DistanceFromOriginCurriculum(Curriculum[None]):
         prev_state: CurriculumState[None],
     ) -> CurriculumState[None]:
         distance = jnp.linalg.norm(trajectory.qpos[..., :3], axis=-1).max()
-        level = self.min_level + (distance - self.min_distance) / (self.max_distance - self.min_distance)
-        return CurriculumState(level=jnp.clip(level, 0.0, 1.0), state=None)
+        level = (distance - self.min_distance) / (self.max_distance - self.min_distance)
+        return CurriculumState(level=jnp.clip(level, self.min_level, 1.0), state=None)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
         return CurriculumState(level=jnp.array(self.min_level), state=None)
@@ -198,12 +196,10 @@ class RewardLevelCurriculum(Curriculum[Array]):
         should_increase = reward > self.increase_threshold
         should_decrease = reward < self.decrease_threshold
         delta = 1.0 / self.num_levels
-        level = self.min_level + jnp.where(
-            should_increase, level + delta, jnp.where(should_decrease, level - delta, level)
-        )
+        level = jnp.where(should_increase, level + delta, jnp.where(should_decrease, level - delta, level))
 
         new_steps = jnp.full_like(level, self.min_level_steps, dtype=jnp.int32)
-        return jnp.clip(level, 0.0, 1.0), new_steps
+        return jnp.clip(level, self.min_level, 1.0), new_steps
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
         return CurriculumState(level=jnp.array(self.min_level), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
@@ -247,10 +243,8 @@ class StepWhenSaturated(Curriculum[Array]):
         should_increase = deaths < self.increase_threshold
         should_decrease = deaths > self.decrease_threshold
         delta = 1.0 / self.num_levels
-        level = self.min_level + jnp.where(
-            should_increase, level + delta, jnp.where(should_decrease, level - delta, level)
-        )
-        return jnp.clip(level, 0.0, 1.0), jnp.array(self.min_level_steps, dtype=jnp.int32)
+        level = jnp.where(should_increase, level + delta, jnp.where(should_decrease, level - delta, level))
+        return jnp.clip(level, self.min_level, 1.0), jnp.array(self.min_level_steps, dtype=jnp.int32)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
         return CurriculumState(level=jnp.array(self.min_level), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
