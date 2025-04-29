@@ -77,6 +77,7 @@ class LinearCurriculum(Curriculum[None]):
 
     step_size: float = attrs.field(default=0.01, validator=attrs.validators.ge(0.0))
     step_every_n_epochs: int = attrs.field(default=1, validator=attrs.validators.ge(1))
+    min_level: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
 
     def __call__(
         self,
@@ -85,12 +86,12 @@ class LinearCurriculum(Curriculum[None]):
         training_state: xax.State,
         prev_state: CurriculumState[None],
     ) -> CurriculumState[None]:
-        level = (training_state.num_steps // self.step_every_n_epochs) * self.step_size
+        level = self.min_level + (training_state.num_steps // self.step_every_n_epochs) * self.step_size
         level = jnp.clip(level, 0.0, 1.0)
         return CurriculumState(level=level, state=None)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
-        return CurriculumState(level=jnp.array(0.0), state=None)
+        return CurriculumState(level=jnp.array(self.min_level), state=None)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -102,6 +103,7 @@ class EpisodeLengthCurriculum(Curriculum[Array]):
     decrease_threshold: float = attrs.field(validator=attrs.validators.ge(0.0))
     min_level_steps: int = attrs.field(validator=attrs.validators.ge(0))
     dt: float = attrs.field(validator=attrs.validators.ge(0.0))
+    min_level: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
 
     def __call__(
         self,
@@ -118,13 +120,15 @@ class EpisodeLengthCurriculum(Curriculum[Array]):
         can_step = next_steps == 0
         should_inc = (episode_length > self.increase_threshold) & can_step
         should_dec = (episode_length < self.decrease_threshold) & can_step
-        next_level = jnp.where(should_inc, level + step_size, jnp.where(should_dec, level - step_size, level))
+        next_level = self.min_level + jnp.where(
+            should_inc, level + step_size, jnp.where(should_dec, level - step_size, level)
+        )
         next_level = jnp.clip(next_level, 0.0, 1.0)
         next_steps = jnp.where(should_inc | should_dec, self.min_level_steps, next_steps)
         return CurriculumState(level=next_level, state=next_steps)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
-        return CurriculumState(level=jnp.array(0.0), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
+        return CurriculumState(level=jnp.array(self.min_level), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -133,6 +137,7 @@ class DistanceFromOriginCurriculum(Curriculum[None]):
 
     min_distance: float = attrs.field(validator=attrs.validators.ge(0.0))
     max_distance: float = attrs.field(validator=attrs.validators.ge(0.0))
+    min_level: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
 
     def __call__(
         self,
@@ -142,11 +147,11 @@ class DistanceFromOriginCurriculum(Curriculum[None]):
         prev_state: CurriculumState[None],
     ) -> CurriculumState[None]:
         distance = jnp.linalg.norm(trajectory.qpos[..., :3], axis=-1).max()
-        level = (distance - self.min_distance) / (self.max_distance - self.min_distance)
+        level = self.min_level + (distance - self.min_distance) / (self.max_distance - self.min_distance)
         return CurriculumState(level=jnp.clip(level, 0.0, 1.0), state=None)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
-        return CurriculumState(level=jnp.array(0.0), state=None)
+        return CurriculumState(level=jnp.array(self.min_level), state=None)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -165,6 +170,7 @@ class RewardLevelCurriculum(Curriculum[Array]):
     decrease_threshold: float = attrs.field()
     reward_name: str = attrs.field()
     min_level_steps: int = attrs.field()
+    min_level: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
 
     def __call__(
         self,
@@ -192,13 +198,15 @@ class RewardLevelCurriculum(Curriculum[Array]):
         should_increase = reward > self.increase_threshold
         should_decrease = reward < self.decrease_threshold
         delta = 1.0 / self.num_levels
-        level = jnp.where(should_increase, level + delta, jnp.where(should_decrease, level - delta, level))
+        level = self.min_level + jnp.where(
+            should_increase, level + delta, jnp.where(should_decrease, level - delta, level)
+        )
 
         new_steps = jnp.full_like(level, self.min_level_steps, dtype=jnp.int32)
         return jnp.clip(level, 0.0, 1.0), new_steps
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
-        return CurriculumState(level=jnp.array(0.0), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
+        return CurriculumState(level=jnp.array(self.min_level), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -217,6 +225,7 @@ class StepWhenSaturated(Curriculum[Array]):
     increase_threshold: float = attrs.field()
     decrease_threshold: float = attrs.field()
     min_level_steps: int = attrs.field()
+    min_level: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
 
     def __call__(
         self,
@@ -238,8 +247,10 @@ class StepWhenSaturated(Curriculum[Array]):
         should_increase = deaths < self.increase_threshold
         should_decrease = deaths > self.decrease_threshold
         delta = 1.0 / self.num_levels
-        level = jnp.where(should_increase, level + delta, jnp.where(should_decrease, level - delta, level))
+        level = self.min_level + jnp.where(
+            should_increase, level + delta, jnp.where(should_decrease, level - delta, level)
+        )
         return jnp.clip(level, 0.0, 1.0), jnp.array(self.min_level_steps, dtype=jnp.int32)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
-        return CurriculumState(level=jnp.array(0.0), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
+        return CurriculumState(level=jnp.array(self.min_level), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
