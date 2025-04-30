@@ -6,6 +6,7 @@ __all__ = [
     "TorqueActuators",
     "MITPositionActuators",
     "MITPositionVelocityActuators",
+    "MITDeltaPositionActuators",
 ]
 
 import logging
@@ -14,6 +15,7 @@ from typing import Literal
 
 import jax
 import jax.numpy as jnp
+import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 
@@ -63,6 +65,97 @@ class StatefulActuators(Actuators):
     @abstractmethod
     def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> PyTree:
         """Get the initial state for the actuator."""
+
+    def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: Array) -> Array:
+        raise NotImplementedError("Stateful actuators should use `get_stateful_ctrl` instead.")
+
+
+class MITDeltaPositionActuators(StatefulActuators):
+    """Stateful MIT-mode actuator controller operating on delta position inputs."""
+
+    def __init__(
+        self,
+        physics_model: PhysicsModel,
+        joint_name_to_metadata: dict[str, JointMetadataOutput],
+        action_noise: float = 0.0,
+        action_noise_type: NoiseType = "none",
+        torque_noise: float = 0.0,
+        torque_noise_type: NoiseType = "none",
+        ctrl_clip: list[float] | None = None,
+        freejoint_first: bool = True,
+    ) -> None:
+        """Creates easily vector multipliable kps and kds."""
+        ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
+        kps_list = [-1.0] * len(ctrl_name_to_idx)
+        kds_list = [-1.0] * len(ctrl_name_to_idx)
+
+        self.freejoint_first = freejoint_first
+
+        for joint_name, params in joint_name_to_metadata.items():
+            actuator_name = self.get_actuator_name(joint_name)
+            if actuator_name not in ctrl_name_to_idx:
+                logger.warning("Joint %s has no actuator name. Skipping.", joint_name)
+                continue
+            actuator_idx = ctrl_name_to_idx[actuator_name]
+
+            kp_str = params.kp
+            kd_str = params.kd
+            assert kp_str is not None and kd_str is not None, f"Missing kp or kd for joint {joint_name}"
+            kp = float(kp_str)
+            kd = float(kd_str)
+
+            kps_list[actuator_idx] = kp
+            kds_list[actuator_idx] = kd
+
+        self.kps = jnp.array(kps_list)
+        self.kds = jnp.array(kds_list)
+        self.action_noise = action_noise
+        self.action_noise_type = action_noise_type
+        self.torque_noise = torque_noise
+        self.torque_noise_type = torque_noise_type
+
+        if ctrl_clip is not None:
+            self.ctrl_clip = jnp.array(ctrl_clip)
+        else:
+            self.ctrl_clip = jnp.ones_like(self.kps) * jnp.inf
+
+        if any(self.kps < 0) or any(self.kds < 0):
+            raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
+        if any(self.kps == 0) or any(self.kds == 0):
+            logger.warning("Some KPs or KDs are 0. Check the provided metadata.")
+
+    def get_actuator_name(self, joint_name: str) -> str:
+        # This can be overridden if necessary.
+        return f"{joint_name}_ctrl"
+
+    def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> PyTree:
+        """Get the initial state for the actuator."""
+        return xax.FrozenDict({"target_pos": jnp.zeros_like(physics_data.qpos)})
+
+    def get_stateful_ctrl(
+        self, action: Array, physics_data: PhysicsData, actuator_state: PyTree, rng: PRNGKeyArray
+    ) -> tuple[Array, PyTree]:
+        """Get the control signal from the (position) action vector."""
+        pos_rng, tor_rng = jax.random.split(rng)
+        if self.freejoint_first:
+            current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
+            current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
+        else:
+            current_pos = physics_data.qpos[:]
+            current_vel = physics_data.qvel[:]
+        target_velocities = jnp.zeros_like(action)
+
+        new_target_pos = action + actuator_state["target_pos"]
+        pos_delta = self.add_noise(self.action_noise, self.action_noise_type, new_target_pos - current_pos, pos_rng)
+        vel_delta = target_velocities - current_vel
+
+        ctrl = self.kps * pos_delta + self.kds * vel_delta
+
+        return jnp.clip(
+            self.add_noise(self.torque_noise, self.torque_noise_type, ctrl, tor_rng),
+            -self.ctrl_clip,
+            self.ctrl_clip,
+        ), xax.FrozenDict({"target_pos": new_target_pos})
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: Array) -> Array:
         raise NotImplementedError("Stateful actuators should use `get_stateful_ctrl` instead.")
