@@ -26,8 +26,8 @@ from scipy.spatial.transform import Rotation as R
 
 import ksim
 from ksim.types import PhysicsModel
-from ksim.utils.reference_motion import (
-    ReferenceMapping,
+from ksim.utils.priors import (
+    MotionReferenceMapping,
     generate_reference_motion,
     get_reference_joint_id,
     local_to_absolute,
@@ -35,11 +35,7 @@ from ksim.utils.reference_motion import (
     visualize_reference_points,
 )
 
-from .walking import (
-    HumanoidWalkingTask,
-    HumanoidWalkingTaskConfig,
-    NaiveForwardReward,
-)
+from .walking import HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 
 @dataclass
@@ -79,18 +75,18 @@ class HumanoidWalkingReferenceMotionTaskConfig(HumanoidWalkingTaskConfig):
 
 
 HUMANOID_REFERENCE_MAPPINGS = (
-    ReferenceMapping("CC_Base_L_ThighTwist01", "thigh_left"),  # hip
-    ReferenceMapping("CC_Base_L_CalfTwist01", "shin_left"),  # knee
-    ReferenceMapping("CC_Base_L_Foot", "foot_left"),  # foot
-    ReferenceMapping("CC_Base_L_UpperarmTwist01", "upper_arm_left"),  # shoulder
-    ReferenceMapping("CC_Base_L_ForearmTwist01", "lower_arm_left"),  # elbow
-    ReferenceMapping("CC_Base_L_Hand", "hand_left"),  # hand
-    ReferenceMapping("CC_Base_R_ThighTwist01", "thigh_right"),  # hip
-    ReferenceMapping("CC_Base_R_CalfTwist01", "shin_right"),  # knee
-    ReferenceMapping("CC_Base_R_Foot", "foot_right"),  # foot
-    ReferenceMapping("CC_Base_R_UpperarmTwist01", "upper_arm_right"),  # shoulder
-    ReferenceMapping("CC_Base_R_ForearmTwist01", "lower_arm_right"),  # elbow
-    ReferenceMapping("CC_Base_R_Hand", "hand_right"),  # hand
+    MotionReferenceMapping("CC_Base_L_ThighTwist01", "thigh_left"),  # hip
+    MotionReferenceMapping("CC_Base_L_CalfTwist01", "shin_left"),  # knee
+    MotionReferenceMapping("CC_Base_L_Foot", "foot_left"),  # foot
+    MotionReferenceMapping("CC_Base_L_UpperarmTwist01", "upper_arm_left"),  # shoulder
+    MotionReferenceMapping("CC_Base_L_ForearmTwist01", "lower_arm_left"),  # elbow
+    MotionReferenceMapping("CC_Base_L_Hand", "hand_left"),  # hand
+    MotionReferenceMapping("CC_Base_R_ThighTwist01", "thigh_right"),  # hip
+    MotionReferenceMapping("CC_Base_R_CalfTwist01", "shin_right"),  # knee
+    MotionReferenceMapping("CC_Base_R_Foot", "foot_right"),  # foot
+    MotionReferenceMapping("CC_Base_R_UpperarmTwist01", "upper_arm_right"),  # shoulder
+    MotionReferenceMapping("CC_Base_R_ForearmTwist01", "lower_arm_right"),  # elbow
+    MotionReferenceMapping("CC_Base_R_Hand", "hand_right"),  # hand
 )
 
 
@@ -134,24 +130,26 @@ class QposReferenceMotionReward(ksim.Reward):
     def num_frames(self) -> int:
         return self.reference_qpos.array.shape[0]
 
-    def __call__(self, trajectory: ksim.Trajectory, _: None) -> tuple[Array, None]:
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos = trajectory.qpos
         step_number = jnp.int32(jnp.round(trajectory.timestep / self.ctrl_dt)) % self.num_frames
         reference_qpos = jnp.take(self.reference_qpos.array, step_number, axis=0)
         error = xax.get_norm(reference_qpos - qpos, self.norm)
         mean_error = error.mean(axis=-1)
         reward = jnp.exp(-mean_error * self.sensitivity)
-        return reward, None
+        return reward
 
 
 class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Config]):
+    reference_qpos: Array
+
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards = [
             ksim.StayAliveReward(scale=1.0),
             QposReferenceMotionReward(
                 reference_qpos=self.reference_motion.qpos, ctrl_dt=self.config.ctrl_dt, scale=0.5
             ),
-            NaiveForwardReward(scale=1.0),
+            # ksim.NaiveForwardReward(scale=1.0),
         ]
 
         return rewards
@@ -160,7 +158,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
         mj_model: PhysicsModel = self.get_mujoco_model()
         root: BvhioJoint = bvhio.readAsHierarchy(self.config.bvh_path)
         reference_base_id = get_reference_joint_id(root, self.config.reference_base_name)
-        self.mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
+        mj_base_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, self.config.mj_base_name)
 
         def rotation_callback(root: BvhioJoint) -> None:
             euler_rotation = np.array(self.config.rotate_bvh_euler)
@@ -169,7 +167,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
 
         reference_motion = generate_reference_motion(
             model=mj_model,
-            mj_base_id=self.mj_base_id,
+            mj_base_id=mj_base_id,
             bvh_root=root,
             bvh_to_mujoco_names=HUMANOID_REFERENCE_MAPPINGS,
             bvh_base_id=reference_base_id,
@@ -193,7 +191,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
         if self.config.visualize_reference_points:
             visualize_reference_points(
                 model=mj_model,
-                base_id=self.mj_base_id,
+                base_id=mj_base_id,
                 reference_motion=np_cartesian_motion,
             )
         elif self.config.visualize_reference_motion:
@@ -201,7 +199,7 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
                 model=mj_model,
                 reference_qpos=np.asarray(self.reference_motion.qpos),
                 cartesian_motion=np_cartesian_motion,
-                mj_base_id=self.mj_base_id,
+                mj_base_id=mj_base_id,
             )
         else:
             super().run()
@@ -211,23 +209,24 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.walking_reference_motion
     # To visualize the environment, use the following command:
-    #   python -m examples.walking_reference_motion run_environment=True
+    #   python -m examples.walking_reference_motion run_model_viewer=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking_reference_motion num_envs=8 num_batches=2
+    #   python -m examples.walking_reference_motion num_envs=2 batch_size=1
     HumanoidWalkingReferenceMotionTask.launch(
         HumanoidWalkingReferenceMotionTaskConfig(
             num_envs=2048,
             batch_size=256,
             num_passes=10,
+            iterations=8,
+            ls_iterations=8,
             epochs_per_log_step=1,
             valid_every_n_steps=10,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
             max_action_latency=0.0,
-            min_action_latency=0.0,
             rollout_length_seconds=5.0,
             # PPO parameters
             gamma=0.97,

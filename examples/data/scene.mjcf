@@ -6,10 +6,6 @@
     <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance=".2"/>
   </asset>
 
-  <option timestep="0.005" solver="Newton" iterations="4" ls_iterations="8">
-    <flag eulerdamp="disable"/>
-  </option>
-
   <custom>
     <numeric data="8" name="max_contact_points"/>
     <numeric data="8" name="max_geom_pairs"/>
@@ -114,6 +110,7 @@
               <joint name="knee_right" class="knee"/>
               <geom name="shin_right" class="shin"/>
               <body name="foot_right" pos="0 0 -.39">
+                <site name="right_foot" />
                 <joint name="ankle_y_right" class="ankle_y"/>
                 <joint name="ankle_x_right" class="ankle_x" axis="1 0 .5"/>
                 <geom name="foot1_right" class="foot1"/>
@@ -130,6 +127,7 @@
               <joint name="knee_left" class="knee"/>
               <geom name="shin_left" fromto="0 0 0 0 0 -.3" class="shin"/>
               <body name="foot_left" pos="0 0 -.39">
+                <site name="left_foot" />
                 <joint name="ankle_y_left" class="ankle_y"/>
                 <joint name="ankle_x_left" class="ankle_x" axis="-1 0 -.5"/>
                 <geom name="foot1_left" class="foot1"/>
@@ -163,7 +161,7 @@
           </body>
         </body>
       </body>
-      <site name="imu_site" />
+      <site name="imu" />
     </body>
   </worldbody>
 
@@ -201,8 +199,21 @@
   </actuator>
 
   <sensor>
-    <accelerometer name="imu_acc" site="imu_site" noise="0.01" />
-    <gyro name="imu_gyro" site="imu_site" noise="0.01" />
+    <gyro site="imu" name="imu_gyro"/>
+    <velocimeter site="imu" name="local_linvel"/>
+    <accelerometer site="imu" name="imu_acc"/>
+    <framezaxis objtype="site" objname="imu" name="upvector"/>
+    <framexaxis objtype="site" objname="imu" name="forwardvector"/>
+    <framelinvel objtype="site" objname="imu" name="global_linvel"/>
+    <frameangvel objtype="site" objname="imu" name="global_angvel"/>
+    <framepos objtype="site" objname="imu" name="position"/>
+    <framequat objtype="site" objname="imu" name="orientation"/>
+    <framelinvel objtype="site" objname="right_foot" name="right_foot_global_linvel"/>
+    <framelinvel objtype="site" objname="left_foot" name="left_foot_global_linvel"/>
+    <framexaxis objtype="site" objname="left_foot" name="left_foot_upvector"/>
+    <framexaxis objtype="site" objname="right_foot" name="right_foot_upvector"/>
+    <framepos objtype="site" objname="left_foot" name="left_foot_pos"/>
+    <framepos objtype="site" objname="right_foot" name="right_foot_pos"/>
   </sensor>
 
   <keyframe>

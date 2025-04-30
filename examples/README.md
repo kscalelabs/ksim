@@ -1,28 +1,39 @@
-# Default Humanoid
+# Examples
 
-This is a simple example of a humanoid robot walking task.
+This directory contains example scripts for training policies in K-Sim.
 
-To create this example, we took the `humanoid.xml` model from: https://github.com/google-deepmind/mujoco/blob/main/mjx/mujoco/mjx/test_data/humanoid/humanoid.xml and did the following:
+While not strictly necessary, we recommend using `ksim` with a GPU - we do most of our development on 4090s, but other GPUs should work as well, although you might encounter minor bugs.
 
-- Added `_ctrl` suffix to all the motor names
-- Removed the floor geom
+To get started, follow these instructions:
 
-# AMP / Gait Matching
+1. Clone this repository:
+```bash
+git clone git@github.com:kscalelabs/ksim.git
+cd ksim
+```
+2. Create a new Python environment (requires Python 3.11 or later). We recommend using [uv](https://docs.astral.sh/uv/).
+3. Install `ksim`:
+```bash
+pip install ksim  # To install the public version
+pip install -e '.'  # To install your local copy
+```
+4. Run an example script:
+```bash
+python -m examples.walking
+```
 
-## Setup
+## Creating reference motion data
 
-First, make sure to install bvhio
+To create reference motion data, run the following command (from the root directory):
 
 ```
-pip install bvhio
+ksim-generate-reference --config examples/data/walk_normal.yaml
 ```
 
-To create the actorcore BVH file, we ran a simple converter from FBX to BVH and took the "looped" version.
+This will generate a `humanoid_amp_walk_ref.npz` file in the `examples/data` directory.
 
-To map the actorcore motion to default_humanoid update offsets (after converting from .fbx to .bvh):
+To visualize the reference motion, run the following command:
 
-- Base_Spine01: add 3 on the Z offset
-- Base_L/R_Forearm: add 5.5 to the X offset
-- Base_L/R_Hand: add 5.5 in the -X offset
-- Base_L/R_Calf: subtract 7 in the -Z offset
-- Base_L/R_Foot: subtract 7.5 in the -Z offset
+```
+ksim-visualize-reference examples/data/humanoid_amp_walk_ref.npz --model examples/data/scene.mjcf
+```

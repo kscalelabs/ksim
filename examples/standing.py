@@ -29,7 +29,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.standing
     # To visualize the environment, use the following command:
-    #   python -m examples.standing run_environment=True
+    #   python -m examples.standing run_model_viewer=True
     HumanoidStandingTask.launch(
         HumanoidStandingTaskConfig(
             # Training parameters.
@@ -38,12 +38,11 @@ if __name__ == "__main__":
             num_passes=32,
             epochs_per_log_step=1,
             rollout_length_seconds=2.0,
-            # Logging parameters.
-            # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
-            min_action_latency=0.0,
+            iterations=3,
+            ls_iterations=5,
+            max_action_latency=0.01,
         ),
     )

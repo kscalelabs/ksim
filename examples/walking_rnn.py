@@ -22,15 +22,6 @@ from .walking import (
 )
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class AuxOutputs:
-    log_probs: Array
-    values: Array
-    actor_carry: Array
-    critic_carry: Array
-
-
 class DefaultHumanoidRNNActor(eqx.Module):
     """RNN-based actor for the walking task."""
 
@@ -229,8 +220,9 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        proj_grav_3 = observations["projected_gravity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
         base_pos_3 = observations["base_position_observation"]
         base_quat_4 = observations["base_orientation_observation"]
@@ -247,8 +239,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
                 com_vel_n,  # 96
-                imu_acc_3 / 50.0,  # 3
-                imu_gyro_3 / 3.0,  # 3
+                proj_grav_3,  # 3
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
                 base_pos_3,  # 3
                 base_quat_4,  # 4
@@ -273,8 +264,9 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        proj_grav_3 = observations["projected_gravity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
         base_pos_3 = observations["base_position_observation"]
         base_quat_4 = observations["base_orientation_observation"]
@@ -291,8 +283,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
                 com_vel_n,  # 96
-                imu_acc_3 / 50.0,  # 3
-                imu_gyro_3 / 3.0,  # 3
+                proj_grav_3,  # 3
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
                 base_pos_3,  # 3
                 base_quat_4,  # 4
@@ -313,7 +304,8 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
         def scan_fn(
-            actor_critic_carry: tuple[Array, Array], transition: ksim.Trajectory
+            actor_critic_carry: tuple[Array, Array],
+            transition: ksim.Trajectory,
         ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
             actor_carry, critic_carry = actor_critic_carry
             actor_dist, next_actor_carry = self.run_actor(
@@ -336,9 +328,10 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
                 values=value.squeeze(-1),
             )
 
-            initial_carry = self.get_initial_model_carry(rng)
             next_carry = jax.tree.map(
-                lambda x, y: jnp.where(transition.done, x, y), initial_carry, (next_actor_carry, next_critic_carry)
+                lambda x, y: jnp.where(transition.done, x, y),
+                self.get_initial_model_carry(rng),
+                (next_actor_carry, next_critic_carry),
             )
 
             return next_carry, transition_ppo_variables
@@ -387,19 +380,20 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.walking_rnn
     # To visualize the environment, use the following command:
-    #   python -m examples.walking_rnn run_environment=True
+    #   python -m examples.walking_rnn run_model_viewer=True
     HumanoidWalkingRNNTask.launch(
         HumanoidWalkingRNNTaskConfig(
             # Training parameters.
             num_envs=2048,
             batch_size=256,
-            num_passes=4,
+            num_passes=2,
             epochs_per_log_step=1,
-            rollout_length_seconds=10.0,
+            rollout_length_seconds=8.0,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
-            min_action_latency=0.0,
+            iterations=3,
+            ls_iterations=5,
+            max_action_latency=0.01,
         ),
     )

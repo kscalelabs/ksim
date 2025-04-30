@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
 
-import attrs
 import distrax
 import equinox as eqx
 import jax
@@ -15,21 +14,12 @@ import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import JointMetadataOutput
-from mujoco import mjx
 
 import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
-
-
-@attrs.define(frozen=True, kw_only=True)
-class NaiveForwardReward(ksim.Reward):
-    clip_max: float = attrs.field(default=5.0)
-
-    def __call__(self, trajectory: ksim.Trajectory, reward_carry: None) -> tuple[Array, None]:
-        return trajectory.qvel[..., 0].clip(max=self.clip_max), None
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -79,12 +69,7 @@ class DefaultHumanoidActor(eqx.Module):
 
         # Softplus and clip to ensure positive standard deviations.
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
-
-        dist_n = distrax.MixtureSameFamily(
-            mixture_distribution=distrax.Categorical(logits=logits_nm),
-            components_distribution=distrax.Normal(mean_nm, std_nm),
-        )
-
+        dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
         return dist_n
 
 
@@ -175,6 +160,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=math.pi / 8,
         help="The maximum value for the angular velocity reward.",
     )
+    naive_forward_reward: bool = xax.field(
+        value=False,
+        help="If set, use the naive forward reward instead of the joystick reward.",
+    )
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
@@ -188,24 +177,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     adam_weight_decay: float = xax.field(
         value=0.0,
         help="Weight decay for the Adam optimizer.",
-    )
-
-    # Mujoco parameters.
-    kp: float = xax.field(
-        value=1.0,
-        help="The Kp for the actuators",
-    )
-    kd: float = xax.field(
-        value=0.1,
-        help="The Kd for the actuators",
-    )
-    armature: float = xax.field(
-        value=1e-2,
-        help="A value representing the effective inertia of the actuator armature",
-    )
-    friction: float = xax.field(
-        value=1e-6,
-        help="The dynamic friction loss for the actuator",
     )
 
     # Curriculum parameters.
@@ -232,23 +203,12 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The body id to track with the render camera.",
     )
 
-    # Checkpointing parameters.
-    export_for_inference: bool = xax.field(
-        value=False,
-        help="Whether to export the model for inference.",
-    )
-
 
 Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 
 
 class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
-        """Builds the optimizer.
-
-        This provides a reasonable default optimizer for training PPO models,
-        but can be overridden by subclasses who want to do something different.
-        """
         optimizer = optax.chain(
             optax.clip_by_global_norm(self.config.max_grad_norm),
             (
@@ -260,29 +220,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
         return optimizer
 
-    def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
+    def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
-        mj_model = mujoco.MjModel.from_xml_path(mjcf_path)
+        return mujoco.MjModel.from_xml_path(mjcf_path)
 
-        mj_model.opt.timestep = jnp.array(self.config.dt)
-        mj_model.opt.iterations = 4
-        mj_model.opt.ls_iterations = 8
-        mj_model.opt.disableflags = mjx.DisableBit.EULERDAMP
-        mj_model.opt.solver = mjx.SolverType.CG
-
-        # Observed NaNs in qpos with Newton solver...
-        # mj_model.opt.solver = mjx.SolverType.NEWTON
-
-        return mj_model
-
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        return ksim.get_joint_metadata(
-            mj_model,
-            kp=self.config.kp,
-            kd=self.config.kd,
-            armature=self.config.armature,
-            friction=self.config.friction,
-        )
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, ksim.JointMetadataOutput]:
+        return ksim.get_joint_metadata(mj_model, kp=1.0, kd=0.1, armature=1e-2, friction=1e-6)
 
     def get_actuators(
         self,
@@ -319,7 +262,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
-            ksim.RandomJointPositionReset(),
+            ksim.RandomJointPositionReset.create(physics_model, zeros={"abdomen_z": 0.0}),
             ksim.RandomJointVelocityReset(),
         ]
 
@@ -336,9 +279,26 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.BaseAngularVelocityObservation(),
             ksim.BaseLinearAccelerationObservation(),
             ksim.BaseAngularAccelerationObservation(),
+            ksim.ProjectedGravityObservation.create(
+                physics_model=physics_model,
+                framequat_name="orientation",
+            ),
             ksim.ActuatorAccelerationObservation(),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="local_linvel"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="forwardvector"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_linvel"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_angvel"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="position"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="orientation"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_global_linvel"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_global_linvel"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_upvector"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_upvector"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_pos"),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_pos"),
             ksim.FeetContactObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names=["foot1_left", "foot2_left"],
@@ -369,21 +329,35 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
+        rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(scale=1.0),
-            ksim.JoystickReward(
-                linear_velocity_clip_max=self.config.linear_velocity_clip_max,
-                angular_velocity_clip_max=self.config.angular_velocity_clip_max,
-                command_name="joystick_command",
-                scale=1.0,
-            ),
+            ksim.UprightReward(scale=1.0),
         ]
+
+        if self.config.naive_forward_reward:
+            rewards += [
+                ksim.NaiveForwardReward(
+                    scale=1.0,
+                ),
+            ]
+
+        else:
+            rewards += [
+                ksim.JoystickReward(
+                    linear_velocity_clip_max=self.config.linear_velocity_clip_max,
+                    angular_velocity_clip_max=self.config.angular_velocity_clip_max,
+                    command_name="joystick_command",
+                    scale=1.0,
+                ),
+            ]
+
+        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
-            ksim.PitchTooGreatTermination(max_pitch=math.pi / 3),
-            ksim.RollTooGreatTermination(max_roll=math.pi / 3),
+            ksim.PitchTooGreatTermination(max_pitch=math.radians(30)),
+            ksim.RollTooGreatTermination(max_roll=math.radians(30)),
             ksim.FastAccelerationTermination(),
             # ksim.FarFromOriginTermination(max_dist=10.0),
         ]
@@ -419,8 +393,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        proj_grav_3 = observations["projected_gravity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
         base_pos_3 = observations["base_position_observation"]
         base_quat_4 = observations["base_orientation_observation"]
@@ -437,8 +412,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
                 com_vel_n,  # 96
-                imu_acc_3 / 50.0,  # 3
-                imu_gyro_3 / 3.0,  # 3
+                proj_grav_3,  # 3
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
                 base_pos_3,  # 3
                 base_quat_4,  # 4
@@ -462,8 +436,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        proj_grav_3 = observations["projected_gravity_observation"]
         act_frc_obs_n = observations["actuator_force_observation"]
         base_pos_3 = observations["base_position_observation"]
         base_quat_4 = observations["base_orientation_observation"]
@@ -480,8 +455,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
                 com_vel_n,  # 96
-                imu_acc_3 / 50.0,  # 3
-                imu_gyro_3 / 3.0,  # 3
+                proj_grav_3,  # 3
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
                 base_pos_3,  # 3
                 base_quat_4,  # 4
@@ -545,7 +519,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.walking
     # To visualize the environment, use the following command:
-    #   python -m examples.walking run_environment=True
+    #   python -m examples.walking run_model_viewer=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
@@ -555,15 +529,19 @@ if __name__ == "__main__":
             # Training parameters.
             num_envs=2048,
             batch_size=256,
-            num_passes=4,
+            num_passes=2,
             epochs_per_log_step=1,
-            rollout_length_seconds=10.0,
+            rollout_length_seconds=8.0,
             # Logging parameters.
-            # log_full_trajectory_every_n_seconds=60,
+            valid_first_n_steps=1,
+            render_full_every_n_steps=1,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
-            min_action_latency=0.0,
+            iterations=3,
+            ls_iterations=5,
+            max_action_latency=0.01,
+            # Checkpointing parameters.
+            save_every_n_seconds=60,
         ),
     )

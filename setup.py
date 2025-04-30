@@ -27,7 +27,7 @@ version: str = version_re.group(1)
 setup(
     name="ksim",
     version=version,
-    description="The ksim project",
+    description="A modular and easy-to-use framework for training policies in simulation.",
     author="K-Scale Labs",
     url="https://github.com/kscalelabs/ksim",
     long_description=long_description,
@@ -36,9 +36,10 @@ setup(
     install_requires=requirements,
     extras_require={"dev": requirements_dev},
     packages=find_packages(),
-    # entry_points={
-    #     "console_scripts": [
-    #         "ksim.cli:main",
-    #     ],
-    # },
+    entry_points={
+        "console_scripts": [
+            "ksim-generate-reference=ksim.utils.priors:main",
+            "ksim-visualize-reference=ksim.utils.priors:vis_entry_point",
+        ],
+    },
 )
