@@ -392,17 +392,20 @@ class AvoidLimitsReward(Reward):
         reward = jnp.where(joint_limited, in_bounds, 0)
         return reward.all(axis=-1).astype(trajectory.qpos.dtype)
 
-
-def joint_threshold_validator(
-    inst: "ActionNearPositionPenalty",
-    attr: attrs.Attribute,
-    value: xax.HashableArray,
-) -> None:
-    arr = value.array
-    if arr.ndim != 1:
-        raise ValueError(f"Joint threshold must have shape (n_joints,), got {arr.shape}")
-    if arr.dtype != jnp.float32:
-        raise ValueError(f"Joint threshold must be a float array, got {arr.dtype}")
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        factor: float = 0.05,
+    ) -> Self:
+        jnt_min, jnt_max = model.jnt_range[..., 0], model.jnt_range[..., 1]
+        jnt_diff = (jnt_max - jnt_min) * factor
+        jnt_min = jnt_min - jnt_diff
+        jnt_max = jnt_max + jnt_diff
+        return cls(
+            joint_limits=jnp.stack([jnt_min, jnt_max], axis=-1),
+            joint_limited=model.jnt_limited,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -427,12 +430,12 @@ class ActionNearPositionPenalty(Reward):
     controller model, where actions correspond to positions.
     """
 
-    joint_threshold: xax.HashableArray = attrs.field(validator=joint_threshold_validator)
+    joint_threshold: float = attrs.field(validator=attrs.validators.gt(0.0))
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         current_position = trajectory.qpos[..., 7:]
         action = trajectory.action
-        out_of_bounds = jnp.abs(current_position - action) > self.joint_threshold.array
+        out_of_bounds = jnp.abs(current_position - action) > self.joint_threshold
         return out_of_bounds.astype(trajectory.qpos.dtype).mean(axis=-1)
 
 
