@@ -15,6 +15,7 @@ __all__ = [
     "BaseHeightRangeReward",
     "ActionSmoothnessPenalty",
     "ActuatorForcePenalty",
+    "ActuatorRelativeForcePenalty",
     "BaseJerkZPenalty",
     "ActuatorJerkPenalty",
     "AvoidLimitsReward",
@@ -311,6 +312,40 @@ class ActuatorForcePenalty(Reward):
             raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
         reward = xax.get_norm(trajectory.obs[self.observation_name], self.norm).mean(axis=-1)
         return reward
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ActuatorRelativeForcePenalty(Reward):
+    """Same as ActuatorForcePenalty but scaled by the maximum force on each actuator."""
+
+    magnitudes: tuple[float, ...] = attrs.field()
+    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
+    observation_name: str = attrs.field(default="actuator_force_observation")
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        if self.observation_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
+        reward = xax.get_norm(trajectory.obs[self.observation_name], self.norm)
+        reward = reward / jnp.array(self.magnitudes)
+        return reward.mean(axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        norm: xax.NormType = "l1",
+        observation_name: str = "actuator_force_observation",
+        scale: float = -1.0,
+    ) -> Self:
+        act_force = jnp.array(model.jnt_actfrcrange)
+
+        breakpoint()
+
+        return cls(
+            observation_name=observation_name,
+            norm=norm,
+            scale=scale,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
