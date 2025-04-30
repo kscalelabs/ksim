@@ -430,12 +430,13 @@ class ActionNearPositionPenalty(Reward):
     controller model, where actions correspond to positions.
     """
 
-    joint_threshold: float = attrs.field(validator=attrs.validators.gt(0.0))
+    joint_threshold: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
+    backoff_scale: float = attrs.field(default=1.0)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         current_position = trajectory.qpos[..., 7:]
         action = trajectory.action
-        out_of_bounds = jnp.abs(current_position - action) > self.joint_threshold
+        out_of_bounds = jnp.abs(current_position - action).clip(min=self.joint_threshold) * self.backoff_scale
         return out_of_bounds.astype(trajectory.qpos.dtype).mean(axis=-1)
 
 
