@@ -6,6 +6,7 @@ __all__ = [
     "TorqueActuators",
     "MITPositionActuators",
     "MITPositionVelocityActuators",
+    "MITDeltaPositionActuators",
 ]
 
 import logging
@@ -226,3 +227,14 @@ class MITPositionVelocityActuators(MITPositionActuators):
         else:
             qpos_dim = len(physics_data.qpos)
         return jnp.zeros(qpos_dim * 2)
+
+
+class MITDeltaPositionActuators(MITPositionActuators):
+    """Stateful MIT-mode actuator controller operating on delta position inputs."""
+
+    def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
+        if self.freejoint_first:
+            current_pos = physics_data.qpos[7:]
+        else:
+            current_pos = physics_data.qpos[:]
+        return super().get_ctrl(action + current_pos, physics_data, rng)
