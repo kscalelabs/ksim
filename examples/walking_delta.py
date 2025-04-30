@@ -8,21 +8,21 @@ from kscale.web.gen.api import JointMetadataOutput
 
 import ksim
 
-from .walking import (
-    HumanoidWalkingTask,
-    HumanoidWalkingTaskConfig,
+from .walking_rnn import (
+    HumanoidWalkingRNNTask,
+    HumanoidWalkingRNNTaskConfig,
 )
 
 
 @dataclass
-class HumanoidWalkingDeltaTaskConfig(HumanoidWalkingTaskConfig):
+class HumanoidWalkingDeltaTaskConfig(HumanoidWalkingRNNTaskConfig):
     pass
 
 
 Config = TypeVar("Config", bound=HumanoidWalkingDeltaTaskConfig)
 
 
-class HumanoidWalkingDeltaTask(HumanoidWalkingTask[Config], Generic[Config]):
+class HumanoidWalkingDeltaTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
     def get_actuators(
         self,
         physics_model: ksim.PhysicsModel,
