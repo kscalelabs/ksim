@@ -55,9 +55,15 @@ class MotionReferenceData:
     """Stores reference motion data (qpos and Cartesian poses)."""
 
     qpos: xax.HashableArray  # Shape: [T, nq]
-    qvel: xax.HashableArray  # Shape: [T, nq]
-    cartesian_poses: xax.FrozenDict[int, xax.HashableArray]  # Dict: body_id -> [T, 3]
-    ctrl_dt: float
+    qvel: xax.HashableArray  # Shape: [T, nq - 1]
+    # cartesian_poses: xax.FrozenDict[int, xax.HashableArray]  # Dict: body_id -> [T, 3]
+    freejoint: bool = False
+    ctrl_dt: float | None = None
+    xpos: xax.HashableArray | None = None  # Shape: [T, nb, 3]
+    xquat: xax.HashableArray | None = None  # Shape: [T, nb, 4]
+    cvel: xax.HashableArray | None = None  # Shape: [T, 6]
+    site_xpos: xax.HashableArray | None = None  # Shape: [T, ns, 3]
+    site_xmat: xax.HashableArray | None = None  # Shape: [T, ns, 9]
 
     @property
     def num_frames(self) -> int:
@@ -81,6 +87,26 @@ class MotionReferenceData:
             lambda hashable_arr: jnp.take(hashable_arr.array, frame_index, axis=0), self.cartesian_poses
         )
 
+    def get_site_xpos_at_step(self, step: int | Array) -> Array:
+        """Gets the reference site_xpos at a specific step (or steps)."""
+        frame_index = step % self.num_frames
+        return jnp.take(self.site_xpos.array, frame_index, axis=0)
+
+    def get_cvel_at_step(self, step: int | Array) -> Array:
+        """Gets the reference cvel at a specific step (or steps)."""
+        frame_index = step % self.num_frames
+        return jnp.take(self.cvel.array, frame_index, axis=0)
+
+    def get_xpos_at_step(self, step: int | Array) -> Array:
+        """Gets the reference xpos at a specific step (or steps)."""
+        frame_index = step % self.num_frames
+        return jnp.take(self.xpos.array, frame_index, axis=0)
+
+    def get_xquat_at_step(self, step: int | Array) -> Array:
+        """Gets the reference xquat at a specific step (or steps)."""
+        frame_index = step % self.num_frames
+        return jnp.take(self.xquat.array, frame_index, axis=0)
+
     def get_qpos_at_time(self, time: float | Array) -> Array:
         """Gets the reference qpos closest to a specific time."""
         step = jnp.int32(jnp.round(time / self.ctrl_dt))
@@ -90,6 +116,26 @@ class MotionReferenceData:
         """Gets the reference Cartesian pose closest to a specific time."""
         step = jnp.int32(jnp.round(time / self.ctrl_dt))
         return self.get_cartesian_pose_at_step(step)
+
+    def get_xpos_at_time(self, time: float | Array) -> Array:
+        """Gets the reference xpos closest to a specific time."""
+        step = jnp.int32(jnp.round(time / self.ctrl_dt))
+        return self.get_xpos_at_step(step)
+
+    def get_xquat_at_time(self, time: float | Array) -> Array:
+        """Gets the reference xquat closest to a specific time."""
+        step = jnp.int32(jnp.round(time / self.ctrl_dt))
+        return self.get_xquat_at_step(step)
+
+    def get_site_xpos_at_time(self, time: float | Array) -> Array:
+        """Gets the reference site_xpos closest to a specific time."""
+        step = jnp.int32(jnp.round(time / self.ctrl_dt))
+        return self.get_site_xpos_at_step(step)
+
+    def get_cvel_at_time(self, time: float | Array) -> Array:
+        """Gets the reference cvel closest to a specific time."""
+        step = jnp.int32(jnp.round(time / self.ctrl_dt))
+        return self.get_cvel_at_step(step)
 
     def save(self, path: str | Path) -> None:
         """Saves the MotionReferenceData to a .npz file."""
@@ -113,7 +159,7 @@ class MotionReferenceData:
         logger.info("Saved reference motion data to %s", save_path)
 
     @classmethod
-    def load(cls, path: str | Path) -> Self:
+    def load(cls, path: str | Path, freejoint: bool = False) -> Self:
         """Loads MotionReferenceData from a .npz file."""
         load_path = Path(path)
         if not load_path.exists():
@@ -122,24 +168,65 @@ class MotionReferenceData:
         logger.info("Loading reference motion data from %s", load_path)
         data = np.load(load_path)
 
-        qpos = xax.HashableArray(jnp.array(data["qpos"]))
-        qvel = xax.HashableArray(jnp.array(data["qvel"]))
-        ctrl_dt = float(data["ctrl_dt"].item())
+        if "qpos" not in data or "qvel" not in data:
+            raise ValueError("qpos or qvel must be present in reference motion file")
 
-        # Reconstruct cartesian poses dictionary
-        body_ids = data["cartesian_pose_body_ids"]
-        cartesian_poses_stacked = data["cartesian_poses_stacked"]
-        cartesian_poses: xax.FrozenDict[int, xax.HashableArray] = xax.FrozenDict(
-            {
-                int(body_id): xax.HashableArray(jnp.array(cartesian_poses_stacked[i]))
-                for i, body_id in enumerate(body_ids)
-            }
-        )
+        qvel = xax.HashableArray(jnp.array(data["qvel"]))
+        qpos = xax.HashableArray(jnp.array(data["qpos"]))
+
+        if "xpos" in data:
+            xpos = xax.HashableArray(jnp.array(data["xpos"]))
+        else:
+            xpos = None
+
+        if "xquat" in data:
+            xquat = xax.HashableArray(jnp.array(data["xquat"]))
+        else:
+            xquat = None
+
+        if "site_xpos" in data:
+            site_xpos = xax.HashableArray(jnp.array(data["site_xpos"]))
+        else:
+            site_xpos = None
+
+        if "site_xmat" in data:
+            site_xmat = xax.HashableArray(jnp.array(data["site_xmat"]))
+        else:
+            site_xmat = None
+
+        if "ctrl_dt" in data:
+            ctrl_dt = float(data["ctrl_dt"].item())
+        else:
+            # TODO Fix it
+            ctrl_dt = None
+            ctrl_dt = 0.02
+
+        if "cvel" in data:
+            cvel = xax.HashableArray(jnp.array(data["cvel"]))
+        else:
+            cvel = None
+
+        if "cartesian_pose_body_ids" in data and "cartesian_poses_stacked" in data:
+            body_ids = data["cartesian_pose_body_ids"]
+            cartesian_poses_stacked = data["cartesian_poses_stacked"]
+            cartesian_poses: xax.FrozenDict[int, xax.HashableArray] = xax.FrozenDict(
+                {
+                    int(body_id): xax.HashableArray(jnp.array(cartesian_poses_stacked[i]))
+                    for i, body_id in enumerate(body_ids)
+                }
+            )
+        else:
+            cartesian_poses = None
 
         return cls(
             qpos=qpos,
             qvel=qvel,
-            cartesian_poses=cartesian_poses,
+            freejoint=freejoint,
+            xpos=xpos,
+            xquat=xquat,
+            cvel=cvel,
+            site_xpos=site_xpos,
+            site_xmat=site_xmat,
             ctrl_dt=ctrl_dt,
         )
 
@@ -281,6 +368,7 @@ def visualize_reference_points(
 def visualize_reference_motion(
     model: mujoco.MjModel,
     reference_qpos: np.ndarray,
+    reference_qvel: np.ndarray,
     cartesian_motion: xax.FrozenDict[int, np.ndarray],
     mj_base_id: int,
 ) -> None:
@@ -299,6 +387,7 @@ def visualize_reference_motion(
 
         # Update the pose from reference qpos
         data.qpos = reference_qpos[frame]
+        data.qvel = reference_qvel[frame]
         mujoco.mj_forward(model, data)
 
         # Clear previous geoms
@@ -327,7 +416,7 @@ def visualize_reference_motion(
         # Advance simulation time
         data.time += model.opt.timestep
 
-        viewer.render(callback=marker_callback)
+        viewer.render() #callback=marker_callback)
 
 
 def get_reference_cartesian_poses(

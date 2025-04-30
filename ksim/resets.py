@@ -248,14 +248,18 @@ class InitialMotionStateReset(Reset):
     """Resets the initial state to the one from the motion bank."""
 
     reference_motion: MotionReferenceData
-    freejoint: bool = attrs.field(default=False)
+    # Motion reference data might have frames that
+    # are too high for the robot to handle in mjx.
+    clip_vel: float = attrs.field(default=jnp.inf)
+    clip_pos: float = attrs.field(default=jnp.inf)
 
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         frame_index = jax.random.randint(rng, (1,), 0, self.reference_motion.num_frames)[0]
-        qpos = self.reference_motion.get_qpos_at_step(frame_index)
-        qvel = self.reference_motion.get_qvel_at_step(frame_index)
 
-        if self.freejoint:
+        qpos = self.reference_motion.get_qpos_at_step(frame_index).clip(-self.clip_pos, self.clip_pos)
+        qvel = self.reference_motion.get_qvel_at_step(frame_index).clip(-self.clip_vel, self.clip_vel)
+
+        if self.reference_motion.freejoint:
             data = update_data_field(data, "qpos", qpos)
             data = update_data_field(data, "qvel", qvel)
         else:
@@ -264,5 +268,17 @@ class InitialMotionStateReset(Reset):
             new_qvel = jnp.concatenate([data.qvel[:6], qvel[7:]])
             data = update_data_field(data, "qvel", new_qvel)
 
-        data = update_data_field(data, "time", frame_index * self.reference_motion.ctrl_dt)
+        if self.reference_motion.cvel is not None:
+            cvel = self.reference_motion.get_cvel_at_step(frame_index)
+            data = update_data_field(data, "cvel", cvel)
+        if self.reference_motion.xpos is not None:
+            xpos = self.reference_motion.get_xpos_at_step(frame_index)
+            data = update_data_field(data, "xpos", xpos)
+        if self.reference_motion.xquat is not None:
+            xquat = self.reference_motion.get_xquat_at_step(frame_index)
+            data = update_data_field(data, "xquat", xquat)
+
+        if self.reference_motion.ctrl_dt:
+            data = update_data_field(data, "time", frame_index * self.reference_motion.ctrl_dt)
+        breakpoint()
         return data
