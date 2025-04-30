@@ -397,7 +397,7 @@ class AvoidLimitsReward(Reward):
         jnt_min = jnp.where(jnt_limited, jnt_min, -jnp.inf)
         jnt_max = jnp.where(jnt_limited, jnt_max, jnp.inf)
         joint_limits = jnp.stack([jnt_min, jnt_max], axis=-1)
-        return cls(joint_limits=xax.hashable_array(joint_limits), scale=scale)
+        return cls(joint_limits=xax.hashable_array(joint_limits[..., 1:, :]), scale=scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
