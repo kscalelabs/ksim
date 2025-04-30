@@ -405,7 +405,7 @@ class AvoidLimitsReward(Reward):
         jnt_max = jnt_max + jnt_diff
         return cls(
             joint_limits=xax.hashable_array(jnp.stack([jnt_min, jnt_max], axis=-1)),
-            joint_limited=xax.hashable_array(model.jnt_limited),
+            joint_limited=xax.hashable_array(jnp.array(model.jnt_limited, dtype=jnp.bool_)),
             scale=scale,
         )
 
