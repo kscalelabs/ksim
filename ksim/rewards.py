@@ -397,14 +397,16 @@ class AvoidLimitsReward(Reward):
         cls,
         model: PhysicsModel,
         factor: float = 0.05,
+        scale: float = 1.0,
     ) -> Self:
         jnt_min, jnt_max = model.jnt_range[..., 0], model.jnt_range[..., 1]
         jnt_diff = (jnt_max - jnt_min) * factor
         jnt_min = jnt_min - jnt_diff
         jnt_max = jnt_max + jnt_diff
         return cls(
-            joint_limits=jnp.stack([jnt_min, jnt_max], axis=-1),
-            joint_limited=model.jnt_limited,
+            joint_limits=xax.hashable_array(jnp.stack([jnt_min, jnt_max], axis=-1)),
+            joint_limited=xax.hashable_array(model.jnt_limited),
+            scale=scale,
         )
 
 
