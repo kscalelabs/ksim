@@ -369,12 +369,6 @@ def joint_limits_validator(inst: "AvoidLimitsReward", attr: attrs.Attribute, val
         raise ValueError(f"Joint range must be a float array, got {arr.dtype}")
 
 
-def joint_limited_validator(inst: "AvoidLimitsReward", attr: attrs.Attribute, value: xax.HashableArray) -> None:
-    arr = value.array
-    if arr.ndim != 1:
-        raise ValueError(f"Joint limited must have shape (n_joints,), got {arr.shape}")
-
-
 @attrs.define(frozen=True, kw_only=True)
 class AvoidLimitsReward(Reward):
     """Reward for being too close to the joint limits."""
