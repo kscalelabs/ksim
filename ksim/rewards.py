@@ -337,12 +337,19 @@ class ActuatorRelativeForcePenalty(Reward):
         observation_name: str = "actuator_force_observation",
         scale: float = -1.0,
     ) -> Self:
-        act_force = jnp.array(model.jnt_actfrcrange)
+        act_force_limited = jnp.array(model.jnt_actfrclimited)[..., 1:]
+        if not act_force_limited.all().item():
+            raise ValueError("Actuator force limits must be set for all actuators.")
 
-        breakpoint()
+        act_force = jnp.array(model.jnt_actfrcrange)[..., 1:, :]
+        act_force_min, act_force_max = act_force[..., 0], act_force[..., 1]
+        act_force_magnitude = (act_force_max - act_force_min) // 2
+        chex.assert_shape(act_force_magnitude, (None,))
+        magnitudes = tuple(act_force_magnitude.tolist())
 
         return cls(
             observation_name=observation_name,
+            magnitudes=magnitudes,
             norm=norm,
             scale=scale,
         )
