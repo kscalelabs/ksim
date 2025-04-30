@@ -394,9 +394,9 @@ class AvoidLimitsReward(Reward):
         jnt_diff = (jnt_max - jnt_min) * factor
         jnt_min = jnt_min - jnt_diff
         jnt_max = jnt_max + jnt_diff
+        jnt_min = jnp.where(jnt_limited, jnt_min, -jnp.inf)
+        jnt_max = jnp.where(jnt_limited, jnt_max, jnp.inf)
         joint_limits = jnp.stack([jnt_min, jnt_max], axis=-1)
-        inf_limits = jnp.stack([jnp.full_like(jnt_min, -jnp.inf), jnp.full_like(jnt_max, jnp.inf)], axis=-1)
-        joint_limits = jnp.where(jnt_limited, joint_limits, inf_limits)
         return cls(joint_limits=xax.hashable_array(joint_limits), scale=scale)
 
 
