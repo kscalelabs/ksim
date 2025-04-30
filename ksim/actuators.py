@@ -11,12 +11,10 @@ __all__ = [
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Literal
 
 import jax
 import jax.numpy as jnp
-import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 
