@@ -69,12 +69,7 @@ class DefaultHumanoidActor(eqx.Module):
 
         # Softplus and clip to ensure positive standard deviations.
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
-
-        dist_n = distrax.MixtureSameFamily(
-            mixture_distribution=distrax.Categorical(logits=logits_nm),
-            components_distribution=distrax.Normal(mean_nm, std_nm),
-        )
-
+        dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
         return dist_n
 
 
@@ -184,24 +179,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="Weight decay for the Adam optimizer.",
     )
 
-    # Mujoco parameters.
-    kp: float = xax.field(
-        value=1.0,
-        help="The Kp for the actuators",
-    )
-    kd: float = xax.field(
-        value=0.1,
-        help="The Kd for the actuators",
-    )
-    armature: float = xax.field(
-        value=1e-2,
-        help="A value representing the effective inertia of the actuator armature",
-    )
-    friction: float = xax.field(
-        value=1e-6,
-        help="The dynamic friction loss for the actuator",
-    )
-
     # Curriculum parameters.
     num_curriculum_levels: int = xax.field(
         value=10,
@@ -232,11 +209,6 @@ Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 
 class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
-        """Builds the optimizer.
-
-        This provides a reasonable default optimizer for training PPO models,
-        but can be overridden by subclasses who want to do something different.
-        """
         optimizer = optax.chain(
             optax.clip_by_global_norm(self.config.max_grad_norm),
             (
@@ -248,18 +220,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
         return optimizer
 
-    def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
+    def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         return mujoco.MjModel.from_xml_path(mjcf_path)
 
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        return ksim.get_joint_metadata(
-            mj_model,
-            kp=self.config.kp,
-            kd=self.config.kd,
-            armature=self.config.armature,
-            friction=self.config.friction,
-        )
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, ksim.JointMetadataOutput]:
+        return ksim.get_joint_metadata(mj_model, kp=1.0, kd=0.1, armature=1e-2, friction=1e-6)
 
     def get_actuators(
         self,
@@ -296,7 +262,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
-            ksim.RandomJointPositionReset(),
+            ksim.RandomJointPositionReset.create(physics_model, zeros={"abdomen_z": 0.0}),
             ksim.RandomJointVelocityReset(),
         ]
 
@@ -365,8 +331,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(scale=1.0),
-            ksim.AngularVelocityPenalty(index="x", scale=-0.001),
-            ksim.AngularVelocityPenalty(index="y", scale=-0.001),
+            ksim.UprightReward(scale=1.0),
         ]
 
         if self.config.naive_forward_reward:
@@ -391,8 +356,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
-            ksim.PitchTooGreatTermination(max_pitch=math.pi / 3),
-            ksim.RollTooGreatTermination(max_roll=math.pi / 3),
+            ksim.PitchTooGreatTermination(max_pitch=math.radians(30)),
+            ksim.RollTooGreatTermination(max_roll=math.radians(30)),
             ksim.FastAccelerationTermination(),
             ksim.FarFromOriginTermination(max_dist=10.0),
         ]
@@ -554,7 +519,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.walking
     # To visualize the environment, use the following command:
-    #   python -m examples.walking run_environment=True
+    #   python -m examples.walking run_model_viewer=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
@@ -568,12 +533,13 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
             # Logging parameters.
-            # log_full_trajectory_every_n_seconds=60,
+            valid_first_n_steps=1,
+            render_full_every_n_steps=1,
             # Simulation parameters.
-            dt=0.005,
+            dt=0.002,
             ctrl_dt=0.02,
-            iterations=8,
-            ls_iterations=8,
+            iterations=3,
+            ls_iterations=5,
             max_action_latency=0.01,
             # Checkpointing parameters.
             save_every_n_seconds=60,

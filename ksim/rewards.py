@@ -24,6 +24,7 @@ __all__ = [
     "FeetFlatReward",
     "FeetNoContactReward",
     "PositionTrackingReward",
+    "UprightReward",
     "JoystickReward",
 ]
 
@@ -95,6 +96,7 @@ class Reward(ABC):
     """Base class for defining reward functions."""
 
     scale: float = attrs.field(validator=reward_scale_validator)
+    scale_by_curriculum: bool = attrs.field(default=False)
 
     @abstractmethod
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -164,12 +166,16 @@ class StayAliveReward(Reward):
     """
 
     balance: float = attrs.field(default=10.0)
-    success_reward: float = attrs.field(default=0.0)
+    success_reward: float | None = attrs.field(default=None)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         reward = jnp.where(
             trajectory.done,
-            jnp.where(trajectory.success, self.success_reward, -1.0),
+            jnp.where(
+                trajectory.success,
+                1.0 / self.balance if self.success_reward is None else self.success_reward,
+                -1.0,
+            ),
             1.0 / self.balance,
         )
         return reward
@@ -346,10 +352,9 @@ class ActuatorJerkPenalty(Reward):
         acc = acc[None]
         # First value will always be 0, because the acceleration is not changing.
         prev_acc = jnp.concatenate([acc[..., :1], acc[..., :-1]], axis=-1)
-        # We multiply by ctrl_dt instead of dividing because we want the scale
-        # for the penalty to be roughly the same magnitude as a velocity
-        # penalty.
-        jerk = (acc - prev_acc) * self.ctrl_dt
+        # We multiply by ctrl_dt here we want the scale for the penalty to be
+        # roughly the same magnitude as a velocity penalty.
+        jerk = (acc - prev_acc) * self.ctrl_dt * self.ctrl_dt
         reward = xax.get_norm(jerk, self.norm).mean(axis=-1).squeeze(0)
         return reward
 
@@ -566,6 +571,7 @@ class PositionTrackingReward(Reward):
         temp: float = 1.0,
         monotonic_fn: MonotonicFn = "inv",
         scale: float = 1.0,
+        scale_by_curriculum: bool = False,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
         base_body_idx = get_body_data_idx_from_name(model, base_body_name)
@@ -576,12 +582,31 @@ class PositionTrackingReward(Reward):
             command_name=command_name,
             body_name=tracked_body_name,
             scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
             temp=temp,
             monotonic_fn=monotonic_fn,
         )
 
     def get_name(self) -> str:
         return f"{self.body_name}_{super().get_name()}"
+
+
+@attrs.define(frozen=True, kw_only=True)
+class UprightReward(Reward):
+    """Reward for staying upright."""
+
+    observation_name: str = attrs.field(default="projected_gravity_observation")
+    index: CartesianIndex = attrs.field(default="z", validator=dimension_index_validator)
+    inverted: bool = attrs.field(default=True)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        dim = cartesian_index_to_dim(self.index)
+        obs = trajectory.obs[self.observation_name] / 9.81
+        reward = obs[..., dim]
+        if self.inverted:
+            reward = -reward
+        reward = reward * 2 - jnp.abs(obs).mean(axis=-1)
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)

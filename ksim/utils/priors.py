@@ -1,9 +1,32 @@
 """Reference motion utilities."""
 
-import time
-from dataclasses import dataclass
-from typing import Callable
+__all__ = [
+    "MotionReferenceMapping",
+    "MotionReferenceData",
+    "get_local_xpos",
+    "get_local_reference_pos",
+    "local_to_absolute",
+    "get_reference_joint_id",
+    "get_body_id",
+    "get_reference_joint_ids",
+    "get_body_ids",
+    "visualize_reference_points",
+    "visualize_reference_motion",
+    "get_reference_cartesian_poses",
+    "generate_reference_motion",
+]
 
+import argparse
+import logging
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Self, Sequence, cast
+
+import bvhio
+import colorlogging
+import glm
 import jax
 import jax.numpy as jnp
 import mujoco
@@ -11,19 +34,24 @@ import numpy as np
 import xax
 from bvhio.lib.hierarchy import Joint as BvhioJoint
 from jaxtyping import Array
+from omegaconf import MISSING, DictConfig, ListConfig, OmegaConf
+from omegaconf.errors import ConfigKeyError, MissingMandatoryValue
 from scipy.optimize import least_squares
+from scipy.spatial.transform import Rotation as R
 
 from ksim.viewer import GlfwMujocoViewer
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
-class ReferenceMapping:
+class MotionReferenceMapping:
     reference_joint_name: str
     mj_body_name: str
 
 
 @dataclass(frozen=True)
-class ReferenceMotionData:
+class MotionReferenceData:
     """Stores reference motion data (qpos and Cartesian poses)."""
 
     qpos: xax.HashableArray  # Shape: [T, nq]
@@ -62,6 +90,58 @@ class ReferenceMotionData:
         """Gets the reference Cartesian pose closest to a specific time."""
         step = jnp.int32(jnp.round(time / self.ctrl_dt))
         return self.get_cartesian_pose_at_step(step)
+
+    def save(self, path: str | Path) -> None:
+        """Saves the MotionReferenceData to a .npz file."""
+        save_path = Path(path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        body_ids = np.array(list(self.cartesian_poses.keys()))
+        pose_arrays = [pose.array for pose in self.cartesian_poses.values()]
+
+        pose_arrays_np = [np.asarray(arr) for arr in pose_arrays]
+        cartesian_poses_stacked = np.stack(pose_arrays_np, axis=0)  # Shape [num_bodies, T, 3]
+
+        np.savez(
+            save_path,
+            qpos=np.asarray(self.qpos.array),
+            qvel=np.asarray(self.qvel.array),
+            cartesian_pose_body_ids=body_ids,
+            cartesian_poses_stacked=cartesian_poses_stacked,
+            ctrl_dt=np.array(self.ctrl_dt),
+        )
+        logger.info("Saved reference motion data to %s", save_path)
+
+    @classmethod
+    def load(cls, path: str | Path) -> Self:
+        """Loads MotionReferenceData from a .npz file."""
+        load_path = Path(path)
+        if not load_path.exists():
+            raise FileNotFoundError(f"Reference motion file not found: {load_path}")
+
+        logger.info("Loading reference motion data from %s", load_path)
+        data = np.load(load_path)
+
+        qpos = xax.HashableArray(jnp.array(data["qpos"]))
+        qvel = xax.HashableArray(jnp.array(data["qvel"]))
+        ctrl_dt = float(data["ctrl_dt"].item())
+
+        # Reconstruct cartesian poses dictionary
+        body_ids = data["cartesian_pose_body_ids"]
+        cartesian_poses_stacked = data["cartesian_poses_stacked"]
+        cartesian_poses: xax.FrozenDict[int, xax.HashableArray] = xax.FrozenDict(
+            {
+                int(body_id): xax.HashableArray(jnp.array(cartesian_poses_stacked[i]))
+                for i, body_id in enumerate(body_ids)
+            }
+        )
+
+        return cls(
+            qpos=qpos,
+            qvel=qvel,
+            cartesian_poses=cartesian_poses,
+            ctrl_dt=ctrl_dt,
+        )
 
 
 def _add_reference_marker_to_scene(
@@ -108,7 +188,10 @@ def get_local_xpos(xpos: np.ndarray | jax.Array, body_id: int, base_id: int) -> 
 
 
 def get_local_reference_pos(
-    root: BvhioJoint, reference_id: int, reference_base_id: int, scaling_factor: float = 1.0
+    root: BvhioJoint,
+    reference_id: int,
+    reference_base_id: int,
+    scaling_factor: float = 1.0,
 ) -> np.ndarray | jax.Array:
     """Gets the cartesian pos of a reference joint w.r.t. the base (e.g. pelvis)."""
     layout = root.layout()
@@ -136,11 +219,11 @@ def get_body_id(model: mujoco.MjModel, mj_body_name: str) -> int:
     return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, mj_body_name)
 
 
-def get_reference_joint_ids(root: BvhioJoint, mappings: tuple[ReferenceMapping, ...]) -> tuple[int, ...]:
+def get_reference_joint_ids(root: BvhioJoint, mappings: tuple[MotionReferenceMapping, ...]) -> tuple[int, ...]:
     return tuple([get_reference_joint_id(root, mapping.reference_joint_name) for mapping in mappings])
 
 
-def get_body_ids(model: mujoco.MjModel, mappings: tuple[ReferenceMapping, ...]) -> tuple[int, ...]:
+def get_body_ids(model: mujoco.MjModel, mappings: tuple[MotionReferenceMapping, ...]) -> tuple[int, ...]:
     return tuple([get_body_id(model, mapping.mj_body_name) for mapping in mappings])
 
 
@@ -248,7 +331,7 @@ def visualize_reference_motion(
 
 
 def get_reference_cartesian_poses(
-    mappings: tuple[ReferenceMapping, ...],
+    mappings: tuple[MotionReferenceMapping, ...],
     model: mujoco.MjModel,
     root: BvhioJoint,
     reference_base_id: int,
@@ -433,7 +516,7 @@ def generate_reference_motion(
     model: mujoco.MjModel,
     mj_base_id: int,
     bvh_root: BvhioJoint,
-    bvh_to_mujoco_names: tuple[ReferenceMapping, ...],
+    bvh_to_mujoco_names: tuple[MotionReferenceMapping, ...],
     bvh_base_id: int,
     ctrl_dt: float,
     bvh_offset: np.ndarray | None = None,
@@ -449,7 +532,7 @@ def generate_reference_motion(
     xtol: float = 1e-8,
     max_nfev: int = 2000,
     verbose: bool = False,
-) -> ReferenceMotionData:
+) -> MotionReferenceData:
     """Generates reference qpos and cartesian poses from BVH data.
 
     Args:
@@ -540,9 +623,286 @@ def generate_reference_motion(
     jnp_qvel = jnp.array(qvel_reference_motion)
 
     # 3. Create and return the data object
-    return ReferenceMotionData(
+    return MotionReferenceData(
         qpos=xax.HashableArray(jnp_reference_qpos),
         qvel=xax.HashableArray(jnp_qvel),
         cartesian_poses=jnp_cartesian_motion,
         ctrl_dt=ctrl_dt,
     )
+
+
+def vis_entry_point() -> None:
+    parser = argparse.ArgumentParser(description="Visualize reference motion from a config file")
+    parser.add_argument("motion", type=str, help="Path to the configuration file")
+    parser.add_argument("--model", type=str, required=True, help="Path to the Mujoco model")
+    parser.add_argument("--base_name", type=str, default="pelvis", help="Name of the Mujoco base")
+    args = parser.parse_args()
+
+    reference_data = MotionReferenceData.load(args.motion)
+    model = mujoco.MjModel.from_xml_path(args.model)
+    mj_base_id = get_body_id(model, args.base_name)
+
+    np_cartesian_motion = jax.tree.map(lambda x: np.asarray(x.array), reference_data.cartesian_poses)
+
+    visualize_reference_motion(
+        model=model,
+        reference_qpos=np.asarray(reference_data.qpos.array),
+        cartesian_motion=np_cartesian_motion,
+        mj_base_id=mj_base_id,
+    )
+
+
+@dataclass
+class IKParams:
+    neutral_similarity_weight: float = field(
+        default=0.1,
+        metadata={
+            "help": "Weight of neutral similarity term",
+        },
+    )
+    temporal_consistency_weight: float = field(
+        default=0.1,
+        metadata={
+            "help": "Weight of temporal consistency term",
+        },
+    )
+    n_restarts: int = field(
+        default=5,
+        metadata={
+            "help": "Number of random restarts to try",
+        },
+    )
+    error_acceptance_threshold: float = field(
+        default=1e-4,
+        metadata={
+            "help": "The threshold for the error",
+        },
+    )
+    ftol: float = field(
+        default=1e-8,
+        metadata={
+            "help": "The tolerance for the function value",
+        },
+    )
+    xtol: float = field(
+        default=1e-8,
+        metadata={
+            "help": "The tolerance for the solution",
+        },
+    )
+    max_nfev: int = field(
+        default=2000,
+        metadata={
+            "help": "The maximum number of function evaluations",
+        },
+    )
+
+
+@dataclass
+class ReferenceMotionGeneratorConfig:
+    model_path: str = field(
+        default=MISSING,
+        metadata={
+            "help": "Path to the Mujoco model",
+        },
+    )
+    bvh_path: str = field(
+        default=MISSING,
+        metadata={
+            "help": "Path to the BVH file",
+        },
+    )
+    output_path: str = field(
+        default=MISSING,
+        metadata={
+            "help": "Path to the output file",
+        },
+    )
+    mj_base_name: str = field(
+        default=MISSING,
+        metadata={
+            "help": "Name of the Mujoco base",
+        },
+    )
+    bvh_base_name: str = field(
+        default=MISSING,
+        metadata={
+            "help": "Name of the BVH base",
+        },
+    )
+    mappings: list[str] = field(
+        default_factory=list,
+        metadata={
+            "help": "List of mappings in 'BvhJointName:MjBodyName' format",
+        },
+    )
+    ctrl_dt: float = field(
+        default=0.02,
+        metadata={
+            "help": "The control timestep",
+        },
+    )
+    bvh_offset: list[float] = field(
+        default_factory=lambda: [0, 0, 0],
+        metadata={
+            "help": "Offset of the BVH root",
+        },
+    )
+    rotate_bvh_euler: list[float] = field(
+        default_factory=lambda: [0, 0, 0],
+        metadata={
+            "help": "Euler angles to rotate the BVH root",
+        },
+    )
+    bvh_scaling_factor: float = field(
+        default=1.0,
+        metadata={
+            "help": "Scaling factor for the reference motion",
+        },
+    )
+    constrained_joint_ids: list[int] = field(
+        default_factory=lambda: [0, 1, 2, 3, 4, 5, 6],
+        metadata={
+            "help": "Indices of the constrained joints",
+        },
+    )
+    ik_params: IKParams = field(
+        default_factory=IKParams,
+        metadata={
+            "help": "IK parameters",
+        },
+    )
+    verbose: bool = field(
+        default=False,
+        metadata={"help": "Whether to print verbose output"},
+    )
+
+    @classmethod
+    def from_cli_args(cls, args: Sequence[str] | None = None) -> Self:
+        """Parses configuration from command line arguments and optional config file."""
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument("-f", "--config", type=Path, default=None, help="Path to the configuration file.")
+        parsed_args, remaining_args = parser.parse_known_args(args)
+        config_path: Path | None = parsed_args.config
+
+        cfg = cast(Self, OmegaConf.structured(cls))
+
+        if config_path is not None:
+            if config_path.is_file():
+                logger.info("Loading configuration from: %s", config_path)
+                try:
+                    file_conf = OmegaConf.load(config_path)
+                    cfg = cast(Self, OmegaConf.merge(cfg, file_conf))
+                except Exception as e:
+                    logger.error("Error loading config file '%s': %s", config_path, e)
+                    sys.exit(1)
+            else:
+                logger.warning("Config file specified but not found: %s", config_path)
+
+        try:
+            cli_conf = OmegaConf.from_cli(remaining_args)
+            cfg = cast(Self, OmegaConf.merge(cfg, cli_conf))
+        except ConfigKeyError as e:
+            logger.error(
+                "Invalid command line config override: %s. Check if the key exists in the configuration structure.", e
+            )
+            sys.exit(1)
+        except Exception as e:
+            logger.error("Error parsing command line arguments: %s", e)
+            sys.exit(1)
+
+        try:
+            OmegaConf.resolve(cast(DictConfig, cfg))
+            assert isinstance(cfg.mappings, ListConfig), "Config error: 'mappings' must be a list of strings."
+            mapping_msg = "Config error: All 'mappings' must be strings in 'BvhJointName:MjBodyName' format."
+            assert all(isinstance(m, str) and ":" in m for m in cfg.mappings), mapping_msg
+            bvh_offset_msg = "Config error: 'bvh_offset' must be a list of 3 floats."
+            assert isinstance(cfg.bvh_offset, ListConfig) and len(cfg.bvh_offset) == 3, bvh_offset_msg
+            rotate_bvh_euler_msg = "Config error: 'rotate_bvh_euler' must be a list of 3 floats."
+            assert isinstance(cfg.rotate_bvh_euler, ListConfig) and len(cfg.rotate_bvh_euler) == 3, rotate_bvh_euler_msg
+            constrained_joint_ids_msg = "Config error: 'constrained_joint_ids' must be a list of integers."
+            assert isinstance(cfg.constrained_joint_ids, ListConfig), constrained_joint_ids_msg
+
+        except MissingMandatoryValue as e:
+            logger.error("Missing required configuration value: %s", e)
+            logger.error("Please provide it via command line (e.g., model_path=...) or in a config file.")
+            sys.exit(1)
+        except AssertionError as e:
+            logger.error(e)
+            sys.exit(1)
+        except Exception as e:
+            logger.error("Configuration Error: %s", e)
+            sys.exit(1)
+
+        return cfg
+
+
+def main() -> None:
+    colorlogging.configure(level=logging.INFO)
+
+    cfg = ReferenceMotionGeneratorConfig.from_cli_args(sys.argv[1:])
+
+    logger.info("Final configuration:\n%s", OmegaConf.to_yaml(cfg))
+
+    try:
+        parsed_mappings_list = []
+        for mapping_str in cfg.mappings:
+            parts = mapping_str.split(":")
+            if len(parts) != 2:
+                raise ValueError("Invalid mapping format: '%s'. Use 'BvhJointName:MjBodyName'.", mapping_str)
+            parsed_mappings_list.append(MotionReferenceMapping(reference_joint_name=parts[0], mj_body_name=parts[1]))
+        parsed_mappings: tuple[MotionReferenceMapping, ...] = tuple(parsed_mappings_list)
+    except ValueError as e:
+        logger.error("Configuration Error: %s", e)
+        sys.exit(1)
+
+    logger.info("Loading MuJoCo model from %s", cfg.model_path)
+    model = mujoco.MjModel.from_xml_path(cfg.model_path)
+
+    logger.info("Loading BVH file from %s", cfg.bvh_path)
+    bvh_root = bvhio.readAsHierarchy(cfg.bvh_path)
+
+    constrained_joint_ids = tuple(cfg.constrained_joint_ids)
+
+    mj_base_id = get_body_id(model, cfg.mj_base_name)
+    bvh_base_id = get_reference_joint_id(bvh_root, cfg.bvh_base_name)
+
+    logger.info("Generating reference motion...")
+    output_dir = Path(cfg.output_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    def rotation_callback(root: BvhioJoint) -> None:
+        euler_rotation = np.array(cfg.rotate_bvh_euler)
+        quat = R.from_euler("xyz", euler_rotation).as_quat(scalar_first=True)
+        root.applyRotation(glm.quat(*quat), bake=True)
+
+    reference_data = generate_reference_motion(
+        model=model,
+        mj_base_id=mj_base_id,
+        bvh_root=bvh_root,
+        bvh_to_mujoco_names=parsed_mappings,
+        bvh_base_id=bvh_base_id,
+        ctrl_dt=cfg.ctrl_dt,
+        bvh_offset=np.array(cfg.bvh_offset),
+        bvh_root_callback=rotation_callback,
+        bvh_scaling_factor=cfg.bvh_scaling_factor,
+        constrained_joint_ids=constrained_joint_ids,
+        neutral_qpos=None,
+        neutral_similarity_weight=cfg.ik_params.neutral_similarity_weight,
+        temporal_consistency_weight=cfg.ik_params.temporal_consistency_weight,
+        n_restarts=cfg.ik_params.n_restarts,
+        error_acceptance_threshold=cfg.ik_params.error_acceptance_threshold,
+        ftol=cfg.ik_params.ftol,
+        xtol=cfg.ik_params.xtol,
+        max_nfev=cfg.ik_params.max_nfev,
+        verbose=cfg.verbose,
+    )
+
+    logger.info("Saving reference motion data to %s", cfg.output_path)
+    reference_data.save(cfg.output_path)
+
+    logger.info("Done.")
+
+
+if __name__ == "__main__":
+    main()

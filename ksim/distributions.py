@@ -4,6 +4,7 @@ __all__ = [
     "AsymmetricBijector",
     "UnitIntervalToRangeBijector",
     "DoubleUnitIntervalToRangeBijector",
+    "MixtureOfGaussians",
 ]
 
 import distrax
@@ -148,3 +149,19 @@ class DoubleUnitIntervalToRangeBijector(distrax.Bijector):
             and jnp.array_equal(self._min, other._min).all().item()
             and jnp.array_equal(self._max, other._max).all().item()
         )
+
+
+class MixtureOfGaussians(distrax.MixtureSameFamily):
+    def __init__(self, means_nm: Array, stds_nm: Array, logits_nm: Array) -> None:
+        super().__init__(
+            mixture_distribution=distrax.Categorical(logits=logits_nm),
+            components_distribution=distrax.Normal(means_nm, stds_nm),
+        )
+
+    def mode(self) -> Array:
+        # The mode of a mixture of Gaussians is the mean of the component
+        # with the highest mixture probability.
+        top_mixture_n = self.mixture_distribution.mode()
+        means_nm = self.components_distribution.loc
+        top_mean_n = jnp.take_along_axis(means_nm, top_mixture_n[..., None], axis=-1)[..., 0]
+        return top_mean_n

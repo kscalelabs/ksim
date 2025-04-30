@@ -3,6 +3,7 @@
 __all__ = [
     "Reset",
     "HFieldXYPositionReset",
+    "InitialMotionStateReset",
     "PlaneXYPositionReset",
     "RandomJointPositionReset",
     "RandomJointVelocityReset",
@@ -23,7 +24,12 @@ from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
 from ksim.types import PhysicsData, PhysicsModel
-from ksim.utils.mujoco import update_data_field
+from ksim.utils.mujoco import (
+    get_joint_names_in_order,
+    get_position_limits,
+    update_data_field,
+)
+from ksim.utils.priors import MotionReferenceData
 
 logger = logging.getLogger(__name__)
 
@@ -127,13 +133,36 @@ class RandomJointPositionReset(Reset):
     """Resets the joint positions of the robot to random values."""
 
     scale: float = attrs.field(default=0.01)
+    zeros: tuple[float, ...] | None = attrs.field(default=None)
 
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
-        noise = jax.random.uniform(rng, data.qpos[7:].shape, minval=-self.scale, maxval=self.scale) * curriculum_level
-        new_qpos = data.qpos[7:] + noise
+        pos = jax.random.uniform(rng, data.qpos[7:].shape, minval=-self.scale, maxval=self.scale) * curriculum_level
+        if self.zeros is not None:
+            pos = pos + jnp.array(self.zeros)
+        new_qpos = data.qpos[7:] + pos
         new_qpos = jnp.concatenate([data.qpos[:7], new_qpos])
         data = update_data_field(data, "qpos", new_qpos)
         return data
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        zeros: dict[str, float] | None = None,
+        scale: float = 0.01,
+    ) -> "RandomJointPositionReset":
+        joint_names = get_joint_names_in_order(physics_model)[1:]  # Remove the first joint (root)
+        zeros_values = [0.0 for _ in range(len(joint_names))]
+        if zeros is not None:
+            joint_limits = get_position_limits(physics_model)
+            for name, value in zeros.items():
+                if (index := joint_names.index(name)) < 0:
+                    raise ValueError(f"Joint {name} not found in model. Choices are: {joint_names}")
+                joint_min, joint_max = joint_limits[name]
+                if value < joint_min or value > joint_max:
+                    raise ValueError(f"Zero value {value} for joint {name} is out of range {joint_min}, {joint_max}")
+                zeros_values[index] = value
+        return cls(scale=scale, zeros=tuple(zeros_values))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -239,3 +268,28 @@ def get_xy_position_reset(
             y_range=y_range,
             robot_base_height=robot_base_height,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class InitialMotionStateReset(Reset):
+    """Resets the initial state to the one from the motion bank."""
+
+    reference_motion: MotionReferenceData
+    freejoint: bool = attrs.field(default=False)
+
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
+        frame_index = jax.random.randint(rng, (1,), 0, self.reference_motion.num_frames)[0]
+        qpos = self.reference_motion.get_qpos_at_step(frame_index)
+        qvel = self.reference_motion.get_qvel_at_step(frame_index)
+
+        if self.freejoint:
+            data = update_data_field(data, "qpos", qpos)
+            data = update_data_field(data, "qvel", qvel)
+        else:
+            new_qpos = jnp.concatenate([data.qpos[:7], qpos[7:]])
+            data = update_data_field(data, "qpos", new_qpos)
+            new_qvel = jnp.concatenate([data.qvel[:6], qvel[7:]])
+            data = update_data_field(data, "qvel", new_qvel)
+
+        data = update_data_field(data, "time", frame_index * self.reference_motion.ctrl_dt)
+        return data

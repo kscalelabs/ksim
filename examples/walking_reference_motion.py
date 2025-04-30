@@ -26,8 +26,8 @@ from scipy.spatial.transform import Rotation as R
 
 import ksim
 from ksim.types import PhysicsModel
-from ksim.utils.reference_motion import (
-    ReferenceMapping,
+from ksim.utils.priors import (
+    MotionReferenceMapping,
     generate_reference_motion,
     get_reference_joint_id,
     local_to_absolute,
@@ -75,18 +75,18 @@ class HumanoidWalkingReferenceMotionTaskConfig(HumanoidWalkingTaskConfig):
 
 
 HUMANOID_REFERENCE_MAPPINGS = (
-    ReferenceMapping("CC_Base_L_ThighTwist01", "thigh_left"),  # hip
-    ReferenceMapping("CC_Base_L_CalfTwist01", "shin_left"),  # knee
-    ReferenceMapping("CC_Base_L_Foot", "foot_left"),  # foot
-    ReferenceMapping("CC_Base_L_UpperarmTwist01", "upper_arm_left"),  # shoulder
-    ReferenceMapping("CC_Base_L_ForearmTwist01", "lower_arm_left"),  # elbow
-    ReferenceMapping("CC_Base_L_Hand", "hand_left"),  # hand
-    ReferenceMapping("CC_Base_R_ThighTwist01", "thigh_right"),  # hip
-    ReferenceMapping("CC_Base_R_CalfTwist01", "shin_right"),  # knee
-    ReferenceMapping("CC_Base_R_Foot", "foot_right"),  # foot
-    ReferenceMapping("CC_Base_R_UpperarmTwist01", "upper_arm_right"),  # shoulder
-    ReferenceMapping("CC_Base_R_ForearmTwist01", "lower_arm_right"),  # elbow
-    ReferenceMapping("CC_Base_R_Hand", "hand_right"),  # hand
+    MotionReferenceMapping("CC_Base_L_ThighTwist01", "thigh_left"),  # hip
+    MotionReferenceMapping("CC_Base_L_CalfTwist01", "shin_left"),  # knee
+    MotionReferenceMapping("CC_Base_L_Foot", "foot_left"),  # foot
+    MotionReferenceMapping("CC_Base_L_UpperarmTwist01", "upper_arm_left"),  # shoulder
+    MotionReferenceMapping("CC_Base_L_ForearmTwist01", "lower_arm_left"),  # elbow
+    MotionReferenceMapping("CC_Base_L_Hand", "hand_left"),  # hand
+    MotionReferenceMapping("CC_Base_R_ThighTwist01", "thigh_right"),  # hip
+    MotionReferenceMapping("CC_Base_R_CalfTwist01", "shin_right"),  # knee
+    MotionReferenceMapping("CC_Base_R_Foot", "foot_right"),  # foot
+    MotionReferenceMapping("CC_Base_R_UpperarmTwist01", "upper_arm_right"),  # shoulder
+    MotionReferenceMapping("CC_Base_R_ForearmTwist01", "lower_arm_right"),  # elbow
+    MotionReferenceMapping("CC_Base_R_Hand", "hand_right"),  # hand
 )
 
 
@@ -209,16 +209,18 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.walking_reference_motion
     # To visualize the environment, use the following command:
-    #   python -m examples.walking_reference_motion run_environment=True
+    #   python -m examples.walking_reference_motion run_model_viewer=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking_reference_motion num_envs=8 num_batches=2
+    #   python -m examples.walking_reference_motion num_envs=2 batch_size=1
     HumanoidWalkingReferenceMotionTask.launch(
         HumanoidWalkingReferenceMotionTaskConfig(
             num_envs=2048,
             batch_size=256,
             num_passes=10,
+            iterations=8,
+            ls_iterations=8,
             epochs_per_log_step=1,
             valid_every_n_steps=10,
             # Simulation parameters.

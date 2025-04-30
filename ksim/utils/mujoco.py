@@ -9,6 +9,7 @@ __all__ = [
     "get_geom_data_idx_from_name",
     "get_body_data_idx_by_name",
     "get_body_data_idx_from_name",
+    "get_site_data_idx_from_name",
     "get_floor_idx",
     "geoms_colliding",
     "get_joint_metadata",

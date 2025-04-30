@@ -37,7 +37,7 @@ Config = TypeVar("Config", bound=HumanoidPseudoIKTaskConfig)
 
 
 class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
-    def get_mujoco_model(self) -> tuple[mujoco.MjModel, dict[str, JointMetadataOutput]]:
+    def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         mj_model_joint_removed = remove_mujoco_joints_except(
             mjcf_path, ["shoulder1_right", "shoulder2_right", "elbow_right"]
@@ -229,7 +229,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.pseudo_ik
     # To visualize the environment, use the following command:
-    #   python -m examples.pseudo_ik run_environment=True
+    #   python -m examples.pseudo_ik run_model_viewer=True
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
@@ -241,8 +241,6 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=10,
             epochs_per_log_step=1,
-            # Logging parameters.
-            # log_full_trajectory_every_n_seconds=60,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
