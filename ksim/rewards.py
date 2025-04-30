@@ -369,28 +369,17 @@ def joint_limits_validator(inst: "AvoidLimitsReward", attr: attrs.Attribute, val
         raise ValueError(f"Joint range must be a float array, got {arr.dtype}")
 
 
-def joint_limited_validator(inst: "AvoidLimitsReward", attr: attrs.Attribute, value: xax.HashableArray) -> None:
-    arr = value.array
-    if arr.ndim != 1:
-        raise ValueError(f"Joint limited must have shape (n_joints,), got {arr.shape}")
-    if arr.dtype != jnp.bool_:
-        raise ValueError(f"Joint limited must be a boolean array, got {arr.dtype}")
-
-
 @attrs.define(frozen=True, kw_only=True)
 class AvoidLimitsReward(Reward):
     """Reward for being too close to the joint limits."""
 
     joint_limits: xax.HashableArray = attrs.field(validator=joint_limits_validator)
-    joint_limited: xax.HashableArray = attrs.field(validator=joint_limited_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         joint_pos = trajectory.qpos[..., 7:]
         joint_limits = self.joint_limits.array
-        joint_limited = self.joint_limited.array
         in_bounds = (joint_pos > joint_limits[..., 0]) & (joint_pos < joint_limits[..., 1])
-        reward = jnp.where(joint_limited, in_bounds, 0)
-        return reward.all(axis=-1).astype(trajectory.qpos.dtype)
+        return in_bounds.all(axis=-1).astype(trajectory.qpos.dtype)
 
     @classmethod
     def create(
@@ -399,15 +388,16 @@ class AvoidLimitsReward(Reward):
         factor: float = 0.05,
         scale: float = 1.0,
     ) -> Self:
-        jnt_min, jnt_max = model.jnt_range[..., 0], model.jnt_range[..., 1]
+        jnt_range = jnp.array(model.jnt_range)
+        jnt_limited = jnp.array(model.jnt_limited, dtype=jnp.bool_)
+        jnt_min, jnt_max = jnt_range[..., 0], jnt_range[..., 1]
         jnt_diff = (jnt_max - jnt_min) * factor
         jnt_min = jnt_min - jnt_diff
         jnt_max = jnt_max + jnt_diff
-        return cls(
-            joint_limits=xax.hashable_array(jnp.stack([jnt_min, jnt_max], axis=-1)),
-            joint_limited=xax.hashable_array(model.jnt_limited),
-            scale=scale,
-        )
+        joint_limits = jnp.stack([jnt_min, jnt_max], axis=-1)
+        inf_limits = jnp.stack([jnp.full_like(jnt_min, -jnp.inf), jnp.full_like(jnt_max, jnp.inf)], axis=-1)
+        joint_limits = jnp.where(jnt_limited, joint_limits, inf_limits)
+        return cls(joint_limits=xax.hashable_array(joint_limits), scale=scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
