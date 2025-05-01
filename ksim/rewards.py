@@ -336,6 +336,7 @@ class ActuatorRelativeForcePenalty(Reward):
         norm: xax.NormType = "l1",
         observation_name: str = "actuator_force_observation",
         scale: float = -1.0,
+        scale_by_curriculum: bool = False,
     ) -> Self:
         act_force_limited = jnp.array(model.jnt_actfrclimited)[..., 1:]
         if not act_force_limited.all().item():
@@ -352,6 +353,7 @@ class ActuatorRelativeForcePenalty(Reward):
             magnitudes=magnitudes,
             norm=norm,
             scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
         )
 
 
