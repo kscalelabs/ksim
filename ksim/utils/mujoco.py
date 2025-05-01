@@ -270,16 +270,7 @@ def log_joint_config(
     model: PhysicsModel, 
     metadata: dict[str, JointMetadataOutput] | None = None,
 ) -> None:
-    """Log detailed configuration of joints and actuators for debugging.
-    
-    This function prints a comprehensive overview of all joints in the model,
-    including their physical properties, associated actuators, and control parameters.
-    It automatically determines the neural network output indices based on actuator indices.
-    
-    Args:
-        model: The physics model containing joint and actuator information
-        metadata: Optional metadata for joints that includes kp, kd values
-    """
+    """Log configuration of joints and actuators for debugging."""
     logger = logging.getLogger(__name__)
     
     # Define helper functions for either MuJoCo or MJX models
@@ -407,37 +398,37 @@ def log_joint_config(
     # Prepare table data and headers
     table_data = []
     headers = [
+        "Joint Name",
         "NN ID", 
-        "Joint Name", 
         "Joint ID",
+        "Type",
+        "Kp",
+        "Kd",
         "Damping", 
         "Armature", 
         "Friction", 
         "Actuator Name",
         "Actuator ID",
         "Force Min",
-        "Force Max",
-        "Kp",
-        "Kd",
-        "Type"
+        "Force Max"
     ]
     
     # Convert joint data to table rows
     for joint in joint_data:
         row = [
-            joint["nn_id_str"],
             joint["joint_name"],
+            joint["nn_id_str"],
             joint["joint_id"],
+            joint["actuator_type"],
+            joint["kp"],
+            joint["kd"],
             f"{joint['damping']:.3f}",
             f"{joint['armature']:.3f}",
             f"{joint['frictionloss']:.3f}",
             joint["actuator_name"],
             joint["actuator_id"],
             joint["force_min"],
-            joint["force_max"],
-            joint["kp"],
-            joint["kd"],
-            joint["actuator_type"]
+            joint["force_max"]
         ]
         table_data.append(row)
     

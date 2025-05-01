@@ -676,21 +676,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return mj_model
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        """Get joint metadata from the model.
-        
-        Also logs detailed joint configuration for debugging purposes.
-
-        Args:
-            mj_model: The MuJoCo model.
-
-        Returns:
-            A dictionary mapping joint names to their metadata.
-        """
         metadata = get_joint_metadata(mj_model)
-        
-        # Log the joint configuration for debugging
         log_joint_config(mj_model, metadata)
-        
         return metadata
 
     def get_mjx_model(self, mj_model: mujoco.MjModel) -> mjx.Model:
