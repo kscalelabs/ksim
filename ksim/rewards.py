@@ -416,7 +416,7 @@ def joint_limits_validator(inst: "AvoidLimitsReward", attr: attrs.Attribute, val
 
 @attrs.define(frozen=True, kw_only=True)
 class AvoidLimitsReward(Reward):
-    """Reward for being too close to the joint limits."""
+    """Reward for not being too close to the joint limits."""
 
     joint_limits: xax.HashableArray = attrs.field(validator=joint_limits_validator)
 
