@@ -432,6 +432,7 @@ class AvoidLimitsReward(Reward):
         model: PhysicsModel,
         factor: float = 0.05,
         scale: float = 1.0,
+        scale_by_curriculum: bool = False,
     ) -> Self:
         jnt_range = jnp.array(model.jnt_range)
         jnt_limited = jnp.array(model.jnt_limited, dtype=jnp.bool_)
@@ -442,7 +443,11 @@ class AvoidLimitsReward(Reward):
         jnt_min = jnp.where(jnt_limited, jnt_min, -jnp.inf)
         jnt_max = jnp.where(jnt_limited, jnt_max, jnp.inf)
         joint_limits = jnp.stack([jnt_min, jnt_max], axis=-1)
-        return cls(joint_limits=xax.hashable_array(joint_limits[..., 1:, :]), scale=scale)
+        return cls(
+            joint_limits=xax.hashable_array(joint_limits[..., 1:, :]),
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -499,6 +504,7 @@ class ActionInBoundsReward(Reward):
         model: PhysicsModel,
         factor: float = 0.05,
         scale: float = 1.0,
+        scale_by_curriculum: bool = False,
     ) -> Self:
         jnt_range = jnp.array(model.jnt_range)
         jnt_limited = jnp.array(model.jnt_limited, dtype=jnp.bool_)
@@ -509,7 +515,11 @@ class ActionInBoundsReward(Reward):
         jnt_min = jnp.where(jnt_limited, jnt_min, -jnp.inf)
         jnt_max = jnp.where(jnt_limited, jnt_max, jnp.inf)
         joint_limits = jnp.stack([jnt_min, jnt_max], axis=-1)
-        return cls(joint_limits=xax.hashable_array(joint_limits[..., 1:, :]), scale=scale)
+        return cls(
+            joint_limits=xax.hashable_array(joint_limits[..., 1:, :]),
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
