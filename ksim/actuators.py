@@ -136,7 +136,6 @@ class MITPositionActuators(Actuators):
         self.torque_noise = torque_noise
         self.torque_noise_type = torque_noise_type
 
-
         if any(self.kps < 0) or any(self.kds < 0):
             raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
         if any(self.kps == 0) or any(self.kds == 0):
