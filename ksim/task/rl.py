@@ -72,11 +72,13 @@ from ksim.types import (
     Trajectory,
 )
 from ksim.utils.mujoco import (
+    get_body_data_idx_by_name,
     get_joint_metadata,
     get_joint_names_in_order,
     get_position_limits,
     get_torque_limits,
     load_model,
+    log_joint_config,
 )
 from ksim.viewer import DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
@@ -674,7 +676,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return mj_model
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        return get_joint_metadata(mj_model)
+        """Get joint metadata from the model.
+        
+        Also logs detailed joint configuration for debugging purposes.
+
+        Args:
+            mj_model: The MuJoCo model.
+
+        Returns:
+            A dictionary mapping joint names to their metadata.
+        """
+        metadata = get_joint_metadata(mj_model)
+        
+        # Log the joint configuration for debugging
+        log_joint_config(mj_model, metadata)
+        
+        return metadata
 
     def get_mjx_model(self, mj_model: mujoco.MjModel) -> mjx.Model:
         """Convert a mujoco model to an mjx model.

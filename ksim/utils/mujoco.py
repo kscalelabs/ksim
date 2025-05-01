@@ -29,10 +29,11 @@ __all__ = [
     "get_site_pose_by_name",
     "remove_mujoco_joints_except",
     "add_new_mujoco_body",
+    "log_joint_config",
 ]
 
 import logging
-from typing import Any, Hashable, TypeVar
+from typing import Any, Hashable, Sequence, TypeVar
 from xml.etree import ElementTree as ET
 
 import chex
@@ -262,6 +263,135 @@ def get_joint_metadata(
             actuator_type=None,
         )
     return metadata
+
+
+def log_joint_config(
+    model: PhysicsModel, 
+    metadata: dict[str, JointMetadataOutput] | None = None,
+    nn_id_mapping: dict[str, int] | None = None,
+) -> None:
+    """Log detailed configuration of joints and actuators for debugging.
+    
+    This function prints a comprehensive overview of all joints in the model,
+    including their physical properties, associated actuators, and control parameters.
+    
+    Args:
+        model: The physics model containing joint and actuator information
+        metadata: Optional metadata for joints that includes kp, kd values
+        nn_id_mapping: Optional mapping from joint names to neural network output indices
+    """
+    logger = logging.getLogger(__name__)
+    debug_lines = ["==== Joint and Actuator Properties ===="]
+    
+    # Get the number of joints
+    njnt = model.njnt
+    
+    # Define helper functions for either MuJoCo or MJX models
+    if isinstance(model, mujoco.MjModel):
+        logger.debug("PhysicsModel is Mujoco")
+        
+        def get_joint_name(idx: int) -> str | None:
+            return mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, idx)
+        
+        def get_actuator_id(name: str) -> int:
+            return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
+        
+        dof_damping = model.dof_damping
+        dof_armature = model.dof_armature
+        dof_frictionloss = model.dof_frictionloss
+        jnt_dofadr = model.jnt_dofadr
+        actuator_forcerange = model.actuator_forcerange
+        
+    elif isinstance(model, mjx.Model):
+        logger.debug("PhysicsModel is MJX")
+        
+        dof_damping = model.dof_damping
+        dof_armature = model.dof_armature
+        dof_frictionloss = model.dof_frictionloss
+        jnt_dofadr = model.jnt_dofadr
+        actuator_forcerange = model.actuator_forcerange
+        
+        def extract_name(byte_array: bytes, adr_array: Sequence[int], idx: int) -> str | None:
+            adr = adr_array[idx]
+            if adr < 0:
+                return None
+            end = byte_array.find(b"\x00", adr)
+            return byte_array[adr:end].decode("utf-8")
+        
+        actuator_name_to_id = {
+            extract_name(model.names, model.name_actuatoradr, i): i
+            for i in range(model.nu)
+            if model.name_actuatoradr[i] >= 0
+        }
+        
+        def get_joint_name(idx: int) -> str | None:
+            return extract_name(model.names, model.name_jntadr, idx)
+        
+        def get_actuator_id(name: str) -> int:
+            return actuator_name_to_id.get(name, -1)
+    
+    else:
+        raise TypeError(f"Unsupported model type: {type(model)}")
+    
+    # Process each joint
+    for i in range(njnt):
+        joint_name = get_joint_name(i)
+        if joint_name is None:
+            continue
+        
+        # Get DOF ID and physical properties
+        dof_id = jnt_dofadr[i]
+        damping = dof_damping[dof_id]
+        armature = dof_armature[dof_id]
+        frictionloss = dof_frictionloss[dof_id]
+        
+        # Get metadata if available
+        joint_meta = None if metadata is None else metadata.get(joint_name)
+        
+        # Get neural network ID if available
+        nn_id = None if nn_id_mapping is None else nn_id_mapping.get(joint_name)
+        
+        # Get KP and KD values from metadata
+        kp = "N/A"
+        kd = "N/A"
+        actuator_type = "N/A"
+        joint_id = "N/A"
+        
+        if joint_meta is not None:
+            kp = joint_meta.kp if joint_meta.kp is not None else "N/A"
+            kd = joint_meta.kd if joint_meta.kd is not None else "N/A"
+            actuator_type = joint_meta.actuator_type if joint_meta.actuator_type is not None else "N/A"
+            joint_id = joint_meta.id if joint_meta.id is not None else "N/A"
+        
+        # Check for associated actuator
+        actuator_name = f"{joint_name}_ctrl"
+        actuator_id = get_actuator_id(actuator_name)
+        
+        # Build the line with all information
+        line = (
+            f"Joint: {joint_name:<20} | "
+            f"Joint ID: {joint_id!s:<3} | "
+            f"NN ID: {nn_id if nn_id is not None else 'N/A':<3} | "
+            f"Damping: {damping:6.3f} | "
+            f"Armature: {armature:6.3f} | "
+            f"Friction: {frictionloss:6.3f}"
+        )
+        
+        # Add actuator info if present
+        if actuator_id >= 0:
+            forcerange = actuator_forcerange[actuator_id]
+            line += (
+                f" | Actuator: {actuator_name:<20} (ID: {actuator_id:2d}) | "
+                f"Forcerange: [{forcerange[0]:6.3f}, {forcerange[1]:6.3f}] | "
+                f"Kp: {kp} | Kd: {kd} | Type: {actuator_type}"
+            )
+        else:
+            line += " | Actuator: N/A (passive joint)"
+        
+        debug_lines.append(line)
+    
+    # Log the joint configuration (using INFO level for visibility)
+    logger.info("\n".join(debug_lines))
 
 
 def update_model_field(model: mujoco.MjModel | mjx.Model, name: str, new_value: Array) -> mujoco.MjModel | mjx.Model:
