@@ -44,6 +44,7 @@ import numpy as np
 from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
+from tabulate import tabulate
 
 from ksim.types import PhysicsData, PhysicsModel
 
@@ -281,10 +282,6 @@ def log_joint_config(
         nn_id_mapping: Optional mapping from joint names to neural network output indices
     """
     logger = logging.getLogger(__name__)
-    debug_lines = ["==== Joint and Actuator Properties ===="]
-    
-    # Get the number of joints
-    njnt = model.njnt
     
     # Define helper functions for either MuJoCo or MJX models
     if isinstance(model, mujoco.MjModel):
@@ -333,8 +330,26 @@ def log_joint_config(
     else:
         raise TypeError(f"Unsupported model type: {type(model)}")
     
+    # Prepare table data
+    table_data = []
+    headers = [
+        "Joint Name", 
+        "Joint ID",
+        "NN ID", 
+        "Damping", 
+        "Armature", 
+        "Friction", 
+        "Actuator Name",
+        "Actuator ID",
+        "Force Min",
+        "Force Max",
+        "Kp",
+        "Kd",
+        "Type"
+    ]
+    
     # Process each joint
-    for i in range(njnt):
+    for i in range(model.njnt):
         joint_name = get_joint_name(i)
         if joint_name is None:
             continue
@@ -350,6 +365,7 @@ def log_joint_config(
         
         # Get neural network ID if available
         nn_id = None if nn_id_mapping is None else nn_id_mapping.get(joint_name)
+        nn_id_str = str(nn_id) if nn_id is not None else "N/A"
         
         # Get KP and KD values from metadata
         kp = "N/A"
@@ -361,37 +377,50 @@ def log_joint_config(
             kp = joint_meta.kp if joint_meta.kp is not None else "N/A"
             kd = joint_meta.kd if joint_meta.kd is not None else "N/A"
             actuator_type = joint_meta.actuator_type if joint_meta.actuator_type is not None else "N/A"
-            joint_id = joint_meta.id if joint_meta.id is not None else "N/A"
+            joint_id = str(joint_meta.id) if joint_meta.id is not None else "N/A"
         
         # Check for associated actuator
         actuator_name = f"{joint_name}_ctrl"
         actuator_id = get_actuator_id(actuator_name)
         
-        # Build the line with all information
-        line = (
-            f"Joint: {joint_name:<20} | "
-            f"Joint ID: {joint_id!s:<3} | "
-            f"NN ID: {nn_id if nn_id is not None else 'N/A':<3} | "
-            f"Damping: {damping:6.3f} | "
-            f"Armature: {armature:6.3f} | "
-            f"Friction: {frictionloss:6.3f}"
-        )
+        # Prepare row data
+        row = [
+            joint_name,
+            joint_id,
+            nn_id_str,
+            f"{damping:.3f}",
+            f"{armature:.3f}",
+            f"{frictionloss:.3f}",
+        ]
         
         # Add actuator info if present
         if actuator_id >= 0:
             forcerange = actuator_forcerange[actuator_id]
-            line += (
-                f" | Actuator: {actuator_name:<20} (ID: {actuator_id:2d}) | "
-                f"Forcerange: [{forcerange[0]:6.3f}, {forcerange[1]:6.3f}] | "
-                f"Kp: {kp} | Kd: {kd} | Type: {actuator_type}"
-            )
+            row.extend([
+                actuator_name,
+                str(actuator_id),
+                f"{forcerange[0]:.3f}",
+                f"{forcerange[1]:.3f}",
+                kp,
+                kd,
+                actuator_type
+            ])
         else:
-            line += " | Actuator: N/A (passive joint)"
+            row.extend(["N/A (passive)", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A"])
         
-        debug_lines.append(line)
+        table_data.append(row)
+    
+    # Create the table using tabulate
+    table = tabulate(
+        table_data,
+        headers=headers,
+        tablefmt="grid",
+        numalign="right",
+        stralign="left"
+    )
     
     # Log the joint configuration (using INFO level for visibility)
-    logger.info("\n".join(debug_lines))
+    logger.info("==== Joint and Actuator Properties ====\n%s", table)
 
 
 def update_model_field(model: mujoco.MjModel | mjx.Model, name: str, new_value: Array) -> mujoco.MjModel | mjx.Model:
