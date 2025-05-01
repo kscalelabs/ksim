@@ -7,7 +7,7 @@ __all__ = [
     "MinimumHeightTermination",
     "IllegalContactTermination",
     "BadZTermination",
-    "FastAccelerationTermination",
+    "HighVelocityTermination",
     "FarFromOriginTermination",
 ]
 
@@ -154,7 +154,7 @@ class BadZTermination(Termination):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class FastAccelerationTermination(Termination):
+class HighVelocityTermination(Termination):
     """Terminates the episode if the robot is moving too fast."""
 
     # Good default value for Mujoco physics errors.
