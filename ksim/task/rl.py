@@ -1133,6 +1133,21 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if self.config.render_length_seconds is not None:
             logged_traj = self._crop_to_length(logged_traj, self.config.render_length_seconds)
 
+        def create_plot_image(
+            fig_size: tuple[float, float], plot_fn: Callable[[plt.Figure, plt.Axes], None]
+        ) -> Image.Image:
+            """Create a plot image using the provided plotting function."""
+            plt.figure(figsize=fig_size)
+            ax = plt.gca()
+            plot_fn(plt.gcf(), ax)
+
+            # Convert to PIL image
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png")
+            plt.close()
+            buf.seek(0)
+            return Image.open(buf)
+
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Emojis are used in order to prevent conflicts with user-specified namespaces.
         for namespace, arr_dict in (
@@ -1146,31 +1161,46 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ("📈 metrics images", logged_traj.metrics),
         ):
             for key, value in arr_dict.items():
-                plt.figure(figsize=self.config.plot_figsize)
 
-                # Ensures a consistent shape and truncates if necessary.
-                value = value.reshape(value.shape[0], -1)
-                if value.shape[-1] > self.config.max_values_per_plot:
-                    logger.debug("Truncating %s to %d values per plot.", key, self.config.max_values_per_plot)
-                    value = value[..., : self.config.max_values_per_plot]
+                def plot_individual_component(
+                    fig: plt.Figure, ax: plt.Axes, key: str = key, value: Array = value
+                ) -> None:
+                    # Ensures a consistent shape and truncates if necessary.
+                    processed_value = value.reshape(value.shape[0], -1)
+                    if processed_value.shape[-1] > self.config.max_values_per_plot:
+                        logger.debug("Truncating %s to %d values per plot.", key, self.config.max_values_per_plot)
+                        processed_value = processed_value[..., : self.config.max_values_per_plot]
 
-                for i in range(value.shape[1]):
-                    plt.plot(value[:, i], label=f"{i}")
+                    for i in range(processed_value.shape[1]):
+                        ax.plot(processed_value[:, i], label=f"{i}")
 
-                if value.shape[1] > 1:
-                    plt.legend()
-                plt.title(key)
+                    if processed_value.shape[1] > 1:
+                        ax.legend()
+                    ax.set_title(key)
 
-                # Converts to PIL image.
-                buf = io.BytesIO()
-                plt.savefig(buf, format="png")
-                plt.close()
-                buf.seek(0)
-                img = Image.open(buf)
-
-                # Logs the image.
-                # self.logger.log_image(key=key, value=img, namespace=namespace)
+                # Create and log the image
+                img = create_plot_image(self.config.plot_figsize, plot_individual_component)
                 log_callback(key, img, namespace)
+
+        # Add a combined plot with all reward components for easy comparison
+        def plot_combined_rewards(fig: plt.Figure, ax: plt.Axes) -> None:
+            for key, value in logged_traj.rewards.components.items():
+                processed_value = value.reshape(value.shape[0], -1)
+                if processed_value.shape[1] > 1:
+                    processed_value = processed_value.mean(axis=1)
+
+                ax.plot(processed_value, label=key, alpha=0.8)
+
+            ax.set_title("All Rewards")
+            ax.legend(loc="center left", bbox_to_anchor=(1.05, 0.5))
+            fig.tight_layout()
+            # Add extra space to the right for the legend
+            fig.subplots_adjust(right=0.7)
+
+        # Make the plot wider so the legend fits
+        combined_rewards_figsize = (self.config.plot_figsize[0] * 1.3, self.config.plot_figsize[1])
+        img = create_plot_image(combined_rewards_figsize, plot_combined_rewards)
+        log_callback("all_components_comparison", img, "🎁 reward images")
 
     def _log_logged_trajectory_video(
         self,
