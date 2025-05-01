@@ -162,8 +162,9 @@ class HighVelocityTermination(Termination):
     max_lin_vel: float = attrs.field(default=100.0)
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        lin_vel = state.cvel[..., :3]
-        ang_vel = state.cvel[..., 3:]
+        lin_vel = state.cvel[..., 3:]
+        ang_vel = state.cvel[..., :3]
+
         return jnp.where((lin_vel > self.max_lin_vel).any() | (ang_vel > self.max_ang_vel).any(), -1, 0)
 
 
