@@ -173,3 +173,7 @@ class JumpEvent(Event):
         time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
 
         return updated_data, time_remaining
+
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
+        minval, maxval = self.interval_range
+        return jax.random.uniform(rng, (), minval=minval, maxval=maxval)
