@@ -269,17 +269,16 @@ def get_joint_metadata(
 def log_joint_config(
     model: PhysicsModel, 
     metadata: dict[str, JointMetadataOutput] | None = None,
-    nn_id_mapping: dict[str, int] | None = None,
 ) -> None:
     """Log detailed configuration of joints and actuators for debugging.
     
     This function prints a comprehensive overview of all joints in the model,
     including their physical properties, associated actuators, and control parameters.
+    It automatically determines the neural network output indices based on actuator indices.
     
     Args:
         model: The physics model containing joint and actuator information
         metadata: Optional metadata for joints that includes kp, kd values
-        nn_id_mapping: Optional mapping from joint names to neural network output indices
     """
     logger = logging.getLogger(__name__)
     
@@ -330,30 +329,26 @@ def log_joint_config(
     else:
         raise TypeError(f"Unsupported model type: {type(model)}")
     
-    # Prepare table data
-    table_data = []
-    headers = [
-        "Joint Name", 
-        "Joint ID",
-        "NN ID", 
-        "Damping", 
-        "Armature", 
-        "Friction", 
-        "Actuator Name",
-        "Actuator ID",
-        "Force Min",
-        "Force Max",
-        "Kp",
-        "Kd",
-        "Type"
-    ]
+    # Programmatically determine NN indices based on actuator indices
+    derived_nn_id_mapping = {}
+    joint_to_actuator_mapping = {}
     
-    # Process each joint
+    # Prepare the joint info and determine actuator/NN indices
+    joint_data = []
     for i in range(model.njnt):
         joint_name = get_joint_name(i)
         if joint_name is None:
             continue
         
+        # Determine associated actuator
+        actuator_name = f"{joint_name}_ctrl"
+        actuator_id = get_actuator_id(actuator_name)
+        
+        # Store actuator ID for this joint (used for NN index derivation)
+        if actuator_id >= 0:
+            joint_to_actuator_mapping[joint_name] = actuator_id
+            derived_nn_id_mapping[joint_name] = actuator_id
+
         # Get DOF ID and physical properties
         dof_id = jnt_dofadr[i]
         damping = dof_damping[dof_id]
@@ -363,8 +358,8 @@ def log_joint_config(
         # Get metadata if available
         joint_meta = None if metadata is None else metadata.get(joint_name)
         
-        # Get neural network ID if available
-        nn_id = None if nn_id_mapping is None else nn_id_mapping.get(joint_name)
+        # Determine NN ID from actuator ID
+        nn_id = derived_nn_id_mapping.get(joint_name)
         nn_id_str = str(nn_id) if nn_id is not None else "N/A"
         
         # Get KP and KD values from metadata
@@ -379,35 +374,71 @@ def log_joint_config(
             actuator_type = joint_meta.actuator_type if joint_meta.actuator_type is not None else "N/A"
             joint_id = str(joint_meta.id) if joint_meta.id is not None else "N/A"
         
-        # Check for associated actuator
-        actuator_name = f"{joint_name}_ctrl"
-        actuator_id = get_actuator_id(actuator_name)
-        
-        # Prepare row data
-        row = [
-            joint_name,
-            joint_id,
-            nn_id_str,
-            f"{damping:.3f}",
-            f"{armature:.3f}",
-            f"{frictionloss:.3f}",
-        ]
-        
-        # Add actuator info if present
+        # Prepare force range info
         if actuator_id >= 0:
             forcerange = actuator_forcerange[actuator_id]
-            row.extend([
-                actuator_name,
-                str(actuator_id),
-                f"{forcerange[0]:.3f}",
-                f"{forcerange[1]:.3f}",
-                kp,
-                kd,
-                actuator_type
-            ])
+            force_min = f"{forcerange[0]:.3f}"
+            force_max = f"{forcerange[1]:.3f}"
         else:
-            row.extend(["N/A (passive)", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A"])
-        
+            force_min = "N/A"
+            force_max = "N/A"
+            
+        # Append to the joint data list for sorting
+        joint_data.append({
+            "joint_name": joint_name,
+            "joint_id": joint_id,
+            "nn_id": nn_id,
+            "nn_id_str": nn_id_str, 
+            "damping": damping,
+            "armature": armature,
+            "frictionloss": frictionloss,
+            "actuator_name": actuator_name if actuator_id >= 0 else "N/A (passive)",
+            "actuator_id": str(actuator_id) if actuator_id >= 0 else "N/A",
+            "force_min": force_min,
+            "force_max": force_max,
+            "kp": kp,
+            "kd": kd,
+            "actuator_type": actuator_type,
+        })
+    
+    # Sort the data by nn_id (if available) or by joint name
+    joint_data.sort(key=lambda x: (x["nn_id"] if x["nn_id"] is not None else float('inf'), x["joint_name"]))
+    
+    # Prepare table data and headers
+    table_data = []
+    headers = [
+        "NN ID", 
+        "Joint Name", 
+        "Joint ID",
+        "Damping", 
+        "Armature", 
+        "Friction", 
+        "Actuator Name",
+        "Actuator ID",
+        "Force Min",
+        "Force Max",
+        "Kp",
+        "Kd",
+        "Type"
+    ]
+    
+    # Convert joint data to table rows
+    for joint in joint_data:
+        row = [
+            joint["nn_id_str"],
+            joint["joint_name"],
+            joint["joint_id"],
+            f"{joint['damping']:.3f}",
+            f"{joint['armature']:.3f}",
+            f"{joint['frictionloss']:.3f}",
+            joint["actuator_name"],
+            joint["actuator_id"],
+            joint["force_min"],
+            joint["force_max"],
+            joint["kp"],
+            joint["kd"],
+            joint["actuator_type"]
+        ]
         table_data.append(row)
     
     # Create the table using tabulate
