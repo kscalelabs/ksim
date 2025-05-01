@@ -21,6 +21,7 @@ __all__ = [
     "AvoidLimitsReward",
     "ObservationMeanPenalty",
     "ActionNearPositionPenalty",
+    "ActionInBoundsReward",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
     "FeetNoContactReward",
@@ -474,6 +475,41 @@ class ActionNearPositionPenalty(Reward):
         action = trajectory.action
         out_of_bounds = jnp.abs(current_position - action).clip(min=self.joint_threshold) * self.backoff_scale
         return out_of_bounds.astype(trajectory.qpos.dtype).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ActionInBoundsReward(Reward):
+    """Reward for the actions being within the joint limits.
+
+    Note that this penalty only makes sense if you are using a position
+    controller model, where actions correspond to positions.
+    """
+
+    joint_limits: xax.HashableArray = attrs.field(validator=joint_limits_validator)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        action = trajectory.action
+        joint_limits = self.joint_limits.array
+        in_bounds = (action > joint_limits[..., 0]) & (action < joint_limits[..., 1])
+        return in_bounds.all(axis=-1).astype(trajectory.qpos.dtype)
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        factor: float = 0.05,
+        scale: float = 1.0,
+    ) -> Self:
+        jnt_range = jnp.array(model.jnt_range)
+        jnt_limited = jnp.array(model.jnt_limited, dtype=jnp.bool_)
+        jnt_min, jnt_max = jnt_range[..., 0], jnt_range[..., 1]
+        jnt_diff = (jnt_max - jnt_min) * factor
+        jnt_min = jnt_min - jnt_diff
+        jnt_max = jnt_max + jnt_diff
+        jnt_min = jnp.where(jnt_limited, jnt_min, -jnp.inf)
+        jnt_max = jnp.where(jnt_limited, jnt_max, jnp.inf)
+        joint_limits = jnp.stack([jnt_min, jnt_max], axis=-1)
+        return cls(joint_limits=xax.hashable_array(joint_limits[..., 1:, :]), scale=scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
