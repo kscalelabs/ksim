@@ -19,6 +19,7 @@ __all__ = [
     "BaseJerkZPenalty",
     "ActuatorJerkPenalty",
     "AvoidLimitsReward",
+    "AvoidLimitsPenalty",
     "ObservationMeanPenalty",
     "ActionNearPositionPenalty",
     "ActionInBoundsReward",
@@ -425,6 +426,43 @@ class AvoidLimitsReward(Reward):
         joint_limits = self.joint_limits.array
         in_bounds = (joint_pos > joint_limits[..., 0]) & (joint_pos < joint_limits[..., 1])
         return in_bounds.all(axis=-1).astype(trajectory.qpos.dtype)
+
+    @classmethod
+    def create(
+        cls,
+        model: PhysicsModel,
+        factor: float = 0.05,
+        scale: float = 1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        jnt_range = jnp.array(model.jnt_range)
+        jnt_limited = jnp.array(model.jnt_limited, dtype=jnp.bool_)
+        jnt_min, jnt_max = jnt_range[..., 0], jnt_range[..., 1]
+        jnt_diff = (jnt_max - jnt_min) * factor
+        jnt_min = jnt_min - jnt_diff
+        jnt_max = jnt_max + jnt_diff
+        jnt_min = jnp.where(jnt_limited, jnt_min, -jnp.inf)
+        jnt_max = jnp.where(jnt_limited, jnt_max, jnp.inf)
+        joint_limits = jnp.stack([jnt_min, jnt_max], axis=-1)
+        return cls(
+            joint_limits=xax.hashable_array(joint_limits[..., 1:, :]),
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AvoidLimitsPenalty(Reward):
+    """Penalty for being too close to the joint limits."""
+
+    joint_limits: xax.HashableArray = attrs.field(validator=joint_limits_validator)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        joint_pos = trajectory.qpos[..., 7:]
+        joint_limits = self.joint_limits.array
+        penalty = -jnp.clip(joint_pos - joint_limits[..., 0], None, 0.0)
+        penalty += jnp.clip(joint_pos - joint_limits[..., 1], 0.0, None)
+        return jnp.sum(penalty, axis=-1)
 
     @classmethod
     def create(

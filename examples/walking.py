@@ -332,6 +332,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
+            ksim.AvoidLimitsReward.create(model=physics_model, factor=0.05),
+            ksim.AvoidLimitsPenalty.create(model=physics_model, factor=0.05, scale=-1.0),
         ]
 
         if self.config.naive_forward_reward:
@@ -523,7 +525,7 @@ if __name__ == "__main__":
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking num_envs=8 rollouts_per_batch=4
+    #   python -m examples.walking num_envs=8 batch_size=4
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             # Training parameters.
