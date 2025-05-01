@@ -188,7 +188,6 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.FastAccelerationTermination(),
             # TODO: add for collisions
         ]
 
