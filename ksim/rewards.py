@@ -796,9 +796,10 @@ class JoystickReward(Reward):
 class HeadingTrackingReward(Reward):
     """Reward for aligning robot yaw with commanded XY velocity heading."""
 
-    error_scale: float = attrs.field(default=0.25)
+    temperature: float = attrs.field(default=0.25)
     linear_velocity_obs_name: str = attrs.field()
     linear_velocity_cmd_name: str = attrs.field(default="float_vector_command")
+    monotonic_fn: MonotonicFn = attrs.field(default="exp")
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -811,4 +812,4 @@ class HeadingTrackingReward(Reward):
         lin_vel_error = xax.get_norm(command - trajectory.obs[self.linear_velocity_obs_name][..., :2], self.norm).sum(
             axis=-1
         )
-        return jnp.exp(-lin_vel_error / self.error_scale)
+        return norm_to_reward(lin_vel_error, self.temperature, self.monotonic_fn)
