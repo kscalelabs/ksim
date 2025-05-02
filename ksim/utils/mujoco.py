@@ -314,9 +314,9 @@ def log_joint_config(
         assert actuator_nn_id >= 0, f"Actuator {actuator_name} has invalid index {actuator_nn_id}"
         assert actuator_nn_id == joint_meta.nn_id, f"Actuator index mismatch: {actuator_nn_id} != {joint_meta.nn_id}"
 
-        assert float(joint_meta.soft_torque_limit) <= float(model.jnt_actfrcrange[joint_idx][1]), (
-            f"Soft torque limit {joint_meta.soft_torque_limit} exceeds max {model.jnt_actfrcrange[joint_idx][1]}"
-        )
+        stl_float = float(joint_meta.soft_torque_limit)
+        frcrange_float = float(model.jnt_actfrcrange[joint_idx][1])
+        assert stl_float <= frcrange_float, f"Soft torque limit {stl_float} > max {frcrange_float} for {joint_name}"
 
         joint_data.append(
             {
