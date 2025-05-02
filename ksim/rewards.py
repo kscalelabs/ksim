@@ -191,12 +191,17 @@ class LinearVelocityReward(Reward):
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
     clip_min: float | None = attrs.field(default=None)
     clip_max: float | None = attrs.field(default=None)
+    in_robot_frame: bool = attrs.field(default=True)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         dim = cartesian_index_to_dim(self.index)
-        lin_vel = trajectory.qvel[..., dim].clip(self.clip_min, self.clip_max)
-        return xax.get_norm(lin_vel, self.norm)
+        linvel = trajectory.qvel[..., :3]
+        if self.in_robot_frame:
+            quat = trajectory.qpos[..., 3:7]
+            linvel = xax.rotate_vector_by_quat(linvel, quat)
+        dimvel = linvel[..., dim].clip(self.clip_min, self.clip_max)
+        return xax.get_norm(dimvel, self.norm)
 
     def get_name(self) -> str:
         return f"{self.index}_{super().get_name()}"
@@ -218,12 +223,17 @@ class AngularVelocityReward(Reward):
     index: CartesianIndex = attrs.field(validator=dimension_index_validator)
     clip_min: float | None = attrs.field(default=None)
     clip_max: float | None = attrs.field(default=None)
+    in_robot_frame: bool = attrs.field(default=True)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        dim = cartesian_index_to_dim(self.index) + 3
-        ang_vel = trajectory.qvel[..., dim].clip(self.clip_min, self.clip_max)
-        return xax.get_norm(ang_vel, self.norm)
+        dim = cartesian_index_to_dim(self.index)
+        angvel = trajectory.qvel[..., 3:6]
+        if self.in_robot_frame:
+            quat = trajectory.qpos[..., 3:7]
+            angvel = xax.rotate_vector_by_quat(angvel, quat)
+        dimvel = angvel[..., dim].clip(self.clip_min, self.clip_max)
+        return xax.get_norm(dimvel, self.norm)
 
     def get_name(self) -> str:
         return f"{self.index}_{super().get_name()}"
@@ -725,6 +735,7 @@ class JoystickReward(Reward):
     linear_velocity_clip_max: float = attrs.field(validator=attrs.validators.gt(0.0))
     angular_velocity_clip_max: float = attrs.field(validator=attrs.validators.gt(0.0))
     command_name: str = attrs.field(default="joystick_command")
+    in_robot_frame: bool = attrs.field(default=True)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
     norm_penalty: float = attrs.field(default=0.01)
 
@@ -733,13 +744,21 @@ class JoystickReward(Reward):
         chex.assert_shape(command, (..., 1))
         command = command.squeeze(-1)
 
+        linvel = trajectory.qvel[..., :3]
+        angvel = trajectory.qvel[..., 3:6]
+
+        if self.in_robot_frame:
+            quat = trajectory.qpos[..., 3:7]
+            linvel = xax.rotate_vector_by_quat(linvel, quat)
+            angvel = xax.rotate_vector_by_quat(angvel, quat)
+
         # Gets the velocity of the robot.
-        xvel = trajectory.qvel[..., 0]
-        yvel = trajectory.qvel[..., 1]
-        zvel = trajectory.qvel[..., 2]
-        dxvel = trajectory.qvel[..., 4]
-        dyvel = trajectory.qvel[..., 5]
-        dzvel = trajectory.qvel[..., 6]
+        xvel = linvel[..., 0]
+        yvel = linvel[..., 1]
+        zvel = linvel[..., 2]
+        dxvel = angvel[..., 0]
+        dyvel = angvel[..., 1]
+        dzvel = angvel[..., 2]
 
         reward = jnp.where(
             command == 1,
