@@ -245,6 +245,7 @@ def get_joint_metadata(
     kd: float | None = None,
     armature: float | None = None,
     friction: float | None = None,
+    soft_torque_limit: float | None = None,
 ) -> dict[str, JointMetadataOutput]:
     """Get the joint metadata from the model."""
     metadata = {}
@@ -261,7 +262,7 @@ def get_joint_metadata(
             offset=None,
             actuator_type=None,
             nn_id=None,
-            soft_torque_limit=None,
+            soft_torque_limit=None if soft_torque_limit is None else str(soft_torque_limit),
         )
     return metadata
 
