@@ -1,34 +1,34 @@
 """Defines a base interface for defining reward functions."""
 
 __all__ = [
-    "ActionInBoundsReward",
-    "ActionNearPositionPenalty",
+    "MonotonicFn",
+    "norm_to_reward",
+    "Reward",
+    "StatefulReward",
+    "StayAliveReward",
+    "LinearVelocityReward",
+    "LinearVelocityPenalty",
+    "NaiveForwardReward",
+    "AngularVelocityReward",
+    "AngularVelocityPenalty",
+    "JointVelocityPenalty",
+    "BaseHeightReward",
+    "BaseHeightRangeReward",
     "ActionSmoothnessPenalty",
     "ActuatorForcePenalty",
-    "ActuatorJerkPenalty",
     "ActuatorRelativeForcePenalty",
-    "AngularVelocityPenalty",
-    "AngularVelocityReward",
-    "AvoidLimitsPenalty",
-    "BaseHeightRangeReward",
-    "BaseHeightReward",
     "BaseJerkZPenalty",
-    "FeetFlatReward",
-    "FeetLinearVelocityTrackingPenalty",
-    "FeetNoContactReward",
+    "ActuatorJerkPenalty",
+    "ActionInBoundsReward",
+    "AvoidLimitsPenalty",
+    "ActionNearPositionPenalty",
     "JointDeviationPenalty",
-    "JointVelocityPenalty",
-    "JoystickReward",
-    "LinearVelocityPenalty",
-    "LinearVelocityReward",
-    "MonotonicFn",
-    "NaiveForwardReward",
-    "norm_to_reward",
-    "ObservationMeanPenalty",
+    "FeetLinearVelocityTrackingPenalty",
+    "FeetFlatReward",
+    "FeetNoContactReward",
     "PositionTrackingReward",
-    "Reward",
-    "StayAliveReward",
     "UprightReward",
+    "JoystickReward",
 ]
 
 import functools
@@ -502,6 +502,41 @@ class ActionNearPositionPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class JointDeviationPenalty(Reward):
+    """Penalty for joint deviations from target positions."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+    joint_indices: tuple[int, ...] = attrs.field()
+    joint_targets: tuple[float, ...] = attrs.field()
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        diff = (
+            trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
+            - jnp.array(self.joint_targets)[jnp.array(self.joint_indices)]
+        )
+        penalty = xax.get_norm(diff, self.norm).sum(axis=-1)
+        return penalty
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        joint_names: tuple[str, ...],
+        joint_targets: tuple[float, ...],
+        scale: float = -1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
+        joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
+        return cls(
+            joint_indices=joint_indices,
+            joint_targets=joint_targets,
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
 class FeetLinearVelocityTrackingPenalty(Reward):
     """Explicit penalty for tracking the linear velocity of the feet.
 
@@ -754,38 +789,3 @@ class JoystickReward(Reward):
             ),
         )
         return reward
-
-
-@attrs.define(frozen=True, kw_only=True)
-class JointDeviationPenalty(Reward):
-    """Penalty for joint deviations from target positions."""
-
-    norm: xax.NormType = attrs.field(default="l2")
-    joint_indices: tuple[int, ...] = attrs.field()
-    joint_targets: tuple[float, ...] = attrs.field()
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        diff = (
-            trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
-            - jnp.array(self.joint_targets)[jnp.array(self.joint_indices)]
-        )
-        penalty = xax.get_norm(diff, self.norm).sum(axis=-1)
-        return penalty
-
-    @classmethod
-    def create(
-        cls,
-        physics_model: PhysicsModel,
-        joint_names: tuple[str, ...],
-        joint_targets: tuple[float, ...],
-        scale: float = -1.0,
-        scale_by_curriculum: bool = False,
-    ) -> Self:
-        joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
-        joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
-        return cls(
-            joint_indices=joint_indices,
-            joint_targets=joint_targets,
-            scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
-        )
