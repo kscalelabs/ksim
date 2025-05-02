@@ -1,33 +1,34 @@
 """Defines a base interface for defining reward functions."""
 
 __all__ = [
-    "MonotonicFn",
-    "norm_to_reward",
-    "Reward",
-    "StayAliveReward",
-    "LinearVelocityReward",
-    "LinearVelocityPenalty",
-    "NaiveForwardReward",
-    "AngularVelocityReward",
-    "AngularVelocityPenalty",
-    "JointVelocityPenalty",
-    "BaseHeightReward",
-    "BaseHeightRangeReward",
+    "ActionInBoundsReward",
+    "ActionNearPositionPenalty",
     "ActionSmoothnessPenalty",
     "ActuatorForcePenalty",
-    "ActuatorRelativeForcePenalty",
-    "BaseJerkZPenalty",
     "ActuatorJerkPenalty",
+    "ActuatorRelativeForcePenalty",
+    "AngularVelocityPenalty",
+    "AngularVelocityReward",
     "AvoidLimitsPenalty",
-    "ObservationMeanPenalty",
-    "ActionNearPositionPenalty",
-    "ActionInBoundsReward",
-    "FeetLinearVelocityTrackingPenalty",
+    "BaseHeightRangeReward",
+    "BaseHeightReward",
+    "BaseJerkZPenalty",
     "FeetFlatReward",
+    "FeetLinearVelocityTrackingPenalty",
     "FeetNoContactReward",
-    "PositionTrackingReward",
-    "UprightReward",
+    "JointDeviationPenalty",
+    "JointVelocityPenalty",
     "JoystickReward",
+    "LinearVelocityPenalty",
+    "LinearVelocityReward",
+    "MonotonicFn",
+    "NaiveForwardReward",
+    "norm_to_reward",
+    "ObservationMeanPenalty",
+    "PositionTrackingReward",
+    "Reward",
+    "StayAliveReward",
+    "UprightReward",
 ]
 
 import functools
@@ -43,7 +44,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsModel, Trajectory
-from ksim.utils.mujoco import get_body_data_idx_from_name
+from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
 from ksim.utils.types import (
     CartesianIndex,
     cartesian_index_to_dim,
@@ -753,3 +754,39 @@ class JoystickReward(Reward):
             ),
         )
         return reward
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointDeviationPenalty(Reward):
+    """Penalty for joint deviations from target positions."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+    joint_indices: tuple[int, ...] = attrs.field()
+    joint_targets: tuple[float, ...] = attrs.field()
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        diff = (
+            trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
+            - jnp.array(self.joint_targets)[jnp.array(self.joint_indices)]
+        )
+        reward_value = xax.get_norm(diff, self.norm).sum(axis=-1)
+        return reward_value
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        joint_names: tuple[str, ...],
+        joint_targets: tuple[float, ...],
+        scale: float = -1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        """Create a sensor observation from a physics model."""
+        joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
+        joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
+        return cls(
+            joint_indices=joint_indices,
+            joint_targets=joint_targets,
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
