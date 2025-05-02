@@ -34,6 +34,11 @@ class HumanoidWalkingDeltaTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
             joint_name_to_metadata=metadata,
         )
 
+    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
+        rewards = super().get_rewards(physics_model)
+        rewards.append(ksim.FeetFlatReward(scale=1.0))
+        return rewards
+
 
 if __name__ == "__main__":
     # To run training, use the following command:
