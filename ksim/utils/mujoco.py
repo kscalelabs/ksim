@@ -260,6 +260,8 @@ def get_joint_metadata(
             flipped=None,
             offset=None,
             actuator_type=None,
+            nn_id=None,
+            soft_torque_limit=None,
         )
     return metadata
 
