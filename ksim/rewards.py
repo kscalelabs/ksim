@@ -769,8 +769,8 @@ class JointDeviationPenalty(Reward):
             trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
             - jnp.array(self.joint_targets)[jnp.array(self.joint_indices)]
         )
-        reward_value = xax.get_norm(diff, self.norm).sum(axis=-1)
-        return reward_value
+        penalty = xax.get_norm(diff, self.norm).sum(axis=-1)
+        return penalty
 
     @classmethod
     def create(
@@ -781,7 +781,6 @@ class JointDeviationPenalty(Reward):
         scale: float = -1.0,
         scale_by_curriculum: bool = False,
     ) -> Self:
-        """Create a sensor observation from a physics model."""
         joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
         joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
         return cls(
