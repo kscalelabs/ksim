@@ -137,7 +137,6 @@ class MITPositionActuators(Actuators):
         if any(self.kps == 0) or any(self.kds == 0):
             logger.warning("Some KPs or KDs are 0. Check the provided metadata.")
 
-        # Log joint and actuator configuration
         log_joint_config(physics_model, joint_name_to_metadata)
 
     def get_actuator_name(self, joint_name: str) -> str:

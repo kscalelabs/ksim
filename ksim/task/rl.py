@@ -676,9 +676,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return mj_model
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        metadata = get_joint_metadata(mj_model)
-        log_joint_config(mj_model, metadata)
-        return metadata
+        return get_joint_metadata(mj_model)
 
     def get_mjx_model(self, mj_model: mujoco.MjModel) -> mjx.Model:
         """Convert a mujoco model to an mjx model.
