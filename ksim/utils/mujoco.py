@@ -306,21 +306,28 @@ def log_joint_config(
             continue
 
         dof_id = model.jnt_dofadr[joint_idx]
-
         actuator_name = f"{joint_name}_ctrl"
-        assert actuator_name in actuator_name_to_nn_id, f"Actuator {actuator_name} not found in model"
+
+        # Checks for errors in the joint configuration setup
+        if actuator_name not in actuator_name_to_nn_id:
+            raise ValueError(f"Actuator {actuator_name} not found in model")
         actuator_nn_id = actuator_name_to_nn_id[actuator_name]
 
-        assert joint_name in metadata, f"Joint {joint_name} not found in metadata"
+        if joint_name not in metadata:
+            raise ValueError(f"Joint {joint_name} not found in metadata")
         joint_meta = metadata[joint_name]
 
-        assert actuator_nn_id >= 0, f"Actuator {actuator_name} has invalid index {actuator_nn_id}"
-        assert actuator_nn_id == joint_meta.nn_id, f"Actuator index mismatch: {actuator_nn_id} != {joint_meta.nn_id}"
-        assert joint_meta.soft_torque_limit is not None, f"Joint {joint_name} has no soft torque limit"
+        if actuator_nn_id < 0:
+            raise ValueError(f"Actuator {actuator_name} has invalid index {actuator_nn_id}")
+        if actuator_nn_id != joint_meta.nn_id:
+            raise ValueError(f"Actuator index mismatch: {actuator_nn_id} != {joint_meta.nn_id}")
+        if joint_meta.soft_torque_limit is None:
+            raise ValueError(f"Joint {joint_name} has no soft torque limit")
 
         stl_float = float(joint_meta.soft_torque_limit)
         frcrange_float = float(model.jnt_actfrcrange[joint_idx][1])
-        assert stl_float <= frcrange_float, f"Soft torque limit {stl_float} > max {frcrange_float} for {joint_name}"
+        if stl_float > frcrange_float:
+            raise ValueError(f"Soft torque limit {stl_float} > max {frcrange_float} for {joint_name}")
 
         joint_data.append(
             {
