@@ -19,7 +19,7 @@ import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 2
 
 
 class DefaultHumanoidActor(eqx.Module):
@@ -161,8 +161,8 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The maximum value for the angular velocity reward.",
     )
     naive_forward_reward: bool = xax.field(
-        value=False,
-        help="If set, use the naive forward reward instead of the joystick reward.",
+        value=True,
+        help="If set, use the naive forward reward instead of the heading tracking reward.",
     )
 
     # Optimizer parameters.
@@ -233,32 +233,29 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         metadata: dict[str, JointMetadataOutput] | None = None,
     ) -> ksim.Actuators:
         assert metadata is not None, "Metadata is required"
-        return ksim.MITPositionActuators(
-            physics_model=physics_model,
-            joint_name_to_metadata=metadata,
-        )
+        return ksim.MITPositionActuators(physics_model=physics_model, joint_name_to_metadata=metadata)
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
-        return [
-            ksim.StaticFrictionRandomizer(),
-            ksim.ArmatureRandomizer(),
-            ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "torso"),
-            ksim.JointDampingRandomizer(),
-            ksim.JointZeroPositionRandomizer(),
-        ]
+        return []
+        #     ksim.StaticFrictionRandomizer(),
+        #     ksim.ArmatureRandomizer(),
+        #     ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "torso"),
+        #     ksim.JointDampingRandomizer(),
+        #     ksim.JointZeroPositionRandomizer(),
+        # ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.PushEvent(
-                x_force=1.0,
-                y_force=1.0,
-                z_force=0.0,
-                x_angular_force=0.1,
-                y_angular_force=0.1,
-                z_angular_force=0.3,
-                interval_range=(0.25, 0.75),
-            ),
-        ]
+        return []
+        #     ksim.PushEvent(
+        #         x_force=1.0,
+        #         y_force=1.0,
+        #         z_force=0.0,
+        #         x_angular_force=0.1,
+        #         y_angular_force=0.1,
+        #         z_angular_force=0.3,
+        #         interval_range=(0.25, 0.75),
+        #     ),
+        # ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
@@ -320,33 +317,31 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            (
-                ksim.JoystickCommand(
-                    ranges=((0, 1),) if self.config.move_forward_command else ((0, 4),),
-                    switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average.
-                )
+            ksim.FloatVectorCommand(
+                ranges=((0.0, 0.5), (0.0, 0.1)),  # x axis
+                switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average.
+            ),
+            ksim.FloatVectorCommand(
+                ranges=((0.0, 0.0), (0.0, 0.0)),  # y axis
+                switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average.
             ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [ksim.StayAliveReward(scale=1.0), ksim.UprightReward(scale=1.0)]
 
-        if self.config.naive_forward_reward:
-            rewards += [
-                ksim.NaiveForwardReward(
-                    scale=1.0,
-                ),
-            ]
-
-        else:
-            rewards += [
-                ksim.JoystickReward(
-                    linear_velocity_clip_max=self.config.linear_velocity_clip_max,
-                    angular_velocity_clip_max=self.config.angular_velocity_clip_max,
-                    command_name="joystick_command",
-                    scale=1.0,
-                ),
-            ]
+        rewards += [
+            ksim.HeadingTrackingReward(
+                quat_obs_name="sensor_observation_orientation",
+                cmd_name="float_vector_command",
+                scale=1.0,
+            ),
+        ]
+        # rewards += [
+        #     ksim.NaiveForwardReward(
+        #         scale=1.0,
+        #     ),
+        # ]
 
         return rewards
 
@@ -360,13 +355,14 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.EpisodeLengthCurriculum(
-            num_levels=self.config.num_curriculum_levels,
-            increase_threshold=self.config.increase_threshold,
-            decrease_threshold=self.config.decrease_threshold,
-            min_level_steps=self.config.min_level_steps,
-            dt=self.config.ctrl_dt,
-        )
+        return ksim.ConstantCurriculum(level=1.0)
+        # ksim.EpisodeLengthCurriculum(
+        #     num_levels=self.config.num_curriculum_levels,
+        #     increase_threshold=self.config.increase_threshold,
+        #     decrease_threshold=self.config.decrease_threshold,
+        #     min_level_steps=self.config.min_level_steps,
+        #     dt=self.config.ctrl_dt,
+        # )
 
     def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
         return DefaultHumanoidModel(
@@ -398,9 +394,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_1 = commands["joystick_command"]
-        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
-
+        float_vector_command_2 = commands["float_vector_command"]
         obs_n = jnp.concatenate(
             [
                 jnp.cos(timestep_1),  # 1
@@ -415,7 +409,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_6,  # 6
+                float_vector_command_2,  # 2
+                # add ang
             ],
             axis=-1,
         )
@@ -441,9 +436,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_1 = commands["joystick_command"]
-        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
-
+        float_vector_command_2 = commands["float_vector_command"]
         obs_n = jnp.concatenate(
             [
                 jnp.cos(timestep_1),  # 1
@@ -458,7 +451,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_6,  # 6
+                float_vector_command_2,  # 2
             ],
             axis=-1,
         )
@@ -514,7 +507,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.walking
+    #   python -m examples.walking disable_multiprocessing=True
     # To visualize the environment, use the following command:
     #   python -m examples.walking run_model_viewer=True
     # On MacOS or other devices with less memory, you can change the number
