@@ -318,12 +318,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             ksim.FloatVectorCommand(
-                ranges=((0.0, 0.5), (0.0, 0.1)),  # x axis
-                switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average.
-            ),
-            ksim.FloatVectorCommand(
-                ranges=((0.0, 0.0), (0.0, 0.0)),  # y axis
-                switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average.
+                ranges=(
+                    (0.3, 0.3),
+                    (0.0, 0.0),
+                ),
+                switch_prob=(self.config.ctrl_dt / 5, 0),  # Switch every 5 seconds, on average.
             ),
         ]
 
@@ -332,16 +331,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
         rewards += [
             ksim.HeadingTrackingReward(
-                quat_obs_name="sensor_observation_orientation",
-                cmd_name="float_vector_command",
+                linear_velocity_obs_name="sensor_observation_local_linvel",
+                linear_velocity_cmd_name="float_vector_command",
                 scale=1.0,
             ),
         ]
-        # rewards += [
-        #     ksim.NaiveForwardReward(
-        #         scale=1.0,
-        #     ),
-        # ]
 
         return rewards
 

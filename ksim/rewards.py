@@ -797,27 +797,18 @@ class HeadingTrackingReward(Reward):
     """Reward for aligning robot yaw with commanded XY velocity heading."""
 
     error_scale: float = attrs.field(default=0.25)
-    quat_obs_name: str = attrs.field(default="orientation")
-    cmd_name: str = attrs.field(default="float_vector_command")
+    linear_velocity_obs_name: str = attrs.field()
+    linear_velocity_cmd_name: str = attrs.field(default="float_vector_command")
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        if self.quat_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.quat_obs_name} not found.")
-        if self.cmd_name not in trajectory.command:
-            raise ValueError(f"Command {self.x_cmd_name} not found.")
+        if self.linear_velocity_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.linear_velocity_obs_name} not found.")
+        if self.linear_velocity_cmd_name not in trajectory.command:
+            raise ValueError(f"Command {self.linear_velocity_cmd_name} not found.")
 
-        obs_q = trajectory.obs[self.quat_obs_name]
-        cmd_vel = trajectory.command[self.cmd_name]
-
-        # observed heading
-        w, x, y, z = jnp.split(obs_q, 4, axis=-1)
-        obs_yaw = jnp.arctan2(2 * (w * z + x * y), 1 - 2 * (y**2 + z**2)).squeeze(-1)
-
-        # commanded heading
-        cmd_yaw = jnp.arctan2(cmd_vel[..., 1], cmd_vel[..., 0])
-
-        err = cmd_yaw - obs_yaw
-        yaw_error = jnp.abs(err)
-
-        jax.debug.breakpoint()
-        return jnp.exp(-yaw_error / self.error_scale)
+        command = trajectory.command[self.linear_velocity_cmd_name]
+        lin_vel_error = xax.get_norm(command - trajectory.obs[self.linear_velocity_obs_name][..., :2], self.norm).sum(
+            axis=-1
+        )
+        return jnp.exp(-lin_vel_error / self.error_scale)
