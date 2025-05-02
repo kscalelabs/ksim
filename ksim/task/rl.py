@@ -72,13 +72,11 @@ from ksim.types import (
     Trajectory,
 )
 from ksim.utils.mujoco import (
-    get_body_data_idx_by_name,
     get_joint_metadata,
     get_joint_names_in_order,
     get_position_limits,
     get_torque_limits,
     load_model,
-    log_joint_config,
 )
 from ksim.viewer import DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
