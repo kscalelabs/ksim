@@ -4,6 +4,7 @@ __all__ = [
     "MonotonicFn",
     "norm_to_reward",
     "Reward",
+    "StatefulReward",
     "StayAliveReward",
     "LinearVelocityReward",
     "LinearVelocityPenalty",
@@ -18,10 +19,10 @@ __all__ = [
     "ActuatorRelativeForcePenalty",
     "BaseJerkZPenalty",
     "ActuatorJerkPenalty",
-    "AvoidLimitsReward",
-    "ObservationMeanPenalty",
-    "ActionNearPositionPenalty",
     "ActionInBoundsReward",
+    "AvoidLimitsPenalty",
+    "ActionNearPositionPenalty",
+    "JointDeviationPenalty",
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
     "FeetNoContactReward",
@@ -43,7 +44,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsModel, Trajectory
-from ksim.utils.mujoco import get_body_data_idx_from_name
+from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
 from ksim.utils.types import (
     CartesianIndex,
     cartesian_index_to_dim,
@@ -404,7 +405,7 @@ class ActuatorJerkPenalty(Reward):
         return reward
 
 
-def joint_limits_validator(inst: "AvoidLimitsReward", attr: attrs.Attribute, value: xax.HashableArray) -> None:
+def joint_limits_validator(inst: "ActionInBoundsReward", attr: attrs.Attribute, value: xax.HashableArray) -> None:
     arr = value.array
     if arr.ndim != 2 or arr.shape[1] != 2:
         raise ValueError(f"Joint range must have shape (n_joints, 2), got {arr.shape}")
@@ -412,74 +413,6 @@ def joint_limits_validator(inst: "AvoidLimitsReward", attr: attrs.Attribute, val
         raise ValueError(f"Joint range must be sorted, got {arr}")
     if not arr.dtype == jnp.float32:
         raise ValueError(f"Joint range must be a float array, got {arr.dtype}")
-
-
-@attrs.define(frozen=True, kw_only=True)
-class AvoidLimitsReward(Reward):
-    """Reward for not being too close to the joint limits."""
-
-    joint_limits: xax.HashableArray = attrs.field(validator=joint_limits_validator)
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        joint_pos = trajectory.qpos[..., 7:]
-        joint_limits = self.joint_limits.array
-        in_bounds = (joint_pos > joint_limits[..., 0]) & (joint_pos < joint_limits[..., 1])
-        return in_bounds.all(axis=-1).astype(trajectory.qpos.dtype)
-
-    @classmethod
-    def create(
-        cls,
-        model: PhysicsModel,
-        factor: float = 0.05,
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
-    ) -> Self:
-        jnt_range = jnp.array(model.jnt_range)
-        jnt_limited = jnp.array(model.jnt_limited, dtype=jnp.bool_)
-        jnt_min, jnt_max = jnt_range[..., 0], jnt_range[..., 1]
-        jnt_diff = (jnt_max - jnt_min) * factor
-        jnt_min = jnt_min - jnt_diff
-        jnt_max = jnt_max + jnt_diff
-        jnt_min = jnp.where(jnt_limited, jnt_min, -jnp.inf)
-        jnt_max = jnp.where(jnt_limited, jnt_max, jnp.inf)
-        joint_limits = jnp.stack([jnt_min, jnt_max], axis=-1)
-        return cls(
-            joint_limits=xax.hashable_array(joint_limits[..., 1:, :]),
-            scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
-        )
-
-
-@attrs.define(frozen=True, kw_only=True)
-class ObservationMeanPenalty(Reward):
-    """Penalty for the mean of an observation."""
-
-    observation_name: str = attrs.field()
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        reward = trajectory.obs[self.observation_name].mean(axis=-1)
-        return reward
-
-    def get_name(self) -> str:
-        return f"{super().get_name()}_{self.observation_name}"
-
-
-@attrs.define(frozen=True, kw_only=True)
-class ActionNearPositionPenalty(Reward):
-    """Penalizes the action for being too far from the target position.
-
-    Note that this penalty only makes sense if you are using a position
-    controller model, where actions correspond to positions.
-    """
-
-    joint_threshold: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
-    backoff_scale: float = attrs.field(default=1.0)
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        current_position = trajectory.qpos[..., 7:]
-        action = trajectory.action
-        out_of_bounds = jnp.abs(current_position - action).clip(min=self.joint_threshold) * self.backoff_scale
-        return out_of_bounds.astype(trajectory.qpos.dtype).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -517,6 +450,87 @@ class ActionInBoundsReward(Reward):
         joint_limits = jnp.stack([jnt_min, jnt_max], axis=-1)
         return cls(
             joint_limits=xax.hashable_array(joint_limits[..., 1:, :]),
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AvoidLimitsPenalty(ActionInBoundsReward):
+    """Penalty for being too close to the joint limits."""
+
+    joint_limits: xax.HashableArray = attrs.field(validator=joint_limits_validator)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        joint_pos = trajectory.qpos[..., 7:]
+        joint_limits = self.joint_limits.array
+        penalty = -jnp.clip(joint_pos - joint_limits[..., 0], None, 0.0)
+        penalty += jnp.clip(joint_pos - joint_limits[..., 1], 0.0, None)
+        return jnp.sum(penalty, axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ObservationMeanPenalty(Reward):
+    """Penalty for the mean of an observation."""
+
+    observation_name: str = attrs.field()
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        reward = trajectory.obs[self.observation_name].mean(axis=-1)
+        return reward
+
+    def get_name(self) -> str:
+        return f"{super().get_name()}_{self.observation_name}"
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ActionNearPositionPenalty(Reward):
+    """Penalizes the action for being too far from the target position.
+
+    Note that this penalty only makes sense if you are using a position
+    controller model, where actions correspond to positions.
+    """
+
+    joint_threshold: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
+    backoff_scale: float = attrs.field(default=1.0)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        current_position = trajectory.qpos[..., 7:]
+        action = trajectory.action
+        out_of_bounds = jnp.abs(current_position - action).clip(min=self.joint_threshold) * self.backoff_scale
+        return out_of_bounds.astype(trajectory.qpos.dtype).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointDeviationPenalty(Reward):
+    """Penalty for joint deviations from target positions."""
+
+    norm: xax.NormType = attrs.field(default="l2")
+    joint_indices: tuple[int, ...] = attrs.field()
+    joint_targets: tuple[float, ...] = attrs.field()
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        diff = (
+            trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
+            - jnp.array(self.joint_targets)[jnp.array(self.joint_indices)]
+        )
+        penalty = xax.get_norm(diff, self.norm).sum(axis=-1)
+        return penalty
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        joint_names: tuple[str, ...],
+        joint_targets: tuple[float, ...],
+        scale: float = -1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
+        joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
+        return cls(
+            joint_indices=joint_indices,
+            joint_targets=joint_targets,
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
         )

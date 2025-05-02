@@ -35,7 +35,7 @@ This launches PPO training on the default humanoid with 2048 parallel environmen
 If you are on a Mac or a system with less memory:
 
 ```
-python -m examples.walking num_envs=8 rollouts_per_batch=4
+python -m examples.walking num_envs=8 batch_size=4
 ```
 
 ---
