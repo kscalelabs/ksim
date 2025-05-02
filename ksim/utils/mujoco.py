@@ -33,7 +33,7 @@ __all__ = [
 ]
 
 import logging
-from typing import Any, Hashable, Sequence, TypeVar
+from typing import Any, Hashable, TypeVar
 from xml.etree import ElementTree as ET
 
 import chex
@@ -267,182 +267,84 @@ def get_joint_metadata(
 
 
 def log_joint_config(
-    model: PhysicsModel, 
-    metadata: dict[str, JointMetadataOutput] | None = None,
+    model: PhysicsModel,
+    metadata: dict[str, JointMetadataOutput],
 ) -> None:
-    """Log configuration of joints and actuators for debugging."""
-    logger = logging.getLogger(__name__)
-    
-    # Define helper functions for either MuJoCo or MJX models
-    if isinstance(model, mujoco.MjModel):
-        logger.debug("PhysicsModel is Mujoco")
-        
-        def get_joint_name(idx: int) -> str | None:
-            return mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, idx)
-        
-        def get_actuator_id(name: str) -> int:
-            return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
-        
-        dof_damping = model.dof_damping
-        dof_armature = model.dof_armature
-        dof_frictionloss = model.dof_frictionloss
-        jnt_dofadr = model.jnt_dofadr
-        actuator_forcerange = model.actuator_forcerange
-        
-    elif isinstance(model, mjx.Model):
-        logger.debug("PhysicsModel is MJX")
-        
-        dof_damping = model.dof_damping
-        dof_armature = model.dof_armature
-        dof_frictionloss = model.dof_frictionloss
-        jnt_dofadr = model.jnt_dofadr
-        actuator_forcerange = model.actuator_forcerange
-        
-        def extract_name(byte_array: bytes, adr_array: Sequence[int], idx: int) -> str | None:
-            adr = adr_array[idx]
-            if adr < 0:
-                return None
-            end = byte_array.find(b"\x00", adr)
-            return byte_array[adr:end].decode("utf-8")
-        
-        actuator_name_to_id = {
-            extract_name(model.names, model.name_actuatoradr, i): i
-            for i in range(model.nu)
-            if model.name_actuatoradr[i] >= 0
-        }
-        
-        def get_joint_name(idx: int) -> str | None:
-            return extract_name(model.names, model.name_jntadr, idx)
-        
-        def get_actuator_id(name: str) -> int:
-            return actuator_name_to_id.get(name, -1)
-    
-    else:
-        raise TypeError(f"Unsupported model type: {type(model)}")
-    
-    # Programmatically determine NN indices based on actuator indices
-    derived_nn_id_mapping = {}
-    joint_to_actuator_mapping = {}
-    
-    # Prepare the joint info and determine actuator/NN indices
-    joint_data = []
-    for i in range(model.njnt):
-        joint_name = get_joint_name(i)
-        if joint_name is None:
-            continue
-        
-        # Determine associated actuator
-        actuator_name = f"{joint_name}_ctrl"
-        actuator_id = get_actuator_id(actuator_name)
-        
-        # Store actuator ID for this joint (used for NN index derivation)
-        if actuator_id >= 0:
-            joint_to_actuator_mapping[joint_name] = actuator_id
-            derived_nn_id_mapping[joint_name] = actuator_id
+    """Log configuration of joints and actuators in a table."""
+    actuator_name_to_nn_id = get_ctrl_data_idx_by_name(model)
+    joint_names = get_joint_names_in_order(model)
+    joint_limits = get_position_limits(model)
 
-        # Get DOF ID and physical properties
-        dof_id = jnt_dofadr[i]
-        damping = dof_damping[dof_id]
-        armature = dof_armature[dof_id]
-        frictionloss = dof_frictionloss[dof_id]
-        
-        # Get metadata if available
-        joint_meta = None if metadata is None else metadata.get(joint_name)
-        
-        # Determine NN ID from actuator ID
-        nn_id = derived_nn_id_mapping.get(joint_name)
-        nn_id_str = str(nn_id) if nn_id is not None else "N/A"
-        
-        # Get KP and KD values from metadata
-        kp = "N/A"
-        kd = "N/A"
-        actuator_type = "N/A"
-        joint_id = "N/A"
-        
-        if joint_meta is not None:
-            kp = joint_meta.kp if joint_meta.kp is not None else "N/A"
-            kd = joint_meta.kd if joint_meta.kd is not None else "N/A"
-            actuator_type = joint_meta.actuator_type if joint_meta.actuator_type is not None else "N/A"
-            joint_id = str(joint_meta.id) if joint_meta.id is not None else "N/A"
-        
-        # Prepare force range info
-        if actuator_id >= 0:
-            forcerange = actuator_forcerange[actuator_id]
-            force_min = f"{forcerange[0]:.3f}"
-            force_max = f"{forcerange[1]:.3f}"
-        else:
-            force_min = "N/A"
-            force_max = "N/A"
-            
-        # Append to the joint data list for sorting
-        joint_data.append({
-            "joint_name": joint_name,
-            "joint_id": joint_id,
-            "nn_id": nn_id,
-            "nn_id_str": nn_id_str, 
-            "damping": damping,
-            "armature": armature,
-            "frictionloss": frictionloss,
-            "actuator_name": actuator_name if actuator_id >= 0 else "N/A (passive)",
-            "actuator_id": str(actuator_id) if actuator_id >= 0 else "N/A",
-            "force_min": force_min,
-            "force_max": force_max,
-            "kp": kp,
-            "kd": kd,
-            "actuator_type": actuator_type,
-        })
-    
-    # Sort the data by nn_id (if available) or by joint name
-    joint_data.sort(key=lambda x: (x["nn_id"] if x["nn_id"] is not None else float('inf'), x["joint_name"]))
-    
-    # Prepare table data and headers
-    table_data = []
+    # The \n is to make the table headers take up less horizontal space.
     headers = [
         "Joint Name",
-        "NN ID", 
-        "Joint ID",
+        "NN\nID",
+        "KOS\nID",
         "Type",
         "Kp",
         "Kd",
-        "Damping", 
-        "Armature", 
-        "Friction", 
-        "Actuator Name",
-        "Actuator ID",
-        "Force Min",
-        "Force Max"
+        "Soft\nTorque\nLimit",
+        "Dmp",
+        "Arm",
+        "Fric",
+        "Joint\nLimit\nMin",
+        "Joint\nLimit\nMax",
+        "Ctrl\nMin",
+        "Ctrl\nMax",
+        "Force\nMin",
+        "Force\nMax",
+        "Joint\nIdx",
+        "DOF\nIdx",
     ]
-    
-    # Convert joint data to table rows
-    for joint in joint_data:
-        row = [
-            joint["joint_name"],
-            joint["nn_id_str"],
-            joint["joint_id"],
-            joint["actuator_type"],
-            joint["kp"],
-            joint["kd"],
-            f"{joint['damping']:.3f}",
-            f"{joint['armature']:.3f}",
-            f"{joint['frictionloss']:.3f}",
-            joint["actuator_name"],
-            joint["actuator_id"],
-            joint["force_min"],
-            joint["force_max"]
-        ]
-        table_data.append(row)
-    
-    # Create the table using tabulate
-    table = tabulate(
-        table_data,
-        headers=headers,
-        tablefmt="grid",
-        numalign="right",
-        stralign="left"
-    )
-    
-    # Log the joint configuration (using INFO level for visibility)
-    logger.info("==== Joint and Actuator Properties ====\n%s", table)
+
+    joint_data = []
+    for joint_idx, joint_name in enumerate(joint_names):
+        if joint_name == "floating_base":
+            continue
+
+        dof_id = model.jnt_dofadr[joint_idx]
+
+        actuator_name = f"{joint_name}_ctrl"
+        assert actuator_name in actuator_name_to_nn_id, f"Actuator {actuator_name} not found in model"
+        actuator_nn_id = actuator_name_to_nn_id[actuator_name]
+
+        assert joint_name in metadata, f"Joint {joint_name} not found in metadata"
+        joint_meta = metadata[joint_name]
+
+        assert actuator_nn_id >= 0, f"Actuator {actuator_name} has invalid index {actuator_nn_id}"
+        assert actuator_nn_id == joint_meta.nn_id, f"Actuator index mismatch: {actuator_nn_id} != {joint_meta.nn_id}"
+
+        assert joint_meta.soft_torque_limit <= model.jnt_actfrcrange[joint_idx][1], (
+            f"Soft torque limit {joint_meta.soft_torque_limit} exceeds max {model.jnt_actfrcrange[joint_idx][1]}"
+        )
+
+        joint_data.append(
+            {
+                "Joint Name": joint_name,
+                "NN\nID": actuator_nn_id,
+                "KOS\nID": str(joint_meta.id),
+                "Type": joint_meta.actuator_type,
+                "Kp": joint_meta.kp,
+                "Kd": joint_meta.kd,
+                "Soft\nTorque\nLimit": joint_meta.soft_torque_limit,
+                "Dmp": model.dof_damping[dof_id],
+                "Arm": model.dof_armature[dof_id],
+                "Fric": model.dof_frictionloss[dof_id],
+                "Joint\nLimit\nMin": f"{joint_limits[joint_name][0]:.3f}",
+                "Joint\nLimit\nMax": f"{joint_limits[joint_name][1]:.3f}",
+                "Ctrl\nMin": model.actuator_ctrlrange[actuator_nn_id][0],
+                "Ctrl\nMax": model.actuator_ctrlrange[actuator_nn_id][1],
+                "Force\nMin": model.jnt_actfrcrange[joint_idx][0],
+                "Force\nMax": model.jnt_actfrcrange[joint_idx][1],
+                "Joint\nIdx": joint_idx,
+                "DOF\nIdx": dof_id,
+            }
+        )
+
+    joint_data.sort(key=lambda x: (x["NN\nID"], x["Joint Name"]))
+    table_data = [[joint[header] for header in headers] for joint in joint_data]
+    table = tabulate(table_data, headers=headers, tablefmt="grid", numalign="right", stralign="left")
+    logger.info("Joint Configuration:\n%s", table)
 
 
 def update_model_field(model: mujoco.MjModel | mjx.Model, name: str, new_value: Array) -> mujoco.MjModel | mjx.Model:
