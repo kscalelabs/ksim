@@ -1708,7 +1708,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         observations = self.get_observations(physics_model)
         commands = self.get_commands(physics_model)
         rewards_terms = self.get_rewards(physics_model)
+        if len(rewards_terms) == 0:
+            raise ValueError("No rewards found! Must have at least one reward.")
         terminations = self.get_terminations(physics_model)
+        if len(terminations) == 0:
+            raise ValueError("No terminations found! Must have at least one termination.")
         curriculum = self.get_curriculum(physics_model)
 
         return RolloutConstants(

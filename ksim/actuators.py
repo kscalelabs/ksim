@@ -94,13 +94,13 @@ class MITPositionActuators(Actuators):
         action_noise_type: NoiseType = "none",
         torque_noise: float = 0.0,
         torque_noise_type: NoiseType = "none",
-        ctrl_clip: list[float] | None = None,
         freejoint_first: bool = True,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
         kps_list = [-1.0] * len(ctrl_name_to_idx)
         kds_list = [-1.0] * len(ctrl_name_to_idx)
+        ctrl_clip_list = [jnp.inf] * len(ctrl_name_to_idx)
 
         self.freejoint_first = freejoint_first
 
@@ -113,24 +113,28 @@ class MITPositionActuators(Actuators):
 
             kp_str = params.kp
             kd_str = params.kd
+            ctrl_clip_str = params.soft_torque_limit
             assert kp_str is not None and kd_str is not None, f"Missing kp or kd for joint {joint_name}"
             kp = float(kp_str)
             kd = float(kd_str)
+
+            if ctrl_clip_str is not None:
+                ctrl_clip = float(ctrl_clip_str)
+                if ctrl_clip < 0:
+                    raise ValueError(f"Soft torque limit for joint {joint_name} is negative: {ctrl_clip}")
+                ctrl_clip_list[actuator_idx] = ctrl_clip
 
             kps_list[actuator_idx] = kp
             kds_list[actuator_idx] = kd
 
         self.kps = jnp.array(kps_list)
         self.kds = jnp.array(kds_list)
+        self.ctrl_clip = jnp.array(ctrl_clip_list)
+
         self.action_noise = action_noise
         self.action_noise_type = action_noise_type
         self.torque_noise = torque_noise
         self.torque_noise_type = torque_noise_type
-
-        if ctrl_clip is not None:
-            self.ctrl_clip = jnp.array(ctrl_clip)
-        else:
-            self.ctrl_clip = jnp.ones_like(self.kps) * jnp.inf
 
         if any(self.kps < 0) or any(self.kds < 0):
             raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
@@ -176,7 +180,6 @@ class MITPositionVelocityActuators(MITPositionActuators):
         vel_action_noise_type: NoiseType = "none",
         torque_noise: float = 0.0,
         torque_noise_type: NoiseType = "none",
-        ctrl_clip: list[float] | None = None,
         freejoint_first: bool = True,
     ) -> None:
         super().__init__(
@@ -186,7 +189,6 @@ class MITPositionVelocityActuators(MITPositionActuators):
             action_noise_type=pos_action_noise_type,
             torque_noise=torque_noise,
             torque_noise_type=torque_noise_type,
-            ctrl_clip=ctrl_clip,
             freejoint_first=freejoint_first,
         )
 

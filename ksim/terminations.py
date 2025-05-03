@@ -9,6 +9,7 @@ __all__ = [
     "BadZTermination",
     "HighVelocityTermination",
     "FarFromOriginTermination",
+    "EpisodeLengthTermination",
 ]
 
 import functools
@@ -179,3 +180,13 @@ class FarFromOriginTermination(Termination):
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         return jnp.where(jnp.linalg.norm(state.qpos[..., :3], axis=-1) > self.max_dist, 1, 0)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class EpisodeLengthTermination(Termination):
+    """Terminates the episode if the robot is in collision."""
+
+    max_length: float = attrs.field(validator=attrs.validators.gt(0.0))
+
+    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
+        return jnp.where(state.time > self.max_length, 1, 0)
