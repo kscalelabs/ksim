@@ -2057,7 +2057,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 logged_traj=logged_traj,
                                 markers=markers,
                                 viewer=viewer,
-                                key="trajectory",
+                                key="full-trajectory" if full_render else "trajectory",
                             )
                             if full_render:
                                 self._log_logged_trajectory_graphs(
