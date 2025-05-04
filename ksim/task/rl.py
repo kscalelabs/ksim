@@ -1224,7 +1224,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             key=key,
             value=frames,
             fps=round(fps / self.config.render_slowdown),
-            namespace="➡️ trajectory images",
+            namespace=f"➡️ {key} images",
         )
 
     @abstractmethod
@@ -2057,7 +2057,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 logged_traj=logged_traj,
                                 markers=markers,
                                 viewer=viewer,
-                                key="full-trajectory" if full_render else "trajectory",
+                                key="full trajectory" if full_render else "trajectory",
                             )
                             if full_render:
                                 self._log_logged_trajectory_graphs(
