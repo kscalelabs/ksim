@@ -2001,7 +2001,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 mj_model=mj_model,
                 config=self.config,
                 mode="offscreen",
-                is_small=False,
             )
 
             state = self.on_training_start(state)
