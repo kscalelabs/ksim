@@ -264,6 +264,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.RandomJointPositionReset.create(physics_model, zeros={"abdomen_z": 0.0}),
             ksim.RandomJointVelocityReset(),
+            ksim.RandomHeadingReset(),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
