@@ -437,14 +437,6 @@ class RLConfig(xax.Config):
         value=False,
         help="If true, render inertia.",
     )
-    render_height_small: int = xax.field(
-        value=240,
-        help="The height of the rendered images.",
-    )
-    render_width_small: int = xax.field(
-        value=360,
-        help="The width of the rendered images.",
-    )
     render_height: int = xax.field(
         value=480,
         help="The height of the rendered images during the validation phase.",
@@ -550,7 +542,6 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
-    is_small: bool = False,
 ) -> GlfwMujocoViewer | DefaultMujocoViewer:
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
@@ -565,8 +556,8 @@ def get_viewer(
             mj_model,
             data=mj_data,
             mode=mode,
-            width=config.render_width_small if is_small else config.render_width,
-            height=config.render_height_small if is_small else config.render_height,
+            width=config.render_width,
+            height=config.render_height,
             shadow=config.render_shadow,
             reflection=config.render_reflection,
             contact_force=config.render_contact_force,
@@ -577,8 +568,8 @@ def get_viewer(
     else:
         viewer = DefaultMujocoViewer(
             mj_model,
-            width=config.render_width_small if is_small else config.render_width,
-            height=config.render_height_small if is_small else config.render_height,
+            width=config.render_width,
+            height=config.render_height,
         )
 
     # Sets the viewer camera.
@@ -2006,13 +1997,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             # Creates the viewer.
-            small_viewer = get_viewer(
-                mj_model=mj_model,
-                config=self.config,
-                mode="offscreen",
-                is_small=True,
-            )
-            full_viewer = get_viewer(
+            viewer = get_viewer(
                 mj_model=mj_model,
                 config=self.config,
                 mode="offscreen",
@@ -2068,26 +2053,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
 
                         if valid_step:
-                            full_size_render = state.num_valid_steps.item() % self.config.render_full_every_n_steps == 0
-                            if full_size_render:
-                                self._log_logged_trajectory_video(
-                                    logged_traj=logged_traj,
-                                    markers=markers,
-                                    viewer=full_viewer,
-                                    key="trajectory",
-                                )
+                            full_render = state.num_valid_steps.item() % self.config.render_full_every_n_steps == 0
+                            self._log_logged_trajectory_video(
+                                logged_traj=logged_traj,
+                                markers=markers,
+                                viewer=viewer,
+                                key="trajectory",
+                            )
+                            if full_render:
                                 self._log_logged_trajectory_graphs(
                                     logged_traj=logged_traj,
                                     log_callback=lambda key, value, namespace: self.logger.log_image(
                                         key=key, value=value, namespace=namespace
                                     ),
-                                )
-                            else:
-                                self._log_logged_trajectory_video(
-                                    logged_traj=logged_traj,
-                                    markers=markers,
-                                    viewer=small_viewer,
-                                    key="trajectory_small",
                                 )
                             state = state.replace(
                                 num_valid_steps=state.num_valid_steps + num_steps,
