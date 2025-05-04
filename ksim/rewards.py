@@ -199,7 +199,7 @@ class LinearVelocityReward(Reward):
         linvel = trajectory.qvel[..., :3]
         if self.in_robot_frame:
             quat = trajectory.qpos[..., 3:7]
-            linvel = xax.rotate_vector_by_quat(linvel, quat)
+            linvel = xax.rotate_vector_by_quat(linvel, quat, inverse=True)
         dimvel = linvel[..., dim].clip(self.clip_min, self.clip_max)
         return xax.get_norm(dimvel, self.norm)
 
@@ -231,7 +231,7 @@ class AngularVelocityReward(Reward):
         angvel = trajectory.qvel[..., 3:6]
         if self.in_robot_frame:
             quat = trajectory.qpos[..., 3:7]
-            angvel = xax.rotate_vector_by_quat(angvel, quat)
+            angvel = xax.rotate_vector_by_quat(angvel, quat, inverse=True)
         dimvel = angvel[..., dim].clip(self.clip_min, self.clip_max)
         return xax.get_norm(dimvel, self.norm)
 
@@ -749,8 +749,8 @@ class JoystickReward(Reward):
 
         if self.in_robot_frame:
             quat = trajectory.qpos[..., 3:7]
-            linvel = xax.rotate_vector_by_quat(linvel, quat)
-            angvel = xax.rotate_vector_by_quat(angvel, quat)
+            linvel = xax.rotate_vector_by_quat(linvel, quat, inverse=True)
+            angvel = xax.rotate_vector_by_quat(angvel, quat, inverse=True)
 
         # Gets the velocity of the robot.
         xvel = linvel[..., 0]
