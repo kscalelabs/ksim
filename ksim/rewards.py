@@ -26,6 +26,7 @@ __all__ = [
     "FeetLinearVelocityTrackingPenalty",
     "FeetFlatReward",
     "FeetNoContactReward",
+    "FeetSlipPenalty",
     "PositionTrackingReward",
     "UprightReward",
     "JoystickReward",
@@ -638,6 +639,28 @@ class FeetNoContactReward(Reward):
 
         no_contact = counts >= self.window_size
         return no_contact.any(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetSlipPenalty(Reward):
+    """Penalty for feet slipping."""
+
+    obs_name: str = attrs.field(default="feet_contact_observation")
+    com_vel_obs_name: str = attrs.field(default="center_of_mass_velocity_observation")
+    scale: float = -1.0
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        if self.obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.obs_name} not found; add it as an observation in your task.")
+
+        feet_contact = trajectory.obs[self.obs_name]
+        chex.assert_shape(feet_contact, (..., 2))
+
+        feet_contact = feet_contact.reshape(feet_contact.shape[0], -1)
+        body_vel = trajectory.obs[self.com_vel_obs_name][..., :2]
+        norm_body_vel = jnp.linalg.norm(body_vel, axis=-1, keepdims=True)
+
+        return jnp.sum(norm_body_vel * feet_contact, axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
