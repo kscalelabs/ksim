@@ -164,6 +164,7 @@ def get_rewards(
     rewards_carry: xax.FrozenDict[str, PyTree],
     rollout_length_steps: int,
     curriculum_level: Array,
+    rng: PRNGKeyArray,
     clip_min: float | None = None,
     clip_max: float | None = None,
 ) -> RewardState:
@@ -177,6 +178,7 @@ def get_rewards(
         reward_carry = rewards_carry[reward_name]
 
         if isinstance(reward, StatefulReward):
+            reward_carry = jnp.where(trajectory.done, reward.initial_carry(rng), reward_carry)
             reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
         else:
             reward_val = reward.get_reward(trajectory)
@@ -1374,12 +1376,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Gets the rewards.
+        rng, reward_rng = jax.random.split(env_state.rng)
         reward = get_rewards(
             trajectory=trajectory,
             rewards=constants.rewards,
             rewards_carry=env_state.reward_carry,
             rollout_length_steps=self.rollout_length_steps,
             curriculum_level=env_state.curriculum_state.level,
+            rng=reward_rng,
             clip_min=self.config.reward_clip_min,
             clip_max=self.config.reward_clip_max,
         )
@@ -1388,6 +1392,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         env_state = dataclass_replace(
             env_state,
             reward_carry=reward.carry,
+            rng=rng,
         )
 
         return trajectory, reward, env_state
@@ -1616,12 +1621,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
 
+            rng, reward_rng = jax.random.split(rng)
             reward_state = get_rewards(
                 trajectory=trajectory,
                 rewards=constants.rewards,
                 rewards_carry=env_states.reward_carry,
                 rollout_length_steps=self.rollout_length_steps,
                 curriculum_level=env_states.curriculum_state.level,
+                rng=reward_rng,
                 clip_min=self.config.reward_clip_min,
                 clip_max=self.config.reward_clip_max,
             )
