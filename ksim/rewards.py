@@ -11,6 +11,7 @@ __all__ = [
     "NaiveForwardReward",
     "AngularVelocityReward",
     "AngularVelocityPenalty",
+    "XYAngularVelocityPenalty",
     "JointVelocityPenalty",
     "BaseHeightReward",
     "BaseHeightRangeReward",
@@ -48,6 +49,7 @@ from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by
 from ksim.utils.types import (
     CartesianIndex,
     cartesian_index_to_dim,
+    dimension_index_tuple_validator,
     dimension_index_validator,
     norm_validator,
 )
@@ -188,23 +190,23 @@ class StayAliveReward(Reward):
 class LinearVelocityReward(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
-    index: CartesianIndex = attrs.field(validator=dimension_index_validator)
+    indices: tuple[CartesianIndex, ...] = attrs.field(validator=dimension_index_tuple_validator)
     clip_min: float | None = attrs.field(default=None)
     clip_max: float | None = attrs.field(default=None)
-    in_robot_frame: bool = attrs.field(default=True)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    in_robot_frame: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        dim = cartesian_index_to_dim(self.index)
+        dims = tuple(cartesian_index_to_dim(index) for index in self.indices)
         linvel = trajectory.qvel[..., :3]
         if self.in_robot_frame:
-            quat = trajectory.qpos[..., 3:7]
-            linvel = xax.rotate_vector_by_quat(linvel, quat, inverse=True)
-        dimvel = linvel[..., dim].clip(self.clip_min, self.clip_max)
+            # Same as reading from a velocimeter attached to base.
+            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
+        dimvel = linvel[..., dims].clip(self.clip_min, self.clip_max).mean(axis=-1)
         return xax.get_norm(dimvel, self.norm)
 
     def get_name(self) -> str:
-        return f"{self.index}_{super().get_name()}"
+        return f"{''.join(self.indices)}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -213,34 +215,38 @@ class LinearVelocityPenalty(LinearVelocityReward): ...
 
 @attrs.define(frozen=True, kw_only=True)
 class NaiveForwardReward(LinearVelocityReward):
-    index: CartesianIndex = attrs.field(default="x", validator=dimension_index_validator)
+    indices: tuple[CartesianIndex, ...] = attrs.field(default=("x",), validator=dimension_index_tuple_validator)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class AngularVelocityReward(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
-    index: CartesianIndex = attrs.field(validator=dimension_index_validator)
+    indices: tuple[CartesianIndex, ...] = attrs.field(validator=dimension_index_tuple_validator)
     clip_min: float | None = attrs.field(default=None)
     clip_max: float | None = attrs.field(default=None)
-    in_robot_frame: bool = attrs.field(default=True)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    in_robot_frame: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        dim = cartesian_index_to_dim(self.index)
+        dims = tuple(cartesian_index_to_dim(index) for index in self.indices)
         angvel = trajectory.qvel[..., 3:6]
         if self.in_robot_frame:
-            quat = trajectory.qpos[..., 3:7]
-            angvel = xax.rotate_vector_by_quat(angvel, quat, inverse=True)
-        dimvel = angvel[..., dim].clip(self.clip_min, self.clip_max)
+            angvel = xax.rotate_vector_by_quat(angvel, trajectory.qpos[..., 3:7], inverse=True)
+        dimvel = angvel[..., dims].clip(self.clip_min, self.clip_max).mean(axis=-1)
         return xax.get_norm(dimvel, self.norm)
 
     def get_name(self) -> str:
-        return f"{self.index}_{super().get_name()}"
+        return f"{''.join(self.indices)}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)
 class AngularVelocityPenalty(AngularVelocityReward): ...
+
+
+@attrs.define(frozen=True, kw_only=True)
+class XYAngularVelocityPenalty(AngularVelocityReward):
+    indices: tuple[CartesianIndex, ...] = attrs.field(default=("x", "y"), validator=dimension_index_tuple_validator)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -746,7 +752,6 @@ class JoystickReward(Reward):
 
         linvel = trajectory.qvel[..., :3]
         angvel = trajectory.qvel[..., 3:6]
-
         if self.in_robot_frame:
             quat = trajectory.qpos[..., 3:7]
             linvel = xax.rotate_vector_by_quat(linvel, quat, inverse=True)

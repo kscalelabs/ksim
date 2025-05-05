@@ -37,6 +37,16 @@ def dimension_index_validator(
             raise ValueError(f"Linear velocity index must be one of {choices}, got {value}")
 
 
+def dimension_index_tuple_validator(
+    inst: Any,  # noqa: ANN401
+    attr: attrs.Attribute,
+    value: tuple[CartesianIndex, ...] | None,
+) -> None:
+    if value is not None:
+        for index in value:
+            dimension_index_validator(inst, attr, index)
+
+
 def norm_validator(
     inst: Any,  # noqa: ANN401
     attr: attrs.Attribute,
