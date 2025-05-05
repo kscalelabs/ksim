@@ -30,6 +30,7 @@ __all__ = [
     "PositionTrackingReward",
     "UprightReward",
     "JoystickReward",
+    "TestReward",
 ]
 
 import functools
@@ -159,6 +160,27 @@ class StatefulReward(Reward):
             A tuple containing the reward for the current timestep and the
             reward carry for the next timestep.
         """
+
+@attrs.define(frozen=True, kw_only=True)
+class TestReward(StatefulReward):
+    """Reward for heading."""
+
+    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
+        """Initial reward carry for the trajectory, optionally overridable.
+
+        Some rewards require information from the same episode in a previous
+        rollout. E.g. a reward could require the last time the robot was in
+        contact with the ground. This function simply returns the initial reward
+        """
+        return jnp.array(0.0)
+
+    def get_reward_stateful(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
+        done = trajectory.done
+        success = trajectory.success
+        heading = trajectory.qpos[..., 3]
+        reward = jnp.where(done, success, 0.0)
+
+        return reward, reward_carry
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -619,7 +641,7 @@ class FeetFlatReward(Reward):
         feet_quat = trajectory.obs[self.obs_name]
         chex.assert_shape(feet_quat, (..., 2, 4))
         unit_vec = jnp.array(self.plane, dtype=feet_quat.dtype)
-        unit_vec = xax.rotate_vector_by_quat(unit_vec, feet_quat)
+        unit_vec = xax.rotate_vector_by_quat(unit_vec, feet_quat, inverse=True)
         unit_vec_x, unit_vec_y, unit_vec_z = unit_vec[..., 0], unit_vec[..., 1], unit_vec[..., 2]
 
         # Z should be 1, and X and Y should be 0.
