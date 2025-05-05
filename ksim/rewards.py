@@ -197,7 +197,7 @@ class LinearVelocityReward(Reward):
     in_robot_frame: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        indices = (self.index,) if isinstance(self.index, CartesianIndex) else self.index
+        indices = self.index if isinstance(self.index, tuple) else (self.index,)
         dims = tuple(cartesian_index_to_dim(index) for index in indices)
         linvel = trajectory.qvel[..., :3]
         if self.in_robot_frame:
@@ -207,7 +207,7 @@ class LinearVelocityReward(Reward):
         return xax.get_norm(dimvel, self.norm)
 
     def get_name(self) -> str:
-        indices = (self.index,) if isinstance(self.index, CartesianIndex) else self.index
+        indices = self.index if isinstance(self.index, tuple) else (self.index,)
         return f"{''.join(indices)}_{super().get_name()}"
 
 
@@ -231,7 +231,7 @@ class AngularVelocityReward(Reward):
     in_robot_frame: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        indices = (self.index,) if isinstance(self.index, CartesianIndex) else self.index
+        indices = self.index if isinstance(self.index, tuple) else (self.index,)
         dims = tuple(cartesian_index_to_dim(index) for index in indices)
         angvel = trajectory.qvel[..., 3:6]
         if self.in_robot_frame:
@@ -240,7 +240,7 @@ class AngularVelocityReward(Reward):
         return xax.get_norm(dimvel, self.norm)
 
     def get_name(self) -> str:
-        indices = (self.index,) if isinstance(self.index, CartesianIndex) else self.index
+        indices = self.index if isinstance(self.index, tuple) else (self.index,)
         return f"{''.join(indices)}_{super().get_name()}"
 
 
