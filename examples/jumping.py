@@ -37,7 +37,7 @@ class HumanoidJumpingTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             UpwardReward(scale=0.5),
-            ksim.LinearVelocityPenalty(indices=("z",), scale=-0.01),
+            ksim.LinearVelocityPenalty(index=("z",), scale=-0.01),
             ksim.XYAngularVelocityPenalty(scale=-0.01),
         ]
 

@@ -190,14 +190,15 @@ class StayAliveReward(Reward):
 class LinearVelocityReward(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
-    indices: tuple[CartesianIndex, ...] = attrs.field(validator=dimension_index_tuple_validator)
+    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(validator=dimension_index_tuple_validator)
     clip_min: float | None = attrs.field(default=None)
     clip_max: float | None = attrs.field(default=None)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
     in_robot_frame: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        dims = tuple(cartesian_index_to_dim(index) for index in self.indices)
+        indices = (self.index,) if isinstance(self.index, CartesianIndex) else self.index
+        dims = tuple(cartesian_index_to_dim(index) for index in indices)
         linvel = trajectory.qvel[..., :3]
         if self.in_robot_frame:
             # Same as reading from a velocimeter attached to base.
@@ -206,7 +207,8 @@ class LinearVelocityReward(Reward):
         return xax.get_norm(dimvel, self.norm)
 
     def get_name(self) -> str:
-        return f"{''.join(self.indices)}_{super().get_name()}"
+        indices = (self.index,) if isinstance(self.index, CartesianIndex) else self.index
+        return f"{''.join(indices)}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -215,21 +217,22 @@ class LinearVelocityPenalty(LinearVelocityReward): ...
 
 @attrs.define(frozen=True, kw_only=True)
 class NaiveForwardReward(LinearVelocityReward):
-    indices: tuple[CartesianIndex, ...] = attrs.field(default=("x",), validator=dimension_index_tuple_validator)
+    index: tuple[CartesianIndex, ...] = attrs.field(default=("x",), validator=dimension_index_tuple_validator)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class AngularVelocityReward(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
-    indices: tuple[CartesianIndex, ...] = attrs.field(validator=dimension_index_tuple_validator)
+    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(validator=dimension_index_tuple_validator)
     clip_min: float | None = attrs.field(default=None)
     clip_max: float | None = attrs.field(default=None)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
     in_robot_frame: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        dims = tuple(cartesian_index_to_dim(index) for index in self.indices)
+        indices = (self.index,) if isinstance(self.index, CartesianIndex) else self.index
+        dims = tuple(cartesian_index_to_dim(index) for index in indices)
         angvel = trajectory.qvel[..., 3:6]
         if self.in_robot_frame:
             angvel = xax.rotate_vector_by_quat(angvel, trajectory.qpos[..., 3:7], inverse=True)
@@ -237,7 +240,8 @@ class AngularVelocityReward(Reward):
         return xax.get_norm(dimvel, self.norm)
 
     def get_name(self) -> str:
-        return f"{''.join(self.indices)}_{super().get_name()}"
+        indices = (self.index,) if isinstance(self.index, CartesianIndex) else self.index
+        return f"{''.join(indices)}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -246,7 +250,10 @@ class AngularVelocityPenalty(AngularVelocityReward): ...
 
 @attrs.define(frozen=True, kw_only=True)
 class XYAngularVelocityPenalty(AngularVelocityReward):
-    indices: tuple[CartesianIndex, ...] = attrs.field(default=("x", "y"), validator=dimension_index_tuple_validator)
+    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
+        default=("x", "y"),
+        validator=dimension_index_tuple_validator,
+    )
 
 
 @attrs.define(frozen=True, kw_only=True)
