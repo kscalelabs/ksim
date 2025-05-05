@@ -1621,12 +1621,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
 
+            rng, reward_rng = jax.random.split(rng)
             reward_state = get_rewards(
                 trajectory=trajectory,
                 rewards=constants.rewards,
                 rewards_carry=env_states.reward_carry,
                 rollout_length_steps=self.rollout_length_steps,
                 curriculum_level=env_states.curriculum_state.level,
+                rng=reward_rng,
                 clip_min=self.config.reward_clip_min,
                 clip_max=self.config.reward_clip_max,
             )
