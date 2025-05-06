@@ -2,8 +2,7 @@
 
 __all__ = [
     "Termination",
-    "PitchTooGreatTermination",
-    "RollTooGreatTermination",
+    "NotUprightTermination",
     "MinimumHeightTermination",
     "IllegalContactTermination",
     "BadZTermination",
@@ -59,29 +58,16 @@ class Termination(ABC):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class PitchTooGreatTermination(Termination):
+class NotUprightTermination(Termination):
     """Terminates the episode if the pitch is too great."""
 
-    max_pitch: float = attrs.field(validator=attrs.validators.gt(0.0))
+    max_radians: float = attrs.field(validator=attrs.validators.gt(0.0))
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        quat = state.qpos[3:7]
-        quat = quat / jnp.linalg.norm(quat, axis=-1, keepdims=True)
-        pitch = jnp.arcsin(2 * (quat[0] * quat[2] - quat[3] * quat[1]))
-        return jnp.where(jnp.abs(pitch) > self.max_pitch, -1, 0)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class RollTooGreatTermination(Termination):
-    """Terminates the episode if the roll is too great."""
-
-    max_roll: float = attrs.field(validator=attrs.validators.gt(0.0))
-
-    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        quat = state.qpos[3:7]
-        quat = quat / jnp.linalg.norm(quat, axis=-1, keepdims=True)
-        roll = jnp.arctan2(2 * (quat[0] * quat[1] + quat[2] * quat[3]), 1 - 2 * (quat[1] ** 2 + quat[2] ** 2))
-        return jnp.where(jnp.abs(roll) > self.max_roll, -1, 0)
+        gravity = jnp.array([0.0, 0.0, 1.0])
+        quat = state.qpos[..., 3:7]
+        gravity_vec = xax.rotate_vector_by_quat(gravity, quat, inverse=True)[..., 2]
+        return jnp.where(jnp.arccos(gravity_vec) > self.max_radians, -1, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)

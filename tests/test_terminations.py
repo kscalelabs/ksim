@@ -60,40 +60,21 @@ def test_termination_name() -> None:
     assert term.termination_name == "dummy_termination"
 
 
-class TestPitchTooGreatTermination:
-    """Tests for the PitchTooGreatTermination class."""
+class TestNotUprightTermination:
+    """Tests for the NotUprightTermination class."""
 
-    def test_pitch_too_great_termination(self) -> None:
-        """Test that the PitchTooGreatTermination terminates when pitch exceeds the max."""
+    def test_not_upright_termination(self) -> None:
+        """Test that the NotUprightTermination terminates when pitch or roll exceeds the max."""
         data = DummyMjxData()
         curriculum_level = jnp.array(0.0)
 
-        # With a small max_pitch, should terminate
-        term = ksim.PitchTooGreatTermination(max_pitch=0.1)
+        # With a small max_radians, should terminate
+        term = ksim.NotUprightTermination(max_radians=0.1)
         result = term(data, curriculum_level)
         assert result.item()
 
-        # With a large max_pitch, should not terminate
-        term = ksim.PitchTooGreatTermination(max_pitch=10.0)
-        result = term(data, curriculum_level)
-        assert not result.item()
-
-
-class TestRollTooGreatTermination:
-    """Tests for the RollTooGreatTermination class."""
-
-    def test_roll_too_great_termination(self) -> None:
-        """Test that the RollTooGreatTermination terminates when roll exceeds the max."""
-        data = DummyMjxData()
-        curriculum_level = jnp.array(0.0)
-
-        # With a small max_roll, should terminate
-        term = ksim.RollTooGreatTermination(max_roll=0.1)
-        result = term(data, curriculum_level)
-        assert result.item()
-
-        # With a large max_roll, should not terminate
-        term = ksim.RollTooGreatTermination(max_roll=10.0)
+        # With a large max_radians, should not terminate
+        term = ksim.NotUprightTermination(max_radians=10.0)
         result = term(data, curriculum_level)
         assert not result.item()
 

@@ -14,6 +14,7 @@ import datetime
 import functools
 import io
 import itertools
+import json
 import logging
 import signal
 import sys
@@ -929,6 +930,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             aux_outputs=action.aux_outputs,
         )
 
+        next_physics_state = jax.lax.cond(
+            terminated,
+            lambda: constants.engine.reset(
+                shared_state.physics_model,
+                env_states.curriculum_state.level,
+                reset_rng,
+            ),
+            lambda: next_physics_state,
+        )
+
         # Conditionally reset on termination.
         next_commands = jax.lax.cond(
             terminated,
@@ -951,16 +962,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             terminated,
             lambda: get_initial_obs_carry(rng=carry_rng, observations=constants.observations),
             lambda: next_obs_carry,
-        )
-
-        next_physics_state = jax.lax.cond(
-            terminated,
-            lambda: constants.engine.reset(
-                shared_state.physics_model,
-                env_states.curriculum_state.level,
-                reset_rng,
-            ),
-            lambda: next_physics_state,
         )
 
         next_model_carry = jax.lax.cond(
@@ -1702,6 +1703,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             raise ValueError("No models found")
 
         metadata = self.get_mujoco_model_metadata(mj_model)
+        metadata_str = json.dumps({k: v.model_dump() for k, v in metadata.items()}, indent=2, sort_keys=True)
+        self.logger.log_file("mujoco_metadata.json", metadata_str)
         engine = self.get_engine(physics_model, metadata)
         observations = self.get_observations(physics_model)
         commands = self.get_commands(physics_model)
