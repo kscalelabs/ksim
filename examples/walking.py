@@ -147,6 +147,20 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The number of mixtures for the actor.",
     )
 
+    # Reward parameters.
+    target_linear_velocity: float = xax.field(
+        value=1.0,
+        help="The linear velocity for the joystick command.",
+    )
+    target_angular_velocity: float = xax.field(
+        value=math.radians(90.0),
+        help="The angular velocity for the joystick command.",
+    )
+    use_naive_forward_reward: bool = xax.field(
+        value=False,
+        help="Whether to use the naive forward reward.",
+    )
+
     # Optimizer parameters.
     learning_rate: float = xax.field(
         value=1e-3,
@@ -303,20 +317,32 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
+            ksim.StartQuaternionCommand(),
             ksim.JoystickCommand(switch_prob=0.01),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
+        rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
-            ksim.JoystickPenalty(
-                translation_speed=1.0,
-                rotation_speed=math.radians(90.0),
-                scale=-1.0,
-            ),
             ksim.FeetFlatReward(scale=0.1),
         ]
+
+        if self.config.use_naive_forward_reward:
+            rewards += [
+                ksim.HeadingTrackingReward(scale=1.0),
+                ksim.HeadingVelocityReward(target_velocity=self.config.target_linear_velocity, scale=1.0),
+            ]
+        else:
+            rewards += [
+                ksim.JoystickPenalty(
+                    translation_speed=self.config.target_linear_velocity,
+                    rotation_speed=self.config.target_angular_velocity,
+                    scale=-1.0,
+                ),
+            ]
+
+        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [

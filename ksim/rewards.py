@@ -30,6 +30,7 @@ __all__ = [
     "PositionTrackingReward",
     "UprightReward",
     "HeadingTrackingReward",
+    "HeadingVelocityReward",
     "JoystickPenalty",
 ]
 
@@ -729,7 +730,6 @@ class HeadingTrackingReward(Reward):
     """Reward for tracking the heading vector."""
 
     command_name: str = attrs.field(default="start_quaternion_command")
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(default=("x", "y"))
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
@@ -740,12 +740,6 @@ class HeadingTrackingReward(Reward):
         # Gets the current heading vector.
         target_heading = get_heading(target_quat)
         current_heading = get_heading(trajectory.qpos[..., 3:7])
-
-        # Gets the dimensions to use for the reward.
-        indices = self.index if isinstance(self.index, tuple) else (self.index,)
-        dims = tuple(cartesian_index_to_dim(index) for index in indices)
-        target_heading = target_heading[..., dims]
-        current_heading = current_heading[..., dims]
 
         # Maximize the dot product between the current and target heading vectors.
         dot_product = jnp.einsum("...i,...i->...", current_heading, target_heading)

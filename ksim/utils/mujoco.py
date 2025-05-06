@@ -481,9 +481,9 @@ def add_new_mujoco_body(
 
 def get_heading(quat: Array) -> Array:
     heading_vector = jnp.array([1.0, 0.0, 0.0])
-    return xax.rotate_vector_by_quat(heading_vector, quat, inverse=True)
+    return xax.rotate_vector_by_quat(heading_vector, quat)
 
 
 def get_heading_velocity(quat: Array, qvel: Array) -> Array:
     linvel = qvel[..., :3]
-    return xax.rotate_vector_by_quat(linvel, quat, inverse=True)
+    return xax.rotate_vector_by_quat(linvel, quat)
