@@ -221,7 +221,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return mujoco.MjModel.from_xml_path(mjcf_path)
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, ksim.JointMetadataOutput]:
-        return ksim.get_joint_metadata(mj_model, kp=10.0, kd=1.0, armature=1e-4, friction=1e-6)
+        return ksim.get_joint_metadata(mj_model, kp=100.0, kd=5.0, armature=1e-4, friction=1e-6)
 
     def get_actuators(
         self,
