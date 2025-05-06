@@ -227,6 +227,8 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        joystick_cmd_10 = commands["joystick_command"]
+        joystick_cmd_ohe_7 = joystick_cmd_10[..., :7]
 
         obs_n = jnp.concatenate(
             [
@@ -242,6 +244,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
+                joystick_cmd_ohe_7,  # 7
             ],
             axis=-1,
         )
@@ -268,6 +271,8 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        joystick_cmd_10 = commands["joystick_command"]
+        joystick_cmd_ohe_7 = joystick_cmd_10[..., :7]
 
         obs_n = jnp.concatenate(
             [
@@ -283,6 +288,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
+                joystick_cmd_ohe_7,  # 7
             ],
             axis=-1,
         )
