@@ -40,11 +40,14 @@ def dimension_index_validator(
 def dimension_index_tuple_validator(
     inst: Any,  # noqa: ANN401
     attr: attrs.Attribute,
-    value: tuple[CartesianIndex, ...] | None,
+    value: CartesianIndex | tuple[CartesianIndex, ...] | None,
 ) -> None:
     if value is not None:
-        for index in value:
-            dimension_index_validator(inst, attr, index)
+        if isinstance(value, tuple):
+            for index in value:
+                dimension_index_validator(inst, attr, index)
+        else:
+            dimension_index_validator(inst, attr, value)
 
 
 def norm_validator(

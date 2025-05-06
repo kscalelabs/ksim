@@ -52,6 +52,7 @@ from ksim.utils.types import (
     CartesianIndex,
     cartesian_index_to_dim,
     dimension_index_tuple_validator,
+    dimension_index_validator,
     norm_validator,
 )
 from ksim.vis import Marker
@@ -739,7 +740,10 @@ class UprightReward(Reward):
 class HeadingTrackingReward(Reward):
     """Reward for tracking the heading vector."""
 
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(default=("x", "y"))
+    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
+        default=("x", "y"),
+        validator=dimension_index_tuple_validator,
+    )
     command_name: str = attrs.field(default="start_quaternion_command")
 
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -750,8 +754,9 @@ class HeadingTrackingReward(Reward):
 
         # Gets the current heading vector along the relevant indices.
         indices = self.index if isinstance(self.index, tuple) else (self.index,)
-        target_heading = get_heading(target_quat)[..., indices]
-        current_heading = get_heading(trajectory.qpos[..., 3:7])[..., indices]
+        dims = tuple([cartesian_index_to_dim(index) for index in indices])
+        target_heading = get_heading(target_quat)[..., dims]
+        current_heading = get_heading(trajectory.qpos[..., 3:7])[..., dims]
 
         # Maximize the dot product between the current and target heading vectors.
         dot_product = jnp.einsum("...i,...i->...", current_heading, target_heading)
@@ -763,16 +768,20 @@ class HeadingVelocityReward(Reward):
     """Reward for moving in the heading vector direction."""
 
     target_velocity: float = attrs.field()
+    index: CartesianIndex = attrs.field(default="x", validator=dimension_index_validator)
+    flip_sign: bool = attrs.field(default=False)
     command_name: str = attrs.field(default="start_quaternion_command")
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(default=("x", "y"))
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
         target_quat = trajectory.command[self.command_name]
         chex.assert_shape(target_quat, (..., 4))
-        heading_velocity = get_heading_velocity(target_quat, trajectory.qvel)
-        return heading_velocity[..., 0].clip(min=0.0, max=self.target_velocity)
+        dim = cartesian_index_to_dim(self.index)
+        heading_velocity = get_heading_velocity(target_quat, trajectory.qvel)[..., dim]
+        if self.flip_sign:
+            heading_velocity = -heading_velocity
+        return heading_velocity.clip(min=0.0, max=self.target_velocity)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -807,11 +816,15 @@ class JoystickPenalty(Reward):
         current_heading = get_heading(trajectory.qpos[..., 3:7])[..., (0, 1)]
         heading_reward = jnp.einsum("...i,...i->...", current_heading, target_heading) * self.heading_reward_scale
 
-        qvel = trajectory.qvel
-        heading_vel = get_heading_velocity(target_quat, qvel)
+        qvel = trajectory.qvel[..., :6]
+        linvel = qvel[..., :3]
+        angvel = qvel[..., 3:]
+        heading_vel = get_heading_velocity(target_quat, linvel)
         forward_vel = heading_vel[..., 0]
         left_vel = heading_vel[..., 1]
-        rotation_vel = qvel[..., 5]  # Rotation about the Z axis.
+        rotation_vel = angvel[..., 2]  # Rotation about the Z axis.
+
+        # Penalties to minimize.
 
         # Computes each of the penalties.
         stand_still_penalty = xax.get_norm(qvel[..., :6], self.norm).mean(axis=-1)
