@@ -457,7 +457,7 @@ class RLConfig(xax.Config):
         help="The target FPS for the renderered video.",
     )
     render_slowdown: float = xax.field(
-        value=2.0,
+        value=1.0,
         help="The slowdown factor for the rendered video.",
     )
     render_track_body_id: int | None = xax.field(
