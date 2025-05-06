@@ -739,6 +739,7 @@ class UprightReward(Reward):
 class HeadingTrackingReward(Reward):
     """Reward for tracking the heading vector."""
 
+    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(default=("x", "y"))
     command_name: str = attrs.field(default="start_quaternion_command")
 
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -747,9 +748,10 @@ class HeadingTrackingReward(Reward):
         target_quat = trajectory.command[self.command_name]
         chex.assert_shape(target_quat, (..., 4))
 
-        # Gets the current heading vector.
-        target_heading = get_heading(target_quat)
-        current_heading = get_heading(trajectory.qpos[..., 3:7])
+        # Gets the current heading vector along the relevant indices.
+        indices = self.index if isinstance(self.index, tuple) else (self.index,)
+        target_heading = get_heading(target_quat)[..., indices]
+        current_heading = get_heading(trajectory.qpos[..., 3:7])[..., indices]
 
         # Maximize the dot product between the current and target heading vectors.
         dot_product = jnp.einsum("...i,...i->...", current_heading, target_heading)
@@ -786,6 +788,8 @@ class JoystickPenalty(Reward):
     rotation_speed: float = attrs.field()
     command_name: str = attrs.field(default="joystick_command")
     heading_reward_scale: float = attrs.field(default=0.1)
+    lin_vel_penalty_scale: float = attrs.field(default=0.1)
+    ang_vel_penalty_scale: float = attrs.field(default=0.1)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
