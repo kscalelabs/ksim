@@ -16,12 +16,13 @@ import ksim
 from .walking import (
     NUM_INPUTS,
     NUM_JOINTS,
+    ZEROS,
     HumanoidWalkingTask,
     HumanoidWalkingTaskConfig,
 )
 
 
-class DefaultHumanoidRNNActor(eqx.Module):
+class Actor(eqx.Module):
     """RNN-based actor for the walking task."""
 
     input_proj: eqx.nn.Linear
@@ -32,6 +33,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
+    num_mixtures: int = eqx.static_field()
 
     def __init__(
         self,
@@ -44,6 +46,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
         var_scale: float,
         hidden_size: int,
         depth: int,
+        num_mixtures: int,
     ) -> None:
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
@@ -69,7 +72,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
         # Project to output
         self.output_proj = eqx.nn.Linear(
             in_features=hidden_size,
-            out_features=num_outputs * 2,
+            out_features=num_outputs * 3 * num_mixtures,
             key=key,
         )
 
@@ -78,6 +81,7 @@ class DefaultHumanoidRNNActor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
+        self.num_mixtures = num_mixtures
 
     def forward(self, obs_n: Array, carry: Array) -> tuple[distrax.Distribution, Array]:
         x_n = self.input_proj(obs_n)
@@ -85,20 +89,25 @@ class DefaultHumanoidRNNActor(eqx.Module):
         for i, rnn in enumerate(self.rnns):
             x_n = rnn(x_n, carry[i])
             out_carries.append(x_n)
-        out_n = self.output_proj(x_n)
+        prediction_n = self.output_proj(x_n)
 
-        # Converts the output to a distribution.
-        mean_n = out_n[..., : self.num_outputs]
-        std_n = out_n[..., self.num_outputs :]
+        # Splits the predictions into means, standard deviations, and logits.
+        slice_len = NUM_JOINTS * self.num_mixtures
+        mean_nm = prediction_n[:slice_len].reshape(NUM_JOINTS, self.num_mixtures)
+        std_nm = prediction_n[slice_len : slice_len * 2].reshape(NUM_JOINTS, self.num_mixtures)
+        logits_nm = prediction_n[slice_len * 2 :].reshape(NUM_JOINTS, self.num_mixtures)
 
         # Softplus and clip to ensure positive standard deviations.
-        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
+        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
 
-        dist_n = distrax.Normal(mean_n, std_n)
+        # Apply bias to the means.
+        mean_nm = mean_nm + jnp.array([v for _, v in ZEROS])[:, None]
+
+        dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
         return dist_n, jnp.stack(out_carries, axis=0)
 
 
-class DefaultHumanoidRNNCritic(eqx.Module):
+class Critic(eqx.Module):
     """RNN-based critic for the walking task."""
 
     input_proj: eqx.nn.Linear
@@ -154,9 +163,9 @@ class DefaultHumanoidRNNCritic(eqx.Module):
         return out_n, jnp.stack(out_carries, axis=0)
 
 
-class DefaultHumanoidRNNModel(eqx.Module):
-    actor: DefaultHumanoidRNNActor
-    critic: DefaultHumanoidRNNCritic
+class Model(eqx.Module):
+    actor: Actor
+    critic: Critic
 
     def __init__(
         self,
@@ -168,8 +177,9 @@ class DefaultHumanoidRNNModel(eqx.Module):
         num_joints: int,
         hidden_size: int,
         depth: int,
+        num_mixtures: int,
     ) -> None:
-        self.actor = DefaultHumanoidRNNActor(
+        self.actor = Actor(
             key,
             num_inputs=num_inputs,
             num_outputs=num_joints,
@@ -178,8 +188,9 @@ class DefaultHumanoidRNNModel(eqx.Module):
             var_scale=0.5,
             hidden_size=hidden_size,
             depth=depth,
+            num_mixtures=num_mixtures,
         )
-        self.critic = DefaultHumanoidRNNCritic(
+        self.critic = Critic(
             key,
             num_inputs=num_inputs,
             hidden_size=hidden_size,
@@ -196,8 +207,8 @@ Config = TypeVar("Config", bound=HumanoidWalkingRNNTaskConfig)
 
 
 class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
-    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidRNNModel:
-        return DefaultHumanoidRNNModel(
+    def get_model(self, key: PRNGKeyArray) -> Model:
+        return Model(
             key,
             num_inputs=NUM_INPUTS,
             num_joints=NUM_JOINTS,
@@ -205,11 +216,12 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             max_std=1.0,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
+            num_mixtures=self.config.num_mixtures,
         )
 
     def run_actor(
         self,
-        model: DefaultHumanoidRNNActor,
+        model: Actor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         carry: Array,
@@ -253,7 +265,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def run_critic(
         self,
-        model: DefaultHumanoidRNNCritic,
+        model: Critic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         carry: Array,
@@ -297,7 +309,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def get_ppo_variables(
         self,
-        model: DefaultHumanoidRNNModel,
+        model: Model,
         trajectory: ksim.Trajectory,
         model_carry: tuple[Array, Array],
         rng: PRNGKeyArray,
@@ -347,7 +359,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
     def sample_action(
         self,
-        model: DefaultHumanoidRNNModel,
+        model: Model,
         model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,

@@ -16,11 +16,11 @@ import ksim
 from ksim.utils.mujoco import remove_mujoco_joints_except
 
 from .walking_rnn import (
-    DefaultHumanoidRNNActor,
-    DefaultHumanoidRNNCritic,
-    DefaultHumanoidRNNModel,
+    Actor,
+    Critic,
     HumanoidWalkingRNNTask,
     HumanoidWalkingRNNTaskConfig,
+    Model,
 )
 
 NUM_JOINTS = 3
@@ -44,8 +44,8 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
         )
         return mujoco.MjModel.from_xml_string(mj_model_joint_removed)
 
-    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidRNNModel:
-        return DefaultHumanoidRNNModel(
+    def get_model(self, key: PRNGKeyArray) -> Model:
+        return Model(
             key,
             num_inputs=NUM_INPUTS,
             num_joints=NUM_JOINTS,
@@ -57,7 +57,7 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
 
     def run_actor(
         self,
-        model: DefaultHumanoidRNNActor,
+        model: Actor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         carry: Array,
@@ -86,7 +86,7 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
 
     def run_critic(
         self,
-        model: DefaultHumanoidRNNCritic,
+        model: Critic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         carry: Array,
@@ -196,7 +196,7 @@ class HumanoidPseudoIKTask(HumanoidWalkingRNNTask[Config], Generic[Config]):
 
     def sample_action(
         self,
-        model: DefaultHumanoidRNNModel,
+        model: Model,
         model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,

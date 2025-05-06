@@ -21,6 +21,30 @@ NUM_JOINTS = 21
 
 NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 7
 
+ZEROS = [
+    ("abdomen_z", 0.0),
+    ("abdomen_y", 0.0),
+    ("abdomen_x", 0.0),
+    ("hip_x_right", 0.0),
+    ("hip_z_right", 0.0),
+    ("hip_y_right", math.radians(-25.0)),
+    ("knee_right", math.radians(-50.0)),
+    ("ankle_y_right", math.radians(-25.0)),
+    ("ankle_x_right", 0.0),
+    ("hip_x_left", 0.0),
+    ("hip_z_left", 0.0),
+    ("hip_y_left", math.radians(-25.0)),
+    ("knee_left", math.radians(-50.0)),
+    ("ankle_y_left", math.radians(-25.0)),
+    ("ankle_x_left", 0.0),
+    ("shoulder1_right", 0.0),
+    ("shoulder2_right", 0.0),
+    ("elbow_right", 0.0),
+    ("shoulder1_left", 0.0),
+    ("shoulder2_left", 0.0),
+    ("elbow_left", 0.0),
+]
+
 
 class Actor(eqx.Module):
     """Actor for the walking task."""
@@ -69,6 +93,10 @@ class Actor(eqx.Module):
 
         # Softplus and clip to ensure positive standard deviations.
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
+
+        # Apply bias to the means.
+        mean_nm = mean_nm + jnp.array([v for _, v in ZEROS])[:, None]
+
         dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
         return dist_n
 
