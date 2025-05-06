@@ -162,7 +162,7 @@ class StartPositionCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        return physics_data.qpos[..., :3]
+        return jnp.array(physics_data.qpos[..., :3])
 
     def __call__(
         self,
@@ -184,7 +184,7 @@ class StartQuaternionCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        return physics_data.qpos[..., 3:7]
+        return jnp.array(physics_data.qpos[..., 3:7])
 
     def __call__(
         self,

@@ -929,6 +929,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             aux_outputs=action.aux_outputs,
         )
 
+        next_physics_state = jax.lax.cond(
+            terminated,
+            lambda: constants.engine.reset(
+                shared_state.physics_model,
+                env_states.curriculum_state.level,
+                reset_rng,
+            ),
+            lambda: next_physics_state,
+        )
+
         # Conditionally reset on termination.
         next_commands = jax.lax.cond(
             terminated,
@@ -951,16 +961,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             terminated,
             lambda: get_initial_obs_carry(rng=carry_rng, observations=constants.observations),
             lambda: next_obs_carry,
-        )
-
-        next_physics_state = jax.lax.cond(
-            terminated,
-            lambda: constants.engine.reset(
-                shared_state.physics_model,
-                env_states.curriculum_state.level,
-                reset_rng,
-            ),
-            lambda: next_physics_state,
         )
 
         next_model_carry = jax.lax.cond(
