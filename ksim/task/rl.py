@@ -511,9 +511,7 @@ class RLConfig(xax.Config):
         help="The integrator algorithm to use",
     )
     contact_friction_cone: int = xax.field(
-        value=0,
-        help="The type of contact friction to use: pyramidal (0) or elliptic (1)",
-        choices=[0, 1],
+        value=0, help="The type of contact friction to use: pyramidal (0) or elliptic (1)"
     )
     disable_euler_damping: bool = xax.field(
         value=True,
