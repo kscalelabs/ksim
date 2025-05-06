@@ -19,10 +19,34 @@ import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 6
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 7
+
+ZEROS = [
+    ("abdomen_z", 0.0),
+    ("abdomen_y", 0.0),
+    ("abdomen_x", 0.0),
+    ("hip_x_right", 0.0),
+    ("hip_z_right", 0.0),
+    ("hip_y_right", math.radians(-25.0)),
+    ("knee_right", math.radians(-50.0)),
+    ("ankle_y_right", math.radians(-25.0)),
+    ("ankle_x_right", 0.0),
+    ("hip_x_left", 0.0),
+    ("hip_z_left", 0.0),
+    ("hip_y_left", math.radians(-25.0)),
+    ("knee_left", math.radians(-50.0)),
+    ("ankle_y_left", math.radians(-25.0)),
+    ("ankle_x_left", 0.0),
+    ("shoulder1_right", 0.0),
+    ("shoulder2_right", 0.0),
+    ("elbow_right", 0.0),
+    ("shoulder1_left", 0.0),
+    ("shoulder2_left", 0.0),
+    ("elbow_left", 0.0),
+]
 
 
-class DefaultHumanoidActor(eqx.Module):
+class Actor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
@@ -69,11 +93,15 @@ class DefaultHumanoidActor(eqx.Module):
 
         # Softplus and clip to ensure positive standard deviations.
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
+
+        # Apply bias to the means.
+        mean_nm = mean_nm + jnp.array([v for _, v in ZEROS])[:, None]
+
         dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
         return dist_n
 
 
-class DefaultHumanoidCritic(eqx.Module):
+class Critic(eqx.Module):
     """Critic for the walking task."""
 
     mlp: eqx.nn.MLP
@@ -101,9 +129,9 @@ class DefaultHumanoidCritic(eqx.Module):
         return self.mlp(obs_n)
 
 
-class DefaultHumanoidModel(eqx.Module):
-    actor: DefaultHumanoidActor
-    critic: DefaultHumanoidCritic
+class Model(eqx.Module):
+    actor: Actor
+    critic: Critic
 
     def __init__(
         self,
@@ -113,7 +141,7 @@ class DefaultHumanoidModel(eqx.Module):
         depth: int,
         num_mixtures: int,
     ) -> None:
-        self.actor = DefaultHumanoidActor(
+        self.actor = Actor(
             key,
             min_std=0.01,
             max_std=1.0,
@@ -122,7 +150,7 @@ class DefaultHumanoidModel(eqx.Module):
             depth=depth,
             num_mixtures=num_mixtures,
         )
-        self.critic = DefaultHumanoidCritic(
+        self.critic = Critic(
             key,
             hidden_size=hidden_size,
             depth=depth,
@@ -148,21 +176,17 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
     # Reward parameters.
-    move_forward_command: bool = xax.field(
-        value=False,
-        help="If set, just move forward or stand still instead of using all possible controls",
-    )
-    linear_velocity_clip_max: float = xax.field(
+    target_linear_velocity: float = xax.field(
         value=1.0,
-        help="The maximum value for the linear velocity reward.",
+        help="The linear velocity for the joystick command.",
     )
-    angular_velocity_clip_max: float = xax.field(
-        value=math.pi / 8,
-        help="The maximum value for the angular velocity reward.",
+    target_angular_velocity: float = xax.field(
+        value=math.radians(90.0),
+        help="The angular velocity for the joystick command.",
     )
-    naive_forward_reward: bool = xax.field(
+    use_naive_forward_reward: bool = xax.field(
         value=False,
-        help="If set, use the naive forward reward instead of the joystick reward.",
+        help="Whether to use the naive forward reward.",
     )
 
     # Optimizer parameters.
@@ -225,7 +249,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return mujoco.MjModel.from_xml_path(mjcf_path)
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, ksim.JointMetadataOutput]:
-        return ksim.get_joint_metadata(mj_model, kp=1.0, kd=0.1, armature=1e-2, friction=1e-6)
+        return ksim.get_joint_metadata(mj_model, kp=100.0, kd=5.0, armature=1e-4, friction=1e-6)
 
     def get_actuators(
         self,
@@ -321,34 +345,32 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            (
-                ksim.JoystickCommand(
-                    ranges=((0, 1),) if self.config.move_forward_command else ((0, 4),),
-                    switch_prob=self.config.ctrl_dt / 5,  # Switch every 5 seconds, on average.
-                )
-            ),
+            ksim.StartQuaternionCommand(),
+            ksim.JoystickCommand(switch_prob=0.01),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
+            ksim.FlatBodyReward.create(
+                physics_model=physics_model,
+                body_names=("foot_left", "foot_right"),
+                scale=1.0,
+            ),
         ]
 
-        if self.config.naive_forward_reward:
+        if self.config.use_naive_forward_reward:
             rewards += [
-                ksim.NaiveForwardReward(
-                    scale=1.0,
-                ),
+                ksim.HeadingTrackingReward(scale=1.0),
+                ksim.HeadingVelocityReward(target_velocity=self.config.target_linear_velocity, scale=1.0),
             ]
-
         else:
             rewards += [
-                ksim.JoystickReward(
-                    linear_velocity_clip_max=self.config.linear_velocity_clip_max,
-                    angular_velocity_clip_max=self.config.angular_velocity_clip_max,
-                    command_name="joystick_command",
-                    scale=1.0,
+                ksim.JoystickPenalty(
+                    translation_speed=self.config.target_linear_velocity,
+                    rotation_speed=self.config.target_angular_velocity,
+                    scale=-1.0,
                 ),
             ]
 
@@ -357,8 +379,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
-            ksim.PitchTooGreatTermination(max_pitch=math.radians(30)),
-            ksim.RollTooGreatTermination(max_roll=math.radians(30)),
+            ksim.NotUprightTermination(max_radians=math.radians(30)),
             ksim.HighVelocityTermination(),
             ksim.FarFromOriginTermination(max_dist=10.0),
         ]
@@ -372,8 +393,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             dt=self.config.ctrl_dt,
         )
 
-    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
-        return DefaultHumanoidModel(
+    def get_model(self, key: PRNGKeyArray) -> Model:
+        return Model(
             key,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
@@ -385,7 +406,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def run_actor(
         self,
-        model: DefaultHumanoidActor,
+        model: Actor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Distribution:
@@ -402,8 +423,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_1 = commands["joystick_command"]
-        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
+        joystick_cmd_10 = commands["joystick_command"]
+        joystick_cmd_ohe_7 = joystick_cmd_10[..., :7]
 
         obs_n = jnp.concatenate(
             [
@@ -419,7 +440,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_6,  # 6
+                joystick_cmd_ohe_7,  # 7
             ],
             axis=-1,
         )
@@ -428,7 +449,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def run_critic(
         self,
-        model: DefaultHumanoidCritic,
+        model: Critic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
@@ -445,8 +466,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_1 = commands["joystick_command"]
-        joystick_cmd_ohe_6 = jax.nn.one_hot(joystick_cmd_1, num_classes=6).squeeze(-2)
+        joystick_cmd_10 = commands["joystick_command"]
+        joystick_cmd_ohe_7 = joystick_cmd_10[..., :7]
 
         obs_n = jnp.concatenate(
             [
@@ -462,7 +483,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_6,  # 6
+                joystick_cmd_ohe_7,  # 7
             ],
             axis=-1,
         )
@@ -471,7 +492,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_ppo_variables(
         self,
-        model: DefaultHumanoidModel,
+        model: Model,
         trajectory: ksim.Trajectory,
         model_carry: None,
         rng: PRNGKeyArray,
@@ -498,7 +519,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def sample_action(
         self,
-        model: DefaultHumanoidModel,
+        model: Model,
         model_carry: None,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
