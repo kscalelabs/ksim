@@ -484,6 +484,5 @@ def get_heading(quat: Array) -> Array:
     return xax.rotate_vector_by_quat(heading_vector, quat, inverse=True)
 
 
-def get_heading_velocity(quat: Array, qvel: Array) -> Array:
-    linvel = qvel[..., :3]
-    return xax.rotate_vector_by_quat(linvel, quat, inverse=True)
+def get_velocity_in_frame(quat: Array, vel: Array) -> Array:
+    return xax.rotate_vector_by_quat(vel, quat, inverse=True)

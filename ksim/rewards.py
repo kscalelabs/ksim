@@ -47,7 +47,12 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsModel, Trajectory
-from ksim.utils.mujoco import get_body_data_idx_from_name, get_heading, get_heading_velocity, get_qpos_data_idxs_by_name
+from ksim.utils.mujoco import (
+    get_body_data_idx_from_name,
+    get_heading,
+    get_qpos_data_idxs_by_name,
+    get_velocity_in_frame,
+)
 from ksim.utils.types import (
     CartesianIndex,
     cartesian_index_to_dim,
@@ -621,7 +626,7 @@ class FlatBodyReward(Reward):
         body_quat = trajectory.xquat[..., self.body_indices, :]
         plane_vec = jnp.array(self.plane, dtype=body_quat.dtype)
         unit_vec = xax.rotate_vector_by_quat(plane_vec, body_quat, inverse=True)
-        return jnp.einsum("...i,...i->...", unit_vec, plane_vec)
+        return jnp.einsum("...i,...i->...", unit_vec, plane_vec).mean(axis=-1)
 
     @classmethod
     def create(
@@ -778,7 +783,7 @@ class HeadingVelocityReward(Reward):
         target_quat = trajectory.command[self.command_name]
         chex.assert_shape(target_quat, (..., 4))
         dim = cartesian_index_to_dim(self.index)
-        heading_velocity = get_heading_velocity(target_quat, trajectory.qvel)[..., dim]
+        heading_velocity = get_velocity_in_frame(target_quat, trajectory.qvel[..., :3])[..., dim]
         if self.flip_sign:
             heading_velocity = -heading_velocity
         return heading_velocity.clip(min=0.0, max=self.target_velocity)
@@ -819,21 +824,31 @@ class JoystickPenalty(Reward):
         qvel = trajectory.qvel[..., :6]
         linvel = qvel[..., :3]
         angvel = qvel[..., 3:]
-        heading_vel = get_heading_velocity(target_quat, linvel)
+        heading_vel = get_velocity_in_frame(target_quat, linvel)
         forward_vel = heading_vel[..., 0]
         left_vel = heading_vel[..., 1]
         rotation_vel = angvel[..., 2]  # Rotation about the Z axis.
 
         # Penalties to minimize.
+        linvel = get_velocity_in_frame(target_quat, linvel)
+        angvel = get_velocity_in_frame(target_quat, angvel)
+        xlv = xax.get_norm(linvel[..., 0], self.norm) * self.lin_vel_penalty_scale
+        ylv = xax.get_norm(linvel[..., 1], self.norm) * self.lin_vel_penalty_scale
+        zlv = xax.get_norm(linvel[..., 2], self.norm) * self.lin_vel_penalty_scale
+        xav = xax.get_norm(angvel[..., 0], self.norm) * self.ang_vel_penalty_scale
+        yav = xax.get_norm(angvel[..., 1], self.norm) * self.ang_vel_penalty_scale
+        zav = xax.get_norm(angvel[..., 2], self.norm) * self.ang_vel_penalty_scale
+        alllv = xlv + ylv + zlv
+        allav = xav + yav + zav
 
         # Computes each of the penalties.
-        stand_still_penalty = xax.get_norm(qvel[..., :6], self.norm).mean(axis=-1)
-        walk_forward_penalty = xax.get_norm(forward_vel - self.translation_speed, self.norm)
-        walk_backward_penalty = xax.get_norm(forward_vel + self.translation_speed, self.norm)
-        turn_left_penalty = xax.get_norm(rotation_vel + self.rotation_speed, self.norm)
-        turn_right_penalty = xax.get_norm(rotation_vel - self.rotation_speed, self.norm)
-        strafe_left_penalty = xax.get_norm(left_vel - self.translation_speed, self.norm)
-        strafe_right_penalty = xax.get_norm(left_vel + self.translation_speed, self.norm)
+        stand_still_penalty = alllv + allav
+        walk_forward_penalty = xax.get_norm(forward_vel - self.translation_speed, self.norm) + ylv + zlv + allav
+        walk_backward_penalty = xax.get_norm(forward_vel + self.translation_speed, self.norm) + ylv + zlv + allav
+        turn_left_penalty = xax.get_norm(rotation_vel + self.rotation_speed, self.norm) + alllv + xlv + ylv
+        turn_right_penalty = xax.get_norm(rotation_vel - self.rotation_speed, self.norm) + alllv + xlv + ylv
+        strafe_left_penalty = xax.get_norm(left_vel - self.translation_speed, self.norm) + xlv + zlv + allav
+        strafe_right_penalty = xax.get_norm(left_vel + self.translation_speed, self.norm) + xlv + zlv + allav
 
         all_penalties = jnp.stack(
             [
