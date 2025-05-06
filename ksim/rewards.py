@@ -531,7 +531,7 @@ class JointDeviationPenalty(Reward):
     norm: xax.NormType = attrs.field(default="l2")
     joint_indices: tuple[int, ...] = attrs.field()
     joint_targets: tuple[float, ...] = attrs.field()
-    joint_weights: tuple[float, ...] = attrs.field(default=None)
+    joint_weights: tuple[float, ...] | None = attrs.field(default=None)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         diff = (
@@ -540,7 +540,7 @@ class JointDeviationPenalty(Reward):
         )
 
         if self.joint_weights is not None:
-            diff = diff * jnp.array(self.joint_weights)
+            diff *= jnp.array(self.joint_weights)
 
         penalty = xax.get_norm(diff, self.norm).sum(axis=-1)
         return penalty
