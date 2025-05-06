@@ -22,7 +22,7 @@ NUM_JOINTS = 21
 NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 7
 
 
-class DefaultHumanoidActor(eqx.Module):
+class Actor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
@@ -73,7 +73,7 @@ class DefaultHumanoidActor(eqx.Module):
         return dist_n
 
 
-class DefaultHumanoidCritic(eqx.Module):
+class Critic(eqx.Module):
     """Critic for the walking task."""
 
     mlp: eqx.nn.MLP
@@ -101,9 +101,9 @@ class DefaultHumanoidCritic(eqx.Module):
         return self.mlp(obs_n)
 
 
-class DefaultHumanoidModel(eqx.Module):
-    actor: DefaultHumanoidActor
-    critic: DefaultHumanoidCritic
+class Model(eqx.Module):
+    actor: Actor
+    critic: Critic
 
     def __init__(
         self,
@@ -113,7 +113,7 @@ class DefaultHumanoidModel(eqx.Module):
         depth: int,
         num_mixtures: int,
     ) -> None:
-        self.actor = DefaultHumanoidActor(
+        self.actor = Actor(
             key,
             min_std=0.01,
             max_std=1.0,
@@ -122,7 +122,7 @@ class DefaultHumanoidModel(eqx.Module):
             depth=depth,
             num_mixtures=num_mixtures,
         )
-        self.critic = DefaultHumanoidCritic(
+        self.critic = Critic(
             key,
             hidden_size=hidden_size,
             depth=depth,
@@ -325,7 +325,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         rewards: list[ksim.Reward] = [
             ksim.StayAliveReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
-            ksim.FeetFlatReward(scale=0.1),
+            ksim.FlatBodyReward.create(
+                physics_model=physics_model,
+                body_names=("foot_left", "foot_right"),
+                scale=1.0,
+            ),
         ]
 
         if self.config.use_naive_forward_reward:
@@ -361,8 +365,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             dt=self.config.ctrl_dt,
         )
 
-    def get_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
-        return DefaultHumanoidModel(
+    def get_model(self, key: PRNGKeyArray) -> Model:
+        return Model(
             key,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
@@ -374,7 +378,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def run_actor(
         self,
-        model: DefaultHumanoidActor,
+        model: Actor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Distribution:
@@ -417,7 +421,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def run_critic(
         self,
-        model: DefaultHumanoidCritic,
+        model: Critic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
@@ -460,7 +464,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_ppo_variables(
         self,
-        model: DefaultHumanoidModel,
+        model: Model,
         trajectory: ksim.Trajectory,
         model_carry: None,
         rng: PRNGKeyArray,
@@ -487,7 +491,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def sample_action(
         self,
-        model: DefaultHumanoidModel,
+        model: Model,
         model_carry: None,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,

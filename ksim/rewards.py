@@ -25,7 +25,7 @@ __all__ = [
     "ActionNearPositionPenalty",
     "JointDeviationPenalty",
     "FeetLinearVelocityTrackingPenalty",
-    "FeetFlatReward",
+    "FlatBodyReward",
     "FeetNoContactReward",
     "PositionTrackingReward",
     "UprightReward",
@@ -609,26 +609,36 @@ class FeetLinearVelocityTrackingPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class FeetFlatReward(Reward):
-    """Reward for keeping the feet parallel to the relevant plane."""
+class FlatBodyReward(Reward):
+    """Reward for keeping the body parallel to the ground."""
 
-    obs_name: str = attrs.field(default="feet_orientation_observation")
+    body_indices: tuple[int, ...] = attrs.field()
     plane: tuple[float, float, float] = attrs.field(default=(0.0, 0.0, 1.0))
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        feet_quat = trajectory.obs[self.obs_name]
-        chex.assert_shape(feet_quat, (..., 2, 4))
-        unit_vec = jnp.array(self.plane, dtype=feet_quat.dtype)
-        unit_vec = xax.rotate_vector_by_quat(unit_vec, feet_quat, inverse=True)
-        unit_vec_x, unit_vec_y, unit_vec_z = unit_vec[..., 0], unit_vec[..., 1], unit_vec[..., 2]
+        body_quat = trajectory.xquat[..., self.body_indices, :]
+        plane_vec = jnp.array(self.plane, dtype=body_quat.dtype)
+        unit_vec = xax.rotate_vector_by_quat(plane_vec, body_quat, inverse=True)
+        return jnp.einsum("...i,...i->...", unit_vec, plane_vec)
 
-        # Z should be 1, and X and Y should be 0.
-        return (
-            xax.get_norm(unit_vec_z, self.norm)
-            - xax.get_norm(unit_vec_x, self.norm)
-            - xax.get_norm(unit_vec_y, self.norm)
-        ).min(axis=-1)
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        body_names: tuple[str, ...],
+        plane: tuple[float, float, float] = (0.0, 0.0, 1.0),
+        norm: xax.NormType = "l2",
+        scale: float = 1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        return cls(
+            body_indices=tuple([get_body_data_idx_from_name(physics_model, name) for name in body_names]),
+            plane=plane,
+            norm=norm,
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
