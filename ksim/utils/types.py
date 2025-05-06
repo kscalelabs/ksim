@@ -55,3 +55,12 @@ def norm_validator(
     choices = get_args(xax.NormType)
     if value not in choices:
         raise ValueError(f"Norm must be one of {choices}, got {value}")
+
+
+def sample_probs_validator(
+    inst: Any,  # noqa: ANN401
+    attr: attrs.Attribute,
+    value: tuple[float, ...],
+) -> None:
+    if abs(sum(value) - 1.0) > 1e-6:
+        raise ValueError("Sample probabilities must sum to 1.0")

@@ -289,6 +289,13 @@ class BaseAngularAccelerationObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class ProjectedGravityObservation(StatefulObservation):
+    """Observes the projected gravity vector.
+
+    This provides an approximation of reading the projected gravity vector from
+    the IMU on the physical robot. The `framequat_name` should be the name of
+    the framequat sensor attached to the IMU.
+    """
+
     framequat_idx_range: tuple[int, int | None] = attrs.field()
     gravity: tuple[float, float, float] = attrs.field()
     lag_range: tuple[float, float] = attrs.field(

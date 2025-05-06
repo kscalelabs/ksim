@@ -5,6 +5,8 @@ __all__ = [
     "FloatVectorCommand",
     "IntVectorCommand",
     "JoystickCommand",
+    "StartPositionCommand",
+    "StartQuaternionCommand",
     "PositionCommand",
 ]
 
@@ -20,6 +22,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
+from ksim.utils.types import sample_probs_validator
 from ksim.vis import Marker
 
 
@@ -87,7 +90,7 @@ class Command(ABC):
         return self.get_name()
 
 
-@attrs.define(frozen=True)
+@attrs.define(frozen=True, kw_only=True)
 class FloatVectorCommand(Command):
     """Samples a set of scalars uniformly within some bounding box.
 
@@ -120,7 +123,7 @@ class FloatVectorCommand(Command):
         return jnp.where(switch_mask, new_commands, prev_command)
 
 
-@attrs.define(frozen=True)
+@attrs.define(frozen=True, kw_only=True)
 class IntVectorCommand(Command):
     """Samples an integer vector uniformly within some bounding box."""
 
@@ -149,9 +152,57 @@ class IntVectorCommand(Command):
         return jnp.where(switch_mask, new_commands, prev_command)
 
 
-@attrs.define(frozen=True)
-class JoystickCommand(IntVectorCommand):
+@attrs.define(frozen=True, kw_only=True)
+class StartPositionCommand(Command):
+    """Provides the initial position of the robot as a command."""
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        return physics_data.qpos[..., :3]
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        return prev_command
+
+
+@attrs.define(frozen=True, kw_only=True)
+class StartQuaternionCommand(Command):
+    """Provides the initial quaternion of the robot as a command."""
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        return physics_data.qpos[..., 3:7]
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        return prev_command
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JoystickCommand(Command):
     """Provides joystick-like controls for the robot.
+
+    Commands are encoded as one-hot vectors and concatenated with the
+    quaternion from when the command is sampled. This means that the total
+    command dimensionality will be 7 + 4 = 11.
 
     Command mapping:
 
@@ -160,9 +211,37 @@ class JoystickCommand(IntVectorCommand):
         2 = walk backward
         3 = turn left
         4 = turn right
+        5 = strafe left
+        6 = strafe right
     """
 
-    ranges: tuple[tuple[int, int], ...] = attrs.field(default=((0, 4),))
+    sample_probs: tuple[float, float, float, float, float, float, float] = attrs.field(
+        default=(0.1, 0.5, 0.1, 0.1, 0.1, 0.05, 0.05),
+        validator=sample_probs_validator,
+    )
+    switch_prob: float = attrs.field(default=0.0)
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        command = jax.random.choice(rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs))
+        command_ohe = jax.nn.one_hot(command, num_classes=7)
+        return jnp.concatenate([command_ohe, physics_data.qpos[..., 3:7]])
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
 
 
 @attrs.define(kw_only=True)
