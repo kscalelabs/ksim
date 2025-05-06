@@ -510,6 +510,10 @@ class RLConfig(xax.Config):
         value="implicitfast",
         help="The integrator algorithm to use",
     )
+    cone: int = xax.field(
+        value=0,
+        help="The type of cone to use: pyramidal (0) or elliptic (1)",
+    )
     disable_euler_damping: bool = xax.field(
         value=True,
         help="If set, disable Euler damping - this is a performance improvement",
@@ -661,6 +665,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         _set_opt("integrator", integrator)
         _set_opt("tolerance", self.config.tolerance)
         _set_opt("solver", solver)
+        _set_opt("cone", self.config.cone)
 
         if self.config.disable_euler_damping:
             mj_model.opt.disableflags = mj_model.opt.disableflags | mjx.DisableBit.EULERDAMP
