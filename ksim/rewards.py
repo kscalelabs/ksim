@@ -531,12 +531,17 @@ class JointDeviationPenalty(Reward):
     norm: xax.NormType = attrs.field(default="l2")
     joint_indices: tuple[int, ...] = attrs.field()
     joint_targets: tuple[float, ...] = attrs.field()
+    joint_weights: tuple[float, ...] = attrs.field(default=None)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         diff = (
             trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
             - jnp.array(self.joint_targets)[jnp.array(self.joint_indices)]
         )
+
+        if self.joint_weights is not None:
+            diff = diff * jnp.array(self.joint_weights)
+
         penalty = xax.get_norm(diff, self.norm).sum(axis=-1)
         return penalty
 
@@ -547,6 +552,7 @@ class JointDeviationPenalty(Reward):
         joint_names: tuple[str, ...],
         joint_targets: tuple[float, ...],
         scale: float = -1.0,
+        joint_weights: tuple[float, ...] | None = None,
         scale_by_curriculum: bool = False,
     ) -> Self:
         joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
@@ -554,6 +560,7 @@ class JointDeviationPenalty(Reward):
         return cls(
             joint_indices=joint_indices,
             joint_targets=joint_targets,
+            joint_weights=joint_weights,
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
         )
