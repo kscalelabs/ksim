@@ -67,6 +67,7 @@ class PushEvent(Event):
     x_force: float = attrs.field()
     y_force: float = attrs.field()
     z_force: float = attrs.field(default=0.0)
+    force_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
     x_angular_force: float = attrs.field(default=0.0)
     y_angular_force: float = attrs.field(default=0.0)
     z_angular_force: float = attrs.field(default=0.0)
@@ -110,8 +111,10 @@ class PushEvent(Event):
                 self.z_angular_force,
             ]
         )
-        random_forces = jax.random.uniform(rng, (6,), minval=-1.0, maxval=1.0)
-        random_forces = random_forces * force_scales * curriculum_level
+        force_min, force_max = self.force_range
+        random_forces = jax.random.uniform(rng, (6,), minval=force_min, maxval=force_max)
+        random_flip = jax.random.bernoulli(rng, (6,), p=0.5, dtype=random_forces.dtype) * 2 - 1
+        random_forces = random_forces * force_scales * curriculum_level * random_flip
         random_forces += data.qvel[:6]
         new_qvel = slice_update(data, "qvel", slice(0, 6), random_forces)
         updated_data = update_data_field(data, "qvel", new_qvel)
