@@ -179,7 +179,7 @@ def get_rewards(
         reward_carry = rewards_carry[reward_name]
 
         if isinstance(reward, StatefulReward):
-            reward_carry = jnp.where(trajectory.done, reward.initial_carry(rng), reward_carry)
+            reward_carry = jnp.where(trajectory.done[-1], reward.initial_carry(rng), reward_carry)
             reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
         else:
             reward_val = reward.get_reward(trajectory)
@@ -189,6 +189,7 @@ def get_rewards(
 
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
+
         reward_dict[reward_name] = reward_val
         next_reward_carry[reward_name] = reward_carry
 
@@ -1110,7 +1111,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def _crop_to_length(self, logged_traj: LoggedTrajectory, length: float) -> LoggedTrajectory:
         render_frames = round(length / self.config.ctrl_dt)
-        return jax.tree.map(lambda arr: arr[:render_frames], logged_traj)
+        return jax.tree.map(lambda arr: arr[:render_frames] if arr.ndim > 0 else arr, logged_traj)
 
     def _log_logged_trajectory_graphs(
         self,
