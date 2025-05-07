@@ -113,7 +113,7 @@ class PushEvent(Event):
         )
         force_min, force_max = self.force_range
         random_forces = jax.random.uniform(rng, shape=(6,), minval=force_min, maxval=force_max)
-        random_flip = jax.random.bernoulli(rng, p=0.5, shape=(6,), dtype=random_forces.dtype) * 2 - 1
+        random_flip = jax.random.bernoulli(rng, p=0.5, shape=(6,)).astype(random_forces.dtype) * 2 - 1
         random_forces = random_forces * force_scales * curriculum_level * random_flip
         random_forces += data.qvel[:6]
         new_qvel = slice_update(data, "qvel", slice(0, 6), random_forces)
