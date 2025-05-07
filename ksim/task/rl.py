@@ -179,7 +179,7 @@ def get_rewards(
         reward_carry = rewards_carry[reward_name]
 
         if isinstance(reward, StatefulReward):
-            reward_carry = jnp.where(trajectory.done[-1], reward.initial_carry(rng), reward_carry)
+            reward_carry = jnp.where(trajectory.done[..., -1], reward.initial_carry(rng), reward_carry)
             reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
         else:
             reward_val = reward.get_reward(trajectory)
