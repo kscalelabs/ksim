@@ -274,7 +274,7 @@ def get_joint_metadata(
 def log_joint_config(
     model: PhysicsModel,
     metadata: dict[str, JointMetadataOutput],
-) -> None:
+) -> str:
     """Log configuration of joints and actuators in a table."""
     actuator_name_to_nn_id = get_ctrl_data_idx_by_name(model)
     joint_names = get_joint_names_in_order(model)
@@ -358,6 +358,7 @@ def log_joint_config(
     table_data = [[joint[header] for header in headers] for joint in joint_data]
     table = tabulate(table_data, headers=headers, tablefmt="grid", numalign="right", stralign="left")
     logger.info("Joint Configuration:\n%s", table)
+    return table
 
 
 def update_model_field(model: mujoco.MjModel | mjx.Model, name: str, new_value: Array) -> mujoco.MjModel | mjx.Model:
