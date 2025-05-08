@@ -527,8 +527,8 @@ class ActionNearPositionPenalty(Reward):
     def get_reward(self, trajectory: Trajectory) -> Array:
         current_position = trajectory.qpos[..., 7:]
         action = trajectory.action
-        out_of_bounds = jnp.abs(current_position - action).clip(min=self.joint_threshold) * self.backoff_scale
-        return out_of_bounds.astype(trajectory.qpos.dtype).mean(axis=-1)
+        out_of_bounds = (jnp.abs(current_position - action) - self.joint_threshold).clip(min=self.joint_threshold)
+        return (out_of_bounds * self.backoff_scale).astype(trajectory.qpos.dtype).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
