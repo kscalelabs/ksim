@@ -88,6 +88,7 @@ class LinearCurriculum(Curriculum[None]):
     ) -> CurriculumState[None]:
         level = (training_state.num_steps // self.step_every_n_epochs) * self.step_size
         level = jnp.clip(level, self.min_level, 1.0)
+        level = jnp.full_like(prev_state.level, level)
         return CurriculumState(level=level, state=None)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
