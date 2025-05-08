@@ -43,9 +43,9 @@ class PhysicsState:
 class Trajectory:
     """Stackable structure of transitions.
 
-    Note that `qpos`, `qvel`, `xpos`, and `xquat` are the values from *after*
-    the action has been taken, while `obs` and `command` are the values from
-    *before* the action has been taken.
+    Note that `qpos`, `qvel`, `xpos`, `xquat` and `timestep` are the values
+    from *after* the action has been taken, while `obs` and `command` are the
+    values from *before* the action has been taken.
     """
 
     qpos: Array
