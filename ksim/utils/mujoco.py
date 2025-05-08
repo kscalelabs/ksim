@@ -30,6 +30,7 @@ __all__ = [
     "remove_mujoco_joints_except",
     "add_new_mujoco_body",
     "log_joint_config",
+    "get_heading",
 ]
 
 import logging
@@ -41,6 +42,7 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
+import xax
 from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
@@ -566,3 +568,12 @@ def add_new_mujoco_body(
     parent_body.append(new_body)
 
     return ET.tostring(root, encoding="utf-8").decode("utf-8")
+
+
+def get_heading(quat: Array) -> Array:
+    heading_vector = jnp.array([1.0, 0.0, 0.0])
+    return xax.rotate_vector_by_quat(heading_vector, quat, inverse=True)
+
+
+def get_velocity_in_frame(quat: Array, vel: Array) -> Array:
+    return xax.rotate_vector_by_quat(vel, quat, inverse=True)

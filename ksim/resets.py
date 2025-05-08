@@ -9,6 +9,7 @@ __all__ = [
     "RandomJointVelocityReset",
     "RandomBaseVelocityXYReset",
     "get_xy_position_reset",
+    "RandomHeadingReset",
 ]
 
 import functools
@@ -27,6 +28,7 @@ from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import (
     get_joint_names_in_order,
     get_position_limits,
+    slice_update,
     update_data_field,
 )
 from ksim.utils.priors import MotionReferenceData
@@ -292,4 +294,17 @@ class InitialMotionStateReset(Reset):
             data = update_data_field(data, "qvel", new_qvel)
 
         data = update_data_field(data, "time", frame_index * self.reference_motion.ctrl_dt)
+        return data
+
+
+@attrs.define(frozen=True, kw_only=True)
+class RandomHeadingReset(Reset):
+    """Resets the heading of the robot to a random value."""
+
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
+        angle = jax.random.uniform(rng, data.qpos.shape[:-1], minval=-jnp.pi, maxval=jnp.pi)
+        euler = jnp.stack([jnp.zeros_like(angle), jnp.zeros_like(angle), angle], axis=-1)
+        quat = xax.euler_to_quat(euler)
+        qpos = slice_update(data, "qpos", slice(3, 7), quat)
+        data = update_data_field(data, "qpos", qpos)
         return data

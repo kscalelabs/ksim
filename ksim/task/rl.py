@@ -14,6 +14,7 @@ import datetime
 import functools
 import io
 import itertools
+import json
 import logging
 import signal
 import sys
@@ -164,6 +165,7 @@ def get_rewards(
     rewards_carry: xax.FrozenDict[str, PyTree],
     rollout_length_steps: int,
     curriculum_level: Array,
+    rng: PRNGKeyArray,
     clip_min: float | None = None,
     clip_max: float | None = None,
 ) -> RewardState:
@@ -177,6 +179,7 @@ def get_rewards(
         reward_carry = rewards_carry[reward_name]
 
         if isinstance(reward, StatefulReward):
+            reward_carry = jnp.where(trajectory.done[..., -1], reward.initial_carry(rng), reward_carry)
             reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
         else:
             reward_val = reward.get_reward(trajectory)
@@ -186,6 +189,7 @@ def get_rewards(
 
         if reward_val.shape != trajectory.done.shape:
             raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
+
         reward_dict[reward_name] = reward_val
         next_reward_carry[reward_name] = reward_carry
 
@@ -437,14 +441,6 @@ class RLConfig(xax.Config):
         value=False,
         help="If true, render inertia.",
     )
-    render_height_small: int = xax.field(
-        value=240,
-        help="The height of the rendered images.",
-    )
-    render_width_small: int = xax.field(
-        value=360,
-        help="The width of the rendered images.",
-    )
     render_height: int = xax.field(
         value=480,
         help="The height of the rendered images during the validation phase.",
@@ -462,7 +458,7 @@ class RLConfig(xax.Config):
         help="The target FPS for the renderered video.",
     )
     render_slowdown: float = xax.field(
-        value=2.0,
+        value=1.0,
         help="The slowdown factor for the rendered video.",
     )
     render_track_body_id: int | None = xax.field(
@@ -550,7 +546,6 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
-    is_small: bool = False,
 ) -> GlfwMujocoViewer | DefaultMujocoViewer:
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
@@ -565,8 +560,8 @@ def get_viewer(
             mj_model,
             data=mj_data,
             mode=mode,
-            width=config.render_width_small if is_small else config.render_width,
-            height=config.render_height_small if is_small else config.render_height,
+            width=config.render_width,
+            height=config.render_height,
             shadow=config.render_shadow,
             reflection=config.render_reflection,
             contact_force=config.render_contact_force,
@@ -577,8 +572,8 @@ def get_viewer(
     else:
         viewer = DefaultMujocoViewer(
             mj_model,
-            width=config.render_width_small if is_small else config.render_width,
-            height=config.render_height_small if is_small else config.render_height,
+            width=config.render_width,
+            height=config.render_height,
         )
 
     # Sets the viewer camera.
@@ -936,6 +931,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             aux_outputs=action.aux_outputs,
         )
 
+        next_physics_state = jax.lax.cond(
+            terminated,
+            lambda: constants.engine.reset(
+                shared_state.physics_model,
+                env_states.curriculum_state.level,
+                reset_rng,
+            ),
+            lambda: next_physics_state,
+        )
+
         # Conditionally reset on termination.
         next_commands = jax.lax.cond(
             terminated,
@@ -958,16 +963,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             terminated,
             lambda: get_initial_obs_carry(rng=carry_rng, observations=constants.observations),
             lambda: next_obs_carry,
-        )
-
-        next_physics_state = jax.lax.cond(
-            terminated,
-            lambda: constants.engine.reset(
-                shared_state.physics_model,
-                env_states.curriculum_state.level,
-                reset_rng,
-            ),
-            lambda: next_physics_state,
         )
 
         next_model_carry = jax.lax.cond(
@@ -1116,7 +1111,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def _crop_to_length(self, logged_traj: LoggedTrajectory, length: float) -> LoggedTrajectory:
         render_frames = round(length / self.config.ctrl_dt)
-        return jax.tree.map(lambda arr: arr[:render_frames], logged_traj)
+        return jax.tree.map(lambda arr: arr[:render_frames] if arr.ndim > 0 else arr, logged_traj)
 
     def _log_logged_trajectory_graphs(
         self,
@@ -1233,7 +1228,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             key=key,
             value=frames,
             fps=round(fps / self.config.render_slowdown),
-            namespace="➡️ trajectory images",
+            namespace=f"➡️ {key} images",
         )
 
     @abstractmethod
@@ -1383,12 +1378,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Gets the rewards.
+        rng, reward_rng = jax.random.split(env_state.rng)
         reward = get_rewards(
             trajectory=trajectory,
             rewards=constants.rewards,
             rewards_carry=env_state.reward_carry,
             rollout_length_steps=self.rollout_length_steps,
             curriculum_level=env_state.curriculum_state.level,
+            rng=reward_rng,
             clip_min=self.config.reward_clip_min,
             clip_max=self.config.reward_clip_max,
         )
@@ -1397,6 +1394,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         env_state = dataclass_replace(
             env_state,
             reward_carry=reward.carry,
+            rng=rng,
         )
 
         return trajectory, reward, env_state
@@ -1625,12 +1623,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
 
+            rng, reward_rng = jax.random.split(rng)
             reward_state = get_rewards(
                 trajectory=trajectory,
                 rewards=constants.rewards,
                 rewards_carry=env_states.reward_carry,
                 rollout_length_steps=self.rollout_length_steps,
                 curriculum_level=env_states.curriculum_state.level,
+                rng=reward_rng,
                 clip_min=self.config.reward_clip_min,
                 clip_max=self.config.reward_clip_max,
             )
@@ -1704,6 +1704,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             raise ValueError("No models found")
 
         metadata = self.get_mujoco_model_metadata(mj_model)
+        metadata_str = json.dumps({k: v.model_dump() for k, v in metadata.items()}, indent=2, sort_keys=True)
+        self.logger.log_file("mujoco_metadata.json", metadata_str)
         engine = self.get_engine(physics_model, metadata)
         observations = self.get_observations(physics_model)
         commands = self.get_commands(physics_model)
@@ -2006,17 +2008,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             # Creates the viewer.
-            small_viewer = get_viewer(
+            viewer = get_viewer(
                 mj_model=mj_model,
                 config=self.config,
                 mode="offscreen",
-                is_small=True,
-            )
-            full_viewer = get_viewer(
-                mj_model=mj_model,
-                config=self.config,
-                mode="offscreen",
-                is_small=False,
             )
 
             state = self.on_training_start(state)
@@ -2068,26 +2063,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
 
                         if valid_step:
-                            full_size_render = state.num_valid_steps.item() % self.config.render_full_every_n_steps == 0
-                            if full_size_render:
-                                self._log_logged_trajectory_video(
-                                    logged_traj=logged_traj,
-                                    markers=markers,
-                                    viewer=full_viewer,
-                                    key="trajectory",
-                                )
+                            full_render = state.num_valid_steps.item() % self.config.render_full_every_n_steps == 0
+                            self._log_logged_trajectory_video(
+                                logged_traj=logged_traj,
+                                markers=markers,
+                                viewer=viewer,
+                                key="full trajectory" if full_render else "trajectory",
+                            )
+                            if full_render:
                                 self._log_logged_trajectory_graphs(
                                     logged_traj=logged_traj,
                                     log_callback=lambda key, value, namespace: self.logger.log_image(
                                         key=key, value=value, namespace=namespace
                                     ),
-                                )
-                            else:
-                                self._log_logged_trajectory_video(
-                                    logged_traj=logged_traj,
-                                    markers=markers,
-                                    viewer=small_viewer,
-                                    key="trajectory_small",
                                 )
                             state = state.replace(
                                 num_valid_steps=state.num_valid_steps + num_steps,
