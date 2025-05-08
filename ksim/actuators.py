@@ -19,7 +19,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 
 from ksim.types import PhysicsData, PhysicsModel
-from ksim.utils.mujoco import get_ctrl_data_idx_by_name
+from ksim.utils.mujoco import get_ctrl_data_idx_by_name, log_joint_config
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +140,8 @@ class MITPositionActuators(Actuators):
             raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
         if any(self.kps == 0) or any(self.kds == 0):
             logger.warning("Some KPs or KDs are 0. Check the provided metadata.")
+
+        log_joint_config(physics_model, joint_name_to_metadata)
 
     def get_actuator_name(self, joint_name: str) -> str:
         # This can be overridden if necessary.
