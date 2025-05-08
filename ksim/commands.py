@@ -11,6 +11,7 @@ __all__ = [
 ]
 
 import functools
+import numpy as np
 from abc import ABC, abstractmethod
 from typing import Collection, Self
 
@@ -196,6 +197,42 @@ class StartQuaternionCommand(Command):
         return prev_command
 
 
+@attrs.define(kw_only=True)
+class JoystickCommandMarker(Marker):
+    command_name: str = attrs.field()
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Update the marker position and rotation."""
+        # self.pos = trajectory.command[self.command_name][:3]
+        command = trajectory.command[self.command_name]
+        # command_ohe = command[..., :7]
+        command_quat = command[..., 7:11]
+
+        # Rotates the arrow so that it poins in the X direction instead of the Z direction.
+        z_to_x_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, jnp.pi / 2.0]))
+        quat = xax.quat_mul(command_quat, z_to_x_quat)
+
+        x, y, z, w = np.array(quat).flatten().tolist()
+        self.orientation = (x, y, z, w)
+
+    @classmethod
+    def get(
+        cls,
+        command_name: str,
+        base_name: str | None,
+        radius: float,
+        length: float,
+        rgba: tuple[float, float, float, float],
+    ) -> Self:
+        return cls(
+            command_name=command_name,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,
+            scale=(radius, radius, length),
+            rgba=rgba,
+        )
+
+
 @attrs.define(frozen=True, kw_only=True)
 class JoystickCommand(Command):
     """Provides joystick-like controls for the robot.
@@ -220,6 +257,10 @@ class JoystickCommand(Command):
         validator=sample_probs_validator,
     )
     switch_prob: float = attrs.field(default=0.0)
+    base_name: str | None = attrs.field(default=None)
+    vis_radius: float = attrs.field(default=0.05)
+    vis_length: float = attrs.field(default=0.5)
+    vis_color: tuple[float, float, float, float] = attrs.field(default=(1.0, 0.0, 0.0, 0.8))
 
     def initial_command(
         self,
@@ -242,6 +283,17 @@ class JoystickCommand(Command):
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
+
+    def get_markers(self) -> Collection[Marker]:
+        return [
+            JoystickCommandMarker.get(
+                self.command_name,
+                self.base_name,
+                self.vis_radius,
+                self.vis_length,
+                self.vis_color,
+            ),
+        ]
 
 
 @attrs.define(kw_only=True)
