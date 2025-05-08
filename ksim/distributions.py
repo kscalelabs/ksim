@@ -8,6 +8,7 @@ __all__ = [
 ]
 
 import distrax
+import jax
 import jax.numpy as jnp
 from distrax._src.utils import conversion
 from jaxtyping import Array
@@ -159,9 +160,24 @@ class MixtureOfGaussians(distrax.MixtureSameFamily):
         )
 
     def mode(self) -> Array:
-        # The mode of a mixture of Gaussians is the mean of the component
+        # The approximation of the mode of a mixture of Gaussians is the mean of the component
         # with the highest mixture probability.
         top_mixture_n = self.mixture_distribution.mode()
         means_nm = self.components_distribution.loc
-        top_mean_n = jnp.take_along_axis(means_nm, top_mixture_n[..., None], axis=-1)[..., 0]
+
+        num_components = self.mixture_distribution.num_categories
+
+        one_hot_selection = jax.nn.one_hot(
+            top_mixture_n,
+            num_classes=num_components,
+            dtype=means_nm.dtype,
+        )
+
+        num_event_dims_of_components = len(self.components_distribution.event_shape)
+        reshape_target = list(one_hot_selection.shape) + [1] * num_event_dims_of_components
+        one_hot_reshaped = jnp.reshape(one_hot_selection, reshape_target)
+        weighted_means = means_nm * one_hot_reshaped
+        component_axis = len(self.mixture_distribution.batch_shape)
+        top_mean_n = jnp.sum(weighted_means, axis=component_axis)
+
         return top_mean_n
