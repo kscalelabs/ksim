@@ -43,10 +43,9 @@ class PhysicsState:
 class Trajectory:
     """Stackable structure of transitions.
 
-    Naming convention by dimension:
-    - `transition`: (leaf dim,)
-    - `trajectory`: (time, leaf dim)
-    - `trajectories`: (num envs or batch size, time, leaf dim)
+    Note that `qpos`, `qvel`, `xpos`, and `xquat` are the values from *after*
+    the action has been taken, while `obs` and `command` are the values from
+    *before* the action has been taken.
     """
 
     qpos: Array
