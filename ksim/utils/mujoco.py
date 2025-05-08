@@ -29,6 +29,7 @@ __all__ = [
     "get_site_pose_by_name",
     "remove_mujoco_joints_except",
     "add_new_mujoco_body",
+    "log_joint_config",
     "get_heading",
 ]
 
@@ -45,6 +46,7 @@ import xax
 from jaxtyping import Array
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
+from tabulate import tabulate
 
 from ksim.types import PhysicsData, PhysicsModel
 
@@ -267,6 +269,96 @@ def get_joint_metadata(
             soft_torque_limit=None if soft_torque_limit is None else str(soft_torque_limit),
         )
     return metadata
+
+
+def log_joint_config(
+    model: PhysicsModel,
+    metadata: dict[str, JointMetadataOutput],
+) -> str:
+    """Log configuration of joints and actuators in a table."""
+    actuator_name_to_nn_id = get_ctrl_data_idx_by_name(model)
+    joint_names = get_joint_names_in_order(model)
+    joint_limits = get_position_limits(model)
+
+    # The \n is to make the table headers take up less horizontal space.
+    headers = [
+        "Joint Name",
+        "NN\nID",
+        "KOS\nID",
+        "Type",
+        "Kp",
+        "Kd",
+        "Soft\nTorque\nLimit",
+        "Dmp",
+        "Arm",
+        "Fric",
+        "Joint\nLimit\nMin",
+        "Joint\nLimit\nMax",
+        "Ctrl\nMin",
+        "Ctrl\nMax",
+        "Force\nMin",
+        "Force\nMax",
+        "Joint\nIdx",
+        "DOF\nIdx",
+    ]
+
+    joint_data = []
+    for joint_idx, joint_name in enumerate(joint_names):
+        if joint_name == "floating_base":
+            continue
+
+        dof_id = model.jnt_dofadr[joint_idx]
+        actuator_name = f"{joint_name}_ctrl"
+
+        # Checks for errors in the joint configuration setup
+        if actuator_name not in actuator_name_to_nn_id:
+            raise ValueError(f"Actuator {actuator_name} not found in model")
+        actuator_nn_id = actuator_name_to_nn_id[actuator_name]
+
+        if joint_name not in metadata:
+            raise ValueError(f"Joint {joint_name} not found in metadata")
+        joint_meta = metadata[joint_name]
+
+        if actuator_nn_id < 0:
+            raise ValueError(f"Actuator {actuator_name} has invalid index {actuator_nn_id}")
+        if actuator_nn_id != joint_meta.nn_id:
+            raise ValueError(f"Actuator index mismatch: {actuator_nn_id} != {joint_meta.nn_id}")
+        if joint_meta.soft_torque_limit is None:
+            raise ValueError(f"Joint {joint_name} has no soft torque limit")
+
+        stl_float = float(joint_meta.soft_torque_limit)
+        frcrange_float = float(model.jnt_actfrcrange[joint_idx][1])
+        if stl_float > frcrange_float:
+            raise ValueError(f"Soft torque limit {stl_float} > max {frcrange_float} for {joint_name}")
+
+        joint_data.append(
+            {
+                "Joint Name": joint_name,
+                "NN\nID": actuator_nn_id,
+                "KOS\nID": str(joint_meta.id),
+                "Type": joint_meta.actuator_type,
+                "Kp": joint_meta.kp,
+                "Kd": joint_meta.kd,
+                "Soft\nTorque\nLimit": joint_meta.soft_torque_limit,
+                "Dmp": model.dof_damping[dof_id],
+                "Arm": model.dof_armature[dof_id],
+                "Fric": model.dof_frictionloss[dof_id],
+                "Joint\nLimit\nMin": f"{joint_limits[joint_name][0]:.3f}",
+                "Joint\nLimit\nMax": f"{joint_limits[joint_name][1]:.3f}",
+                "Ctrl\nMin": model.actuator_ctrlrange[actuator_nn_id][0],
+                "Ctrl\nMax": model.actuator_ctrlrange[actuator_nn_id][1],
+                "Force\nMin": model.jnt_actfrcrange[joint_idx][0],
+                "Force\nMax": model.jnt_actfrcrange[joint_idx][1],
+                "Joint\nIdx": joint_idx,
+                "DOF\nIdx": dof_id,
+            }
+        )
+
+    joint_data.sort(key=lambda x: (x["NN\nID"], x["Joint Name"]))
+    table_data = [[joint[header] for header in headers] for joint in joint_data]
+    table = tabulate(table_data, headers=headers, tablefmt="grid", numalign="right", stralign="left")
+    logger.info("Joint Configuration:\n%s", table)
+    return table
 
 
 def update_model_field(model: mujoco.MjModel | mjx.Model, name: str, new_value: Array) -> mujoco.MjModel | mjx.Model:
