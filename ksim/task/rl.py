@@ -1944,11 +1944,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
         )
 
-        # Log metadata and joint configuration
-        metadata = self.get_mujoco_model_metadata(mj_model)
-        joint_config_table = log_joint_config(mj_model, metadata)
-        self.logger.log_file("joint_config_table.txt", joint_config_table)
-
         # Loads the MJX model, and initializes the loop variables.
         mjx_model = self.get_mjx_model(mj_model)
         randomizers = self.get_physics_randomizers(mjx_model)
