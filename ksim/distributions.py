@@ -159,6 +159,12 @@ class MixtureOfGaussians(distrax.MixtureSameFamily):
             components_distribution=distrax.Normal(means_nm, stds_nm),
         )
 
+    def mode2(self) -> Array:
+        top_mixture_n = self.mixture_distribution.mode()
+        means_nm = self.components_distribution.loc
+        top_mean_n = jnp.take_along_axis(means_nm, top_mixture_n[..., None], axis=-1)[..., 0]
+        return top_mean_n
+
     def mode(self) -> Array:
         # The approximation of the mode of a mixture of Gaussians is the mean of the component
         # with the highest mixture probability.
@@ -171,13 +177,8 @@ class MixtureOfGaussians(distrax.MixtureSameFamily):
             num_classes=num_components_m,
             dtype=means_nm.dtype,
         )
-        num_event_dims_of_components = len(self.components_distribution.event_shape)
 
-        # Reshape the one-hot selection to match the shape of the means
-        reshape_target_nm = list(one_hot_selection_nm.shape) + [1] * num_event_dims_of_components
-        one_hot_reshaped_nm = jnp.reshape(one_hot_selection_nm, reshape_target_nm)
-        weighted_means_nm = means_nm * one_hot_reshaped_nm
+        top_one_hot_means_nm = means_nm * one_hot_selection_nm
         component_axis = len(self.mixture_distribution.batch_shape)
-        top_mean_n = jnp.sum(weighted_means_nm, axis=component_axis)
-
+        top_mean_n = jnp.sum(top_one_hot_means_nm, axis=component_axis)
         return top_mean_n
