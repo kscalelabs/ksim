@@ -11,8 +11,7 @@ import itertools
 import logging
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from dataclasses import replace as dataclass_replace
+from dataclasses import dataclass, replace as dataclass_replace
 from typing import Generic, Iterable, TypeVar
 
 import attrs
