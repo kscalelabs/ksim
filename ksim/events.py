@@ -100,6 +100,8 @@ class PushEvent(Event):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
+        urng, brng, trng = jax.random.split(rng, 3)
+
         # Randomly applies a force.
         force_scales = jnp.array(
             [
@@ -112,8 +114,8 @@ class PushEvent(Event):
             ]
         )
         force_min, force_max = self.force_range
-        random_forces = jax.random.uniform(rng, shape=(6,), minval=force_min, maxval=force_max)
-        random_flip = jax.random.bernoulli(rng, p=0.5, shape=(6,)).astype(random_forces.dtype) * 2 - 1
+        random_forces = jax.random.uniform(urng, shape=(6,), minval=force_min, maxval=force_max)
+        random_flip = jax.random.bernoulli(brng, p=0.5, shape=(6,)).astype(random_forces.dtype) * 2 - 1
         random_forces = random_forces * force_scales * curriculum_level * random_flip
         random_forces += data.qvel[:6]
         new_qvel = slice_update(data, "qvel", slice(0, 6), random_forces)
@@ -121,7 +123,7 @@ class PushEvent(Event):
 
         # Chooses a new remaining interval.
         minval, maxval = self.interval_range
-        time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+        time_remaining = jax.random.uniform(trng, (), minval=minval, maxval=maxval)
         return updated_data, time_remaining
 
     def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
@@ -164,16 +166,18 @@ class JumpEvent(Event):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
+        urng, trng = jax.random.split(rng, 2)
+
         # Implements a jump as a vertical velocity impulse. We compute the
         # required vertical velocity impulse to reach the desired jump height.
         minval, maxval = self.jump_height_range
-        jump_height = jax.random.uniform(rng, (), minval=minval, maxval=maxval) * curriculum_level
+        jump_height = jax.random.uniform(urng, (), minval=minval, maxval=maxval) * curriculum_level
         new_qvel = slice_update(data, "qvel", 2, jnp.sqrt(2 * model.opt.gravity * jump_height))
         updated_data = update_data_field(data, "qvel", new_qvel)
 
         # Chooses a new remaining interval.
         minval, maxval = self.interval_range
-        time_remaining = jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+        time_remaining = jax.random.uniform(trng, (), minval=minval, maxval=maxval)
 
         return updated_data, time_remaining
 

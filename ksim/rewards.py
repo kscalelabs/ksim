@@ -523,11 +523,13 @@ class ActionNearPositionPenalty(Reward):
 
     joint_threshold: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
     backoff_scale: float = attrs.field(default=1.0)
+    norm: xax.NormType = attrs.field(default="l2")
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         current_position = trajectory.qpos[..., 7:]
         action = trajectory.action
-        out_of_bounds = (jnp.abs(current_position - action) - self.joint_threshold).clip(min=self.joint_threshold)
+        diff = xax.get_norm(current_position - action, self.norm)
+        out_of_bounds = (diff - self.joint_threshold).clip(min=self.joint_threshold)
         return (out_of_bounds * self.backoff_scale).astype(trajectory.qpos.dtype).mean(axis=-1)
 
 
