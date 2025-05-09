@@ -11,7 +11,8 @@ import itertools
 import logging
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, replace as dataclass_replace
+from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from typing import Generic, Iterable, TypeVar
 
 import attrs
@@ -90,19 +91,20 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
     """
 
     def run(self) -> None:
-        if self.config.run_motion_viewer:
-            self.run_motion_viewer(
-                num_steps=(
-                    None
-                    if self.config.run_viewer_num_seconds is None
-                    else round(self.config.run_viewer_num_seconds / self.config.ctrl_dt)
-                ),
-                save_renders=self.config.run_viewer_save_renders,
-                loop=self.config.run_motion_viewer_loop,
-            )
+        match self.config.run_mode.lower():
+            case "view_motion":
+                self.run_motion_viewer(
+                    num_steps=(
+                        None
+                        if self.config.viewer_num_seconds is None
+                        else round(self.config.viewer_num_seconds / self.config.ctrl_dt)
+                    ),
+                    save_renders=self.config.viewer_save_renders,
+                    loop=self.config.run_motion_viewer_loop,
+                )
 
-        else:
-            super().run()
+            case _:
+                return super().run()
 
     def run_motion_viewer(
         self,
