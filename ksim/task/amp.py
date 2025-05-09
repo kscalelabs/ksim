@@ -11,7 +11,7 @@ import itertools
 import logging
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, replace as dataclass_replace
+from dataclasses import dataclass, replace
 from typing import Generic, Iterable, TypeVar
 
 import attrs
@@ -90,19 +90,20 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
     """
 
     def run(self) -> None:
-        if self.config.run_motion_viewer:
-            self.run_motion_viewer(
-                num_steps=(
-                    None
-                    if self.config.run_viewer_num_seconds is None
-                    else round(self.config.run_viewer_num_seconds / self.config.ctrl_dt)
-                ),
-                save_renders=self.config.run_viewer_save_renders,
-                loop=self.config.run_motion_viewer_loop,
-            )
+        match self.config.run_mode.lower():
+            case "view_motion":
+                self.run_motion_viewer(
+                    num_steps=(
+                        None
+                        if self.config.viewer_num_seconds is None
+                        else round(self.config.viewer_num_seconds / self.config.ctrl_dt)
+                    ),
+                    save_renders=self.config.viewer_save_renders,
+                    loop=self.config.run_motion_viewer_loop,
+                )
 
-        else:
-            super().run()
+            case _:
+                return super().run()
 
     def run_motion_viewer(
         self,
@@ -264,7 +265,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             physics_model=physics_model,
             model_arrs=model_arrs,
         )
-        shared_state = dataclass_replace(
+        shared_state = replace(
             shared_state,
             aux_values=xax.FrozenDict(
                 shared_state.aux_values.unfreeze()
@@ -302,7 +303,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         # Adds the discriminator output to the auxiliary outputs.
         aux_outputs = trajectory.aux_outputs.unfreeze() if trajectory.aux_outputs else {}
         aux_outputs[DISCRIMINATOR_OUTPUT_KEY] = discriminator_logits
-        trajectory = dataclass_replace(trajectory, aux_outputs=xax.FrozenDict(aux_outputs))
+        trajectory = replace(trajectory, aux_outputs=xax.FrozenDict(aux_outputs))
 
         return trajectory
 
@@ -408,9 +409,9 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         )
 
         # Updates the carry with the new model and optimizer states.
-        carry = dataclass_replace(
+        carry = replace(
             carry,
-            shared_state=dataclass_replace(
+            shared_state=replace(
                 carry.shared_state,
                 model_arrs=xax.tuple_insert(carry.shared_state.model_arrs, 1, new_model_arr),
             ),

@@ -391,7 +391,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.walking_rnn
     # To visualize the environment, use the following command:
-    #   python -m examples.walking_rnn run_model_viewer=True
+    #   python -m examples.walking_rnn run_mode=view
     HumanoidWalkingRNNTask.launch(
         HumanoidWalkingRNNTaskConfig(
             # Training parameters.

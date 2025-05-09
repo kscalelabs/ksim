@@ -23,7 +23,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
-from dataclasses import dataclass, replace as dataclass_replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Thread
 from typing import Any, Callable, Collection, Generic, TypeVar
@@ -78,6 +78,7 @@ from ksim.utils.mujoco import (
     get_position_limits,
     get_torque_limits,
     load_model,
+    log_joint_config,
 )
 from ksim.viewer import DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
@@ -327,23 +328,23 @@ def apply_randomizations(
 @dataclass
 class RLConfig(xax.Config):
     # Toggle this to run the environment viewer loop.
-    run_model_viewer: bool = xax.field(
-        value=False,
-        help="Instead of dropping into the training loop, run the environment loop.",
+    run_mode: str = xax.field(
+        value="train",
+        help="Mode to run the task in - either 'train' or 'view'",
     )
-    run_model_viewer_argmax_action: bool = xax.field(
+    viewer_argmax_action: bool = xax.field(
         value=True,
         help="If set, take the argmax action instead of sampling from the action distribution.",
     )
-    run_viewer_num_seconds: float | None = xax.field(
+    viewer_num_seconds: float | None = xax.field(
         value=None,
         help="If provided, run the environment loop for the given number of seconds.",
     )
-    run_viewer_save_renders: bool = xax.field(
+    viewer_save_renders: bool = xax.field(
         value=False,
         help="If set, save the renders to the experiment directory.",
     )
-    run_viewer_save_video: bool = xax.field(
+    viewer_save_video: bool = xax.field(
         value=False,
         help="If set, render the environment as a video instead of a GIF.",
     )
@@ -972,7 +973,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Gets the variables for the next step.
-        next_env_state = dataclass_replace(
+        next_env_state = replace(
             env_states,
             commands=next_commands,
             physics_state=next_physics_state,
@@ -994,26 +995,30 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run(self) -> None:
         """Highest level entry point for RL tasks, determines what to run."""
-        if self.config.run_model_viewer:
-            self.run_model_viewer(
-                num_steps=(
-                    None
-                    if self.config.run_viewer_num_seconds is None
-                    else round(self.config.run_viewer_num_seconds / self.config.ctrl_dt)
-                ),
-                save_renders=self.config.run_viewer_save_renders,
-                argmax_action=self.config.run_model_viewer_argmax_action,
-            )
+        match self.config.run_mode.lower():
+            case "train":
+                self.run_training()
 
-        elif self.config.collect_dataset:
-            self.collect_dataset(
-                num_batches=self.config.dataset_num_batches,
-                save_path=self.config.dataset_save_path,
-                argmax_action=self.config.collect_dataset_argmax_action,
-            )
+            case "view":
+                self.run_model_viewer(
+                    num_steps=(
+                        None
+                        if self.config.viewer_num_seconds is None
+                        else round(self.config.viewer_num_seconds / self.config.ctrl_dt)
+                    ),
+                    save_renders=self.config.viewer_save_renders,
+                    argmax_action=self.config.viewer_argmax_action,
+                )
 
-        else:
-            self.run_training()
+            case "collect_dataset":
+                self.collect_dataset(
+                    num_batches=self.config.dataset_num_batches,
+                    save_path=self.config.dataset_save_path,
+                    argmax_action=self.config.collect_dataset_argmax_action,
+                )
+
+            case _:
+                raise ValueError(f"Invalid run mode: {self.config.run_mode}")
 
     def log_train_metrics(self, metrics: Metrics) -> None:
         """Logs the train metrics.
@@ -1349,7 +1354,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         shared_state: RolloutSharedState,
     ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
         # Applies randomizations to the model.
-        shared_state = dataclass_replace(
+        shared_state = replace(
             shared_state,
             physics_model=shared_state.physics_model.tree_replace(env_state.randomization_dict),
         )
@@ -1391,7 +1396,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Updates the reward carry in the environment state.
-        env_state = dataclass_replace(
+        env_state = replace(
             env_state,
             reward_carry=reward.carry,
             rng=rng,
@@ -1449,9 +1454,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Update the environment states *after* doing the model update -
             # the model needs to be updated using the same environment states
             # that were used to generate the trajectory.
-            carry_i = dataclass_replace(
+            carry_i = replace(
                 carry_i,
-                env_states=dataclass_replace(
+                env_states=replace(
                     env_state,
                     curriculum_state=curriculum_state,
                 ),
@@ -1529,8 +1534,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Loads the Mujoco model and logs some information about it.
             mj_model = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
-            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
-            self.logger.log_file("mujoco_info.yaml", mujoco_info)
+            metadata = self.get_mujoco_model_metadata(mj_model)
+            joint_config_table = log_joint_config(mj_model, metadata)
+            self.logger.log_file("joint_config_table.txt", joint_config_table)
 
             randomizers = self.get_physics_randomizers(mj_model)
 
@@ -1649,7 +1655,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def _save_viewer_video(self, frames: list[np.ndarray], save_path: Path) -> None:
         fps = round(1 / self.config.ctrl_dt)
-        vid_save_path = save_path / ("render.mp4" if self.config.run_viewer_save_video else "render.gif")
+        vid_save_path = save_path / ("render.mp4" if self.config.viewer_save_video else "render.gif")
 
         match vid_save_path.suffix.lower():
             case ".mp4":
@@ -1854,8 +1860,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Loads the Mujoco model and logs some information about it.
             mj_model: PhysicsModel = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
-            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
-            self.logger.log_file("mujoco_info.yaml", mujoco_info)
+            metadata = self.get_mujoco_model_metadata(mj_model)
+            joint_config_table = log_joint_config(mj_model, metadata)
+            self.logger.log_file("joint_config_table.txt", joint_config_table)
 
             mjx_model = self.get_mjx_model(mj_model)
             randomizations = self.get_physics_randomizers(mjx_model)
