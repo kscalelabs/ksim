@@ -45,16 +45,16 @@ python -m examples.walking num_envs=8 batch_size=4
 To visualize the behavior of a policy:
 
 ```
-python -m examples.walking run_model_viewer=True
+python -m examples.walking run_mode=view
 ```
 
 This will launch a rendering window and run the policy in real time. To run for a fixed amount of time:
 
 ```
-python -m examples.walking run_model_viewer=True run_viewer_num_seconds=10
+python -m examples.walking run_mode=view viewer_num_seconds=10
 ```
 
-Use `run_model_viewer_argmax_action=True` to visualize the deterministic policy.
+Use `viewer_argmax_action=True` to visualize the deterministic policy.
 
 ---
 
