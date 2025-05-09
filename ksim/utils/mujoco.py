@@ -296,6 +296,7 @@ def log_joint_config(
         "Joint\nLimit\nMax",
         "Ctrl\nMin",
         "Ctrl\nMax",
+        "Force\nLimited",
         "Force\nMin",
         "Force\nMax",
         "Joint\nIdx",
@@ -304,7 +305,8 @@ def log_joint_config(
 
     joint_data = []
     for joint_idx, joint_name in enumerate(joint_names):
-        if joint_name == "floating_base":
+        # Skip floating base and/or root joint as they are not actuated.
+        if joint_name in {"floating_base", "root"}:
             continue
 
         dof_id = model.jnt_dofadr[joint_idx]
@@ -319,17 +321,14 @@ def log_joint_config(
             raise ValueError(f"Joint {joint_name} not found in metadata")
         joint_meta = metadata[joint_name]
 
-        if actuator_nn_id < 0:
-            raise ValueError(f"Actuator {actuator_name} has invalid index {actuator_nn_id}")
-        if actuator_nn_id != joint_meta.nn_id:
-            raise ValueError(f"Actuator index mismatch: {actuator_nn_id} != {joint_meta.nn_id}")
-        if joint_meta.soft_torque_limit is None:
-            raise ValueError(f"Joint {joint_name} has no soft torque limit")
-
-        stl_float = float(joint_meta.soft_torque_limit)
-        frcrange_float = float(model.jnt_actfrcrange[joint_idx][1])
-        if stl_float > frcrange_float:
-            raise ValueError(f"Soft torque limit {stl_float} > max {frcrange_float} for {joint_name}")
+        if joint_meta.soft_torque_limit is not None:
+            stl_float = float(joint_meta.soft_torque_limit)
+            if model.jnt_actfrclimited[joint_idx]:
+                frcrange_float = float(model.jnt_actfrcrange[joint_idx][1])
+                if stl_float > frcrange_float:
+                    raise ValueError(f"Soft torque limit {stl_float} > max {frcrange_float} for {joint_name}")
+        else:
+            logger.warning("Joint %s has no soft torque limit", joint_name)
 
         joint_data.append(
             {
@@ -339,7 +338,9 @@ def log_joint_config(
                 "Type": joint_meta.actuator_type,
                 "Kp": joint_meta.kp,
                 "Kd": joint_meta.kd,
-                "Soft\nTorque\nLimit": joint_meta.soft_torque_limit,
+                "Soft\nTorque\nLimit": (
+                    joint_meta.soft_torque_limit if joint_meta.soft_torque_limit is not None else "None"
+                ),
                 "Dmp": model.dof_damping[dof_id],
                 "Arm": model.dof_armature[dof_id],
                 "Fric": model.dof_frictionloss[dof_id],
@@ -347,6 +348,7 @@ def log_joint_config(
                 "Joint\nLimit\nMax": f"{joint_limits[joint_name][1]:.3f}",
                 "Ctrl\nMin": model.actuator_ctrlrange[actuator_nn_id][0],
                 "Ctrl\nMax": model.actuator_ctrlrange[actuator_nn_id][1],
+                "Force\nLimited": model.jnt_actfrclimited[joint_idx],
                 "Force\nMin": model.jnt_actfrcrange[joint_idx][0],
                 "Force\nMax": model.jnt_actfrcrange[joint_idx][1],
                 "Joint\nIdx": joint_idx,
