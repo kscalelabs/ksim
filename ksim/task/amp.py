@@ -11,7 +11,7 @@ import itertools
 import logging
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, replace as dataclass_replace
+from dataclasses import dataclass, replace
 from typing import Generic, Iterable, TypeVar
 
 import attrs
@@ -265,7 +265,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             physics_model=physics_model,
             model_arrs=model_arrs,
         )
-        shared_state = dataclass_replace(
+        shared_state = replace(
             shared_state,
             aux_values=xax.FrozenDict(
                 shared_state.aux_values.unfreeze()
@@ -303,7 +303,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         # Adds the discriminator output to the auxiliary outputs.
         aux_outputs = trajectory.aux_outputs.unfreeze() if trajectory.aux_outputs else {}
         aux_outputs[DISCRIMINATOR_OUTPUT_KEY] = discriminator_logits
-        trajectory = dataclass_replace(trajectory, aux_outputs=xax.FrozenDict(aux_outputs))
+        trajectory = replace(trajectory, aux_outputs=xax.FrozenDict(aux_outputs))
 
         return trajectory
 
@@ -409,9 +409,9 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         )
 
         # Updates the carry with the new model and optimizer states.
-        carry = dataclass_replace(
+        carry = replace(
             carry,
-            shared_state=dataclass_replace(
+            shared_state=replace(
                 carry.shared_state,
                 model_arrs=xax.tuple_insert(carry.shared_state.model_arrs, 1, new_model_arr),
             ),

@@ -23,7 +23,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
-from dataclasses import dataclass, replace as dataclass_replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Thread
 from typing import Any, Callable, Collection, Generic, TypeVar
@@ -973,7 +973,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Gets the variables for the next step.
-        next_env_state = dataclass_replace(
+        next_env_state = replace(
             env_states,
             commands=next_commands,
             physics_state=next_physics_state,
@@ -1354,7 +1354,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         shared_state: RolloutSharedState,
     ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
         # Applies randomizations to the model.
-        shared_state = dataclass_replace(
+        shared_state = replace(
             shared_state,
             physics_model=shared_state.physics_model.tree_replace(env_state.randomization_dict),
         )
@@ -1396,7 +1396,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         )
 
         # Updates the reward carry in the environment state.
-        env_state = dataclass_replace(
+        env_state = replace(
             env_state,
             reward_carry=reward.carry,
             rng=rng,
@@ -1454,9 +1454,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Update the environment states *after* doing the model update -
             # the model needs to be updated using the same environment states
             # that were used to generate the trajectory.
-            carry_i = dataclass_replace(
+            carry_i = replace(
                 carry_i,
-                env_states=dataclass_replace(
+                env_states=replace(
                     env_state,
                     curriculum_state=curriculum_state,
                 ),

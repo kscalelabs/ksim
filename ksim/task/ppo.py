@@ -8,7 +8,7 @@ __all__ = [
 ]
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, replace as dataclass_replace
+from dataclasses import dataclass, replace
 from typing import Generic, Mapping, TypeVar
 
 import chex
@@ -18,12 +18,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.task.rl import (
-    RLConfig,
-    RLLoopCarry,
-    RLLoopConstants,
-    RLTask,
-)
+from ksim.task.rl import RLConfig, RLLoopCarry, RLLoopConstants, RLTask
 from ksim.types import LoggedTrajectory, RewardState, Trajectory
 
 
@@ -560,9 +555,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         # Updates the carry with the new model and optimizer states.
-        carry = dataclass_replace(
+        carry = replace(
             carry,
-            shared_state=dataclass_replace(
+            shared_state=replace(
                 carry.shared_state,
                 model_arrs=xax.tuple_insert(carry.shared_state.model_arrs, 0, new_model_arr),
             ),
@@ -616,13 +611,13 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 trajectories=trajectory_batch,
                 rewards=reward_batch,
                 constants=constants,
-                carry=dataclass_replace(carry, env_states=env_states_batch),
+                carry=replace(carry, env_states=env_states_batch),
                 on_policy_variables=on_policy_variables_batch,
                 rng=batch_rng,
             )
 
             # Update the carry's shared states.
-            carry = dataclass_replace(
+            carry = replace(
                 carry,
                 opt_state=next_carry.opt_state,
                 shared_state=next_carry.shared_state,
@@ -680,9 +675,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 policy_model, trajectories, carry.env_states.model_carry, off_policy_rngs
             )
 
-            carry = dataclass_replace(
+            carry = replace(
                 carry,
-                env_states=dataclass_replace(
+                env_states=replace(
                     carry.env_states,
                     model_carry=next_model_carrys,
                 ),
