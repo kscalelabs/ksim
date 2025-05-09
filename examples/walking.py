@@ -541,7 +541,7 @@ if __name__ == "__main__":
     # To run training, use the following command:
     #   python -m examples.walking
     # To visualize the environment, use the following command:
-    #   python -m examples.walking run_model_viewer=True
+    #   python -m examples.walking run_mode=view
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
