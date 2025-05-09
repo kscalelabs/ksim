@@ -159,12 +159,6 @@ class MixtureOfGaussians(distrax.MixtureSameFamily):
             components_distribution=distrax.Normal(means_nm, stds_nm),
         )
 
-    def mode2(self) -> Array:
-        top_mixture_n = self.mixture_distribution.mode()
-        means_nm = self.components_distribution.loc
-        top_mean_n = jnp.take_along_axis(means_nm, top_mixture_n[..., None], axis=-1)[..., 0]
-        return top_mean_n
-
     def mode(self) -> Array:
         # The approximation of the mode of a mixture of Gaussians is the mean of the component
         # with the highest mixture probability.
