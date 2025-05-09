@@ -165,19 +165,19 @@ class MixtureOfGaussians(distrax.MixtureSameFamily):
         top_mixture_n = self.mixture_distribution.mode()
         means_nm = self.components_distribution.loc
 
-        num_components = self.mixture_distribution.num_categories
-
-        one_hot_selection = jax.nn.one_hot(
+        num_components_m = self.mixture_distribution.num_categories
+        one_hot_selection_nm = jax.nn.one_hot(
             top_mixture_n,
-            num_classes=num_components,
+            num_classes=num_components_m,
             dtype=means_nm.dtype,
         )
-
         num_event_dims_of_components = len(self.components_distribution.event_shape)
-        reshape_target = list(one_hot_selection.shape) + [1] * num_event_dims_of_components
-        one_hot_reshaped = jnp.reshape(one_hot_selection, reshape_target)
-        weighted_means = means_nm * one_hot_reshaped
+
+        # Reshape the one-hot selection to match the shape of the means
+        reshape_target_nm = list(one_hot_selection_nm.shape) + [1] * num_event_dims_of_components
+        one_hot_reshaped_nm = jnp.reshape(one_hot_selection_nm, reshape_target_nm)
+        weighted_means_nm = means_nm * one_hot_reshaped_nm
         component_axis = len(self.mixture_distribution.batch_shape)
-        top_mean_n = jnp.sum(weighted_means, axis=component_axis)
+        top_mean_n = jnp.sum(weighted_means_nm, axis=component_axis)
 
         return top_mean_n
