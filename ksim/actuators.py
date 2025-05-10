@@ -103,6 +103,8 @@ class MITPositionActuators(Actuators):
         ctrl_clip_list = [jnp.inf] * len(ctrl_name_to_idx)
 
         self.freejoint_first = freejoint_first
+        if metadata.joint_name_to_metadata is None:
+            raise ValueError("Joint metadata is required for MITPositionActuators")
         joint_name_to_metadata = metadata.joint_name_to_metadata
 
         for joint_name, params in joint_name_to_metadata.items():

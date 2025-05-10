@@ -254,7 +254,24 @@ def get_metadata(model: PhysicsModel) -> RobotURDFMetadataOutput:
 
 def get_actuator_metadata(model: PhysicsModel) -> dict[str, ActuatorMetadataOutput]:
     """Generate *default* actuator metadata for a MuJoCo model."""
-    metadata: dict[str, ActuatorMetadataOutput] = {"motor": ActuatorMetadataOutput(actuator_type="motor")}
+    metadata: dict[str, ActuatorMetadataOutput] = {
+        "motor": ActuatorMetadataOutput(
+            actuator_type="motor",
+            sysid="",
+            max_torque=None,
+            armature=None,
+            damping=None,
+            frictionloss=None,
+            vin=None,
+            kt=None,
+            R=None,
+            vmax=None,
+            amax=None,
+            max_velocity=None,
+            max_pwm=None,
+            error_gain=None,
+        )
+    }
     return metadata
 
 
@@ -295,6 +312,9 @@ def log_joint_config_table(
     actuator_name_to_nn_id = get_ctrl_data_idx_by_name(model)
     joint_names = get_joint_names_in_order(model)
     joint_limits = get_position_limits(model)
+
+    if metadata.joint_name_to_metadata is None:
+        raise ValueError("Joint metadata is required for the joint config table")
     joint_metadata = metadata.joint_name_to_metadata
 
     # The \n is to make the table headers take up less horizontal space.

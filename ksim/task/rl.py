@@ -732,7 +732,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_actuators(
         self,
         physics_model: PhysicsModel,
-        metadata: dict[str, JointMetadataOutput] | None = None,
+        metadata: RobotURDFMetadataOutput | None = None,
     ) -> Actuators: ...
 
     @abstractmethod
