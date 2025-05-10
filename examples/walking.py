@@ -263,12 +263,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_actuators(
         self,
         physics_model: ksim.PhysicsModel,
-        metadata: dict[str, JointMetadataOutput] | None = None,
+        metadata: RobotURDFMetadataOutput | None = None,
     ) -> ksim.Actuators:
         assert metadata is not None, "Metadata is required"
         return ksim.MITPositionActuators(
             physics_model=physics_model,
-            joint_name_to_metadata=metadata,
+            joint_name_to_metadata=metadata.joint_name_to_metadata,
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
