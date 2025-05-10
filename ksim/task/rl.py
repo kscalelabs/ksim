@@ -41,7 +41,7 @@ import tqdm
 import xax
 from dpshdl.dataset import Dataset
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from kscale.web.gen.api import JointMetadataOutput
+from kscale.web.gen.api import RobotURDFMetadataOutput, JointMetadataOutput, ActuatorMetadataOutput
 from mujoco import mjx
 from omegaconf import MISSING
 from PIL import Image, ImageDraw
@@ -79,6 +79,7 @@ from ksim.utils.mujoco import (
     get_torque_limits,
     load_model,
     log_joint_config_table,
+    get_metadata,
 )
 from ksim.viewer import DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
@@ -669,8 +670,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return mj_model
 
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        return get_joint_metadata(mj_model)
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> RobotURDFMetadataOutput:
+        # Fallback to automatically generated, minimal metadata when no
+        # handcrafted metadata.json is available.
+        return get_metadata(mj_model)
 
     def get_mjx_model(self, mj_model: mujoco.MjModel) -> mjx.Model:
         """Convert a mujoco model to an mjx model.
@@ -686,13 +689,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_engine(
         self,
         physics_model: PhysicsModel,
-        metadata: dict[str, JointMetadataOutput] | None = None,
+        metadata: RobotURDFMetadataOutput | None = None,
     ) -> PhysicsEngine:
         return get_physics_engine(
             engine_type=engine_type_from_physics_model(physics_model),
             resets=self.get_resets(physics_model),
             events=self.get_events(physics_model),
-            actuators=self.get_actuators(physics_model, metadata),
+            actuators=self.get_actuators(physics_model, metadata.joint_name_to_metadata if metadata else None),
             dt=float(physics_model.opt.timestep),
             ctrl_dt=self.config.ctrl_dt,
             max_action_latency=self.config.max_action_latency,
@@ -1535,7 +1538,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
-            log_joint_config_table(mj_model, metadata, self.logger)
+            log_joint_config_table(mj_model, metadata.joint_name_to_metadata, self.logger)
 
             randomizers = self.get_physics_randomizers(mj_model)
 
@@ -1709,7 +1712,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             raise ValueError("No models found")
 
         metadata = self.get_mujoco_model_metadata(mj_model)
-        metadata_str = json.dumps({k: v.model_dump() for k, v in metadata.items()}, indent=2, sort_keys=True)
+        # Serialize metadata for logging
+        metadata_str = json.dumps(metadata.model_dump(), indent=2, sort_keys=True)
         self.logger.log_file("mujoco_metadata.json", metadata_str)
         engine = self.get_engine(physics_model, metadata)
         observations = self.get_observations(physics_model)
@@ -2001,7 +2005,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model: PhysicsModel = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
-            log_joint_config_table(mj_model, metadata, self.logger)
+            log_joint_config_table(mj_model, metadata.joint_name_to_metadata, self.logger)
 
             constants, carry, state = self.initialize_rl_training(mj_model, rng)
 

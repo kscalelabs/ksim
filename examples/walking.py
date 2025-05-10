@@ -1,9 +1,11 @@
 """Defines simple task for training a walking policy for the default humanoid."""
 
+import asyncio
+import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Any, Generic, Self, TypeVar
 
 import distrax
 import equinox as eqx
@@ -13,7 +15,8 @@ import mujoco
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from kscale.web.gen.api import JointMetadataOutput
+from kscale.web.gen.api import JointMetadataOutput, RobotURDFMetadataOutput
+from ksim.utils.mujoco import get_actuator_metadata
 
 import ksim
 
@@ -248,8 +251,14 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         return mujoco.MjModel.from_xml_path(mjcf_path)
 
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, ksim.JointMetadataOutput]:
-        return ksim.get_joint_metadata(mj_model, kp=100.0, kd=5.0, armature=1e-4, friction=1e-6)
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> RobotURDFMetadataOutput:
+        return RobotURDFMetadataOutput(
+            joint_name_to_metadata=ksim.get_joint_metadata(
+                mj_model, kp=100.0, kd=5.0, armature=1e-4, friction=1e-6
+            ),
+            actuator_type_to_metadata=get_actuator_metadata(mj_model),
+            control_frequency=None,
+        )
 
     def get_actuators(
         self,

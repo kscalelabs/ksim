@@ -44,7 +44,7 @@ import mujoco
 import numpy as np
 import xax
 from jaxtyping import Array
-from kscale.web.gen.api import JointMetadataOutput
+from kscale.web.gen.api import RobotURDFMetadataOutput, JointMetadataOutput, ActuatorMetadataOutput
 from mujoco import mjx
 from tabulate import tabulate
 
@@ -243,6 +243,22 @@ def get_torque_limits(model: PhysicsModel) -> dict[str, tuple[float, float]]:
     return ranges
 
 
+def get_metadata(model: PhysicsModel) -> RobotURDFMetadataOutput:
+    """Return default metadata for a MuJoCo model."""
+
+    return RobotURDFMetadataOutput(
+        joint_name_to_metadata=get_joint_metadata(model),
+        actuator_type_to_metadata=get_actuator_metadata(model),
+        control_frequency=None,
+    )
+
+
+def get_actuator_metadata(model: PhysicsModel) -> dict[str, ActuatorMetadataOutput]:
+    """Generate *default* actuator metadata for a MuJoCo model."""
+    metadata: dict[str, ActuatorMetadataOutput] = {"motor": ActuatorMetadataOutput(actuator_type="motor")}
+    return metadata
+
+
 def get_joint_metadata(
     model: PhysicsModel,
     kp: float | None = None,
@@ -273,7 +289,7 @@ def get_joint_metadata(
 
 def log_joint_config_table(
     model: PhysicsModel,
-    metadata: dict[str, JointMetadataOutput],
+    joint_metadata: dict[str, JointMetadataOutput],
     xax_logger: xax.Logger,
 ) -> None:
     """Log configuration of joints and actuators in a table."""
@@ -318,9 +334,9 @@ def log_joint_config_table(
             raise ValueError(f"Actuator {actuator_name} not found in model")
         actuator_nn_id = actuator_name_to_nn_id[actuator_name]
 
-        if joint_name not in metadata:
+        if joint_name not in joint_metadata:
             raise ValueError(f"Joint {joint_name} not found in metadata")
-        joint_meta = metadata[joint_name]
+        joint_meta = joint_metadata[joint_name]
 
         if joint_meta.soft_torque_limit is not None:
             stl_float = float(joint_meta.soft_torque_limit)
