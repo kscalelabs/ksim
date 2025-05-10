@@ -288,13 +288,14 @@ def get_joint_metadata(
 
 def log_joint_config_table(
     model: PhysicsModel,
-    joint_metadata: dict[str, JointMetadataOutput],
+    metadata: RobotURDFMetadataOutput,
     xax_logger: xax.Logger,
 ) -> None:
     """Log configuration of joints and actuators in a table."""
     actuator_name_to_nn_id = get_ctrl_data_idx_by_name(model)
     joint_names = get_joint_names_in_order(model)
     joint_limits = get_position_limits(model)
+    joint_metadata = metadata.joint_name_to_metadata
 
     # The \n is to make the table headers take up less horizontal space.
     headers = [

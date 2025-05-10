@@ -670,8 +670,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return mj_model
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> RobotURDFMetadataOutput:
-        # Fallback to automatically generated, minimal metadata when no
-        # handcrafted metadata.json is available.
         return get_metadata(mj_model)
 
     def get_mjx_model(self, mj_model: mujoco.MjModel) -> mjx.Model:
@@ -1537,7 +1535,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
-            log_joint_config_table(mj_model, metadata.joint_name_to_metadata, self.logger)
+            log_joint_config_table(mj_model, metadata, self.logger)
 
             randomizers = self.get_physics_randomizers(mj_model)
 
@@ -1711,7 +1709,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             raise ValueError("No models found")
 
         metadata = self.get_mujoco_model_metadata(mj_model)
-        # Serialize metadata for logging
         metadata_str = json.dumps(metadata.model_dump(), indent=2, sort_keys=True)
         self.logger.log_file("mujoco_metadata.json", metadata_str)
         engine = self.get_engine(physics_model, metadata)
@@ -2004,7 +2001,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model: PhysicsModel = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
-            log_joint_config_table(mj_model, metadata.joint_name_to_metadata, self.logger)
+            log_joint_config_table(mj_model, metadata, self.logger)
 
             constants, carry, state = self.initialize_rl_training(mj_model, rng)
 
