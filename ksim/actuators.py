@@ -16,7 +16,7 @@ from typing import Literal
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from kscale.web.gen.api import JointMetadataOutput, RobotURDFMetadataOutput
+from kscale.web.gen.api import RobotURDFMetadataOutput
 
 from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name

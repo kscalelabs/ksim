@@ -1,12 +1,10 @@
 # mypy: disable-error-code="override"
 """Example walking task using Adversarial Motion Priors."""
 
-import asyncio
-import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Generic, Self, TypeVar
+from typing import Callable, Generic, TypeVar
 
 import distrax
 import equinox as eqx
@@ -17,11 +15,10 @@ import numpy as np
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
-
-from kscale.web.gen.api import JointMetadataOutput, RobotURDFMetadataOutput
-from ksim.utils.mujoco import get_actuator_metadata
+from kscale.web.gen.api import RobotURDFMetadataOutput
 
 import ksim
+from ksim.utils.mujoco import get_actuator_metadata
 
 NUM_JOINTS = 21
 
@@ -407,9 +404,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> RobotURDFMetadataOutput:
         return RobotURDFMetadataOutput(
-            joint_name_to_metadata=ksim.get_joint_metadata(
-                mj_model, kp=1.0, kd=0.1, armature=1e-2, friction=1e-6
-            ),
+            joint_name_to_metadata=ksim.get_joint_metadata(mj_model, kp=1.0, kd=0.1, armature=1e-2, friction=1e-6),
             actuator_type_to_metadata=get_actuator_metadata(mj_model),
             control_frequency=None,
         )

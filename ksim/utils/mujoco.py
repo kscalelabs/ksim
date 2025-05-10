@@ -44,7 +44,7 @@ import mujoco
 import numpy as np
 import xax
 from jaxtyping import Array
-from kscale.web.gen.api import RobotURDFMetadataOutput, JointMetadataOutput, ActuatorMetadataOutput
+from kscale.web.gen.api import ActuatorMetadataOutput, JointMetadataOutput, RobotURDFMetadataOutput
 from mujoco import mjx
 from tabulate import tabulate
 
@@ -245,7 +245,6 @@ def get_torque_limits(model: PhysicsModel) -> dict[str, tuple[float, float]]:
 
 def get_metadata(model: PhysicsModel) -> RobotURDFMetadataOutput:
     """Return default metadata for a MuJoCo model."""
-
     return RobotURDFMetadataOutput(
         joint_name_to_metadata=get_joint_metadata(model),
         actuator_type_to_metadata=get_actuator_metadata(model),

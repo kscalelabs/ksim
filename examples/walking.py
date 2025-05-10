@@ -1,11 +1,9 @@
 """Defines simple task for training a walking policy for the default humanoid."""
 
-import asyncio
-import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generic, Self, TypeVar
+from typing import Generic, TypeVar
 
 import distrax
 import equinox as eqx
@@ -15,10 +13,10 @@ import mujoco
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from kscale.web.gen.api import JointMetadataOutput, RobotURDFMetadataOutput
-from ksim.utils.mujoco import get_actuator_metadata
+from kscale.web.gen.api import RobotURDFMetadataOutput
 
 import ksim
+from ksim.utils.mujoco import get_actuator_metadata
 
 NUM_JOINTS = 21
 
@@ -253,9 +251,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> RobotURDFMetadataOutput:
         return RobotURDFMetadataOutput(
-            joint_name_to_metadata=ksim.get_joint_metadata(
-                mj_model, kp=100.0, kd=5.0, armature=1e-4, friction=1e-6
-            ),
+            joint_name_to_metadata=ksim.get_joint_metadata(mj_model, kp=100.0, kd=5.0, armature=1e-4, friction=1e-6),
             actuator_type_to_metadata=get_actuator_metadata(mj_model),
             control_frequency=None,
         )

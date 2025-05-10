@@ -41,7 +41,7 @@ import tqdm
 import xax
 from dpshdl.dataset import Dataset
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from kscale.web.gen.api import RobotURDFMetadataOutput, JointMetadataOutput, ActuatorMetadataOutput
+from kscale.web.gen.api import JointMetadataOutput, RobotURDFMetadataOutput
 from mujoco import mjx
 from omegaconf import MISSING
 from PIL import Image, ImageDraw
@@ -73,13 +73,12 @@ from ksim.types import (
     Trajectory,
 )
 from ksim.utils.mujoco import (
-    get_joint_metadata,
     get_joint_names_in_order,
+    get_metadata,
     get_position_limits,
     get_torque_limits,
     load_model,
     log_joint_config_table,
-    get_metadata,
 )
 from ksim.viewer import DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
