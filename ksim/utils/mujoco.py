@@ -29,7 +29,7 @@ __all__ = [
     "get_site_pose_by_name",
     "remove_mujoco_joints_except",
     "add_new_mujoco_body",
-    "get_joint_config_table",
+    "log_joint_config_table",
     "get_heading",
 ]
 
@@ -271,10 +271,11 @@ def get_joint_metadata(
     return metadata
 
 
-def get_joint_config_table(
+def log_joint_config_table(
     model: PhysicsModel,
     metadata: dict[str, JointMetadataOutput],
-) -> str:
+    xax_logger: xax.Logger,
+) -> None:
     """Log configuration of joints and actuators in a table."""
     actuator_name_to_nn_id = get_ctrl_data_idx_by_name(model)
     joint_names = get_joint_names_in_order(model)
@@ -359,7 +360,8 @@ def get_joint_config_table(
     joint_data.sort(key=lambda x: (x["NN\nID"], x["Joint Name"]))
     table_data = [[joint[header] for header in headers] for joint in joint_data]
     table = tabulate(table_data, headers=headers, tablefmt="grid", numalign="right", stralign="left")
-    return table
+    logger.info("Joint Configuration:\n%s", table)
+    xax_logger.log_file("joint_config_table.txt", table)
 
 
 def update_model_field(model: mujoco.MjModel | mjx.Model, name: str, new_value: Array) -> mujoco.MjModel | mjx.Model:

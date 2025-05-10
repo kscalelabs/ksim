@@ -73,12 +73,12 @@ from ksim.types import (
     Trajectory,
 )
 from ksim.utils.mujoco import (
-    get_joint_config_table,
     get_joint_metadata,
     get_joint_names_in_order,
     get_position_limits,
     get_torque_limits,
     load_model,
+    log_joint_config_table,
 )
 from ksim.viewer import DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
@@ -1535,9 +1535,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
-            joint_config_table = get_joint_config_table(mj_model, metadata)
-            logger.info("Joint Configuration:\n%s", joint_config_table)
-            self.logger.log_file("joint_config_table.txt", joint_config_table)
+            log_joint_config_table(mj_model, metadata, self.logger)
 
             randomizers = self.get_physics_randomizers(mj_model)
 
@@ -1862,9 +1860,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model: PhysicsModel = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
-            joint_config_table = get_joint_config_table(mj_model, metadata)
-            logger.info("Joint Configuration:\n%s", joint_config_table)
-            self.logger.log_file("joint_config_table.txt", joint_config_table)
+            log_joint_config_table(mj_model, metadata, self.logger)
 
             mjx_model = self.get_mjx_model(mj_model)
             randomizations = self.get_physics_randomizers(mjx_model)
@@ -2005,9 +2001,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model: PhysicsModel = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
-            joint_config_table = get_joint_config_table(mj_model, metadata)
-            logger.info("Joint Configuration:\n%s", joint_config_table)
-            self.logger.log_file("joint_config_table.txt", joint_config_table)
+            log_joint_config_table(mj_model, metadata, self.logger)
 
             constants, carry, state = self.initialize_rl_training(mj_model, rng)
 
