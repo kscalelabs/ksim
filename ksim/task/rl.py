@@ -43,7 +43,7 @@ from dpshdl.dataset import Dataset
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import JointMetadataOutput
 from mujoco import mjx
-from omegaconf import MISSING, DictConfig, OmegaConf
+from omegaconf import MISSING
 from PIL import Image, ImageDraw
 
 from ksim.actuators import Actuators
@@ -73,12 +73,12 @@ from ksim.types import (
     Trajectory,
 )
 from ksim.utils.mujoco import (
+    get_joint_config_table,
     get_joint_metadata,
     get_joint_names_in_order,
     get_position_limits,
     get_torque_limits,
     load_model,
-    log_joint_config,
 )
 from ksim.viewer import DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
@@ -1535,7 +1535,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
-            joint_config_table = log_joint_config(mj_model, metadata)
+            joint_config_table = get_joint_config_table(mj_model, metadata)
+            logger.info("Joint Configuration:\n%s", joint_config_table)
             self.logger.log_file("joint_config_table.txt", joint_config_table)
 
             randomizers = self.get_physics_randomizers(mj_model)
@@ -1861,7 +1862,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model: PhysicsModel = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
-            joint_config_table = log_joint_config(mj_model, metadata)
+            joint_config_table = get_joint_config_table(mj_model, metadata)
+            logger.info("Joint Configuration:\n%s", joint_config_table)
             self.logger.log_file("joint_config_table.txt", joint_config_table)
 
             mjx_model = self.get_mjx_model(mj_model)
@@ -2002,8 +2004,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Loads the Mujoco model and logs some information about it.
             mj_model: PhysicsModel = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
-            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
-            self.logger.log_file("mujoco_info.yaml", mujoco_info)
+            metadata = self.get_mujoco_model_metadata(mj_model)
+            joint_config_table = get_joint_config_table(mj_model, metadata)
+            logger.info("Joint Configuration:\n%s", joint_config_table)
+            self.logger.log_file("joint_config_table.txt", joint_config_table)
 
             constants, carry, state = self.initialize_rl_training(mj_model, rng)
 

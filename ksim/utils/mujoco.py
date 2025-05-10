@@ -29,7 +29,7 @@ __all__ = [
     "get_site_pose_by_name",
     "remove_mujoco_joints_except",
     "add_new_mujoco_body",
-    "log_joint_config",
+    "get_joint_config_table",
     "get_heading",
 ]
 
@@ -271,7 +271,7 @@ def get_joint_metadata(
     return metadata
 
 
-def log_joint_config(
+def get_joint_config_table(
     model: PhysicsModel,
     metadata: dict[str, JointMetadataOutput],
 ) -> str:
@@ -359,7 +359,6 @@ def log_joint_config(
     joint_data.sort(key=lambda x: (x["NN\nID"], x["Joint Name"]))
     table_data = [[joint[header] for header in headers] for joint in joint_data]
     table = tabulate(table_data, headers=headers, tablefmt="grid", numalign="right", stralign="left")
-    logger.info("Joint Configuration:\n%s", table)
     return table
 
 
