@@ -16,7 +16,7 @@ from typing import Literal
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from kscale.web.gen.api import JointMetadataOutput
+from kscale.web.gen.api import RobotURDFMetadataOutput
 
 from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
@@ -89,7 +89,7 @@ class MITPositionActuators(Actuators):
     def __init__(
         self,
         physics_model: PhysicsModel,
-        joint_name_to_metadata: dict[str, JointMetadataOutput],
+        metadata: RobotURDFMetadataOutput,
         action_noise: float = 0.0,
         action_noise_type: NoiseType = "none",
         torque_noise: float = 0.0,
@@ -103,6 +103,9 @@ class MITPositionActuators(Actuators):
         ctrl_clip_list = [jnp.inf] * len(ctrl_name_to_idx)
 
         self.freejoint_first = freejoint_first
+        if metadata.joint_name_to_metadata is None:
+            raise ValueError("Joint metadata is required for MITPositionActuators")
+        joint_name_to_metadata = metadata.joint_name_to_metadata
 
         for joint_name, params in joint_name_to_metadata.items():
             actuator_name = self.get_actuator_name(joint_name)
@@ -173,7 +176,7 @@ class MITPositionVelocityActuators(MITPositionActuators):
     def __init__(
         self,
         physics_model: PhysicsModel,
-        joint_name_to_metadata: dict[str, JointMetadataOutput],
+        metadata: RobotURDFMetadataOutput,
         pos_action_noise: float = 0.0,
         pos_action_noise_type: NoiseType = "none",
         vel_action_noise: float = 0.0,
@@ -184,7 +187,7 @@ class MITPositionVelocityActuators(MITPositionActuators):
     ) -> None:
         super().__init__(
             physics_model=physics_model,
-            joint_name_to_metadata=joint_name_to_metadata,
+            metadata=metadata,
             action_noise=pos_action_noise,
             action_noise_type=pos_action_noise_type,
             torque_noise=torque_noise,
