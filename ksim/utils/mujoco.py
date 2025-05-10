@@ -44,7 +44,7 @@ import mujoco
 import numpy as np
 import xax
 from jaxtyping import Array
-from kscale.web.gen.api import JointMetadataOutput
+from kscale.web.gen.api import ActuatorMetadataOutput, JointMetadataOutput, RobotURDFMetadataOutput
 from mujoco import mjx
 from tabulate import tabulate
 
@@ -243,6 +243,38 @@ def get_torque_limits(model: PhysicsModel) -> dict[str, tuple[float, float]]:
     return ranges
 
 
+def get_metadata(model: PhysicsModel) -> RobotURDFMetadataOutput:
+    """Return default metadata for a MuJoCo model."""
+    return RobotURDFMetadataOutput(
+        joint_name_to_metadata=get_joint_metadata(model),
+        actuator_type_to_metadata=get_actuator_metadata(model),
+        control_frequency=None,
+    )
+
+
+def get_actuator_metadata(model: PhysicsModel) -> dict[str, ActuatorMetadataOutput]:
+    """Generate *default* actuator metadata for a MuJoCo model."""
+    metadata: dict[str, ActuatorMetadataOutput] = {
+        "motor": ActuatorMetadataOutput(
+            actuator_type="motor",
+            sysid="",
+            max_torque=None,
+            armature=None,
+            damping=None,
+            frictionloss=None,
+            vin=None,
+            kt=None,
+            R=None,
+            vmax=None,
+            amax=None,
+            max_velocity=None,
+            max_pwm=None,
+            error_gain=None,
+        )
+    }
+    return metadata
+
+
 def get_joint_metadata(
     model: PhysicsModel,
     kp: float | None = None,
@@ -273,13 +305,17 @@ def get_joint_metadata(
 
 def log_joint_config_table(
     model: PhysicsModel,
-    metadata: dict[str, JointMetadataOutput],
+    metadata: RobotURDFMetadataOutput,
     xax_logger: xax.Logger,
 ) -> None:
     """Log configuration of joints and actuators in a table."""
     actuator_name_to_nn_id = get_ctrl_data_idx_by_name(model)
     joint_names = get_joint_names_in_order(model)
     joint_limits = get_position_limits(model)
+
+    if metadata.joint_name_to_metadata is None:
+        raise ValueError("Joint metadata is required for the joint config table")
+    joint_metadata = metadata.joint_name_to_metadata
 
     # The \n is to make the table headers take up less horizontal space.
     headers = [
@@ -318,9 +354,9 @@ def log_joint_config_table(
             raise ValueError(f"Actuator {actuator_name} not found in model")
         actuator_nn_id = actuator_name_to_nn_id[actuator_name]
 
-        if joint_name not in metadata:
+        if joint_name not in joint_metadata:
             raise ValueError(f"Joint {joint_name} not found in metadata")
-        joint_meta = metadata[joint_name]
+        joint_meta = joint_metadata[joint_name]
 
         if joint_meta.soft_torque_limit is not None:
             stl_float = float(joint_meta.soft_torque_limit)

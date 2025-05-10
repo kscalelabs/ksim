@@ -15,8 +15,10 @@ import numpy as np
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
+from kscale.web.gen.api import RobotURDFMetadataOutput
 
 import ksim
+from ksim.utils.mujoco import get_actuator_metadata
 
 NUM_JOINTS = 21
 
@@ -400,18 +402,22 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         return mujoco.MjModel.from_xml_path(mjcf_path)
 
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, ksim.JointMetadataOutput]:
-        return ksim.get_joint_metadata(mj_model, kp=1.0, kd=0.1, armature=1e-2, friction=1e-6)
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> RobotURDFMetadataOutput:
+        return RobotURDFMetadataOutput(
+            joint_name_to_metadata=ksim.get_joint_metadata(mj_model, kp=1.0, kd=0.1, armature=1e-2, friction=1e-6),
+            actuator_type_to_metadata=get_actuator_metadata(mj_model),
+            control_frequency=None,
+        )
 
     def get_actuators(
         self,
         physics_model: ksim.PhysicsModel,
-        metadata: dict[str, ksim.JointMetadataOutput] | None = None,
+        metadata: RobotURDFMetadataOutput | None = None,
     ) -> ksim.Actuators:
         assert metadata is not None, "Metadata is required"
         return ksim.MITPositionActuators(
             physics_model=physics_model,
-            joint_name_to_metadata=metadata,
+            metadata=metadata,
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
