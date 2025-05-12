@@ -19,9 +19,8 @@ __all__ = [
     "JointVelocityPenalty",
     "JointAccelerationPenalty",
     "JointJerkPenalty",
-    "ActionInBoundsReward",
     "AvoidLimitsPenalty",
-    "ActionNearPositionPenalty",
+    "CtrlPenalty",
     "JointDeviationPenalty",
     "FlatBodyReward",
     "PositionTrackingReward",
@@ -362,7 +361,7 @@ class JointJerkPenalty(Reward):
         return penalty
 
 
-def joint_limits_validator(inst: "ActionInBoundsReward", attr: attrs.Attribute, value: xax.HashableArray) -> None:
+def joint_limits_validator(inst: "AvoidLimitsPenalty", attr: attrs.Attribute, value: xax.HashableArray) -> None:
     arr = value.array
     if arr.ndim != 2 or arr.shape[1] != 2:
         raise ValueError(f"Joint range must have shape (n_joints, 2), got {arr.shape}")
@@ -373,20 +372,17 @@ def joint_limits_validator(inst: "ActionInBoundsReward", attr: attrs.Attribute, 
 
 
 @attrs.define(frozen=True, kw_only=True)
-class ActionInBoundsReward(Reward):
-    """Reward for the actions being within the joint limits.
-
-    Note that this penalty only makes sense if you are using a position
-    controller model, where actions correspond to positions.
-    """
+class AvoidLimitsPenalty(Reward):
+    """Reward for keeping the joint positions away from the joint limits."""
 
     joint_limits: xax.HashableArray = attrs.field(validator=joint_limits_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        action = trajectory.action
+        joint_pos = trajectory.qpos[..., 7:]
         joint_limits = self.joint_limits.array
-        in_bounds = (action > joint_limits[..., 0]) & (action < joint_limits[..., 1])
-        return in_bounds.all(axis=-1).astype(trajectory.qpos.dtype)
+        penalty = -jnp.clip(joint_pos - joint_limits[..., 0], None, 0.0)
+        penalty += jnp.clip(joint_pos - joint_limits[..., 1], 0.0, None)
+        return penalty.mean(axis=-1)
 
     @classmethod
     def create(
@@ -413,37 +409,14 @@ class ActionInBoundsReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class AvoidLimitsPenalty(ActionInBoundsReward):
-    """Penalty for being too close to the joint limits."""
+class CtrlPenalty(Reward):
+    """Penalty for large torque commands."""
 
-    joint_limits: xax.HashableArray = attrs.field(validator=joint_limits_validator)
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        joint_pos = trajectory.qpos[..., 7:]
-        joint_limits = self.joint_limits.array
-        penalty = -jnp.clip(joint_pos - joint_limits[..., 0], None, 0.0)
-        penalty += jnp.clip(joint_pos - joint_limits[..., 1], 0.0, None)
-        return jnp.sum(penalty, axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class ActionNearPositionPenalty(Reward):
-    """Penalizes the action for being too far from the target position.
-
-    Note that this penalty only makes sense if you are using a position
-    controller model, where actions correspond to positions.
-    """
-
-    joint_threshold: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
-    backoff_scale: float = attrs.field(default=1.0)
     norm: xax.NormType = attrs.field(default="l2")
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        current_position = trajectory.qpos[..., 7:]
-        action = trajectory.action
-        diff = xax.get_norm(current_position - action, self.norm)
-        out_of_bounds = (diff - self.joint_threshold).clip(min=self.joint_threshold)
-        return (out_of_bounds * self.backoff_scale).astype(trajectory.qpos.dtype).mean(axis=-1)
+        ctrl = trajectory.ctrl
+        return xax.get_norm(ctrl, self.norm).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
