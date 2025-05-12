@@ -53,7 +53,7 @@ from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
 
-MonotonicFn = Literal["exp", "inv"]
+MonotonicFn = Literal["exp", "inv", "sigmoid"]
 
 
 def norm_to_reward(value: Array, temp: float, monotonic_fn: MonotonicFn) -> Array:
@@ -90,6 +90,11 @@ def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) 
             raise RuntimeError(f"Penalty function {inst.reward_name} has a positive scale {value}")
     else:
         logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", inst.reward_name, value)
+
+
+def index_to_dims(index: CartesianIndex | tuple[CartesianIndex, ...]) -> tuple[int, ...]:
+    indices = index if isinstance(index, tuple) else (index,)
+    return tuple(cartesian_index_to_dim(index) for index in indices)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -138,7 +143,6 @@ class StatefulReward(Reward):
         contact with the ground. This function simply returns the initial reward
         carry, which is `None` by default.
         """
-        return None
 
     @abstractmethod
     def get_reward_stateful(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
@@ -193,8 +197,7 @@ class LinearVelocityReward(Reward):
     in_robot_frame: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        indices = self.index if isinstance(self.index, tuple) else (self.index,)
-        dims = tuple(cartesian_index_to_dim(index) for index in indices)
+        dims = index_to_dims(self.index)
         linvel = trajectory.qvel[..., :3]
         if self.in_robot_frame:
             # Same as reading from a velocimeter attached to base.
@@ -227,8 +230,7 @@ class AngularVelocityReward(Reward):
     in_robot_frame: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        indices = self.index if isinstance(self.index, tuple) else (self.index,)
-        dims = tuple(cartesian_index_to_dim(index) for index in indices)
+        dims = index_to_dims(self.index)
         angvel = trajectory.qvel[..., 3:6]
         if self.in_robot_frame:
             angvel = xax.rotate_vector_by_quat(angvel, trajectory.qpos[..., 3:7], inverse=True)
