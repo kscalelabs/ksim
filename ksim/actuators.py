@@ -6,7 +6,6 @@ __all__ = [
     "TorqueActuators",
     "PositionActuators",
     "PositionVelocityActuator",
-    "VelocityActuators",
 ]
 
 import logging
