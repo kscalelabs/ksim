@@ -396,7 +396,7 @@ def log_joint_config_table(
     joint_data.sort(key=lambda x: (x["NN\nID"], x["Joint Name"]))
     table_data = [[joint[header] for header in headers] for joint in joint_data]
     table = tabulate(table_data, headers=headers, tablefmt="grid", numalign="right", stralign="left")
-    logger.info("Joint Configuration:\n%s", table)
+    logger.debug("Joint Configuration:\n%s", table)
     xax_logger.log_file("joint_config_table.txt", table)
 
 
