@@ -30,7 +30,6 @@ __all__ = [
     "remove_mujoco_joints_except",
     "add_new_mujoco_body",
     "log_joint_config_table",
-    "get_heading",
 ]
 
 import logging
@@ -612,13 +611,3 @@ def add_new_mujoco_body(
     parent_body.append(new_body)
 
     return ET.tostring(root, encoding="utf-8").decode("utf-8")
-
-
-def get_heading(quat: Array) -> Array:
-    global_x = jnp.array([1.0, 0.0, 0.0])
-    local_x = xax.rotate_vector_by_quat(global_x, quat)
-    return local_x
-
-
-def get_velocity_in_frame(quat: Array, vel: Array) -> Array:
-    return xax.rotate_vector_by_quat(vel, quat, inverse=True)
