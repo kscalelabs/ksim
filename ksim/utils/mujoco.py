@@ -44,7 +44,11 @@ import mujoco
 import numpy as np
 import xax
 from jaxtyping import Array
-from kscale.web.gen.api import ActuatorMetadataOutput, JointMetadataOutput, RobotURDFMetadataOutput
+from kscale.web.gen.api import (
+    ActuatorMetadataOutput,
+    JointMetadataOutput,
+    RobotURDFMetadataOutput,
+)
 from mujoco import mjx
 from tabulate import tabulate
 
@@ -611,8 +615,9 @@ def add_new_mujoco_body(
 
 
 def get_heading(quat: Array) -> Array:
-    heading_vector = jnp.array([1.0, 0.0, 0.0])
-    return xax.rotate_vector_by_quat(heading_vector, quat, inverse=True)
+    global_x = jnp.array([1.0, 0.0, 0.0])
+    local_x = xax.rotate_vector_by_quat(global_x, quat)
+    return local_x
 
 
 def get_velocity_in_frame(quat: Array, vel: Array) -> Array:
