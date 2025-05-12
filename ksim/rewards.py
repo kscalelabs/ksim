@@ -701,8 +701,8 @@ class JoystickPenalty(Reward):
         stand_still_penalty = (alv + aav) / 6.0
         walk_forward_penalty = xax.get_norm(linvel[..., 0] - self.forward_speed, self.norm) + (ylv + zlv + aav) / 5.0
         walk_backward_penalty = xax.get_norm(linvel[..., 0] + self.backward_speed, self.norm) + (ylv + zlv + aav) / 5.0
-        turn_left_penalty = xax.get_norm(angvel[..., 2] + self.rotation_speed, self.norm) + (alv + xlv + ylv) / 5.0
-        turn_right_penalty = xax.get_norm(angvel[..., 2] - self.rotation_speed, self.norm) + (alv + xlv + ylv) / 5.0
+        turn_left_penalty = xax.get_norm(angvel[..., 2] - self.rotation_speed, self.norm) + (alv + xlv + ylv) / 5.0
+        turn_right_penalty = xax.get_norm(angvel[..., 2] + self.rotation_speed, self.norm) + (alv + xlv + ylv) / 5.0
         strafe_left_penalty = xax.get_norm(linvel[..., 1] - self.strafe_speed, self.norm) + (xlv + zlv + aav) / 5.0
         strafe_right_penalty = xax.get_norm(linvel[..., 1] + self.strafe_speed, self.norm) + (xlv + zlv + aav) / 5.0
 
