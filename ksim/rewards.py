@@ -656,7 +656,9 @@ class JoystickPenalty(Reward):
     angular velocity.
     """
 
-    translation_speed: float = attrs.field()
+    forward_speed: float = attrs.field()
+    backward_speed: float = attrs.field()
+    strafe_speed: float = attrs.field()
     rotation_speed: float = attrs.field()
     command_name: str = attrs.field(default="joystick_command")
     heading_reward_scale: float = attrs.field(default=0.1)
@@ -697,12 +699,12 @@ class JoystickPenalty(Reward):
 
         # Computes each of the penalties.
         stand_still_penalty = alllv + allav
-        walk_forward_penalty = xax.get_norm(linvel[..., 0] - self.translation_speed, self.norm) + ylv + zlv + allav
-        walk_backward_penalty = xax.get_norm(linvel[..., 0] + self.translation_speed, self.norm) + ylv + zlv + allav
+        walk_forward_penalty = xax.get_norm(linvel[..., 0] - self.forward_speed, self.norm) + ylv + zlv + allav
+        walk_backward_penalty = xax.get_norm(linvel[..., 0] + self.backward_speed, self.norm) + ylv + zlv + allav
         turn_left_penalty = xax.get_norm(angvel[..., 2] + self.rotation_speed, self.norm) + alllv + xlv + ylv
         turn_right_penalty = xax.get_norm(angvel[..., 2] - self.rotation_speed, self.norm) + alllv + xlv + ylv
-        strafe_left_penalty = xax.get_norm(linvel[..., 1] - self.translation_speed, self.norm) + xlv + zlv + allav
-        strafe_right_penalty = xax.get_norm(linvel[..., 1] + self.translation_speed, self.norm) + xlv + zlv + allav
+        strafe_left_penalty = xax.get_norm(linvel[..., 1] - self.strafe_speed, self.norm) + xlv + zlv + allav
+        strafe_right_penalty = xax.get_norm(linvel[..., 1] + self.strafe_speed, self.norm) + xlv + zlv + allav
 
         all_penalties = jnp.stack(
             [
