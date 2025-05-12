@@ -516,9 +516,9 @@ class RLConfig(xax.Config):
         value=True,
         help="If set, disable Euler damping - this is a performance improvement",
     )
-    max_action_latency: float = xax.field(
-        value=0.0,
-        help="The maximum latency of the action.",
+    action_latency_range: tuple[float, float] = xax.field(
+        value=(0.0, 0.0),
+        help="The range of action latencies to use.",
     )
     reward_clip_min: float | None = xax.field(
         value=None,
@@ -695,7 +695,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             actuators=self.get_actuators(physics_model, metadata),
             dt=float(physics_model.opt.timestep),
             ctrl_dt=self.config.ctrl_dt,
-            max_action_latency=self.config.max_action_latency,
+            action_latency_range=self.config.action_latency_range,
         )
 
     @abstractmethod

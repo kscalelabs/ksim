@@ -41,6 +41,7 @@ class PhysicsEngine(eqx.Module, ABC):
     resets: Collection[Reset]
     events: Collection[Event]
     phys_steps_per_ctrl_steps: int
+    min_action_latency_step: float
     max_action_latency_step: float
 
     def __init__(
@@ -49,6 +50,7 @@ class PhysicsEngine(eqx.Module, ABC):
         events: Collection[Event],
         actuators: Actuators,
         phys_steps_per_ctrl_steps: int,
+        min_action_latency_step: float,
         max_action_latency_step: float,
     ) -> None:
         """Initialize the MJX engine with resetting and actuators."""
@@ -56,6 +58,7 @@ class PhysicsEngine(eqx.Module, ABC):
         self.resets = resets
         self.events = events
         self.phys_steps_per_ctrl_steps = phys_steps_per_ctrl_steps
+        self.min_action_latency_step = min_action_latency_step
         self.max_action_latency_step = max_action_latency_step
 
     @abstractmethod
@@ -110,8 +113,8 @@ class MjxEngine(PhysicsEngine):
             actuator_state=actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
-                minval=0,
-                maxval=self.max_action_latency_step * curriculum_level.astype(float),
+                minval=self.min_action_latency_step,
+                maxval=self.max_action_latency_step,
             )
             .round()
             .astype(int),
@@ -293,14 +296,18 @@ def get_physics_engine(
     *,
     dt: float,
     ctrl_dt: float,
-    max_action_latency: float,
+    action_latency_range: tuple[float, float]
 ) -> PhysicsEngine:
+    min_action_latency, max_action_latency = action_latency_range
+    if min_action_latency > max_action_latency:
+        raise ValueError("`min_action_latency` must be less than or equal to `max_action_latency`")
     if max_action_latency > ctrl_dt:
         logger.warning("`max_action_latency=%f` is greater than `ctrl_dt=%f`", max_action_latency, ctrl_dt)
     if (remainder := (ctrl_dt - round(ctrl_dt / dt) * dt)) > 1e-6:
         logger.warning("`ctrl_dt=%f` is not a multiple of `dt=%f` (remainder=%f)", ctrl_dt, dt, remainder)
 
     # Converts to steps.
+    min_action_latency_step = min(min_action_latency / dt, 0)
     max_action_latency_step = max(max_action_latency / dt, 0)
     phys_steps_per_ctrl_steps = round(ctrl_dt / dt)
 
@@ -310,6 +317,7 @@ def get_physics_engine(
                 resets=resets,
                 events=events,
                 actuators=actuators,
+                min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
             )
@@ -319,6 +327,7 @@ def get_physics_engine(
                 resets=resets,
                 events=events,
                 actuators=actuators,
+                min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
             )
