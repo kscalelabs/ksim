@@ -360,7 +360,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=1.0,
             ),
             ksim.JoystickPenalty(
-                translation_speed=self.config.target_linear_velocity,
+                forward_speed=self.config.target_linear_velocity,
+                backward_speed=self.config.target_linear_velocity / 2.0,
+                strafe_speed=self.config.target_linear_velocity / 2.0,
                 rotation_speed=self.config.target_angular_velocity,
                 scale=-1.0,
             ),
