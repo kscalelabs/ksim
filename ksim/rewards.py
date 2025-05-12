@@ -40,7 +40,6 @@ from typing import Collection, Literal, Self
 
 import attrs
 import chex
-import jax
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
