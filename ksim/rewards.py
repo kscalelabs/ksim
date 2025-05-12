@@ -638,8 +638,8 @@ class JoystickPenalty(Reward):
 
         # Transforms linear and angular velocities into the target frame.
         qvel = trajectory.qvel[..., :6]
-        linvel = xax.rotate_vector_by_quat(target_quat, qvel[..., :3], inverse=True)
-        angvel = xax.rotate_vector_by_quat(target_quat, qvel[..., 3:], inverse=True)
+        linvel = xax.rotate_vector_by_quat(qvel[..., :3], target_quat, inverse=True)
+        angvel = xax.rotate_vector_by_quat(qvel[..., 3:], target_quat, inverse=True)
 
         # Encourages these values to be zero.
         xlv = xax.get_norm(linvel[..., 0], self.norm) * self.lin_vel_penalty_scale
