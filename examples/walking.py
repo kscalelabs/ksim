@@ -9,12 +9,13 @@ import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import ksim
 import mujoco
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import RobotURDFMetadataOutput
+
+import ksim
 from ksim.utils.mujoco import get_actuator_metadata
 
 NUM_JOINTS = 21
