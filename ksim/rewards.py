@@ -604,6 +604,37 @@ class LinkJerkPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class SymmetryReward(Reward):
+    """Rewards joints for having symmetrical positions."""
+
+    joint_indices: tuple[int, ...] = attrs.field()
+    joint_targets: tuple[float, ...] = attrs.field()
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        qpos = trajectory.qpos[..., jnp.array(self.joint_indices) + 7] - jnp.array(self.joint_targets)
+        qpos_mean = qpos.mean(axis=-2, keepdims=True)
+        return (qpos * -qpos_mean).sum(axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        joint_names: tuple[str, ...],
+        joint_targets: tuple[float, ...],
+        scale: float = 1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
+        joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
+        return cls(
+            joint_indices=joint_indices,
+            joint_targets=joint_targets,
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
 class JoystickPenalty(Reward):
     """Reward for tracking the joystick commands.
 
