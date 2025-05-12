@@ -590,10 +590,10 @@ class UprightReward(Reward):
     """Reward for staying upright."""
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        gravity = jnp.array([0.0, 0.0, 1.0])
+        local_z = jnp.array([0.0, 0.0, 1.0])
         quat = trajectory.qpos[..., 3:7]
-        proj_grav = xax.rotate_vector_by_quat(gravity, quat, inverse=True)
-        return proj_grav[..., 2] - proj_grav[..., :2].sum(axis=-1)
+        global_z = xax.rotate_vector_by_quat(local_z, quat)
+        return global_z[..., 2] - jnp.linalg.norm(global_z[..., :2], axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
