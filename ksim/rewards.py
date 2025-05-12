@@ -426,20 +426,6 @@ class AvoidLimitsPenalty(ActionInBoundsReward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class ObservationMeanPenalty(Reward):
-    """Penalty for the mean of an observation."""
-
-    observation_name: str = attrs.field()
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        reward = trajectory.obs[self.observation_name].mean(axis=-1)
-        return reward
-
-    def get_name(self) -> str:
-        return f"{super().get_name()}_{self.observation_name}"
-
-
-@attrs.define(frozen=True, kw_only=True)
 class ActionNearPositionPenalty(Reward):
     """Penalizes the action for being too far from the target position.
 
