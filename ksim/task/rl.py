@@ -921,6 +921,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             qvel=jnp.array(next_physics_state.data.qvel),
             xpos=jnp.array(next_physics_state.data.xpos),
             xquat=jnp.array(next_physics_state.data.xquat),
+            ctrl=jnp.array(next_physics_state.data.ctrl),
             obs=observations,
             command=env_states.commands,
             event_state=next_physics_state.event_states,
