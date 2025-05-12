@@ -12,10 +12,11 @@ __all__ = [
     "AngularVelocityReward",
     "AngularVelocityPenalty",
     "XYAngularVelocityPenalty",
-    "JointVelocityPenalty",
     "BaseHeightReward",
     "BaseHeightRangeReward",
-    "ActionSmoothnessPenalty",
+    "ActionAccelerationPenalty",
+    "ActionJerkPenalty",
+    "JointVelocityPenalty",
     "JointAccelerationPenalty",
     "JointJerkPenalty",
     "ActionInBoundsReward",
@@ -262,21 +263,6 @@ class XYAngularVelocityPenalty(AngularVelocityReward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointVelocityPenalty(Reward):
-    """Penalty for how fast the joint angular velocities are changing."""
-
-    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    freejoint_first: bool = attrs.field(default=True)
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        if self.freejoint_first:
-            joint_vel = trajectory.qvel[..., 6:]
-            return xax.get_norm(joint_vel, self.norm).mean(axis=-1)
-        else:
-            return xax.get_norm(trajectory.qvel, self.norm).mean(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
 class BaseHeightReward(Reward):
     """Penalty for deviating from the base height target."""
 
@@ -308,7 +294,7 @@ class BaseHeightRangeReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class ActionSmoothnessPenalty(Reward):
+class ActionAccelerationPenalty(Reward):
     """Penalty for large changes between consecutive actions."""
 
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
@@ -319,6 +305,32 @@ class ActionSmoothnessPenalty(Reward):
         actions_vel = actions_zp[..., 1:, :] - actions_zp[..., :-1, :]
         actions_acc = actions_vel[..., 1:, :] - actions_vel[..., :-1, :]
         return xax.get_norm(actions_acc, self.norm).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ActionJerkPenalty(Reward):
+    """Penalty for large changes between consecutive actions."""
+
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        actions = trajectory.action
+        actions_zp = jnp.pad(actions, ((3, 0), (0, 0)), mode="edge")
+        actions_vel = actions_zp[..., 1:, :] - actions_zp[..., :-1, :]
+        actions_acc = actions_vel[..., 1:, :] - actions_vel[..., :-1, :]
+        actions_jerk = actions_acc[..., 1:, :] - actions_acc[..., :-1, :]
+        return xax.get_norm(actions_jerk, self.norm).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointVelocityPenalty(Reward):
+    """Penalty for how fast the joint angular velocities are changing."""
+
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        joint_vel = trajectory.qvel[..., 6:]
+        return xax.get_norm(joint_vel, self.norm).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
