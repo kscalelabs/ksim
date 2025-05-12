@@ -141,10 +141,10 @@ class MjxEngine(PhysicsEngine):
         prev_action = physics_state.most_recent_action
 
         def move_physics(
-            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree],
-            rng: PRNGKeyArray,
-        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree], None]:
-            data, step_num, event_states, actuator_state = carry
+            _: int,
+            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree, PRNGKeyArray],
+        ) -> tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree, PRNGKeyArray]:
+            data, step_num, event_states, actuator_state, rng = carry
 
             # Randomly apply the action with some latency.
             ctrl = jax.lax.select(step_num >= physics_state.action_latency, action, prev_action)
@@ -176,13 +176,14 @@ class MjxEngine(PhysicsEngine):
 
             data_with_ctrl = data.replace(ctrl=torques)
             new_data = self._physics_step(physics_model, data_with_ctrl)
-            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state), None
+            return new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state, rng
 
         # Runs the model for N steps.
-        (mjx_data, *_, event_info, actuator_state_final), _ = jax.lax.scan(
+        mjx_data, *_, event_info, actuator_state_final, _ = jax.lax.fori_loop(
+            0,
+            phys_steps_per_ctrl_steps,
             move_physics,
-            (mjx_data, jnp.array(0.0), physics_state.event_states, physics_state.actuator_state),
-            jax.random.split(rng, phys_steps_per_ctrl_steps),
+            (mjx_data, jnp.array(0.0), physics_state.event_states, physics_state.actuator_state, rng),
         )
 
         return PhysicsState(
@@ -221,8 +222,8 @@ class MujocoEngine(PhysicsEngine):
             actuator_state=actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
-                minval=0,
-                maxval=self.max_action_latency_step * curriculum_level.astype(float),
+                minval=self.min_action_latency_step,
+                maxval=self.max_action_latency_step,
             )
             .round()
             .astype(int),
@@ -307,7 +308,7 @@ def get_physics_engine(
         logger.warning("`ctrl_dt=%f` is not a multiple of `dt=%f` (remainder=%f)", ctrl_dt, dt, remainder)
 
     # Converts to steps.
-    min_action_latency_step = min(min_action_latency / dt, 0)
+    min_action_latency_step = max(min_action_latency / dt, 0)
     max_action_latency_step = max(max_action_latency / dt, 0)
     phys_steps_per_ctrl_steps = round(ctrl_dt / dt)
 
