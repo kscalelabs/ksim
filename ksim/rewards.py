@@ -656,12 +656,14 @@ class JoystickPenalty(Reward):
     angular velocity.
     """
 
-    translation_speed: float = attrs.field()
+    forward_speed: float = attrs.field()
+    backward_speed: float = attrs.field()
+    strafe_speed: float = attrs.field()
     rotation_speed: float = attrs.field()
     command_name: str = attrs.field(default="joystick_command")
-    heading_reward_scale: float = attrs.field(default=0.1)
-    lin_vel_penalty_scale: float = attrs.field(default=0.1)
-    ang_vel_penalty_scale: float = attrs.field(default=0.1)
+    heading_reward_scale: float = attrs.field(default=0.2)
+    lin_vel_penalty_scale: float = attrs.field(default=0.5)
+    ang_vel_penalty_scale: float = attrs.field(default=0.5)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -678,7 +680,7 @@ class JoystickPenalty(Reward):
         x_vec = jnp.array([1.0, 0.0, 0.0])
         x_vec = xax.rotate_vector_by_quat(x_vec, trajectory.qpos[..., 3:7])
         x_vec = xax.rotate_vector_by_quat(x_vec, target_quat, inverse=True)
-        heading_reward = x_vec[..., 0] - jnp.linalg.norm(x_vec[..., 1:], axis=-1)
+        heading_reward = (x_vec[..., 0] - jnp.linalg.norm(x_vec[..., 1:], axis=-1)) * self.heading_reward_scale
 
         # Transforms linear and angular velocities into the target frame.
         qvel = trajectory.qvel[..., :6]
@@ -692,17 +694,17 @@ class JoystickPenalty(Reward):
         xav = xax.get_norm(angvel[..., 0], self.norm) * self.ang_vel_penalty_scale
         yav = xax.get_norm(angvel[..., 1], self.norm) * self.ang_vel_penalty_scale
         zav = xax.get_norm(angvel[..., 2], self.norm) * self.ang_vel_penalty_scale
-        alllv = xlv + ylv + zlv
-        allav = xav + yav + zav
+        alv = xlv + ylv + zlv
+        aav = xav + yav + zav
 
         # Computes each of the penalties.
-        stand_still_penalty = alllv + allav
-        walk_forward_penalty = xax.get_norm(linvel[..., 0] - self.translation_speed, self.norm) + ylv + zlv + allav
-        walk_backward_penalty = xax.get_norm(linvel[..., 0] + self.translation_speed, self.norm) + ylv + zlv + allav
-        turn_left_penalty = xax.get_norm(angvel[..., 2] + self.rotation_speed, self.norm) + alllv + xlv + ylv
-        turn_right_penalty = xax.get_norm(angvel[..., 2] - self.rotation_speed, self.norm) + alllv + xlv + ylv
-        strafe_left_penalty = xax.get_norm(linvel[..., 1] - self.translation_speed, self.norm) + xlv + zlv + allav
-        strafe_right_penalty = xax.get_norm(linvel[..., 1] + self.translation_speed, self.norm) + xlv + zlv + allav
+        stand_still_penalty = (alv + aav) / 6.0
+        walk_forward_penalty = xax.get_norm(linvel[..., 0] - self.forward_speed, self.norm) + (ylv + zlv + aav) / 5.0
+        walk_backward_penalty = xax.get_norm(linvel[..., 0] + self.backward_speed, self.norm) + (ylv + zlv + aav) / 5.0
+        turn_left_penalty = xax.get_norm(angvel[..., 2] - self.rotation_speed, self.norm) + (alv + xlv + ylv) / 5.0
+        turn_right_penalty = xax.get_norm(angvel[..., 2] + self.rotation_speed, self.norm) + (alv + xlv + ylv) / 5.0
+        strafe_left_penalty = xax.get_norm(linvel[..., 1] - self.strafe_speed, self.norm) + (xlv + zlv + aav) / 5.0
+        strafe_right_penalty = xax.get_norm(linvel[..., 1] + self.strafe_speed, self.norm) + (xlv + zlv + aav) / 5.0
 
         all_penalties = jnp.stack(
             [
