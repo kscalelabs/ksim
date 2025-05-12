@@ -16,8 +16,7 @@ __all__ = [
     "BaseHeightReward",
     "BaseHeightRangeReward",
     "ActionSmoothnessPenalty",
-    "ActuatorForcePenalty",
-    "ActuatorRelativeForcePenalty",
+    "JointAccelerationPenalty",
     "BaseJerkZPenalty",
     "ActuatorJerkPenalty",
     "ActionInBoundsReward",
@@ -314,80 +313,30 @@ class BaseHeightRangeReward(Reward):
 class ActionSmoothnessPenalty(Reward):
     """Penalty for large changes between consecutive actions."""
 
+    ctrl_dt: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        current_actions = trajectory.action
-
-        # Shift actions to get previous actions (pad with first action)
-        previous_actions = jnp.concatenate(
-            [
-                current_actions[..., :1, :],  # First action
-                current_actions[..., :-1, :],  # Previous actions for remaining timesteps
-            ],
-            axis=-2,
-        )
-
-        action_deltas = current_actions - previous_actions
-        reward = xax.get_norm(action_deltas, self.norm).mean(axis=-1)
-        return reward
+        actions = trajectory.action
+        actions_zp = jnp.pad(actions, ((2, 0), (0, 0)), mode="edge")
+        actions_vel = (actions_zp[..., 1:, :] - actions_zp[..., :-1, :]) / self.ctrl_dt
+        actions_acc = (actions_vel[..., 1:, :] - actions_vel[..., :-1, :]) / self.ctrl_dt
+        return xax.get_norm(actions_acc, self.norm).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class ActuatorForcePenalty(Reward):
-    """Penalty for high actuator forces."""
+class JointAccelerationPenalty(Reward):
+    """Penalty for high joint accelerations."""
 
+    ctrl_dt: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    observation_name: str = attrs.field(default="actuator_force_observation")
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        if self.observation_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
-        reward = xax.get_norm(trajectory.obs[self.observation_name], self.norm).mean(axis=-1)
-        return reward
-
-
-@attrs.define(frozen=True, kw_only=True)
-class ActuatorRelativeForcePenalty(Reward):
-    """Same as ActuatorForcePenalty but scaled by the maximum force on each actuator."""
-
-    magnitudes: tuple[float, ...] = attrs.field()
-    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    observation_name: str = attrs.field(default="actuator_force_observation")
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        if self.observation_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.observation_name} not found; add it as an observation in your task.")
-        reward = xax.get_norm(trajectory.obs[self.observation_name], self.norm)
-        reward = reward / jnp.array(self.magnitudes)
-        return reward.mean(axis=-1)
-
-    @classmethod
-    def create(
-        cls,
-        model: PhysicsModel,
-        norm: xax.NormType = "l1",
-        observation_name: str = "actuator_force_observation",
-        scale: float = -1.0,
-        scale_by_curriculum: bool = False,
-    ) -> Self:
-        act_force_limited = jnp.array(model.jnt_actfrclimited)[..., 1:]
-        if not act_force_limited.all().item():
-            raise ValueError("Actuator force limits must be set for all actuators.")
-
-        act_force = jnp.array(model.jnt_actfrcrange)[..., 1:, :]
-        act_force_min, act_force_max = act_force[..., 0], act_force[..., 1]
-        act_force_magnitude = (act_force_max - act_force_min) // 2
-        chex.assert_shape(act_force_magnitude, (None,))
-        magnitudes = tuple(act_force_magnitude.tolist())
-
-        return cls(
-            observation_name=observation_name,
-            magnitudes=magnitudes,
-            norm=norm,
-            scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
-        )
+        qpos = trajectory.qpos[..., 7:]
+        qpos_zp = jnp.pad(qpos, ((2, 0), (0, 0)), mode="edge")
+        qvel = (qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :]) / self.ctrl_dt
+        qacc = (qvel[..., 1:, :] - qvel[..., :-1, :]) / self.ctrl_dt
+        return xax.get_norm(qacc, self.norm).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -809,7 +758,7 @@ class LinkAccelerationPenalty(Reward):
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         pos = trajectory.xpos
-        pos_zp = jnp.pad(pos, ((2, 0), (0, 0), (0, 0)), mode="constant", constant_values=0.0)
+        pos_zp = jnp.pad(pos, ((2, 0), (0, 0), (0, 0)), mode="edge")
         vel = jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1) / self.ctrl_dt
         acc = vel[..., 1:, :] - vel[..., :-1, :] / self.ctrl_dt
         return xax.get_norm(acc, self.norm).mean(axis=-1)
