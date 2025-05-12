@@ -678,7 +678,7 @@ class JoystickPenalty(Reward):
         x_vec = jnp.array([1.0, 0.0, 0.0])
         x_vec = xax.rotate_vector_by_quat(x_vec, trajectory.qpos[..., 3:7])
         x_vec = xax.rotate_vector_by_quat(x_vec, target_quat, inverse=True)
-        heading_reward = x_vec[..., 0] - jnp.linalg.norm(x_vec[..., 1:], axis=-1)
+        heading_reward = (x_vec[..., 0] - jnp.linalg.norm(x_vec[..., 1:], axis=-1)) * self.heading_reward_scale
 
         # Transforms linear and angular velocities into the target frame.
         qvel = trajectory.qvel[..., :6]
