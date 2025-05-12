@@ -6,7 +6,6 @@ __all__ = [
     "TorqueActuators",
     "PositionActuators",
     "PositionVelocityActuator",
-    "VelocityActuators",
 ]
 
 import logging
@@ -217,68 +216,3 @@ class PositionVelocityActuator(PositionActuators):
         """Get the default action (zeros) with the correct shape."""
         qpos_dim = len(physics_data.qpos[7:])
         return jnp.zeros(qpos_dim * 2)
-
-
-class VelocityActuators(PositionActuators):
-    """MIT Cheetah-style actuator controller operating on velocity inputs."""
-
-    def __init__(
-        self,
-        physics_model: PhysicsModel,
-        metadata: RobotURDFMetadataOutput,
-        ctrl_dt: float,
-        action_noise: float = 0.0,
-        action_noise_type: NoiseType = "none",
-        torque_noise: float = 0.0,
-        torque_noise_type: NoiseType = "none",
-    ) -> None:
-        super().__init__(
-            physics_model=physics_model,
-            metadata=metadata,
-            action_noise=action_noise,
-            action_noise_type=action_noise_type,
-            torque_noise=torque_noise,
-            torque_noise_type=torque_noise_type,
-        )
-
-        self.ctrl_dt = ctrl_dt
-
-    def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
-        vel = action * self.ctrl_dt
-        current_pos = physics_data.qpos[7:]
-        return super().get_ctrl(vel + current_pos, physics_data, rng)
-
-
-class AccelerationActuators(VelocityActuators, StatefulActuators):
-    def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(len(physics_data.qpos[7:]))  # Initial joint velocities.
-
-    def get_stateful_ctrl(
-        self,
-        action: Array,
-        physics_data: PhysicsData,
-        actuator_state: PyTree,
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, Array]:
-        vel = actuator_state
-        vel = vel + action * self.ctrl_dt
-        ctrl = super(VelocityActuators, self).get_ctrl(vel, physics_data, rng)
-        return ctrl, actuator_state
-
-
-class JerkActuators(AccelerationActuators):
-    def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros((2, len(physics_data.qvel[6:])))  # Initial joint velocities and accelerations.
-
-    def get_stateful_ctrl(
-        self,
-        action: Array,
-        physics_data: PhysicsData,
-        actuator_state: PyTree,
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, Array]:
-        vel, acc = actuator_state[..., 0, :], actuator_state[..., 1, :]
-        acc = acc + action * self.ctrl_dt
-        vel = vel + acc * self.ctrl_dt
-        ctrl = super(VelocityActuators, self).get_ctrl(vel, physics_data, rng)
-        return ctrl, jnp.stack([vel, acc], axis=-2)
