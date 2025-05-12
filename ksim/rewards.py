@@ -17,20 +17,18 @@ __all__ = [
     "BaseHeightRangeReward",
     "ActionSmoothnessPenalty",
     "JointAccelerationPenalty",
-    "BaseJerkZPenalty",
-    "ActuatorJerkPenalty",
+    "JointJerkPenalty",
     "ActionInBoundsReward",
     "AvoidLimitsPenalty",
     "ActionNearPositionPenalty",
     "JointDeviationPenalty",
-    "FeetLinearVelocityTrackingPenalty",
     "FlatBodyReward",
-    "FeetNoContactReward",
     "PositionTrackingReward",
     "UprightReward",
     "HeadingTrackingReward",
     "HeadingVelocityReward",
     "LinkAccelerationPenalty",
+    "LinkJerkPenalty",
     "JoystickPenalty",
 ]
 
@@ -313,14 +311,13 @@ class BaseHeightRangeReward(Reward):
 class ActionSmoothnessPenalty(Reward):
     """Penalty for large changes between consecutive actions."""
 
-    ctrl_dt: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         actions = trajectory.action
         actions_zp = jnp.pad(actions, ((2, 0), (0, 0)), mode="edge")
-        actions_vel = (actions_zp[..., 1:, :] - actions_zp[..., :-1, :]) / self.ctrl_dt
-        actions_acc = (actions_vel[..., 1:, :] - actions_vel[..., :-1, :]) / self.ctrl_dt
+        actions_vel = actions_zp[..., 1:, :] - actions_zp[..., :-1, :]
+        actions_acc = actions_vel[..., 1:, :] - actions_vel[..., :-1, :]
         return xax.get_norm(actions_acc, self.norm).mean(axis=-1)
 
 
@@ -328,61 +325,29 @@ class ActionSmoothnessPenalty(Reward):
 class JointAccelerationPenalty(Reward):
     """Penalty for high joint accelerations."""
 
-    ctrl_dt: float = attrs.field()
-    norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos = trajectory.qpos[..., 7:]
         qpos_zp = jnp.pad(qpos, ((2, 0), (0, 0)), mode="edge")
-        qvel = (qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :]) / self.ctrl_dt
-        qacc = (qvel[..., 1:, :] - qvel[..., :-1, :]) / self.ctrl_dt
+        qvel = qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :]
+        qacc = qvel[..., 1:, :] - qvel[..., :-1, :]
         return xax.get_norm(qacc, self.norm).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class BaseJerkZPenalty(Reward):
-    """Penalty for high base jerk."""
-
-    ctrl_dt: float = attrs.field()
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-    acc_obs_name: str = attrs.field(default="base_linear_acceleration_observation")
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        if self.acc_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.acc_obs_name} not found; add it as an observation in your task.")
-        acc = trajectory.obs[self.acc_obs_name]
-        acc = acc[None]
-        acc_z = acc[..., 2]
-        # First value will always be 0, because the acceleration is not changing.
-        prev_acc_z = jnp.concatenate([acc_z[..., :1], acc_z[..., :-1]], axis=-1)
-        # We multiply by ctrl_dt instead of dividing because we want the scale
-        # for the penalty to be roughly the same magnitude as a velocity
-        # penalty.
-        jerk_z = (acc_z - prev_acc_z) * self.ctrl_dt
-        reward = xax.get_norm(jerk_z, self.norm).squeeze(0)
-        return reward
-
-
-@attrs.define(frozen=True, kw_only=True)
-class ActuatorJerkPenalty(Reward):
-    """Penalty for high actuator jerks."""
+class JointJerkPenalty(Reward):
+    """Penalty for high joint jerks."""
 
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-    acc_obs_name: str = attrs.field(default="actuator_acceleration_observation")
-    ctrl_dt: float = attrs.field()
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        if self.acc_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.acc_obs_name} not found; add it as an observation in your task.")
-        acc = trajectory.obs[self.acc_obs_name]
-        acc = acc[None]
-        # First value will always be 0, because the acceleration is not changing.
-        prev_acc = jnp.concatenate([acc[..., :1], acc[..., :-1]], axis=-1)
-        # We multiply by ctrl_dt here we want the scale for the penalty to be
-        # roughly the same magnitude as a velocity penalty.
-        jerk = (acc - prev_acc) * self.ctrl_dt * self.ctrl_dt
-        reward = xax.get_norm(jerk, self.norm).mean(axis=-1).squeeze(0)
-        return reward
+        qpos = trajectory.qpos[..., 7:]
+        qpos_zp = jnp.pad(qpos, ((3, 0), (0, 0)), mode="edge")
+        qvel = qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :]
+        qacc = qvel[..., 1:, :] - qvel[..., :-1, :]
+        qjerk = qacc[..., 1:, :] - qacc[..., :-1, :]
+        return xax.get_norm(qjerk, self.norm).mean(axis=-1)
 
 
 def joint_limits_validator(inst: "ActionInBoundsReward", attr: attrs.Attribute, value: xax.HashableArray) -> None:
@@ -526,54 +491,6 @@ class JointDeviationPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class FeetLinearVelocityTrackingPenalty(Reward):
-    """Explicit penalty for tracking the linear velocity of the feet.
-
-    This reward provides an explicit penalty to incentivize the robot to move
-    it's feet in the direction of the velocity command.
-
-    This penalty expects a reference linear velocity command, as well as the
-    feet velocity observations.
-    """
-
-    ctrl_dt: float = attrs.field()
-    command_name: str = attrs.field()
-    obs_name: str = attrs.field(default="feet_position_observation")
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        cmd = trajectory.command[self.command_name]
-        chex.assert_shape(cmd, (..., 2))
-        lin_vel_x_cmd = cmd[..., 0]
-        lin_vel_y_cmd = cmd[..., 1]
-
-        obs = trajectory.obs[self.obs_name]
-        chex.assert_shape(obs, (..., 2, 3))
-
-        def get_vel_from_pos(pos: Array) -> Array:
-            next_pos = jnp.concatenate([pos[..., 1:], pos[..., -1:]], axis=-1)
-            return (next_pos - pos) / self.ctrl_dt
-
-        left_vel_x = get_vel_from_pos(obs[..., 0, 0])
-        left_vel_y = get_vel_from_pos(obs[..., 0, 1])
-        right_vel_x = get_vel_from_pos(obs[..., 1, 0])
-        right_vel_y = get_vel_from_pos(obs[..., 1, 1])
-
-        # Mean of the two foot velocities should be close to the command.
-        lin_vel_x_mean = (left_vel_x + right_vel_x) / 2
-        lin_vel_y_mean = (left_vel_y + right_vel_y) / 2
-
-        lin_vel_x_penalty = xax.get_norm(lin_vel_x_mean - lin_vel_x_cmd, self.norm)
-        lin_vel_y_penalty = xax.get_norm(lin_vel_y_mean - lin_vel_y_cmd, self.norm)
-        penalty = lin_vel_x_penalty + lin_vel_y_penalty
-
-        # Don't penalize after falling over.
-        penalty = jnp.where(trajectory.done, 0.0, penalty)
-
-        return penalty
-
-
-@attrs.define(frozen=True, kw_only=True)
 class FlatBodyReward(Reward):
     """Reward for keeping the body parallel to the ground."""
 
@@ -604,39 +521,6 @@ class FlatBodyReward(Reward):
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
         )
-
-
-@attrs.define(frozen=True, kw_only=True)
-class FeetNoContactReward(Reward):
-    """Reward for keeping the feet off the ground.
-
-    This reward incentivizes the robot to keep at least one foot off the ground
-    for at least `window_size` steps at a time. If the foot touches the ground
-    again within `window_size` steps, the reward for the entire "off the ground"
-    period is reset to 0.
-    """
-
-    window_size: int = attrs.field()
-    obs_name: str = attrs.field(default="feet_contact_observation")
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        feet_contact = trajectory.obs[self.obs_name]
-        chex.assert_shape(feet_contact, (..., 2))
-
-        def count_scan_fn(carry: Array, contact: Array) -> tuple[Array, Array]:
-            carry = jnp.where(contact, 0, carry + 1)
-            return carry, carry
-
-        _, counts = jax.lax.scan(count_scan_fn, jnp.zeros_like(feet_contact[0]), feet_contact, reverse=True)
-
-        def reward_scan_fn(carry: Array, counts: Array) -> tuple[Array, Array]:
-            carry = jnp.where(counts == 0, 0, jnp.where(carry == 0, counts, carry))
-            return carry, carry
-
-        _, counts = jax.lax.scan(reward_scan_fn, counts[0], counts)
-
-        no_contact = counts >= self.window_size
-        return no_contact.any(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -751,17 +635,31 @@ class HeadingVelocityReward(Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class LinkAccelerationPenalty(Reward):
-    """Penalty for high link accelerations."""
+    """Penalty for high link accelerations in the world frame."""
 
-    ctrl_dt: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         pos = trajectory.xpos
         pos_zp = jnp.pad(pos, ((2, 0), (0, 0), (0, 0)), mode="edge")
-        vel = jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1) / self.ctrl_dt
-        acc = vel[..., 1:, :] - vel[..., :-1, :] / self.ctrl_dt
+        vel = jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1)
+        acc = vel[..., 1:, :] - vel[..., :-1, :]
         return xax.get_norm(acc, self.norm).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class LinkJerkPenalty(Reward):
+    """Penalty for high link jerks in the world frame."""
+
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        pos = trajectory.xpos
+        pos_zp = jnp.pad(pos, ((3, 0), (0, 0), (0, 0)), mode="edge")
+        vel = jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1)
+        acc = vel[..., 1:, :] - vel[..., :-1, :]
+        jerk = acc[..., 1:, :] - acc[..., :-1, :]
+        return xax.get_norm(jerk, self.norm).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
