@@ -200,9 +200,10 @@ class StartQuaternionCommand(Command):
 class JoystickCommand(Command):
     """Provides joystick-like controls for the robot.
 
-    Commands are encoded as one-hot vectors and concatenated with the
-    quaternion from when the command is sampled. This means that the total
-    command dimensionality will be 7 + 4 = 11.
+    Commands are encoded as one-hot vectors. This command should be paired with
+    the JoystickReward. The robot is expected to always start aligned with the
+    forward X direction of the world frame - for example, we reward the robot
+    for moving forward along the global X axis.
 
     Command mapping:
 
