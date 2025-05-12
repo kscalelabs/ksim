@@ -633,9 +633,8 @@ class JoystickReward(Reward):
     strafe_speed: float = attrs.field()
     rotation_speed: float = attrs.field()
     command_name: str = attrs.field(default="joystick_command")
-    lin_vel_penalty_scale: float = attrs.field(default=0.001)
-    ang_vel_penalty_scale: float = attrs.field(default=0.001)
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    lin_vel_penalty_scale: float = attrs.field(default=0.01)
+    ang_vel_penalty_scale: float = attrs.field(default=0.01)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
@@ -649,12 +648,12 @@ class JoystickReward(Reward):
         angvel = qvel[..., 3:]
 
         # Encourages these values to be zero.
-        xlv = xax.get_norm(linvel[..., 0], self.norm) * self.lin_vel_penalty_scale
-        ylv = xax.get_norm(linvel[..., 1], self.norm) * self.lin_vel_penalty_scale
-        zlv = xax.get_norm(linvel[..., 2], self.norm) * self.lin_vel_penalty_scale
-        xav = xax.get_norm(angvel[..., 0], self.norm) * self.ang_vel_penalty_scale
-        yav = xax.get_norm(angvel[..., 1], self.norm) * self.ang_vel_penalty_scale
-        zav = xax.get_norm(angvel[..., 2], self.norm) * self.ang_vel_penalty_scale
+        xlv = jnp.abs(linvel[..., 0]) * self.lin_vel_penalty_scale
+        ylv = jnp.abs(linvel[..., 1]) * self.lin_vel_penalty_scale
+        zlv = jnp.abs(linvel[..., 2]) * self.lin_vel_penalty_scale
+        xav = jnp.abs(angvel[..., 0]) * self.ang_vel_penalty_scale
+        yav = jnp.abs(angvel[..., 1]) * self.ang_vel_penalty_scale
+        zav = jnp.abs(angvel[..., 2]) * self.ang_vel_penalty_scale
         alv = xlv + ylv + zlv
         aav = xav + yav + zav
 

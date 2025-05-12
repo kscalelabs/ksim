@@ -178,7 +178,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Reward parameters.
     target_linear_velocity: float = xax.field(
-        value=1.0,
+        value=2.0,
         help="The linear velocity for the joystick command.",
     )
     target_angular_velocity: float = xax.field(
@@ -363,7 +363,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 backward_speed=self.config.target_linear_velocity / 2.0,
                 strafe_speed=self.config.target_linear_velocity / 2.0,
                 rotation_speed=self.config.target_angular_velocity,
-                scale=-1.0,
+                scale=1.0,
             ),
         ]
 
