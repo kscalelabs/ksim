@@ -293,7 +293,7 @@ class ActionAccelerationPenalty(Reward):
     def get_reward(self, trajectory: Trajectory) -> Array:
         actions = trajectory.action
         actions_zp = jnp.pad(actions, ((2, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done, ((1, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done[..., :-1], ((2, 0),), mode="edge")[..., None]
         actions_vel = jnp.where(done, 0.0, actions_zp[..., 1:, :] - actions_zp[..., :-1, :])
         actions_acc = jnp.where(done[..., 1:, :], 0.0, actions_vel[..., 1:, :] - actions_vel[..., :-1, :])
         penalty = xax.get_norm(actions_acc, self.norm).mean(axis=-1)
@@ -309,7 +309,7 @@ class ActionJerkPenalty(Reward):
     def get_reward(self, trajectory: Trajectory) -> Array:
         actions = trajectory.action
         actions_zp = jnp.pad(actions, ((3, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done[..., :-1], ((3, 0),), mode="edge")[..., None]
         actions_vel = jnp.where(done, 0.0, actions_zp[..., 1:, :] - actions_zp[..., :-1, :])
         actions_acc = jnp.where(done[..., 1:, :], 0.0, actions_vel[..., 1:, :] - actions_vel[..., :-1, :])
         actions_jerk = jnp.where(done[..., 2:, :], 0.0, actions_acc[..., 1:, :] - actions_acc[..., :-1, :])
@@ -338,7 +338,7 @@ class JointAccelerationPenalty(Reward):
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos = trajectory.qpos[..., 7:]
         qpos_zp = jnp.pad(qpos, ((2, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done, ((1, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done[..., :-1], ((2, 0),), mode="edge")[..., None]
         qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
         qacc = jnp.where(done[..., 1:, :], 0.0, qvel[..., 1:, :] - qvel[..., :-1, :])
         penalty = xax.get_norm(qacc, self.norm).mean(axis=-1)
@@ -354,7 +354,7 @@ class JointJerkPenalty(Reward):
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos = trajectory.qpos[..., 7:]
         qpos_zp = jnp.pad(qpos, ((3, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done[..., :-1], ((3, 0),), mode="edge")[..., None]
         qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
         qacc = jnp.where(done[..., 1:, :], 0.0, qvel[..., 1:, :] - qvel[..., :-1, :])
         qjerk = jnp.where(done[..., 2:, :], 0.0, qacc[..., 1:, :] - qacc[..., :-1, :])
@@ -590,9 +590,9 @@ class LinkAccelerationPenalty(Reward):
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        pos = trajectory.xpos
+        pos = trajectory.xpos[..., 1:, :]
         pos_zp = jnp.pad(pos, ((2, 0), (0, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done, ((1, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done[..., :-1], ((2, 0),), mode="edge")[..., None]
         vel = jnp.where(done, 0.0, jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1))
         acc = jnp.where(done[..., 1:, :], 0.0, vel[..., 1:, :] - vel[..., :-1, :])
         penalty = xax.get_norm(acc, self.norm).mean(axis=-1)
@@ -606,9 +606,10 @@ class LinkJerkPenalty(Reward):
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        pos = trajectory.xpos
+        breakpoint()
+        pos = trajectory.xpos[..., 1:, :]
         pos_zp = jnp.pad(pos, ((3, 0), (0, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done[..., :-1], ((3, 0),), mode="edge")[..., None]
         vel = jnp.where(done, 0.0, jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1))
         acc = jnp.where(done[..., 1:, :], 0.0, vel[..., 1:, :] - vel[..., :-1, :])
         jerk = jnp.where(done[..., 2:, :], 0.0, acc[..., 1:, :] - acc[..., :-1, :])
