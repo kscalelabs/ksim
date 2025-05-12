@@ -147,7 +147,9 @@ class HumanoidWalkingReferenceMotionTask(HumanoidWalkingTask[Config], Generic[Co
         rewards = [
             ksim.StayAliveReward(scale=1.0),
             QposReferenceMotionReward(
-                reference_qpos=self.reference_motion.qpos, ctrl_dt=self.config.ctrl_dt, scale=0.5
+                reference_qpos=self.reference_motion.qpos,
+                ctrl_dt=self.config.ctrl_dt,
+                scale=0.5,
             ),
             # ksim.NaiveForwardReward(scale=1.0),
         ]
