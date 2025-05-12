@@ -606,7 +606,6 @@ class LinkJerkPenalty(Reward):
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        breakpoint()
         pos = trajectory.xpos[..., 1:, :]
         pos_zp = jnp.pad(pos, ((3, 0), (0, 0), (0, 0)), mode="edge")
         done = jnp.pad(trajectory.done[..., :-1], ((3, 0),), mode="edge")[..., None]
