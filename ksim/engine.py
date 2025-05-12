@@ -296,7 +296,7 @@ def get_physics_engine(
     *,
     dt: float,
     ctrl_dt: float,
-    action_latency_range: tuple[float, float]
+    action_latency_range: tuple[float, float],
 ) -> PhysicsEngine:
     min_action_latency, max_action_latency = action_latency_range
     if min_action_latency > max_action_latency:
