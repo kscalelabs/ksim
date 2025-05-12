@@ -737,11 +737,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
 
-        return ksim.Action(
-            action=action_j,
-            carry=(actor_carry, critic_carry_in),
-            aux_outputs=None,
-        )
+        return ksim.Action(action=action_j, carry=(actor_carry, critic_carry_in))
 
 
 if __name__ == "__main__":

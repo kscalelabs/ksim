@@ -525,7 +525,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             commands=commands,
         )
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
-        return ksim.Action(action=action_j, carry=None, aux_outputs=None)
+        return ksim.Action(action=action_j, carry=None)
 
 
 if __name__ == "__main__":
