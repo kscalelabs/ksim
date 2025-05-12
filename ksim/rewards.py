@@ -809,8 +809,9 @@ class LinkAccelerationPenalty(Reward):
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         pos = trajectory.xpos
-        vel = (pos[..., 1:, :] - pos[..., :-1, :]) / self.ctrl_dt
-        acc = (vel[..., 1:, :] - vel[..., :-1, :]) / self.ctrl_dt
+        pos_zp = jnp.pad(pos, ((2, 0), (0, 0), (0, 0)), mode="constant", constant_values=0.0)
+        vel = jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1) / self.ctrl_dt
+        acc = vel[..., 1:, :] - vel[..., :-1, :] / self.ctrl_dt
         return xax.get_norm(acc, self.norm).mean(axis=-1)
 
 
