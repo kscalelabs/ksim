@@ -415,7 +415,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         metadata: RobotURDFMetadataOutput | None = None,
     ) -> ksim.Actuators:
         assert metadata is not None, "Metadata is required"
-        return ksim.MITPositionActuators(
+        return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
         )
