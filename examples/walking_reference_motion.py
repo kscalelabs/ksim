@@ -228,7 +228,6 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
-            max_action_latency=0.0,
             rollout_length_seconds=5.0,
             # PPO parameters
             gamma=0.97,

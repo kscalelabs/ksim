@@ -553,7 +553,6 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             iterations=3,
             ls_iterations=5,
-            max_action_latency=0.01,
             # Checkpointing parameters.
             save_every_n_seconds=60,
         ),
