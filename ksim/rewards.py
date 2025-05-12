@@ -27,7 +27,7 @@ __all__ = [
     "UprightReward",
     "LinkAccelerationPenalty",
     "LinkJerkPenalty",
-    "JoystickPenalty",
+    "JoystickReward",
 ]
 
 import functools
@@ -53,7 +53,7 @@ from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
 
-MonotonicFn = Literal["exp", "inv"]
+MonotonicFn = Literal["exp", "inv", "sigmoid"]
 
 
 def norm_to_reward(value: Array, temp: float, monotonic_fn: MonotonicFn) -> Array:
@@ -90,6 +90,11 @@ def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) 
             raise RuntimeError(f"Penalty function {inst.reward_name} has a positive scale {value}")
     else:
         logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", inst.reward_name, value)
+
+
+def index_to_dims(index: CartesianIndex | tuple[CartesianIndex, ...]) -> tuple[int, ...]:
+    indices = index if isinstance(index, tuple) else (index,)
+    return tuple(cartesian_index_to_dim(index) for index in indices)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -138,7 +143,6 @@ class StatefulReward(Reward):
         contact with the ground. This function simply returns the initial reward
         carry, which is `None` by default.
         """
-        return None
 
     @abstractmethod
     def get_reward_stateful(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
@@ -193,8 +197,7 @@ class LinearVelocityReward(Reward):
     in_robot_frame: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        indices = self.index if isinstance(self.index, tuple) else (self.index,)
-        dims = tuple(cartesian_index_to_dim(index) for index in indices)
+        dims = index_to_dims(self.index)
         linvel = trajectory.qvel[..., :3]
         if self.in_robot_frame:
             # Same as reading from a velocimeter attached to base.
@@ -227,8 +230,7 @@ class AngularVelocityReward(Reward):
     in_robot_frame: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        indices = self.index if isinstance(self.index, tuple) else (self.index,)
-        dims = tuple(cartesian_index_to_dim(index) for index in indices)
+        dims = index_to_dims(self.index)
         angvel = trajectory.qvel[..., 3:6]
         if self.in_robot_frame:
             angvel = xax.rotate_vector_by_quat(angvel, trajectory.qpos[..., 3:7], inverse=True)
@@ -621,12 +623,11 @@ class SymmetryReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JoystickPenalty(Reward):
+class JoystickReward(Reward):
     """Reward for tracking the joystick commands.
 
-    This creates one big penalty which encourages the robot to follow the
-    joystick command, in terms of it's orientation, linear velocity, and
-    angular velocity.
+    This reward uses global coordinates, so the robot should always start
+    facing forward in the X direction.
     """
 
     forward_speed: float = attrs.field()
@@ -634,65 +635,53 @@ class JoystickPenalty(Reward):
     strafe_speed: float = attrs.field()
     rotation_speed: float = attrs.field()
     command_name: str = attrs.field(default="joystick_command")
-    heading_reward_scale: float = attrs.field(default=0.2)
-    lin_vel_penalty_scale: float = attrs.field(default=0.5)
-    ang_vel_penalty_scale: float = attrs.field(default=0.5)
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    lin_vel_penalty_scale: float = attrs.field(default=0.01)
+    ang_vel_penalty_scale: float = attrs.field(default=0.01)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
         joystick_cmd = trajectory.command[self.command_name]
-        chex.assert_shape(joystick_cmd, (..., 11))
-
-        # Splits command into one-hot encoded command and target quaternion.
-        command_ohe = joystick_cmd[..., :7]
-        target_quat = joystick_cmd[..., 7:]
-
-        # Rewards the robot for keeping pointed at the target heading.
-        x_vec = jnp.array([1.0, 0.0, 0.0])
-        x_vec = xax.rotate_vector_by_quat(x_vec, trajectory.qpos[..., 3:7])
-        x_vec = xax.rotate_vector_by_quat(x_vec, target_quat, inverse=True)
-        heading_reward = (x_vec[..., 0] - jnp.linalg.norm(x_vec[..., 1:], axis=-1)) * self.heading_reward_scale
+        chex.assert_shape(joystick_cmd, (..., 7))
 
         # Transforms linear and angular velocities into the target frame.
         qvel = trajectory.qvel[..., :6]
-        linvel = xax.rotate_vector_by_quat(qvel[..., :3], target_quat, inverse=True)
-        angvel = xax.rotate_vector_by_quat(qvel[..., 3:], target_quat, inverse=True)
+        linvel = qvel[..., :3]
+        angvel = qvel[..., 3:]
 
         # Encourages these values to be zero.
-        xlv = xax.get_norm(linvel[..., 0], self.norm) * self.lin_vel_penalty_scale
-        ylv = xax.get_norm(linvel[..., 1], self.norm) * self.lin_vel_penalty_scale
-        zlv = xax.get_norm(linvel[..., 2], self.norm) * self.lin_vel_penalty_scale
-        xav = xax.get_norm(angvel[..., 0], self.norm) * self.ang_vel_penalty_scale
-        yav = xax.get_norm(angvel[..., 1], self.norm) * self.ang_vel_penalty_scale
-        zav = xax.get_norm(angvel[..., 2], self.norm) * self.ang_vel_penalty_scale
+        xlv = jnp.abs(linvel[..., 0]) * self.lin_vel_penalty_scale
+        ylv = jnp.abs(linvel[..., 1]) * self.lin_vel_penalty_scale
+        zlv = jnp.abs(linvel[..., 2]) * self.lin_vel_penalty_scale
+        xav = jnp.abs(angvel[..., 0]) * self.ang_vel_penalty_scale
+        yav = jnp.abs(angvel[..., 1]) * self.ang_vel_penalty_scale
+        zav = jnp.abs(angvel[..., 2]) * self.ang_vel_penalty_scale
         alv = xlv + ylv + zlv
         aav = xav + yav + zav
 
         # Computes each of the penalties.
-        stand_still_penalty = (alv + aav) / 6.0
-        walk_forward_penalty = xax.get_norm(linvel[..., 0] - self.forward_speed, self.norm) + (ylv + zlv + aav) / 5.0
-        walk_backward_penalty = xax.get_norm(linvel[..., 0] + self.backward_speed, self.norm) + (ylv + zlv + aav) / 5.0
-        turn_left_penalty = xax.get_norm(angvel[..., 2] - self.rotation_speed, self.norm) + (alv + xlv + ylv) / 5.0
-        turn_right_penalty = xax.get_norm(angvel[..., 2] + self.rotation_speed, self.norm) + (alv + xlv + ylv) / 5.0
-        strafe_left_penalty = xax.get_norm(linvel[..., 1] - self.strafe_speed, self.norm) + (xlv + zlv + aav) / 5.0
-        strafe_right_penalty = xax.get_norm(linvel[..., 1] + self.strafe_speed, self.norm) + (xlv + zlv + aav) / 5.0
+        stand_still_reward = -(alv + aav) / 6.0
+        walk_forward_reward = linvel[..., 0].clip(max=self.forward_speed) - (ylv + zlv + aav) / 5.0
+        walk_backward_reward = (-linvel[..., 0]).clip(max=self.backward_speed) - (ylv + zlv + aav) / 5.0
+        turn_left_reward = angvel[..., 2].clip(max=self.rotation_speed) - (alv + xlv + ylv) / 5.0
+        turn_right_reward = (-angvel[..., 2]).clip(max=self.rotation_speed) - (alv + xlv + ylv) / 5.0
+        strafe_left_reward = linvel[..., 1].clip(max=self.strafe_speed) - (xlv + zlv + aav) / 5.0
+        strafe_right_reward = (-linvel[..., 1]).clip(max=self.strafe_speed) - (xlv + zlv + aav) / 5.0
 
-        all_penalties = jnp.stack(
+        all_rewards = jnp.stack(
             [
-                stand_still_penalty - heading_reward,
-                walk_forward_penalty - heading_reward,
-                walk_backward_penalty - heading_reward,
-                turn_left_penalty,
-                turn_right_penalty,
-                strafe_left_penalty - heading_reward,
-                strafe_right_penalty - heading_reward,
+                stand_still_reward,
+                walk_forward_reward,
+                walk_backward_reward,
+                turn_left_reward,
+                turn_right_reward,
+                strafe_left_reward,
+                strafe_right_reward,
             ],
             axis=-1,
         )
 
-        # Weights each of the penalties by the one-hot encoded command.
-        total_penalty = jnp.einsum("...i,...i->...", command_ohe, all_penalties)
+        # Weights each of the rewards by the one-hot encoded command.
+        total_reward = jnp.einsum("...i,...i->...", joystick_cmd, all_rewards)
 
-        return total_penalty
+        return total_reward
