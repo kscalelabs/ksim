@@ -747,7 +747,8 @@ class UprightReward(Reward):
     def get_reward(self, trajectory: Trajectory) -> Array:
         gravity = jnp.array([0.0, 0.0, 1.0])
         quat = trajectory.qpos[..., 3:7]
-        return xax.rotate_vector_by_quat(gravity, quat, inverse=True)[..., 2]
+        proj_grav = xax.rotate_vector_by_quat(gravity, quat, inverse=True)
+        return proj_grav[..., 2] - proj_grav[..., :2].sum(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
