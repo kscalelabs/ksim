@@ -94,7 +94,6 @@ class MITPositionActuators(Actuators):
         action_noise_type: NoiseType = "none",
         torque_noise: float = 0.0,
         torque_noise_type: NoiseType = "none",
-        freejoint_first: bool = True,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
@@ -102,7 +101,6 @@ class MITPositionActuators(Actuators):
         kds_list = [-1.0] * len(ctrl_name_to_idx)
         ctrl_clip_list = [jnp.inf] * len(ctrl_name_to_idx)
 
-        self.freejoint_first = freejoint_first
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is required for MITPositionActuators")
         joint_name_to_metadata = metadata.joint_name_to_metadata
@@ -151,12 +149,8 @@ class MITPositionActuators(Actuators):
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
         """Get the control signal from the (position) action vector."""
         pos_rng, tor_rng = jax.random.split(rng)
-        if self.freejoint_first:
-            current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
-            current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
-        else:
-            current_pos = physics_data.qpos[:]
-            current_vel = physics_data.qvel[:]
+        current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
+        current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
         target_velocities = jnp.zeros_like(action)
         pos_delta = self.add_noise(self.action_noise, self.action_noise_type, action - current_pos, pos_rng)
         vel_delta = target_velocities - current_vel
@@ -183,7 +177,6 @@ class MITPositionVelocityActuators(MITPositionActuators):
         vel_action_noise_type: NoiseType = "none",
         torque_noise: float = 0.0,
         torque_noise_type: NoiseType = "none",
-        freejoint_first: bool = True,
     ) -> None:
         super().__init__(
             physics_model=physics_model,
@@ -192,7 +185,6 @@ class MITPositionVelocityActuators(MITPositionActuators):
             action_noise_type=pos_action_noise_type,
             torque_noise=torque_noise,
             torque_noise_type=torque_noise_type,
-            freejoint_first=freejoint_first,
         )
 
         self.vel_action_noise = vel_action_noise
@@ -202,12 +194,8 @@ class MITPositionVelocityActuators(MITPositionActuators):
         """Get the control signal from the (position and velocity) action vector."""
         pos_rng, vel_rng, tor_rng = jax.random.split(rng, 3)
 
-        if self.freejoint_first:
-            current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
-            current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
-        else:
-            current_pos = physics_data.qpos[:]
-            current_vel = physics_data.qvel[:]
+        current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
+        current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
 
         # Adds position and velocity noise.
         target_position = action[: len(current_pos)]
@@ -227,10 +215,7 @@ class MITPositionVelocityActuators(MITPositionActuators):
 
     def get_default_action(self, physics_data: PhysicsData) -> Array:
         """Get the default action (zeros) with the correct shape."""
-        if self.freejoint_first:
-            qpos_dim = len(physics_data.qpos[7:])
-        else:
-            qpos_dim = len(physics_data.qpos)
+        qpos_dim = len(physics_data.qpos[7:])
         return jnp.zeros(qpos_dim * 2)
 
 
@@ -238,8 +223,5 @@ class MITDeltaPositionActuators(MITPositionActuators):
     """Stateful MIT-mode actuator controller operating on delta position inputs."""
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
-        if self.freejoint_first:
-            current_pos = physics_data.qpos[7:]
-        else:
-            current_pos = physics_data.qpos[:]
+        current_pos = physics_data.qpos[7:]
         return super().get_ctrl(action + current_pos, physics_data, rng)

@@ -190,24 +190,14 @@ class BaseAngularVelocityObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class JointPositionObservation(Observation):
-    freejoint_first: bool = attrs.field(default=True)
-
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        if self.freejoint_first:
-            return state.physics_state.data.qpos[7:]  # (N,)
-        else:
-            return state.physics_state.data.qpos  # (N,)
+        return state.physics_state.data.qpos[7:]  # (N,)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class JointVelocityObservation(Observation):
-    freejoint_first: bool = attrs.field(default=True)
-
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        if self.freejoint_first:
-            return state.physics_state.data.qvel[6:]  # (N,)
-        else:
-            return state.physics_state.data.qvel  # (N,)
+        return state.physics_state.data.qvel[6:]  # (N,)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -369,13 +359,8 @@ class ProjectedGravityObservation(StatefulObservation):
 
 @attrs.define(frozen=True, kw_only=True)
 class ActuatorAccelerationObservation(Observation):
-    freejoint_first: bool = attrs.field(default=True)
-
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        if self.freejoint_first:
-            return state.physics_state.data.qacc[6:]
-        else:
-            return state.physics_state.data.qacc
+        return state.physics_state.data.qacc[6:]
 
 
 @attrs.define(frozen=True, kw_only=True)
