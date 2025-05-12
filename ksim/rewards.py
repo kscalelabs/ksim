@@ -633,8 +633,8 @@ class JoystickReward(Reward):
     strafe_speed: float = attrs.field()
     rotation_speed: float = attrs.field()
     command_name: str = attrs.field(default="joystick_command")
-    lin_vel_penalty_scale: float = attrs.field(default=0.1)
-    ang_vel_penalty_scale: float = attrs.field(default=0.1)
+    lin_vel_penalty_scale: float = attrs.field(default=0.001)
+    ang_vel_penalty_scale: float = attrs.field(default=0.001)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
