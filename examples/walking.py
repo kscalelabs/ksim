@@ -185,10 +185,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=math.radians(90.0),
         help="The angular velocity for the joystick command.",
     )
-    use_naive_forward_reward: bool = xax.field(
-        value=False,
-        help="Whether to use the naive forward reward.",
-    )
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
@@ -355,7 +351,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        rewards: list[ksim.Reward] = [
+        return [
             ksim.StayAliveReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
             ksim.FlatBodyReward.create(
@@ -363,23 +359,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 body_names=("foot_left", "foot_right"),
                 scale=1.0,
             ),
+            ksim.JoystickPenalty(
+                translation_speed=self.config.target_linear_velocity,
+                rotation_speed=self.config.target_angular_velocity,
+                scale=-1.0,
+            ),
         ]
-
-        if self.config.use_naive_forward_reward:
-            rewards += [
-                ksim.HeadingTrackingReward(scale=1.0),
-                ksim.HeadingVelocityReward(target_velocity=self.config.target_linear_velocity, scale=1.0),
-            ]
-        else:
-            rewards += [
-                ksim.JoystickPenalty(
-                    translation_speed=self.config.target_linear_velocity,
-                    rotation_speed=self.config.target_angular_velocity,
-                    scale=-1.0,
-                ),
-            ]
-
-        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
