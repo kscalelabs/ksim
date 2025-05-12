@@ -296,7 +296,7 @@ class ActionAccelerationPenalty(Reward):
         actions_vel = actions_zp[..., 1:, :] - actions_zp[..., :-1, :]
         actions_acc = actions_vel[..., 1:, :] - actions_vel[..., :-1, :]
         penalty = xax.get_norm(actions_acc, self.norm).mean(axis=-1)
-        penalty = jnp.where(jnp.pad(trajectory.done[..., :-1], ((1, 0)), mode="edge"), 0.0, penalty)
+        penalty = jnp.where(trajectory.done, 0.0, penalty)
         return penalty
 
 
@@ -313,7 +313,7 @@ class ActionJerkPenalty(Reward):
         actions_acc = actions_vel[..., 1:, :] - actions_vel[..., :-1, :]
         actions_jerk = actions_acc[..., 1:, :] - actions_acc[..., :-1, :]
         penalty = xax.get_norm(actions_jerk, self.norm).mean(axis=-1)
-        penalty = jnp.where(jnp.pad(trajectory.done[..., :-1], ((1, 0)), mode="edge"), 0.0, penalty)
+        penalty = jnp.where(trajectory.done, 0.0, penalty)
         return penalty
 
 
@@ -340,7 +340,7 @@ class JointAccelerationPenalty(Reward):
         qvel = qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :]
         qacc = qvel[..., 1:, :] - qvel[..., :-1, :]
         penalty = xax.get_norm(qacc, self.norm).mean(axis=-1)
-        penalty = jnp.where(jnp.pad(trajectory.done[..., :-1], ((1, 0)), mode="edge"), 0.0, penalty)
+        penalty = jnp.where(trajectory.done, 0.0, penalty)
         return penalty
 
 
@@ -357,7 +357,7 @@ class JointJerkPenalty(Reward):
         qacc = qvel[..., 1:, :] - qvel[..., :-1, :]
         qjerk = qacc[..., 1:, :] - qacc[..., :-1, :]
         penalty = xax.get_norm(qjerk, self.norm).mean(axis=-1)
-        penalty = jnp.where(jnp.pad(trajectory.done[..., :-1], ((1, 0)), mode="edge"), 0.0, penalty)
+        penalty = jnp.where(trajectory.done, 0.0, penalty)
         return penalty
 
 
@@ -594,7 +594,7 @@ class LinkAccelerationPenalty(Reward):
         vel = jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1)
         acc = vel[..., 1:, :] - vel[..., :-1, :]
         penalty = xax.get_norm(acc, self.norm).mean(axis=-1)
-        penalty = jnp.where(jnp.pad(trajectory.done[..., :-1], ((1, 0)), mode="edge"), 0.0, penalty)
+        penalty = jnp.where(trajectory.done, 0.0, penalty)
         return penalty
 
 
@@ -611,7 +611,7 @@ class LinkJerkPenalty(Reward):
         acc = vel[..., 1:, :] - vel[..., :-1, :]
         jerk = acc[..., 1:, :] - acc[..., :-1, :]
         penalty = xax.get_norm(jerk, self.norm).mean(axis=-1)
-        penalty = jnp.where(jnp.pad(trajectory.done[..., :-1], ((1, 0)), mode="edge"), 0.0, penalty)
+        penalty = jnp.where(trajectory.done, 0.0, penalty)
         return penalty
 
 
