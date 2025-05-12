@@ -219,7 +219,6 @@ class JoystickCommand(Command):
         default=(0.1, 0.5, 0.1, 0.1, 0.1, 0.05, 0.05),
         validator=sample_probs_validator,
     )
-    switch_prob: float = attrs.field(default=0.0)
 
     def initial_command(
         self,
@@ -229,7 +228,7 @@ class JoystickCommand(Command):
     ) -> Array:
         command = jax.random.choice(rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs))
         command_ohe = jax.nn.one_hot(command, num_classes=7)
-        return jnp.concatenate([command_ohe, physics_data.qpos[..., 3:7]])
+        return command_ohe
 
     def __call__(
         self,
@@ -238,10 +237,7 @@ class JoystickCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
+        return prev_command
 
 
 @attrs.define(kw_only=True)

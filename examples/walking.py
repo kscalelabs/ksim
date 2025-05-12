@@ -9,13 +9,12 @@ import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import ksim
 import mujoco
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
 from kscale.web.gen.api import RobotURDFMetadataOutput
-
-import ksim
 from ksim.utils.mujoco import get_actuator_metadata
 
 NUM_JOINTS = 21
@@ -289,7 +288,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.RandomJointPositionReset.create(physics_model, zeros={"abdomen_z": 0.0}),
             ksim.RandomJointVelocityReset(),
-            ksim.RandomHeadingReset(),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -347,7 +345,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             ksim.StartQuaternionCommand(),
-            ksim.JoystickCommand(switch_prob=0.01),
+            ksim.JoystickCommand(),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -359,7 +357,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 body_names=("foot_left", "foot_right"),
                 scale=1.0,
             ),
-            ksim.JoystickPenalty(
+            ksim.JoystickReward(
                 forward_speed=self.config.target_linear_velocity,
                 backward_speed=self.config.target_linear_velocity / 2.0,
                 strafe_speed=self.config.target_linear_velocity / 2.0,
