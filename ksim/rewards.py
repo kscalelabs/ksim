@@ -292,11 +292,11 @@ class ActionAccelerationPenalty(Reward):
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         actions = trajectory.action
+        done = trajectory.done[..., None]
         actions_zp = jnp.pad(actions, ((2, 0), (0, 0)), mode="edge")
-        actions_vel = actions_zp[..., 1:, :] - actions_zp[..., :-1, :]
-        actions_acc = actions_vel[..., 1:, :] - actions_vel[..., :-1, :]
+        actions_vel = jnp.where(done, 0.0, actions_zp[..., 1:, :] - actions_zp[..., :-1, :])
+        actions_acc = jnp.where(done, 0.0, actions_vel[..., 1:, :] - actions_vel[..., :-1, :])
         penalty = xax.get_norm(actions_acc, self.norm).mean(axis=-1)
-        penalty = jnp.where(trajectory.done, 0.0, penalty)
         return penalty
 
 
