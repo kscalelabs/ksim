@@ -31,6 +31,7 @@ __all__ = [
     "UprightReward",
     "HeadingTrackingReward",
     "HeadingVelocityReward",
+    "LinkAccelerationPenalty",
     "JoystickPenalty",
 ]
 
@@ -797,6 +798,21 @@ class HeadingVelocityReward(Reward):
         if self.flip_sign:
             heading_velocity = -heading_velocity
         return heading_velocity.clip(min=0.0, max=self.target_velocity)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class LinkAccelerationPenalty(Reward):
+    """Penalty for high link accelerations."""
+
+    ctrl_dt: float = attrs.field()
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        pos = trajectory.xpos
+        pos_zp = jnp.pad(pos, ((2, 0), (0, 0), (0, 0)), mode="constant", constant_values=0.0)
+        vel = jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1) / self.ctrl_dt
+        acc = vel[..., 1:, :] - vel[..., :-1, :] / self.ctrl_dt
+        return xax.get_norm(acc, self.norm).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
