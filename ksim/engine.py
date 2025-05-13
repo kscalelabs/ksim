@@ -116,8 +116,8 @@ class MjxEngine(PhysicsEngine):
             actuator_state=actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
-                minval=self.min_action_latency_step,
-                maxval=self.max_action_latency_step,
+                minval=self.min_action_latency_step * curriculum_level,
+                maxval=self.max_action_latency_step * curriculum_level,
             )
             .round()
             .astype(int),
@@ -145,7 +145,7 @@ class MjxEngine(PhysicsEngine):
 
         # Randomly drops some actions.
         rng, drop_rng = jax.random.split(rng)
-        drop_action = jax.random.bernoulli(drop_rng, self.drop_action_prob, shape=action.shape)
+        drop_action = jax.random.bernoulli(drop_rng, self.drop_action_prob * curriculum_level, shape=action.shape)
         action = jnp.where(drop_action, prev_action, action)
 
         def move_physics(
@@ -230,8 +230,8 @@ class MujocoEngine(PhysicsEngine):
             actuator_state=actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
-                minval=self.min_action_latency_step,
-                maxval=self.max_action_latency_step,
+                minval=self.min_action_latency_step * curriculum_level,
+                maxval=self.max_action_latency_step * curriculum_level,
             )
             .round()
             .astype(int),
@@ -256,7 +256,7 @@ class MujocoEngine(PhysicsEngine):
 
         # Randomly drops some actions.
         rng, drop_rng = jax.random.split(rng)
-        drop_action = jax.random.bernoulli(drop_rng, self.drop_action_prob, shape=action.shape)
+        drop_action = jax.random.bernoulli(drop_rng, self.drop_action_prob * curriculum_level, shape=action.shape)
         action = jnp.where(drop_action, prev_action, action)
 
         event_states = physics_state.event_states
