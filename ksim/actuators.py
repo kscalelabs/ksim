@@ -12,6 +12,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Literal
 
+import chex
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
@@ -34,7 +35,7 @@ class Actuators(ABC):
             case "none":
                 return action
             case "uniform":
-                return action + jax.random.uniform(rng, action.shape) * noise
+                return action + (jax.random.uniform(rng, action.shape) * 2 - 1) * noise
             case "gaussian":
                 return action + jax.random.normal(rng, action.shape) * noise
             case _:
@@ -64,7 +65,7 @@ class StatefulActuators(Actuators):
     def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> PyTree:
         """Get the initial state for the actuator."""
 
-    def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: Array) -> Array:
+    def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
         raise NotImplementedError("Stateful actuators should use `get_stateful_ctrl` instead.")
 
 
@@ -107,7 +108,8 @@ class PositionActuators(Actuators):
         for joint_name, params in joint_name_to_metadata.items():
             actuator_name = self.get_actuator_name(joint_name)
             if actuator_name not in ctrl_name_to_idx:
-                logger.warning("Joint %s has no actuator name. Skipping.", joint_name)
+                if actuator_name != "root":
+                    logger.warning("Joint %s has no actuator name. Skipping.", joint_name)
                 continue
             actuator_idx = ctrl_name_to_idx[actuator_name]
 
@@ -126,6 +128,11 @@ class PositionActuators(Actuators):
 
             kps_list[actuator_idx] = kp
             kds_list[actuator_idx] = kd
+
+        if any(kp == -1 for kp in kps_list):
+            raise ValueError("Some KPs are not set. Check the provided metadata.")
+        if any(kd == -1 for kd in kds_list):
+            raise ValueError("Some KDs are not set. Check the provided metadata.")
 
         self.kps = jnp.array(kps_list)
         self.kds = jnp.array(kds_list)
@@ -199,6 +206,7 @@ class PositionVelocityActuator(PositionActuators):
         # Adds position and velocity noise.
         target_position = action[: len(current_pos)]
         target_velocity = action[len(current_pos) :]
+        chex.assert_equal_shape([current_pos, target_position, current_vel, target_velocity])
         target_position = self.add_noise(self.action_noise, self.action_noise_type, target_position, pos_rng)
         target_velocity = self.add_noise(self.vel_action_noise, self.vel_action_noise_type, target_velocity, vel_rng)
 
