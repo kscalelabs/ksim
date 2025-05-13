@@ -43,6 +43,7 @@ class PhysicsEngine(eqx.Module, ABC):
     phys_steps_per_ctrl_steps: int
     min_action_latency_step: float
     max_action_latency_step: float
+    drop_action_prob: float
 
     def __init__(
         self,
@@ -52,6 +53,7 @@ class PhysicsEngine(eqx.Module, ABC):
         phys_steps_per_ctrl_steps: int,
         min_action_latency_step: float,
         max_action_latency_step: float,
+        drop_action_prob: float,
     ) -> None:
         """Initialize the MJX engine with resetting and actuators."""
         self.actuators = actuators
@@ -60,6 +62,7 @@ class PhysicsEngine(eqx.Module, ABC):
         self.phys_steps_per_ctrl_steps = phys_steps_per_ctrl_steps
         self.min_action_latency_step = min_action_latency_step
         self.max_action_latency_step = max_action_latency_step
+        self.drop_action_prob = drop_action_prob
 
     @abstractmethod
     def reset(self, physics_model: PhysicsModel, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsState:
@@ -139,6 +142,11 @@ class MjxEngine(PhysicsEngine):
         mjx_data = physics_state.data
         phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
+
+        # Randomly drops some actions.
+        rng, drop_rng = jax.random.split(rng)
+        drop_action = jax.random.bernoulli(drop_rng, self.drop_action_prob, shape=action.shape)
+        action = jnp.where(drop_action, prev_action, action)
 
         def move_physics(
             _: int,
@@ -246,6 +254,11 @@ class MujocoEngine(PhysicsEngine):
         phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
 
+        # Randomly drops some actions.
+        rng, drop_rng = jax.random.split(rng)
+        drop_action = jax.random.bernoulli(drop_rng, self.drop_action_prob, shape=action.shape)
+        action = jnp.where(drop_action, prev_action, action)
+
         event_states = physics_state.event_states
         actuator_state = physics_state.actuator_state
 
@@ -298,18 +311,23 @@ def get_physics_engine(
     dt: float,
     ctrl_dt: float,
     action_latency_range: tuple[float, float],
+    drop_action_prob: float,
 ) -> PhysicsEngine:
     min_action_latency, max_action_latency = action_latency_range
+    if min_action_latency < 0:
+        raise ValueError("`min_action_latency` must be non-negative")
     if min_action_latency > max_action_latency:
         raise ValueError("`min_action_latency` must be less than or equal to `max_action_latency`")
     if max_action_latency > ctrl_dt:
         logger.warning("`max_action_latency=%f` is greater than `ctrl_dt=%f`", max_action_latency, ctrl_dt)
     if (remainder := (ctrl_dt - round(ctrl_dt / dt) * dt)) > 1e-6:
         logger.warning("`ctrl_dt=%f` is not a multiple of `dt=%f` (remainder=%f)", ctrl_dt, dt, remainder)
+    if drop_action_prob < 0 or drop_action_prob > 1:
+        raise ValueError("`drop_action_prob` must be between 0 and 1")
 
     # Converts to steps.
-    min_action_latency_step = max(min_action_latency / dt, 0)
-    max_action_latency_step = max(max_action_latency / dt, 0)
+    min_action_latency_step = min_action_latency / dt
+    max_action_latency_step = max_action_latency / dt
     phys_steps_per_ctrl_steps = round(ctrl_dt / dt)
 
     match engine_type:
@@ -321,6 +339,7 @@ def get_physics_engine(
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
+                drop_action_prob=drop_action_prob,
             )
 
         case "mjx":
@@ -331,6 +350,7 @@ def get_physics_engine(
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
+                drop_action_prob=drop_action_prob,
             )
 
         case _:
