@@ -658,7 +658,10 @@ class JoystickReward(Reward):
         vel_norm = linvel_norm + angvel_norm
 
         # Computes each of the penalties.
-        stand_still_norm = xax.get_norm(linvel[..., 0] + linvel[..., 1] + angvel[..., 2], self.norm)
+        stand_still_norm = xax.get_norm(
+            (jnp.abs(linvel[..., 0]) + jnp.abs(linvel[..., 1]) + jnp.abs(angvel[..., 2]) / 3),
+            self.norm,
+        )
         walk_forward_norm = xax.get_norm(linvel[..., 0] - self.forward_speed, self.norm)
         walk_backward_norm = xax.get_norm(-linvel[..., 0] - self.backward_speed, self.norm)
         turn_left_norm = xax.get_norm(angvel[..., 2] - self.rotation_speed, self.norm)
