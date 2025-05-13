@@ -9,6 +9,7 @@ __all__ = [
 ]
 
 import logging
+import chex
 from abc import ABC, abstractmethod
 from typing import Literal
 
@@ -205,6 +206,7 @@ class PositionVelocityActuator(PositionActuators):
         # Adds position and velocity noise.
         target_position = action[: len(current_pos)]
         target_velocity = action[len(current_pos) :]
+        chex.assert_equal_shape([current_pos, target_position, current_vel, target_velocity])
         target_position = self.add_noise(self.action_noise, self.action_noise_type, target_position, pos_rng)
         target_velocity = self.add_noise(self.vel_action_noise, self.vel_action_noise_type, target_velocity, vel_rng)
 
