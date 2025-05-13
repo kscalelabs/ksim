@@ -650,8 +650,8 @@ class JoystickReward(Reward):
         angvel = qvel[..., 3:]
 
         # Penalty to discourage movement in general.
-        linvel_norm = jnp.linalg.norm(linvel) * self.lin_vel_penalty_scale
-        angvel_norm = jnp.linalg.norm(angvel) * self.ang_vel_penalty_scale
+        linvel_norm = jnp.linalg.norm(linvel, axis=-1) * self.lin_vel_penalty_scale
+        angvel_norm = jnp.linalg.norm(angvel, axis=-1) * self.ang_vel_penalty_scale
         vel_norm = linvel_norm + angvel_norm
 
         # Computes each of the penalties.
