@@ -353,11 +353,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.StayAliveReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
-            ksim.FlatBodyReward.create(
-                physics_model=physics_model,
-                body_names=("foot_left", "foot_right"),
-                scale=1.0,
-            ),
             ksim.JoystickReward(
                 forward_speed=self.config.target_linear_velocity,
                 backward_speed=self.config.target_linear_velocity / 2.0,
@@ -381,7 +376,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             increase_threshold=self.config.increase_threshold,
             decrease_threshold=self.config.decrease_threshold,
             min_level_steps=self.config.min_level_steps,
-            dt=self.config.ctrl_dt,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
@@ -414,8 +408,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_10 = commands["joystick_command"]
-        joystick_cmd_ohe_7 = joystick_cmd_10[..., :7]
+        joystick_cmd_ohe_7 = commands["joystick_command"]
 
         obs_n = jnp.concatenate(
             [
@@ -457,8 +450,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_10 = commands["joystick_command"]
-        joystick_cmd_ohe_7 = joystick_cmd_10[..., :7]
+        joystick_cmd_ohe_7 = commands["joystick_command"]
 
         obs_n = jnp.concatenate(
             [
