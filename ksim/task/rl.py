@@ -380,7 +380,10 @@ class RLConfig(xax.Config):
         value=False,
         help="If true, profile memory usage.",
     )
-
+    exclude_combined_reward_components: list[str] = xax.field(
+        value=[],
+        help="If provided, exclude these components from the combined reward plot.",
+    )
     # Training parameters.
     num_envs: int = xax.field(
         value=MISSING,
@@ -1191,6 +1194,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Add a combined plot with all reward components for easy comparison
         def plot_combined_rewards(fig: plt.Figure, ax: plt.Axes) -> None:
             for key, value in logged_traj.rewards.components.items():
+                if key in self.config.exclude_combined_reward_components:
+                    continue
                 processed_value = value.reshape(value.shape[0], -1)
                 if processed_value.shape[1] > 1:
                     processed_value = processed_value.mean(axis=1)
