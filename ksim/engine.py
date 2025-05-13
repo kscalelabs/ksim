@@ -100,6 +100,13 @@ class MjxEngine(PhysicsEngine):
 
         mjx_data = mjx.forward(physics_model, mjx_data)
         assert isinstance(mjx_data, mjx.Data)
+
+        # Zeros out some non-zeroed quantities.
+        mjx_data.qvel[:] = 0.0
+        mjx_data.qacc[:] = 0.0
+        mjx_data.cvel[:] = 0.0
+        mjx_data.cacc[:] = 0.0
+
         default_action = self.actuators.get_default_action(mjx_data)
 
         # Gets the initial actuator state for stateful actuators.
@@ -207,16 +214,23 @@ class MujocoEngine(PhysicsEngine):
     """Defines an engine for MuJoCo models."""
 
     def reset(self, physics_model: mujoco.MjModel, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsState:
-        mujoco_data = mujoco.MjData(physics_model)
+        mj_data = mujoco.MjData(physics_model)
 
         for reset in self.resets:
             rng, reset_rng = jax.random.split(rng)
-            mujoco_data = reset(mujoco_data, curriculum_level, reset_rng)
+            mj_data = reset(mj_data, curriculum_level, reset_rng)
 
-        mujoco.mj_forward(physics_model, mujoco_data)
-        default_action = self.actuators.get_default_action(mujoco_data)
+        mujoco.mj_forward(physics_model, mj_data)
+
+        # Zeros out some non-zeroed quantities.
+        mj_data.qvel[:] = 0.0
+        mj_data.qacc[:] = 0.0
+        mj_data.cvel[:] = 0.0
+        mj_data.cacc[:] = 0.0
+
+        default_action = self.actuators.get_default_action(mj_data)
         actuator_state = (
-            self.actuators.get_initial_state(mujoco_data, rng)
+            self.actuators.get_initial_state(mj_data, rng)
             if isinstance(self.actuators, StatefulActuators)
             else None
         )
@@ -224,7 +238,7 @@ class MujocoEngine(PhysicsEngine):
         rng, latency_rng = jax.random.split(rng)
 
         return PhysicsState(
-            data=mujoco_data,
+            data=mj_data,
             most_recent_action=default_action,
             event_states=self._reset_events(rng),
             actuator_state=actuator_state,
