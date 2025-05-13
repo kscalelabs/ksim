@@ -128,9 +128,9 @@ class PositionActuators(Actuators):
             kps_list[actuator_idx] = kp
             kds_list[actuator_idx] = kd
 
-        if any(kps_list == -1):
+        if any(kp == -1 for kp in kps_list):
             raise ValueError("Some KPs are not set. Check the provided metadata.")
-        if any(kds_list == -1):
+        if any(kd == -1 for kd in kds_list):
             raise ValueError("Some KDs are not set. Check the provided metadata.")
 
         self.kps = jnp.array(kps_list)
