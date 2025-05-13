@@ -34,7 +34,7 @@ class Actuators(ABC):
             case "none":
                 return action
             case "uniform":
-                return action + jax.random.uniform(rng, action.shape) * noise
+                return action + (jax.random.uniform(rng, action.shape) * 2 - 1) * noise
             case "gaussian":
                 return action + jax.random.normal(rng, action.shape) * noise
             case _:
@@ -64,7 +64,7 @@ class StatefulActuators(Actuators):
     def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> PyTree:
         """Get the initial state for the actuator."""
 
-    def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: Array) -> Array:
+    def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
         raise NotImplementedError("Stateful actuators should use `get_stateful_ctrl` instead.")
 
 
@@ -127,6 +127,11 @@ class PositionActuators(Actuators):
 
             kps_list[actuator_idx] = kp
             kds_list[actuator_idx] = kd
+
+        if any(kps_list == -1):
+            raise ValueError("Some KPs are not set. Check the provided metadata.")
+        if any(kds_list == -1):
+            raise ValueError("Some KDs are not set. Check the provided metadata.")
 
         self.kps = jnp.array(kps_list)
         self.kds = jnp.array(kds_list)
