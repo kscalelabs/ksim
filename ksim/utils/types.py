@@ -1,69 +1,76 @@
-"""Defines some commonly-used types and helper functions."""
+"""Defines common types used throughout the project."""
 
-__all__ = [
-    "CartesianIndex",
-    "cartesian_index_to_dim",
-    "dimension_index_validator",
-]
+from dataclasses import dataclass
+from typing import TypeVar
 
-from typing import Any, Literal, get_args
+from kscale.web.gen.api import (
+    ActuatorMetadataOutput,
+    JointMetadataOutput,
+    RobotURDFMetadataOutput,
+)
 
-import attrs
-import xax
-
-CartesianIndex = Literal["x", "y", "z"]
+T = TypeVar("T")
 
 
-def cartesian_index_to_dim(index: CartesianIndex) -> int:
-    match index:
-        case "x":
-            return 0
-        case "y":
-            return 1
-        case "z":
-            return 2
-        case _:
-            raise ValueError(f"Invalid linear velocity index: {index}")
+def _parse_float(value: str | None) -> float | None:
+    return None if value is None else float(value)
 
 
-def dimension_index_validator(
-    inst: Any,  # noqa: ANN401
-    attr: attrs.Attribute,
-    value: CartesianIndex | None,
-) -> None:
-    if value is not None:
-        choices = get_args(CartesianIndex)
-        if value not in choices:
-            raise ValueError(f"Linear velocity index must be one of {choices}, got {value}")
+def _nn(value: T | None, name: str) -> T:
+    if value is None:
+        raise ValueError(f"'{name}' from the K-Scale API is None")
+    return value
 
 
-def dimension_index_tuple_validator(
-    inst: Any,  # noqa: ANN401
-    attr: attrs.Attribute,
-    value: CartesianIndex | tuple[CartesianIndex, ...] | None,
-) -> None:
-    if value is not None:
-        if isinstance(value, tuple):
-            for index in value:
-                dimension_index_validator(inst, attr, index)
-        else:
-            dimension_index_validator(inst, attr, value)
+@dataclass
+class JointMetadata:
+    kp: float | None = None
+    kd: float | None = None
+
+    @classmethod
+    def from_kscale_joint_metadata(cls, metadata: JointMetadataOutput) -> "JointMetadata":
+        return cls(
+            kp=_parse_float(metadata.kp),
+            kd=_parse_float(metadata.kd),
+        )
 
 
-def norm_validator(
-    inst: Any,  # noqa: ANN401
-    attr: attrs.Attribute,
-    value: xax.NormType,
-) -> None:
-    choices = get_args(xax.NormType)
-    if value not in choices:
-        raise ValueError(f"Norm must be one of {choices}, got {value}")
+@dataclass
+class ActuatorMetadata:
+    actuator_type: str
+    max_torque: float
+
+    @classmethod
+    def from_kscale_actuator_metadata(cls, metadata: ActuatorMetadataOutput) -> "ActuatorMetadata":
+        return cls(
+            actuator_type=_nn(metadata.actuator_type, "actuator_type"),
+            max_torque=_nn(_parse_float(metadata.max_torque), "max_torque"),
+        )
 
 
-def sample_probs_validator(
-    inst: Any,  # noqa: ANN401
-    attr: attrs.Attribute,
-    value: tuple[float, ...],
-) -> None:
-    if abs(sum(value) - 1.0) > 1e-6:
-        raise ValueError("Sample probabilities must sum to 1.0")
+@dataclass
+class Metadata:
+    joint_name_to_metadata: dict[str, JointMetadata]
+    actuator_type_to_metadata: dict[str, ActuatorMetadata]
+    control_frequency: float | None = None
+
+    @classmethod
+    def from_kscale_metadata(cls, metadata: RobotURDFMetadataOutput) -> "Metadata":
+        return cls(
+            joint_name_to_metadata=(
+                {}
+                if metadata.joint_name_to_metadata is None
+                else {
+                    k: JointMetadata.from_kscale_joint_metadata(v) for k, v in metadata.joint_name_to_metadata.items()
+                }
+            ),
+            actuator_type_to_metadata=(
+                {}
+                if metadata.actuator_type_to_metadata is None
+                else {
+                    k: ActuatorMetadata.from_kscale_actuator_metadata(v)
+                    for k, v in metadata.actuator_type_to_metadata.items()
+                }
+            ),
+            control_frequency=_parse_float(metadata.control_frequency),
+        )

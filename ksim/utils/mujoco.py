@@ -36,6 +36,8 @@ import logging
 from typing import Any, Hashable, TypeVar
 from xml.etree import ElementTree as ET
 
+from ksim.utils.types import Metadata, JointMetadata, ActuatorMetadata
+from dataclasses import dataclass
 import chex
 import jax
 import jax.numpy as jnp
@@ -246,7 +248,7 @@ def get_torque_limits(model: PhysicsModel) -> dict[str, tuple[float, float]]:
     return ranges
 
 
-def get_metadata(model: PhysicsModel) -> RobotURDFMetadataOutput:
+def get_metadata(model: PhysicsModel) -> Metadata:
     """Return default metadata for a MuJoCo model."""
     return RobotURDFMetadataOutput(
         joint_name_to_metadata=get_joint_metadata(model),

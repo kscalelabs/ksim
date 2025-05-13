@@ -22,7 +22,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray
 
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
-from ksim.utils.types import sample_probs_validator
+from ksim.utils.validators import sample_probs_validator
 from ksim.vis import Marker
 
 
