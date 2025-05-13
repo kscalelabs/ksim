@@ -230,9 +230,7 @@ class MujocoEngine(PhysicsEngine):
 
         default_action = self.actuators.get_default_action(mj_data)
         actuator_state = (
-            self.actuators.get_initial_state(mj_data, rng)
-            if isinstance(self.actuators, StatefulActuators)
-            else None
+            self.actuators.get_initial_state(mj_data, rng) if isinstance(self.actuators, StatefulActuators) else None
         )
 
         rng, latency_rng = jax.random.split(rng)
