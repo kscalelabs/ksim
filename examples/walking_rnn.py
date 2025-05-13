@@ -58,6 +58,7 @@ class Actor(eqx.Module):
 
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
+        rnn_keys = jax.random.split(rnn_key, depth)
         self.rnns = tuple(
             [
                 eqx.nn.GRUCell(
@@ -65,7 +66,7 @@ class Actor(eqx.Module):
                     hidden_size=hidden_size,
                     key=rnn_key,
                 )
-                for _ in range(depth)
+                for rnn_key in rnn_keys
             ]
         )
 
@@ -134,6 +135,7 @@ class Critic(eqx.Module):
 
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
+        rnn_keys = jax.random.split(rnn_key, depth)
         self.rnns = tuple(
             [
                 eqx.nn.GRUCell(
@@ -141,7 +143,7 @@ class Critic(eqx.Module):
                     hidden_size=hidden_size,
                     key=rnn_key,
                 )
-                for _ in range(depth)
+                for rnn_key in rnn_keys
             ]
         )
 
