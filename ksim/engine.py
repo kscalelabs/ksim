@@ -102,10 +102,12 @@ class MjxEngine(PhysicsEngine):
         assert isinstance(mjx_data, mjx.Data)
 
         # Zeros out some non-zeroed quantities.
-        mjx_data.qvel = mjx_data.qvel.at[:].set(0.0)
-        mjx_data.qacc = mjx_data.qacc.at[:].set(0.0)
-        mjx_data.cvel = mjx_data.cvel.at[:].set(0.0)
-        mjx_data.cacc = mjx_data.cacc.at[:].set(0.0)
+        mjx_data = mjx_data.replace(
+            qvel=jnp.zeros_like(mjx_data.qvel),
+            qacc=jnp.zeros_like(mjx_data.qacc),
+            cvel=jnp.zeros_like(mjx_data.cvel),
+            cacc=jnp.zeros_like(mjx_data.cacc),
+        )
 
         default_action = self.actuators.get_default_action(mjx_data)
 
