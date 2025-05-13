@@ -9,10 +9,10 @@ __all__ = [
 ]
 
 import logging
-import chex
 from abc import ABC, abstractmethod
 from typing import Literal
 
+import chex
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
