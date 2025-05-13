@@ -160,8 +160,8 @@ class HighVelocityTermination(Termination):
 class HighRootVelocityTermination(Termination):
     """Terminates the episode if the robot's root is moving too fast."""
 
-    max_lin_vel: float = attrs.field(default=5)
-    max_ang_vel: float = attrs.field(default=math.radians(360.0))
+    max_lin_vel: float = attrs.field()
+    max_ang_vel: float = attrs.field()
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         lin_vel = jnp.linalg.norm(state.qvel[..., :3], axis=-1)
