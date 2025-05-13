@@ -45,7 +45,6 @@ class PPOVariables:
         "decay_gamma",
         "gae_lambda",
         "normalize_advantages",
-        "use_two_step_td_target",
         "monte_carlo_returns",
     ],
     jit_level=6,
@@ -57,7 +56,6 @@ def compute_ppo_inputs(
     decay_gamma: float,
     gae_lambda: float,
     normalize_advantages: bool = False,
-    use_two_step_td_target: bool = False,
     monte_carlo_returns: bool = False,
 ) -> PPOInputs:
     """Computes the advantages using Generalized Advantage Estimation (GAE)."""
@@ -89,20 +87,8 @@ def compute_ppo_inputs(
         # Get the value targets.
         value_targets_t = returns_t if monte_carlo_returns else gae_t + values_t
 
-        if not use_two_step_td_target:
-            return PPOInputs(
-                advantages_t=gae_t,
-                value_targets_t=value_targets_t,
-                gae_t=gae_t,
-                returns_t=returns_t,
-            )
-
-        # Apply another TD step to get the value targets.
-        value_targets_shifted_t = jnp.concatenate([value_targets_t[1:], value_targets_t[-1:]], axis=0)
-        advantages_t = rewards_t + decay_gamma * value_targets_shifted_t * mask_t - values_t
-
         return PPOInputs(
-            advantages_t=advantages_t,
+            advantages_t=gae_t,
             value_targets_t=value_targets_t,
             gae_t=gae_t,
             returns_t=returns_t,
@@ -132,7 +118,14 @@ def clipped_value_loss(
 
 
 @xax.jit(
-    static_argnames=["clip_param", "value_loss_coef", "entropy_coef", "log_clip_value", "use_clipped_value_loss"],
+    static_argnames=[
+        "clip_param",
+        "value_loss_coef",
+        "entropy_coef",
+        "kl_coef",
+        "log_clip_value",
+        "use_clipped_value_loss",
+    ],
     jit_level=6,
 )
 def compute_ppo_loss(
@@ -144,6 +137,7 @@ def compute_ppo_loss(
     clip_param: float = 0.2,
     value_loss_coef: float = 0.5,
     entropy_coef: float = 0.008,
+    kl_coef: float = 0.0,
     log_clip_value: float = 10.0,
     use_clipped_value_loss: bool = True,
 ) -> Array:
@@ -157,6 +151,8 @@ def compute_ppo_loss(
         clip_param: The clip parameter for PPO.
         value_loss_coef: The value loss coefficient for PPO.
         entropy_coef: The entropy coefficient for PPO.
+        kl_coef: The KL divergence coefficient for PPO, to discourage large
+            changes in the policy.
         log_clip_value: The log clip value for PPO, for numerical stability.
         use_clipped_value_loss: Whether to use clipped value loss.
 
@@ -199,33 +195,33 @@ def compute_ppo_loss(
         clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
         surrogate_1 = ratio * ppo_inputs.advantages_t
         surrogate_2 = clipped_ratio * ppo_inputs.advantages_t
-        policy_objective = jnp.minimum(surrogate_1, surrogate_2)
+        policy_objective = -jnp.minimum(surrogate_1, surrogate_2)
 
         # Computes the value loss, with or without clipping.
         if use_clipped_value_loss:
-            value_mse = 0.5 * clipped_value_loss(
+            value_objective = 0.5 * clipped_value_loss(
                 target_values=on_policy_variables.values,
                 values=off_policy_variables.values,
                 value_targets=ppo_inputs.value_targets_t,
                 clip_param=clip_param,
             )
         else:
-            value_mse = 0.5 * (ppo_inputs.value_targets_t - off_policy_variables.values) ** 2
-        value_objective = value_loss_coef * value_mse
+            value_objective = 0.5 * (ppo_inputs.value_targets_t - off_policy_variables.values) ** 2
 
-        total_objective = policy_objective - value_objective
+        # Computes the KL divergence between the two policies, to discourage large changes.
+        kl_div = jnp.sum(on_policy_variables.log_probs - off_policy_variables.log_probs, axis=-1)
+        kl_loss = kl_div * kl_coef
+
+        total_loss = -policy_objective + value_loss_coef * value_objective - kl_loss
 
         # Adds the entropy bonus term, if provided.
         if off_policy_variables.entropy is not None:
-            total_objective = total_objective + entropy_coef * off_policy_variables.entropy.mean(axis=-1)
+            total_loss = total_loss - entropy_coef * off_policy_variables.entropy.mean(axis=-1)
 
         # Adds any additional auxiliary losses.
         if off_policy_variables.aux_losses is not None:
-            for aux_loss_value in off_policy_variables.aux_losses.values():
-                total_objective = total_objective + jnp.mean(aux_loss_value)
-
-        # Maximize the objective.
-        total_loss = -total_objective
+            for aux_loss_term in off_policy_variables.aux_losses.values():
+                total_loss = total_loss + jnp.mean(aux_loss_term)
 
         # Zero out the loss for terminated trajectories.
         total_loss = jnp.where(dones, 0.0, total_loss)
@@ -266,6 +262,10 @@ class PPOConfig(RLConfig):
         value=0.008,
         help="Entropy coefficient for PPO: high = more exploration.",
     )
+    kl_coef: float = xax.field(
+        value=1e-3,
+        help="KL divergence coefficient for PPO, to discourage large changes in the policy.",
+    )
     log_clip_value: float = xax.field(
         value=20.0,
         help="The log clip value for PPO, for numerical stability. For FP16, this should be 10 instead.",
@@ -281,10 +281,6 @@ class PPOConfig(RLConfig):
     normalize_advantages: bool = xax.field(
         value=False,
         help="Whether to normalize the advantages.",
-    )
-    use_two_step_td_target: bool = xax.field(
-        value=False,
-        help="Whether to use two-step TD targets.",
     )
     monte_carlo_returns: bool = xax.field(
         value=False,
@@ -443,7 +439,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 decay_gamma=self.config.gamma,
                 gae_lambda=self.config.lam,
                 normalize_advantages=self.config.normalize_advantages,
-                use_two_step_td_target=self.config.use_two_step_td_target,
                 monte_carlo_returns=self.config.monte_carlo_returns,
             )
 
@@ -455,6 +450,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 clip_param=self.config.clip_param,
                 value_loss_coef=self.config.value_loss_coef,
                 entropy_coef=self.config.entropy_coef,
+                kl_coef=self.config.kl_coef,
                 log_clip_value=self.config.log_clip_value,
                 use_clipped_value_loss=self.config.use_clipped_value_loss,
             )
@@ -592,6 +588,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         on_policy_variables, _ = jax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0))(
             policy_model, trajectories, carry.env_states.model_carry, on_policy_rngs
         )  # (num_envs, num_steps, ppo_vars)
+        on_policy_variables = jax.tree.map(lambda x: jax.lax.stop_gradient(x), on_policy_variables)
 
         # Loops over the trajectory batches and applies gradient updates.
         def update_model_in_batch(
