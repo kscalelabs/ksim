@@ -72,7 +72,8 @@ def compute_ppo_inputs(
 
     def compute_gae_and_targets_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> PPOInputs:
         # Use the last value as the bootstrap value.
-        values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
+        bootstrap_value = jnp.where(dones_t[-1], 0.0, values_t[-1])
+        values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(bootstrap_value, 0)], axis=0)
         mask_t = jnp.where(dones_t, 0.0, 1.0)
         deltas_t = rewards_t + decay_gamma * values_shifted_t * mask_t - values_t
 
@@ -98,7 +99,7 @@ def compute_ppo_inputs(
     inputs = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t)
 
     if normalize_advantages:
-        inputs.advantages_t = inputs.advantages_t / (inputs.advantages_t.std(axis=-1, keepdims=True) + 1e-6)
+        inputs.advantages_t = inputs.advantages_t / jnp.maximum(inputs.advantages_t.std(axis=-1, keepdims=True), 1e-6)
 
     return inputs
 
@@ -195,7 +196,7 @@ def compute_ppo_loss(
         clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
         surrogate_1 = ratio * ppo_inputs.advantages_t
         surrogate_2 = clipped_ratio * ppo_inputs.advantages_t
-        policy_objective = -jnp.minimum(surrogate_1, surrogate_2)
+        policy_objective = jnp.minimum(surrogate_1, surrogate_2)
 
         # Computes the value loss, with or without clipping.
         if use_clipped_value_loss:
@@ -209,19 +210,19 @@ def compute_ppo_loss(
             value_objective = 0.5 * (ppo_inputs.value_targets_t - off_policy_variables.values) ** 2
 
         # Computes the KL divergence between the two policies, to discourage large changes.
-        kl_div = jnp.sum(on_policy_variables.log_probs - off_policy_variables.log_probs, axis=-1)
+        kl_div = (on_policy_variables.log_probs - off_policy_variables.log_probs).sum(axis=-1)
         kl_loss = kl_div * kl_coef
 
         total_loss = -policy_objective + value_loss_coef * value_objective - kl_loss
 
         # Adds the entropy bonus term, if provided.
         if off_policy_variables.entropy is not None:
-            total_loss = total_loss - entropy_coef * off_policy_variables.entropy.mean(axis=-1)
+            total_loss = total_loss - entropy_coef * off_policy_variables.entropy.sum(axis=-1)
 
         # Adds any additional auxiliary losses.
         if off_policy_variables.aux_losses is not None:
             for aux_loss_term in off_policy_variables.aux_losses.values():
-                total_loss = total_loss + jnp.mean(aux_loss_term)
+                total_loss = total_loss + aux_loss_term.sum()
 
         # Zero out the loss for terminated trajectories.
         total_loss = jnp.where(dones, 0.0, total_loss)
