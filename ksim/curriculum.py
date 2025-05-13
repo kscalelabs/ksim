@@ -56,7 +56,7 @@ class Curriculum(ABC, Generic[T]):
 class ConstantCurriculum(Curriculum[None]):
     """Constant curriculum."""
 
-    level: float = attrs.field(validator=attrs.validators.ge(0.0))
+    level: float = attrs.field(default=1.0, validator=attrs.validators.ge(0.0))
 
     def __call__(
         self,
