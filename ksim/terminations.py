@@ -14,7 +14,6 @@ __all__ = [
 
 import functools
 import logging
-import math
 from abc import ABC, abstractmethod
 from typing import Collection, Literal, Self
 
