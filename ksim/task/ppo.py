@@ -196,7 +196,7 @@ def compute_ppo_loss(
         clipped_ratio = jnp.clip(ratio, 1 - clip_param, 1 + clip_param)
         surrogate_1 = ratio * ppo_inputs.advantages_t
         surrogate_2 = clipped_ratio * ppo_inputs.advantages_t
-        policy_objective = jnp.minimum(surrogate_1, surrogate_2)
+        policy_loss = -jnp.minimum(surrogate_1, surrogate_2)
 
         # Computes the value loss, with or without clipping.
         if use_clipped_value_loss:
@@ -208,16 +208,18 @@ def compute_ppo_loss(
             )
         else:
             value_objective = 0.5 * (ppo_inputs.value_targets_t - off_policy_variables.values) ** 2
+        value_loss = value_objective * value_loss_coef
 
-        # Computes the KL divergence between the two policies, to discourage large changes.
+        # Minimize the KL divergence between the two policies, to discourage large changes.
         kl_div = (on_policy_variables.log_probs - off_policy_variables.log_probs).sum(axis=-1)
-        kl_loss = kl_div * kl_coef
+        kl_loss = -kl_div * kl_coef
 
-        total_loss = -policy_objective + value_loss_coef * value_objective - kl_loss
+        total_loss = policy_loss + value_loss + kl_loss
 
-        # Adds the entropy bonus term, if provided.
+        # Maximize the entropy of the policy, to encourage exploration.
         if off_policy_variables.entropy is not None:
-            total_loss = total_loss - entropy_coef * off_policy_variables.entropy.sum(axis=-1)
+            entropy_loss = -off_policy_variables.entropy.sum(axis=-1) * entropy_coef
+            total_loss = total_loss + entropy_loss
 
         # Adds any additional auxiliary losses.
         if off_policy_variables.aux_losses is not None:
