@@ -635,8 +635,8 @@ class JoystickReward(Reward):
     strafe_speed: float = attrs.field()
     rotation_speed: float = attrs.field()
     command_name: str = attrs.field(default="joystick_command")
-    lin_vel_penalty_scale: float = attrs.field(default=0.01)
-    ang_vel_penalty_scale: float = attrs.field(default=0.01)
+    lin_vel_penalty_scale: float = attrs.field(default=0.001)
+    ang_vel_penalty_scale: float = attrs.field(default=0.001)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
