@@ -368,7 +368,7 @@ def log_joint_config_table(
                 if stl_float > frcrange_float:
                     raise ValueError(f"Soft torque limit {stl_float} > max {frcrange_float} for {joint_name}")
         else:
-            logger.warning("Joint %s has no soft torque limit", joint_name)
+            logger.debug("Joint %s has no soft torque limit", joint_name)
 
         joint_data.append(
             {

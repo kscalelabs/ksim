@@ -62,29 +62,29 @@ def compute_ppo_inputs(
 ) -> PPOInputs:
     """Computes the advantages using Generalized Advantage Estimation (GAE)."""
 
-    def returns_scan_fn(returns_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
-        """Scanning this computes the returns in reverse order."""
-        reward, mask = x
+    def returns_and_gae_scan_fn(
+        x_t_plus_1: tuple[Array, Array],
+        x: tuple[Array, Array, Array],
+    ) -> tuple[tuple[Array, Array], tuple[Array, Array]]:
+        reward, delta, mask = x
+        returns_t_plus_1, adv_t_plus_1 = x_t_plus_1
         return_t = reward + decay_gamma * mask * returns_t_plus_1
-        return return_t, return_t
-
-    def gae_scan_fn(adv_t_plus_1: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
-        """Scanning this computes the advantages in reverse order."""
-        delta, mask = x
         adv_t = delta + decay_gamma * gae_lambda * mask * adv_t_plus_1
-        return adv_t, adv_t
+        return (return_t, adv_t), (return_t, adv_t)
 
     def compute_gae_and_targets_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> PPOInputs:
         # Use the last value as the bootstrap value.
         values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
         mask_t = jnp.where(dones_t, 0.0, 1.0)
-
-        # Compute returns.
-        _, returns_t = jax.lax.scan(returns_scan_fn, jnp.zeros_like(rewards_t[-1]), (rewards_t, mask_t), reverse=True)
-
-        # Compute the GAE.
         deltas_t = rewards_t + decay_gamma * values_shifted_t * mask_t - values_t
-        _, gae_t = jax.lax.scan(gae_scan_fn, jnp.zeros_like(deltas_t[-1]), (deltas_t, mask_t), reverse=True)
+
+        # Compute returns and GAE.
+        _, (returns_t, gae_t) = jax.lax.scan(
+            returns_and_gae_scan_fn,
+            (jnp.zeros_like(rewards_t[-1]), jnp.zeros_like(deltas_t[-1])),
+            (rewards_t, deltas_t, mask_t),
+            reverse=True,
+        )
 
         # Get the value targets.
         value_targets_t = returns_t if monte_carlo_returns else gae_t + values_t
