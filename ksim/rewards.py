@@ -638,7 +638,7 @@ class JoystickReward(Reward):
     lin_vel_penalty_scale: float = attrs.field(default=0.01)
     ang_vel_penalty_scale: float = attrs.field(default=0.01)
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-    temp: float = attrs.field(default=1.0)
+    temp: float = attrs.field(default=0.1)
     monotonic_fn: MonotonicFn = attrs.field(default="inv")
 
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -657,32 +657,30 @@ class JoystickReward(Reward):
         angvel_norm = jnp.linalg.norm(angvel, axis=-1) * self.ang_vel_penalty_scale
         vel_norm = linvel_norm + angvel_norm
 
-        # Computes each of the penalties.
-        stand_still_norm = xax.get_norm(
-            (jnp.abs(linvel[..., 0]) + jnp.abs(linvel[..., 1]) + jnp.abs(angvel[..., 2]) / 3),
-            self.norm,
-        )
-        walk_forward_norm = xax.get_norm(linvel[..., 0] - self.forward_speed, self.norm)
-        walk_backward_norm = xax.get_norm(-linvel[..., 0] - self.backward_speed, self.norm)
-        turn_left_norm = xax.get_norm(angvel[..., 2] - self.rotation_speed, self.norm)
-        turn_right_norm = xax.get_norm(-angvel[..., 2] - self.rotation_speed, self.norm)
-        strafe_left_norm = xax.get_norm(linvel[..., 1] - self.strafe_speed, self.norm)
-        strafe_right_norm = xax.get_norm(-linvel[..., 1] - self.strafe_speed, self.norm)
+        def normalize(x: Array, scale: float) -> Array:
+            return x.clip(-scale, scale) / scale
 
-        all_norms = jnp.stack(
+        # Computes each of the penalties.
+        stand_still_reward = jnp.zeros_like(linvel[..., 0])
+        walk_forward_reward = normalize(linvel[..., 0], self.forward_speed)
+        walk_backward_reward = normalize(-linvel[..., 0], self.backward_speed)
+        turn_left_reward = normalize(angvel[..., 2], self.rotation_speed)
+        turn_right_reward = normalize(-angvel[..., 2], self.rotation_speed)
+        strafe_left_reward = normalize(linvel[..., 1], self.strafe_speed)
+        strafe_right_reward = normalize(-linvel[..., 1], self.strafe_speed)
+
+        all_rewards = jnp.stack(
             [
-                stand_still_norm,
-                walk_forward_norm,
-                walk_backward_norm,
-                turn_left_norm,
-                turn_right_norm,
-                strafe_left_norm,
-                strafe_right_norm,
+                stand_still_reward,
+                walk_forward_reward,
+                walk_backward_reward,
+                turn_left_reward,
+                turn_right_reward,
+                strafe_left_reward,
+                strafe_right_reward,
             ],
             axis=-1,
         )
-
-        all_rewards = norm_to_reward(all_norms, self.temp, self.monotonic_fn)
 
         # Weights each of the rewards by the one-hot encoded command.
         total_reward = jnp.einsum("...i,...i->...", joystick_cmd, all_rewards) - vel_norm

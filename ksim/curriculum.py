@@ -95,39 +95,63 @@ class LinearCurriculum(Curriculum[None]):
         return CurriculumState(level=jnp.array(self.min_level), state=None)
 
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class EpisodeLengthCurriculumState:
+    step_counter: Array
+    ema_episode_length: Array
+
+
 @attrs.define(frozen=True, kw_only=True)
-class EpisodeLengthCurriculum(Curriculum[Array]):
+class EpisodeLengthCurriculum(Curriculum[EpisodeLengthCurriculumState]):
     """Curriculum that updates the episode length."""
 
     num_levels: int = attrs.field(validator=attrs.validators.ge(1))
     increase_threshold: float = attrs.field(validator=attrs.validators.ge(0.0))
     decrease_threshold: float = attrs.field(validator=attrs.validators.ge(0.0))
-    min_level_steps: int = attrs.field(validator=attrs.validators.ge(0))
-    dt: float = attrs.field(validator=attrs.validators.ge(0.0))
+    min_level_steps: int = attrs.field(default=1, validator=attrs.validators.ge(0))
     min_level: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
+    ema_decay: float = attrs.field(default=0.9, validator=attrs.validators.ge(0.0))
 
     def __call__(
         self,
         trajectory: Trajectory,
         rewards: RewardState,
         training_state: xax.State,
-        prev_state: CurriculumState[Array],
-    ) -> CurriculumState[Array]:
+        prev_state: CurriculumState[EpisodeLengthCurriculumState],
+    ) -> CurriculumState[EpisodeLengthCurriculumState]:
         step_size = 1 / self.num_levels
+
         episode_length = trajectory.episode_length().mean()
-        steps = prev_state.state
+        ema = self.ema_decay * prev_state.state.ema_episode_length + (1 - self.ema_decay) * episode_length
+
+        steps = prev_state.state.step_counter
         level = prev_state.level
-        next_steps = (steps - 1).clip(min=0)
-        can_step = next_steps == 0
-        should_inc = (episode_length > self.increase_threshold) & can_step
-        should_dec = (episode_length < self.decrease_threshold) & can_step
+        can_step = steps == 0
+        should_inc = (ema > self.increase_threshold) & can_step
+        should_dec = (ema < self.decrease_threshold) & can_step
+        next_steps = jnp.where(should_inc | should_dec, self.min_level_steps, jnp.maximum(steps - 1, 0))
+
         next_level = jnp.where(should_inc, level + step_size, jnp.where(should_dec, level - step_size, level))
         next_level = jnp.clip(next_level, self.min_level, 1.0)
         next_steps = jnp.where(should_inc | should_dec, self.min_level_steps, next_steps)
-        return CurriculumState(level=next_level, state=next_steps)
 
-    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
-        return CurriculumState(level=jnp.array(self.min_level), state=jnp.array(self.min_level_steps, dtype=jnp.int32))
+        return CurriculumState(
+            level=next_level,
+            state=EpisodeLengthCurriculumState(
+                step_counter=next_steps,
+                ema_episode_length=ema,
+            ),
+        )
+
+    def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[EpisodeLengthCurriculumState]:
+        return CurriculumState(
+            level=jnp.array(self.min_level),
+            state=EpisodeLengthCurriculumState(
+                step_counter=jnp.array(self.min_level_steps, dtype=jnp.int32),
+                ema_episode_length=jnp.array(0.0),
+            ),
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
