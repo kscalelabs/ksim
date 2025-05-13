@@ -322,7 +322,7 @@ def get_physics_engine(
         logger.warning("`max_action_latency=%f` is greater than `ctrl_dt=%f`", max_action_latency, ctrl_dt)
     if (remainder := (ctrl_dt - round(ctrl_dt / dt) * dt)) > 1e-6:
         logger.warning("`ctrl_dt=%f` is not a multiple of `dt=%f` (remainder=%f)", ctrl_dt, dt, remainder)
-    if drop_action_prob < 0 or drop_action_prob > 1:
+    if drop_action_prob < 0 or drop_action_prob >= 1:
         raise ValueError("`drop_action_prob` must be between 0 and 1")
 
     # Converts to steps.
