@@ -635,8 +635,8 @@ class JoystickReward(Reward):
     strafe_speed: float = attrs.field()
     rotation_speed: float = attrs.field()
     command_name: str = attrs.field(default="joystick_command")
-    lin_vel_penalty_scale: float = attrs.field(default=0.001)
-    ang_vel_penalty_scale: float = attrs.field(default=0.001)
+    lin_vel_penalty_scale: float = attrs.field(default=0.01)
+    ang_vel_penalty_scale: float = attrs.field(default=0.01)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
@@ -649,24 +649,19 @@ class JoystickReward(Reward):
         linvel = qvel[..., :3]
         angvel = qvel[..., 3:]
 
-        # Encourages these values to be zero.
-        xlv = jnp.abs(linvel[..., 0]) * self.lin_vel_penalty_scale
-        ylv = jnp.abs(linvel[..., 1]) * self.lin_vel_penalty_scale
-        zlv = jnp.abs(linvel[..., 2]) * self.lin_vel_penalty_scale
-        xav = jnp.abs(angvel[..., 0]) * self.ang_vel_penalty_scale
-        yav = jnp.abs(angvel[..., 1]) * self.ang_vel_penalty_scale
-        zav = jnp.abs(angvel[..., 2]) * self.ang_vel_penalty_scale
-        alv = xlv + ylv + zlv
-        aav = xav + yav + zav
+        # Penalty to discourage movement in general.
+        linvel_norm = jnp.linalg.norm(linvel) * self.lin_vel_penalty_scale
+        angvel_norm = jnp.linalg.norm(angvel) * self.ang_vel_penalty_scale
+        vel_norm = linvel_norm + angvel_norm
 
         # Computes each of the penalties.
-        stand_still_reward = -(alv + aav) / 6.0
-        walk_forward_reward = linvel[..., 0].clip(max=self.forward_speed) - (ylv + zlv + aav) / 5.0
-        walk_backward_reward = (-linvel[..., 0]).clip(max=self.backward_speed) - (ylv + zlv + aav) / 5.0
-        turn_left_reward = angvel[..., 2].clip(max=self.rotation_speed) - (alv + xlv + ylv) / 5.0
-        turn_right_reward = (-angvel[..., 2]).clip(max=self.rotation_speed) - (alv + xlv + ylv) / 5.0
-        strafe_left_reward = linvel[..., 1].clip(max=self.strafe_speed) - (xlv + zlv + aav) / 5.0
-        strafe_right_reward = (-linvel[..., 1]).clip(max=self.strafe_speed) - (xlv + zlv + aav) / 5.0
+        stand_still_reward = jnp.zeros_like(linvel[..., 0])
+        walk_forward_reward = linvel[..., 0].clip(max=self.forward_speed)
+        walk_backward_reward = (-linvel[..., 0]).clip(max=self.backward_speed)
+        turn_left_reward = angvel[..., 2].clip(max=self.rotation_speed)
+        turn_right_reward = (-angvel[..., 2]).clip(max=self.rotation_speed)
+        strafe_left_reward = linvel[..., 1].clip(max=self.strafe_speed)
+        strafe_right_reward = (-linvel[..., 1]).clip(max=self.strafe_speed)
 
         all_rewards = jnp.stack(
             [
@@ -682,6 +677,6 @@ class JoystickReward(Reward):
         )
 
         # Weights each of the rewards by the one-hot encoded command.
-        total_reward = jnp.einsum("...i,...i->...", joystick_cmd, all_rewards)
+        total_reward = jnp.einsum("...i,...i->...", joystick_cmd, all_rewards) - vel_norm
 
         return total_reward
