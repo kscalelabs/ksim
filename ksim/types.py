@@ -160,9 +160,7 @@ class JointMetadata:
         soft_torque_limit: float | None = None,
     ) -> dict[str, "JointMetadata"]:
         return {
-            model.names[model.name_jntadr[i] :]
-            .decode("utf-8")
-            .split("\x00", 1)[0]: cls(
+            model.names[model.name_jntadr[i] :].decode("utf-8").split("\x00", 1)[0]: cls(
                 kp=kp,
                 kd=kd,
                 armature=armature,
