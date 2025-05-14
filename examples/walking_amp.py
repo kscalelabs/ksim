@@ -709,7 +709,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
             return next_carry, transition_ppo_variables
 
-        next_model_carry, ppo_variables = jax.lax.scan(scan_fn, model_carry, trajectory)
+        next_model_carry, ppo_variables = xax.scan(scan_fn, model_carry, trajectory, jit_level=ksim.JitLevel.RL_CORE)
 
         return ppo_variables, next_model_carry
 

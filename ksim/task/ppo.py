@@ -18,6 +18,7 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+from ksim.debugging import JitLevel
 from ksim.task.rl import RLConfig, RLLoopCarry, RLLoopConstants, RLTask
 from ksim.types import LoggedTrajectory, RewardState, Trajectory
 
@@ -47,7 +48,7 @@ class PPOVariables:
         "normalize_advantages",
         "monte_carlo_returns",
     ],
-    jit_level=6,
+    jit_level=JitLevel.RL_CORE,
 )
 def compute_ppo_inputs(
     values_t: Array,
@@ -83,7 +84,7 @@ def compute_ppo_inputs(
             (jnp.zeros_like(rewards_t[-1]), jnp.zeros_like(deltas_t[-1])),
             (rewards_t, deltas_t, mask_t),
             reverse=True,
-            jit_level=6,
+            jit_level=JitLevel.RL_CORE,
         )
 
         # Get the value targets.
@@ -105,7 +106,7 @@ def compute_ppo_inputs(
     return inputs
 
 
-@xax.jit(static_argnames=["clip_param"], jit_level=6)
+@xax.jit(static_argnames=["clip_param"], jit_level=JitLevel.AUX_FUNCTIONS)
 def clipped_value_loss(
     target_values: Array,
     values: Array,
@@ -128,7 +129,7 @@ def clipped_value_loss(
         "log_clip_value",
         "use_clipped_value_loss",
     ],
-    jit_level=6,
+    jit_level=JitLevel.RL_CORE,
 )
 def compute_ppo_loss(
     ppo_inputs: PPOInputs,
@@ -234,7 +235,7 @@ def compute_ppo_loss(
 
         return losses
 
-    par_fn = xax.vmap(compute_loss_for_sample, in_axes=0, jit_level=6)
+    par_fn = xax.vmap(compute_loss_for_sample, in_axes=0, jit_level=JitLevel.RL_CORE)
 
     # Computes the vectorized loss.
     losses_t = par_fn(on_policy_variables, off_policy_variables, ppo_inputs)
@@ -404,7 +405,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 metrics[aux_loss_name] = aux_loss_value
         return metrics
 
-    @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
+    @xax.jit(static_argnames=["self", "model_static"], jit_level=JitLevel.RL_CORE)
     def _get_ppo_loss_and_metrics(
         self,
         model_arr: PyTree,
@@ -501,7 +502,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return loss.mean(), (metrics, logged_trajectory)
 
-    @xax.jit(static_argnames=["self", "model_static"], jit_level=3)
+    @xax.jit(static_argnames=["self", "model_static"], jit_level=JitLevel.RL_CORE)
     def _get_ppo_metrics_and_grads(
         self,
         model_arr: PyTree,
@@ -513,7 +514,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
     ) -> tuple[xax.FrozenDict[str, Array], LoggedTrajectory, PyTree]:
         loss_fn = jax.grad(self._get_ppo_loss_and_metrics, argnums=0, has_aux=True)
-        loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
+        loss_fn = xax.jit(static_argnums=[1], jit_level=JitLevel.RL_CORE)(loss_fn)
         grads, (metrics, logged_trajectory) = loss_fn(
             model_arr,
             model_static,
@@ -525,7 +526,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
         return metrics, logged_trajectory, grads
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=4)
+    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _single_step(
         self,
         trajectories: Trajectory,
@@ -595,7 +596,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # Runs the policy model on the trajectory to get the PPO variables.
         on_policy_rngs = jax.random.split(rng, self.config.num_envs)
-        ppo_fn = xax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0), jit_level=4)
+        ppo_fn = xax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0), jit_level=JitLevel.RL_CORE)
         on_policy_variables, _ = ppo_fn(policy_model, trajectories, carry.env_states.model_carry, on_policy_rngs)
         on_policy_variables = jax.tree.map(lambda x: jax.lax.stop_gradient(x), on_policy_variables)
 
@@ -647,7 +648,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 update_model_in_batch,
                 carry,
                 (indices_by_batch, jax.random.split(batch_rng, self.num_batches)),
-                jit_level=4,
+                jit_level=JitLevel.RL_CORE,
             )
 
             # Each batch saves one trajectory for logging, get the last.
@@ -660,7 +661,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             update_model_across_batches,
             carry,
             xs=jax.random.split(rng, self.config.num_passes),
-            jit_level=4,
+            jit_level=JitLevel.RL_CORE,
         )
 
         # Get the last logged trajectory accross all full dataset passes.

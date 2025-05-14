@@ -47,6 +47,7 @@ from ksim.actuators import Actuators
 from ksim.commands import Command
 from ksim.curriculum import Curriculum, CurriculumState
 from ksim.dataset import TrajectoryDataset
+from ksim.debugging import JitLevel
 from ksim.engine import (
     PhysicsEngine,
     engine_type_from_physics_model,
@@ -853,7 +854,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             "torque_limits": get_torque_limits(mj_model),
         }
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=3)
+    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def step_engine(
         self,
         constants: RolloutConstants,
@@ -1354,7 +1355,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> Trajectory:
         return trajectory
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=2)
+    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.OUTER_LOOP)
     def _single_unroll(
         self,
         constants: RolloutConstants,
@@ -1380,7 +1381,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             scan_fn,
             env_state,
             length=self.rollout_length_steps,
-            jit_level=2,
+            jit_level=JitLevel.OUTER_LOOP,
         )
 
         # Post-processes the trajectory.
@@ -1413,7 +1414,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return trajectory, reward, env_state
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=1)
+    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.OUTER_LOOP)
     def _rl_train_loop_step(
         self,
         carry: RLLoopCarry,
@@ -1428,7 +1429,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng: PRNGKeyArray,
         ) -> tuple[RLLoopCarry, tuple[Metrics, LoggedTrajectory]]:
             # Rolls out a new trajectory.
-            vmapped_unroll = xax.vmap(self._single_unroll, in_axes=(None, 0, None), jit_level=2)
+            vmapped_unroll = xax.vmap(self._single_unroll, in_axes=(None, 0, None), jit_level=JitLevel.OUTER_LOOP)
             trajectories, rewards, env_state = vmapped_unroll(
                 constants.constants,
                 carry_i.env_states,
@@ -1474,7 +1475,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return carry_i, (metrics, logged_traj)
 
         rngs = jax.random.split(rng, self.config.epochs_per_log_step)
-        carry, (metrics, logged_traj) = xax.scan(single_step_fn, carry, rngs, jit_level=1)
+        carry, (metrics, logged_traj) = xax.scan(single_step_fn, carry, rngs, jit_level=JitLevel.OUTER_LOOP)
 
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x, metrics)
@@ -1770,17 +1771,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         if isinstance(physics_model, mjx.Model):
             # Defines the vectorized initialization functions.
-            carry_fn = xax.vmap(self.get_initial_model_carry, in_axes=0, jit_level=4)
-            command_fn = xax.vmap(get_initial_commands, in_axes=(0, 0, None, 0), jit_level=4)
-            reward_carry_fn = xax.vmap(get_initial_reward_carry, in_axes=(0, None), jit_level=4)
-            obs_carry_fn = xax.vmap(get_initial_obs_carry, in_axes=(0, None), jit_level=4)
+            carry_fn = xax.vmap(self.get_initial_model_carry, in_axes=0, jit_level=JitLevel.RL_CORE)
+            command_fn = xax.vmap(get_initial_commands, in_axes=(0, 0, None, 0), jit_level=JitLevel.RL_CORE)
+            reward_carry_fn = xax.vmap(get_initial_reward_carry, in_axes=(0, None), jit_level=JitLevel.RL_CORE)
+            obs_carry_fn = xax.vmap(get_initial_obs_carry, in_axes=(0, None), jit_level=JitLevel.RL_CORE)
 
             # Gets the initial curriculum state.
-            curriculum_fn = xax.vmap(rollout_constants.curriculum.get_initial_state, in_axes=0, jit_level=4)
+            curriculum_fn = rollout_constants.curriculum.get_initial_state
+            curriculum_fn = xax.vmap(curriculum_fn, in_axes=0, jit_level=JitLevel.RL_CORE)
             curriculum_state = curriculum_fn(jax.random.split(curriculum_rng, self.config.num_envs))
 
             # Gets the per-environment randomizations.
-            randomization_fn = xax.vmap(apply_randomizations, in_axes=(None, None, None, 0, 0), jit_level=4)
+            randomization_fn = apply_randomizations
+            randomization_fn = xax.vmap(randomization_fn, in_axes=(None, None, None, 0, 0), jit_level=JitLevel.RL_CORE)
             randomization_dict, physics_state = randomization_fn(
                 physics_model,
                 rollout_constants.engine,
@@ -1905,11 +1908,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             state = self.on_training_start(state)
 
-            @xax.jit(jit_level=4)
+            @xax.jit(jit_level=JitLevel.OUTER_LOOP)
             def get_batch(
                 rollout_env_state: RolloutEnvState,
             ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
-                vmapped_unroll = xax.vmap(self._single_unroll, in_axes=(None, 0, None), jit_level=4)
+                vmapped_unroll = xax.vmap(self._single_unroll, in_axes=(None, 0, None), jit_level=JitLevel.OUTER_LOOP)
                 return vmapped_unroll(rollout_constants, rollout_env_state, rollout_shared_state)
 
             with TrajectoryDataset.writer(save_path, num_batches * self.batch_size) as writer:
