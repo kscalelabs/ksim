@@ -268,7 +268,7 @@ class PPOConfig(RLConfig):
         help="Entropy coefficient for PPO: high = more exploration.",
     )
     kl_coef: float = xax.field(
-        value=0.0,
+        value=1e-3,
         help="KL divergence coefficient for PPO, to discourage large changes in the policy.",
     )
     log_clip_value: float = xax.field(
