@@ -138,7 +138,7 @@ def compute_ppo_loss(
     kl_coef: float = 0.0,
     log_clip_value: float = 10.0,
     use_clipped_value_loss: bool = True,
-) -> Array:
+) -> tuple[Array, Array, Array]:
     """Compute PPO loss.
 
     Args:
@@ -155,7 +155,8 @@ def compute_ppo_loss(
         use_clipped_value_loss: Whether to use clipped value loss.
 
     Returns:
-        The PPO loss, with shape (T,).
+        A tuple of the policy loss, value loss, and auxiliary loss, each
+        with shape (T,).
     """
     chex.assert_equal_shape_prefix(
         [
@@ -186,7 +187,7 @@ def compute_ppo_loss(
         off_policy_variables: PPOVariables,
         ppo_inputs: PPOInputs,
         dones: Array,
-    ) -> Array:
+    ) -> tuple[Array, Array, Array]:
         # Preventing underflow / overflow in calculating the ratio.
         log_ratio = jnp.sum(off_policy_variables.log_probs - on_policy_variables.log_probs, axis=-1)
         ratio = jnp.exp(jnp.clip(log_ratio, -log_clip_value, log_clip_value))
@@ -211,29 +212,30 @@ def compute_ppo_loss(
         kl_div = (on_policy_variables.log_probs - off_policy_variables.log_probs).sum(axis=-1)
         kl_loss = -kl_div * kl_coef
 
-        total_loss = policy_loss + value_loss + kl_loss
+        aux_loss = kl_loss
 
         # Maximize the entropy of the policy, to encourage exploration.
         if off_policy_variables.entropy is not None:
             entropy_loss = -off_policy_variables.entropy.sum(axis=-1) * entropy_coef
-            total_loss = total_loss + entropy_loss
+            aux_loss = aux_loss + entropy_loss
 
         # Adds any additional auxiliary losses.
         if off_policy_variables.aux_losses is not None:
             for aux_loss_term in off_policy_variables.aux_losses.values():
-                total_loss = total_loss + aux_loss_term.sum()
+                aux_loss = aux_loss + aux_loss_term.sum()
 
         # Zero out the loss for terminated trajectories.
-        total_loss = jnp.where(dones, 0.0, total_loss)
+        losses = policy_loss, value_loss, aux_loss
+        losses = jax.tree.map(lambda x: jnp.where(dones, 0.0, x), losses)
 
-        return total_loss
+        return losses
 
     par_fn = jax.vmap(compute_loss_for_sample, in_axes=0)
 
     # Computes the vectorized loss.
-    total_loss_t = par_fn(on_policy_variables, off_policy_variables, ppo_inputs, dones_t)
+    losses_t = par_fn(on_policy_variables, off_policy_variables, ppo_inputs, dones_t)
 
-    return total_loss_t
+    return losses_t
 
 
 @jax.tree_util.register_dataclass
@@ -316,7 +318,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
     def get_ppo_metrics(
         self,
-        loss_t: Array,
+        policy_loss_t: Array,
+        value_loss_t: Array,
+        aux_loss_t: Array,
         ppo_inputs: PPOInputs,
         on_policy_variables: PPOVariables,
         off_policy_variables: PPOVariables,
@@ -328,9 +332,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         format and will be logged as a distribution.
 
         Args:
-            trajectories: The batch of trajectories to get metrics for.
-            rewards: The rewards for the trajectories.
-            loss_t: The PPO loss value.
+            policy_loss_t: The policy loss value.
+            value_loss_t: The value loss value.
+            aux_loss_t: The auxiliary loss value.
             ppo_inputs: The PPO inputs.
             on_policy_variables: The variables for the original policy.
             off_policy_variables: The variables for the new policy.
@@ -339,7 +343,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A dictionary of metrics to be logged.
         """
         metrics = {
-            "loss": loss_t.mean(),
+            "policy_loss": policy_loss_t.mean(),
+            "value_loss": value_loss_t.mean(),
+            "aux_loss": aux_loss_t.mean(),
             "on_policy_log_probs": on_policy_variables.log_probs.mean(0).flatten(),
             "off_policy_log_probs": off_policy_variables.log_probs.mean(0).flatten(),
             "on_policy_values": on_policy_variables.values.mean(0).flatten(),
@@ -356,8 +362,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
     def _get_logged_trajectory_metrics(
         self,
+        policy_loss_t: Array,
+        value_loss_t: Array,
+        aux_loss_t: Array,
         ppo_inputs: PPOInputs,
-        loss_t: Array,
         on_policy_variables: PPOVariables,
         off_policy_variables: PPOVariables,
     ) -> dict[str, Array]:
@@ -368,10 +376,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         format and will be logged as a distribution.
 
         Args:
-            trajectories: The batch of trajectories to get metrics for.
-            rewards: The rewards for the trajectories.
+            policy_loss_t: The policy loss value.
+            value_loss_t: The value loss value.
+            aux_loss_t: The auxiliary loss value.
             ppo_inputs: The PPO inputs.
-            loss_t: The PPO loss value.
             on_policy_variables: The variables for the original policy.
             off_policy_variables: The variables for the new policy.
 
@@ -383,7 +391,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "values": off_policy_variables.values,
             "value_targets": ppo_inputs.value_targets_t,
             "advantages": ppo_inputs.advantages_t,
-            "loss": loss_t,
+            "policy_loss": policy_loss_t,
+            "value_loss": value_loss_t,
+            "aux_loss": aux_loss_t,
             "gae": ppo_inputs.gae_t,
             "returns": ppo_inputs.returns_t,
         }
@@ -442,7 +452,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 monte_carlo_returns=self.config.monte_carlo_returns,
             )
 
-            loss_t = compute_ppo_loss(
+            policy_loss_t, value_loss_t, aux_loss_t = compute_ppo_loss(
                 ppo_inputs=ppo_inputs,
                 on_policy_variables=on_policy_variables,
                 off_policy_variables=off_policy_variables,
@@ -456,14 +466,18 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             )
 
             metrics = self.get_ppo_metrics(
-                loss_t=loss_t,
+                policy_loss_t=policy_loss_t,
+                value_loss_t=value_loss_t,
+                aux_loss_t=aux_loss_t,
                 ppo_inputs=ppo_inputs,
                 on_policy_variables=on_policy_variables,
                 off_policy_variables=off_policy_variables,
             )
 
             logged_traj_metrics = self._get_logged_trajectory_metrics(
-                loss_t=loss_t,
+                policy_loss_t=policy_loss_t,
+                value_loss_t=value_loss_t,
+                aux_loss_t=aux_loss_t,
                 ppo_inputs=ppo_inputs,
                 on_policy_variables=on_policy_variables,
                 off_policy_variables=off_policy_variables,
@@ -477,6 +491,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
             # Mean over all non-masked trajectories.
             num_valid = jnp.sum(~trajectory.done)
+            loss_t = policy_loss_t + value_loss_t + aux_loss_t
             loss = loss_t.sum() / (num_valid + 1e-6)
 
             return loss, xax.FrozenDict(metrics), logged_trajectory
