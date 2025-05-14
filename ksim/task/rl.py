@@ -6,7 +6,6 @@ __all__ = [
     "RolloutConstants",
     "RolloutSharedState",
     "RolloutEnvState",
-    "JointMetadataOutput",
 ]
 
 import bdb
@@ -14,7 +13,6 @@ import datetime
 import functools
 import io
 import itertools
-import json
 import logging
 import signal
 import sys
@@ -41,7 +39,6 @@ import tqdm
 import xax
 from dpshdl.dataset import Dataset
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from kscale.web.gen.api import JointMetadataOutput, RobotURDFMetadataOutput
 from mujoco import mjx
 from omegaconf import MISSING
 from PIL import Image, ImageDraw
@@ -65,6 +62,7 @@ from ksim.types import (
     Action,
     Histogram,
     LoggedTrajectory,
+    Metadata,
     Metrics,
     PhysicsData,
     PhysicsModel,
@@ -74,7 +72,6 @@ from ksim.types import (
 )
 from ksim.utils.mujoco import (
     get_joint_names_in_order,
-    get_metadata,
     get_position_limits,
     get_torque_limits,
     load_model,
@@ -676,8 +673,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return mj_model
 
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> RobotURDFMetadataOutput:
-        return get_metadata(mj_model)
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> Metadata:
+        return Metadata.from_model(mj_model)
 
     def get_mjx_model(self, mj_model: mujoco.MjModel) -> mjx.Model:
         """Convert a mujoco model to an mjx model.
@@ -693,7 +690,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_engine(
         self,
         physics_model: PhysicsModel,
-        metadata: RobotURDFMetadataOutput | None = None,
+        metadata: Metadata | None = None,
     ) -> PhysicsEngine:
         return get_physics_engine(
             engine_type=engine_type_from_physics_model(physics_model),
@@ -740,7 +737,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_actuators(
         self,
         physics_model: PhysicsModel,
-        metadata: RobotURDFMetadataOutput | None = None,
+        metadata: Metadata | None = None,
     ) -> Actuators: ...
 
     @abstractmethod
@@ -1720,8 +1717,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             raise ValueError("No models found")
 
         metadata = self.get_mujoco_model_metadata(mj_model)
-        metadata_str = json.dumps(metadata.model_dump(), indent=2, sort_keys=True)
-        self.logger.log_file("mujoco_metadata.json", metadata_str)
         engine = self.get_engine(physics_model, metadata)
         observations = self.get_observations(physics_model)
         commands = self.get_commands(physics_model)

@@ -16,9 +16,8 @@ import chex
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from kscale.web.gen.api import RobotURDFMetadataOutput
 
-from ksim.types import PhysicsData, PhysicsModel
+from ksim.types import Metadata, PhysicsData, PhysicsModel
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
 logger = logging.getLogger(__name__)
@@ -89,7 +88,7 @@ class PositionActuators(Actuators):
     def __init__(
         self,
         physics_model: PhysicsModel,
-        metadata: RobotURDFMetadataOutput,
+        metadata: Metadata,
         action_noise: float = 0.0,
         action_noise_type: NoiseType = "none",
         torque_noise: float = 0.0,
@@ -113,15 +112,12 @@ class PositionActuators(Actuators):
                 continue
             actuator_idx = ctrl_name_to_idx[actuator_name]
 
-            kp_str = params.kp
-            kd_str = params.kd
-            ctrl_clip_str = params.soft_torque_limit
-            assert kp_str is not None and kd_str is not None, f"Missing kp or kd for joint {joint_name}"
-            kp = float(kp_str)
-            kd = float(kd_str)
+            kp = params.kp
+            kd = params.kd
+            ctrl_clip = params.soft_torque_limit
+            assert kp is not None and kd is not None, f"Missing kp or kd for joint {joint_name}"
 
-            if ctrl_clip_str is not None:
-                ctrl_clip = float(ctrl_clip_str)
+            if ctrl_clip is not None:
                 if ctrl_clip < 0:
                     raise ValueError(f"Soft torque limit for joint {joint_name} is negative: {ctrl_clip}")
                 ctrl_clip_list[actuator_idx] = ctrl_clip
@@ -176,7 +172,7 @@ class PositionVelocityActuator(PositionActuators):
     def __init__(
         self,
         physics_model: PhysicsModel,
-        metadata: RobotURDFMetadataOutput,
+        metadata: Metadata,
         pos_action_noise: float = 0.0,
         pos_action_noise_type: NoiseType = "none",
         vel_action_noise: float = 0.0,

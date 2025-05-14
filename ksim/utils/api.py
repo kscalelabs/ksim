@@ -15,6 +15,8 @@ from kscale import K
 from kscale.web.gen.api import RobotURDFMetadataOutput
 from kscale.web.utils import get_robots_dir, should_refresh_file
 
+from ksim.types import Metadata
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,7 +43,7 @@ async def get_mujoco_model_path(model_name: str, cache: bool = True, name: str |
     return mjcf_path
 
 
-async def get_mujoco_model_metadata(model_name: str, cache: bool = True) -> RobotURDFMetadataOutput:
+async def get_mujoco_model_metadata(model_name: str, cache: bool = True) -> Metadata:
     """Downloads and caches the model metadata."""
     try:
         directory = Path(model_name)
@@ -66,13 +68,13 @@ async def get_mujoco_model_metadata(model_name: str, cache: bool = True) -> Robo
     with open(metadata_path, "r") as f:
         metadata = RobotURDFMetadataOutput.model_validate_json(f.read())
 
-    return metadata
+    return Metadata.from_kscale_metadata(metadata)
 
 
 async def get_mujoco_model_and_metadata(
     model_name: str,
     cache: bool = True,
-) -> tuple[str, RobotURDFMetadataOutput]:
+) -> tuple[str, Metadata]:
     """Downloads and caches the model URDF and metadata."""
     urdf_path, metadata = await asyncio.gather(
         get_mujoco_model_path(

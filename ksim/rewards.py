@@ -43,7 +43,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
-from ksim.utils.types import (
+from ksim.utils.validators import (
     CartesianIndex,
     cartesian_index_to_dim,
     dimension_index_tuple_validator,
