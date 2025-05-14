@@ -135,12 +135,12 @@ def compute_ppo_loss(
     off_policy_variables: PPOVariables,
     dones_t: Array,
     *,
-    clip_param: float = 0.2,
-    value_loss_coef: float = 0.5,
-    entropy_coef: float = 0.008,
-    kl_coef: float = 0.0,
-    log_clip_value: float = 10.0,
-    use_clipped_value_loss: bool = True,
+    clip_param: float,
+    value_loss_coef: float,
+    entropy_coef: float,
+    kl_coef: float,
+    log_clip_value: float,
+    use_clipped_value_loss: bool,
 ) -> tuple[Array, Array, Array]:
     """Compute PPO loss.
 
