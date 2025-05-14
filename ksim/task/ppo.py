@@ -513,7 +513,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[xax.FrozenDict[str, Array], LoggedTrajectory, PyTree]:
-        loss_fn = jax.grad(self._get_ppo_loss_and_metrics, argnums=0, has_aux=True)
+        loss_fn = xax.grad(self._get_ppo_loss_and_metrics, argnums=0, has_aux=True, jit_level=JitLevel.RL_CORE)
         loss_fn = xax.jit(static_argnums=[1], jit_level=JitLevel.RL_CORE)(loss_fn)
         grads, (metrics, logged_trajectory) = loss_fn(
             model_arr,
