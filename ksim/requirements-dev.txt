@@ -1,7 +1,5 @@
 # requirements-dev.txt
 
-black
-darglint
 mypy
 pytest
 ruff

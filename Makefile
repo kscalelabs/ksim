@@ -1,9 +1,6 @@
 # Makefile
 
 format:
-	@echo "=== Running Black ==="
-	@black ksim tests examples
-	@echo ""
 	@echo "=== Running Ruff Formatting ==="
 	@ruff format ksim tests examples
 	@echo ""
@@ -12,9 +9,6 @@ format:
 .PHONY: format
 
 static-checks:
-	@echo "=== Running Black ==="
-	@black --diff --check ksim tests examples
-	@echo ""
 	@echo "=== Running Ruff Checks ==="
 	@ruff check ksim tests examples
 	@echo ""
