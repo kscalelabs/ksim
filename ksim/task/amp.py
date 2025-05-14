@@ -71,7 +71,7 @@ class AMPReward(Reward):
     """Reward based on discriminator output for AMP training."""
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        if trajectory.aux_outputs is None or DISCRIMINATOR_OUTPUT_KEY not in trajectory.aux_outputs:
+        if DISCRIMINATOR_OUTPUT_KEY not in trajectory.aux_outputs:
             raise ValueError(
                 "AMPReward auxiliary output is missing! Make sure you are using it within the context of an AMP task, "
                 "which populates the auxiliary output for you."
