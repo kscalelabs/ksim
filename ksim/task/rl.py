@@ -1473,7 +1473,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return carry_i, (metrics, logged_traj)
 
         rngs = jax.random.split(rng, self.config.epochs_per_log_step)
-        carry, (metrics, logged_traj) = jax.lax.scan(single_step_fn, carry, rngs)
+        carry, (metrics, logged_traj) = xax.scan(single_step_fn, carry, rngs, jit_level=1)
 
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x, metrics)

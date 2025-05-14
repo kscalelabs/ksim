@@ -78,11 +78,12 @@ def compute_ppo_inputs(
 
         # Compute returns and GAE.
         deltas_t = rewards_t + decay_gamma * values_shifted_t * mask_t - values_t
-        _, (returns_t, gae_t) = jax.lax.scan(
+        _, (returns_t, gae_t) = xax.scan(
             returns_and_gae_scan_fn,
             (jnp.zeros_like(rewards_t[-1]), jnp.zeros_like(deltas_t[-1])),
             (rewards_t, deltas_t, mask_t),
             reverse=True,
+            jit_level=6,
         )
 
         # Get the value targets.
@@ -643,10 +644,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             indices = jax.random.permutation(shuffle_rng, indices, independent=False)
             indices_by_batch = indices.reshape(self.num_batches, self.batch_size)  # (num_batches, rollouts per batch)
 
-            carry, (metrics, trajs_for_logging) = jax.lax.scan(
+            carry, (metrics, trajs_for_logging) = xax.scan(
                 update_model_in_batch,
                 carry,
                 (indices_by_batch, jax.random.split(batch_rng, self.num_batches)),
+                jit_level=4,
             )
 
             # Each batch saves one trajectory for logging, get the last.
@@ -655,10 +657,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             return carry, (metrics, traj_for_logging)
 
         # Applies gradient update across all batches num_passes times.
-        carry, (metrics, trajs_for_logging) = jax.lax.scan(
+        carry, (metrics, trajs_for_logging) = xax.scan(
             update_model_across_batches,
             carry,
             xs=jax.random.split(rng, self.config.num_passes),
+            jit_level=4,
         )
 
         # Get the last logged trajectory accross all full dataset passes.
