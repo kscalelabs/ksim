@@ -257,8 +257,6 @@ def log_joint_config_table(
     # The \n is to make the table headers take up less horizontal space.
     headers = [
         "Joint Name",
-        "NN\nID",
-        "KOS\nID",
         "Type",
         "Kp",
         "Kd",

@@ -1,19 +1,4 @@
-<!-- Copyright 2021 DeepMind Technologies Limited
-
-     Licensed under the Apache License, Version 2.0 (the "License");
-     you may not use this file except in compliance with the License.
-     You may obtain a copy of the License at
-
-         http://www.apache.org/licenses/LICENSE-2.0
-
-     Unless required by applicable law or agreed to in writing, software
-     distributed under the License is distributed on an "AS IS" BASIS,
-     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-     See the License for the specific language governing permissions and
-     limitations under the License.
--->
-
-<mujoco model="Humanoid">
+<mujoco model="humanoid">
   <asset>
     <texture name="body" type="cube" builtin="flat" mark="cross" width="512" height="512" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" markrgb="1 1 1" random="0.01"/>
     <material name="body" texture="body" texuniform="true" rgba="0.8 0.6 .4 1"/>
@@ -21,12 +6,17 @@
     <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance=".2"/>
   </asset>
 
+  <custom>
+    <numeric data="8" name="max_contact_points"/>
+    <numeric data="8" name="max_geom_pairs"/>
+  </custom>
+
   <default>
     <motor ctrlrange="-1 1" ctrllimited="true"/>
     <default class="body">
 
       <!-- geoms -->
-      <geom type="capsule" condim="3" friction=".7" solimp="0.9 0.95 0.001" solref="0.002 1" material="body" contype="0" conaffinity="0"/>
+      <geom type="capsule" condim="1" friction=".7" solimp=".9 .99 .003" solref=".015 1" material="body" contype="0" conaffinity="0"/>
       <default class="thigh">
         <geom size=".06"/>
       </default>
@@ -35,11 +25,8 @@
       </default>
       <default class="foot">
         <geom size=".027"/>
-        <default class="foot1">
-          <geom fromto="-.07 -.01 0 .14 -.03 0"/>
-        </default>
-        <default class="foot2">
-          <geom fromto="-.07 .01 0 .14  .03 0"/>
+        <default class="foot_ball">
+          <geom type="sphere" size="0.05" pos="0 0 0"/>
         </default>
       </default>
       <default class="arm_upper">
@@ -91,7 +78,7 @@
   </default>
 
   <worldbody>
-    <geom name="floor" size="0 0 .05" type="plane" material="grid" condim="3"/>
+    <geom name="floor" size="0 0 .05" type="plane" material="grid" condim="1"/>
     <light name="spotlight" mode="targetbodycom" target="torso" diffuse=".8 .8 .8" specular="0.3 0.3 0.3" pos="0 -6 4" cutoff="30"/>
     <body name="torso" pos="0 0 1.4" childclass="body">
       <light name="top" pos="0 0 2" mode="trackcom"/>
@@ -119,11 +106,11 @@
             <body name="shin_right" pos="0 .01 -.4">
               <joint name="knee_right" class="knee"/>
               <geom name="shin_right" class="shin"/>
-              <body name="foot_right" pos="0 0 -.39">
+              <body name="foot_right" pos="0.05 0.02 -.39">
+                <site name="right_foot" />
                 <joint name="ankle_y_right" class="ankle_y"/>
                 <joint name="ankle_x_right" class="ankle_x" axis="1 0 .5"/>
-                <geom name="foot1_right" class="foot1"/>
-                <geom name="foot2_right" class="foot2"/>
+                <geom name="foot_right" type="sphere" size="0.05" pos="0 0 0"/>
               </body>
             </body>
           </body>
@@ -135,11 +122,11 @@
             <body name="shin_left" pos="0 -.01 -.4">
               <joint name="knee_left" class="knee"/>
               <geom name="shin_left" fromto="0 0 0 0 0 -.3" class="shin"/>
-              <body name="foot_left" pos="0 0 -.39">
+              <body name="foot_left" pos="0.05 -0.02 -.39">
+                <site name="left_foot" />
                 <joint name="ankle_y_left" class="ankle_y"/>
                 <joint name="ankle_x_left" class="ankle_x" axis="-1 0 -.5"/>
-                <geom name="foot1_left" class="foot1"/>
-                <geom name="foot2_left" class="foot2"/>
+                <geom name="foot_left" type="sphere" size="0.05" pos="0 0 0"/>
               </body>
             </body>
           </body>
@@ -169,17 +156,15 @@
           </body>
         </body>
       </body>
-      <site name="imu_site" />
+      <site name="imu" />
     </body>
   </worldbody>
 
   <contact>
     <exclude body1="waist_lower" body2="thigh_right"/>
     <exclude body1="waist_lower" body2="thigh_left"/>
-    <pair geom1="foot1_left" geom2="floor"/>
-    <pair geom1="foot1_right" geom2="floor"/>
-    <pair geom1="foot2_left" geom2="floor"/>
-    <pair geom1="foot2_right" geom2="floor"/>
+    <pair geom1="foot_left" geom2="floor"/>
+    <pair geom1="foot_right" geom2="floor"/>
   </contact>
 
   <actuator>
@@ -207,15 +192,23 @@
   </actuator>
 
   <sensor>
-    <accelerometer name="imu_acc" site="imu_site" noise="0.01" />
-    <gyro name="imu_gyro" site="imu_site" noise="0.01" />
-    <magnetometer name="imu_mag" site="imu_site" noise="0.05" />
-    <framepos name="base_link_pos" objtype="site" objname="imu_site" />
-    <framequat name="base_link_quat" objtype="site" objname="imu_site" />
-    <framelinvel name="base_link_vel" objtype="site" objname="imu_site" />
-    <frameangvel name="base_link_ang_vel" objtype="site" objname="imu_site" />
+    <gyro site="imu" name="imu_gyro"/>
+    <velocimeter site="imu" name="local_linvel"/>
+    <accelerometer site="imu" name="imu_acc"/>
+    <framezaxis objtype="site" objname="imu" name="upvector"/>
+    <framexaxis objtype="site" objname="imu" name="forwardvector"/>
+    <framelinvel objtype="site" objname="imu" name="global_linvel"/>
+    <frameangvel objtype="site" objname="imu" name="global_angvel"/>
+    <framepos objtype="site" objname="imu" name="position"/>
+    <framequat objtype="site" objname="imu" name="orientation"/>
+    <framelinvel objtype="site" objname="right_foot" name="right_foot_global_linvel"/>
+    <framelinvel objtype="site" objname="left_foot" name="left_foot_global_linvel"/>
+    <framexaxis objtype="site" objname="left_foot" name="left_foot_upvector"/>
+    <framexaxis objtype="site" objname="right_foot" name="right_foot_upvector"/>
+    <framepos objtype="site" objname="left_foot" name="left_foot_pos"/>
+    <framepos objtype="site" objname="right_foot" name="right_foot_pos"/>
   </sensor>
-  
+
   <keyframe>
     <key name="boxer" qpos='0 0 1.4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'/>
     <key name="relaxed" qpos='0 0 1.4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.71797 -0.52222 -1.54867 0.71797 -0.52222 -1.54867'/>

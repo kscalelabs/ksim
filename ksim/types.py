@@ -230,7 +230,14 @@ class Metadata:
         soft_torque_limit: float | None = None,
     ) -> "Metadata":
         return cls(
-            joint_name_to_metadata=JointMetadata.from_model(model),
+            joint_name_to_metadata=JointMetadata.from_model(
+                model,
+                kp=kp,
+                kd=kd,
+                armature=armature,
+                friction=friction,
+                soft_torque_limit=soft_torque_limit,
+            ),
             actuator_type_to_metadata=ActuatorMetadata.from_model(model),
             control_frequency=None,
         )

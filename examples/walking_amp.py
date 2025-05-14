@@ -483,8 +483,8 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_pos"),
             ksim.FeetContactObservation.create(
                 physics_model=physics_model,
-                foot_left_geom_names=["foot1_left", "foot2_left"],
-                foot_right_geom_names=["foot1_right", "foot2_right"],
+                foot_left_geom_names=["foot_left"],
+                foot_right_geom_names=["foot_right"],
                 floor_geom_names=["floor"],
             ),
             ksim.FeetPositionObservation.create(
