@@ -189,10 +189,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=1e-3,
         help="Learning rate for PPO.",
     )
-    max_grad_norm: float = xax.field(
-        value=2.0,
-        help="Maximum gradient norm for clipping.",
-    )
     adam_weight_decay: float = xax.field(
         value=0.0,
         help="Weight decay for the Adam optimizer.",
@@ -228,16 +224,11 @@ Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 
 class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            (
-                optax.adam(self.config.learning_rate)
-                if self.config.adam_weight_decay == 0.0
-                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
-            ),
+        return (
+            optax.adam(self.config.learning_rate)
+            if self.config.adam_weight_decay == 0.0
+            else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
         )
-
-        return optimizer
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
@@ -533,6 +524,7 @@ if __name__ == "__main__":
             num_passes=2,
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
+            global_grad_clip=2.0,
             # Logging parameters.
             valid_first_n_steps=1,
             render_full_every_n_steps=1,
