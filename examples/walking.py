@@ -345,14 +345,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.StartQuaternionCommand(),
             ksim.JoystickCommand(),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             ksim.StayAliveReward(scale=1.0),
-            ksim.UprightReward(scale=1.0),
             ksim.JoystickReward(
                 forward_speed=self.config.target_linear_velocity,
                 backward_speed=self.config.target_linear_velocity / 2.0,
@@ -365,8 +363,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
-            ksim.NotUprightTermination(max_radians=math.radians(30)),
-            ksim.HighVelocityTermination(),
             ksim.FarFromOriginTermination(max_dist=10.0),
         ]
 
