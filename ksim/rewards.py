@@ -215,8 +215,18 @@ class LinearVelocityPenalty(LinearVelocityReward): ...
 
 
 @attrs.define(frozen=True, kw_only=True)
-class NaiveForwardReward(LinearVelocityReward):
-    index: tuple[CartesianIndex, ...] = attrs.field(default=("x",), validator=dimension_index_tuple_validator)
+class NaiveForwardReward(Reward):
+    clip_min: float | None = attrs.field(default=None)
+    clip_max: float | None = attrs.field(default=None)
+    in_robot_frame: bool = attrs.field(default=True)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        linvel = trajectory.qvel[..., :3]
+        if self.in_robot_frame:
+            # Same as reading from a velocimeter attached to base.
+            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
+        dimvel = linvel[..., 0].clip(self.clip_min, self.clip_max)
+        return dimvel
 
 
 @attrs.define(frozen=True, kw_only=True)
