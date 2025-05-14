@@ -234,7 +234,7 @@ def compute_ppo_loss(
 
         return losses
 
-    par_fn = jax.vmap(compute_loss_for_sample, in_axes=0)
+    par_fn = xax.vmap(compute_loss_for_sample, in_axes=0, jit_level=6)
 
     # Computes the vectorized loss.
     losses_t = par_fn(on_policy_variables, off_policy_variables, ppo_inputs)
@@ -595,9 +595,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # Runs the policy model on the trajectory to get the PPO variables.
         on_policy_rngs = jax.random.split(rng, self.config.num_envs)
-        on_policy_variables, _ = jax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0))(
-            policy_model, trajectories, carry.env_states.model_carry, on_policy_rngs
-        )  # (num_envs, num_steps, ppo_vars)
+        ppo_fn = xax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0), jit_level=4)
+        on_policy_variables, _ = ppo_fn(policy_model, trajectories, carry.env_states.model_carry, on_policy_rngs)
         on_policy_variables = jax.tree.map(lambda x: jax.lax.stop_gradient(x), on_policy_variables)
 
         # Loops over the trajectory batches and applies gradient updates.
@@ -680,9 +679,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             # previous rollout's model carry will be incorrect. This does perform
             # some additional computation, but the impact is small.
             off_policy_rngs = jax.random.split(rng, self.config.num_envs)
-            _, next_model_carrys = jax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0))(
-                policy_model, trajectories, carry.env_states.model_carry, off_policy_rngs
-            )
+            _, next_model_carrys = ppo_fn(policy_model, trajectories, carry.env_states.model_carry, off_policy_rngs)
 
             carry = replace(
                 carry,

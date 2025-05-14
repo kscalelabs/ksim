@@ -132,14 +132,14 @@ class MjxEngine(PhysicsEngine):
             .astype(int),
         )
 
-    @xax.jit(static_argnames=["self"])
+    @xax.jit(static_argnames=["self"], jit_level=11)
     def _physics_step(self, physics_model: mjx.Model, data_with_ctrl: mjx.Data) -> mjx.Data:
         # Just performs the MJX step, but wraps it in it's own JIT which can be
         # cached to prevent heavy recompilation every time the rewards or
         # events change.
         return mjx.step(physics_model, data_with_ctrl)
 
-    @xax.jit(static_argnames=["self"])
+    @xax.jit(static_argnames=["self"], jit_level=8)
     def step(
         self,
         action: Array,
@@ -194,10 +194,11 @@ class MjxEngine(PhysicsEngine):
             return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state), None
 
         # Runs the model for N steps.
-        (mjx_data, *_, event_info, actuator_state_final), _ = jax.lax.scan(
+        (mjx_data, *_, event_info, actuator_state_final), _ = xax.scan(
             move_physics,
             (mjx_data, jnp.array(0.0), physics_state.event_states, physics_state.actuator_state),
             jax.random.split(rng, phys_steps_per_ctrl_steps),
+            jit_level=8,
         )
 
         return PhysicsState(

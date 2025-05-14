@@ -1380,6 +1380,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             scan_fn,
             env_state,
             length=self.rollout_length_steps,
+            jit_level=2,
         )
 
         # Post-processes the trajectory.
@@ -1427,7 +1428,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng: PRNGKeyArray,
         ) -> tuple[RLLoopCarry, tuple[Metrics, LoggedTrajectory]]:
             # Rolls out a new trajectory.
-            vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(None, 0, None))
+            vmapped_unroll = xax.vmap(self._single_unroll, in_axes=(None, 0, None), jit_level=2)
             trajectories, rewards, env_state = vmapped_unroll(
                 constants.constants,
                 carry_i.env_states,
@@ -1767,22 +1768,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> RolloutEnvState:
         rng, carry_rng, command_rng, rand_rng, rollout_rng, curriculum_rng, reward_rng = jax.random.split(rng, 7)
 
-        # Vectorize across N environments for MJX models, use single model for Mujoco.
-        # TODO (for a later refactor): just one code path and vmap on the outside.
         if isinstance(physics_model, mjx.Model):
             # Defines the vectorized initialization functions.
-            carry_fn = jax.vmap(self.get_initial_model_carry, in_axes=0)
-            command_fn = jax.vmap(get_initial_commands, in_axes=(0, 0, None, 0))
-            reward_carry_fn = jax.vmap(get_initial_reward_carry, in_axes=(0, None))
-            obs_carry_fn = jax.vmap(get_initial_obs_carry, in_axes=(0, None))
+            carry_fn = xax.vmap(self.get_initial_model_carry, in_axes=0, jit_level=4)
+            command_fn = xax.vmap(get_initial_commands, in_axes=(0, 0, None, 0), jit_level=4)
+            reward_carry_fn = xax.vmap(get_initial_reward_carry, in_axes=(0, None), jit_level=4)
+            obs_carry_fn = xax.vmap(get_initial_obs_carry, in_axes=(0, None), jit_level=4)
 
             # Gets the initial curriculum state.
-            curriculum_state = jax.vmap(rollout_constants.curriculum.get_initial_state, in_axes=0)(
-                jax.random.split(curriculum_rng, self.config.num_envs)
-            )
+            curriculum_fn = xax.vmap(rollout_constants.curriculum.get_initial_state, in_axes=0, jit_level=4)
+            curriculum_state = curriculum_fn(jax.random.split(curriculum_rng, self.config.num_envs))
 
             # Gets the per-environment randomizations.
-            randomization_fn = jax.vmap(apply_randomizations, in_axes=(None, None, None, 0, 0))
+            randomization_fn = xax.vmap(apply_randomizations, in_axes=(None, None, None, 0, 0), jit_level=4)
             randomization_dict, physics_state = randomization_fn(
                 physics_model,
                 rollout_constants.engine,
@@ -1907,11 +1905,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             state = self.on_training_start(state)
 
-            @xax.jit()
+            @xax.jit(jit_level=4)
             def get_batch(
                 rollout_env_state: RolloutEnvState,
             ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
-                vmapped_unroll = jax.vmap(self._single_unroll, in_axes=(None, 0, None))
+                vmapped_unroll = xax.vmap(self._single_unroll, in_axes=(None, 0, None), jit_level=4)
                 return vmapped_unroll(rollout_constants, rollout_env_state, rollout_shared_state)
 
             with TrajectoryDataset.writer(save_path, num_batches * self.batch_size) as writer:
