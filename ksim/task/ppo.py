@@ -210,7 +210,7 @@ def compute_ppo_loss(
 
         # Minimize the KL divergence between the two policies, to discourage large changes.
         kl_div = (on_policy_variables.log_probs - off_policy_variables.log_probs).sum(axis=-1)
-        kl_loss = -kl_div * kl_coef
+        kl_loss = kl_div * kl_coef
 
         aux_loss = kl_loss
 
