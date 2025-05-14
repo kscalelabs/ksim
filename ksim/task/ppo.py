@@ -513,8 +513,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[xax.FrozenDict[str, Array], LoggedTrajectory, PyTree]:
-        loss_fn = xax.grad(self._get_ppo_loss_and_metrics, argnums=0, has_aux=True, jit_level=JitLevel.RL_CORE)
-        loss_fn = xax.jit(static_argnums=[1], jit_level=JitLevel.RL_CORE)(loss_fn)
+        loss_fn = xax.grad(
+            self._get_ppo_loss_and_metrics,
+            argnums=0,
+            has_aux=True,
+            jit_level=JitLevel.RL_CORE,
+        )
         grads, (metrics, logged_trajectory) = loss_fn(
             model_arr,
             model_static,
@@ -680,7 +684,12 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             # previous rollout's model carry will be incorrect. This does perform
             # some additional computation, but the impact is small.
             off_policy_rngs = jax.random.split(rng, self.config.num_envs)
-            _, next_model_carrys = ppo_fn(policy_model, trajectories, carry.env_states.model_carry, off_policy_rngs)
+            _, next_model_carrys = ppo_fn(
+                policy_model,
+                trajectories,
+                carry.env_states.model_carry,
+                off_policy_rngs,
+            )
 
             carry = replace(
                 carry,
