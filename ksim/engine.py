@@ -158,10 +158,10 @@ class MjxEngine(PhysicsEngine):
         action = jnp.where(drop_action, prev_action, action)
 
         def move_physics(
-            _: int,
-            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree, PRNGKeyArray],
-        ) -> tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree, PRNGKeyArray]:
-            data, step_num, event_states, actuator_state, rng = carry
+            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree],
+            rng: PRNGKeyArray,
+        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree], None]:
+            data, step_num, event_states, actuator_state = carry
 
             # Randomly apply the action with some latency.
             ctrl = jax.lax.select(step_num >= physics_state.action_latency, action, prev_action)
@@ -179,28 +179,25 @@ class MjxEngine(PhysicsEngine):
                 )
                 new_event_states[event.event_name] = new_event_state
 
-            rng, ctrl_rng = jax.random.split(rng)
-
             if isinstance(self.actuators, StatefulActuators):
                 torques, actuator_state = self.actuators.get_stateful_ctrl(
                     action=ctrl,
                     physics_data=data,
                     actuator_state=actuator_state,
-                    rng=ctrl_rng,
+                    rng=rng,
                 )
             else:
-                torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=ctrl_rng)
+                torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
 
             data_with_ctrl = data.replace(ctrl=torques)
             new_data = self._physics_step(physics_model, data_with_ctrl)
-            return new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state, rng
+            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state), None
 
         # Runs the model for N steps.
-        mjx_data, *_, event_info, actuator_state_final, _ = jax.lax.fori_loop(
-            0,
-            phys_steps_per_ctrl_steps,
+        (mjx_data, *_, event_info, actuator_state_final), _ = jax.lax.scan(
             move_physics,
-            (mjx_data, jnp.array(0.0), physics_state.event_states, physics_state.actuator_state, rng),
+            (mjx_data, jnp.array(0.0), physics_state.event_states, physics_state.actuator_state),
+            jax.random.split(rng, phys_steps_per_ctrl_steps),
         )
 
         return PhysicsState(
