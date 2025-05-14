@@ -494,7 +494,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         # Gets the loss and metrics for each trajectory in the batch.
         rngs = jax.random.split(rng, rewards.total.shape[0])
-        par_fn = jax.vmap(loss_and_metrics_fn, in_axes=0)
+        par_fn = xax.vmap(loss_and_metrics_fn, in_axes=0, jit_level=JitLevel.RL_CORE)
         loss, metrics, logged_trajectories = par_fn(trajectories, rewards, init_carry, on_policy_variables, rngs)
 
         # Only take the last trajectory in the batch.
