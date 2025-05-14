@@ -127,6 +127,7 @@ def _parse_float(value: str | None) -> float | None:
     return None if value is None else float(value)
 
 
+@jax.tree_util.register_dataclass
 @dataclass
 class JointMetadata:
     kp: float | None = None
@@ -173,6 +174,7 @@ class JointMetadata:
         }
 
 
+@jax.tree_util.register_dataclass
 @dataclass
 class ActuatorMetadata:
     actuator_type: str
@@ -189,6 +191,7 @@ class ActuatorMetadata:
         return {"motor": cls(actuator_type="motor")}
 
 
+@jax.tree_util.register_dataclass
 @dataclass
 class Metadata:
     joint_name_to_metadata: dict[str, JointMetadata]
