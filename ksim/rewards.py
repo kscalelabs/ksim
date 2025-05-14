@@ -225,7 +225,7 @@ class NaiveForwardReward(Reward):
         if self.in_robot_frame:
             # Same as reading from a velocimeter attached to base.
             linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
-        dimvel = linvel[..., 0].clip(self.clip_min, self.clip_max).mean(axis=-1)
+        dimvel = linvel[..., 0].clip(self.clip_min, self.clip_max)
         return dimvel
 
 
