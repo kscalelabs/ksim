@@ -106,7 +106,7 @@ def compute_ppo_inputs(
     return inputs
 
 
-@xax.jit(static_argnames=["clip_param"], jit_level=JitLevel.AUX_FUNCTIONS)
+@xax.jit(static_argnames=["clip_param"], jit_level=JitLevel.HELPER_FUNCTIONS)
 def clipped_value_loss(
     target_values: Array,
     values: Array,

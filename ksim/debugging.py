@@ -6,8 +6,10 @@ __all__ = [
 
 
 class JitLevel:
-    OUTER_LOOP = 1
-    RL_CORE = 5
-    ENGINE_STEP = 10
-    AUX_FUNCTIONS = 11
-    MJX_STEP = 12
+    OUTER_LOOP = 10
+    RL_CORE = 20
+    UNROLL = 30
+    INITIALIZATION = 40
+    ENGINE = 50
+    HELPER_FUNCTIONS = 60
+    MJX = 70
