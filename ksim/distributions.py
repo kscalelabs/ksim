@@ -178,5 +178,4 @@ class MixtureOfGaussians(distrax.MixtureSameFamily):
         return top_mean_n
 
     def entropy(self) -> Array:
-        component_axis = len(self.mixture_distribution.batch_shape)
-        return jnp.sum(self.components_distribution.entropy() * self.mixture_distribution.prob(), axis=component_axis)
+        return self.components_distribution.entropy() * self.mixture_distribution.probs
