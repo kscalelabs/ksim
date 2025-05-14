@@ -227,11 +227,7 @@ def compute_ppo_loss(
             for aux_loss_term in off_policy_variables.aux_losses.values():
                 aux_loss = aux_loss + aux_loss_term.sum()
 
-        # Zero out the loss for terminated trajectories.
-        losses = policy_loss, value_loss, aux_loss
-        losses = jax.tree.map(lambda x: jnp.where(dones, 0.0, x), losses)
-
-        return losses
+        return policy_loss, value_loss, aux_loss
 
     par_fn = jax.vmap(compute_loss_for_sample, in_axes=0)
 
@@ -272,8 +268,8 @@ class PPOConfig(RLConfig):
         help="KL divergence coefficient for PPO, to discourage large changes in the policy.",
     )
     log_clip_value: float = xax.field(
-        value=20.0,
-        help="The log clip value for PPO, for numerical stability. For FP16, this should be 10 instead.",
+        value=5.0,
+        help="The log clip value for PPO, for numerical stability.",
     )
     gamma: float = xax.field(
         value=0.99,
@@ -284,7 +280,7 @@ class PPOConfig(RLConfig):
         help="Lambda for GAE: high = more bias; low = more variance",
     )
     normalize_advantages: bool = xax.field(
-        value=False,
+        value=True,
         help="Whether to normalize the advantages.",
     )
     monte_carlo_returns: bool = xax.field(
@@ -359,7 +355,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         if off_policy_variables.entropy is not None:
             metrics["entropy"] = off_policy_variables.entropy.mean(0).flatten()
         if off_policy_variables.aux_losses is not None:
-            for aux_loss_name, aux_loss_value in off_policy_variables.aux_losses.items():
+            for (
+                aux_loss_name,
+                aux_loss_value,
+            ) in off_policy_variables.aux_losses.items():
                 metrics[aux_loss_name] = aux_loss_value.mean()
         return metrics
 
@@ -403,7 +402,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         if off_policy_variables.entropy is not None:
             metrics["entropy"] = off_policy_variables.entropy
         if off_policy_variables.aux_losses is not None:
-            for aux_loss_name, aux_loss_value in off_policy_variables.aux_losses.items():
+            for (
+                aux_loss_name,
+                aux_loss_value,
+            ) in off_policy_variables.aux_losses.items():
                 metrics[aux_loss_name] = aux_loss_value
         return metrics
 
