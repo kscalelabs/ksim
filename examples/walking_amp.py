@@ -15,10 +15,8 @@ import numpy as np
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from kscale.web.gen.api import RobotURDFMetadataOutput
 
 import ksim
-from ksim.utils.mujoco import get_actuator_metadata
 
 NUM_JOINTS = 21
 
@@ -402,17 +400,19 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         return mujoco.MjModel.from_xml_path(mjcf_path)
 
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> RobotURDFMetadataOutput:
-        return RobotURDFMetadataOutput(
-            joint_name_to_metadata=ksim.get_joint_metadata(mj_model, kp=1.0, kd=0.1, armature=1e-2, friction=1e-6),
-            actuator_type_to_metadata=get_actuator_metadata(mj_model),
-            control_frequency=None,
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
+        return ksim.Metadata.from_model(
+            mj_model,
+            kp=1.0,
+            kd=0.1,
+            armature=1e-2,
+            friction=1e-6,
         )
 
     def get_actuators(
         self,
         physics_model: ksim.PhysicsModel,
-        metadata: RobotURDFMetadataOutput | None = None,
+        metadata: ksim.Metadata | None = None,
     ) -> ksim.Actuators:
         assert metadata is not None, "Metadata is required"
         return ksim.PositionActuators(

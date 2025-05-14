@@ -1,5 +1,11 @@
 """Defines common types used throughout the project."""
 
+__all__ = [
+    "JointMetadata",
+    "ActuatorMetadata",
+    "Metadata",
+]
+
 from dataclasses import dataclass
 from typing import TypeVar
 
@@ -8,6 +14,8 @@ from kscale.web.gen.api import (
     JointMetadataOutput,
     RobotURDFMetadataOutput,
 )
+
+from ksim.types import PhysicsModel
 
 T = TypeVar("T")
 
@@ -26,6 +34,9 @@ def _nn(value: T | None, name: str) -> T:
 class JointMetadata:
     kp: float | None = None
     kd: float | None = None
+    armature: float | None = None
+    friction: float | None = None
+    soft_torque_limit: float | None = None
 
     @classmethod
     def from_kscale_joint_metadata(cls, metadata: JointMetadataOutput) -> "JointMetadata":
@@ -34,18 +45,44 @@ class JointMetadata:
             kd=_parse_float(metadata.kd),
         )
 
+    @classmethod
+    def from_model(
+        cls,
+        model: PhysicsModel,
+        kp: float | None = None,
+        kd: float | None = None,
+        armature: float | None = None,
+        friction: float | None = None,
+        soft_torque_limit: float | None = None,
+    ) -> dict[str, "JointMetadata"]:
+        return {
+            model.names[model.name_jntadr[i] :]
+            .decode("utf-8")
+            .split("\x00", 1)[0]: cls(
+                kp=kp,
+                kd=kd,
+                armature=armature,
+                friction=friction,
+                soft_torque_limit=soft_torque_limit,
+            )
+            for i in range(model.njnt)
+        }
+
 
 @dataclass
 class ActuatorMetadata:
     actuator_type: str
-    max_torque: float
+    max_torque: float | None = None
 
     @classmethod
     def from_kscale_actuator_metadata(cls, metadata: ActuatorMetadataOutput) -> "ActuatorMetadata":
         return cls(
-            actuator_type=_nn(metadata.actuator_type, "actuator_type"),
-            max_torque=_nn(_parse_float(metadata.max_torque), "max_torque"),
+            actuator_type="motor",
         )
+
+    @classmethod
+    def from_model(cls, model: PhysicsModel) -> dict[str, "ActuatorMetadata"]:
+        return {"motor": cls(actuator_type="motor")}
 
 
 @dataclass
@@ -73,4 +110,20 @@ class Metadata:
                 }
             ),
             control_frequency=_parse_float(metadata.control_frequency),
+        )
+
+    @classmethod
+    def from_model(
+        cls,
+        model: PhysicsModel,
+        kp: float | None = None,
+        kd: float | None = None,
+        armature: float | None = None,
+        friction: float | None = None,
+        soft_torque_limit: float | None = None,
+    ) -> "Metadata":
+        return cls(
+            joint_name_to_metadata=JointMetadata.from_model(model),
+            actuator_type_to_metadata=ActuatorMetadata.from_model(model),
+            control_frequency=None,
         )

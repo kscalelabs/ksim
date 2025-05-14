@@ -12,7 +12,6 @@ __all__ = [
     "get_site_data_idx_from_name",
     "get_floor_idx",
     "geoms_colliding",
-    "get_joint_metadata",
     "get_joint_names_in_order",
     "get_position_limits",
     "get_torque_limits",
@@ -36,8 +35,6 @@ import logging
 from typing import Any, Hashable, TypeVar
 from xml.etree import ElementTree as ET
 
-from ksim.utils.types import Metadata, JointMetadata, ActuatorMetadata
-from dataclasses import dataclass
 import chex
 import jax
 import jax.numpy as jnp
@@ -45,15 +42,10 @@ import mujoco
 import numpy as np
 import xax
 from jaxtyping import Array
-from kscale.web.gen.api import (
-    ActuatorMetadataOutput,
-    JointMetadataOutput,
-    RobotURDFMetadataOutput,
-)
 from mujoco import mjx
 from tabulate import tabulate
 
-from ksim.types import PhysicsData, PhysicsModel
+from ksim.types import Metadata, PhysicsData, PhysicsModel
 
 logger = logging.getLogger(__name__)
 
@@ -248,69 +240,9 @@ def get_torque_limits(model: PhysicsModel) -> dict[str, tuple[float, float]]:
     return ranges
 
 
-def get_metadata(model: PhysicsModel) -> Metadata:
-    """Return default metadata for a MuJoCo model."""
-    return RobotURDFMetadataOutput(
-        joint_name_to_metadata=get_joint_metadata(model),
-        actuator_type_to_metadata=get_actuator_metadata(model),
-        control_frequency=None,
-    )
-
-
-def get_actuator_metadata(model: PhysicsModel) -> dict[str, ActuatorMetadataOutput]:
-    """Generate *default* actuator metadata for a MuJoCo model."""
-    metadata: dict[str, ActuatorMetadataOutput] = {
-        "motor": ActuatorMetadataOutput(
-            actuator_type="motor",
-            sysid="",
-            max_torque=None,
-            armature=None,
-            damping=None,
-            frictionloss=None,
-            vin=None,
-            kt=None,
-            R=None,
-            vmax=None,
-            amax=None,
-            max_velocity=None,
-            max_pwm=None,
-            error_gain=None,
-        )
-    }
-    return metadata
-
-
-def get_joint_metadata(
-    model: PhysicsModel,
-    kp: float | None = None,
-    kd: float | None = None,
-    armature: float | None = None,
-    friction: float | None = None,
-    soft_torque_limit: float | None = None,
-) -> dict[str, JointMetadataOutput]:
-    """Get the joint metadata from the model."""
-    metadata = {}
-    for i in range(model.njnt):
-        name_start = model.name_jntadr[i]
-        name = bytes(model.names[name_start:]).decode("utf-8").split("\x00")[0]
-        metadata[name] = JointMetadataOutput(
-            kp=None if kp is None else str(kp),
-            kd=None if kd is None else str(kd),
-            armature=None if armature is None else str(armature),
-            friction=None if friction is None else str(friction),
-            id=None,
-            flipped=None,
-            offset=None,
-            actuator_type=None,
-            nn_id=None,
-            soft_torque_limit=None if soft_torque_limit is None else str(soft_torque_limit),
-        )
-    return metadata
-
-
 def log_joint_config_table(
     model: PhysicsModel,
-    metadata: RobotURDFMetadataOutput,
+    metadata: Metadata,
     xax_logger: xax.Logger,
 ) -> None:
     """Log configuration of joints and actuators in a table."""
@@ -375,8 +307,6 @@ def log_joint_config_table(
         joint_data.append(
             {
                 "Joint Name": joint_name,
-                "NN\nID": actuator_nn_id,
-                "KOS\nID": str(joint_meta.id),
                 "Type": joint_meta.actuator_type,
                 "Kp": joint_meta.kp,
                 "Kd": joint_meta.kd,

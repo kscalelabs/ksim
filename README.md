@@ -80,8 +80,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
         return mujoco.MjModel.from_xml_path(mjcf_path)
 
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> dict[str, JointMetadataOutput]:
-        return ksim.get_joint_metadata(
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
+        return ksim.Metadata.from_model(
             mj_model,
             kp=self.config.kp,
             kd=self.config.kd,
