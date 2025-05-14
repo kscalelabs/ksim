@@ -25,11 +25,8 @@
       </default>
       <default class="foot">
         <geom size=".027"/>
-        <default class="foot1">
-          <geom fromto="-.07 -.01 0 .14 -.03 0"/>
-        </default>
-        <default class="foot2">
-          <geom fromto="-.07 .01 0 .14  .03 0"/>
+        <default class="foot_ball">
+          <geom type="sphere" size="0.05" pos="0 0 0"/>
         </default>
       </default>
       <default class="arm_upper">
@@ -109,12 +106,11 @@
             <body name="shin_right" pos="0 .01 -.4">
               <joint name="knee_right" class="knee"/>
               <geom name="shin_right" class="shin"/>
-              <body name="foot_right" pos="0 0 -.39">
+              <body name="foot_right" pos="0.05 0.02 -.39">
                 <site name="right_foot" />
                 <joint name="ankle_y_right" class="ankle_y"/>
                 <joint name="ankle_x_right" class="ankle_x" axis="1 0 .5"/>
-                <geom name="foot1_right" class="foot1"/>
-                <geom name="foot2_right" class="foot2"/>
+                <geom name="foot_right" type="sphere" size="0.05" pos="0 0 0"/>
               </body>
             </body>
           </body>
@@ -126,12 +122,11 @@
             <body name="shin_left" pos="0 -.01 -.4">
               <joint name="knee_left" class="knee"/>
               <geom name="shin_left" fromto="0 0 0 0 0 -.3" class="shin"/>
-              <body name="foot_left" pos="0 0 -.39">
+              <body name="foot_left" pos="0.05 -0.02 -.39">
                 <site name="left_foot" />
                 <joint name="ankle_y_left" class="ankle_y"/>
                 <joint name="ankle_x_left" class="ankle_x" axis="-1 0 -.5"/>
-                <geom name="foot1_left" class="foot1"/>
-                <geom name="foot2_left" class="foot2"/>
+                <geom name="foot_left" type="sphere" size="0.05" pos="0 0 0"/>
               </body>
             </body>
           </body>
@@ -168,10 +163,8 @@
   <contact>
     <exclude body1="waist_lower" body2="thigh_right"/>
     <exclude body1="waist_lower" body2="thigh_left"/>
-    <pair geom1="foot1_left" geom2="floor"/>
-    <pair geom1="foot1_right" geom2="floor"/>
-    <pair geom1="foot2_left" geom2="floor"/>
-    <pair geom1="foot2_right" geom2="floor"/>
+    <pair geom1="foot_left" geom2="floor"/>
+    <pair geom1="foot_right" geom2="floor"/>
   </contact>
 
   <actuator>

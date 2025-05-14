@@ -257,8 +257,6 @@ def log_joint_config_table(
     # The \n is to make the table headers take up less horizontal space.
     headers = [
         "Joint Name",
-        "NN\nID",
-        "KOS\nID",
         "Type",
         "Kp",
         "Kd",
@@ -328,7 +326,7 @@ def log_joint_config_table(
             }
         )
 
-    joint_data.sort(key=lambda x: (x["NN\nID"], x["Joint Name"]))
+    joint_data.sort(key=lambda x: x["Joint Name"])
     table_data = [[joint[header] for header in headers] for joint in joint_data]
     table = tabulate(table_data, headers=headers, tablefmt="grid", numalign="right", stralign="left")
     logger.debug("Joint Configuration:\n%s", table)

@@ -159,10 +159,11 @@ class JointMetadata:
         actuator_type: str | None = None,
         soft_torque_limit: float | None = None,
     ) -> dict[str, "JointMetadata"]:
+        def _get_name(i: int) -> str:
+            return model.names[model.name_jntadr[i] :].decode("utf-8").split("\x00", 1)[0]
+
         return {
-            model.names[model.name_jntadr[i] :]
-            .decode("utf-8")
-            .split("\x00", 1)[0]: cls(
+            _get_name(i): cls(
                 kp=kp,
                 kd=kd,
                 armature=armature,
@@ -230,7 +231,14 @@ class Metadata:
         soft_torque_limit: float | None = None,
     ) -> "Metadata":
         return cls(
-            joint_name_to_metadata=JointMetadata.from_model(model),
+            joint_name_to_metadata=JointMetadata.from_model(
+                model,
+                kp=kp,
+                kd=kd,
+                armature=armature,
+                friction=friction,
+                soft_torque_limit=soft_torque_limit,
+            ),
             actuator_type_to_metadata=ActuatorMetadata.from_model(model),
             control_frequency=None,
         )
