@@ -133,7 +133,6 @@ def compute_ppo_loss(
     ppo_inputs: PPOInputs,
     on_policy_variables: PPOVariables,
     off_policy_variables: PPOVariables,
-    dones_t: Array,
     *,
     clip_param: float,
     value_loss_coef: float,
@@ -141,14 +140,13 @@ def compute_ppo_loss(
     kl_coef: float,
     log_clip_value: float,
     use_clipped_value_loss: bool,
-) -> tuple[Array, Array, Array]:
+) -> dict[str, Array]:
     """Compute PPO loss.
 
     Args:
         ppo_inputs: The pre-computed PPO inputs.
         on_policy_variables: The variables for the original policy.
         off_policy_variables: The variables for the new policy.
-        dones_t: The termination mask, with shape (T,).
         clip_param: The clip parameter for PPO.
         value_loss_coef: The value loss coefficient for PPO.
         entropy_coef: The entropy coefficient for PPO.
@@ -158,8 +156,7 @@ def compute_ppo_loss(
         use_clipped_value_loss: Whether to use clipped value loss.
 
     Returns:
-        A tuple of the policy loss, value loss, and auxiliary loss, each
-        with shape (T,).
+        A dictionary of the various loss terms, each with shape (T,).
     """
     chex.assert_equal_shape_prefix(
         [
@@ -169,28 +166,31 @@ def compute_ppo_loss(
             off_policy_variables.values,
             ppo_inputs.advantages_t,
             ppo_inputs.value_targets_t,
-            dones_t,
         ]
         + ([] if off_policy_variables.aux_losses is None else list(off_policy_variables.aux_losses.values())),
         prefix_len=1,
     )
+
     # The following should not have any singleton dimensions.
     chex.assert_rank(on_policy_variables.values, 1)
     chex.assert_rank(off_policy_variables.values, 1)
     chex.assert_rank(ppo_inputs.advantages_t, 1)
     chex.assert_rank(ppo_inputs.value_targets_t, 1)
-    chex.assert_rank(dones_t, 1)
+    if off_policy_variables.aux_losses is not None:
+        for aux_loss in off_policy_variables.aux_losses.values():
+            chex.assert_rank(aux_loss, 1)
 
     # Log probs should have an extra dimension for the number of actions.
     chex.assert_rank(on_policy_variables.log_probs, 2)
     chex.assert_rank(off_policy_variables.log_probs, 2)
+    if off_policy_variables.entropy is not None:
+        chex.assert_rank(off_policy_variables.entropy, 2)
 
     def compute_loss_for_sample(
         on_policy_variables: PPOVariables,
         off_policy_variables: PPOVariables,
         ppo_inputs: PPOInputs,
-        dones: Array,
-    ) -> tuple[Array, Array, Array]:
+    ) -> dict[str, Array]:
         # Preventing underflow / overflow in calculating the ratio.
         log_ratio = jnp.sum(off_policy_variables.log_probs - on_policy_variables.log_probs, axis=-1)
         ratio = jnp.exp(jnp.clip(log_ratio, -log_clip_value, log_clip_value))
@@ -215,24 +215,28 @@ def compute_ppo_loss(
         kl_div = (on_policy_variables.log_probs - off_policy_variables.log_probs).sum(axis=-1)
         kl_loss = kl_div * kl_coef
 
-        aux_loss = kl_loss
+        losses = {
+            "policy": policy_loss,
+            "value": value_loss,
+            "kl": kl_loss,
+        }
 
         # Maximize the entropy of the policy, to encourage exploration.
         if off_policy_variables.entropy is not None:
             entropy_loss = -off_policy_variables.entropy.sum(axis=-1) * entropy_coef
-            aux_loss = aux_loss + entropy_loss
+            losses["entropy"] = entropy_loss
 
         # Adds any additional auxiliary losses.
         if off_policy_variables.aux_losses is not None:
-            for aux_loss_term in off_policy_variables.aux_losses.values():
-                aux_loss = aux_loss + aux_loss_term.sum()
+            for name, aux_loss_term in off_policy_variables.aux_losses.items():
+                losses[name] = aux_loss_term
 
-        return policy_loss, value_loss, aux_loss
+        return losses
 
     par_fn = jax.vmap(compute_loss_for_sample, in_axes=0)
 
     # Computes the vectorized loss.
-    losses_t = par_fn(on_policy_variables, off_policy_variables, ppo_inputs, dones_t)
+    losses_t = par_fn(on_policy_variables, off_policy_variables, ppo_inputs)
 
     return losses_t
 
@@ -317,9 +321,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
     def get_ppo_metrics(
         self,
-        policy_loss_t: Array,
-        value_loss_t: Array,
-        aux_loss_t: Array,
+        losses_t: dict[str, Array],
         ppo_inputs: PPOInputs,
         on_policy_variables: PPOVariables,
         off_policy_variables: PPOVariables,
@@ -331,9 +333,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         format and will be logged as a distribution.
 
         Args:
-            policy_loss_t: The policy loss value.
-            value_loss_t: The value loss value.
-            aux_loss_t: The auxiliary loss value.
+            losses_t: The dictionary of losses.
             ppo_inputs: The PPO inputs.
             on_policy_variables: The variables for the original policy.
             off_policy_variables: The variables for the new policy.
@@ -342,9 +342,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             A dictionary of metrics to be logged.
         """
         metrics = {
-            "policy_loss": policy_loss_t.mean(),
-            "value_loss": value_loss_t.mean(),
-            "aux_loss": aux_loss_t.mean(),
             "on_policy_log_probs": on_policy_variables.log_probs.mean(0).flatten(),
             "off_policy_log_probs": off_policy_variables.log_probs.mean(0).flatten(),
             "on_policy_values": on_policy_variables.values.mean(0).flatten(),
@@ -352,6 +349,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "value_targets": ppo_inputs.value_targets_t.mean(),
             "advantages": ppo_inputs.advantages_t.mean(),
         }
+        for name, loss in losses_t.items():
+            metrics[f"loss_{name}"] = loss.mean()
         if off_policy_variables.entropy is not None:
             metrics["entropy"] = off_policy_variables.entropy.mean(0).flatten()
         if off_policy_variables.aux_losses is not None:
@@ -364,9 +363,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
     def _get_logged_trajectory_metrics(
         self,
-        policy_loss_t: Array,
-        value_loss_t: Array,
-        aux_loss_t: Array,
+        losses_t: dict[str, Array],
         ppo_inputs: PPOInputs,
         on_policy_variables: PPOVariables,
         off_policy_variables: PPOVariables,
@@ -378,9 +375,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         format and will be logged as a distribution.
 
         Args:
-            policy_loss_t: The policy loss value.
-            value_loss_t: The value loss value.
-            aux_loss_t: The auxiliary loss value.
+            losses_t: The dictionary of losses.
             ppo_inputs: The PPO inputs.
             on_policy_variables: The variables for the original policy.
             off_policy_variables: The variables for the new policy.
@@ -393,12 +388,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "values": off_policy_variables.values,
             "value_targets": ppo_inputs.value_targets_t,
             "advantages": ppo_inputs.advantages_t,
-            "policy_loss": policy_loss_t,
-            "value_loss": value_loss_t,
-            "aux_loss": aux_loss_t,
             "gae": ppo_inputs.gae_t,
             "returns": ppo_inputs.returns_t,
         }
+        for name, loss in losses_t.items():
+            metrics[f"loss_{name}"] = loss
         if off_policy_variables.entropy is not None:
             metrics["entropy"] = off_policy_variables.entropy
         if off_policy_variables.aux_losses is not None:
@@ -457,11 +451,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 monte_carlo_returns=self.config.monte_carlo_returns,
             )
 
-            policy_loss_t, value_loss_t, aux_loss_t = compute_ppo_loss(
+            losses_t = compute_ppo_loss(
                 ppo_inputs=ppo_inputs,
                 on_policy_variables=on_policy_variables,
                 off_policy_variables=off_policy_variables,
-                dones_t=trajectory.done,
                 clip_param=self.config.clip_param,
                 value_loss_coef=self.config.value_loss_coef,
                 entropy_coef=self.config.entropy_coef,
@@ -471,18 +464,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             )
 
             metrics = self.get_ppo_metrics(
-                policy_loss_t=policy_loss_t,
-                value_loss_t=value_loss_t,
-                aux_loss_t=aux_loss_t,
+                losses_t=losses_t,
                 ppo_inputs=ppo_inputs,
                 on_policy_variables=on_policy_variables,
                 off_policy_variables=off_policy_variables,
             )
 
             logged_traj_metrics = self._get_logged_trajectory_metrics(
-                policy_loss_t=policy_loss_t,
-                value_loss_t=value_loss_t,
-                aux_loss_t=aux_loss_t,
+                losses_t=losses_t,
                 ppo_inputs=ppo_inputs,
                 on_policy_variables=on_policy_variables,
                 off_policy_variables=off_policy_variables,
@@ -496,7 +485,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
             # Mean over all non-masked trajectories.
             num_valid = jnp.sum(~trajectory.done)
-            loss_t = policy_loss_t + value_loss_t + aux_loss_t
+            loss_t = jnp.stack(list(losses_t.values()), axis=-1).sum(axis=-1)
             loss = loss_t.sum() / (num_valid + 1e-6)
 
             return loss, xax.FrozenDict(metrics), logged_trajectory
