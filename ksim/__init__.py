@@ -6,6 +6,7 @@ from .actuators import *
 from .commands import *
 from .curriculum import *
 from .dataset import *
+from .debugging import *
 from .distributions import *
 from .engine import *
 from .events import *

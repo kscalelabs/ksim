@@ -235,7 +235,7 @@ if __name__ == "__main__":
             entropy_coef=0.001,
             learning_rate=3e-4,
             clip_param=0.3,
-            max_grad_norm=1.0,
+            global_grad_clip=2.0,
             # Gait matching parameters.
             bvh_path=str(Path(__file__).parent / "data" / "walk_normal_dh.bvh"),
             rotate_bvh_euler=(0, np.pi / 2, 0),

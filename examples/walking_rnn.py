@@ -347,7 +347,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
             return next_carry, transition_ppo_variables
 
-        next_model_carry, ppo_variables = jax.lax.scan(scan_fn, model_carry, trajectory)
+        next_model_carry, ppo_variables = xax.scan(scan_fn, model_carry, trajectory, jit_level=ksim.JitLevel.RL_CORE)
 
         return ppo_variables, next_model_carry
 
@@ -396,6 +396,7 @@ if __name__ == "__main__":
             num_passes=2,
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
+            global_grad_clip=2.0,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,

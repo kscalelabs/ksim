@@ -300,10 +300,6 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
         value=1e-3,
         help="Learning rate for PPO.",
     )
-    max_grad_norm: float = xax.field(
-        value=2.0,
-        help="Maximum gradient norm for clipping.",
-    )
     adam_weight_decay: float = xax.field(
         value=0.0,
         help="Weight decay for the Adam optimizer.",
@@ -554,16 +550,11 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         )
 
     def get_policy_optimizer(self) -> optax.GradientTransformation:
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(self.config.max_grad_norm),
-            (
-                optax.adam(self.config.learning_rate)
-                if self.config.adam_weight_decay == 0.0
-                else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
-            ),
+        return (
+            optax.adam(self.config.learning_rate)
+            if self.config.adam_weight_decay == 0.0
+            else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
         )
-
-        return optimizer
 
     def get_discriminator_optimizer(self) -> optax.GradientTransformation:
         optimizer = optax.chain(
@@ -704,12 +695,14 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
             initial_carry = self.get_initial_model_carry(rng)
             next_carry = jax.tree.map(
-                lambda x, y: jnp.where(transition.done, x, y), initial_carry, (next_actor_carry, next_critic_carry)
+                lambda x, y: jnp.where(transition.done, x, y),
+                initial_carry,
+                (next_actor_carry, next_critic_carry),
             )
 
             return next_carry, transition_ppo_variables
 
-        next_model_carry, ppo_variables = jax.lax.scan(scan_fn, model_carry, trajectory)
+        next_model_carry, ppo_variables = xax.scan(scan_fn, model_carry, trajectory, jit_level=ksim.JitLevel.RL_CORE)
 
         return ppo_variables, next_model_carry
 
@@ -767,7 +760,7 @@ if __name__ == "__main__":
             entropy_coef=0.001,
             learning_rate=3e-4,
             clip_param=0.3,
-            max_grad_norm=1.0,
+            global_grad_clip=1.0,
             # Gait matching parameters.
             rotate_bvh_euler=(0, np.pi / 2, 0),
             bvh_scaling_factor=1 / 100,

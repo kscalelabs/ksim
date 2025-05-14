@@ -27,6 +27,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from omegaconf import DictConfig, OmegaConf
 
+from ksim.debugging import JitLevel
 from ksim.rewards import Reward
 from ksim.task.ppo import PPOConfig, PPOTask, PPOVariables
 from ksim.task.rl import (
@@ -316,7 +317,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         sim_disc_loss = jnp.mean((sim_disc_logits + 1) ** 2)
         return real_disc_loss, sim_disc_loss
 
-    @xax.jit(static_argnames=["self", "model_static"], jit_level=5)
+    @xax.jit(static_argnames=["self", "model_static"], jit_level=JitLevel.RL_CORE)
     def _get_amp_disc_loss_and_metrics(
         self,
         model_arr: PyTree,
@@ -341,8 +342,9 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         sim_motions = self.trajectory_to_motion(trajectories)
 
         # Computes the discriminator loss.
-        real_disc_logits = jax.vmap(self.call_discriminator, in_axes=(None, 0))(model, real_motions)
-        sim_disc_logits = jax.vmap(self.call_discriminator, in_axes=(None, 0))(model, sim_motions)
+        disc_fn = xax.vmap(self.call_discriminator, in_axes=(None, 0), jit_level=JitLevel.RL_CORE)
+        real_disc_logits = disc_fn(model, real_motions)
+        sim_disc_logits = disc_fn(model, sim_motions)
         real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
 
         disc_loss = real_disc_loss + sim_disc_loss
@@ -354,7 +356,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         return disc_loss, xax.FrozenDict(disc_metrics)
 
-    @xax.jit(static_argnames=["self", "model_static"], jit_level=3)
+    @xax.jit(static_argnames=["self", "model_static"], jit_level=JitLevel.RL_CORE)
     def _get_disc_metrics_and_grads(
         self,
         model_arr: PyTree,
@@ -363,11 +365,11 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         real_motions: PyTree,
     ) -> tuple[xax.FrozenDict[str, Array], PyTree]:
         loss_fn = jax.grad(self._get_amp_disc_loss_and_metrics, argnums=0, has_aux=True)
-        loss_fn = xax.jit(static_argnums=[1], jit_level=3)(loss_fn)
+        loss_fn = xax.jit(static_argnums=[1], jit_level=JitLevel.RL_CORE)(loss_fn)
         grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions)
         return metrics, grads
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=4)
+    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _single_step(
         self,
         trajectories: Trajectory,
