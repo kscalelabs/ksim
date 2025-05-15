@@ -274,7 +274,7 @@ class GlfwMujocoViewer:
         self._last_mouse_x = xpos
         self._last_mouse_y = ypos
 
-        # Apply perturbation forces
+        # If already applying a perturbation force
         if self.pert.active:
             # Get framebuffer size to normalize mouse movement.
             width, height = glfw.get_framebuffer_size(window)
