@@ -240,7 +240,7 @@ class NaiveForwardOrientationReward(NaiveForwardReward):
         quat = trajectory.qpos[..., 3:7]
         forward_vec = jnp.array([1.0, 0.0, 0.0])
         forward_vec = xax.rotate_vector_by_quat(forward_vec, quat, inverse=True)
-        return forward_vec[..., 0] - forward_vec[..., 1:].sum(axis=-1)
+        return forward_vec[..., 0] - jnp.linalg.norm(forward_vec[..., 1:], axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
