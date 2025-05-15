@@ -196,6 +196,75 @@ class StartQuaternionCommand(Command):
         return prev_command
 
 
+@attrs.define(kw_only=True)
+class JoystickCommandMarker(Marker):
+    command_name: str = attrs.field()
+    radius: float = attrs.field(default=0.05)
+    size: float = attrs.field(default=0.03)
+    arrow_len: float = attrs.field(default=0.25)
+    height: float = attrs.field(default=0.5)
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Update the marker geometry to reflect the active joystick command."""
+        cmd_vec = jnp.asarray(trajectory.command[self.command_name])
+        cmd_idx: int = int(cmd_vec.argmax())
+
+        self.pos = (0.0, 0.0, self.height)
+
+        if cmd_idx == 0:
+            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
+            self.scale = (self.radius, self.radius, self.radius)
+            self.rgba = (1.0, 1.0, 1.0, 0.8)
+
+        elif cmd_idx in (1, 2, 5, 6):
+            dir_map = {
+                1: (1.0, 0.0, 0.0),  # forward
+                2: (-1.0, 0.0, 0.0),  # backward
+                5: (0.0, 1.0, 0.0),  # strafe left
+                6: (0.0, -1.0, 0.0),  # strafe right
+            }
+            direction = dir_map[cmd_idx]
+            self.geom = mujoco.mjtGeom.mjGEOM_ARROW
+            self.scale = (self.size, self.size, self.arrow_len)
+            self.orientation = self.quat_from_direction(direction)
+            self.rgba = (0.2, 0.8, 0.2, 0.8)
+
+        else:
+            self.geom = mujoco.mjtGeom.mjGEOM_ARROW
+            self.scale = (self.size, self.size, self.arrow_len)
+
+            # Up for left-turn, down for right-turn (like right-hand rule).
+            direction = (0.0, 0.0, 1.0) if cmd_idx == 3 else (0.0, 0.0, -1.0)
+            self.orientation = self.quat_from_direction(direction)
+
+            # Blue for left-turn, orange for right-turn.
+            self.rgba = (0.2, 0.2, 1.0, 0.8) if cmd_idx == 3 else (1.0, 0.5, 0.0, 0.8)
+
+    @classmethod
+    def get(
+        cls,
+        command_name: str,
+        radius: float = 0.05,
+        size: float = 0.03,
+        arrow_len: float = 0.25,
+        rgba: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 0.8),
+        height: float = 0.5,
+        in_robot_frame: bool = False,
+    ) -> Self:
+        return cls(
+            command_name=command_name,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,
+            scale=(radius, radius, radius),
+            size=size,
+            arrow_len=arrow_len,
+            radius=radius,
+            rgba=rgba,
+            height=height,
+            track_rotation=in_robot_frame,
+        )
+
+
 @attrs.define(frozen=True, kw_only=True)
 class JoystickCommand(Command):
     """Provides joystick-like controls for the robot.
@@ -221,6 +290,9 @@ class JoystickCommand(Command):
         validator=sample_probs_validator,
     )
 
+    in_robot_frame: bool = attrs.field(default=False)
+    marker_z_offset: float = attrs.field(default=0.5)
+
     def initial_command(
         self,
         physics_data: PhysicsData,
@@ -239,6 +311,23 @@ class JoystickCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         return prev_command
+
+    def get_markers(self) -> Collection[Marker]:
+        """Get the visualizations for the command.
+
+        Args:
+            command: The command to get the visualizations for.
+
+        Returns:
+            The visualizations to add to the scene.
+        """
+        return [
+            JoystickCommandMarker.get(
+                self.command_name,
+                height=self.marker_z_offset,
+                in_robot_frame=self.in_robot_frame,
+            )
+        ]
 
 
 @attrs.define(kw_only=True)
