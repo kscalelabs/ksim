@@ -650,6 +650,7 @@ class JoystickReward(Reward):
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
     temp: float = attrs.field(default=0.1)
     monotonic_fn: MonotonicFn = attrs.field(default="inv")
+    in_robot_frame: bool = attrs.field(default=False)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
@@ -657,10 +658,12 @@ class JoystickReward(Reward):
         joystick_cmd = trajectory.command[self.command_name]
         chex.assert_shape(joystick_cmd, (..., 7))
 
-        # Transforms linear and angular velocities into the target frame.
         qvel = trajectory.qvel[..., :6]
         linvel = qvel[..., :3]
         angvel = qvel[..., 3:]
+
+        if self.in_robot_frame:
+            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
 
         # Penalty to discourage movement in general.
         linvel_norm = jnp.linalg.norm(linvel, axis=-1) * self.lin_vel_penalty_scale
