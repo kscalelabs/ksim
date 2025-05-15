@@ -1633,7 +1633,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     else:
                         frames.append(viewer.read_pixels(callback=render_callback))
 
-                    # Apply perturbation forces from viewer to environment.
+                    # Apply perturbation forces from the viewer to the environment.
                     env_states.physics_state.data.xfrc_applied[:] = viewer.data.xfrc_applied
                     viewer.data.xfrc_applied[:] = 0
 

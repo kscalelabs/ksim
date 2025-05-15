@@ -276,6 +276,7 @@ class GlfwMujocoViewer:
 
         # Apply perturbation forces
         if self.pert.active:
+            # Get framebuffer size to normalize mouse movement.
             width, height = glfw.get_framebuffer_size(window)
             mod_shift = (
                 glfw.get_key(window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS
@@ -298,8 +299,7 @@ class GlfwMujocoViewer:
                     self.scn,
                     self.pert,
                 )
-            return  # Skip camera manipulation when perturbing.
-        # ------------------------------------------------------------------
+            return
 
         # Left button: rotate camera
         if self._button_left:
@@ -314,13 +314,7 @@ class GlfwMujocoViewer:
                     np.sin(np.deg2rad(self.cam.elevation)),
                 ]
             )
-            right = np.array(
-                [
-                    -np.sin(np.deg2rad(self.cam.azimuth)),
-                    np.cos(np.deg2rad(self.cam.azimuth)),
-                    0,
-                ]
-            )
+            right = np.array([-np.sin(np.deg2rad(self.cam.azimuth)), np.cos(np.deg2rad(self.cam.azimuth)), 0])
             up = np.cross(right, forward)
 
             # Scale pan speed with distance
@@ -341,18 +335,22 @@ class GlfwMujocoViewer:
         self._last_mouse_x = x
         self._last_mouse_y = y
 
-        # ----- interactive perturbation selection / activation -----
+        # Apply perturbation forces
         ctrl_pressed = mods & glfw.MOD_CONTROL
 
         if act == glfw.PRESS and ctrl_pressed:
+            # Get framebuffer size to normalize mouse movement.
             width, height = glfw.get_framebuffer_size(window)
             aspectratio = width / height
             relx = x / width
             rely = (height - y) / height
 
+            # Select a body to perturb
             selpnt = np.zeros(3)
             selgeom = np.zeros(1, dtype=np.int32)
             selskin = np.zeros(1, dtype=np.int32)
+
+            # Calls the MuJoCo's select function to find the relevant body
             selbody = mujoco.mjv_select(
                 self.model,
                 self.data,
@@ -373,6 +371,7 @@ class GlfwMujocoViewer:
                 vec = selpnt - self.data.xpos[selbody]
                 self.pert.localpos = self.data.xmat[selbody].reshape(3, 3).dot(vec)
 
+            # Set the perturbation type
             newperturb = 0
             if selbody >= 0:
                 if button == glfw.MOUSE_BUTTON_RIGHT:
@@ -380,6 +379,7 @@ class GlfwMujocoViewer:
                 elif button == glfw.MOUSE_BUTTON_LEFT:
                     newperturb = mujoco.mjtPertBit.mjPERT_ROTATE
 
+            # Initialize the perturbation
             if newperturb and not self.pert.active:
                 mujoco.mjv_initPerturb(self.model, self.data, self.scn, self.pert)
             self.pert.active = newperturb
@@ -387,7 +387,6 @@ class GlfwMujocoViewer:
         # On release, stop perturbation
         if act == glfw.RELEASE:
             self.pert.active = 0
-        # ----- end perturb logic -----
 
     def _scroll(self, window: glfw._GLFWwindow, xoffset: float, yoffset: float) -> None:
         """Mouse scroll callback."""
