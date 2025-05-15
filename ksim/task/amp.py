@@ -124,7 +124,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             save_renders: If provided, save the rendered video to the given path.
             loop: If true, loop through the motions.
         """
-        save_path = self.exp_dir / "renders" / f"render_{time.time()}" if save_renders else None
+        save_path = self.exp_dir / "renders" / f"render_{time.monotonic()}" if save_renders else None
         if save_path is not None:
             save_path.mkdir(parents=True, exist_ok=True)
 
