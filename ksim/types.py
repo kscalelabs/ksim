@@ -179,12 +179,37 @@ class JointMetadata:
 @dataclass
 class ActuatorMetadata:
     actuator_type: str
+    sys_id: str | None = None
     max_torque: float | None = None
+    armature: float | None = None
+    damping: float | None = None
+    frictionloss: float | None = None
+    vin: float | None = None
+    kt: float | None = None
+    R: float | None = None
+    vmax: float | None = None
+    amax: float | None = None
+    max_velocity: float | None = None
+    max_pwm: float | None = None
+    error_gain: float | None = None
 
     @classmethod
     def from_kscale_actuator_metadata(cls, metadata: ActuatorMetadataOutput) -> "ActuatorMetadata":
         return cls(
-            actuator_type="motor",
+            actuator_type=metadata.actuator_type,
+            sys_id=metadata.sysid,
+            max_torque=_parse_float(metadata.max_torque),
+            armature=_parse_float(metadata.armature),
+            damping=_parse_float(metadata.damping),
+            frictionloss=_parse_float(metadata.frictionloss),
+            vin=_parse_float(metadata.vin),
+            kt=_parse_float(metadata.kt),
+            R=_parse_float(metadata.R),
+            vmax=_parse_float(metadata.vmax),
+            amax=_parse_float(metadata.amax),
+            max_velocity=_parse_float(metadata.max_velocity),
+            max_pwm=_parse_float(metadata.max_pwm),
+            error_gain=_parse_float(metadata.error_gain),
         )
 
     @classmethod
