@@ -274,11 +274,37 @@ class GlfwMujocoViewer:
         self._last_mouse_x = xpos
         self._last_mouse_y = ypos
 
+        # Apply perturbation forces
+        if self.pert.active:
+            width, height = glfw.get_framebuffer_size(window)
+            mod_shift = (
+                glfw.get_key(window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS
+                or glfw.get_key(window, glfw.KEY_RIGHT_SHIFT) == glfw.PRESS
+            )
+            if self._button_right:
+                action = mujoco.mjtMouse.mjMOUSE_MOVE_H if mod_shift else mujoco.mjtMouse.mjMOUSE_MOVE_V
+            elif self._button_left:
+                action = mujoco.mjtMouse.mjMOUSE_ROTATE_H if mod_shift else mujoco.mjtMouse.mjMOUSE_ROTATE_V
+            else:
+                action = mujoco.mjtMouse.mjMOUSE_ZOOM
+
+            with self._gui_lock:
+                mujoco.mjv_movePerturb(
+                    self.model,
+                    self.data,
+                    action,
+                    dx / height,
+                    dy / height,
+                    self.scn,
+                    self.pert,
+                )
+            return  # Skip camera manipulation when perturbing.
+        # ------------------------------------------------------------------
+
         # Left button: rotate camera
         if self._button_left:
             self.cam.azimuth -= dx * 0.5
             self.cam.elevation -= dy * 0.5
-
         # Right button: pan camera
         elif self._button_right:
             forward = np.array(
@@ -288,7 +314,13 @@ class GlfwMujocoViewer:
                     np.sin(np.deg2rad(self.cam.elevation)),
                 ]
             )
-            right = np.array([-np.sin(np.deg2rad(self.cam.azimuth)), np.cos(np.deg2rad(self.cam.azimuth)), 0])
+            right = np.array(
+                [
+                    -np.sin(np.deg2rad(self.cam.azimuth)),
+                    np.cos(np.deg2rad(self.cam.azimuth)),
+                    0,
+                ]
+            )
             up = np.cross(right, forward)
 
             # Scale pan speed with distance
@@ -308,6 +340,54 @@ class GlfwMujocoViewer:
         x, y = glfw.get_cursor_pos(window)
         self._last_mouse_x = x
         self._last_mouse_y = y
+
+        # ----- interactive perturbation selection / activation -----
+        ctrl_pressed = mods & glfw.MOD_CONTROL
+
+        if act == glfw.PRESS and ctrl_pressed:
+            width, height = glfw.get_framebuffer_size(window)
+            aspectratio = width / height
+            relx = x / width
+            rely = (height - y) / height
+
+            selpnt = np.zeros(3)
+            selgeom = np.zeros(1, dtype=np.int32)
+            selskin = np.zeros(1, dtype=np.int32)
+            selbody = mujoco.mjv_select(
+                self.model,
+                self.data,
+                self.vopt,
+                aspectratio,
+                relx,
+                rely,
+                self.scn,
+                selpnt,
+                selgeom,
+                np.zeros(1, dtype=np.int32),
+                selskin,
+            )
+
+            if selbody >= 0:
+                self.pert.select = selbody
+                self.pert.skinselect = int(selskin[0])
+                vec = selpnt - self.data.xpos[selbody]
+                self.pert.localpos = self.data.xmat[selbody].reshape(3, 3).dot(vec)
+
+            newperturb = 0
+            if selbody >= 0:
+                if button == glfw.MOUSE_BUTTON_RIGHT:
+                    newperturb = mujoco.mjtPertBit.mjPERT_TRANSLATE
+                elif button == glfw.MOUSE_BUTTON_LEFT:
+                    newperturb = mujoco.mjtPertBit.mjPERT_ROTATE
+
+            if newperturb and not self.pert.active:
+                mujoco.mjv_initPerturb(self.model, self.data, self.scn, self.pert)
+            self.pert.active = newperturb
+
+        # On release, stop perturbation
+        if act == glfw.RELEASE:
+            self.pert.active = 0
+        # ----- end perturb logic -----
 
     def _scroll(self, window: glfw._GLFWwindow, xoffset: float, yoffset: float) -> None:
         """Mouse scroll callback."""
@@ -390,8 +470,16 @@ class GlfwMujocoViewer:
             update()
             self._loop_count -= 1
 
+        self.apply_perturbations()
+
     def close(self) -> None:
         """Close the viewer and clean up resources."""
         self.is_alive = False
         glfw.terminate()
         self.ctx.free()
+
+    def apply_perturbations(self) -> None:
+        """Apply user perturbations (via Ctrl+click and drag) to the simulation."""
+        self.data.xfrc_applied[:] = 0
+        mujoco.mjv_applyPerturbPose(self.model, self.data, self.pert, 0)
+        mujoco.mjv_applyPerturbForce(self.model, self.data, self.pert)

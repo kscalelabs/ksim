@@ -1633,6 +1633,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     else:
                         frames.append(viewer.read_pixels(callback=render_callback))
 
+                    # Apply perturbation forces from viewer to environment.
+                    env_states.physics_state.data.xfrc_applied[:] = viewer.data.xfrc_applied
+                    viewer.data.xfrc_applied[:] = 0
+
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
 
