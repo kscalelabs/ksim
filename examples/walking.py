@@ -527,7 +527,6 @@ if __name__ == "__main__":
             global_grad_clip=2.0,
             # Logging parameters.
             valid_first_n_steps=1,
-            render_full_every_n_steps=1,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
