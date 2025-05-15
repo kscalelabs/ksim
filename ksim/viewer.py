@@ -357,7 +357,7 @@ class GlfwMujocoViewer:
             return
 
         def update() -> None:
-            render_start = time.time()
+            render_start = time.monotonic()
             width, height = glfw.get_framebuffer_size(self.window)
             self.rect.width, self.rect.height = width, height
 
@@ -380,7 +380,7 @@ class GlfwMujocoViewer:
 
                 glfw.swap_buffers(self.window)
             glfw.poll_events()
-            self._time_per_render = 0.9 * self._time_per_render + 0.1 * (time.time() - render_start)
+            self._time_per_render = 0.9 * self._time_per_render + 0.1 * (time.monotonic() - render_start)
 
         # Handle running in real-time.
         self._loop_count += self.model.opt.timestep / self._time_per_render

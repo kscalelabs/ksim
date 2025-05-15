@@ -405,8 +405,8 @@ class RLConfig(xax.Config):
         value=None,
         help="Run first validation after N seconds",
     )
-    render_full_every_n_steps: int = xax.field(
-        value=12,
+    render_full_every_n_seconds: float = xax.field(
+        value=60.0 * 30.0,
         help="Render the trajectory (without associated graphs) every N seconds",
     )
 
@@ -1537,7 +1537,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             argmax_action: If set, get the argmax action, otherwise sample
                 randomly from the model.
         """
-        save_path = self.exp_dir / "renders" / f"render_{time.time()}" if save_renders else None
+        save_path = self.exp_dir / "renders" / f"render_{time.monotonic()}" if save_renders else None
         if save_path is not None:
             save_path.mkdir(parents=True, exist_ok=True)
 
@@ -2047,6 +2047,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
 
             is_first_step = True
+            last_full_render_time = 0.0
 
             try:
                 while not self.is_training_over(state):
@@ -2087,7 +2088,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
 
                         if valid_step:
-                            full_render = state.num_valid_steps.item() % self.config.render_full_every_n_steps == 0
+                            current_time = time.monotonic()
+                            full_render = (
+                                current_time - last_full_render_time
+                            ) > self.config.render_full_every_n_seconds
+
+                            full_render = state.num_steps.item() % self.config.render_full_every_n_seconds == 0
                             self._log_logged_trajectory_video(
                                 logged_traj=logged_traj,
                                 markers=markers,
@@ -2101,29 +2107,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                         key=key, value=value, namespace=namespace
                                     ),
                                 )
-                            state = state.replace(
-                                num_valid_steps=state.num_valid_steps + num_steps,
-                                num_valid_samples=state.num_valid_samples + num_samples,
-                            )
+                                last_full_render_time = current_time
 
-                        else:
-                            state = state.replace(
-                                num_steps=state.num_steps + num_steps,
-                                num_samples=state.num_samples + num_samples,
-                            )
+                        state = state.replace(
+                            num_steps=state.num_steps + num_steps,
+                            num_samples=state.num_samples + num_samples,
+                        )
 
                         self.write_logs(state)
 
                     # Update  state with the elapsed time.
                     elapsed_time = timer.elapsed_time
-                    if valid_step:
-                        state = state.replace(
-                            valid_elapsed_time_s=state.valid_elapsed_time_s + elapsed_time,
-                        )
-                    else:
-                        state = state.replace(
-                            elapsed_time_s=state.elapsed_time_s + elapsed_time,
-                        )
+                    state = state.replace(
+                        elapsed_time_s=state.elapsed_time_s + elapsed_time,
+                    )
 
                     if is_first_step:
                         is_first_step = False
