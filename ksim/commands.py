@@ -215,7 +215,6 @@ class JoystickCommandMarker(Marker):
             self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
             self.scale = (self.radius, self.radius, self.radius)
             self.rgba = (1.0, 1.0, 1.0, 0.8)
-            self.track_rotation = False
 
         elif cmd_idx in (1, 2, 5, 6):
             dir_map = {
@@ -229,7 +228,6 @@ class JoystickCommandMarker(Marker):
             self.scale = (self.size, self.size, self.arrow_len)
             self.orientation = self.quat_from_direction(direction)
             self.rgba = (0.2, 0.8, 0.2, 0.8)
-            self.track_rotation = True
 
         else:
             self.geom = mujoco.mjtGeom.mjGEOM_ARROW
@@ -241,22 +239,20 @@ class JoystickCommandMarker(Marker):
 
             # Blue for left-turn, orange for right-turn.
             self.rgba = (0.2, 0.2, 1.0, 0.8) if cmd_idx == 3 else (1.0, 0.5, 0.0, 0.8)
-            self.track_rotation = False
 
     @classmethod
     def get(
         cls,
         command_name: str,
-        base_name: str | None = None,
         radius: float = 0.05,
         size: float = 0.03,
         arrow_len: float = 0.25,
         rgba: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 0.8),
         height: float = 0.5,
+        in_robot_frame: bool = False,
     ) -> Self:
         return cls(
             command_name=command_name,
-            target_name=base_name,
             target_type="root",
             geom=mujoco.mjtGeom.mjGEOM_SPHERE,
             scale=(radius, radius, radius),
@@ -265,6 +261,7 @@ class JoystickCommandMarker(Marker):
             radius=radius,
             rgba=rgba,
             height=height,
+            track_rotation=in_robot_frame,
         )
 
 
@@ -293,7 +290,7 @@ class JoystickCommand(Command):
         validator=sample_probs_validator,
     )
 
-    marker_base_name: str | None = attrs.field(default="floating_base_link")
+    in_robot_frame: bool = attrs.field(default=False)
     marker_z_offset: float = attrs.field(default=0.5)
 
     def initial_command(
@@ -325,7 +322,11 @@ class JoystickCommand(Command):
             The visualizations to add to the scene.
         """
         return [
-            JoystickCommandMarker.get(self.command_name, base_name=self.marker_base_name, height=self.marker_z_offset)
+            JoystickCommandMarker.get(
+                self.command_name,
+                height=self.marker_z_offset,
+                in_robot_frame=self.in_robot_frame,
+            )
         ]
 
 
