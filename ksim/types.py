@@ -178,7 +178,7 @@ class JointMetadata:
 @jax.tree_util.register_dataclass
 @dataclass
 class ActuatorMetadata:
-    actuator_type: str
+    actuator_type: str | None = None
     sys_id: str | None = None
     max_torque: float | None = None
     armature: float | None = None
