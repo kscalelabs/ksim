@@ -2088,10 +2088,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
 
                         if valid_step:
-                            current_time = time.monotonic()
-                            full_render = (
-                                current_time - last_full_render_time
-                            ) > self.config.render_full_every_n_seconds
+                            cur_time = time.monotonic()
+                            full_render = cur_time - last_full_render_time > self.config.render_full_every_n_seconds
 
                             full_render = state.num_steps.item() % self.config.render_full_every_n_seconds == 0
                             self._log_logged_trajectory_video(
@@ -2104,10 +2102,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 self._log_logged_trajectory_graphs(
                                     logged_traj=logged_traj,
                                     log_callback=lambda key, value, namespace: self.logger.log_image(
-                                        key=key, value=value, namespace=namespace
+                                        key=key,
+                                        value=value,
+                                        namespace=namespace,
                                     ),
                                 )
-                                last_full_render_time = current_time
+                                last_full_render_time = cur_time
 
                         state = state.replace(
                             num_steps=state.num_steps + num_steps,
