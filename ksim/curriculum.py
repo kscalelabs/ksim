@@ -6,7 +6,6 @@ __all__ = [
     "ConstantCurriculum",
     "EpisodeLengthCurriculum",
     "DistanceFromOriginCurriculum",
-    "RewardLevelCurriculum",
     "StepWhenSaturated",
 ]
 
