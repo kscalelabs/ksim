@@ -9,6 +9,7 @@ __all__ = [
     "LinearVelocityReward",
     "LinearVelocityPenalty",
     "NaiveForwardReward",
+    "NaiveForwardOrientationReward",
     "AngularVelocityReward",
     "AngularVelocityPenalty",
     "XYAngularVelocityPenalty",
@@ -216,6 +217,8 @@ class LinearVelocityPenalty(LinearVelocityReward): ...
 
 @attrs.define(frozen=True, kw_only=True)
 class NaiveForwardReward(Reward):
+    """Simple reward for moving forward in the X-direction."""
+
     clip_min: float | None = attrs.field(default=None)
     clip_max: float | None = attrs.field(default=None)
     in_robot_frame: bool = attrs.field(default=True)
@@ -227,6 +230,17 @@ class NaiveForwardReward(Reward):
             linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
         dimvel = linvel[..., 0].clip(self.clip_min, self.clip_max)
         return dimvel
+
+
+@attrs.define(frozen=True, kw_only=True)
+class NaiveForwardOrientationReward(NaiveForwardReward):
+    """Simple reward for keeping the robot oriented in the X-direction."""
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        quat = trajectory.qpos[..., 3:7]
+        forward_vec = jnp.array([1.0, 0.0, 0.0])
+        forward_vec = xax.rotate_vector_by_quat(forward_vec, quat)
+        return forward_vec[..., 0] - forward_vec[..., 1:].sum(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
