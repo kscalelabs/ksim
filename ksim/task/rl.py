@@ -2090,8 +2090,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         if valid_step:
                             cur_time = time.monotonic()
                             full_render = cur_time - last_full_render_time > self.config.render_full_every_n_seconds
-
-                            full_render = state.num_steps.item() % self.config.render_full_every_n_seconds == 0
                             self._log_logged_trajectory_video(
                                 logged_traj=logged_traj,
                                 markers=markers,
