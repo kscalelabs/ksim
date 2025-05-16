@@ -637,18 +637,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 f"the batch size ({self.config.batch_size})"
             )
 
-    def _run_cleanup(self) -> None:
-        """Run all registered cleanup handlers in reverse order."""
-        for handler in reversed(self._cleanup_handlers):
-            try:
-                handler()
-            except Exception as e:
-                logger.error(f"Error during cleanup: {e}")
-
-    def add_cleanup_handler(self, handler: Callable[[], None]) -> None:
-        """Register a cleanup handler to be called during shutdown."""
-        self._cleanup_handlers.append(handler)
-
     @functools.cached_property
     def batch_size(self) -> int:
         return self.config.batch_size
