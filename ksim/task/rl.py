@@ -24,6 +24,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Thread
+from types import FrameType
 from typing import Any, Callable, Collection, Generic, TypeVar
 
 import chex
@@ -626,6 +627,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def __init__(self, config: Config) -> None:
         super().__init__(config)
+        self._is_running = True
 
         # Using this Matplotlib backend since it is non-interactive.
         matplotlib.use("agg")
@@ -2013,9 +2015,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
+
+        def on_exit(signum: int, frame: FrameType | None) -> None:
+            if self._is_running:
+                self._is_running = False
+                if xax.is_master():
+                    xax.show_info("Gracefully shutting down...", important=True)
+
+        signal.signal(signal.SIGINT, on_exit)
+        signal.signal(signal.SIGTERM, on_exit)
+
         with self:
             rng = self.prng_key()
             self.set_loggers()
+            self._is_running = True
 
             if xax.is_master():
                 Thread(target=self.log_state, daemon=True).start()
@@ -2044,17 +2057,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             state = self.on_training_start(state)
 
-            def on_exit() -> None:
-                self._save(constants=constants, carry=carry, state=state)
-
-            # Handle user-defined interrupts during the training loop.
-            self.add_signal_handler(on_exit, signal.SIGUSR1, signal.SIGTERM)
-
             is_first_step = True
             last_full_render_time = 0.0
 
             try:
-                while not self.is_training_over(state):
+                while self._is_running and not self.is_training_over(state):
                     # Runs the training loop.
                     with xax.ContextTimer() as timer:
                         valid_step = self.valid_step_timer(state)
@@ -2140,10 +2147,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     msg = f"Finished training after {state.num_steps}steps and {state.num_samples} samples"
                     xax.show_info(msg, important=True)
                 self._save(constants=constants, carry=carry, state=state)
-
-            except (KeyboardInterrupt, bdb.BdbQuit):
-                if xax.is_master():
-                    xax.show_info("Interrupted training", important=True)
 
             except BaseException:
                 exception_tb = textwrap.indent(xax.highlight_exception_message(traceback.format_exc()), "  ")
