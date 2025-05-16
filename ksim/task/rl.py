@@ -24,6 +24,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Thread
+from types import FrameType
 from typing import Any, Callable, Collection, Generic, TypeVar
 
 import chex
@@ -2014,14 +2015,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
-        def on_exit(signum, frame):
-                if self._is_running:
-                    self._is_running = False
-                    if xax.is_master():
-                        xax.show_info("Gracefully shutting down...", important=True)
+
+        def on_exit(signum: int, frame: FrameType | None) -> None:
+            if self._is_running:
+                self._is_running = False
+                if xax.is_master():
+                    xax.show_info("Gracefully shutting down...", important=True)
+
         signal.signal(signal.SIGINT, on_exit)
         signal.signal(signal.SIGTERM, on_exit)
-            
+
         with self:
             rng = self.prng_key()
             self.set_loggers()
@@ -2053,7 +2056,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             state = self.on_training_start(state)
-
 
             is_first_step = True
             last_full_render_time = 0.0
