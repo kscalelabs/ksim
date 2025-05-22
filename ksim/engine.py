@@ -128,9 +128,7 @@ class MjxEngine(PhysicsEngine):
                 latency_rng,
                 minval=self.min_action_latency_step * curriculum_level,
                 maxval=self.max_action_latency_step * curriculum_level,
-            )
-            .round()
-            .astype(int),
+            ),
         )
 
     @xax.jit(static_argnames=["self"], jit_level=JitLevel.MJX)
@@ -165,7 +163,8 @@ class MjxEngine(PhysicsEngine):
             data, step_num, event_states, actuator_state = carry
 
             # Randomly apply the action with some latency.
-            ctrl = jax.lax.select(step_num >= physics_state.action_latency, action, prev_action)
+            prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
+            ctrl = prev_action * (1.0 - prct) + action * prct
 
             # Apply the events.
             new_event_states = {}
@@ -245,9 +244,7 @@ class MujocoEngine(PhysicsEngine):
                 latency_rng,
                 minval=self.min_action_latency_step * curriculum_level,
                 maxval=self.max_action_latency_step * curriculum_level,
-            )
-            .round()
-            .astype(int),
+            ),
         )
 
     def step(
@@ -277,7 +274,8 @@ class MujocoEngine(PhysicsEngine):
 
         for step_num in range(phys_steps_per_ctrl_steps):
             # Randomly apply the action with some latency.
-            ctrl = jax.lax.select(step_num >= physics_state.action_latency, action, prev_action)
+            prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
+            ctrl = prev_action * (1.0 - prct) + action * prct
 
             # Apply the events.
             new_event_states = {}
