@@ -590,3 +590,7 @@ JAX_DEBUG_NANS=True DISABLE_JIT_LEVEL=10 python -m examples.walking exp_dir=...<
 For advanced usage, see the `RLTask` and `PPOTask` base classes in the `ksim` source code.
 
 Happy walking! 🚶
+
+## Acknowledgements
+
+Many of the design decisions in `ksim` are heavily influenced other reinforcement learning training libraries like [Mujoco Playground](https://github.com/google-deepmind/mujoco_playground), [Isaac Lab](https://isaac-sim.github.io/IsaacLab/main/index.html) and [Maniskill](https://github.com/haosulab/ManiSkill). In particular, we are very grateful to the Mujoco and MJX maintainers for building a great, cross-platform simulator, and we hope `ksim` will help contribute to making it the ecosystem standard.

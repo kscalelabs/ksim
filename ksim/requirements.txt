@@ -5,6 +5,7 @@ numpy
 matplotlib
 tqdm
 tabulate
+
 # K-Scale CLI
 kscale
 
@@ -24,6 +25,3 @@ mujoco-mjx
 # Priors
 bvhio
 pyglm
-
-# Deployment
-pykos
