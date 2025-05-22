@@ -10,6 +10,7 @@ __all__ = [
     "RandomBaseVelocityXYReset",
     "get_xy_position_reset",
     "RandomHeadingReset",
+    "RandomHeightReset",
 ]
 
 import functools
@@ -306,5 +307,19 @@ class RandomHeadingReset(Reset):
         euler = jnp.stack([jnp.zeros_like(angle), jnp.zeros_like(angle), angle], axis=-1)
         quat = xax.euler_to_quat(euler)
         qpos = slice_update(data, "qpos", slice(3, 7), quat)
+        data = update_data_field(data, "qpos", qpos)
+        return data
+
+
+@attrs.define(frozen=True, kw_only=True)
+class RandomHeightReset(Reset):
+    """Resets the height of the robot to a random value."""
+
+    range: tuple[float, float] = attrs.field(default=(0.0, 0.1))
+
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
+        qpos = data.qpos
+        min_height, max_height = self.range
+        qpos = qpos.at[2:3].set(jax.random.uniform(rng, qpos[2:3].shape, minval=min_height, maxval=max_height))
         data = update_data_field(data, "qpos", qpos)
         return data
