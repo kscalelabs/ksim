@@ -320,6 +320,7 @@ class RandomHeightReset(Reset):
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         qpos = data.qpos
         min_height, max_height = self.range
-        qpos = qpos.at[2:3].set(jax.random.uniform(rng, qpos[2:3].shape, minval=min_height, maxval=max_height))
+        new_z = jax.random.uniform(rng, qpos[..., 2:3].shape, minval=min_height, maxval=max_height)
+        qpos = slice_update(data, "qpos", slice(2, 3), qpos[..., 2:3] + new_z)
         data = update_data_field(data, "qpos", qpos)
         return data

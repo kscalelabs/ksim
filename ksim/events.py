@@ -172,7 +172,8 @@ class JumpEvent(Event):
         # required vertical velocity impulse to reach the desired jump height.
         minval, maxval = self.jump_height_range
         jump_height = jax.random.uniform(urng, (), minval=minval, maxval=maxval) * curriculum_level
-        new_qvel = slice_update(data, "qvel", 2, jnp.sqrt(2 * model.opt.gravity * jump_height))
+        vel = jnp.sqrt(2 * model.opt.gravity * jump_height)
+        new_qvel = slice_update(data, "qvel", slice(0, 3), data.qvel[2:3] + vel)
         updated_data = update_data_field(data, "qvel", new_qvel)
 
         # Chooses a new remaining interval.
