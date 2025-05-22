@@ -3,7 +3,7 @@
 __all__ = [
     "StudentTask",
     "save_teacher",
-    "TeacherConfig",
+    "StudentConfig",
     "TeacherReward",
 ]
 
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 @jax.tree_util.register_dataclass
 @dataclass
-class TeacherConfig(PPOConfig):
+class StudentConfig(PPOConfig):
     """Configuration for teacher-student training."""
 
     # Teacher model path
@@ -48,7 +48,7 @@ class TeacherConfig(PPOConfig):
     )
 
 
-Config = TypeVar("Config", bound=TeacherConfig)
+Config = TypeVar("Config", bound=StudentConfig)
 
 
 @attrs.define(frozen=True, kw_only=True)

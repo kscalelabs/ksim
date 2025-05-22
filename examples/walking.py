@@ -415,7 +415,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ],
             axis=-1,
         )
-
         return model.forward(obs_n)
 
     def run_critic(

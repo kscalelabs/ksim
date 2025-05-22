@@ -160,7 +160,7 @@ class Model(eqx.Module):
 
 
 @dataclass
-class HumanoidWalkingTaskConfig(ksim.TeacherConfig):
+class HumanoidWalkingTaskConfig(ksim.StudentConfig):
     """Config for the humanoid walking task."""
 
     # Model parameters.
