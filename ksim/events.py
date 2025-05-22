@@ -142,6 +142,7 @@ class JumpEvent(Event):
 
     jump_height_range: tuple[float, float] = attrs.field()
     interval_range: tuple[float, float] = attrs.field()
+    curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
 
     def __call__(
         self,
@@ -172,6 +173,10 @@ class JumpEvent(Event):
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
         urng, trng = jax.random.split(rng, 2)
+
+        # Scales the curriculum level range.
+        curriculum_min, curriculum_max = self.curriculum_range
+        curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
 
         # Implements a jump as a vertical velocity impulse. We compute the
         # required vertical velocity impulse to reach the desired jump height.
