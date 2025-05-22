@@ -349,6 +349,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 rotation_speed=self.config.target_angular_velocity,
                 scale=1.0,
             ),
+            ksim.CtrlPenalty.create(physics_model),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
