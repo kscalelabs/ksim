@@ -72,6 +72,7 @@ class PushEvent(Event):
     y_angular_force: float = attrs.field(default=0.0)
     z_angular_force: float = attrs.field(default=0.0)
     interval_range: tuple[float, float] = attrs.field()
+    curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
 
     def __call__(
         self,
@@ -101,6 +102,10 @@ class PushEvent(Event):
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
         urng, brng, trng = jax.random.split(rng, 3)
+
+        # Scales the curriculum level range.
+        curriculum_min, curriculum_max = self.curriculum_range
+        curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
 
         # Randomly applies a force.
         force_scales = jnp.array(
@@ -137,6 +142,7 @@ class JumpEvent(Event):
 
     jump_height_range: tuple[float, float] = attrs.field()
     interval_range: tuple[float, float] = attrs.field()
+    curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
 
     def __call__(
         self,
@@ -167,6 +173,10 @@ class JumpEvent(Event):
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
         urng, trng = jax.random.split(rng, 2)
+
+        # Scales the curriculum level range.
+        curriculum_min, curriculum_max = self.curriculum_range
+        curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
 
         # Implements a jump as a vertical velocity impulse. We compute the
         # required vertical velocity impulse to reach the desired jump height.
