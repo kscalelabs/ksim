@@ -1608,6 +1608,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             try:
                 for _ in iterator:
+                    # Get commands
+                    new_commands = self.get_viewer_commands(
+                        commands=constants.commands, prev_command_inputs=env_states.commands
+                    )
+                    env_states = replace(env_states, commands=new_commands)
+
                     transition, env_states = self.step_engine(
                         constants=constants,
                         env_states=env_states,
@@ -1671,6 +1677,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 )
 
                 self._save_viewer_video(frames, save_path)
+
+    def get_viewer_commands(
+        self, commands: Collection[Command], prev_command_inputs: xax.FrozenDict[str, Array]
+    ) -> xax.FrozenDict[str, Array]:
+        """Get the commands when running with run_mode == "view".
+
+        This is a no-op by default, but can be overridden by subclasses to provide
+        a custom command for the viewer. E.g. to read keyboard inputs and pass commands
+        to the environment based on the inputs.
+        """
+        return prev_command_inputs
 
     def _save_viewer_video(self, frames: list[np.ndarray], save_path: Path) -> None:
         fps = round(1 / self.config.ctrl_dt)
