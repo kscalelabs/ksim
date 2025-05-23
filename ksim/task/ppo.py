@@ -107,7 +107,7 @@ def compute_ppo_inputs(
         )
 
     # Compute the advantages and value targets for each sample in the batch.
-    # Pass successes_t to the inner function
+    # Pass successes_t to the inner function for 1-step bootstrap on successful terminations.
     inputs = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t, successes_t)
 
     if normalize_advantages:
