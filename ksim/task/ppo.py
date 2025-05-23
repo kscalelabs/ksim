@@ -54,6 +54,7 @@ def compute_ppo_inputs(
     values_t: Array,
     rewards_t: Array,
     dones_t: Array,
+    successes_t: Array,
     decay_gamma: float,
     gae_lambda: float,
     normalize_advantages: bool = False,
@@ -72,17 +73,25 @@ def compute_ppo_inputs(
         adv_t = delta + decay_gamma * gae_lambda * mask * adv_t_plus_1
         return (return_t, adv_t), (return_t, adv_t)
 
-    def compute_gae_and_targets_for_sample(values_t: Array, rewards_t: Array, dones_t: Array) -> PPOInputs:
-        # Use the last value as the bootstrap value.
+    def compute_gae_and_targets_for_sample(
+        values_t: Array, rewards_t: Array, dones_t: Array, successes_t: Array
+    ) -> PPOInputs:
+        # values_shifted_t is V(s_{t+1}) for t < T_rollout, and V(s_T) for t = T_rollout
+        # Uses the last value of the trajectory as the bootstrap value.
         values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
+
+        # 1-step bootstrap on successful terminations.
+        trunc_mask_t = jnp.where(successes_t, 1.0, 0.0)
+        bootstrapped_rewards_t = rewards_t + decay_gamma * values_t * trunc_mask_t
+
         mask_t = jnp.where(dones_t, 0.0, 1.0)
 
         # Compute returns and GAE.
-        deltas_t = rewards_t + decay_gamma * values_shifted_t * mask_t - values_t
+        deltas_t = bootstrapped_rewards_t + decay_gamma * values_shifted_t * mask_t - values_t
         _, (returns_t, gae_t) = xax.scan(
             returns_and_gae_scan_fn,
             (jnp.zeros_like(rewards_t[-1]), jnp.zeros_like(deltas_t[-1])),
-            (rewards_t, deltas_t, mask_t),
+            (bootstrapped_rewards_t, deltas_t, mask_t),
             reverse=True,
             jit_level=JitLevel.RL_CORE,
         )
@@ -98,7 +107,8 @@ def compute_ppo_inputs(
         )
 
     # Compute the advantages and value targets for each sample in the batch.
-    inputs = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t)
+    # Pass successes_t to the inner function
+    inputs = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t, successes_t)
 
     if normalize_advantages:
         inputs.advantages_t = inputs.advantages_t / jnp.maximum(inputs.advantages_t.std(axis=-1, keepdims=True), 1e-6)
@@ -447,6 +457,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 values_t=jax.lax.stop_gradient(off_policy_variables.values),
                 rewards_t=rewards.total,
                 dones_t=trajectory.done,
+                successes_t=trajectory.success,
                 decay_gamma=self.config.gamma,
                 gae_lambda=self.config.lam,
                 normalize_advantages=self.config.normalize_advantages,
