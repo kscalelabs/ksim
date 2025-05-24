@@ -23,6 +23,7 @@ __all__ = [
     "FeetPositionObservation",
     "FeetOrientationObservation",
     "TimestepObservation",
+    "ActPosObservation",
 ]
 
 import functools
@@ -41,7 +42,9 @@ from ksim.types import PhysicsModel, PhysicsState
 from ksim.utils.mujoco import (
     geoms_colliding,
     get_body_data_idx_from_name,
+    get_ctrl_data_idx_by_name,
     get_geom_data_idx_from_name,
+    get_qpos_data_idxs_by_name,
     get_sensor_data_idxs_by_name,
 )
 from ksim.vis import Marker
@@ -503,3 +506,41 @@ class TimestepObservation(Observation):
         if not isinstance(time, Array):
             time = jnp.array(time)
         return time.reshape(1)
+
+
+@attrs.define(frozen=True)
+class ActPosObservation(Observation):
+    """Observation that returns a specific joint's action and position.
+
+    This observation is for debugging purposes, to check how well a given joint is following
+    the corresponding action. It is not intended to be passed to a model or used for training.
+    """
+
+    joint_name: str = attrs.field()
+    ctrl_idx: int = attrs.field()
+    qpos_idx: int = attrs.field()
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        joint_name: str,
+    ) -> Self:
+        qpos_idx, _ = get_qpos_data_idxs_by_name(physics_model)[joint_name]
+        ctrl_idx = get_ctrl_data_idx_by_name(physics_model)[f"{joint_name}_ctrl"]
+
+        return cls(
+            joint_name=joint_name,
+            ctrl_idx=ctrl_idx,
+            qpos_idx=qpos_idx,
+        )
+
+    def get_name(self) -> str:
+        """Get the name of the observation with joint details."""
+        return f"apo_q{self.qpos_idx}_a{self.ctrl_idx}_{self.joint_name}"
+
+    def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        action_val = state.physics_state.most_recent_action[self.ctrl_idx]
+        joint_pos = state.physics_state.data.qpos[self.qpos_idx]
+        return jnp.array([action_val, joint_pos])
