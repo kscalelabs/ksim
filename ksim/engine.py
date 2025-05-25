@@ -132,11 +132,11 @@ class MjxEngine(PhysicsEngine):
         )
 
     @xax.jit(static_argnames=["self"], jit_level=JitLevel.MJX)
-    def _physics_step(self, physics_model: mjx.Model, data_with_ctrl: mjx.Data) -> mjx.Data:
+    def _physics_step(self, physics_model: mjx.Model, data: mjx.Data) -> mjx.Data:
         # Just performs the MJX step, but wraps it in it's own JIT which can be
         # cached to prevent heavy recompilation every time the rewards or
         # events change.
-        return mjx.step(physics_model, data_with_ctrl)
+        return mjx.step(physics_model, data)
 
     @xax.jit(static_argnames=["self"], jit_level=JitLevel.ENGINE)
     def step(
@@ -176,7 +176,7 @@ class MjxEngine(PhysicsEngine):
                 )
             else:
                 torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
-            data_with_ctrl = data.replace(ctrl=torques)
+            data = data.replace(ctrl=torques)
 
             # Apply the events.
             new_event_states = {}
@@ -191,7 +191,7 @@ class MjxEngine(PhysicsEngine):
                 )
                 new_event_states[event.event_name] = new_event_state
 
-            new_data = self._physics_step(physics_model, data_with_ctrl)
+            new_data = self._physics_step(physics_model, data)
             return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state), None
 
         # Runs the model for N steps.
@@ -256,12 +256,12 @@ class MujocoEngine(PhysicsEngine):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> PhysicsState:
-        mujoco_data = physics_state.data
+        data = physics_state.data
 
-        if not isinstance(mujoco_data, mujoco.MjData):
+        if not isinstance(data, mujoco.MjData):
             raise ValueError("Mujoco data is not a MjData")
 
-        mujoco.mj_forward(physics_model, mujoco_data)
+        mujoco.mj_forward(physics_model, data)
         phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
 
@@ -281,20 +281,20 @@ class MujocoEngine(PhysicsEngine):
             if isinstance(self.actuators, StatefulActuators):
                 torques, actuator_state = self.actuators.get_stateful_ctrl(
                     action=ctrl,
-                    physics_data=mujoco_data,
+                    physics_data=data,
                     actuator_state=actuator_state,
                     rng=rng,
                 )
             else:
-                torques = self.actuators.get_ctrl(action=ctrl, physics_data=mujoco_data, rng=rng)
-            mujoco_data.ctrl[:] = torques
+                torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
+            data.ctrl[:] = torques
 
             # Apply the events.
             new_event_states = {}
             for event in self.events:
-                mujoco_data, new_event_state = event(
+                data, new_event_state = event(
                     model=physics_model,
-                    data=mujoco_data,
+                    data=data,
                     event_state=event_states[event.event_name],
                     curriculum_level=curriculum_level,
                     rng=rng,
@@ -302,10 +302,10 @@ class MujocoEngine(PhysicsEngine):
                 new_event_states[event.event_name] = new_event_state
             event_states = xax.FrozenDict(new_event_states)
 
-            mujoco.mj_step(physics_model, mujoco_data)
+            mujoco.mj_step(physics_model, data)
 
         return PhysicsState(
-            data=mujoco_data,
+            data=data,
             most_recent_action=action,
             event_states=event_states,
             actuator_state=actuator_state,
