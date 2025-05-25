@@ -266,13 +266,23 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                x_force=1.0,
-                y_force=1.0,
-                z_force=0.0,
-                x_angular_force=0.1,
-                y_angular_force=0.1,
-                z_angular_force=0.3,
-                interval_range=(0.25, 0.75),
+                x_linvel=1.0,
+                y_linvel=1.0,
+                z_linvel=0.0,
+                x_angvel=0.1,
+                y_angvel=0.1,
+                z_angvel=0.3,
+                interval_range=(2.0, 5.0),
+            ),
+            ksim.JumpEvent(
+                jump_height_range=(1.0, 2.0),
+                interval_range=(2.0, 5.0),
+            ),
+            ksim.JointPerturbationEvent(
+                std=50.0,
+                mask_prct=0.9,
+                interval_range=(0.1, 0.15),
+                curriculum_range=(1.0, 1.0),
             ),
         ]
 
@@ -354,7 +364,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
+            ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=5.0),
             ksim.FarFromOriginTermination(max_dist=10.0),
         ]
 

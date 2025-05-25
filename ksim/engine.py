@@ -166,6 +166,18 @@ class MjxEngine(PhysicsEngine):
             prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
             ctrl = prev_action * (1.0 - prct) + action * prct
 
+            # Gets the torques from the actuators.
+            if isinstance(self.actuators, StatefulActuators):
+                torques, actuator_state = self.actuators.get_stateful_ctrl(
+                    action=ctrl,
+                    physics_data=data,
+                    actuator_state=actuator_state,
+                    rng=rng,
+                )
+            else:
+                torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
+            data_with_ctrl = data.replace(ctrl=torques)
+
             # Apply the events.
             new_event_states = {}
             for event in self.events:
@@ -179,17 +191,6 @@ class MjxEngine(PhysicsEngine):
                 )
                 new_event_states[event.event_name] = new_event_state
 
-            if isinstance(self.actuators, StatefulActuators):
-                torques, actuator_state = self.actuators.get_stateful_ctrl(
-                    action=ctrl,
-                    physics_data=data,
-                    actuator_state=actuator_state,
-                    rng=rng,
-                )
-            else:
-                torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
-
-            data_with_ctrl = data.replace(ctrl=torques)
             new_data = self._physics_step(physics_model, data_with_ctrl)
             return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state), None
 
@@ -277,6 +278,17 @@ class MujocoEngine(PhysicsEngine):
             prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
             ctrl = prev_action * (1.0 - prct) + action * prct
 
+            if isinstance(self.actuators, StatefulActuators):
+                torques, actuator_state = self.actuators.get_stateful_ctrl(
+                    action=ctrl,
+                    physics_data=mujoco_data,
+                    actuator_state=actuator_state,
+                    rng=rng,
+                )
+            else:
+                torques = self.actuators.get_ctrl(action=ctrl, physics_data=mujoco_data, rng=rng)
+            mujoco_data.ctrl[:] = torques
+
             # Apply the events.
             new_event_states = {}
             for event in self.events:
@@ -288,20 +300,8 @@ class MujocoEngine(PhysicsEngine):
                     rng=rng,
                 )
                 new_event_states[event.event_name] = new_event_state
-
             event_states = xax.FrozenDict(new_event_states)
 
-            if isinstance(self.actuators, StatefulActuators):
-                torques, actuator_state = self.actuators.get_stateful_ctrl(
-                    action=ctrl,
-                    physics_data=mujoco_data,
-                    actuator_state=actuator_state,
-                    rng=rng,
-                )
-            else:
-                torques = self.actuators.get_ctrl(action=ctrl, physics_data=mujoco_data, rng=rng)
-
-            mujoco_data.ctrl[:] = torques
             mujoco.mj_step(physics_model, mujoco_data)
 
         return PhysicsState(
