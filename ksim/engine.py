@@ -231,6 +231,7 @@ class MjxEngine(PhysicsEngine):
             action_latency=physics_state.action_latency,
         )
 
+
 class MujocoEngine(PhysicsEngine):
     """Defines an engine for MuJoCo models."""
 
@@ -293,20 +294,27 @@ class MujocoEngine(PhysicsEngine):
         event_states = physics_state.event_states
         actuator_state = physics_state.actuator_state
 
+        last_torques = jnp.zeros_like(action)
+
         for step_num in range(phys_steps_per_ctrl_steps):
             # Randomly apply the action with some latency.
             prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
             ctrl = prev_action * (1.0 - prct) + action * prct
 
-            if isinstance(self.actuators, StatefulActuators):
-                torques, actuator_state = self.actuators.get_stateful_ctrl(
-                    action=ctrl,
-                    physics_data=data,
-                    actuator_state=actuator_state,
-                    rng=rng,
-                )
+            if (step_num % self.phys_steps_per_actuator_step) == 0:
+                if isinstance(self.actuators, StatefulActuators):
+                    torques, actuator_state = self.actuators.get_stateful_ctrl(
+                        action=ctrl,
+                        physics_data=data,
+                        actuator_state=actuator_state,
+                        rng=rng,
+                    )
+                else:
+                    torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
+                last_torques = torques
             else:
-                torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
+                torques = last_torques
+
             data.ctrl[:] = torques
 
             # Apply the events.
