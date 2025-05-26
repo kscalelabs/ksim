@@ -234,16 +234,6 @@ class MjxEngine(PhysicsEngine):
             action_latency=physics_state.action_latency,
         )
 
-
-# 50hz control
-# 1000hz physics
-# phys_steps_per_ctrl_steps = 20
-# actuator_freq_hz = 100
-# dt = 1.0 / (20 * 100) = 1/2000
-# actuator_steps_per_update = (1 / (100 * 1/2000)) = 20
-# step_num = 0, 20
-
-
 class MujocoEngine(PhysicsEngine):
     """Defines an engine for MuJoCo models."""
 
