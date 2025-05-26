@@ -658,7 +658,6 @@ class JoystickReward(Reward):
     backward_speed: float = attrs.field()
     strafe_speed: float = attrs.field()
     rotation_speed: float = attrs.field()
-    stand_still_neutral_speed: float = attrs.field(default=0.1)
     command_name: str = attrs.field(default="joystick_command")
     lin_vel_penalty_scale: float = attrs.field(default=0.01)
     ang_vel_penalty_scale: float = attrs.field(default=0.01)
@@ -689,11 +688,7 @@ class JoystickReward(Reward):
             return x.clip(-scale, scale) / scale
 
         # Computes each of the penalties.
-        stand_still_reward = (
-            (self.stand_still_neutral_speed - vel_norm).clip(
-                -self.stand_still_neutral_speed, self.stand_still_neutral_speed
-            )
-        ) / self.stand_still_neutral_speed
+        stand_still_reward = jnp.zeros_like(linvel[..., 0])
         walk_forward_reward = normalize(linvel[..., 0], self.forward_speed)
         walk_backward_reward = normalize(-linvel[..., 0], self.backward_speed)
         turn_left_reward = normalize(angvel[..., 2], self.rotation_speed)
