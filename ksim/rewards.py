@@ -439,10 +439,25 @@ class CtrlPenalty(Reward):
     """Penalty for large torque commands."""
 
     norm: xax.NormType = attrs.field(default="l2")
+    scales: tuple[float, ...] | None = attrs.field(default=None)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         ctrl = trajectory.ctrl
+        if self.scales is not None:
+            ctrl = ctrl / jnp.array(self.scales)
         return xax.get_norm(ctrl, self.norm).mean(axis=-1)
+
+    @classmethod
+    def create(cls, model: PhysicsModel, scale: float = -1.0, scale_by_curriculum: bool = False) -> Self:
+        ctrl_min = model.actuator_ctrlrange[..., 0]
+        ctrl_max = model.actuator_ctrlrange[..., 1]
+        ctrl_range = (ctrl_max - ctrl_min) / 2.0
+        ctrl_range_list = ctrl_range.flatten().tolist()
+        return cls(
+            scales=tuple(ctrl_range_list),
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
