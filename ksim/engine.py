@@ -45,6 +45,7 @@ class PhysicsEngine(eqx.Module, ABC):
     min_action_latency_step: float
     max_action_latency_step: float
     drop_action_prob: float
+    phys_steps_per_actuator_step: float
 
     def __init__(
         self,
@@ -55,6 +56,7 @@ class PhysicsEngine(eqx.Module, ABC):
         min_action_latency_step: float,
         max_action_latency_step: float,
         drop_action_prob: float,
+        phys_steps_per_actuator_step: float | None = None,
     ) -> None:
         """Initialize the MJX engine with resetting and actuators."""
         self.actuators = actuators
@@ -64,6 +66,10 @@ class PhysicsEngine(eqx.Module, ABC):
         self.min_action_latency_step = min_action_latency_step
         self.max_action_latency_step = max_action_latency_step
         self.drop_action_prob = drop_action_prob
+        if phys_steps_per_actuator_step is not None:
+            self.phys_steps_per_actuator_step = phys_steps_per_actuator_step
+        else:
+            self.phys_steps_per_actuator_step = 1
 
     @abstractmethod
     def reset(self, physics_model: PhysicsModel, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsState:
@@ -157,25 +163,36 @@ class MjxEngine(PhysicsEngine):
         action = jnp.where(drop_action, prev_action, action)
 
         def move_physics(
-            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree],
+            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree, Array],
             rng: PRNGKeyArray,
-        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree], None]:
-            data, step_num, event_states, actuator_state = carry
+        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree, Array], None]:
+            data, step_num, event_states, actuator_state, last_torques = carry
 
             # Randomly apply the action with some latency.
             prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
             ctrl = prev_action * (1.0 - prct) + action * prct
 
-            # Gets the torques from the actuators.
-            if isinstance(self.actuators, StatefulActuators):
-                torques, actuator_state = self.actuators.get_stateful_ctrl(
-                    action=ctrl,
-                    physics_data=data,
-                    actuator_state=actuator_state,
-                    rng=rng,
-                )
-            else:
-                torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
+            should_update = jnp.mod(step_num, self.phys_steps_per_actuator_step) == 0
+
+            def update_actuators(prev_actuator_state: PyTree) -> tuple[Array, PyTree]:
+                if isinstance(self.actuators, StatefulActuators):
+                    torques, actuator_state = self.actuators.get_stateful_ctrl(
+                        action=ctrl,
+                        physics_data=data,
+                        actuator_state=prev_actuator_state,
+                        rng=rng,
+                    )
+                else:
+                    torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
+                    actuator_state = prev_actuator_state
+                return torques, actuator_state
+
+            torques, actuator_state = jax.lax.cond(
+                should_update,
+                lambda: update_actuators(actuator_state),
+                lambda: (last_torques, actuator_state),
+            )
+
             data = data.replace(ctrl=torques)
 
             # Apply the events.
@@ -192,12 +209,19 @@ class MjxEngine(PhysicsEngine):
                 new_event_states[event.event_name] = new_event_state
 
             new_data = self._physics_step(physics_model, data)
-            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state), None
+            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state, torques), None
 
         # Runs the model for N steps.
-        (mjx_data, *_, event_info, actuator_state_final), _ = xax.scan(
+        (mjx_data, *_, event_info, actuator_state_final, _), _ = xax.scan(
             move_physics,
-            (mjx_data, jnp.array(0.0), physics_state.event_states, physics_state.actuator_state),
+            # Note that we pass in 0 for initial last computed torques but step 0 will always update.
+            (
+                mjx_data,
+                jnp.array(0.0),
+                physics_state.event_states,
+                physics_state.actuator_state,
+                jnp.zeros_like(action),
+            ),
             jax.random.split(rng, phys_steps_per_ctrl_steps),
             jit_level=JitLevel.ENGINE,
         )
@@ -209,6 +233,15 @@ class MjxEngine(PhysicsEngine):
             actuator_state=actuator_state_final,
             action_latency=physics_state.action_latency,
         )
+
+
+# 50hz control
+# 1000hz physics
+# phys_steps_per_ctrl_steps = 20
+# actuator_freq_hz = 100
+# dt = 1.0 / (20 * 100) = 1/2000
+# actuator_steps_per_update = (1 / (100 * 1/2000)) = 20
+# step_num = 0, 20
 
 
 class MujocoEngine(PhysicsEngine):
@@ -323,6 +356,7 @@ def get_physics_engine(
     ctrl_dt: float,
     action_latency_range: tuple[float, float],
     drop_action_prob: float,
+    actuator_update_dt: float | None,
 ) -> PhysicsEngine:
     min_action_latency, max_action_latency = action_latency_range
     if min_action_latency < 0:
@@ -341,6 +375,11 @@ def get_physics_engine(
     max_action_latency_step = max_action_latency / dt
     phys_steps_per_ctrl_steps = round(ctrl_dt / dt)
 
+    if actuator_update_dt is not None:
+        phys_steps_per_actuator_step = max(1, round(actuator_update_dt / dt))
+    else:
+        phys_steps_per_actuator_step = None
+
     match engine_type:
         case "mujoco":
             return MujocoEngine(
@@ -351,6 +390,7 @@ def get_physics_engine(
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
                 drop_action_prob=drop_action_prob,
+                phys_steps_per_actuator_step=phys_steps_per_actuator_step,
             )
 
         case "mjx":
@@ -362,6 +402,7 @@ def get_physics_engine(
                 max_action_latency_step=max_action_latency_step,
                 phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
                 drop_action_prob=drop_action_prob,
+                phys_steps_per_actuator_step=phys_steps_per_actuator_step,
             )
 
         case _:

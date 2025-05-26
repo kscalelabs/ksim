@@ -522,6 +522,10 @@ class RLConfig(xax.Config):
         value=(0.0, 0.0),
         help="The range of action latencies to use.",
     )
+    actuator_update_dt: float | None = xax.field(
+        value=None,
+        help="The time step of the actuator update.",
+    )
     drop_action_prob: float = xax.field(
         value=0.0,
         help="The probability of dropping an action.",
@@ -704,6 +708,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ctrl_dt=self.config.ctrl_dt,
             action_latency_range=self.config.action_latency_range,
             drop_action_prob=self.config.drop_action_prob,
+            actuator_update_dt=self.config.actuator_update_dt,
         )
 
     @abstractmethod
