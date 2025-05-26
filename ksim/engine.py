@@ -45,7 +45,7 @@ class PhysicsEngine(eqx.Module, ABC):
     min_action_latency_step: float
     max_action_latency_step: float
     drop_action_prob: float
-    phys_steps_per_actuator_step: float
+    phys_steps_per_actuator_step: int
 
     def __init__(
         self,
@@ -56,7 +56,7 @@ class PhysicsEngine(eqx.Module, ABC):
         min_action_latency_step: float,
         max_action_latency_step: float,
         drop_action_prob: float,
-        phys_steps_per_actuator_step: float | None = None,
+        phys_steps_per_actuator_step: int,
     ) -> None:
         """Initialize the MJX engine with resetting and actuators."""
         self.actuators = actuators
@@ -66,10 +66,7 @@ class PhysicsEngine(eqx.Module, ABC):
         self.min_action_latency_step = min_action_latency_step
         self.max_action_latency_step = max_action_latency_step
         self.drop_action_prob = drop_action_prob
-        if phys_steps_per_actuator_step is not None:
-            self.phys_steps_per_actuator_step = phys_steps_per_actuator_step
-        else:
-            self.phys_steps_per_actuator_step = 1
+        self.phys_steps_per_actuator_step = phys_steps_per_actuator_step
 
     @abstractmethod
     def reset(self, physics_model: PhysicsModel, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsState:
@@ -368,7 +365,7 @@ def get_physics_engine(
     if actuator_update_dt is not None:
         phys_steps_per_actuator_step = max(1, round(actuator_update_dt / dt))
     else:
-        phys_steps_per_actuator_step = None
+        phys_steps_per_actuator_step = 1
 
     match engine_type:
         case "mujoco":
