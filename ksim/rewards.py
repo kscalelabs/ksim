@@ -730,20 +730,25 @@ class JoystickReward(Reward):
 
         return total_reward
 
+
 @attrs.define(frozen=True, kw_only=True)
 class ReachabilityPenalty(Reward):
-    """Penalises commands that exceed the per‑joint reachability envelope
-    Δmax = vmax·Δt + ½·amax·Δt²."""
+    """Penalty for commands that exceed the per‑joint reachability envelope.
+
+    Maximum joint movement in a single time step is given by:
+    Δmax = vmax·Δt + ½·amax·Δt²
+    """
 
     delta_max_j: tuple[float, ...] = attrs.field(eq=False, hash=False)
-    squared:      bool = True      # ‑‑ use L2 on the excess (L1 if False)
-    def get_reward(self, traj: Trajectory) -> jnp.ndarray:
-        action_tj  = traj.action
-        q_prev_tj  = traj.qpos[..., 7:]
-        dm_j       = jnp.asarray(self.delta_max_j)
+    squared: bool = True  # ‑‑ use L2 on the excess (L1 if False)
 
-        excess_tj  = jnp.maximum(0.0, jnp.abs(action_tj - q_prev_tj) - dm_j)
-        per_joint  = excess_tj**2 if self.squared else excess_tj
-        penalty_t  = per_joint.sum(axis=-1)
+    def get_reward(self, traj: Trajectory) -> jnp.ndarray:
+        action_tj = traj.action
+        q_prev_tj = traj.qpos[..., 7:]
+        dm_j = jnp.asarray(self.delta_max_j)
+
+        excess_tj = jnp.maximum(0.0, jnp.abs(action_tj - q_prev_tj) - dm_j)
+        per_joint = excess_tj**2 if self.squared else excess_tj
+        penalty_t = per_joint.sum(axis=-1)
 
         return penalty_t
