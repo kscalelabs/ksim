@@ -267,13 +267,13 @@ class IMUAlignmentRandomizer(PhysicsRandomizer):
         rng, sub = jax.random.split(rng)
         rx, ry = jax.random.normal(sub, (2,)) * self.tilt_std_rad
 
-        rz = 0.0
+        rz = jnp.array(0.0)
         if self.yaw_std_rad is not None:
             rng, sub = jax.random.split(rng)
             rz = jax.random.normal(sub) * self.yaw_std_rad
 
         # small angle approximation: q ≈ [1, θx/2, θy/2, θz/2]
-        h = 0.5
+        h = jnp.array(0.5)
         qx = jnp.array([1.0, rx * h, 0.0, 0.0])
         qy = jnp.array([1.0, 0.0, ry * h, 0.0])
         qz = jnp.array([1.0, 0.0, 0.0, rz * h])
