@@ -217,7 +217,7 @@ class MjxEngine(PhysicsEngine):
                 jnp.array(0.0),
                 physics_state.event_states,
                 physics_state.actuator_state,
-                jnp.zeros_like(action),
+                jnp.zeros_like(physics_state.data.ctrl),
             ),
             jax.random.split(rng, phys_steps_per_ctrl_steps),
             jit_level=JitLevel.ENGINE,
