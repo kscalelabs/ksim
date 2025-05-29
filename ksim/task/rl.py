@@ -79,8 +79,10 @@ from ksim.utils.mujoco import (
     load_model,
     log_joint_config_table,
 )
-from ksim.viewer import DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
+import kmv
+from ksim.viewer import DefaultMujocoViewer, RenderMode
 from ksim.vis import Marker, configure_scene
+
 
 logger = logging.getLogger(__name__)
 
@@ -553,17 +555,18 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
-) -> GlfwMujocoViewer | DefaultMujocoViewer:
+) -> "DefaultMujocoViewer | kmv.QtViewer":
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
 
     if (render_with_glfw := config.render_with_glfw) is None:
         render_with_glfw = mode == "window"
 
-    viewer: GlfwMujocoViewer | DefaultMujocoViewer
+    viewer: "DefaultMujocoViewer | kmv.QtViewer"
 
     if render_with_glfw:
-        viewer = GlfwMujocoViewer(
+        # Use KMV Qt-based viewer for interactive mode
+        viewer = kmv.QtViewer(
             mj_model,
             data=mj_data,
             mode=mode,
@@ -575,8 +578,8 @@ def get_viewer(
             contact_point=config.render_contact_point,
             inertia=config.render_inertia,
         )
-
     else:
+        # Use default offscreen viewer
         viewer = DefaultMujocoViewer(
             mj_model,
             width=config.render_width,
@@ -595,14 +598,16 @@ def get_viewer(
     if config.render_camera_name is not None:
         viewer.set_camera(config.render_camera_name)
 
-    configure_scene(
-        viewer.scn,
-        viewer.vopt,
-        shadow=config.render_shadow,
-        contact_force=config.render_contact_force,
-        contact_point=config.render_contact_point,
-        inertia=config.render_inertia,
-    )
+    # Only configure scene for non-KMV viewers (KMV handles this internally)
+    if not render_with_glfw:
+        configure_scene(
+            viewer.scn,
+            viewer.vopt,
+            shadow=config.render_shadow,
+            contact_force=config.render_contact_force,
+            contact_point=config.render_contact_point,
+            inertia=config.render_inertia,
+        )
 
     return viewer
 
@@ -1063,7 +1068,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectory: Trajectory,
         markers: Collection[Marker],
-        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
+        viewer: "DefaultMujocoViewer | kmv.QtViewer",
         target_fps: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
@@ -1217,7 +1222,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         logged_traj: LoggedTrajectory,
         markers: Collection[Marker],
-        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
+        viewer: "DefaultMujocoViewer | kmv.QtViewer",
         key: str,
     ) -> None:
         """Visualizes a single trajectory.

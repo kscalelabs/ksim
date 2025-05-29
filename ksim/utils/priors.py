@@ -39,8 +39,6 @@ from omegaconf.errors import ConfigKeyError, MissingMandatoryValue
 from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation as R
 
-from ksim.viewer import GlfwMujocoViewer
-
 logger = logging.getLogger(__name__)
 
 
@@ -284,8 +282,12 @@ def visualize_reference_motion(
     cartesian_motion: xax.FrozenDict[int, np.ndarray],
     mj_base_id: int,
 ) -> None:
+    """Visualizes the reference motion with markers using the Mujoco viewer."""
+    import kmv
+    
     data = mujoco.MjData(model)
-    viewer = GlfwMujocoViewer(model, data, mode="window", width=1024, height=768)
+    mujoco.mj_resetData(model, data)
+    viewer = kmv.QtViewer(model, data, mode="window", width=1024, height=768)
 
     # Set some nice camera parameters
     viewer.cam.distance = 3.0
