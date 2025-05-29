@@ -272,23 +272,23 @@ class IMUAlignmentRandomizer(PhysicsRandomizer):
             rng, sub = jax.random.split(rng)
             rz = jax.random.normal(sub) * self.yaw_std_rad
 
-        # small angle approximation: q ≈ [1, θx/2, θy/2, θz/2]
+        # Small angle approximation: q ≈ [1, θx/2, θy/2, θz/2].
         h = jnp.array(0.5)
         qx = jnp.array([1.0, rx * h, 0.0, 0.0])
         qy = jnp.array([1.0, 0.0, ry * h, 0.0])
         qz = jnp.array([1.0, 0.0, 0.0, rz * h])
 
-        # compose rotations: Z(yaw) * Y(pitch) * X(roll)
-        # this applies roll first in body frame, then pitch, then yaw
+        # Compose rotations: Z(yaw) * Y(pitch) * X(roll).
+        # This applies roll first in body frame, then pitch, then yaw.
         q_offset = xax.quat_mul(qz, xax.quat_mul(qy, qx))
         q_offset = q_offset / jnp.linalg.norm(q_offset)
 
-        # apply rotation offset to IMU site
+        # Apply rotation offset to IMU site.
         site_id = get_site_data_idx_by_name(model)[self.site_name]
         new_site_quat = model.site_quat.at[site_id].set(xax.quat_mul(q_offset, model.site_quat[site_id]))
         updates = {"site_quat": new_site_quat}
 
-        # translation noise
+        # Translation noise.
         if self.translate_std_m is not None and self.translate_std_m > 0.0:
             rng, sub = jax.random.split(rng)
             dpos = jax.random.normal(sub, (3,)) * self.translate_std_m

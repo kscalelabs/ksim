@@ -740,7 +740,7 @@ class ReachabilityPenalty(Reward):
     """
 
     delta_max_j: tuple[float, ...] = attrs.field(eq=False, hash=False)
-    squared: bool = True  # ‑‑ use L2 on the excess (L1 if False)
+    squared: bool = True  # ‑‑ Use L2 on the excess (L1 if False).
 
     def get_reward(self, traj: Trajectory) -> jnp.ndarray:
         action_tj = traj.action
