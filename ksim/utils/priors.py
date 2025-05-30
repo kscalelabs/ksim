@@ -38,6 +38,7 @@ from omegaconf import MISSING, DictConfig, ListConfig, OmegaConf
 from omegaconf.errors import ConfigKeyError, MissingMandatoryValue
 from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation as R
+from kmv import QtViewer
 
 logger = logging.getLogger(__name__)
 
@@ -283,11 +284,10 @@ def visualize_reference_motion(
     mj_base_id: int,
 ) -> None:
     """Visualizes the reference motion with markers using the Mujoco viewer."""
-    import kmv
     
     data = mujoco.MjData(model)
     mujoco.mj_resetData(model, data)
-    viewer = kmv.QtViewer(model, data, mode="window", width=1024, height=768)
+    viewer = QtViewer(model, data, mode="window", width=1024, height=768)
 
     # Set some nice camera parameters
     viewer.cam.distance = 3.0

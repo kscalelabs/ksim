@@ -79,8 +79,8 @@ from ksim.utils.mujoco import (
     load_model,
     log_joint_config_table,
 )
-import kmv
-from ksim.viewer import DefaultMujocoViewer, RenderMode
+from kmv import DefaultMujocoViewer, QtViewer
+from kmv.viewer import RenderMode
 from ksim.vis import Marker, configure_scene
 
 
@@ -555,18 +555,18 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
-) -> "DefaultMujocoViewer | kmv.QtViewer":
+) -> DefaultMujocoViewer | QtViewer:
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
 
     if (render_with_glfw := config.render_with_glfw) is None:
         render_with_glfw = mode == "window"
 
-    viewer: "DefaultMujocoViewer | kmv.QtViewer"
+    viewer: DefaultMujocoViewer | QtViewer
 
     if render_with_glfw:
         # Use KMV Qt-based viewer for interactive mode
-        viewer = kmv.QtViewer(
+        viewer = QtViewer(
             mj_model,
             data=mj_data,
             mode=mode,
@@ -1068,7 +1068,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectory: Trajectory,
         markers: Collection[Marker],
-        viewer: "DefaultMujocoViewer | kmv.QtViewer",
+        viewer: DefaultMujocoViewer | QtViewer,
         target_fps: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
@@ -1222,7 +1222,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         logged_traj: LoggedTrajectory,
         markers: Collection[Marker],
-        viewer: "DefaultMujocoViewer | kmv.QtViewer",
+        viewer: DefaultMujocoViewer | QtViewer,
         key: str,
     ) -> None:
         """Visualizes a single trajectory.
