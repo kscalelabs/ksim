@@ -20,7 +20,7 @@ import textwrap
 import time
 import traceback
 from abc import ABC, abstractmethod
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Thread
@@ -1600,6 +1600,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 model_arrs=model_arrs,
             )
 
+            WINDOW = 4                       # 3 for jerk + 1 current
+            step_buffer = deque(maxlen=WINDOW)
+
+            reward_carry = env_states.reward_carry      # stateful-reward memory
+            dbg_rng      = rng                          # local RNG for get_rewards
+
             # Creates the markers.
             markers = self.get_markers(
                 commands=constants.commands,
@@ -1620,6 +1626,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             transitions = []
 
+            # Helper variables for time tracking and reward streaming
+            time_offset   = 0.0
+            last_mj_time  = 0.0
+
             try:
                 for _ in iterator:
                     # Get commands
@@ -1633,7 +1643,48 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         env_states=env_states,
                         shared_state=shared_state,
                     )
+                    
+                    # Update env_states for consistency with local reward_carry
+                    env_states = replace(env_states, reward_carry=reward_carry)
+                    
                     transitions.append(transition)
+
+                    # ---- inside the for-loop, right after `transitions.append(transition)` ----
+                    step_buffer.append(transition)
+
+                    # Build a *constant-size* trajectory (≤4)
+                    traj_small = jax.tree.map(lambda *xs: jnp.stack(xs), *step_buffer)
+
+                    dbg_rng, step_rng = jax.random.split(dbg_rng)
+                    reward_state = get_rewards(
+                        trajectory           = traj_small,
+                        rewards              = constants.rewards,
+                        rewards_carry        = reward_carry,
+                        rollout_length_steps = 1,            # don't divide by horizon
+                        curriculum_level     = env_states.curriculum_state.level,
+                        rng                  = step_rng,
+                        clip_min             = self.config.reward_clip_min,
+                        clip_max             = self.config.reward_clip_max,
+                    )
+                    reward_carry = reward_state.carry        # keep carry in sync
+
+                    cur_raw = float(env_states.physics_state.data.time)
+                    if cur_raw < last_mj_time - 1e-9:          # detect reset
+                        time_offset += last_mj_time
+                    last_mj_time = cur_raw
+                    total_time = time_offset + cur_raw
+
+                    scalars = {"total_reward": float(jax.device_get(reward_state.total[-1]))}
+                    scalars.update({k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()})
+
+                    if hasattr(viewer, "push_scalars"):        # only for QtViewer/window mode
+                        viewer.push_scalars(total_time, scalars)
+
+                    # #  -- tiny array ⇒ cheap device→host transfer
+                    # tot  = float(jax.device_get(reward_state.total[-1]))
+                    # comps = {k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()}
+
+
 
                     # Logs the frames to render.
                     viewer.set_mjdata(env_states.physics_state.data)
