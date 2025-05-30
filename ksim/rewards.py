@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 MonotonicFn = Literal["exp", "inv", "sigmoid"]
 
 
-def norm_to_reward(value: Array, temp: float, monotonic_fn: MonotonicFn) -> Array:
+def norm_to_reward(value: Array, temp: float = 1.0, monotonic_fn: MonotonicFn = "inv") -> Array:
     """Helper function for converting from a norm to a reward.
 
     Args:
@@ -71,10 +71,10 @@ def norm_to_reward(value: Array, temp: float, monotonic_fn: MonotonicFn) -> Arra
         The reward.
     """
     match monotonic_fn:
-        case "exp":
-            return jnp.exp(-value / temp)
         case "inv":
             return 1.0 / (value / temp + 1.0)
+        case "exp":
+            return jnp.exp(-value / temp)
         case "sigmoid":
             return 1.0 / (1.0 + jnp.exp(-value / temp))
         case _:
