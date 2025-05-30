@@ -183,9 +183,17 @@ class FarFromOriginTermination(Termination):
 
 @attrs.define(frozen=True, kw_only=True)
 class EpisodeLengthTermination(Termination):
-    """Terminates the episode if the robot is in collision."""
+    """Terminates the episode if the robot has been alive for too long.
 
-    max_length: float = attrs.field(validator=attrs.validators.gt(0.0))
+    This is treated as a positive termination.
+    """
+
+    max_length_sec: float = attrs.field(validator=attrs.validators.gt(0.0))
+    disable_at_curriculum_level: int = attrs.field(default=None)
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        return jnp.where(state.time > self.max_length, 1, 0)
+        long_episodes = jnp.where(state.time > self.max_length_sec, 1, 0)
+        if self.disable_at_curriculum_level is not None:
+            return jnp.where(curriculum_level < self.disable_at_curriculum_level, 0, long_episodes)
+
+        return long_episodes

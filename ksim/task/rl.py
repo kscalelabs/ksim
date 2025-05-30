@@ -181,7 +181,11 @@ def get_rewards(
         reward_carry = rewards_carry[reward_name]
 
         if isinstance(reward, StatefulReward):
-            reward_carry = jnp.where(trajectory.done[..., -1], reward.initial_carry(rng), reward_carry)
+            reward_carry = jax.tree.map(
+                lambda new, old: jnp.where(trajectory.done[..., -1], new, old),
+                reward.initial_carry(rng),
+                reward_carry,
+            )
             reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
         else:
             reward_val = reward.get_reward(trajectory)
@@ -524,6 +528,10 @@ class RLConfig(xax.Config):
         value=(0.0, 0.0),
         help="The range of action latencies to use.",
     )
+    actuator_update_dt: float | None = xax.field(
+        value=None,
+        help="The time step of the actuator update.",
+    )
     drop_action_prob: float = xax.field(
         value=0.0,
         help="The probability of dropping an action.",
@@ -709,6 +717,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ctrl_dt=self.config.ctrl_dt,
             action_latency_range=self.config.action_latency_range,
             drop_action_prob=self.config.drop_action_prob,
+            actuator_update_dt=self.config.actuator_update_dt,
         )
 
     @abstractmethod
