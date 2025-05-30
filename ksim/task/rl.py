@@ -1636,8 +1636,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     transitions.append(transition)
 
                     # Logs the frames to render.
-                    viewer.data.qpos[:] = np.array(env_states.physics_state.data.qpos)
-                    viewer.data.qvel[:] = np.array(env_states.physics_state.data.qvel)
+                    viewer.set_mjdata(env_states.physics_state.data)
                     mujoco.mj_forward(viewer.model, viewer.data)
 
                     def render_callback(
