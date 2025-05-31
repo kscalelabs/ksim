@@ -20,7 +20,7 @@ import textwrap
 import time
 import traceback
 from abc import ABC, abstractmethod
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Thread
@@ -79,8 +79,11 @@ from ksim.utils.mujoco import (
     load_model,
     log_joint_config_table,
 )
-from ksim.viewer import DefaultMujocoViewer, GlfwMujocoViewer, RenderMode
+from kmv.app.viewer import DefaultMujocoViewer, QtViewer
+from kmv.core.types import RenderMode, Frame
+from kmv.core.ring import Ring
 from ksim.vis import Marker, configure_scene
+
 
 logger = logging.getLogger(__name__)
 
@@ -561,19 +564,22 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
-) -> GlfwMujocoViewer | DefaultMujocoViewer:
+    ring: Ring[Frame] | None = None,
+) -> DefaultMujocoViewer | QtViewer:
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
 
     if (render_with_glfw := config.render_with_glfw) is None:
         render_with_glfw = mode == "window"
 
-    viewer: GlfwMujocoViewer | DefaultMujocoViewer
+    viewer: DefaultMujocoViewer | QtViewer
 
     if render_with_glfw:
-        viewer = GlfwMujocoViewer(
+        # Use KMV Qt-based viewer for interactive mode
+        viewer = QtViewer(
             mj_model,
             data=mj_data,
+            ring=ring,
             mode=mode,
             width=config.render_width,
             height=config.render_height,
@@ -583,8 +589,8 @@ def get_viewer(
             contact_point=config.render_contact_point,
             inertia=config.render_inertia,
         )
-
     else:
+        # Use default offscreen viewer
         viewer = DefaultMujocoViewer(
             mj_model,
             width=config.render_width,
@@ -603,14 +609,16 @@ def get_viewer(
     if config.render_camera_name is not None:
         viewer.set_camera(config.render_camera_name)
 
-    configure_scene(
-        viewer.scn,
-        viewer.vopt,
-        shadow=config.render_shadow,
-        contact_force=config.render_contact_force,
-        contact_point=config.render_contact_point,
-        inertia=config.render_inertia,
-    )
+    # Only configure scene for non-KMV viewers (KMV handles this internally)
+    if not render_with_glfw:
+        configure_scene(
+            viewer.scn,
+            viewer.vopt,
+            shadow=config.render_shadow,
+            contact_force=config.render_contact_force,
+            contact_point=config.render_contact_point,
+            inertia=config.render_inertia,
+        )
 
     return viewer
 
@@ -1072,7 +1080,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectory: Trajectory,
         markers: Collection[Marker],
-        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
+        viewer: DefaultMujocoViewer | QtViewer,
         target_fps: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
@@ -1117,7 +1125,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Overlays the frame number on the frame.
             frame_img = Image.fromarray(frame)
             draw = ImageDraw.Draw(frame_img)
-            draw.text((10, 10), f"Frame {indices[frame_id]}", fill=(255, 255, 255))
+            draw.text((10, 10), f"Frame {indices[frame_id]}", fill=(0, 0, 0))
             frame = np.array(frame_img)
 
             # Draws an RGB patch in the bottom right corner of the frame.
@@ -1226,7 +1234,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         logged_traj: LoggedTrajectory,
         markers: Collection[Marker],
-        viewer: GlfwMujocoViewer | DefaultMujocoViewer,
+        viewer: DefaultMujocoViewer | QtViewer,
         key: str,
     ) -> None:
         """Visualizes a single trajectory.
@@ -1595,6 +1603,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 model_arrs=model_arrs,
             )
 
+            WINDOW = 4                       # 3 for jerk + 1 current
+            step_buffer = deque(maxlen=WINDOW)
+
+            reward_carry = env_states.reward_carry      # stateful-reward memory
+            dbg_rng      = rng                          # local RNG for get_rewards
+
             # Creates the markers.
             markers = self.get_markers(
                 commands=constants.commands,
@@ -1602,18 +1616,36 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rewards=constants.rewards,
             )
 
+            ring: Ring[Frame] = Ring(size=8)        # small buffer is enough
+
             # Creates the viewer.
             viewer = get_viewer(
                 mj_model=mj_model,
                 config=self.config,
                 mj_data=env_states.physics_state.data,
                 save_path=save_path,
+                ring=ring,
             )
+
+            def vis_callback(model: mujoco.MjModel,
+                             data:  mujoco.MjData,
+                             scene: mujoco.MjvScene,
+                             traj:  Trajectory | None = None) -> None:
+                if self.config.render_markers and traj is not None:
+                    for marker in markers:
+                        marker(model, data, scene, traj)
+
+            if save_path is None:
+                viewer.render(callback=vis_callback)
 
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
             frames: list[np.ndarray] = []
 
             transitions = []
+
+            # Helper variables for time tracking and reward streaming
+            time_offset   = 0.0
+            last_mj_time  = 0.0
 
             try:
                 for _ in iterator:
@@ -1628,31 +1660,60 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         env_states=env_states,
                         shared_state=shared_state,
                     )
+                    
+                    ring.push(
+                        Frame(
+                            qpos=np.array(env_states.physics_state.data.qpos),
+                            qvel=np.array(env_states.physics_state.data.qvel),
+                        )
+                    )
+                    
+                    viewer._viewport.set_callback(
+                        (lambda m, d, s, traj=transition:
+                            [marker(m, d, s, traj) for marker in markers])
+                        if self.config.render_markers else None
+                    )
+                    viewer.app.processEvents()
+                    
+                    # Update env_states for consistency with local reward_carry
+                    env_states = replace(env_states, reward_carry=reward_carry)
+                    
                     transitions.append(transition)
 
-                    # Logs the frames to render.
-                    viewer.data.qpos[:] = np.array(env_states.physics_state.data.qpos)
-                    viewer.data.qvel[:] = np.array(env_states.physics_state.data.qvel)
-                    mujoco.mj_forward(viewer.model, viewer.data)
+                    # ---- inside the for-loop, right after `transitions.append(transition)` ----
+                    step_buffer.append(transition)
 
-                    def render_callback(
-                        model: mujoco.MjModel,
-                        data: mujoco.MjData,
-                        scene: mujoco.MjvScene,
-                        traj: Trajectory = transition,
-                    ) -> None:
-                        if self.config.render_markers:
-                            for marker in markers:
-                                marker(model, data, scene, traj)
+                    # Build a *constant-size* trajectory (≤4)
+                    traj_small = jax.tree.map(lambda *xs: jnp.stack(xs), *step_buffer)
 
-                    if save_path is None:
-                        viewer.render(callback=render_callback)
-                    else:
-                        frames.append(viewer.read_pixels(callback=render_callback))
+                    dbg_rng, step_rng = jax.random.split(dbg_rng)
+                    reward_state = get_rewards(
+                        trajectory           = traj_small,
+                        rewards              = constants.rewards,
+                        rewards_carry        = reward_carry,
+                        rollout_length_steps = 1,            # don't divide by horizon
+                        curriculum_level     = env_states.curriculum_state.level,
+                        rng                  = step_rng,
+                        clip_min             = self.config.reward_clip_min,
+                        clip_max             = self.config.reward_clip_max,
+                    )
+                    reward_carry = reward_state.carry        # keep carry in sync
+
+                    cur_raw = float(env_states.physics_state.data.time)
+                    if cur_raw < last_mj_time - 1e-9:          # detect reset
+                        time_offset += last_mj_time
+                    last_mj_time = cur_raw
+                    total_time = time_offset + cur_raw
+
+                    scalars = {"total_reward": float(jax.device_get(reward_state.total[-1]))}
+                    scalars.update({k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()})
+
+                    viewer.push_scalars(total_time, scalars) 
+                    if save_path is not None:
+                        frames.append(viewer.read_pixels(callback=vis_callback))
 
                     # Apply perturbation forces from the viewer to the environment.
                     env_states.physics_state.data.xfrc_applied[:] = viewer.data.xfrc_applied
-                    viewer.data.xfrc_applied[:] = 0
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")

@@ -22,6 +22,9 @@ mujoco
 mujoco-mjx
 # mujoco-scenes
 
+# Viewer
+kmv
+
 # Priors
 bvhio
 pyglm
