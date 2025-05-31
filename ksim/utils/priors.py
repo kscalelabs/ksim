@@ -38,7 +38,7 @@ from omegaconf import MISSING, DictConfig, ListConfig, OmegaConf
 from omegaconf.errors import ConfigKeyError, MissingMandatoryValue
 from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation as R
-from kmv import QtViewer
+# from kmv import QtViewer
 
 logger = logging.getLogger(__name__)
 
@@ -242,39 +242,39 @@ def visualize_reference_points(
     total_frames = list(reference_motion.values())[0].shape[0]
     data = mujoco.MjData(model)
 
-    with mujoco.viewer.launch_passive(model, data) as viewer:
-        frame = 0
-        while viewer.is_running():
-            frame = frame % total_frames
+    # with mujoco.viewer.launch_passive(model, data) as viewer:
+    #     frame = 0
+    #     while viewer.is_running():
+    #         frame = frame % total_frames
 
-            scene = viewer.user_scn
-            scene.ngeom = 0  # Clear previous geoms
+    #         scene = viewer.user_scn
+    #         scene.ngeom = 0  # Clear previous geoms
 
-            # Showing default humanoid geoms for reference
-            for body_id, reference_poses in reference_motion.items():
-                agent_local_pos = get_local_xpos(data.xpos, body_id, base_id)
-                agent_xpos = local_to_absolute(data.xpos, agent_local_pos, base_id)
-                assert isinstance(agent_xpos, np.ndarray)
-                _add_reference_marker_to_scene(
-                    scene,
-                    pos=agent_xpos,
-                    color=np.array([1, 0, 0, 1]),
-                    scale=np.array([0.08, 0.08, 0.08]),
-                )
+    #         # Showing default humanoid geoms for reference
+    #         for body_id, reference_poses in reference_motion.items():
+    #             agent_local_pos = get_local_xpos(data.xpos, body_id, base_id)
+    #             agent_xpos = local_to_absolute(data.xpos, agent_local_pos, base_id)
+    #             assert isinstance(agent_xpos, np.ndarray)
+    #             _add_reference_marker_to_scene(
+    #                 scene,
+    #                 pos=agent_xpos,
+    #                 color=np.array([1, 0, 0, 1]),
+    #                 scale=np.array([0.08, 0.08, 0.08]),
+    #             )
 
-                reference_local_pos = reference_poses[frame]
-                reference_xpos = local_to_absolute(data.xpos, reference_local_pos, base_id)
-                assert isinstance(reference_xpos, np.ndarray)
-                _add_reference_marker_to_scene(
-                    scene,
-                    pos=reference_xpos,
-                    color=np.array([0, 1, 0, 1]),
-                    scale=np.array([0.08, 0.08, 0.08]),
-                )
+    #             reference_local_pos = reference_poses[frame]
+    #             reference_xpos = local_to_absolute(data.xpos, reference_local_pos, base_id)
+    #             assert isinstance(reference_xpos, np.ndarray)
+    #             _add_reference_marker_to_scene(
+    #                 scene,
+    #                 pos=reference_xpos,
+    #                 color=np.array([0, 1, 0, 1]),
+    #                 scale=np.array([0.08, 0.08, 0.08]),
+    #             )
 
-            viewer.sync()
-            time.sleep(0.01)
-            frame += 1
+    #         viewer.sync()
+    #         time.sleep(0.01)
+    #         frame += 1
 
 
 def visualize_reference_motion(

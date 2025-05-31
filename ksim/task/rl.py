@@ -79,8 +79,9 @@ from ksim.utils.mujoco import (
     load_model,
     log_joint_config_table,
 )
-from kmv import DefaultMujocoViewer, QtViewer
-from kmv.viewer import RenderMode
+from kmv.app.viewer import DefaultMujocoViewer, QtViewer
+from kmv.core.types import RenderMode, Frame
+from kmv.core.ring import Ring
 from ksim.vis import Marker, configure_scene
 
 
@@ -563,6 +564,7 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
+    ring: Ring[Frame] | None = None,
 ) -> DefaultMujocoViewer | QtViewer:
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
@@ -577,6 +579,7 @@ def get_viewer(
         viewer = QtViewer(
             mj_model,
             data=mj_data,
+            ring=ring,
             mode=mode,
             width=config.render_width,
             height=config.render_height,
@@ -1613,13 +1616,27 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rewards=constants.rewards,
             )
 
+            ring: Ring[Frame] = Ring(size=8)        # small buffer is enough
+
             # Creates the viewer.
             viewer = get_viewer(
                 mj_model=mj_model,
                 config=self.config,
                 mj_data=env_states.physics_state.data,
                 save_path=save_path,
+                ring=ring,
             )
+
+            def vis_callback(model: mujoco.MjModel,
+                             data:  mujoco.MjData,
+                             scene: mujoco.MjvScene,
+                             traj:  Trajectory | None = None) -> None:
+                if self.config.render_markers and traj is not None:
+                    for marker in markers:
+                        marker(model, data, scene, traj)
+
+            if save_path is None:
+                viewer.render(callback=vis_callback)
 
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
             frames: list[np.ndarray] = []
@@ -1643,6 +1660,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         env_states=env_states,
                         shared_state=shared_state,
                     )
+                    
+                    ring.push(
+                        Frame(
+                            qpos=np.array(env_states.physics_state.data.qpos),
+                            qvel=np.array(env_states.physics_state.data.qvel),
+                        )
+                    )
+                    
+                    viewer._viewport.set_callback(
+                        (lambda m, d, s, traj=transition:
+                            [marker(m, d, s, traj) for marker in markers])
+                        if self.config.render_markers else None
+                    )
+                    viewer.app.processEvents()
                     
                     # Update env_states for consistency with local reward_carry
                     env_states = replace(env_states, reward_carry=reward_carry)
@@ -1677,33 +1708,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     scalars = {"total_reward": float(jax.device_get(reward_state.total[-1]))}
                     scalars.update({k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()})
 
-                    if hasattr(viewer, "push_scalars"):        # only for QtViewer/window mode
-                        viewer.push_scalars(total_time, scalars)
-
-                    # #  -- tiny array ⇒ cheap device→host transfer
-                    # tot  = float(jax.device_get(reward_state.total[-1]))
-                    # comps = {k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()}
-
-
-
-                    # Logs the frames to render.
-                    viewer.set_mjdata(env_states.physics_state.data)
-                    mujoco.mj_forward(viewer.model, viewer.data)
-
-                    def render_callback(
-                        model: mujoco.MjModel,
-                        data: mujoco.MjData,
-                        scene: mujoco.MjvScene,
-                        traj: Trajectory = transition,
-                    ) -> None:
-                        if self.config.render_markers:
-                            for marker in markers:
-                                marker(model, data, scene, traj)
-
-                    if save_path is None:
-                        viewer.render(callback=render_callback)
-                    else:
-                        frames.append(viewer.read_pixels(callback=render_callback))
+                    viewer.push_scalars(total_time, scalars) 
+                    if save_path is not None:
+                        frames.append(viewer.read_pixels(callback=vis_callback))
 
                     # Apply perturbation forces from the viewer to the environment.
                     env_states.physics_state.data.xfrc_applied[:] = viewer.data.xfrc_applied
