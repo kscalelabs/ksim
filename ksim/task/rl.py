@@ -552,6 +552,10 @@ class RLConfig(xax.Config):
         value=None,
         help="The name or id of the camera to use in rendering.",
     )
+    enable_plots: bool = xax.field(
+        value=True,
+        help="If true, enable real-time scalar plots in the viewer.",
+    )
 
 
 Config = TypeVar("Config", bound=RLConfig)
@@ -585,6 +589,7 @@ def get_viewer(
             contact_force=config.render_contact_force,
             contact_point=config.render_contact_point,
             inertia=config.render_inertia,
+            enable_plots=config.enable_plots,
         )
     else:
         # Use default offscreen viewer
