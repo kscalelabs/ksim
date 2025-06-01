@@ -552,9 +552,13 @@ class RLConfig(xax.Config):
         value=None,
         help="The name or id of the camera to use in rendering.",
     )
-    enable_plots: bool = xax.field(
+    enable_live_plots: bool = xax.field(
         value=True,
         help="If true, enable real-time scalar plots in the viewer.",
+    )
+    live_reward_window_size: int = xax.field(
+        value=4,
+        help="Size of the rolling window for computing live rewards (3 for jerk + 1 current).",
     )
 
 
@@ -577,7 +581,6 @@ def get_viewer(
     viewer: DefaultMujocoViewer | QtViewer
 
     if render_with_glfw:
-        # Use KMV Qt-based viewer for interactive mode
         viewer = QtViewer(
             mj_model,
             data=mj_data,
@@ -589,10 +592,9 @@ def get_viewer(
             contact_force=config.render_contact_force,
             contact_point=config.render_contact_point,
             inertia=config.render_inertia,
-            enable_plots=config.enable_plots,
+            enable_plots=config.enable_live_plots,
         )
     else:
-        # Use default offscreen viewer
         viewer = DefaultMujocoViewer(
             mj_model,
             width=config.render_width,
@@ -611,7 +613,7 @@ def get_viewer(
     if config.render_camera_name is not None:
         viewer.set_camera(config.render_camera_name)
 
-    # Only configure scene for non-KMV viewers (KMV handles this internally)
+    # Only configure scene for default viewer (KMV handles this internally)
     if not render_with_glfw:
         configure_scene(
             viewer.scn,
@@ -1605,11 +1607,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 model_arrs=model_arrs,
             )
 
-            WINDOW = 4                       # 3 for jerk + 1 current
-            step_buffer = deque(maxlen=WINDOW)
-
-            reward_carry = env_states.reward_carry      # stateful-reward memory
-            dbg_rng      = rng                          # local RNG for get_rewards
+            live_reward_transition_buffer = deque(maxlen=self.config.live_reward_window_size)
+            viewer_rng      = rng
 
             # Creates the markers.
             markers = self.get_markers(
@@ -1625,9 +1624,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 mj_data=env_states.physics_state.data,
                 save_path=save_path,
             )
-
-            if save_path is None:
-                viewer.render()
 
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
             frames: list[np.ndarray] = []
@@ -1648,40 +1644,38 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         shared_state=shared_state,
                     )
                     
-                    
-                    # Update env_states for consistency with local reward_carry
-                    env_states = replace(env_states, reward_carry=reward_carry)
-                    
                     transitions.append(transition)
 
-                    # ---- inside the for-loop, right after `transitions.append(transition)` ----
-                    step_buffer.append(transition)
-
-                    # Build a *constant-size* trajectory (≤4)
-                    traj_small = jax.tree.map(lambda *xs: jnp.stack(xs), *step_buffer)
-
-                    dbg_rng, step_rng = jax.random.split(dbg_rng)
+                    # Build a window of transitions and compute live rewards
+                    live_reward_transition_buffer.append(transition)
+                    traj_small = jax.tree.map(lambda *xs: jnp.stack(xs), *live_reward_transition_buffer)
+                    viewer_rng, step_rng = jax.random.split(viewer_rng)
                     reward_state = get_rewards(
                         trajectory           = traj_small,
                         rewards              = constants.rewards,
-                        rewards_carry        = reward_carry,
+                        rewards_carry        = env_states.reward_carry,
                         rollout_length_steps = 1,            # don't divide by horizon
                         curriculum_level     = env_states.curriculum_state.level,
                         rng                  = step_rng,
                         clip_min             = self.config.reward_clip_min,
                         clip_max             = self.config.reward_clip_max,
                     )
-                    reward_carry = reward_state.carry        # keep carry in sync
+                    env_states = replace(env_states, reward_carry=reward_state.carry)
 
+                    # Push the MuJoCo frame to the viewer
                     sim_time = float(env_states.physics_state.data.time)
-
                     viewer.push_mujoco_frame(
                         qpos=np.array(env_states.physics_state.data.qpos),
                         qvel=np.array(env_states.physics_state.data.qvel),
                         sim_time=sim_time,
                     )
 
-                    # Create callback with current transition for marker rendering
+                    # Push the live rewards to the viewer
+                    scalars = {"total_reward": float(jax.device_get(reward_state.total[-1]))}
+                    scalars.update({k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()})
+                    viewer.push_scalar(sim_time, scalars) 
+
+                    # Update the viewer and apply any pushes from the viewer
                     def render_callback(
                         model: mujoco.MjModel,
                         data: mujoco.MjData,
@@ -1691,14 +1685,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         if self.config.render_markers:
                             for marker in markers:
                                 marker(model, data, scene, traj)
-                    
                     xfrc = viewer.update(callback=render_callback)
                     env_states.physics_state.data.xfrc_applied[:] = xfrc
 
-                    scalars = {"total_reward": float(jax.device_get(reward_state.total[-1]))}
-                    scalars.update({k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()})
 
-                    viewer.push_scalar(sim_time, scalars) 
                     if save_path is not None:
                         frames.append(viewer.read_pixels(callback=render_callback))
 
