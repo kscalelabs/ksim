@@ -1629,10 +1629,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             transitions = []
 
-            # Helper variables for time tracking and reward streaming
-            time_offset   = 0.0
-            last_mj_time  = 0.0
-
             try:
                 for _ in iterator:
                     # Get commands
@@ -1672,15 +1668,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     )
                     reward_carry = reward_state.carry        # keep carry in sync
 
-                    cur_raw = float(env_states.physics_state.data.time)
-                    if cur_raw < last_mj_time - 1e-9:          # detect reset
-                        time_offset += last_mj_time
-                    last_mj_time = cur_raw
-                    total_time = time_offset + cur_raw
+                    sim_time = float(env_states.physics_state.data.time)
 
                     viewer.push_mujoco_frame(
                         qpos=np.array(env_states.physics_state.data.qpos),
                         qvel=np.array(env_states.physics_state.data.qvel),
+                        sim_time=sim_time,
                     )
 
                     # Create callback with current transition for marker rendering
@@ -1700,7 +1693,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     scalars = {"total_reward": float(jax.device_get(reward_state.total[-1]))}
                     scalars.update({k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()})
 
-                    viewer.push_scalar(total_time, scalars) 
+                    viewer.push_scalar(sim_time, scalars) 
                     if save_path is not None:
                         frames.append(viewer.read_pixels(callback=render_callback))
 
