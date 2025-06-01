@@ -1661,19 +1661,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         shared_state=shared_state,
                     )
                     
-                    ring.push(
-                        Frame(
-                            qpos=np.array(env_states.physics_state.data.qpos),
-                            qvel=np.array(env_states.physics_state.data.qvel),
-                        )
-                    )
-                    
-                    viewer._viewport.set_callback(
-                        (lambda m, d, s, traj=transition:
-                            [marker(m, d, s, traj) for marker in markers])
-                        if self.config.render_markers else None
-                    )
-                    viewer.app.processEvents()
                     
                     # Update env_states for consistency with local reward_carry
                     env_states = replace(env_states, reward_carry=reward_carry)
@@ -1704,6 +1691,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         time_offset += last_mj_time
                     last_mj_time = cur_raw
                     total_time = time_offset + cur_raw
+
+                    ring.push(
+                        Frame(
+                            qpos=np.array(env_states.physics_state.data.qpos),
+                            qvel=np.array(env_states.physics_state.data.qvel),
+                        )
+                    )
+
+                    viewer._viewport.set_callback(
+                        (lambda m, d, s, traj=transition:
+                            [marker(m, d, s, traj) for marker in markers])
+                        if self.config.render_markers else None
+                    )
+                    viewer.app.processEvents()
 
                     scalars = {"total_reward": float(jax.device_get(reward_state.total[-1]))}
                     scalars.update({k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()})
