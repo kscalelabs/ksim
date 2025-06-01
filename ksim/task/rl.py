@@ -80,8 +80,7 @@ from ksim.utils.mujoco import (
     log_joint_config_table,
 )
 from kmv.app.viewer import DefaultMujocoViewer, QtViewer
-from kmv.core.types import RenderMode, Frame
-from kmv.core.buffer import RingBuffer
+from kmv.core.types import RenderMode
 from ksim.vis import Marker, configure_scene
 
 
@@ -1688,10 +1687,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     total_time = time_offset + cur_raw
 
                     viewer.push_mujoco_frame(
-                        Frame(
-                            qpos=np.array(env_states.physics_state.data.qpos),
-                            qvel=np.array(env_states.physics_state.data.qvel),
-                        )
+                        qpos=np.array(env_states.physics_state.data.qpos),
+                        qvel=np.array(env_states.physics_state.data.qvel),
                     )
 
                     viewer._viewport.set_callback(
