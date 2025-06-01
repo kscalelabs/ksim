@@ -81,7 +81,7 @@ from ksim.utils.mujoco import (
 )
 from kmv.app.viewer import DefaultMujocoViewer, QtViewer
 from kmv.core.types import RenderMode, Frame
-from kmv.core.ring import Ring
+from kmv.core.buffer import RingBuffer
 from ksim.vis import Marker, configure_scene
 
 
@@ -564,7 +564,6 @@ def get_viewer(
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
-    ring: Ring[Frame] | None = None,
 ) -> DefaultMujocoViewer | QtViewer:
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
@@ -579,7 +578,6 @@ def get_viewer(
         viewer = QtViewer(
             mj_model,
             data=mj_data,
-            ring=ring,
             mode=mode,
             width=config.render_width,
             height=config.render_height,
@@ -1616,15 +1614,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rewards=constants.rewards,
             )
 
-            ring: Ring[Frame] = Ring(size=8)        # small buffer is enough
-
             # Creates the viewer.
             viewer = get_viewer(
                 mj_model=mj_model,
                 config=self.config,
                 mj_data=env_states.physics_state.data,
                 save_path=save_path,
-                ring=ring,
             )
 
             def vis_callback(model: mujoco.MjModel,
@@ -1692,7 +1687,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     last_mj_time = cur_raw
                     total_time = time_offset + cur_raw
 
-                    ring.push(
+                    viewer.push_mujoco_frame(
                         Frame(
                             qpos=np.array(env_states.physics_state.data.qpos),
                             qvel=np.array(env_states.physics_state.data.qvel),
@@ -1704,17 +1699,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             [marker(m, d, s, traj) for marker in markers])
                         if self.config.render_markers else None
                     )
-                    viewer.app.processEvents()
+                    xfrc = viewer.update(callback=vis_callback)
+                    env_states.physics_state.data.xfrc_applied[:] = xfrc
 
                     scalars = {"total_reward": float(jax.device_get(reward_state.total[-1]))}
                     scalars.update({k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()})
 
-                    viewer.push_scalars(total_time, scalars) 
+                    viewer.push_scalar(total_time, scalars) 
                     if save_path is not None:
                         frames.append(viewer.read_pixels(callback=vis_callback))
-
-                    # Apply perturbation forces from the viewer to the environment.
-                    env_states.physics_state.data.xfrc_applied[:] = viewer.data.xfrc_applied
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
