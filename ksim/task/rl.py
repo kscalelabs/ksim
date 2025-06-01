@@ -1621,16 +1621,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 save_path=save_path,
             )
 
-            def vis_callback(model: mujoco.MjModel,
-                             data:  mujoco.MjData,
-                             scene: mujoco.MjvScene,
-                             traj:  Trajectory | None = None) -> None:
-                if self.config.render_markers and traj is not None:
-                    for marker in markers:
-                        marker(model, data, scene, traj)
-
             if save_path is None:
-                viewer.render(callback=vis_callback)
+                viewer.render()
 
             iterator = tqdm.trange(num_steps) if num_steps is not None else tqdm.tqdm(itertools.count())
             frames: list[np.ndarray] = []
@@ -1691,12 +1683,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         qvel=np.array(env_states.physics_state.data.qvel),
                     )
 
-                    viewer._viewport.set_callback(
-                        (lambda m, d, s, traj=transition:
-                            [marker(m, d, s, traj) for marker in markers])
-                        if self.config.render_markers else None
-                    )
-                    xfrc = viewer.update(callback=vis_callback)
+                    # Create callback with current transition for marker rendering
+                    def render_callback(
+                        model: mujoco.MjModel,
+                        data: mujoco.MjData,
+                        scene: mujoco.MjvScene,
+                        traj: Trajectory = transition,
+                    ) -> None:
+                        if self.config.render_markers:
+                            for marker in markers:
+                                marker(model, data, scene, traj)
+                    
+                    xfrc = viewer.update(callback=render_callback)
                     env_states.physics_state.data.xfrc_applied[:] = xfrc
 
                     scalars = {"total_reward": float(jax.device_get(reward_state.total[-1]))}
@@ -1704,7 +1702,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     viewer.push_scalar(total_time, scalars) 
                     if save_path is not None:
-                        frames.append(viewer.read_pixels(callback=vis_callback))
+                        frames.append(viewer.read_pixels(callback=render_callback))
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
