@@ -15,6 +15,7 @@ __all__ = [
     "XYAngularVelocityPenalty",
     "BaseHeightReward",
     "BaseHeightRangeReward",
+    "ActionVelocityPenalty",
     "ActionAccelerationPenalty",
     "ActionJerkPenalty",
     "JointVelocityPenalty",
@@ -321,6 +322,9 @@ class ActionVelocityPenalty(Reward):
         done = jnp.pad(trajectory.done[..., :-1], ((1, 0),), mode="edge")[..., None]
         actions_vel = jnp.where(done, 0.0, actions_zp[..., 1:, :] - actions_zp[..., :-1, :])
         penalty = xax.get_norm(actions_vel, self.norm).mean(axis=-1)
+
+        mask = jnp.arange(len(penalty)) >= 1
+        penalty = jnp.where(mask, penalty, 0.0)
         return penalty
 
 
@@ -337,6 +341,11 @@ class ActionAccelerationPenalty(Reward):
         actions_vel = jnp.where(done, 0.0, actions_zp[..., 1:, :] - actions_zp[..., :-1, :])
         actions_acc = jnp.where(done[..., 1:, :], 0.0, actions_vel[..., 1:, :] - actions_vel[..., :-1, :])
         penalty = xax.get_norm(actions_acc, self.norm).mean(axis=-1)
+
+        # Mask out timesteps affected by padding to prevent artificial artifacts
+        # (e.g. jump from constant velocity to non-zero acceleration)
+        mask = jnp.arange(len(penalty)) >= 2
+        penalty = jnp.where(mask, penalty, 0.0)
         return penalty
 
 
@@ -354,6 +363,9 @@ class ActionJerkPenalty(Reward):
         actions_acc = jnp.where(done[..., 1:, :], 0.0, actions_vel[..., 1:, :] - actions_vel[..., :-1, :])
         actions_jerk = jnp.where(done[..., 2:, :], 0.0, actions_acc[..., 1:, :] - actions_acc[..., :-1, :])
         penalty = xax.get_norm(actions_jerk, self.norm).mean(axis=-1)
+
+        mask = jnp.arange(len(penalty)) >= 3
+        penalty = jnp.where(mask, penalty, 0.0)
         return penalty
 
 
