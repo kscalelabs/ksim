@@ -81,6 +81,7 @@ from ksim.utils.mujoco import (
 )
 from kmv.app.viewer import DefaultMujocoViewer, QtViewer
 from kmv.core.types import RenderMode
+
 from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
@@ -574,54 +575,57 @@ def get_viewer(
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
 
-    if (render_with_glfw := config.render_with_glfw) is None:
-        render_with_glfw = mode == "window"
-
-    viewer: DefaultMujocoViewer | QtViewer
+    render_with_glfw = (
+        config.render_with_glfw
+        if config.render_with_glfw is not None
+        else mode == "window"
+    )
 
     if render_with_glfw:
         viewer = QtViewer(
             mj_model,
-            width         = config.render_width,
-            height        = config.render_height,
-            shadow        = config.render_shadow,
-            reflection    = config.render_reflection,
-            contact_force = config.render_contact_force,
-            contact_point = config.render_contact_point,
-            inertia       = config.render_inertia,
-            enable_plots  = config.enable_live_plots,
-            camera_distance  = config.render_distance,
-            camera_azimuth   = config.render_azimuth,
-            camera_elevation = config.render_elevation,
-            camera_lookat    = config.render_lookat,
-            track_body_id    = config.render_track_body_id,
+            mode                = mode,
+            width               = config.render_width,
+            height              = config.render_height,
+            enable_plots        = config.enable_live_plots,
+            shadow              = config.render_shadow,
+            reflection          = config.render_reflection,
+            contact_force       = config.render_contact_force,
+            contact_point       = config.render_contact_point,
+            inertia             = config.render_inertia,
+            camera_distance     = config.render_distance,
+            camera_azimuth      = config.render_azimuth,
+            camera_elevation    = config.render_elevation,
+            camera_lookat       = config.render_lookat,
+            track_body_id       = config.render_track_body_id,
         )
-    else:
-        viewer = DefaultMujocoViewer(
-            mj_model,
-            width=config.render_width,
-            height=config.render_height,
-        )
+        return viewer
 
-        viewer.cam.distance = config.render_distance
-        viewer.cam.azimuth = config.render_azimuth
-        viewer.cam.elevation = config.render_elevation
-        viewer.cam.lookat[:] = config.render_lookat
-        if config.render_track_body_id is not None:
-            viewer.cam.trackbodyid = config.render_track_body_id
-            viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+    viewer = DefaultMujocoViewer(
+        mj_model,
+        width=config.render_width,
+        height=config.render_height,
+    )
 
-        if config.render_camera_name is not None:
-            viewer.set_camera(config.render_camera_name)
+    viewer.cam.distance = config.render_distance
+    viewer.cam.azimuth = config.render_azimuth
+    viewer.cam.elevation = config.render_elevation
+    viewer.cam.lookat[:] = config.render_lookat
+    if config.render_track_body_id is not None:
+        viewer.cam.trackbodyid = config.render_track_body_id
+        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
-        configure_scene(
-            viewer.scn,
-            viewer.vopt,
-            shadow=config.render_shadow,
-            contact_force=config.render_contact_force,
-            contact_point=config.render_contact_point,
-            inertia=config.render_inertia,
-        )
+    if config.render_camera_name is not None:
+        viewer.set_camera(config.render_camera_name)
+
+    configure_scene(
+        viewer.scn,
+        viewer.vopt,
+        shadow=config.render_shadow,
+        contact_force=config.render_contact_force,
+        contact_point=config.render_contact_point,
+        inertia=config.render_inertia,
+    )
 
     return viewer
 
