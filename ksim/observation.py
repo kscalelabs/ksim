@@ -195,7 +195,7 @@ class JointPositionObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class DelayedJointPositionObservation(StatefulObservation):
-    delay_steps: int = attrs.field(validator=attrs.validators.ge(1))
+    delay_steps: int = attrs.field(default=1, validator=attrs.validators.ge(1))
 
     def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
         current_qpos = physics_state.data.qpos[7:]
@@ -226,7 +226,7 @@ class JointVelocityObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class DelayedJointVelocityObservation(StatefulObservation):
-    delay_steps: int = attrs.field(validator=attrs.validators.ge(1))
+    delay_steps: int = attrs.field(default=1, validator=attrs.validators.ge(1))
 
     def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
         current_qvel = physics_state.data.qvel[6:]
