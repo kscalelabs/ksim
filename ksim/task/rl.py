@@ -1695,9 +1695,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         for i, val in enumerate(cmd_arr)
                     }
                     viewer.push_plot_metrics(command_scalars, group="command")
-
-                    # Apply pushes from the viewer
-                    if xfrc := viewer.poll_forces():
+                    
+                    xfrc = viewer.poll_forces()
+                    if xfrc is not None:
                         env_states.physics_state.data.xfrc_applied[:] = xfrc
 
                     # TODO: Support markers in kmv
