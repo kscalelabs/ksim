@@ -1716,6 +1716,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
+            finally:
+                # Always release GUI resources so the resource-tracker is happy
+                viewer.close()
 
             if len(transitions) == 0:
                 logger.warning("Trajectory is empty!")
