@@ -10,6 +10,8 @@ __all__ = [
     "BaseAngularVelocityObservation",
     "JointPositionObservation",
     "JointVelocityObservation",
+    "DelayedJointPositionObservation",
+    "DelayedJointVelocityObservation",
     "CenterOfMassInertiaObservation",
     "CenterOfMassVelocityObservation",
     "ActuatorForceObservation",
