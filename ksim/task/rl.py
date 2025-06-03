@@ -83,7 +83,6 @@ from kmv.app.viewer import DefaultMujocoViewer, QtViewer
 from kmv.core.types import RenderMode
 from ksim.vis import Marker, configure_scene
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -583,16 +582,19 @@ def get_viewer(
     if render_with_glfw:
         viewer = QtViewer(
             mj_model,
-            data=mj_data,
-            mode=mode,
-            width=config.render_width,
-            height=config.render_height,
-            shadow=config.render_shadow,
-            reflection=config.render_reflection,
-            contact_force=config.render_contact_force,
-            contact_point=config.render_contact_point,
-            inertia=config.render_inertia,
-            enable_plots=config.enable_live_plots,
+            width         = config.render_width,
+            height        = config.render_height,
+            shadow        = config.render_shadow,
+            reflection    = config.render_reflection,
+            contact_force = config.render_contact_force,
+            contact_point = config.render_contact_point,
+            inertia       = config.render_inertia,
+            enable_plots  = config.enable_live_plots,
+            camera_distance  = config.render_distance,
+            camera_azimuth   = config.render_azimuth,
+            camera_elevation = config.render_elevation,
+            camera_lookat    = config.render_lookat,
+            track_body_id    = config.render_track_body_id,
         )
     else:
         viewer = DefaultMujocoViewer(
@@ -601,20 +603,17 @@ def get_viewer(
             height=config.render_height,
         )
 
-    # Sets the viewer camera.
-    viewer.cam.distance = config.render_distance
-    viewer.cam.azimuth = config.render_azimuth
-    viewer.cam.elevation = config.render_elevation
-    viewer.cam.lookat[:] = config.render_lookat
-    if config.render_track_body_id is not None:
-        viewer.cam.trackbodyid = config.render_track_body_id
-        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+        viewer.cam.distance = config.render_distance
+        viewer.cam.azimuth = config.render_azimuth
+        viewer.cam.elevation = config.render_elevation
+        viewer.cam.lookat[:] = config.render_lookat
+        if config.render_track_body_id is not None:
+            viewer.cam.trackbodyid = config.render_track_body_id
+            viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
-    if config.render_camera_name is not None:
-        viewer.set_camera(config.render_camera_name)
+        if config.render_camera_name is not None:
+            viewer.set_camera(config.render_camera_name)
 
-    # Only configure scene for default viewer (KMV handles this internally)
-    if not render_with_glfw:
         configure_scene(
             viewer.scn,
             viewer.vopt,
@@ -1654,7 +1653,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         trajectory           = traj_small,
                         rewards              = constants.rewards,
                         rewards_carry        = env_states.reward_carry,
-                        rollout_length_steps = 1,            # don't divide by horizon
+                        rollout_length_steps = 1,
                         curriculum_level     = env_states.curriculum_state.level,
                         rng                  = step_rng,
                         clip_min             = self.config.reward_clip_min,
@@ -1662,20 +1661,46 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     )
                     env_states = replace(env_states, reward_carry=reward_state.carry)
 
-                    # Push the MuJoCo frame to the viewer
+                    # Send physics state
                     sim_time = float(env_states.physics_state.data.time)
-                    viewer.push_mujoco_frame(
-                        qpos=np.array(env_states.physics_state.data.qpos),
-                        qvel=np.array(env_states.physics_state.data.qvel),
+                    viewer.push_state(
+                        np.array(env_states.physics_state.data.qpos),
+                        np.array(env_states.physics_state.data.qvel),
                         sim_time=sim_time,
                     )
 
-                    # Push the live rewards to the viewer
-                    scalars = {"total_reward": float(jax.device_get(reward_state.total[-1]))}
-                    scalars.update({k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()})
-                    viewer.push_scalar(sim_time, scalars) 
+                    # Send rewards
+                    reward_scalars = {
+                        "total": float(jax.device_get(reward_state.total[-1])),
+                        **{k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()},
+                    }
+                    viewer.push_plot_metrics(reward_scalars, group="reward")
 
-                    # Update the viewer and apply any pushes from the viewer
+                    # Send physics metrics
+                    qpos_arr = np.asarray(env_states.physics_state.data.qpos)
+                    physics_scalars = {f"qpos{i}": float(qpos_arr[i]) for i in range(min(3, qpos_arr.size))}
+                    viewer.push_plot_metrics(physics_scalars, group="physics")
+
+                    # Send actions
+                    ctrl_arr = np.asarray(env_states.physics_state.data.ctrl)
+                    action_scalars = {
+                        f"act_{i}": float(ctrl_arr[i]) for i in range(min(ctrl_arr.size, 3))
+                    }
+                    viewer.push_plot_metrics(action_scalars, group="action")
+
+                    # Send commands
+                    cmd_arr = np.asarray(jax.device_get(env_states.commands["velocity_command"]))
+                    command_scalars = {
+                        f"cmd_vel_{i}": float(val)
+                        for i, val in enumerate(cmd_arr)
+                    }
+                    viewer.push_plot_metrics(command_scalars, group="command")
+
+                    # Apply pushes from the viewer
+                    if xfrc := viewer.poll_forces():
+                        env_states.physics_state.data.xfrc_applied[:] = xfrc
+
+                    # TODO: Support markers in kmv
                     def render_callback(
                         model: mujoco.MjModel,
                         data: mujoco.MjData,
@@ -1685,9 +1710,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         if self.config.render_markers:
                             for marker in markers:
                                 marker(model, data, scene, traj)
-                    xfrc = viewer.update(callback=render_callback)
-                    env_states.physics_state.data.xfrc_applied[:] = xfrc
-
 
                     if save_path is not None:
                         frames.append(viewer.read_pixels(callback=render_callback))
