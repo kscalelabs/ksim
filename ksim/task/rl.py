@@ -1711,6 +1711,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             for marker in markers:
                                 marker(model, data, scene, traj)
 
+                    if not viewer.is_open:
+                        logger.info("Viewer closed, exiting environment loop")
+                        break
+
                     if save_path is not None:
                         frames.append(viewer.read_pixels(callback=render_callback))
 
