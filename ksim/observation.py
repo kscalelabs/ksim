@@ -140,7 +140,7 @@ class StatefulObservation(Observation):
         """Gets the observation from the state.
 
         Args:
-            state: The inputs from which the obseravtion can be extracted.
+            state: The inputs from which the observation can be extracted.
             rng: A PRNGKeyArray to use for the noise
             curriculum_level: The current curriculum level, a scalar between
                 zero and one.
@@ -150,11 +150,11 @@ class StatefulObservation(Observation):
         """
 
     @abstractmethod
-    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
+    def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
         """Initialize the carry for the observation.
 
         Args:
-            state: The state of the observation
+            physics_state: The current physics state
             rng: A PRNGKeyArray to use for the noise
         """
 
@@ -194,9 +194,37 @@ class JointPositionObservation(Observation):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class DelayedJointPositionObservation(StatefulObservation):
+    delay_steps: int = attrs.field()
+
+    def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
+        return physics_state.data.qpos[7:]
+
+    def observe_stateful(
+        self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> tuple[Array, PyTree]:
+        next_qpos = state.physics_state.data.qpos[7:]
+        return state.obs_carry, next_qpos
+
+
+@attrs.define(frozen=True, kw_only=True)
 class JointVelocityObservation(Observation):
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         return state.physics_state.data.qvel[6:]  # (N,)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class DelayedJointVelocityObservation(StatefulObservation):
+    delay_steps: int = attrs.field()
+
+    def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
+        return physics_state.data.qvel[6:]
+
+    def observe_stateful(
+        self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> tuple[Array, PyTree]:
+        next_qvel = state.physics_state.data.qvel[6:]
+        return state.obs_carry, next_qvel
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -329,7 +357,7 @@ class ProjectedGravityObservation(StatefulObservation):
             noise=noise,
         )
 
-    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> tuple[Array, Array]:
         minval, maxval = self.lag_range
         return jnp.zeros((3,)), jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
 
