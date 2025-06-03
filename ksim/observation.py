@@ -195,16 +195,27 @@ class JointPositionObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class DelayedJointPositionObservation(StatefulObservation):
-    delay_steps: int = attrs.field()
+    delay_steps: int = attrs.field(validator=attrs.validators.ge(1))
 
     def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
-        return physics_state.data.qpos[7:]
+        current_qpos = physics_state.data.qpos[7:]
+
+        # Create a buffer of shape (delay_steps, num_joints) filled with current_qpos
+        return jnp.tile(current_qpos[None, :], (self.delay_steps, 1))
 
     def observe_stateful(
         self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray
     ) -> tuple[Array, PyTree]:
-        next_qpos = state.physics_state.data.qpos[7:]
-        return state.obs_carry, next_qpos
+        current_qpos = state.physics_state.data.qpos[7:]
+
+        carry_buffer = state.obs_carry
+
+        delayed_qpos = carry_buffer[0]
+
+        new_carry = jnp.roll(carry_buffer, -1, axis=0)
+        new_carry = new_carry.at[-1].set(current_qpos)
+
+        return delayed_qpos, new_carry
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -215,16 +226,26 @@ class JointVelocityObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class DelayedJointVelocityObservation(StatefulObservation):
-    delay_steps: int = attrs.field()
+    delay_steps: int = attrs.field(validator=attrs.validators.ge(1))
 
     def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
-        return physics_state.data.qvel[6:]
+        current_qvel = physics_state.data.qvel[6:]
+        # Create a buffer of shape (delay_steps, num_joints) filled with current_qvel
+        return jnp.tile(current_qvel[None, :], (self.delay_steps, 1))
 
     def observe_stateful(
         self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray
     ) -> tuple[Array, PyTree]:
-        next_qvel = state.physics_state.data.qvel[6:]
-        return state.obs_carry, next_qvel
+        current_qvel = state.physics_state.data.qvel[6:]
+
+        carry_buffer = state.obs_carry
+
+        delayed_qvel = carry_buffer[0]
+
+        new_carry = jnp.roll(carry_buffer, -1, axis=0)
+        new_carry = new_carry.at[-1].set(current_qvel)
+
+        return delayed_qvel, new_carry
 
 
 @attrs.define(frozen=True, kw_only=True)
