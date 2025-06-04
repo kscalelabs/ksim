@@ -569,11 +569,11 @@ def get_qt_viewer(
     config: Config,
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
-    mode: RenderMode = "window",
+    mode: RenderMode | None = None,
 ) -> QtViewer:
     return QtViewer(
         mj_model,
-        mode=mode if save_path is None else "offscreen",
+        mode=mode if mode is not None else "window" if save_path is None else "offscreen",
         width=config.render_width,
         height=config.render_height,
         shadow=config.render_shadow,
@@ -1660,7 +1660,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         clip_max=self.config.reward_clip_max,
                     )
                     env_states = replace(env_states, reward_carry=reward_state.carry)
-                    
+
                     # Send viewer the physics state
                     sim_time = float(env_states.physics_state.data.time)
                     viewer.push_state(
@@ -2139,7 +2139,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             viewer = get_default_viewer(
                 mj_model=mj_model,
                 config=self.config,
-                mode="offscreen",
             )
 
             state = self.on_training_start(state)
