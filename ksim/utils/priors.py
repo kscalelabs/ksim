@@ -283,11 +283,10 @@ def visualize_reference_motion(
     cartesian_motion: xax.FrozenDict[int, np.ndarray],
     mj_base_id: int,
 ) -> None:
-    """Visualizes the reference motion with markers using the Mujoco viewer."""
+    """Visualizes a given reference motion with the Mujoco viewer."""
     data = mujoco.MjData(model)
     mujoco.mj_resetData(model, data)
 
-    # All camera knobs are now constructor arguments
     viewer = QtViewer(
         model,
         width=1024,
@@ -297,7 +296,7 @@ def visualize_reference_motion(
         camera_elevation=-20.0,
     )
 
-    # Stream state each frame; the new viewer lives in its own process
+    start_wall_time = time.time()
     while viewer.is_open:
         # Calculate which frame we should be on
         frame = int(data.time / model.opt.timestep) % len(reference_qpos)
@@ -311,8 +310,13 @@ def visualize_reference_motion(
         if (xfrc := viewer.drain_control_pipe()) is not None:
             data.xfrc_applied[:] = xfrc
 
+        # Match sim time with wall time
+        elapsed_real_time = time.time() - start_wall_time
+        time_to_sleep = data.time - elapsed_real_time
+        if time_to_sleep > 0:
+            time.sleep(time_to_sleep)
+
         data.time += model.opt.timestep
-        time.sleep(model.opt.timestep)
 
     viewer.close()
 
