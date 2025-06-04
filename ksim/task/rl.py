@@ -551,6 +551,10 @@ class RLConfig(xax.Config):
         value=None,
         help="The name or id of the camera to use in rendering.",
     )
+    live_reward_buffer_size: int = xax.field(
+        value=4,
+        help="Size of the rolling buffer for computing live rewards (3 for jerk + 1 current).",
+    )
 
 
 Config = TypeVar("Config", bound=RLConfig)
@@ -569,7 +573,6 @@ def get_qt_viewer(
         mode=mode if save_path is None else "offscreen",
         width=config.render_width,
         height=config.render_height,
-        enable_plots=config.enable_live_plots,
         shadow=config.render_shadow,
         reflection=config.render_reflection,
         contact_force=config.render_contact_force,
@@ -1599,7 +1602,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 model_arrs=model_arrs,
             )
 
-            live_reward_transition_buffer: deque[Trajectory] = deque(maxlen=self.config.live_reward_window_size)
+            live_reward_transition_buffer: deque[Trajectory] = deque(maxlen=self.config.live_reward_buffer_size)
             viewer_rng = rng
 
             # Creates the markers.
