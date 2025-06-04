@@ -556,7 +556,7 @@ class RLConfig(xax.Config):
     )
     live_reward_buffer_size: int = xax.field(
         value=4,
-        help="Size of the rolling buffer for computing live rewards (3 for jerk + 1 current).",
+        help="Size of the rolling buffer for computing live rewards",
     )
 
 
@@ -1676,7 +1676,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     }
                     viewer.push_plot_metrics(reward_scalars, group="reward")
 
-                    # Send physics properties (just first 3 values of qposfor now)
+                    # Send physics properties (just first 3 values of qpos for now)
                     qpos_arr = np.asarray(env_states.physics_state.data.qpos)
                     physics_scalars = {f"qpos{i}": float(qpos_arr[i]) for i in range(min(3, qpos_arr.size))}
                     viewer.push_plot_metrics(physics_scalars, group="physics")
@@ -1691,7 +1691,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     command_scalars = {f"cmd_vel_{i}": float(val) for i, val in enumerate(cmd_arr)}
                     viewer.push_plot_metrics(command_scalars, group="command")
 
-                    # Recieve pushes the viewer
+                    # Recieve pushes from the viewer
                     xfrc = viewer.drain_control_pipe()
                     if xfrc is not None:
                         env_states.physics_state.data.xfrc_applied[:] = xfrc
