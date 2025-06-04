@@ -286,15 +286,19 @@ def visualize_reference_motion(
     """Visualizes the reference motion with markers using the Mujoco viewer."""
     data = mujoco.MjData(model)
     mujoco.mj_resetData(model, data)
-    viewer = QtViewer(model, mode="window", width=1024, height=768)
 
-    # Set some nice camera parameters
-    viewer.cam.distance = 3.0
-    viewer.cam.azimuth = 45.0
-    viewer.cam.elevation = -20.0
+    # All camera knobs are now constructor arguments
+    viewer = QtViewer(
+        model,
+        width=1024,
+        height=768,
+        camera_distance=3.0,
+        camera_azimuth=45.0,
+        camera_elevation=-20.0,
+    )
 
-    # Keep the window open until you close it
-    while viewer.is_alive:
+    # Stream state each frame; the new viewer lives in its own process
+    while viewer.is_open:
         # Calculate which frame we should be on
         frame = int(data.time / model.opt.timestep) % len(reference_qpos)
 
@@ -302,33 +306,15 @@ def visualize_reference_motion(
         data.qpos = reference_qpos[frame]
         mujoco.mj_forward(model, data)
 
-        # Clear previous geoms
-        scene = viewer.scn
-        scene.ngeom = 0
+        viewer.push_state(data.qpos, data.qvel, sim_time=data.time)
 
-        def marker_callback(
-            model: mujoco.MjModel,
-            data: mujoco.MjData,
-            scn: mujoco.MjvScene,
-            frame_id: int = frame,
-        ) -> None:
-            # Add markers for cartesian targets
-            for body_id, target_poses in cartesian_motion.items():
-                target_local_pos = target_poses[frame_id]
-                target_xpos = local_to_absolute(data.xpos, target_local_pos, mj_base_id)
-                assert isinstance(target_xpos, np.ndarray)
-                _add_reference_marker_to_scene(
-                    scn,
-                    pos=target_xpos,
-                    color=np.array([0, 1, 0, 0.8]),
-                    scale=np.array([0.05, 0.05, 0.05]),
-                    label=f"target_{model.body(body_id).name}",
-                )
+        if (xfrc := viewer.drain_control_pipe()) is not None:
+            data.xfrc_applied[:] = xfrc
 
-        # Advance simulation time
         data.time += model.opt.timestep
+        time.sleep(model.opt.timestep)
 
-        viewer.render(callback=marker_callback)
+    viewer.close()
 
 
 def get_reference_cartesian_poses(
