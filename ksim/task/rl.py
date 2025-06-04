@@ -551,23 +551,15 @@ class RLConfig(xax.Config):
         value=None,
         help="The name or id of the camera to use in rendering.",
     )
-    enable_live_plots: bool = xax.field(
-        value=True,
-        help="If true, enable real-time scalar plots in the viewer.",
-    )
-    live_reward_window_size: int = xax.field(
-        value=4,
-        help="Size of the rolling window for computing live rewards (3 for jerk + 1 current).",
-    )
 
 
 Config = TypeVar("Config", bound=RLConfig)
 
 
 def get_qt_viewer(
-    *,  # ← force keyword args
+    *,
     mj_model: mujoco.MjModel,
-    config: RLConfig,
+    config: Config,
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
     mode: RenderMode = "window",
@@ -594,7 +586,7 @@ def get_qt_viewer(
 def get_default_viewer(
     *,
     mj_model: mujoco.MjModel,
-    config: RLConfig,
+    config: Config,
     width: int | None = None,
     height: int | None = None,
 ) -> DefaultMujocoViewer:
@@ -615,7 +607,6 @@ def get_default_viewer(
     if config.render_camera_name is not None:
         viewer.set_camera(config.render_camera_name)
 
-    # scene tuning
     configure_scene(
         viewer.scn,
         viewer.vopt,
@@ -624,6 +615,7 @@ def get_default_viewer(
         contact_point=config.render_contact_point,
         inertia=config.render_inertia,
     )
+
     return viewer
 
 
@@ -1643,10 +1635,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         env_states=env_states,
                         shared_state=shared_state,
                     )
-
                     transitions.append(transition)
 
-                    # Build a window of transitions and compute live rewards
+                    # Build a window of transitions to compute live rewards
                     live_reward_transition_buffer.append(transition)
                     traj_small = jax.tree.map(lambda *xs: jnp.stack(xs), *live_reward_transition_buffer)
                     viewer_rng, step_rng = jax.random.split(viewer_rng)
@@ -1661,8 +1652,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         clip_max=self.config.reward_clip_max,
                     )
                     env_states = replace(env_states, reward_carry=reward_state.carry)
-
-                    # Send physics state
+                    
+                    # Send viewer the physics state
                     sim_time = float(env_states.physics_state.data.time)
                     viewer.push_state(
                         np.array(env_states.physics_state.data.qpos),
@@ -1677,12 +1668,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     }
                     viewer.push_plot_metrics(reward_scalars, group="reward")
 
-                    # Send physics metrics
+                    # Send physics properties (just first 3 values of qposfor now)
                     qpos_arr = np.asarray(env_states.physics_state.data.qpos)
                     physics_scalars = {f"qpos{i}": float(qpos_arr[i]) for i in range(min(3, qpos_arr.size))}
                     viewer.push_plot_metrics(physics_scalars, group="physics")
 
-                    # Send actions
+                    # Send actions (just 3 for now)
                     ctrl_arr = np.asarray(env_states.physics_state.data.ctrl)
                     action_scalars = {f"act_{i}": float(ctrl_arr[i]) for i in range(min(ctrl_arr.size, 3))}
                     viewer.push_plot_metrics(action_scalars, group="action")
@@ -1692,6 +1683,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     command_scalars = {f"cmd_vel_{i}": float(val) for i, val in enumerate(cmd_arr)}
                     viewer.push_plot_metrics(command_scalars, group="command")
 
+                    # Recieve pushes the viewer
                     xfrc = viewer.drain_control_pipe()
                     if xfrc is not None:
                         env_states.physics_state.data.xfrc_applied[:] = xfrc
@@ -1711,13 +1703,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         logger.info("Viewer closed, exiting environment loop")
                         break
 
-                    # if save_path is not None:
-                    #     frames.append(viewer.read_pixels(callback=render_callback))
-
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
             finally:
-                # Always release GUI resources so the resource-tracker is happy
                 viewer.close()
 
             if len(transitions) == 0:
