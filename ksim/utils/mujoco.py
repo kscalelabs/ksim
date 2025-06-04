@@ -27,11 +27,13 @@ __all__ = [
     "get_geom_pose_by_name",
     "get_site_pose_by_name",
     "remove_mujoco_joints_except",
+    "remove_first_joint",
     "add_new_mujoco_body",
     "log_joint_config_table",
 ]
 
 import logging
+from collections import deque
 from typing import Any, Hashable, TypeVar
 from xml.etree import ElementTree as ET
 
@@ -446,6 +448,33 @@ def get_site_pose_by_name(
 ) -> tuple[np.ndarray, np.ndarray]:
     site_idx = get_site_data_idx_from_name(model, site_name)
     return get_site_pose(data, site_idx)
+
+
+def remove_first_joint(file_path: str) -> str:
+    """Remove the first joint found in the model."""
+    tree = ET.parse(file_path)
+    root = tree.getroot()
+
+    queue = deque([root])
+
+    while queue:
+        current_element = queue.popleft()
+
+        # Skip defaults
+        if current_element.tag == "default":
+            continue
+
+        # Check all children of the current element
+        for child in current_element:
+            if child.tag in {"joint", "freejoint"}:
+                logger.info("Removing joint %s", child.get("name"))
+                current_element.remove(child)
+                return ET.tostring(root, encoding="utf-8").decode("utf-8")
+
+            queue.append(child)
+
+    logger.warning("No joint found in model. Returning original model.")
+    return ET.tostring(root, encoding="utf-8").decode("utf-8")
 
 
 def remove_mujoco_joints_except(file_path: str, joint_names: list[str]) -> str:

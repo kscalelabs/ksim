@@ -213,13 +213,16 @@ def get_rewards(
 
 def get_initial_obs_carry(
     rng: PRNGKeyArray,
+    physics_state: PhysicsState,
     observations: Collection[Observation],
 ) -> xax.FrozenDict[str, PyTree]:
     """Get the initial observation carry."""
     rngs = jax.random.split(rng, len(observations))
     return xax.FrozenDict(
         {
-            obs.observation_name: (obs.initial_carry(rng) if isinstance(obs, StatefulObservation) else None)
+            obs.observation_name: (
+                obs.initial_carry(physics_state, rng) if isinstance(obs, StatefulObservation) else None
+            )
             for obs, rng in zip(observations, rngs, strict=True)
         }
     )
@@ -987,7 +990,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         next_obs_carry = jax.lax.cond(
             terminated,
-            lambda: get_initial_obs_carry(rng=carry_rng, observations=constants.observations),
+            lambda: get_initial_obs_carry(
+                rng=carry_rng, physics_state=next_physics_state, observations=constants.observations
+            ),
             lambda: next_obs_carry,
         )
 
@@ -1864,7 +1869,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             carry_fn = xax.vmap(self.get_initial_model_carry, in_axes=0, jit_level=JitLevel.INITIALIZATION)
             command_fn = xax.vmap(get_initial_commands, in_axes=(0, 0, None, 0), jit_level=JitLevel.INITIALIZATION)
             reward_carry_fn = xax.vmap(get_initial_reward_carry, in_axes=(0, None), jit_level=JitLevel.INITIALIZATION)
-            obs_carry_fn = xax.vmap(get_initial_obs_carry, in_axes=(0, None), jit_level=JitLevel.INITIALIZATION)
+            obs_carry_fn = xax.vmap(get_initial_obs_carry, in_axes=(0, None, None), jit_level=JitLevel.INITIALIZATION)
 
             # Gets the initial curriculum state.
             curriculum_fn = rollout_constants.curriculum.get_initial_state
@@ -1900,7 +1905,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     jax.random.split(reward_rng, self.config.num_envs), rollout_constants.rewards
                 ),
                 obs_carry=obs_carry_fn(
-                    jax.random.split(carry_rng, self.config.num_envs), rollout_constants.observations
+                    jax.random.split(carry_rng, self.config.num_envs), physics_state, rollout_constants.observations
                 ),
                 curriculum_state=curriculum_state,
                 rng=jax.random.split(rollout_rng, self.config.num_envs),
@@ -1930,7 +1935,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 randomization_dict=randomization_dict,
                 model_carry=self.get_initial_model_carry(carry_rng),
                 reward_carry=get_initial_reward_carry(reward_rng, rollout_constants.rewards),
-                obs_carry=get_initial_obs_carry(rng=carry_rng, observations=rollout_constants.observations),
+                obs_carry=get_initial_obs_carry(
+                    rng=carry_rng, physics_state=physics_state, observations=rollout_constants.observations
+                ),
                 curriculum_state=curriculum_state,
                 rng=rollout_rng,
             )
