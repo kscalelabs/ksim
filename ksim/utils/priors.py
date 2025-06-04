@@ -286,7 +286,7 @@ def visualize_reference_motion(
     """Visualizes the reference motion with markers using the Mujoco viewer."""
     data = mujoco.MjData(model)
     mujoco.mj_resetData(model, data)
-    viewer = QtViewer(model, data, mode="window", width=1024, height=768)
+    viewer = QtViewer(model, mode="window", width=1024, height=768)
 
     # Set some nice camera parameters
     viewer.cam.distance = 3.0

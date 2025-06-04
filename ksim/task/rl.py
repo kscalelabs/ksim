@@ -485,7 +485,7 @@ class RLConfig(xax.Config):
         value=-10.0,
         help="The elevation of the render camera.",
     )
-    render_lookat: list[float] = xax.field(
+    render_lookat: tuple[float, float, float] = xax.field(
         value=[0.0, 0.0, 0.5],
         help="The lookat point of the render camera.",
     )
@@ -564,64 +564,66 @@ class RLConfig(xax.Config):
 Config = TypeVar("Config", bound=RLConfig)
 
 
-def get_viewer(
+def get_qt_viewer(
+    *,  # ← force keyword args
     mj_model: mujoco.MjModel,
-    config: Config,
+    cfg: RLConfig,
     mj_data: mujoco.MjData | None = None,
     save_path: str | Path | None = None,
-    mode: RenderMode | None = None,
-) -> DefaultMujocoViewer | QtViewer:
-    if mode is None:
-        mode = "window" if save_path is None else "offscreen"
-
-    render_with_glfw = config.render_with_glfw if config.render_with_glfw is not None else mode == "window"
-
-    if render_with_glfw:
-        viewer = QtViewer(
-            mj_model,
-            mode=mode,
-            width=config.render_width,
-            height=config.render_height,
-            enable_plots=config.enable_live_plots,
-            shadow=config.render_shadow,
-            reflection=config.render_reflection,
-            contact_force=config.render_contact_force,
-            contact_point=config.render_contact_point,
-            inertia=config.render_inertia,
-            camera_distance=config.render_distance,
-            camera_azimuth=config.render_azimuth,
-            camera_elevation=config.render_elevation,
-            camera_lookat=config.render_lookat,
-            track_body_id=config.render_track_body_id,
-        )
-        return viewer
-
-    viewer = DefaultMujocoViewer(
+    mode: RenderMode = "window",
+) -> QtViewer:
+    return QtViewer(
         mj_model,
-        width=config.render_width,
-        height=config.render_height,
+        mode=mode if save_path is None else "offscreen",
+        width=cfg.render_width,
+        height=cfg.render_height,
+        enable_plots=cfg.enable_live_plots,
+        shadow=cfg.render_shadow,
+        reflection=cfg.render_reflection,
+        contact_force=cfg.render_contact_force,
+        contact_point=cfg.render_contact_point,
+        inertia=cfg.render_inertia,
+        camera_distance=cfg.render_distance,
+        camera_azimuth=cfg.render_azimuth,
+        camera_elevation=cfg.render_elevation,
+        camera_lookat=cfg.render_lookat,
+        track_body_id=cfg.render_track_body_id,
     )
 
-    viewer.cam.distance = config.render_distance
-    viewer.cam.azimuth = config.render_azimuth
-    viewer.cam.elevation = config.render_elevation
-    viewer.cam.lookat[:] = config.render_lookat
-    if config.render_track_body_id is not None:
-        viewer.cam.trackbodyid = config.render_track_body_id
+
+def get_default_viewer(
+    *,
+    mj_model: mujoco.MjModel,
+    cfg: RLConfig,
+    width: int | None = None,
+    height: int | None = None,
+) -> DefaultMujocoViewer:
+    viewer = DefaultMujocoViewer(
+        mj_model,
+        width=width or cfg.render_width,
+        height=height or cfg.render_height,
+    )
+
+    viewer.cam.distance = cfg.render_distance
+    viewer.cam.azimuth = cfg.render_azimuth
+    viewer.cam.elevation = cfg.render_elevation
+    viewer.cam.lookat[:] = cfg.render_lookat
+    if cfg.render_track_body_id is not None:
+        viewer.cam.trackbodyid = cfg.render_track_body_id
         viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 
-    if config.render_camera_name is not None:
-        viewer.set_camera(config.render_camera_name)
+    if cfg.render_camera_name is not None:
+        viewer.set_camera(cfg.render_camera_name)
 
+    # scene tuning
     configure_scene(
         viewer.scn,
         viewer.vopt,
-        shadow=config.render_shadow,
-        contact_force=config.render_contact_force,
-        contact_point=config.render_contact_point,
-        inertia=config.render_inertia,
+        shadow=cfg.render_shadow,
+        contact_force=cfg.render_contact_force,
+        contact_point=cfg.render_contact_point,
+        inertia=cfg.render_inertia,
     )
-
     return viewer
 
 
@@ -1082,7 +1084,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         trajectory: Trajectory,
         markers: Collection[Marker],
-        viewer: DefaultMujocoViewer | QtViewer,
+        viewer: DefaultMujocoViewer,
         target_fps: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Render trajectory as video frames with computed FPS."""
@@ -1236,7 +1238,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         logged_traj: LoggedTrajectory,
         markers: Collection[Marker],
-        viewer: DefaultMujocoViewer | QtViewer,
+        viewer: DefaultMujocoViewer,
         key: str,
     ) -> None:
         """Visualizes a single trajectory.
@@ -1605,7 +1607,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 model_arrs=model_arrs,
             )
 
-            live_reward_transition_buffer = deque(maxlen=self.config.live_reward_window_size)
+            live_reward_transition_buffer: deque[Trajectory] = deque(maxlen=self.config.live_reward_window_size)
             viewer_rng = rng
 
             # Creates the markers.
@@ -1616,9 +1618,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             # Creates the viewer.
-            viewer = get_viewer(
+            viewer = get_qt_viewer(
                 mj_model=mj_model,
-                config=self.config,
+                cfg=self.config,
                 mj_data=env_states.physics_state.data,
                 save_path=save_path,
             )
@@ -1709,8 +1711,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         logger.info("Viewer closed, exiting environment loop")
                         break
 
-                    if save_path is not None:
-                        frames.append(viewer.read_pixels(callback=render_callback))
+                    # if save_path is not None:
+                    #     frames.append(viewer.read_pixels(callback=render_callback))
 
             except (KeyboardInterrupt, bdb.BdbQuit):
                 logger.info("Keyboard interrupt, exiting environment loop")
@@ -2136,9 +2138,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             # Creates the viewer.
-            viewer = get_viewer(
+            viewer = get_default_viewer(
                 mj_model=mj_model,
-                config=self.config,
+                cfg=self.config,
                 mode="offscreen",
             )
 
