@@ -40,6 +40,8 @@ import tqdm
 import xax
 from dpshdl.dataset import Dataset
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from kmv.app.viewer import DefaultMujocoViewer, QtViewer
+from kmv.core.types import RenderMode
 from mujoco import mjx
 from omegaconf import MISSING
 from PIL import Image, ImageDraw
@@ -79,9 +81,6 @@ from ksim.utils.mujoco import (
     load_model,
     log_joint_config_table,
 )
-from kmv.app.viewer import DefaultMujocoViewer, QtViewer
-from kmv.core.types import RenderMode
-
 from ksim.vis import Marker, configure_scene
 
 logger = logging.getLogger(__name__)
@@ -575,29 +574,25 @@ def get_viewer(
     if mode is None:
         mode = "window" if save_path is None else "offscreen"
 
-    render_with_glfw = (
-        config.render_with_glfw
-        if config.render_with_glfw is not None
-        else mode == "window"
-    )
+    render_with_glfw = config.render_with_glfw if config.render_with_glfw is not None else mode == "window"
 
     if render_with_glfw:
         viewer = QtViewer(
             mj_model,
-            mode                = mode,
-            width               = config.render_width,
-            height              = config.render_height,
-            enable_plots        = config.enable_live_plots,
-            shadow              = config.render_shadow,
-            reflection          = config.render_reflection,
-            contact_force       = config.render_contact_force,
-            contact_point       = config.render_contact_point,
-            inertia             = config.render_inertia,
-            camera_distance     = config.render_distance,
-            camera_azimuth      = config.render_azimuth,
-            camera_elevation    = config.render_elevation,
-            camera_lookat       = config.render_lookat,
-            track_body_id       = config.render_track_body_id,
+            mode=mode,
+            width=config.render_width,
+            height=config.render_height,
+            enable_plots=config.enable_live_plots,
+            shadow=config.render_shadow,
+            reflection=config.render_reflection,
+            contact_force=config.render_contact_force,
+            contact_point=config.render_contact_point,
+            inertia=config.render_inertia,
+            camera_distance=config.render_distance,
+            camera_azimuth=config.render_azimuth,
+            camera_elevation=config.render_elevation,
+            camera_lookat=config.render_lookat,
+            track_body_id=config.render_track_body_id,
         )
         return viewer
 
@@ -1611,7 +1606,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             live_reward_transition_buffer = deque(maxlen=self.config.live_reward_window_size)
-            viewer_rng      = rng
+            viewer_rng = rng
 
             # Creates the markers.
             markers = self.get_markers(
@@ -1646,7 +1641,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         env_states=env_states,
                         shared_state=shared_state,
                     )
-                    
+
                     transitions.append(transition)
 
                     # Build a window of transitions and compute live rewards
@@ -1654,14 +1649,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     traj_small = jax.tree.map(lambda *xs: jnp.stack(xs), *live_reward_transition_buffer)
                     viewer_rng, step_rng = jax.random.split(viewer_rng)
                     reward_state = get_rewards(
-                        trajectory           = traj_small,
-                        rewards              = constants.rewards,
-                        rewards_carry        = env_states.reward_carry,
-                        rollout_length_steps = 1,
-                        curriculum_level     = env_states.curriculum_state.level,
-                        rng                  = step_rng,
-                        clip_min             = self.config.reward_clip_min,
-                        clip_max             = self.config.reward_clip_max,
+                        trajectory=traj_small,
+                        rewards=constants.rewards,
+                        rewards_carry=env_states.reward_carry,
+                        rollout_length_steps=1,
+                        curriculum_level=env_states.curriculum_state.level,
+                        rng=step_rng,
+                        clip_min=self.config.reward_clip_min,
+                        clip_max=self.config.reward_clip_max,
                     )
                     env_states = replace(env_states, reward_carry=reward_state.carry)
 
@@ -1687,19 +1682,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     # Send actions
                     ctrl_arr = np.asarray(env_states.physics_state.data.ctrl)
-                    action_scalars = {
-                        f"act_{i}": float(ctrl_arr[i]) for i in range(min(ctrl_arr.size, 3))
-                    }
+                    action_scalars = {f"act_{i}": float(ctrl_arr[i]) for i in range(min(ctrl_arr.size, 3))}
                     viewer.push_plot_metrics(action_scalars, group="action")
 
                     # Send commands
                     cmd_arr = np.asarray(jax.device_get(env_states.commands["velocity_command"]))
-                    command_scalars = {
-                        f"cmd_vel_{i}": float(val)
-                        for i, val in enumerate(cmd_arr)
-                    }
+                    command_scalars = {f"cmd_vel_{i}": float(val) for i, val in enumerate(cmd_arr)}
                     viewer.push_plot_metrics(command_scalars, group="command")
-                    
+
                     xfrc = viewer.drain_control_pipe()
                     if xfrc is not None:
                         env_states.physics_state.data.xfrc_applied[:] = xfrc
