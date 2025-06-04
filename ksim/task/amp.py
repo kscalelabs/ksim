@@ -138,7 +138,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             self.logger.log_file("mujoco_info.yaml", mujoco_info)
 
             # Creates the viewer.
-            viewer = get_default_viewer(mj_model=mj_model, cfg=self.config, save_path=save_path)
+            viewer = get_default_viewer(mj_model=mj_model, config=self.config, save_path=save_path)
 
             # Gets the real motions and converts them to qpos arrays.
             real_motions = self.get_real_motions(mj_model)
