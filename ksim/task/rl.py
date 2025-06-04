@@ -1700,7 +1700,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     }
                     viewer.push_plot_metrics(command_scalars, group="command")
                     
-                    xfrc = viewer.poll_forces()
+                    xfrc = viewer.drain_control_pipe()
                     if xfrc is not None:
                         env_states.physics_state.data.xfrc_applied[:] = xfrc
 
