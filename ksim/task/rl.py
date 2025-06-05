@@ -1129,7 +1129,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Overlays the frame number on the frame.
             frame_img = Image.fromarray(frame)
             draw = ImageDraw.Draw(frame_img)
-            
+
             text = f"Frame {indices[frame_id]}"
             bbox = draw.textbbox((0, 0), text)
             draw.rectangle([8, 8, 12 + bbox[2] - bbox[0], 12 + bbox[3] - bbox[1]], fill="white")
