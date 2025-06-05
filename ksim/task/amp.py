@@ -25,6 +25,7 @@ import optax
 import tqdm
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from kmv.app.viewer import DefaultMujocoViewer, QtViewer
 from omegaconf import DictConfig, OmegaConf
 
 from ksim.debugging import JitLevel
@@ -38,7 +39,8 @@ from ksim.task.rl import (
     RolloutConstants,
     RolloutEnvState,
     RolloutSharedState,
-    get_viewer,
+    get_default_viewer,
+    get_qt_viewer,
 )
 from ksim.types import PhysicsModel, Trajectory
 
@@ -111,6 +113,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         num_steps: int | None,
         save_renders: bool = False,
         loop: bool = True,
+        slowdown: float = 1.0,
     ) -> None:
         """Provides an easy-to-use interface for viewing motions on the robot.
 
@@ -123,6 +126,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
                 environment visualizer.
             save_renders: If provided, save the rendered video to the given path.
             loop: If true, loop through the motions.
+            slowdown: The slowdown factor for the motion viewer.
         """
         save_path = self.exp_dir / "renders" / f"render_{time.monotonic()}" if save_renders else None
         if save_path is not None:
@@ -134,11 +138,16 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             # Loads the Mujoco model and logs some information about it.
             mj_model = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
+            ref_data = mujoco.MjData(mj_model)
             mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
             self.logger.log_file("mujoco_info.yaml", mujoco_info)
 
+            viewer: DefaultMujocoViewer | QtViewer
             # Creates the viewer.
-            viewer = get_viewer(mj_model=mj_model, config=self.config, save_path=save_path)
+            if save_path is None:
+                viewer = get_qt_viewer(mj_model=mj_model, config=self.config)
+            else:
+                viewer = get_default_viewer(mj_model=mj_model, config=self.config)
 
             # Gets the real motions and converts them to qpos arrays.
             real_motions = self.get_real_motions(mj_model)
@@ -152,15 +161,22 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             if loop:
                 iterator = itertools.cycle(iterator)
 
+            target_time = time.time() + self.config.ctrl_dt * slowdown
             try:
                 for i in iterator:
                     # Logs the frames to render.
-                    viewer.data.qpos[:] = np.array(qpos[i])
-                    mujoco.mj_forward(viewer.model, viewer.data)
-
                     if save_path is None:
-                        viewer.render()
+                        assert isinstance(viewer, QtViewer)
+                        viewer.push_state(
+                            qpos=np.array(qpos[i]), qvel=np.zeros_like(ref_data.qvel), sim_time=i * self.config.ctrl_dt
+                        )
+                        logger.debug("Sleeping for %s seconds", target_time - time.time())
+                        time.sleep(max(0, target_time - time.time()))
+                        target_time += self.config.ctrl_dt * slowdown
                     else:
+                        assert isinstance(viewer, DefaultMujocoViewer)
+                        viewer.data.qpos[:] = np.array(qpos[i])
+                        mujoco.mj_forward(viewer.model, viewer.data)
                         frames.append(viewer.read_pixels())
 
             except (KeyboardInterrupt, bdb.BdbQuit):

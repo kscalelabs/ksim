@@ -43,3 +43,9 @@ To visualize the reference motion, run the following command:
 ```
 ksim-visualize-reference examples/data/humanoid_amp_walk_ref.npz --model examples/data/scene.mjcf
 ```
+
+## To visualize the reference motion in your AMP task, run with the following config:
+
+```
+python -m examples.walking_amp run_mode=view_motion
+```
