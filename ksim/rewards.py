@@ -30,6 +30,7 @@ __all__ = [
     "LinkAccelerationPenalty",
     "LinkJerkPenalty",
     "JoystickReward",
+    "ReachabilityPenalty",
 ]
 
 import functools
@@ -756,3 +757,26 @@ class JoystickReward(Reward):
         total_reward = jnp.einsum("...i,...i->...", joystick_cmd, all_rewards) - vel_norm
 
         return total_reward
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ReachabilityPenalty(Reward):
+    """Penalty for commands that exceed the per‑joint reachability envelope.
+
+    Maximum joint movement in a single time step is given by:
+    Δmax = vmax·Δt + ½·amax·Δt²
+    """
+
+    delta_max_j: tuple[float, ...] = attrs.field(eq=False, hash=False)
+    squared: bool = True  # ‑‑ Use L2 on the excess (L1 if False).
+
+    def get_reward(self, traj: Trajectory) -> jnp.ndarray:
+        action_tj = traj.action
+        q_prev_tj = traj.qpos[..., 7:]
+        dm_j = jnp.asarray(self.delta_max_j)
+
+        excess_tj = jnp.maximum(0.0, jnp.abs(action_tj - q_prev_tj) - dm_j)
+        per_joint = excess_tj**2 if self.squared else excess_tj
+        penalty_t = per_joint.sum(axis=-1)
+
+        return penalty_t
