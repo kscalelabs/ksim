@@ -1691,8 +1691,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     viewer.push_plot_metrics(action_scalars, group="action")
 
                     # Send commands
-                    cmd_arr = np.asarray(jax.device_get(env_states.commands["velocity_command"]))
-                    command_scalars = {f"cmd_vel_{i}": float(val) for i, val in enumerate(cmd_arr)}
+                    # Flatten all command arrays into a single dict of scalars
+                    command_scalars = {}
+                    for cmd_name, cmd_val in env_states.commands.items():
+                        cmd_arr = np.asarray(jax.device_get(cmd_val))
+                        command_scalars.update({f"{cmd_name}_{i}": float(val) for i, val in enumerate(cmd_arr.flatten())})
                     viewer.push_plot_metrics(command_scalars, group="command")
 
                     # Recieve pushes from the viewer
