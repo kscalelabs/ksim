@@ -1694,7 +1694,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     command_scalars = {}
                     for cmd_name, cmd_val in env_states.commands.items():
                         cmd_arr = np.asarray(jax.device_get(cmd_val))
-                        command_scalars.update({f"{cmd_name}_{i}": float(val) for i, val in enumerate(cmd_arr.flatten())})
+                        command_scalars.update(
+                            {f"{cmd_name}_{i}": float(val) for i, val in enumerate(cmd_arr.flatten())}
+                        )
                     viewer.push_plot_metrics(command_scalars, group="command")
 
                     # Recieve pushes from the viewer
