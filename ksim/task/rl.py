@@ -1691,7 +1691,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     viewer.push_plot_metrics(action_scalars, group="action")
 
                     # Send commands
-                    # Flatten all command arrays into a single dict of scalars
                     command_scalars = {}
                     for cmd_name, cmd_val in env_states.commands.items():
                         cmd_arr = np.asarray(jax.device_get(cmd_val))
