@@ -164,7 +164,6 @@ def get_rewards(
     trajectory: Trajectory,
     rewards: Collection[Reward],
     rewards_carry: xax.FrozenDict[str, PyTree],
-    rollout_length_steps: int,
     curriculum_level: Array,
     rng: PRNGKeyArray,
     clip_min: float | None = None,
@@ -188,7 +187,7 @@ def get_rewards(
             reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
         else:
             reward_val = reward.get_reward(trajectory)
-        reward_val = reward_val * reward.scale / rollout_length_steps
+        reward_val = reward_val * reward.scale
         if reward.scale_by_curriculum:
             reward_val = reward_val * curriculum_level
 
@@ -1425,7 +1424,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             trajectory=trajectory,
             rewards=constants.rewards,
             rewards_carry=env_state.reward_carry,
-            rollout_length_steps=self.rollout_length_steps,
             curriculum_level=env_state.curriculum_state.level,
             rng=reward_rng,
             clip_min=self.config.reward_clip_min,
@@ -1657,7 +1655,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         trajectory=traj_small,
                         rewards=constants.rewards,
                         rewards_carry=env_states.reward_carry,
-                        rollout_length_steps=1,
                         curriculum_level=env_states.curriculum_state.level,
                         rng=step_rng,
                         clip_min=self.config.reward_clip_min,
@@ -1735,7 +1732,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 trajectory=trajectory,
                 rewards=constants.rewards,
                 rewards_carry=env_states.reward_carry,
-                rollout_length_steps=self.rollout_length_steps,
                 curriculum_level=env_states.curriculum_state.level,
                 rng=reward_rng,
                 clip_min=self.config.reward_clip_min,
