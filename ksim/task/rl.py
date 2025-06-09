@@ -8,7 +8,6 @@ __all__ = [
     "RolloutEnvState",
 ]
 
-from jax.core import get_aval
 import bdb
 import datetime
 import functools
@@ -40,6 +39,7 @@ import optax
 import tqdm
 import xax
 from dpshdl.dataset import Dataset
+from jax.core import get_aval
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from kmv.app.viewer import DefaultMujocoViewer, QtViewer
 from kmv.core.types import RenderMode
