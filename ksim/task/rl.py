@@ -2176,14 +2176,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         rng, update_rng = jax.random.split(rng)
 
-                        post_carry, metrics, logged_traj = self._rl_train_loop_step(
+                        carry, metrics, logged_traj = self._rl_train_loop_step(
                             carry=carry,
                             constants=constants,
                             state=state,
                             rng=update_rng,
                         )
-
-                        carry = post_carry
 
                         if self.config.profile_memory:
                             carry = jax.block_until_ready(carry)
