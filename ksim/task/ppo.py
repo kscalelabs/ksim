@@ -87,7 +87,7 @@ def compute_ppo_inputs(
 
         # 1-step bootstrap on successful terminations.
         trunc_mask_t = jnp.where(successes_t, 1.0, 0.0)
-        bootstrapped_rewards_t = rewards_t + decay_gamma * values_t * trunc_mask_t
+        bootstrapped_rewards_t = rewards_t / rollout_length_steps + decay_gamma * values_t * trunc_mask_t
 
         mask_t = jnp.where(dones_t, 0.0, 1.0)
 
@@ -100,10 +100,6 @@ def compute_ppo_inputs(
             reverse=True,
             jit_level=JitLevel.RL_CORE,
         )
-
-        # Normalize by the sequence length.
-        returns_t = returns_t / rollout_length_steps
-        gae_t = gae_t / rollout_length_steps
 
         # Get the value targets.
         value_targets_t = returns_t if monte_carlo_returns else gae_t + values_t
