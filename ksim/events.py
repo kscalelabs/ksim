@@ -4,6 +4,7 @@ __all__ = [
     "Event",
     "PushEvent",
     "JumpEvent",
+    "JointPerturbationEvent",
 ]
 
 import functools
@@ -64,13 +65,13 @@ class Event(ABC):
 class PushEvent(Event):
     """Randomly push the robot after some interval."""
 
-    x_force: float = attrs.field()
-    y_force: float = attrs.field()
-    z_force: float = attrs.field(default=0.0)
-    force_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
-    x_angular_force: float = attrs.field(default=0.0)
-    y_angular_force: float = attrs.field(default=0.0)
-    z_angular_force: float = attrs.field(default=0.0)
+    x_linvel: float = attrs.field()
+    y_linvel: float = attrs.field()
+    z_linvel: float = attrs.field(default=0.0)
+    x_angvel: float = attrs.field(default=0.0)
+    y_angvel: float = attrs.field(default=0.0)
+    z_angvel: float = attrs.field(default=0.0)
+    vel_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
     interval_range: tuple[float, float] = attrs.field()
     curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
 
@@ -108,22 +109,22 @@ class PushEvent(Event):
         curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
 
         # Randomly applies a force.
-        force_scales = jnp.array(
+        vel_scales = jnp.array(
             [
-                self.x_force,
-                self.y_force,
-                self.z_force,
-                self.x_angular_force,
-                self.y_angular_force,
-                self.z_angular_force,
+                self.x_linvel,
+                self.y_linvel,
+                self.z_linvel,
+                self.x_angvel,
+                self.y_angvel,
+                self.z_angvel,
             ]
         )
-        force_min, force_max = self.force_range
-        random_forces = jax.random.uniform(urng, shape=(6,), minval=force_min, maxval=force_max)
-        random_flip = jax.random.bernoulli(brng, p=0.5, shape=(6,)).astype(random_forces.dtype) * 2 - 1
-        random_forces = random_forces * force_scales * curriculum_level * random_flip
-        random_forces += data.qvel[:6]
-        new_qvel = slice_update(data, "qvel", slice(0, 6), random_forces)
+        vel_min, vel_max = self.vel_range
+        random_vels = jax.random.uniform(urng, shape=(6,), minval=vel_min, maxval=vel_max)
+        random_flip = jax.random.bernoulli(brng, p=0.5, shape=(6,)).astype(random_vels.dtype) * 2 - 1
+        random_vels = random_vels * vel_scales * curriculum_level * random_flip
+        random_vels += data.qvel[:6]
+        new_qvel = slice_update(data, "qvel", slice(0, 6), random_vels)
         updated_data = update_data_field(data, "qvel", new_qvel)
 
         # Chooses a new remaining interval.
@@ -182,14 +183,85 @@ class JumpEvent(Event):
         # required vertical velocity impulse to reach the desired jump height.
         minval, maxval = self.jump_height_range
         jump_height = jax.random.uniform(urng, (), minval=minval, maxval=maxval) * curriculum_level
-        vel = jnp.sqrt(2 * -model.opt.gravity * jump_height)
-        new_qvel = slice_update(data, "qvel", slice(0, 3), data.qvel[2:3] + vel)
+        linvel = jnp.sqrt(2 * -model.opt.gravity * jump_height)
+        angvel = jnp.zeros(3)
+        vel = jnp.concatenate([linvel, angvel], axis=0)
+        new_qvel = slice_update(data, "qvel", slice(0, 6), data.qvel[:6] + vel)
         updated_data = update_data_field(data, "qvel", new_qvel)
 
         # Chooses a new remaining interval.
         minval, maxval = self.interval_range
         time_remaining = jax.random.uniform(trng, (), minval=minval, maxval=maxval)
 
+        return updated_data, time_remaining
+
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
+        minval, maxval = self.interval_range
+        return jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointPerturbationEvent(Event):
+    """Randomly adds some velocity to each joint."""
+
+    std: float = attrs.field(validator=attrs.validators.gt(0.0))
+    mask_prct: float = attrs.field(
+        default=0.0,
+        validator=attrs.validators.and_(
+            attrs.validators.ge(0.0),
+            attrs.validators.le(1.0),
+        ),
+    )
+    interval_range: tuple[float, float] = attrs.field()
+    curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
+
+    def __call__(
+        self,
+        model: PhysicsModel,
+        data: PhysicsData,
+        event_state: Array,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[PhysicsData, Array]:
+        # Decrement by physics timestep.
+        dt = jnp.float32(model.opt.timestep)
+        time_remaining = event_state - dt
+
+        # Update the data if the time remaining is less than 0.
+        updated_data, time_remaining = jax.lax.cond(
+            time_remaining <= 0.0,
+            lambda: self._apply_random_velocity(data, curriculum_level, rng),
+            lambda: (data, time_remaining),
+        )
+
+        return updated_data, time_remaining
+
+    def _apply_random_velocity(
+        self,
+        data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[PhysicsData, Array]:
+        urng, mrng, trng = jax.random.split(rng, 3)
+
+        # Scales the curriculum level range.
+        curriculum_min, curriculum_max = self.curriculum_range
+        curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
+
+        # Randomly applies a velocity to a single joint.
+        std = self.std
+        nomask_prct = 1.0 - self.mask_prct
+        qfrc_applied = data.qfrc_applied[..., 6:]
+        random_vels = jax.random.normal(urng, shape=qfrc_applied.shape) * std
+        random_flip = jax.random.bernoulli(urng, p=0.5, shape=qfrc_applied.shape).astype(random_vels.dtype) * 2 - 1
+        random_mask = jax.random.bernoulli(mrng, p=nomask_prct, shape=qfrc_applied.shape).astype(random_vels.dtype)
+        random_vels = random_vels * curriculum_level * random_flip * random_mask
+        qfrc_applied = slice_update(data, "qfrc_applied", slice(6, None), qfrc_applied + random_vels)
+        updated_data = update_data_field(data, "qfrc_applied", qfrc_applied)
+
+        # Chooses a new remaining interval.
+        minval, maxval = self.interval_range
+        time_remaining = jax.random.uniform(trng, (), minval=minval, maxval=maxval)
         return updated_data, time_remaining
 
     def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:

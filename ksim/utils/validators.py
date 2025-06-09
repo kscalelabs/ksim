@@ -4,6 +4,8 @@ __all__ = [
     "CartesianIndex",
     "cartesian_index_to_dim",
     "dimension_index_validator",
+    "norm_validator",
+    "sample_probs_validator",
 ]
 
 from typing import Any, Literal, get_args
