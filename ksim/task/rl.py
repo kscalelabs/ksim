@@ -1509,12 +1509,18 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         carry, (metrics, logged_traj) = xax.scan(single_step_fn, carry, rngs, jit_level=JitLevel.OUTER_LOOP)
 
         # Convert any array with more than one element to a histogram.
-        metrics = jax.tree.map(lambda x: self.get_histogram(x) if isinstance(x, Array) and x.size > 1 else x, metrics)
+        metrics = jax.tree.map(self._histogram_fn, metrics)
 
         # Only get final trajectory and rewards.
         logged_traj = jax.tree.map(lambda arr: arr[-1], logged_traj)
 
         return carry, metrics, logged_traj
+
+    @xax.jit(static_argnums=(0,), jit_level=JitLevel.HELPER_FUNCTIONS)
+    def _histogram_fn(self, x: Any) -> Any:  # noqa: ANN401
+        if isinstance(x, Array) and x.size > 1:
+            return self.get_histogram(x)
+        return x
 
     def run_environment_step(
         self,
