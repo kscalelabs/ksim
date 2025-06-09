@@ -8,6 +8,7 @@ __all__ = [
     "RolloutEnvState",
 ]
 
+from jax.core import get_aval
 import bdb
 import datetime
 import functools
@@ -2142,6 +2143,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             constants, carry, state = self.initialize_rl_training(mj_model, rng)
 
+            for name, leaf in xax.get_named_leaves(carry, max_depth=3):
+                aval = get_aval(leaf)
+                if aval.weak_type:
+                    logger.warning("Found weak type: '%s' This could slow down compilation time", name)
+
             # Creates the markers.
             markers = self.get_markers(
                 commands=constants.constants.commands,
@@ -2173,12 +2179,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         state = self.on_step_start(state)
 
                         rng, update_rng = jax.random.split(rng)
-                        carry, metrics, logged_traj = self._rl_train_loop_step(
+
+                        post_carry, metrics, logged_traj = self._rl_train_loop_step(
                             carry=carry,
                             constants=constants,
                             state=state,
                             rng=update_rng,
                         )
+
+                        carry = post_carry
 
                         if self.config.profile_memory:
                             carry = jax.block_until_ready(carry)
@@ -2193,10 +2202,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             self._save(constants=constants, carry=carry, state=state)
 
                         state = self.on_step_end(state)
-
-                        # Updates the step and sample counts.
-                        num_steps = self.config.epochs_per_log_step
-                        num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
 
                         if valid_step:
                             cur_time = time.monotonic()
@@ -2217,6 +2222,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                     ),
                                 )
                                 last_full_render_time = cur_time
+
+                        # Updates the step and sample counts.
+                        num_steps = self.config.epochs_per_log_step
+                        num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
 
                         state = state.replace(
                             num_steps=state.num_steps + num_steps,
