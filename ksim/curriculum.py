@@ -67,7 +67,7 @@ class ConstantCurriculum(Curriculum[None]):
         return prev_state
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
-        return CurriculumState(level=jnp.array(self.level), state=None)
+        return CurriculumState(level=jnp.array(self.level, dtype=jnp.float32), state=None)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -91,7 +91,7 @@ class LinearCurriculum(Curriculum[None]):
         return CurriculumState(level=level, state=None)
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[None]:
-        return CurriculumState(level=jnp.array(self.min_level), state=None)
+        return CurriculumState(level=jnp.array(self.min_level, dtype=jnp.float32), state=None)
 
 
 @jax.tree_util.register_dataclass
@@ -149,10 +149,10 @@ class EpisodeLengthCurriculum(Curriculum[EpisodeLengthCurriculumState]):
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[EpisodeLengthCurriculumState]:
         return CurriculumState(
-            level=jnp.array(self.min_level),
+            level=jnp.array(self.min_level, dtype=jnp.float32),
             state=EpisodeLengthCurriculumState(
                 step_counter=jnp.array(self.min_level_steps, dtype=jnp.int32),
-                ema_episode_length=jnp.array(0.0),
+                ema_episode_length=jnp.array(0.0, dtype=jnp.float32),
             ),
         )
 
@@ -216,10 +216,10 @@ class DistanceFromOriginCurriculum(Curriculum[DistanceFromOriginCurriculumState]
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[DistanceFromOriginCurriculumState]:
         return CurriculumState(
-            level=jnp.array(self.min_level),
+            level=jnp.array(self.min_level, dtype=jnp.float32),
             state=DistanceFromOriginCurriculumState(
                 step_counter=jnp.array(self.min_level_steps, dtype=jnp.int32),
-                ema_distance=jnp.array(0.0),
+                ema_distance=jnp.array(0.0, dtype=jnp.float32),
             ),
         )
 
@@ -271,6 +271,6 @@ class StepWhenSaturated(Curriculum[Array]):
 
     def get_initial_state(self, rng: PRNGKeyArray) -> CurriculumState[Array]:
         return CurriculumState(
-            level=jnp.array(self.min_level),
+            level=jnp.array(self.min_level, dtype=jnp.float32),
             state=jnp.array(self.min_level_steps, dtype=jnp.int32),
         )

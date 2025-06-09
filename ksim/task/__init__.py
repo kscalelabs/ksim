@@ -3,3 +3,4 @@
 from .amp import *
 from .ppo import *
 from .rl import *
+from .teacher import *

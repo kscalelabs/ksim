@@ -12,13 +12,16 @@ import jax.numpy as jnp
 import mujoco
 import optax
 import xax
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 import ksim
 
+from .walking import HumanoidWalkingTask as TeacherTask, HumanoidWalkingTaskConfig as TeacherConfig
+
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 7
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 3 + 7
+NUM_CRITIC_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 7
 
 ZEROS = [
     ("abdomen_z", 0.0),
@@ -112,7 +115,7 @@ class Critic(eqx.Module):
         hidden_size: int,
         depth: int,
     ) -> None:
-        num_inputs = NUM_INPUTS
+        num_inputs = NUM_CRITIC_INPUTS
         num_outputs = 1
 
         self.mlp = eqx.nn.MLP(
@@ -157,7 +160,7 @@ class Model(eqx.Module):
 
 
 @dataclass
-class HumanoidWalkingTaskConfig(ksim.PPOConfig):
+class HumanoidWalkingTaskConfig(ksim.StudentConfig):
     """Config for the humanoid walking task."""
 
     # Model parameters.
@@ -222,13 +225,31 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 
 
-class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
+class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         return (
             optax.adam(self.config.learning_rate)
             if self.config.adam_weight_decay == 0.0
             else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
         )
+
+    def get_teacher_template(self) -> PyTree:
+        teacher_task = TeacherTask(
+            config=TeacherConfig(
+                num_envs=1,
+                batch_size=1,
+            ),
+        )
+        return teacher_task.get_model(key=jax.random.PRNGKey(0)).actor
+
+    def run_teacher(self, obs: xax.FrozenDict[str, Array], cmd: xax.FrozenDict[str, Array]) -> distrax.Distribution:
+        teacher_task = TeacherTask(
+            config=TeacherConfig(
+                num_envs=1,
+                batch_size=1,
+            ),
+        )
+        return jax.vmap(teacher_task.run_actor, in_axes=(None, 0, 0))(self.teacher_policy, obs, cmd)
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
@@ -267,22 +288,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.PushEvent(
                 x_linvel=1.0,
-                y_linvel=1.0,
+                y_linvel=0.0,
                 z_linvel=0.0,
                 x_angvel=0.1,
                 y_angvel=0.1,
                 z_angvel=0.3,
-                interval_range=(2.0, 5.0),
-            ),
-            ksim.JumpEvent(
-                jump_height_range=(1.0, 2.0),
-                interval_range=(2.0, 5.0),
-            ),
-            ksim.JointPerturbationEvent(
-                std=50.0,
-                mask_prct=0.9,
-                interval_range=(0.1, 0.15),
-                curriculum_range=(1.0, 1.0),
+                interval_range=(0.25, 0.75),
             ),
         ]
 
@@ -351,6 +362,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
+            ksim.TeacherReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
             ksim.JoystickReward(
                 forward_speed=self.config.target_linear_velocity,
@@ -359,12 +371,11 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 rotation_speed=self.config.target_angular_velocity,
                 scale=1.0,
             ),
-            ksim.CtrlPenalty.create(physics_model),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=5.0),
+            ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
             ksim.FarFromOriginTermination(max_dist=10.0),
         ]
 
@@ -396,16 +407,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        # imu_acc_3 = observations["sensor_observation_imu_acc"]
-        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        act_frc_obs_n = observations["actuator_force_observation"]
-        base_pos_3 = observations["base_position_observation"]
-        base_quat_4 = observations["base_orientation_observation"]
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
         joystick_cmd_ohe_7 = commands["joystick_command"]
 
         obs_n = jnp.concatenate(
@@ -414,18 +416,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 jnp.sin(timestep_1),  # 1
                 dh_joint_pos_j,  # NUM_JOINTS
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
                 proj_grav_3,  # 3
-                act_frc_obs_n / 100.0,  # NUM_JOINTS
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
                 joystick_cmd_ohe_7,  # 7
             ],
             axis=-1,
         )
+
         return model.forward(obs_n)
 
     def run_critic(
@@ -535,6 +531,7 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
             global_grad_clip=2.0,
+            teacher_model_path="examples/data/joystick_teacher/",
             # Logging parameters.
             valid_first_n_steps=1,
             # Simulation parameters.

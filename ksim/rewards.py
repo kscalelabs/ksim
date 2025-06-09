@@ -15,6 +15,7 @@ __all__ = [
     "XYAngularVelocityPenalty",
     "BaseHeightReward",
     "BaseHeightRangeReward",
+    "ActionVelocityPenalty",
     "ActionAccelerationPenalty",
     "ActionJerkPenalty",
     "JointVelocityPenalty",
@@ -311,35 +312,61 @@ class BaseHeightRangeReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class ActionVelocityPenalty(Reward):
+    """Penalty for first derivative change in consecutive actions."""
+
+    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        actions = trajectory.action
+        actions_zp = jnp.pad(actions, ((1, 0), (0, 0)), mode="edge")
+        done = jnp.pad(trajectory.done, ((1, 0),), mode="edge")[..., :-1, None]
+        actions_vel = jnp.where(done, 0.0, actions_zp[..., 1:, :] - actions_zp[..., :-1, :])
+        penalty = xax.get_norm(actions_vel, self.norm).mean(axis=-1)
+
+        mask = jnp.arange(len(penalty)) >= 1
+        penalty = jnp.where(mask, penalty, 0.0)
+        return penalty
+
+
+@attrs.define(frozen=True, kw_only=True)
 class ActionAccelerationPenalty(Reward):
-    """Penalty for large changes between consecutive actions."""
+    """Penalty for second derivative change in consecutive actions."""
 
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         actions = trajectory.action
         actions_zp = jnp.pad(actions, ((2, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done[..., :-1], ((2, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., :-1, None]
         actions_vel = jnp.where(done, 0.0, actions_zp[..., 1:, :] - actions_zp[..., :-1, :])
         actions_acc = jnp.where(done[..., 1:, :], 0.0, actions_vel[..., 1:, :] - actions_vel[..., :-1, :])
         penalty = xax.get_norm(actions_acc, self.norm).mean(axis=-1)
+
+        # Mask out timesteps affected by padding to prevent artificial artifacts
+        # (e.g. jump from constant velocity to non-zero acceleration)
+        mask = jnp.arange(len(penalty)) >= 2
+        penalty = jnp.where(mask, penalty, 0.0)
         return penalty
 
 
 @attrs.define(frozen=True, kw_only=True)
 class ActionJerkPenalty(Reward):
-    """Penalty for large changes between consecutive actions."""
+    """Penalty for third derivative change in consecutive actions."""
 
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         actions = trajectory.action
         actions_zp = jnp.pad(actions, ((3, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done[..., :-1], ((3, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done, ((3, 0),), mode="edge")[..., :-1, None]
         actions_vel = jnp.where(done, 0.0, actions_zp[..., 1:, :] - actions_zp[..., :-1, :])
         actions_acc = jnp.where(done[..., 1:, :], 0.0, actions_vel[..., 1:, :] - actions_vel[..., :-1, :])
         actions_jerk = jnp.where(done[..., 2:, :], 0.0, actions_acc[..., 1:, :] - actions_acc[..., :-1, :])
         penalty = xax.get_norm(actions_jerk, self.norm).mean(axis=-1)
+
+        mask = jnp.arange(len(penalty)) >= 3
+        penalty = jnp.where(mask, penalty, 0.0)
         return penalty
 
 
@@ -364,7 +391,7 @@ class JointAccelerationPenalty(Reward):
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos = trajectory.qpos[..., 7:]
         qpos_zp = jnp.pad(qpos, ((2, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done[..., :-1], ((2, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., :-1, None]
         qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
         qacc = jnp.where(done[..., 1:, :], 0.0, qvel[..., 1:, :] - qvel[..., :-1, :])
         penalty = xax.get_norm(qacc, self.norm).mean(axis=-1)
@@ -380,7 +407,7 @@ class JointJerkPenalty(Reward):
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos = trajectory.qpos[..., 7:]
         qpos_zp = jnp.pad(qpos, ((3, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done[..., :-1], ((3, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done, ((3, 0),), mode="edge")[..., :-1, None]
         qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
         qacc = jnp.where(done[..., 1:, :], 0.0, qvel[..., 1:, :] - qvel[..., :-1, :])
         qjerk = jnp.where(done[..., 2:, :], 0.0, qacc[..., 1:, :] - qacc[..., :-1, :])
@@ -607,7 +634,7 @@ class LinkAccelerationPenalty(Reward):
     def get_reward(self, trajectory: Trajectory) -> Array:
         pos = trajectory.xpos[..., 1:, :]
         pos_zp = jnp.pad(pos, ((2, 0), (0, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done[..., :-1], ((2, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., :-1, None]
         vel = jnp.where(done, 0.0, jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1))
         acc = jnp.where(done[..., 1:, :], 0.0, vel[..., 1:, :] - vel[..., :-1, :])
         penalty = xax.get_norm(acc, self.norm).mean(axis=-1)
@@ -623,7 +650,7 @@ class LinkJerkPenalty(Reward):
     def get_reward(self, trajectory: Trajectory) -> Array:
         pos = trajectory.xpos[..., 1:, :]
         pos_zp = jnp.pad(pos, ((3, 0), (0, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done[..., :-1], ((3, 0),), mode="edge")[..., None]
+        done = jnp.pad(trajectory.done, ((3, 0),), mode="edge")[..., :-1, None]
         vel = jnp.where(done, 0.0, jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1))
         acc = jnp.where(done[..., 1:, :], 0.0, vel[..., 1:, :] - vel[..., :-1, :])
         jerk = jnp.where(done[..., 2:, :], 0.0, acc[..., 1:, :] - acc[..., :-1, :])
@@ -681,6 +708,7 @@ class JoystickReward(Reward):
     temp: float = attrs.field(default=0.1)
     monotonic_fn: MonotonicFn = attrs.field(default="inv")
     in_robot_frame: bool = attrs.field(default=False)
+    stand_base_reward: float = attrs.field(default=1.0)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
@@ -704,7 +732,7 @@ class JoystickReward(Reward):
             return x.clip(-scale, scale) / scale
 
         # Computes each of the penalties.
-        stand_still_reward = jnp.zeros_like(linvel[..., 0])
+        stand_still_reward = self.stand_base_reward * jnp.ones_like(linvel[..., 0])
         walk_forward_reward = normalize(linvel[..., 0], self.forward_speed)
         walk_backward_reward = normalize(-linvel[..., 0], self.backward_speed)
         turn_left_reward = normalize(angvel[..., 2], self.rotation_speed)
