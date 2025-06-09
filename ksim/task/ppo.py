@@ -45,6 +45,7 @@ class PPOVariables:
     static_argnames=[
         "decay_gamma",
         "gae_lambda",
+        "rollout_length_steps",
         "normalize_advantages",
         "monte_carlo_returns",
     ],
@@ -57,6 +58,7 @@ def compute_ppo_inputs(
     successes_t: Array,
     decay_gamma: float,
     gae_lambda: float,
+    rollout_length_steps: int,
     normalize_advantages: bool = False,
     monte_carlo_returns: bool = False,
 ) -> PPOInputs:
@@ -74,7 +76,10 @@ def compute_ppo_inputs(
         return (return_t, adv_t), (return_t, adv_t)
 
     def compute_gae_and_targets_for_sample(
-        values_t: Array, rewards_t: Array, dones_t: Array, successes_t: Array
+        values_t: Array,
+        rewards_t: Array,
+        dones_t: Array,
+        successes_t: Array,
     ) -> PPOInputs:
         # values_shifted_t is V(s_{t+1}) for t < T_rollout, and V(s_T) for t = T_rollout
         # Uses the last value of the trajectory as the bootstrap value.
@@ -95,6 +100,10 @@ def compute_ppo_inputs(
             reverse=True,
             jit_level=JitLevel.RL_CORE,
         )
+
+        # Normalize by the sequence length.
+        returns_t = returns_t / rollout_length_steps
+        gae_t = gae_t / rollout_length_steps
 
         # Get the value targets.
         value_targets_t = returns_t if monte_carlo_returns else gae_t + values_t
@@ -460,6 +469,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 successes_t=trajectory.success,
                 decay_gamma=self.config.gamma,
                 gae_lambda=self.config.lam,
+                rollout_length_steps=self.rollout_length_steps,
                 normalize_advantages=self.config.normalize_advantages,
                 monte_carlo_returns=self.config.monte_carlo_returns,
             )
