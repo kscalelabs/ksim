@@ -109,9 +109,13 @@ class MjxEngine(PhysicsEngine):
         mjx_data = mjx_data.replace(
             qvel=jnp.zeros_like(mjx_data.qvel),
             qacc=jnp.zeros_like(mjx_data.qacc),
-            cvel=jnp.zeros_like(mjx_data.cvel),
-            cacc=jnp.zeros_like(mjx_data.cacc),
         )
+
+        if isinstance(mjx_data, (mjx.DataC, mjx.DataJAX)):
+            mjx_data = mjx_data.replace(
+                cvel=jnp.zeros_like(mjx_data.cvel),
+                cacc=jnp.zeros_like(mjx_data.cacc),
+            )
 
         default_action = self.actuators.get_default_action(mjx_data)
 
