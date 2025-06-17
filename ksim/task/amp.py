@@ -50,10 +50,10 @@ REAL_MOTIONS_KEY = "_real_motions"
 logger = logging.getLogger(__name__)
 
 
-def _loop_slice(one_clip: Array, start: int, window_T: int) -> Array:
+def _loop_slice(one_clip: Array, start: Array, window_t: int) -> Array:
     """Return a T-long window starting at `start`, looping if clip shorter."""
-    T_real = one_clip.shape[0]
-    idx = (jnp.arange(window_T) + start) % T_real
+    t_real = one_clip.shape[0]
+    idx = (jnp.arange(window_t) + start) % t_real
     return one_clip[idx]
 
 
@@ -74,6 +74,10 @@ class AMPConfig(PPOConfig):
     amp_reference_batch_size: int = xax.field(
         value=32,
         help="The batch size for reference motion batching in AMP training.",
+    )
+    amp_reference_noise: float = xax.field(
+        value=0.01,
+        help="The noise to add to the reference motion batch in AMP training.",
     )
 
 
@@ -419,7 +423,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
-        rng, rng_disc = jax.random.split(rng)
+        rng, rng_disc, rng_real_noise = jax.random.split(rng, 3)
         carry, metrics, logged_traj = super()._single_step(
             trajectories=trajectories,
             rewards=rewards,
@@ -446,12 +450,14 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             rng=rng_disc,
         )
 
+        noisy_batch = real_batch + jax.random.normal(rng_real_noise, real_batch.shape) * self.config.amp_reference_noise
+
         # Computes the metrics and PPO gradients.
         disc_metrics, grads = self._get_disc_metrics_and_grads(
             model_arr=model_arr,
             model_static=model_static,
             trajectories=trajectories,
-            real_motions=real_batch,
+            real_motions=noisy_batch,
         )
 
         # Applies the gradients with clipping.
