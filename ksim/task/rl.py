@@ -1749,6 +1749,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 return
 
             trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
+            trajectory = self.postprocess_trajectory(
+                constants=constants,
+                env_states=env_states,
+                shared_state=shared_state,
+                trajectory=trajectory,
+            )
 
             rng, reward_rng = jax.random.split(rng)
             reward_state = get_rewards(
