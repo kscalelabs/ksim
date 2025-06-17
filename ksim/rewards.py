@@ -498,10 +498,9 @@ class JointDeviationPenalty(Reward):
     joint_weights: tuple[float, ...] | None = attrs.field(default=None)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        diff = (
-            trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
-            - jnp.array(self.joint_targets)[jnp.array(self.joint_indices)]
-        )
+        qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
+        target = jnp.asarray(self.joint_targets)
+        diff = qpos_sel - target
 
         if self.joint_weights is not None:
             diff *= jnp.array(self.joint_weights)
