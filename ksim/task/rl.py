@@ -1683,7 +1683,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         **{k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()},
                     }
                     viewer.push_plot_metrics(reward_scalars, group="reward")
-                    
+
                     # Send observations
                     obs_dict = jax.tree_util.tree_map(
                         lambda x: np.asarray(jax.device_get(x)),
