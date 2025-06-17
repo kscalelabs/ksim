@@ -52,11 +52,7 @@ from ksim.commands import Command
 from ksim.curriculum import Curriculum, CurriculumState
 from ksim.dataset import TrajectoryDataset
 from ksim.debugging import JitLevel
-from ksim.engine import (
-    PhysicsEngine,
-    engine_type_from_physics_model,
-    get_physics_engine,
-)
+from ksim.engine import PhysicsEngine, engine_type_from_physics_model, get_physics_engine
 from ksim.events import Event
 from ksim.observation import Observation, ObservationInput, StatefulObservation
 from ksim.randomization import PhysicsRandomizer
@@ -1797,7 +1793,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         match vid_save_path.suffix.lower():
             case ".mp4":
                 try:
-                    import imageio.v2 as imageio
+                    import imageio.v2 as imageio  # noqa: PLC0415
 
                 except ImportError as err:
                     raise RuntimeError(
