@@ -1657,6 +1657,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     # Build a window of transitions to compute live rewards
                     live_reward_transition_buffer.append(transition)
                     traj_small = jax.tree.map(lambda *xs: jnp.stack(xs), *live_reward_transition_buffer)
+                    traj_small = self.postprocess_trajectory(
+                        constants=constants,
+                        env_states=env_states,
+                        shared_state=shared_state,
+                        trajectory=traj_small,
+                    )
                     viewer_rng, step_rng = jax.random.split(viewer_rng)
                     reward_state = get_rewards(
                         trajectory=traj_small,
