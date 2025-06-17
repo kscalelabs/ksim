@@ -355,6 +355,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
+        rng: PRNGKeyArray,
     ) -> tuple[Array, xax.FrozenDict[str, Array]]:
         """Computes the PPO loss and additional metrics.
 
@@ -371,6 +372,11 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model = eqx.combine(model_arr, model_static)
 
         sim_motions = self.trajectory_to_motion(trajectories)
+
+        # Adds noise to the real and sim motions.
+        sim_rng, real_rng = jax.random.split(rng)
+        sim_motions = sim_motions + jax.random.normal(sim_rng, sim_motions.shape) * self.config.amp_reference_noise
+        real_motions = real_motions + jax.random.normal(real_rng, real_motions.shape) * self.config.amp_reference_noise
 
         # Computes the discriminator loss.
         disc_fn = xax.vmap(self.call_discriminator, in_axes=(None, 0), jit_level=JitLevel.RL_CORE)
@@ -394,10 +400,11 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
+        rng: PRNGKeyArray,
     ) -> tuple[xax.FrozenDict[str, Array], PyTree]:
         loss_fn = jax.grad(self._get_amp_disc_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=JitLevel.RL_CORE)(loss_fn)
-        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions)
+        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions, rng)
         return metrics, grads
 
     @staticmethod
@@ -423,7 +430,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
-        rng, rng_disc, rng_real_noise = jax.random.split(rng, 3)
+        rng, rng_disc, rng_noise = jax.random.split(rng, 3)
         carry, metrics, logged_traj = super()._single_step(
             trajectories=trajectories,
             rewards=rewards,
@@ -450,14 +457,13 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             rng=rng_disc,
         )
 
-        noisy_batch = real_batch + jax.random.normal(rng_real_noise, real_batch.shape) * self.config.amp_reference_noise
-
         # Computes the metrics and PPO gradients.
         disc_metrics, grads = self._get_disc_metrics_and_grads(
             model_arr=model_arr,
             model_static=model_static,
             trajectories=trajectories,
-            real_motions=noisy_batch,
+            real_motions=real_batch,
+            rng=rng_noise,
         )
 
         # Applies the gradients with clipping.
