@@ -50,6 +50,13 @@ REAL_MOTIONS_KEY = "_real_motions"
 logger = logging.getLogger(__name__)
 
 
+def _loop_slice(one_clip: Array, start: Array, window_t: int) -> Array:
+    """Return a T-long window starting at `start`, looping if clip shorter."""
+    t_real = one_clip.shape[0]
+    idx = (jnp.arange(window_t) + start) % t_real
+    return one_clip[idx]
+
+
 @jax.tree_util.register_dataclass
 @dataclass
 class AMPConfig(PPOConfig):
@@ -63,6 +70,14 @@ class AMPConfig(PPOConfig):
     run_motion_viewer_loop: bool = xax.field(
         value=True,
         help="If true, the motion will be looped.",
+    )
+    amp_reference_batch_size: int = xax.field(
+        value=32,
+        help="The batch size for reference motion batching in AMP training.",
+    )
+    amp_reference_noise: float = xax.field(
+        value=0.01,
+        help="The noise to add to the reference motion batch in AMP training.",
     )
 
 
@@ -340,6 +355,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
+        rng: PRNGKeyArray,
     ) -> tuple[Array, xax.FrozenDict[str, Array]]:
         """Computes the PPO loss and additional metrics.
 
@@ -348,6 +364,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             model_static: The static part of the discriminator model.
             trajectories: The trajectories to compute the loss on.
             real_motions: The real motions to compute the loss on.
+            rng: The random number generator.
 
         Returns:
             A tuple containing the loss value as a scalar, a dictionary of
@@ -356,6 +373,11 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model = eqx.combine(model_arr, model_static)
 
         sim_motions = self.trajectory_to_motion(trajectories)
+
+        # Adds noise to the real and sim motions.
+        sim_rng, real_rng = jax.random.split(rng)
+        sim_motions = sim_motions + jax.random.normal(sim_rng, sim_motions.shape) * self.config.amp_reference_noise
+        real_motions = real_motions + jax.random.normal(real_rng, real_motions.shape) * self.config.amp_reference_noise
 
         # Computes the discriminator loss.
         disc_fn = xax.vmap(self.call_discriminator, in_axes=(None, 0), jit_level=JitLevel.RL_CORE)
@@ -379,11 +401,25 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
+        rng: PRNGKeyArray,
     ) -> tuple[xax.FrozenDict[str, Array], PyTree]:
         loss_fn = jax.grad(self._get_amp_disc_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=JitLevel.RL_CORE)(loss_fn)
-        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions)
+        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions, rng)
         return metrics, grads
+
+    @staticmethod
+    def _make_real_batch(
+        motions: Array,
+        window_t: int,
+        batch_b: int,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        num_motions = motions.shape[0]
+        clip_rng, start_rng = jax.random.split(rng)
+        clip_idx = jax.random.randint(clip_rng, (batch_b,), 0, num_motions)
+        start_idx = jax.random.randint(start_rng, (batch_b,), 0, window_t)
+        return jax.vmap(_loop_slice, in_axes=(0, 0, None))(motions[clip_idx], start_idx, window_t)
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _single_step(
@@ -395,6 +431,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
+        rng, rng_disc, rng_noise = jax.random.split(rng, 3)
         carry, metrics, logged_traj = super()._single_step(
             trajectories=trajectories,
             rewards=rewards,
@@ -410,12 +447,24 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         optimizer = constants.optimizer[1]
         opt_state = carry.opt_state[1]
 
+        real_motions_full = carry.shared_state.aux_values[REAL_MOTIONS_KEY]
+
+        sim_t = trajectories.done.shape[0]  # match sim horizon
+
+        real_batch = self._make_real_batch(
+            motions=real_motions_full,
+            window_t=sim_t,
+            batch_b=self.config.amp_reference_batch_size,
+            rng=rng_disc,
+        )
+
         # Computes the metrics and PPO gradients.
         disc_metrics, grads = self._get_disc_metrics_and_grads(
             model_arr=model_arr,
             model_static=model_static,
             trajectories=trajectories,
-            real_motions=carry.shared_state.aux_values[REAL_MOTIONS_KEY],
+            real_motions=real_batch,
+            rng=rng_noise,
         )
 
         # Applies the gradients with clipping.
