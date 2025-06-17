@@ -1689,11 +1689,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         lambda x: np.asarray(jax.device_get(x)),
                         transition.obs,
                     )
-
                     for obs_name, obs_value in obs_dict.items():
                         flat_obs = obs_value.reshape(-1)
                         obs_scalars = {f"{obs_name}_{i}": float(v) for i, v in enumerate(flat_obs)}
-                        viewer.push_plot_metrics(obs_scalars, group=f"Obs/{obs_name}")
+                        viewer.push_plot_metrics(obs_scalars, group=f"Observations/{obs_name}")
 
                     # Send physics properties (just first 3 values of qpos for now)
                     qpos_arr = np.asarray(env_states.physics_state.data.qpos)
