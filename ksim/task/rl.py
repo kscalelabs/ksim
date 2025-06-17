@@ -1657,6 +1657,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     # Build a window of transitions to compute live rewards
                     live_reward_transition_buffer.append(transition)
                     traj_small = jax.tree.map(lambda *xs: jnp.stack(xs), *live_reward_transition_buffer)
+                    traj_small = self.postprocess_trajectory(
+                        constants=constants,
+                        env_states=env_states,
+                        shared_state=shared_state,
+                        trajectory=traj_small,
+                    )
                     viewer_rng, step_rng = jax.random.split(viewer_rng)
                     reward_state = get_rewards(
                         trajectory=traj_small,
@@ -1683,6 +1689,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         **{k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()},
                     }
                     viewer.push_plot_metrics(reward_scalars, group="reward")
+
+                    # Send observations
+                    obs_dict = jax.tree_util.tree_map(
+                        lambda x: np.asarray(jax.device_get(x)),
+                        transition.obs,
+                    )
+                    for obs_name, obs_value in obs_dict.items():
+                        flat_obs = obs_value.reshape(-1)
+                        obs_scalars = {f"{obs_name}_{i}": float(v) for i, v in enumerate(flat_obs)}
+                        viewer.push_plot_metrics(obs_scalars, group=f"Observations/{obs_name}")
 
                     # Send physics properties (just first 3 values of qpos for now)
                     qpos_arr = np.asarray(env_states.physics_state.data.qpos)
@@ -1733,6 +1749,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 return
 
             trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
+            trajectory = self.postprocess_trajectory(
+                constants=constants,
+                env_states=env_states,
+                shared_state=shared_state,
+                trajectory=trajectory,
+            )
 
             rng, reward_rng = jax.random.split(rng)
             reward_state = get_rewards(
