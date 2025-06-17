@@ -364,6 +364,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             model_static: The static part of the discriminator model.
             trajectories: The trajectories to compute the loss on.
             real_motions: The real motions to compute the loss on.
+            rng: The random number generator.
 
         Returns:
             A tuple containing the loss value as a scalar, a dictionary of
