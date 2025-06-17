@@ -204,7 +204,7 @@ class DistanceFromOriginCurriculum(Curriculum[DistanceFromOriginCurriculumState]
         new_level = jnp.where(steps == 0, new_level_if_enough_steps, current_level)
 
         # Reset steps if level changed
-        steps = jnp.where(new_level != current_level, jnp.zeros_like(steps), steps)
+        steps = jnp.where(new_level != current_level, jnp.array(self.min_level_steps, dtype=jnp.int32), steps)
 
         return CurriculumState(
             level=new_level,
