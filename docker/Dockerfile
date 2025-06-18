@@ -18,6 +18,17 @@ RUN apt-get update && \
         libglfw3 \
         && rm -rf /var/lib/apt/lists/*
 
+RUN apt-get update && \
+    apt-get install -y \
+        qtbase5-dev \
+        qtbase5-dev-tools \
+        qt5-qmake \
+        libxcb-xinerama0 \
+        libxcb-xinerama0-dev \
+        libxcb-cursor0 \
+        libxcb-cursor-dev \
+        && rm -rf /var/lib/apt/lists/*
+
 # use local version
 # WORKDIR /ksim
 # COPY ../ /ksim

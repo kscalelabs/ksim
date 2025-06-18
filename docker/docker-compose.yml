@@ -4,7 +4,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # runtime: nvidia
     command: bash
     ports:
       - 9249:9249
@@ -14,7 +13,8 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              # device_ids: ['0', '2']   # Specify the desired GPU indices here, else all will be made available
+              count: all # Specify the desired number of GPU devices that should be reserved and made available to the container
               capabilities: [gpu]
     environment:
       - DISPLAY=${DISPLAY}
