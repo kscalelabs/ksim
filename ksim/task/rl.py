@@ -551,7 +551,7 @@ class RLConfig(xax.Config):
         help="The name or id of the camera to use in rendering.",
     )
     live_reward_buffer_size: int = xax.field(
-        value=32,
+        value=4,
         help="Size of the rolling buffer for computing live rewards",
     )
 
