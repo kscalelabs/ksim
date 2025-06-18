@@ -109,8 +109,6 @@ class MjxEngine(PhysicsEngine):
         mjx_data = mjx_data.replace(
             qvel=jnp.zeros_like(mjx_data.qvel),
             qacc=jnp.zeros_like(mjx_data.qacc),
-            cvel=jnp.zeros_like(mjx_data.cvel),
-            cacc=jnp.zeros_like(mjx_data.cacc),
         )
 
         default_action = self.actuators.get_default_action(mjx_data)
@@ -247,8 +245,6 @@ class MujocoEngine(PhysicsEngine):
         # Zeros out some non-zeroed quantities.
         mj_data.qvel[:] = 0.0
         mj_data.qacc[:] = 0.0
-        mj_data.cvel[:] = 0.0
-        mj_data.cacc[:] = 0.0
 
         default_action = self.actuators.get_default_action(mj_data)
         actuator_state = (

@@ -42,6 +42,15 @@ jobs:
             python-requirements-${{ env.pythonLocation }}
             python-requirements-
 
+      - name: Install Qt dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qtbase5-dev \
+            libgl1 \
+            libxkbcommon-x11-0 \
+            xvfb
+
       - name: Install package
         run: |
           python -m pip install --upgrade pip setuptools wheel

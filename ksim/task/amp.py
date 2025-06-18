@@ -25,6 +25,7 @@ import optax
 import tqdm
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from kmv.app.viewer import DefaultMujocoViewer, QtViewer
 from omegaconf import DictConfig, OmegaConf
 
 from ksim.debugging import JitLevel
@@ -38,7 +39,8 @@ from ksim.task.rl import (
     RolloutConstants,
     RolloutEnvState,
     RolloutSharedState,
-    get_viewer,
+    get_default_viewer,
+    get_qt_viewer,
 )
 from ksim.types import PhysicsModel, Trajectory
 
@@ -46,6 +48,13 @@ DISCRIMINATOR_OUTPUT_KEY = "_discriminator_output"
 REAL_MOTIONS_KEY = "_real_motions"
 
 logger = logging.getLogger(__name__)
+
+
+def _loop_slice(one_clip: Array, start: Array, window_t: int) -> Array:
+    """Return a T-long window starting at `start`, looping if clip shorter."""
+    t_real = one_clip.shape[0]
+    idx = (jnp.arange(window_t) + start) % t_real
+    return one_clip[idx]
 
 
 @jax.tree_util.register_dataclass
@@ -61,6 +70,14 @@ class AMPConfig(PPOConfig):
     run_motion_viewer_loop: bool = xax.field(
         value=True,
         help="If true, the motion will be looped.",
+    )
+    amp_reference_batch_size: int = xax.field(
+        value=32,
+        help="The batch size for reference motion batching in AMP training.",
+    )
+    amp_reference_noise: float = xax.field(
+        value=0.01,
+        help="The noise to add to the reference motion batch in AMP training.",
     )
 
 
@@ -111,6 +128,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         num_steps: int | None,
         save_renders: bool = False,
         loop: bool = True,
+        slowdown: float = 1.0,
     ) -> None:
         """Provides an easy-to-use interface for viewing motions on the robot.
 
@@ -123,6 +141,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
                 environment visualizer.
             save_renders: If provided, save the rendered video to the given path.
             loop: If true, loop through the motions.
+            slowdown: The slowdown factor for the motion viewer.
         """
         save_path = self.exp_dir / "renders" / f"render_{time.monotonic()}" if save_renders else None
         if save_path is not None:
@@ -134,11 +153,16 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             # Loads the Mujoco model and logs some information about it.
             mj_model = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
+            ref_data = mujoco.MjData(mj_model)
             mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
             self.logger.log_file("mujoco_info.yaml", mujoco_info)
 
+            viewer: DefaultMujocoViewer | QtViewer
             # Creates the viewer.
-            viewer = get_viewer(mj_model=mj_model, config=self.config, save_path=save_path)
+            if save_path is None:
+                viewer = get_qt_viewer(mj_model=mj_model, config=self.config)
+            else:
+                viewer = get_default_viewer(mj_model=mj_model, config=self.config)
 
             # Gets the real motions and converts them to qpos arrays.
             real_motions = self.get_real_motions(mj_model)
@@ -152,15 +176,22 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             if loop:
                 iterator = itertools.cycle(iterator)
 
+            target_time = time.time() + self.config.ctrl_dt * slowdown
             try:
                 for i in iterator:
                     # Logs the frames to render.
-                    viewer.data.qpos[:] = np.array(qpos[i])
-                    mujoco.mj_forward(viewer.model, viewer.data)
-
                     if save_path is None:
-                        viewer.render()
+                        assert isinstance(viewer, QtViewer)
+                        viewer.push_state(
+                            qpos=np.array(qpos[i]), qvel=np.zeros_like(ref_data.qvel), sim_time=i * self.config.ctrl_dt
+                        )
+                        logger.debug("Sleeping for %s seconds", target_time - time.time())
+                        time.sleep(max(0, target_time - time.time()))
+                        target_time += self.config.ctrl_dt * slowdown
                     else:
+                        assert isinstance(viewer, DefaultMujocoViewer)
+                        viewer.data.qpos[:] = np.array(qpos[i])
+                        mujoco.mj_forward(viewer.model, viewer.data)
                         frames.append(viewer.read_pixels())
 
             except (KeyboardInterrupt, bdb.BdbQuit):
@@ -324,6 +355,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
+        rng: PRNGKeyArray,
     ) -> tuple[Array, xax.FrozenDict[str, Array]]:
         """Computes the PPO loss and additional metrics.
 
@@ -332,6 +364,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             model_static: The static part of the discriminator model.
             trajectories: The trajectories to compute the loss on.
             real_motions: The real motions to compute the loss on.
+            rng: The random number generator.
 
         Returns:
             A tuple containing the loss value as a scalar, a dictionary of
@@ -340,6 +373,11 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model = eqx.combine(model_arr, model_static)
 
         sim_motions = self.trajectory_to_motion(trajectories)
+
+        # Adds noise to the real and sim motions.
+        sim_rng, real_rng = jax.random.split(rng)
+        sim_motions = sim_motions + jax.random.normal(sim_rng, sim_motions.shape) * self.config.amp_reference_noise
+        real_motions = real_motions + jax.random.normal(real_rng, real_motions.shape) * self.config.amp_reference_noise
 
         # Computes the discriminator loss.
         disc_fn = xax.vmap(self.call_discriminator, in_axes=(None, 0), jit_level=JitLevel.RL_CORE)
@@ -363,11 +401,25 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
+        rng: PRNGKeyArray,
     ) -> tuple[xax.FrozenDict[str, Array], PyTree]:
         loss_fn = jax.grad(self._get_amp_disc_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=JitLevel.RL_CORE)(loss_fn)
-        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions)
+        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions, rng)
         return metrics, grads
+
+    @staticmethod
+    def _make_real_batch(
+        motions: Array,
+        window_t: int,
+        batch_b: int,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        num_motions = motions.shape[0]
+        clip_rng, start_rng = jax.random.split(rng)
+        clip_idx = jax.random.randint(clip_rng, (batch_b,), 0, num_motions)
+        start_idx = jax.random.randint(start_rng, (batch_b,), 0, window_t)
+        return jax.vmap(_loop_slice, in_axes=(0, 0, None))(motions[clip_idx], start_idx, window_t)
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _single_step(
@@ -379,6 +431,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
+        rng, rng_disc, rng_noise = jax.random.split(rng, 3)
         carry, metrics, logged_traj = super()._single_step(
             trajectories=trajectories,
             rewards=rewards,
@@ -394,12 +447,24 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         optimizer = constants.optimizer[1]
         opt_state = carry.opt_state[1]
 
+        real_motions_full = carry.shared_state.aux_values[REAL_MOTIONS_KEY]
+
+        sim_t = trajectories.done.shape[0]  # match sim horizon
+
+        real_batch = self._make_real_batch(
+            motions=real_motions_full,
+            window_t=sim_t,
+            batch_b=self.config.amp_reference_batch_size,
+            rng=rng_disc,
+        )
+
         # Computes the metrics and PPO gradients.
         disc_metrics, grads = self._get_disc_metrics_and_grads(
             model_arr=model_arr,
             model_static=model_static,
             trajectories=trajectories,
-            real_motions=carry.shared_state.aux_values[REAL_MOTIONS_KEY],
+            real_motions=real_batch,
+            rng=rng_noise,
         )
 
         # Applies the gradients with clipping.
