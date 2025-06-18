@@ -111,12 +111,6 @@ class MjxEngine(PhysicsEngine):
             qacc=jnp.zeros_like(mjx_data.qacc),
         )
 
-        if hasattr(mjx_data, "cvel") and hasattr(mjx_data, "cacc"):
-            mjx_data = mjx_data.replace(
-                cvel=jnp.zeros_like(mjx_data.cvel),
-                cacc=jnp.zeros_like(mjx_data.cacc),
-            )
-
         default_action = self.actuators.get_default_action(mjx_data)
 
         # Gets the initial actuator state for stateful actuators.
@@ -251,9 +245,6 @@ class MujocoEngine(PhysicsEngine):
         # Zeros out some non-zeroed quantities.
         mj_data.qvel[:] = 0.0
         mj_data.qacc[:] = 0.0
-        if hasattr(mj_data, "cvel") and hasattr(mj_data, "cacc"):
-            mj_data.cvel[:] = 0.0
-            mj_data.cacc[:] = 0.0
 
         default_action = self.actuators.get_default_action(mj_data)
         actuator_state = (
