@@ -336,7 +336,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 foot_left_body_name="foot_left",
                 foot_right_body_name="foot_right",
             ),
-            ksim.FeetOrientationObservation.create(
+            ksim.FeetOrientationObservation.create_from_feet(
                 physics_model=physics_model,
                 foot_left_body_name="foot_left",
                 foot_right_body_name="foot_right",

@@ -21,6 +21,8 @@ __all__ = [
     "ProjectedGravityObservation",
     "ActuatorAccelerationObservation",
     "ContactObservation",
+    "BodyOrientationObservation",
+    "SiteOrientationObservation",
     "FeetContactObservation",
     "FeetPositionObservation",
     "FeetOrientationObservation",
@@ -48,6 +50,7 @@ from ksim.utils.mujoco import (
     get_geom_data_idx_from_name,
     get_qpos_data_idxs_by_name,
     get_sensor_data_idxs_by_name,
+    get_site_data_idx_from_name,
 )
 from ksim.vis import Marker
 
@@ -521,12 +524,88 @@ class FeetPositionObservation(Observation):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class FeetOrientationObservation(Observation):
-    foot_left: int = attrs.field()
-    foot_right: int = attrs.field()
+class BodyOrientationObservation(Observation):
+    body_ids: tuple[int, ...]
+    name: str = attrs.field(default="body_orientation")
 
     @classmethod
     def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        body_names: tuple[str, ...],
+        noise: float = 0.0,
+    ) -> Self:
+        body_ids = tuple(get_body_data_idx_from_name(physics_model, name) for name in body_names)
+        name = f"{xax.camelcase_to_snakecase(cls.__name__)}_{'_'.join(body_names)}"
+        return cls(
+            body_ids=body_ids,
+            name=name,
+            noise=noise,
+        )
+
+    def get_name(self) -> str:
+        return self.name
+
+    def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        quats = state.physics_state.data.xquat[jnp.asarray(self.body_ids)]
+        return quats
+
+
+@attrs.define(frozen=True, kw_only=True)
+class SiteOrientationObservation(Observation):
+    site_ids: tuple[int, ...]
+    name: str = attrs.field(default="site_orientation")
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        site_names: tuple[str, ...],
+        noise: float = 0.0,
+    ) -> Self:
+        site_ids = tuple(get_site_data_idx_from_name(physics_model, name) for name in site_names)
+        name = f"{xax.camelcase_to_snakecase(cls.__name__)}_{'_'.join(site_names)}"
+        return cls(
+            site_ids=site_ids,
+            name=name,
+            noise=noise,
+        )
+
+    def get_name(self) -> str:
+        return self.name
+
+    def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        rot_mats = state.physics_state.data.site_xmat[jnp.asarray(self.site_ids)].reshape(-1, 3, 3)
+        quats = xax.rotation_matrix_to_quat(rot_mats)
+        return quats
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetOrientationObservation(BodyOrientationObservation):
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        body_names: tuple[str, ...],
+        noise: float = 0.0,
+    ) -> Self:                                  # <- same return type
+        if len(body_names) != 2:
+            raise ValueError(
+                "FeetOrientationObservation expects exactly two body names "
+                "(left and right foot)."
+            )
+        return super().create(
+            physics_model=physics_model,
+            body_names=body_names,
+            noise=noise,
+        )
+
+    @classmethod
+    def create_from_feet(
         cls,
         *,
         physics_model: PhysicsModel,
@@ -534,18 +613,15 @@ class FeetOrientationObservation(Observation):
         foot_right_body_name: str,
         noise: float = 0.0,
     ) -> Self:
-        foot_left_idx = get_body_data_idx_from_name(physics_model, foot_left_body_name)
-        foot_right_idx = get_body_data_idx_from_name(physics_model, foot_right_body_name)
-        return cls(
-            foot_left=foot_left_idx,
-            foot_right=foot_right_idx,
+        return super().create(
+            physics_model=physics_model,
+            body_names=(foot_left_body_name, foot_right_body_name),
             noise=noise,
         )
 
-    def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        foot_left_quat = state.physics_state.data.xquat[self.foot_left]
-        foot_right_quat = state.physics_state.data.xquat[self.foot_right]
-        return jnp.stack([foot_left_quat, foot_right_quat], axis=-2)
+    def get_name(self) -> str:
+        """Get the name of the observation."""
+        return xax.camelcase_to_snakecase(self.__class__.__name__)
 
 
 @attrs.define(frozen=True, kw_only=True)
