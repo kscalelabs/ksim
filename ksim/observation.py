@@ -31,6 +31,7 @@ __all__ = [
 ]
 
 import functools
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Collection, Literal, Self
@@ -342,13 +343,17 @@ class ProjectedGravityObservation(StatefulObservation):
     framequat_idx_range: tuple[int, int | None] = attrs.field()
     gravity: tuple[float, float, float] = attrs.field()
     lag_range: tuple[float, float] = attrs.field(
-        default=(0.01, 0.1),
+        default=(0.001, 0.005),
         validator=attrs.validators.deep_iterable(
             attrs.validators.and_(
                 attrs.validators.ge(0.0),
                 attrs.validators.lt(1.0),
             ),
         ),
+    )
+    bias: float = attrs.field(
+        default=math.radians(2.0),
+        validator=attrs.validators.ge(0.0),
     )
 
     @classmethod
@@ -357,7 +362,7 @@ class ProjectedGravityObservation(StatefulObservation):
         *,
         physics_model: PhysicsModel,
         framequat_name: str,
-        lag_range: tuple[float, float] = (0.01, 0.1),
+        lag_range: tuple[float, float] = (0.001, 0.005),
         noise: float = 0.0,
     ) -> Self:
         """Create a projected gravity observation from a physics model.
@@ -383,31 +388,36 @@ class ProjectedGravityObservation(StatefulObservation):
             noise=noise,
         )
 
-    def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> tuple[Array, Array, Array]:
         minval, maxval = self.lag_range
-        return jnp.zeros((3,)), jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
+        lrng, brng = jax.random.split(rng)
+        lag = jax.random.uniform(lrng, (1,), minval=minval, maxval=maxval)
+        bias = jax.random.uniform(brng, (3,), minval=-self.bias, maxval=self.bias)
+        return jnp.zeros((3,)), lag, bias
 
     def observe_stateful(
         self,
         state: ObservationInput,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, tuple[Array, Array]]:
+    ) -> tuple[Array, tuple[Array, Array, Array]]:
+        x, lag, bias = state.obs_carry
         framequat_start, framequat_end = self.framequat_idx_range
         framequat_data = state.physics_state.data.sensordata[framequat_start:framequat_end].ravel()
 
         # Orients the gravity vector according to the quaternion.
         gravity = jnp.array(self.gravity)
+        bias_quat = xax.euler_to_quat(bias)
         proj_gravity = xax.rotate_vector_by_quat(gravity, framequat_data, inverse=True)
+        proj_gravity = xax.rotate_vector_by_quat(proj_gravity, bias_quat)
 
         # Add noise to gravity vector measurement.
         proj_gravity = add_noise(proj_gravity, rng, "gaussian", self.noise, curriculum_level)
 
         # Get current Kalman filter state
-        x, lag = state.obs_carry
         x = x * lag + proj_gravity * (1 - lag)
 
-        return x, (x, lag)
+        return x, (x, lag, bias)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -578,13 +588,12 @@ class SiteOrientationObservation(Observation):
 
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         rot_mats = state.physics_state.data.site_xmat[jnp.asarray(self.site_ids)].reshape(-1, 3, 3)
-        quats = xax.rotation_matrix_to_quat(rot_mats)
-        return quats
+        rot6ds = xax.rotation_matrix_to_rotation6d(rot_mats)
+        return rot6ds
 
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetOrientationObservation(BodyOrientationObservation):
-
     @classmethod
     def create(
         cls,
@@ -592,12 +601,9 @@ class FeetOrientationObservation(BodyOrientationObservation):
         physics_model: PhysicsModel,
         body_names: tuple[str, ...],
         noise: float = 0.0,
-    ) -> Self:                                  # <- same return type
+    ) -> Self:  # <- same return type
         if len(body_names) != 2:
-            raise ValueError(
-                "FeetOrientationObservation expects exactly two body names "
-                "(left and right foot)."
-            )
+            raise ValueError("FeetOrientationObservation expects exactly two body names (left and right foot).")
         return super().create(
             physics_model=physics_model,
             body_names=body_names,
