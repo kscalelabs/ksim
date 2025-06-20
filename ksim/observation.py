@@ -364,6 +364,7 @@ class ProjectedGravityObservation(StatefulObservation):
         framequat_name: str,
         lag_range: tuple[float, float] = (0.001, 0.005),
         noise: float = 0.0,
+        bias: float = math.radians(2.0),
     ) -> Self:
         """Create a projected gravity observation from a physics model.
 
@@ -386,6 +387,7 @@ class ProjectedGravityObservation(StatefulObservation):
             gravity=(float(gx), float(gy), float(gz)),
             lag_range=lag_range,
             noise=noise,
+            bias=bias,
         )
 
     def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> tuple[Array, Array, Array]:
