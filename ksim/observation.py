@@ -343,7 +343,7 @@ class ProjectedGravityObservation(StatefulObservation):
     framequat_idx_range: tuple[int, int | None] = attrs.field()
     gravity: tuple[float, float, float] = attrs.field()
     lag_range: tuple[float, float] = attrs.field(
-        default=(0.01, 0.1),
+        default=(0.001, 0.005),
         validator=attrs.validators.deep_iterable(
             attrs.validators.and_(
                 attrs.validators.ge(0.0),
@@ -362,7 +362,7 @@ class ProjectedGravityObservation(StatefulObservation):
         *,
         physics_model: PhysicsModel,
         framequat_name: str,
-        lag_range: tuple[float, float] = (0.01, 0.1),
+        lag_range: tuple[float, float] = (0.001, 0.005),
         noise: float = 0.0,
     ) -> Self:
         """Create a projected gravity observation from a physics model.
@@ -392,7 +392,7 @@ class ProjectedGravityObservation(StatefulObservation):
         minval, maxval = self.lag_range
         lrng, brng = jax.random.split(rng)
         lag = jax.random.uniform(lrng, (1,), minval=minval, maxval=maxval)
-        bias = jax.random.uniform(brng, (3,), minval=self.bias, maxval=self.bias)
+        bias = jax.random.uniform(brng, (3,), minval=-self.bias, maxval=self.bias)
         return jnp.zeros((3,)), lag, bias
 
     def observe_stateful(
@@ -407,9 +407,9 @@ class ProjectedGravityObservation(StatefulObservation):
 
         # Orients the gravity vector according to the quaternion.
         gravity = jnp.array(self.gravity)
-        bias = xax.euler_to_quat(bias)
+        bias_quat = xax.euler_to_quat(bias)
         proj_gravity = xax.rotate_vector_by_quat(gravity, framequat_data, inverse=True)
-        proj_gravity = xax.rotate_vector_by_quat(proj_gravity, bias)
+        proj_gravity = xax.rotate_vector_by_quat(proj_gravity, bias_quat)
 
         # Add noise to gravity vector measurement.
         proj_gravity = add_noise(proj_gravity, rng, "gaussian", self.noise, curriculum_level)
