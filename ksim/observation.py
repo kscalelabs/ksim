@@ -373,7 +373,8 @@ class ProjectedGravityObservation(StatefulObservation):
             framequat_name: The name of the framequat sensor
             lag_range: The range of EMA factors to use, to approximate the
                 variation in the amount of smoothing of the Kalman filter.
-            noise: The observation noise
+            noise: The observation noise.
+            bias: The bias of the gravity vector, in radians.
         """
         sensor_name_to_idx_range = get_sensor_data_idxs_by_name(physics_model)
         if framequat_name not in sensor_name_to_idx_range:
