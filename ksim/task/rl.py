@@ -1375,6 +1375,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         env_states: RolloutEnvState,
         shared_state: RolloutSharedState,
         trajectory: Trajectory,
+        rng: PRNGKeyArray,
     ) -> Trajectory:
         return trajectory
 
@@ -1407,16 +1408,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             jit_level=JitLevel.UNROLL,
         )
 
+
+        rng, reward_rng, postprocess_rng = jax.random.split(env_state.rng, 3)
+
         # Post-processes the trajectory.
         trajectory = self.postprocess_trajectory(
             constants=constants,
             env_states=env_state,
             shared_state=shared_state,
             trajectory=trajectory,
+            rng=postprocess_rng,
         )
 
         # Gets the rewards.
-        rng, reward_rng = jax.random.split(env_state.rng)
         reward = get_rewards(
             trajectory=trajectory,
             rewards=constants.rewards,
