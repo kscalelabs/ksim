@@ -1408,7 +1408,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             jit_level=JitLevel.UNROLL,
         )
 
-
         rng, reward_rng, postprocess_rng = jax.random.split(env_state.rng, 3)
 
         # Post-processes the trajectory.
