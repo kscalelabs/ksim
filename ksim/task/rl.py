@@ -394,7 +394,7 @@ class RLConfig(xax.Config):
     )
     batch_size: int = xax.field(
         value=1,
-        help="The number of trajectories to process in each minibatch during gradient updates. All environments are still stepped in parallel.",
+        help="The number of trajectories to process in each minibatch during gradient updates.",
     )
     rollout_length_seconds: float = xax.field(
         value=MISSING,
