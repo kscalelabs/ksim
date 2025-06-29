@@ -1,6 +1,7 @@
 """Tests for rewards in the ksim package."""
 
 import jax.numpy as jnp
+import pytest
 import xax
 
 import ksim
@@ -249,6 +250,7 @@ class TestActionJerkPenalty:
         expected_per_timestep = jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         assert jnp.allclose(reward_per_timestep, expected_per_timestep, atol=1e-6)
 
+    @pytest.mark.slow
     def test_cubic_action_constant_jerk(self) -> None:
         """Test cubic action progression gives constant jerk."""
         penalty = ksim.ActionJerkPenalty(scale=-1.0, norm="l2")
