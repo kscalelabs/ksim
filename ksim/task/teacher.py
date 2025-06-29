@@ -20,7 +20,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import xax
-from jaxtyping import Array, PyTree
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.rewards import Reward
 from ksim.task.ppo import PPOConfig, PPOTask
@@ -117,12 +117,14 @@ class StudentTask(PPOTask[Config], Generic[Config], ABC):
         env_states: RolloutEnvState,
         shared_state: RolloutSharedState,
         trajectory: Trajectory,
+        rng: PRNGKeyArray,
     ) -> Trajectory:
         trajectory = super().postprocess_trajectory(
             constants=constants,
             env_states=env_states,
             shared_state=shared_state,
             trajectory=trajectory,
+            rng=rng,
         )
 
         action_dist = self.run_teacher(trajectory.obs, trajectory.command)
