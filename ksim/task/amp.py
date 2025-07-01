@@ -385,15 +385,6 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         sim_motions = self.trajectory_to_motion(trajectories)
 
-        # Adds noise to the real and sim motions.
-        sim_rng, real_rng = jax.random.split(rng)
-        max_noise = self.config.amp_reference_noise
-        min_noise = max_noise * self.config.amp_reference_noise_min_multiplier
-        cur_level = carry.env_states.curriculum_state.level.mean()
-        noise_level = max_noise - (max_noise - min_noise) * cur_level
-        sim_motions = sim_motions + jax.random.normal(sim_rng, sim_motions.shape) * noise_level
-        real_motions = real_motions + jax.random.normal(real_rng, real_motions.shape) * noise_level
-
         # Computes the discriminator loss.
         disc_fn = xax.vmap(self.call_discriminator, in_axes=(None, 0, 0), jit_level=JitLevel.RL_CORE)
         real_disc_rng, sim_disc_rng = jax.random.split(rng)
