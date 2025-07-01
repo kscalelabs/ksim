@@ -388,8 +388,10 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         # Computes the discriminator loss.
         disc_fn = xax.vmap(self.call_discriminator, in_axes=(None, 0, 0), jit_level=JitLevel.RL_CORE)
         real_disc_rng, sim_disc_rng = jax.random.split(rng)
-        real_disc_logits = disc_fn(model, real_motions, jax.random.split(real_disc_rng, real_motions.shape[0]))
-        sim_disc_logits = disc_fn(model, sim_motions, jax.random.split(sim_disc_rng, sim_motions.shape[0]))
+        real_batch = jax.tree_util.tree_leaves(real_motions)[0].shape[0]
+        sim_batch = jax.tree_util.tree_leaves(sim_motions)[0].shape[0]
+        real_disc_logits = disc_fn(model, real_motions, jax.random.split(real_disc_rng, real_batch))
+        sim_disc_logits = disc_fn(model, sim_motions, jax.random.split(sim_disc_rng, sim_batch))
         real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
 
         disc_loss = real_disc_loss + sim_disc_loss
@@ -418,16 +420,37 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
     @staticmethod
     def _make_real_batch(
-        motions: Array,
+        motions: PyTree,
         window_t: int,
         batch_b: int,
         rng: PRNGKeyArray,
-    ) -> Array:
-        num_motions = motions.shape[0]
+    ) -> PyTree:
+        """Sample a batch of windowed motion snippets from a PyTree of motions.
+
+        Args:
+            motions: A PyTree whose leaves are arrays of shape (B, T, ...).
+            window_t: Length of the temporal window to sample.
+            batch_b: Number of windows to sample.
+            rng: PRNG key used for sampling.
+
+        Returns:
+            A PyTree with the same structure as ``motions`` whose leaves have
+            shape (batch_b, window_t, ...).
+        """
+        # Determine number of available motion clips from the first leaf.
+        num_motions = jax.tree_util.tree_leaves(motions)[0].shape[0]
+
+        # Sample which clip and the starting timestep for each element in the batch.
         clip_rng, start_rng = jax.random.split(rng)
         clip_idx = jax.random.randint(clip_rng, (batch_b,), 0, num_motions)
         start_idx = jax.random.randint(start_rng, (batch_b,), 0, window_t)
-        return jax.vmap(_loop_slice, in_axes=(0, 0, None))(motions[clip_idx], start_idx, window_t)
+
+        def _sample_single(idx: Array, start: Array) -> PyTree:
+            single_motion = jax.tree_util.tree_map(lambda arr: arr[idx], motions)
+            return jax.tree_util.tree_map(lambda arr: _loop_slice(arr, start, window_t), single_motion)
+
+        # Vectorise over the batch dimension.
+        return jax.vmap(_sample_single)(clip_idx, start_idx)
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _single_step(
