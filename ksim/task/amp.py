@@ -79,6 +79,10 @@ class AMPConfig(PPOConfig):
         value=0.01,
         help="The noise to add to the reference motion batch in AMP training.",
     )
+    amp_reference_noise_min_multiplier: float = xax.field(
+        value=1.0,
+        help="Decay the noise level by this multiplier at the maximum curriculum level.",
+    )
 
 
 Config = TypeVar("Config", bound=AMPConfig)
@@ -240,13 +244,14 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def call_discriminator(self, model: PyTree, motion: PyTree) -> Array:
+    def call_discriminator(self, model: PyTree, motion: PyTree, rng: PRNGKeyArray) -> Array:
         """Calls the discriminator on a given motion.
 
         Args:
             model: The model returned by `get_model`
             motion: The motion in question, either the real motion from the
                 dataset or a motion derived from a trajectory.
+            rng: The random number generator.
 
         Returns:
             The discriminator logits, as an array with with shape (T). We
@@ -314,12 +319,16 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         env_states: RolloutEnvState,
         shared_state: RolloutSharedState,
         trajectory: Trajectory,
+        rng: PRNGKeyArray,
     ) -> Trajectory:
+        disc_rng, postprocess_rng = jax.random.split(rng)
+
         trajectory = super().postprocess_trajectory(
             constants=constants,
             env_states=env_states,
             shared_state=shared_state,
             trajectory=trajectory,
+            rng=postprocess_rng,
         )
 
         # Recombines the mutable and static parts of the discriminator model.
@@ -329,7 +338,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         # Runs the discriminator on the trajectory.
         motion = self.trajectory_to_motion(trajectory)
-        discriminator_logits = self.call_discriminator(disc_model, motion)
+        discriminator_logits = self.call_discriminator(disc_model, motion, disc_rng)
         chex.assert_equal_shape([discriminator_logits, trajectory.done])
 
         # Adds the discriminator output to the auxiliary outputs.
@@ -355,6 +364,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
+        carry: RLLoopCarry,
         rng: PRNGKeyArray,
     ) -> tuple[Array, xax.FrozenDict[str, Array]]:
         """Computes the PPO loss and additional metrics.
@@ -364,6 +374,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             model_static: The static part of the discriminator model.
             trajectories: The trajectories to compute the loss on.
             real_motions: The real motions to compute the loss on.
+            carry: The carry from the previous step.
             rng: The random number generator.
 
         Returns:
@@ -376,13 +387,18 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         # Adds noise to the real and sim motions.
         sim_rng, real_rng = jax.random.split(rng)
-        sim_motions = sim_motions + jax.random.normal(sim_rng, sim_motions.shape) * self.config.amp_reference_noise
-        real_motions = real_motions + jax.random.normal(real_rng, real_motions.shape) * self.config.amp_reference_noise
+        max_noise = self.config.amp_reference_noise
+        min_noise = max_noise * self.config.amp_reference_noise_min_multiplier
+        cur_level = carry.env_states.curriculum_state.level.mean()
+        noise_level = max_noise - (max_noise - min_noise) * cur_level
+        sim_motions = sim_motions + jax.random.normal(sim_rng, sim_motions.shape) * noise_level
+        real_motions = real_motions + jax.random.normal(real_rng, real_motions.shape) * noise_level
 
         # Computes the discriminator loss.
-        disc_fn = xax.vmap(self.call_discriminator, in_axes=(None, 0), jit_level=JitLevel.RL_CORE)
-        real_disc_logits = disc_fn(model, real_motions)
-        sim_disc_logits = disc_fn(model, sim_motions)
+        disc_fn = xax.vmap(self.call_discriminator, in_axes=(None, 0, 0), jit_level=JitLevel.RL_CORE)
+        real_disc_rng, sim_disc_rng = jax.random.split(rng)
+        real_disc_logits = disc_fn(model, real_motions, jax.random.split(real_disc_rng, real_motions.shape[0]))
+        sim_disc_logits = disc_fn(model, sim_motions, jax.random.split(sim_disc_rng, sim_motions.shape[0]))
         real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
 
         disc_loss = real_disc_loss + sim_disc_loss
@@ -401,11 +417,12 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         model_static: PyTree,
         trajectories: Trajectory,
         real_motions: PyTree,
+        carry: RLLoopCarry,
         rng: PRNGKeyArray,
     ) -> tuple[xax.FrozenDict[str, Array], PyTree]:
         loss_fn = jax.grad(self._get_amp_disc_loss_and_metrics, argnums=0, has_aux=True)
         loss_fn = xax.jit(static_argnums=[1], jit_level=JitLevel.RL_CORE)(loss_fn)
-        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions, rng)
+        grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions, carry, rng)
         return metrics, grads
 
     @staticmethod
@@ -464,6 +481,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             model_static=model_static,
             trajectories=trajectories,
             real_motions=real_batch,
+            carry=carry,
             rng=rng_noise,
         )
 
