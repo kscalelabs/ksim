@@ -418,40 +418,6 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions, carry, rng)
         return metrics, grads
 
-    @staticmethod
-    def _make_real_batch(
-        motions: PyTree,
-        window_t: int,
-        batch_b: int,
-        rng: PRNGKeyArray,
-    ) -> PyTree:
-        """Sample a batch of windowed motion snippets from a PyTree of motions.
-
-        Args:
-            motions: A PyTree whose leaves are arrays of shape (B, T, ...).
-            window_t: Length of the temporal window to sample.
-            batch_b: Number of windows to sample.
-            rng: PRNG key used for sampling.
-
-        Returns:
-            A PyTree with the same structure as ``motions`` whose leaves have
-            shape (batch_b, window_t, ...).
-        """
-        # Determine number of available motion clips from the first leaf.
-        num_motions = jax.tree_util.tree_leaves(motions)[0].shape[0]
-
-        # Sample which clip and the starting timestep for each element in the batch.
-        clip_rng, start_rng = jax.random.split(rng)
-        clip_idx = jax.random.randint(clip_rng, (batch_b,), 0, num_motions)
-        start_idx = jax.random.randint(start_rng, (batch_b,), 0, window_t)
-
-        def _sample_single(idx: Array, start: Array) -> PyTree:
-            single_motion = jax.tree_util.tree_map(lambda arr: arr[idx], motions)
-            return jax.tree_util.tree_map(lambda arr: _loop_slice(arr, start, window_t), single_motion)
-
-        # Vectorise over the batch dimension.
-        return jax.vmap(_sample_single)(clip_idx, start_idx)
-
     @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _single_step(
         self,
@@ -548,3 +514,41 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             rewards=rewards,
             rng=rng,
         )
+
+    @staticmethod  # ensure consistent calling convention
+    def _make_real_batch(
+        motions: PyTree,
+        window_t: int,
+        batch_b: int,
+        rng: PRNGKeyArray,
+    ) -> PyTree:
+        """Sample a batch of windowed motion snippets from a PyTree of motions.
+
+        Args:
+            motions: A PyTree whose leaves are arrays of shape (B, T, ...).
+            window_t: Length of the temporal window to sample.
+            batch_b: Number of windows to sample.
+            rng: PRNG key used for sampling.
+
+        Returns:
+            A PyTree with the same structure as ``motions`` whose leaves have
+            shape (batch_b, window_t, ...).
+        """
+        num_motions = jax.tree_util.tree_leaves(motions)[0].shape[0]
+
+        keys = jax.random.split(rng, batch_b + 1)
+        clip_key, sample_keys = keys[0], keys[1:]
+
+        # Sample which clip each element in the batch comes from.
+        clip_idx = jax.random.randint(clip_key, (batch_b,), 0, num_motions)
+
+        batch_clips = jax.tree_util.tree_map(lambda arr: arr[clip_idx], motions)
+
+        def _sample_single(clip: PyTree, rng_key: PRNGKeyArray) -> PyTree:
+            """Samples an unbiased window from a single motion clip."""
+            # Length of the real clip (may differ across clips).
+            t_real = jax.tree_util.tree_leaves(clip)[0].shape[0]
+            start = jax.random.randint(rng_key, (), 0, t_real)  # unbiased start index
+            return jax.tree_util.tree_map(lambda arr: _loop_slice(arr, start, window_t), clip)
+
+        return jax.vmap(_sample_single)(batch_clips, sample_keys)
