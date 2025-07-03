@@ -172,27 +172,31 @@ class HighRootVelocityTermination(Termination):
 class FarFromOriginTermination(Termination):
     """Terminates the episode if the robot is too far from the origin.
 
-    This is treated as a positive termination.
+    Defaults to a positive termination.
     """
 
     max_dist: float = attrs.field(validator=attrs.validators.gt(0.0))
+    pos_termination: bool = attrs.field(default=True)
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        return jnp.where(jnp.linalg.norm(state.qpos[..., :3], axis=-1) > self.max_dist, 1, 0)
+        termination_value = 1 if self.pos_termination else -1
+        return jnp.where(jnp.linalg.norm(state.qpos[..., :3], axis=-1) > self.max_dist, termination_value, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class EpisodeLengthTermination(Termination):
     """Terminates the episode if the robot has been alive for too long.
 
-    This is treated as a positive termination.
+    This defaults to a positive termination.
     """
 
     max_length_sec: float = attrs.field(validator=attrs.validators.gt(0.0))
     disable_at_curriculum_level: int = attrs.field(default=None)
+    pos_termination: bool = attrs.field(default=True)
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        long_episodes = jnp.where(state.time > self.max_length_sec, 1, 0)
+        termination_value = 1 if self.pos_termination else -1
+        long_episodes = jnp.where(state.time > self.max_length_sec, termination_value, 0)
         if self.disable_at_curriculum_level is not None:
             return jnp.where(curriculum_level < self.disable_at_curriculum_level, 0, long_episodes)
 
