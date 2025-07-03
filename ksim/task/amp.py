@@ -385,20 +385,13 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         sim_motions = self.trajectory_to_motion(trajectories)
 
-        # Adds noise to the real and sim motions.
-        sim_rng, real_rng = jax.random.split(rng)
-        max_noise = self.config.amp_reference_noise
-        min_noise = max_noise * self.config.amp_reference_noise_min_multiplier
-        cur_level = carry.env_states.curriculum_state.level.mean()
-        noise_level = max_noise - (max_noise - min_noise) * cur_level
-        sim_motions = sim_motions + jax.random.normal(sim_rng, sim_motions.shape) * noise_level
-        real_motions = real_motions + jax.random.normal(real_rng, real_motions.shape) * noise_level
-
         # Computes the discriminator loss.
         disc_fn = xax.vmap(self.call_discriminator, in_axes=(None, 0, 0), jit_level=JitLevel.RL_CORE)
         real_disc_rng, sim_disc_rng = jax.random.split(rng)
-        real_disc_logits = disc_fn(model, real_motions, jax.random.split(real_disc_rng, real_motions.shape[0]))
-        sim_disc_logits = disc_fn(model, sim_motions, jax.random.split(sim_disc_rng, sim_motions.shape[0]))
+        real_batch = jax.tree_util.tree_leaves(real_motions)[0].shape[0]
+        sim_batch = jax.tree_util.tree_leaves(sim_motions)[0].shape[0]
+        real_disc_logits = disc_fn(model, real_motions, jax.random.split(real_disc_rng, real_batch))
+        sim_disc_logits = disc_fn(model, sim_motions, jax.random.split(sim_disc_rng, sim_batch))
         real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
 
         disc_loss = real_disc_loss + sim_disc_loss
@@ -424,19 +417,6 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         loss_fn = xax.jit(static_argnums=[1], jit_level=JitLevel.RL_CORE)(loss_fn)
         grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions, carry, rng)
         return metrics, grads
-
-    @staticmethod
-    def _make_real_batch(
-        motions: Array,
-        window_t: int,
-        batch_b: int,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        num_motions = motions.shape[0]
-        clip_rng, start_rng = jax.random.split(rng)
-        clip_idx = jax.random.randint(clip_rng, (batch_b,), 0, num_motions)
-        start_idx = jax.random.randint(start_rng, (batch_b,), 0, window_t)
-        return jax.vmap(_loop_slice, in_axes=(0, 0, None))(motions[clip_idx], start_idx, window_t)
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _single_step(
@@ -534,3 +514,41 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             rewards=rewards,
             rng=rng,
         )
+
+    @staticmethod  # ensure consistent calling convention
+    def _make_real_batch(
+        motions: PyTree,
+        window_t: int,
+        batch_b: int,
+        rng: PRNGKeyArray,
+    ) -> PyTree:
+        """Sample a batch of windowed motion snippets from a PyTree of motions.
+
+        Args:
+            motions: A PyTree whose leaves are arrays of shape (B, T, ...).
+            window_t: Length of the temporal window to sample.
+            batch_b: Number of windows to sample.
+            rng: PRNG key used for sampling.
+
+        Returns:
+            A PyTree with the same structure as ``motions`` whose leaves have
+            shape (batch_b, window_t, ...).
+        """
+        num_motions = jax.tree_util.tree_leaves(motions)[0].shape[0]
+
+        keys = jax.random.split(rng, batch_b + 1)
+        clip_key, sample_keys = keys[0], keys[1:]
+
+        # Sample which clip each element in the batch comes from.
+        clip_idx = jax.random.randint(clip_key, (batch_b,), 0, num_motions)
+
+        batch_clips = jax.tree_util.tree_map(lambda arr: arr[clip_idx], motions)
+
+        def _sample_single(clip: PyTree, rng_key: PRNGKeyArray) -> PyTree:
+            """Samples an unbiased window from a single motion clip."""
+            # Length of the real clip (may differ across clips).
+            t_real = jax.tree_util.tree_leaves(clip)[0].shape[0]
+            start = jax.random.randint(rng_key, (), 0, t_real)  # unbiased start index
+            return jax.tree_util.tree_map(lambda arr: _loop_slice(arr, start, window_t), clip)
+
+        return jax.vmap(_sample_single)(batch_clips, sample_keys)
