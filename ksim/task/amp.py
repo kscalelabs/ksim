@@ -477,7 +477,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         real_motions_full = carry.shared_state.aux_values[REAL_MOTIONS_KEY]
 
-        sim_t = trajectories.done.shape[0]  # match sim horizon
+        sim_t = trajectories.done.shape[-1]
 
         real_batch = self._make_real_batch(
             motions=real_motions_full,
