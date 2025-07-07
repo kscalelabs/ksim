@@ -76,7 +76,7 @@ class AMPConfig(PPOConfig):
         help="The batch size for reference motion batching in AMP training.",
     )
     amp_grad_penalty_coef: float = xax.field(
-        value=0.5,
+        value=10.0,
         help="The coefficient for the gradient penalty in AMP training.",
     )
     amp_reference_noise: float = xax.field(
@@ -422,7 +422,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         sim_disc_logits = disc_fn(model, sim_motions, jax.random.split(sim_disc_rng, sim_batch))
         real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
 
-        gp_loss = self.config.amp_grad_penalty_coef * self._grad_penalty(model, real_motions, gp_rng)
+        gp_loss = self.config.amp_grad_penalty_coef / 2 * self._grad_penalty(model, real_motions, gp_rng)
 
         disc_loss = real_disc_loss + sim_disc_loss + gp_loss
 
