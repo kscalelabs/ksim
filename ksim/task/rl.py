@@ -27,6 +27,10 @@ from threading import Thread
 from types import FrameType
 from typing import Any, Callable, Collection, Generic, TypeVar
 
+from omegaconf import DictConfig, OmegaConf
+from typing import Generic, Iterable, TypeVar
+
+
 import chex
 import equinox as eqx
 import jax
@@ -822,6 +826,42 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             physics_model: The physics model to get the curriculum for.
         """
 
+    def get_real_motions(self, mj_model: mujoco.MjModel) -> PyTree:
+        """Loads the set of real motions for motion-based tasks.
+
+        This should load N real motions into memory.
+
+        Args:
+            mj_model: The Mujoco model to load the motions from.
+
+        Returns:
+            The motions as a PyTree, most likely an array with shape (B, T, N).
+        """
+        raise NotImplementedError(
+            "`get_real_motions(mj_model: mujoco.MjModel) -> PyTree` is not implemented. "
+            "This method is required for motion-based tasks that use `run_mode=view_motion`. "
+            "You should implement this function in your downstream class."
+        )
+
+    def motion_to_qpos(self, motion: PyTree) -> Array:
+        """Converts a motion to `qpos` array.
+
+        This function is used for replaying the motion on the robot model
+        for visualization purposes.
+
+        Args:
+            motion: The full motion, including the batch dimension.
+
+        Returns:
+            The `qpos` array, with shape (B, T, N).
+        """
+        raise NotImplementedError(
+            "`motion_to_qpos(motion: PyTree) -> Array` is not implemented. "
+            "This method is required for motion-based tasks that use `run_mode=view_motion`. "
+            "You should implement this function in your downstream class, depending on how you are "
+            "representing your motions."
+        )
+
     @abstractmethod
     def sample_action(
         self,
@@ -1034,6 +1074,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     ),
                     save_renders=self.config.viewer_save_renders,
                     argmax_action=self.config.viewer_argmax_action,
+                )
+
+            case "view_motion":
+                self.run_motion_viewer(
+                    num_steps=(
+                        None
+                        if self.config.viewer_num_seconds is None
+                        else round(self.config.viewer_num_seconds / self.config.ctrl_dt)
+                    ),
+                    save_renders=self.config.viewer_save_renders,
+                    loop=True,
                 )
 
             case "collect_dataset":
@@ -1976,6 +2027,83 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 curriculum_state=curriculum_state,
                 rng=rollout_rng,
             )
+
+    def run_motion_viewer(
+        self,
+        num_steps: int | None = None,
+        save_renders: bool = False,
+        loop: bool = True,
+        slowdown: float = 1.0,
+    ) -> None:
+        """Provides an easy-to-use interface for viewing motions on the robot.
+
+        This function cycles through the set of provided motions, rendering
+        them on the robot model.
+
+        Args:
+            num_steps: The number of steps to run the environment for. If not
+                provided, run until the user manually terminates the
+                environment visualizer.
+            save_renders: If provided, save the rendered video to the given path.
+            loop: If true, loop through the motions.
+            slowdown: The slowdown factor for the motion viewer.
+        """
+        save_path = self.exp_dir / "renders" / f"render_{time.monotonic()}" if save_renders else None
+        if save_path is not None:
+            save_path.mkdir(parents=True, exist_ok=True)
+
+        with self, jax.disable_jit():
+            self.set_loggers()
+
+            # Loads the Mujoco model and logs some information about it.
+            mj_model = self.get_mujoco_model()
+            mj_model = self.set_mujoco_model_opts(mj_model)
+            ref_data = mujoco.MjData(mj_model)
+            mujoco_info = OmegaConf.to_yaml(DictConfig(self.get_mujoco_model_info(mj_model)))
+            self.logger.log_file("mujoco_info.yaml", mujoco_info)
+
+            viewer: DefaultMujocoViewer | QtViewer
+            # Creates the viewer.
+            if save_path is None:
+                viewer = get_qt_viewer(mj_model=mj_model, config=self.config)
+            else:
+                viewer = get_default_viewer(mj_model=mj_model, config=self.config)
+
+            # Gets the real motions and converts them to qpos arrays.
+            real_motions = self.get_real_motions(mj_model)
+            qpos = self.motion_to_qpos(real_motions)
+            chex.assert_shape(qpos, (None, None, mj_model.nq))
+            qpos = qpos.reshape(-1, qpos.shape[-1])
+
+            iterator: Iterable[int] = tqdm.trange(qpos.shape[0] if num_steps is None else min(num_steps, qpos.shape[0]))
+            frames: list[np.ndarray] = []
+
+            if loop:
+                iterator = itertools.cycle(iterator)
+
+            target_time = time.time() + self.config.ctrl_dt * slowdown
+            try:
+                for i in iterator:
+                    # Logs the frames to render.
+                    if save_path is None:
+                        assert isinstance(viewer, QtViewer)
+                        viewer.push_state(
+                            qpos=np.array(qpos[i]), qvel=np.zeros_like(ref_data.qvel), sim_time=i * self.config.ctrl_dt
+                        )
+                        logger.debug("Sleeping for %s seconds", target_time - time.time())
+                        time.sleep(max(0, target_time - time.time()))
+                        target_time += self.config.ctrl_dt * slowdown
+                    else:
+                        assert isinstance(viewer, DefaultMujocoViewer)
+                        viewer.data.qpos[:] = np.array(qpos[i])
+                        mujoco.mj_forward(viewer.model, viewer.data)
+                        frames.append(viewer.read_pixels())
+
+            except (KeyboardInterrupt, bdb.BdbQuit):
+                logger.info("Keyboard interrupt, exiting environment loop")
+
+            if save_path is not None:
+                self._save_viewer_video(frames, save_path)
 
     def collect_dataset(
         self,
