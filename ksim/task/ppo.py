@@ -58,7 +58,6 @@ def compute_ppo_inputs(
     successes_t: Array,
     decay_gamma: float,
     gae_lambda: float,
-    rollout_length_steps: int,
     normalize_advantages: bool = False,
     monte_carlo_returns: bool = False,
 ) -> PPOInputs:
@@ -87,7 +86,8 @@ def compute_ppo_inputs(
 
         # 1-step bootstrap on successful terminations.
         trunc_mask_t = jnp.where(successes_t, 1.0, 0.0)
-        bootstrapped_rewards_t = rewards_t / rollout_length_steps + decay_gamma * values_t * trunc_mask_t
+        discount_horizon = 1 / (1 - decay_gamma)
+        bootstrapped_rewards_t = rewards_t / discount_horizon + decay_gamma * values_t * trunc_mask_t
 
         mask_t = jnp.where(dones_t, 0.0, 1.0)
 
@@ -465,7 +465,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 successes_t=trajectory.success,
                 decay_gamma=self.config.gamma,
                 gae_lambda=self.config.lam,
-                rollout_length_steps=self.rollout_length_steps,
                 normalize_advantages=self.config.normalize_advantages,
                 monte_carlo_returns=self.config.monte_carlo_returns,
             )
