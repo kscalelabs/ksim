@@ -45,7 +45,6 @@ class PPOVariables:
     static_argnames=[
         "decay_gamma",
         "gae_lambda",
-        "rollout_length_steps",
         "normalize_advantages",
         "monte_carlo_returns",
     ],
