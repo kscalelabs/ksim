@@ -555,7 +555,7 @@ class RLConfig(xax.Config):
         help="Size of the rolling buffer for computing live rewards",
     )
     viewer_timeout_secs: float = xax.field(
-        value=5.0,
+        value=10.0,
         help="The timeout for the QT viewer.",
     )
 
