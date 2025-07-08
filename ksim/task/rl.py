@@ -554,6 +554,10 @@ class RLConfig(xax.Config):
         value=4,
         help="Size of the rolling buffer for computing live rewards",
     )
+    viewer_timeout_secs: float = xax.field(
+        value=10.0,
+        help="The timeout for the QT viewer.",
+    )
 
 
 Config = TypeVar("Config", bound=RLConfig)
@@ -582,6 +586,7 @@ def get_qt_viewer(
         camera_elevation=config.render_elevation,
         camera_lookat=config.render_lookat,
         track_body_id=config.render_track_body_id,
+        timeout_secs=config.viewer_timeout_secs,
     )
 
 
