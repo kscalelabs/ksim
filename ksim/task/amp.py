@@ -75,6 +75,10 @@ class AMPConfig(PPOConfig):
         value=32,
         help="The batch size for reference motion batching in AMP training.",
     )
+    amp_grad_penalty_coef: float = xax.field(
+        value=10.0,
+        help="The coefficient for the gradient penalty in AMP training.",
+    )
     amp_reference_noise: float = xax.field(
         value=0.01,
         help="The noise to add to the reference motion batch in AMP training.",
@@ -100,7 +104,7 @@ class AMPReward(Reward):
             )
 
         discriminator_logits = trajectory.aux_outputs[DISCRIMINATOR_OUTPUT_KEY]
-        reward = discriminator_logits + 1.0
+        reward = jnp.maximum(0.0, 1.0 - 0.25 * jnp.square(discriminator_logits - 1.0))
         return reward
 
 
@@ -357,6 +361,30 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         sim_disc_loss = jnp.mean((sim_disc_logits + 1) ** 2)
         return real_disc_loss, sim_disc_loss
 
+    def _grad_penalty(
+        self,
+        disc_model: PyTree,
+        real_motions: PyTree,  # (B, T, ...)
+        rng: PRNGKeyArray,
+    ) -> Array:
+        """R1 gradient penalty  (w.r.t. the *input* features)."""
+
+        def disc_on_motion(motion: PyTree, key: PRNGKeyArray) -> Array:
+            return self.call_discriminator(disc_model, motion, key).sum()
+
+        grad_fn = jax.grad(disc_on_motion, argnums=0)
+
+        batch_size = jax.tree_util.tree_leaves(real_motions)[0].shape[0]
+        keys = jax.random.split(rng, batch_size)
+        grads = jax.vmap(grad_fn)(real_motions, keys)
+
+        def leaf_sqnorm(leaf: Array) -> Array:
+            return jnp.sum(jnp.square(leaf), axis=tuple(range(1, leaf.ndim)))
+
+        per_sample_sq = sum(jax.tree_util.tree_leaves(jax.tree_util.tree_map(leaf_sqnorm, grads)))  # (B,)
+
+        return jnp.mean(per_sample_sq)
+
     @xax.jit(static_argnames=["self", "model_static"], jit_level=JitLevel.RL_CORE)
     def _get_amp_disc_loss_and_metrics(
         self,
@@ -385,27 +413,23 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         sim_motions = self.trajectory_to_motion(trajectories)
 
-        # Adds noise to the real and sim motions.
-        sim_rng, real_rng = jax.random.split(rng)
-        max_noise = self.config.amp_reference_noise
-        min_noise = max_noise * self.config.amp_reference_noise_min_multiplier
-        cur_level = carry.env_states.curriculum_state.level.mean()
-        noise_level = max_noise - (max_noise - min_noise) * cur_level
-        sim_motions = sim_motions + jax.random.normal(sim_rng, sim_motions.shape) * noise_level
-        real_motions = real_motions + jax.random.normal(real_rng, real_motions.shape) * noise_level
-
         # Computes the discriminator loss.
         disc_fn = xax.vmap(self.call_discriminator, in_axes=(None, 0, 0), jit_level=JitLevel.RL_CORE)
-        real_disc_rng, sim_disc_rng = jax.random.split(rng)
-        real_disc_logits = disc_fn(model, real_motions, jax.random.split(real_disc_rng, real_motions.shape[0]))
-        sim_disc_logits = disc_fn(model, sim_motions, jax.random.split(sim_disc_rng, sim_motions.shape[0]))
+        real_disc_rng, sim_disc_rng, gp_rng = jax.random.split(rng, 3)
+        real_batch = jax.tree_util.tree_leaves(real_motions)[0].shape[0]
+        sim_batch = jax.tree_util.tree_leaves(sim_motions)[0].shape[0]
+        real_disc_logits = disc_fn(model, real_motions, jax.random.split(real_disc_rng, real_batch))
+        sim_disc_logits = disc_fn(model, sim_motions, jax.random.split(sim_disc_rng, sim_batch))
         real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
 
-        disc_loss = real_disc_loss + sim_disc_loss
+        gp_loss = self.config.amp_grad_penalty_coef / 2 * self._grad_penalty(model, real_motions, gp_rng)
+
+        disc_loss = real_disc_loss + sim_disc_loss + gp_loss
 
         disc_metrics = {
             "real_logits": real_disc_logits,
             "sim_logits": sim_disc_logits,
+            "gp_loss": gp_loss,
         }
 
         return disc_loss, xax.FrozenDict(disc_metrics)
@@ -424,19 +448,6 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         loss_fn = xax.jit(static_argnums=[1], jit_level=JitLevel.RL_CORE)(loss_fn)
         grads, metrics = loss_fn(model_arr, model_static, trajectories, real_motions, carry, rng)
         return metrics, grads
-
-    @staticmethod
-    def _make_real_batch(
-        motions: Array,
-        window_t: int,
-        batch_b: int,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        num_motions = motions.shape[0]
-        clip_rng, start_rng = jax.random.split(rng)
-        clip_idx = jax.random.randint(clip_rng, (batch_b,), 0, num_motions)
-        start_idx = jax.random.randint(start_rng, (batch_b,), 0, window_t)
-        return jax.vmap(_loop_slice, in_axes=(0, 0, None))(motions[clip_idx], start_idx, window_t)
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _single_step(
@@ -466,7 +477,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         real_motions_full = carry.shared_state.aux_values[REAL_MOTIONS_KEY]
 
-        sim_t = trajectories.done.shape[0]  # match sim horizon
+        sim_t = trajectories.done.shape[-1]
 
         real_batch = self._make_real_batch(
             motions=real_motions_full,
@@ -534,3 +545,41 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             rewards=rewards,
             rng=rng,
         )
+
+    @staticmethod  # ensure consistent calling convention
+    def _make_real_batch(
+        motions: PyTree,
+        window_t: int,
+        batch_b: int,
+        rng: PRNGKeyArray,
+    ) -> PyTree:
+        """Sample a batch of windowed motion snippets from a PyTree of motions.
+
+        Args:
+            motions: A PyTree whose leaves are arrays of shape (B, T, ...).
+            window_t: Length of the temporal window to sample.
+            batch_b: Number of windows to sample.
+            rng: PRNG key used for sampling.
+
+        Returns:
+            A PyTree with the same structure as ``motions`` whose leaves have
+            shape (batch_b, window_t, ...).
+        """
+        num_motions = jax.tree_util.tree_leaves(motions)[0].shape[0]
+
+        keys = jax.random.split(rng, batch_b + 1)
+        clip_key, sample_keys = keys[0], keys[1:]
+
+        # Sample which clip each element in the batch comes from.
+        clip_idx = jax.random.randint(clip_key, (batch_b,), 0, num_motions)
+
+        batch_clips = jax.tree_util.tree_map(lambda arr: arr[clip_idx], motions)
+
+        def _sample_single(clip: PyTree, rng_key: PRNGKeyArray) -> PyTree:
+            """Samples an unbiased window from a single motion clip."""
+            # Length of the real clip (may differ across clips).
+            t_real = jax.tree_util.tree_leaves(clip)[0].shape[0]
+            start = jax.random.randint(rng_key, (), 0, t_real)  # unbiased start index
+            return jax.tree_util.tree_map(lambda arr: _loop_slice(arr, start, window_t), clip)
+
+        return jax.vmap(_sample_single)(batch_clips, sample_keys)
