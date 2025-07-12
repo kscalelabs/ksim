@@ -785,20 +785,31 @@ class ReachabilityPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class FeetAirTimeReward(Reward):
+class FeetAirTimeReward(StatefulReward):
     """Reward for feet either touching or not touching the ground for some time."""
 
     dt: float = attrs.field()
     threshold: float = attrs.field()
+    num_feet: int = attrs.field(default=2)
     contact_obs: str = attrs.field(default="feet_contact_observation")
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
+    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return (jnp.zeros(self.num_feet, dtype=jnp.int32), jnp.zeros(self.num_feet, dtype=jnp.int32))
+
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: tuple[Array, Array],
+    ) -> tuple[Array, tuple[Array, Array]]:
         sensor_data_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
         sensor_data_tn = sensor_data_tcn.any(axis=-2)
+        chex.assert_shape(sensor_data_tn, (..., self.num_feet))
+
         threshold_steps = round(self.threshold / self.dt)
 
-        def scan_fn(carry: tuple[Array, Array], x_n: Array) -> tuple[tuple[Array, Array], Array]:
+        def scan_fn(carry: tuple[Array, Array], x: tuple[Array, Array]) -> tuple[tuple[Array, Array], Array]:
             count_n, cooldown_n = carry
+            contact_n, done = x
 
             # There is a "cool down" period for each foot after it has been off the ground,
             # equal to the amount of time that it has been off the ground.
@@ -806,23 +817,20 @@ class FeetAirTimeReward(Reward):
             cooldown_n = (cooldown_n - 1).clip(min=0)
 
             # After touching the ground, reset the cooldown to `count`.
-            cooldown_n = jnp.where(x_n, jnp.maximum(cooldown_n, count_n), cooldown_n)
+            cooldown_n = jnp.where(contact_n, jnp.maximum(cooldown_n, count_n), cooldown_n)
 
             # If we're not on cooldown and not touching the ground, increment.
-            count_n = jnp.where(x_n | on_cooldown, 0, count_n + 1)
+            count_n = jnp.where(contact_n | on_cooldown, 0, count_n + 1)
+
+            # If we're done, reset the cooldown and count to zero.
+            count_n = jnp.where(done, 0, count_n)
+            cooldown_n = jnp.where(done, 0, cooldown_n)
 
             return (count_n, cooldown_n), count_n
 
-        _, count_tn = xax.scan(
-            scan_fn,
-            (
-                jnp.zeros_like(sensor_data_tn[0], dtype=jnp.int32),
-                jnp.zeros_like(sensor_data_tn[0], dtype=jnp.int32),
-            ),
-            sensor_data_tn,
-        )
+        reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
 
         # Gradually increase reward until `threshold_steps`.
         reward_tn = jnp.where(count_tn >= threshold_steps, 0, count_tn)
 
-        return reward_tn.max(axis=-1).astype(jnp.float32) * self.dt
+        return reward_tn.max(axis=-1).astype(jnp.float32) * self.dt, reward_carry
