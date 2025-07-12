@@ -803,6 +803,8 @@ class FeetAirTimeReward(StatefulReward):
     ) -> tuple[Array, tuple[Array, Array]]:
         sensor_data_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
         sensor_data_tn = sensor_data_tcn.any(axis=-2)
+        chex.assert_shape(sensor_data_tn, (..., self.num_feet))
+
         threshold_steps = round(self.threshold / self.dt)
 
         def scan_fn(carry: tuple[Array, Array], x_n: Array) -> tuple[tuple[Array, Array], Array]:
