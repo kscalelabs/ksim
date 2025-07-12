@@ -797,11 +797,30 @@ class FeetAirTimeReward(Reward):
         sensor_data_tn = sensor_data_tcn.any(axis=-2)
         threshold_steps = round(self.threshold / self.dt)
 
-        def scan_fn(carry_n: Array, x_n: Array) -> tuple[Array, Array]:
-            count_n = jnp.where(x_n, 0, carry_n + 1)  # Increment if the sensor is off the ground.
-            return count_n, count_n
+        def scan_fn(carry: tuple[Array, Array], x_n: Array) -> tuple[tuple[Array, Array], Array]:
+            count_n, cooldown_n = carry
 
-        _, count_tn = xax.scan(scan_fn, jnp.zeros_like(sensor_data_tn[0], dtype=jnp.int32), sensor_data_tn)
+            # There is a "cool down" period for each foot after it has been off the ground,
+            # equal to the amount of time that it has been off the ground.
+            on_cooldown = cooldown_n > 0
+            cooldown_n = (cooldown_n - 1).clip(min=0)
+
+            # After touching the ground, reset the cooldown to `count`.
+            cooldown_n = jnp.where(x_n, jnp.maximum(cooldown_n, count_n), cooldown_n)
+
+            # If we're not on cooldown and not touching the ground, increment.
+            count_n = jnp.where(x_n | on_cooldown, 0, count_n + 1)
+
+            return (count_n, cooldown_n), count_n
+
+        _, count_tn = xax.scan(
+            scan_fn,
+            (
+                jnp.zeros_like(sensor_data_tn[0], dtype=jnp.int32),
+                jnp.zeros_like(sensor_data_tn[0], dtype=jnp.int32),
+            ),
+            sensor_data_tn,
+        )
 
         # Gradually increase reward until `threshold_steps`.
         reward_tn = jnp.where(count_tn >= threshold_steps, 0, count_tn)

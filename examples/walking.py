@@ -346,7 +346,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.StayAliveReward(scale=1.0),
+            ksim.StayAliveReward(scale=5.0),
             ksim.JoystickReward(
                 forward_speed=self.config.target_linear_velocity,
                 backward_speed=self.config.target_linear_velocity / 2.0,
@@ -354,8 +354,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 rotation_speed=self.config.target_angular_velocity,
                 scale=1.0,
             ),
-            ksim.CtrlPenalty.create(physics_model),
-            ksim.FeetAirTimeReward(dt=self.config.dt, threshold=0.6, scale=1.0),
+            ksim.FeetAirTimeReward(dt=self.config.dt, threshold=0.6, scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
