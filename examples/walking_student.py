@@ -52,10 +52,10 @@ class Actor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
-    min_std: float = eqx.static_field()
-    max_std: float = eqx.static_field()
-    var_scale: float = eqx.static_field()
-    num_mixtures: int = eqx.static_field()
+    min_std: float = eqx.field(static=True)
+    max_std: float = eqx.field(static=True)
+    var_scale: float = eqx.field(static=True)
+    num_mixtures: int = eqx.field(static=True)
 
     def __init__(
         self,
