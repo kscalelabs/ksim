@@ -505,7 +505,7 @@ class FeetContactObservation(Observation):
         floor = jnp.array(self.floor_geom)
         contact_1 = geoms_colliding(state.physics_state.data, foot_left, floor).any(axis=-1)
         contact_2 = geoms_colliding(state.physics_state.data, foot_right, floor).any(axis=-1)
-        return jnp.stack([contact_1, contact_2], axis=-1)
+        return jnp.stack([contact_1, contact_2], axis=-1).squeeze(-2)
 
 
 @attrs.define(frozen=True, kw_only=True)
