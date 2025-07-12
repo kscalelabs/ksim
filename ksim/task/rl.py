@@ -83,6 +83,15 @@ from ksim.vis import Marker, configure_scene
 logger = logging.getLogger(__name__)
 
 
+def assert_distinct(names: Collection[str]) -> None:
+    """Checks that the names are distinct."""
+    names = list(names)
+    names_set = set(names)
+    if len(names) != len(names_set):
+        duplicates = [name for name in names_set if names.count(name) > 1]
+        raise ValueError(f"Names are not distinct! Found duplicates: {duplicates}")
+
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class RolloutEnvState:
@@ -1864,6 +1873,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if len(terminations) == 0:
             raise ValueError("No terminations found! Must have at least one termination.")
         curriculum = self.get_curriculum(physics_model)
+
+        # Checks that the collections are distinct.
+        assert_distinct([observation.observation_name for observation in observations])
+        assert_distinct([command.command_name for command in commands])
+        assert_distinct([reward.reward_name for reward in rewards_terms])
+        assert_distinct([termination.termination_name for termination in terminations])
 
         return RolloutConstants(
             model_statics=model_statics,

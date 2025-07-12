@@ -357,6 +357,15 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=1.0,
             ),
             ksim.CtrlPenalty.create(physics_model),
+            ksim.LongContactReward(
+                dt=self.config.dt,
+                threshold=0.6,
+                touch_sensors=(
+                    "sensor_observation_left_foot_touch",
+                    "sensor_observation_right_foot_touch",
+                ),
+                scale=1.0,
+            ),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
