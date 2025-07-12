@@ -797,4 +797,4 @@ class LongContactReward(Reward):
         threshold_steps = round(self.threshold / self.dt)
         contact_steps = jnp.cumsum(sensor_data, axis=0).clip(max=threshold_steps)
         no_contact_steps = jnp.cumsum(~sensor_data, axis=0).clip(max=threshold_steps)
-        return jnp.stack([contact_steps, no_contact_steps], axis=-1).max(axis=-1).sum(axis=-1)
+        return jnp.stack([contact_steps, no_contact_steps], axis=-1).max(axis=-1).sum(axis=-1) * self.dt
