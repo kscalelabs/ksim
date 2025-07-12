@@ -634,7 +634,8 @@ class LinkAccelerationPenalty(Reward):
         pos = trajectory.xpos[..., 1:, :]
         pos_zp = jnp.pad(pos, ((2, 0), (0, 0), (0, 0)), mode="edge")
         done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., :-1, None]
-        vel = jnp.where(done, 0.0, jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1))
+        vel: Array = jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1)
+        vel = jnp.where(done, 0.0, vel)
         acc = jnp.where(done[..., 1:, :], 0.0, vel[..., 1:, :] - vel[..., :-1, :])
         penalty = xax.get_norm(acc, self.norm).mean(axis=-1)
         return penalty
@@ -650,7 +651,8 @@ class LinkJerkPenalty(Reward):
         pos = trajectory.xpos[..., 1:, :]
         pos_zp = jnp.pad(pos, ((3, 0), (0, 0), (0, 0)), mode="edge")
         done = jnp.pad(trajectory.done, ((3, 0),), mode="edge")[..., :-1, None]
-        vel = jnp.where(done, 0.0, jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1))
+        vel: Array = jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1)
+        vel = jnp.where(done, 0.0, vel)
         acc = jnp.where(done[..., 1:, :], 0.0, vel[..., 1:, :] - vel[..., :-1, :])
         jerk = jnp.where(done[..., 2:, :], 0.0, acc[..., 1:, :] - acc[..., :-1, :])
         penalty = xax.get_norm(jerk, self.norm).mean(axis=-1)
