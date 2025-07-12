@@ -108,9 +108,7 @@ class FloatVectorCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         ranges = jnp.array(self.ranges)  # (N, 2)
-        return jax.random.uniform(
-            rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1]
-        )
+        return jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
 
     def __call__(
         self,
@@ -139,9 +137,7 @@ class IntVectorCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         ranges = jnp.array(self.ranges)  # (N, 2)
-        return jax.random.randint(
-            rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1] + 1
-        )
+        return jax.random.randint(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1] + 1)
 
     def __call__(
         self,
@@ -303,9 +299,7 @@ class JoystickCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        command = jax.random.choice(
-            rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs)
-        )
+        command = jax.random.choice(rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs))
         command_ohe = jax.nn.one_hot(command, num_classes=7)
         return command_ohe
 
@@ -374,9 +368,7 @@ class PositionCommand(Command):
     dt: float = attrs.field()
     base_name: str | None = attrs.field(default=None)
     vis_radius: float = attrs.field(default=0.05)
-    vis_color: tuple[float, float, float, float] = attrs.field(
-        default=(1.0, 0.0, 0.0, 0.8)
-    )
+    vis_color: tuple[float, float, float, float] = attrs.field(default=(1.0, 0.0, 0.0, 0.8))
     min_speed: float = attrs.field(default=0.5)
     max_speed: float = attrs.field(default=3.0)
     switch_prob: float = attrs.field(default=0.0)

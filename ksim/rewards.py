@@ -31,6 +31,7 @@ __all__ = [
     "LinkJerkPenalty",
     "JoystickReward",
     "ReachabilityPenalty",
+    "LongContactReward",
 ]
 
 import functools
@@ -781,3 +782,19 @@ class ReachabilityPenalty(Reward):
         penalty_t = per_joint.sum(axis=-1)
 
         return penalty_t
+
+
+@attrs.define(frozen=True, kw_only=True)
+class LongContactReward(Reward):
+    """Reward for feet either touching or not touching the ground for some time."""
+
+    dt: float = attrs.field()
+    threshold: float = attrs.field()
+    touch_sensors: tuple[str, ...] = attrs.field()
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        sensor_data = jnp.stack([trajectory.obs[sensor].squeeze(-1) > 0.1 for sensor in self.touch_sensors], axis=-1)
+        threshold_steps = round(self.threshold / self.dt)
+        contact_steps = jnp.cumsum(sensor_data, axis=0).clip(max=threshold_steps)
+        no_contact_steps = jnp.cumsum(~sensor_data, axis=0).clip(max=threshold_steps)
+        return jnp.stack([contact_steps, no_contact_steps], axis=-1).max(axis=-1).sum(axis=-1)
