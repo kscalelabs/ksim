@@ -793,7 +793,8 @@ class FeetAirTimeReward(Reward):
     contact_obs: str = attrs.field(default="feet_contact_observation")
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        sensor_data_tn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        sensor_data_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        sensor_data_tn = sensor_data_tcn.any(axis=-2)
         threshold_steps = round(self.threshold / self.dt)
 
         def scan_fn(carry_n: Array, x_n: Array) -> tuple[Array, Array]:
