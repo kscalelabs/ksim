@@ -173,7 +173,6 @@ class PositionActuators(Actuators):
 
         # Clamp target positions to joint limits
         clamped_action = self.clamp_position_targets(action)
-
         target_velocities = jnp.zeros_like(clamped_action)
         pos_delta = self.add_noise(self.action_noise, self.action_noise_type, clamped_action - current_pos, pos_rng)
         vel_delta = target_velocities - current_vel
