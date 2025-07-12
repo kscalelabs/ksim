@@ -320,8 +320,6 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_upvector"),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_pos"),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_pos"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_touch"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_touch"),
             ksim.FeetContactObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names=["foot_left"],
@@ -357,15 +355,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=1.0,
             ),
             ksim.CtrlPenalty.create(physics_model),
-            ksim.LongContactReward(
-                dt=self.config.dt,
-                threshold=0.6,
-                touch_sensors=(
-                    "sensor_observation_left_foot_touch",
-                    "sensor_observation_right_foot_touch",
-                ),
-                scale=1.0,
-            ),
+            ksim.FeetAirTimeReward(dt=self.config.dt, threshold=0.6, scale=1.0),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:

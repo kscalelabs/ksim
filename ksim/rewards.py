@@ -31,7 +31,7 @@ __all__ = [
     "LinkJerkPenalty",
     "JoystickReward",
     "ReachabilityPenalty",
-    "LongContactReward",
+    "FeetAirTimeReward",
 ]
 
 import functools
@@ -785,16 +785,24 @@ class ReachabilityPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class LongContactReward(Reward):
+class FeetAirTimeReward(Reward):
     """Reward for feet either touching or not touching the ground for some time."""
 
     dt: float = attrs.field()
     threshold: float = attrs.field()
-    touch_sensors: tuple[str, ...] = attrs.field()
+    contact_obs: str = attrs.field(default="feet_contact_observation")
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        sensor_data = jnp.stack([trajectory.obs[sensor].squeeze(-1) > 0.1 for sensor in self.touch_sensors], axis=-1)
+        sensor_data_tn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
         threshold_steps = round(self.threshold / self.dt)
-        contact_steps = jnp.cumsum(sensor_data, axis=0).clip(max=threshold_steps)
-        no_contact_steps = jnp.cumsum(~sensor_data, axis=0).clip(max=threshold_steps)
-        return jnp.stack([contact_steps, no_contact_steps], axis=-1).max(axis=-1).sum(axis=-1) * self.dt
+
+        def scan_fn(carry_n: Array, x_n: Array) -> tuple[Array, Array]:
+            count_n = jnp.where(x_n, 0, carry_n + 1)  # Increment if the sensor is off the ground.
+            return count_n, count_n
+
+        _, count_tn = xax.scan(scan_fn, jnp.zeros_like(sensor_data_tn[0], dtype=jnp.int32), sensor_data_tn)
+
+        # Gradually increase reward until `threshold_steps`.
+        reward_tn = jnp.where(count_tn >= threshold_steps, 0, count_tn)
+
+        return reward_tn.max(axis=-1).astype(jnp.float32) * self.dt
