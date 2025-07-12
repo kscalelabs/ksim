@@ -2,7 +2,7 @@
 
 __all__ = [
     "Event",
-    "PushEvent",
+    "LinearPushEvent",
     "JumpEvent",
     "JointPerturbationEvent",
 ]
@@ -62,15 +62,10 @@ class Event(ABC):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class PushEvent(Event):
-    """Randomly push the robot after some interval."""
+class LinearPushEvent(Event):
+    """Randomly push the robot in a linear direction."""
 
-    x_linvel: float = attrs.field()
-    y_linvel: float = attrs.field()
-    z_linvel: float = attrs.field(default=0.0)
-    x_angvel: float = attrs.field(default=0.0)
-    y_angvel: float = attrs.field(default=0.0)
-    z_angvel: float = attrs.field(default=0.0)
+    linvel: float = attrs.field()
     vel_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
     interval_range: tuple[float, float] = attrs.field()
     curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
@@ -108,23 +103,12 @@ class PushEvent(Event):
         curriculum_min, curriculum_max = self.curriculum_range
         curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
 
-        # Randomly applies a force.
-        vel_scales = jnp.array(
-            [
-                self.x_linvel,
-                self.y_linvel,
-                self.z_linvel,
-                self.x_angvel,
-                self.y_angvel,
-                self.z_angvel,
-            ]
-        )
-        vel_min, vel_max = self.vel_range
-        random_vels = jax.random.uniform(urng, shape=(6,), minval=vel_min, maxval=vel_max)
-        random_flip = jax.random.bernoulli(brng, p=0.5, shape=(6,)).astype(random_vels.dtype) * 2 - 1
-        random_vels = random_vels * vel_scales * curriculum_level * random_flip
-        random_vels += data.qvel[:6]
-        new_qvel = slice_update(data, "qvel", slice(0, 6), random_vels)
+        push_theta = jax.random.uniform(urng, (), minval=0.0, maxval=2.0 * jnp.pi)
+        push_theta = jnp.array([jnp.cos(push_theta), jnp.sin(push_theta), 0.0])
+
+        push_mag = jax.random.uniform(urng, (), minval=self.vel_range[0], maxval=self.vel_range[1])
+        push_vel = push_theta * push_mag * curriculum_level
+        new_qvel = slice_update(data, "qvel", slice(0, 3), data.qvel[:3] + push_vel)
         updated_data = update_data_field(data, "qvel", new_qvel)
 
         # Chooses a new remaining interval.
