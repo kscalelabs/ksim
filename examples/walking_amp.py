@@ -1,11 +1,13 @@
 # mypy: disable-error-code="override"
 """Example walking task using Adversarial Motion Priors."""
 
+import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Callable, Collection, Generic, Self, TypeVar
 
+import attrs
 import distrax
 import equinox as eqx
 import jax
@@ -18,25 +20,12 @@ from jaxtyping import Array, PRNGKeyArray
 
 import ksim
 
+logger = logging.getLogger(__name__)
+
+
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3
-
-
-HUMANOID_REFERENCE_MAPPINGS = (
-    ksim.MotionReferenceMapping("CC_Base_L_ThighTwist01", "thigh_left"),  # hip
-    ksim.MotionReferenceMapping("CC_Base_L_CalfTwist01", "shin_left"),  # knee
-    ksim.MotionReferenceMapping("CC_Base_L_Foot", "foot_left"),  # foot
-    ksim.MotionReferenceMapping("CC_Base_L_UpperarmTwist01", "upper_arm_left"),  # shoulder
-    ksim.MotionReferenceMapping("CC_Base_L_ForearmTwist01", "lower_arm_left"),  # elbow
-    ksim.MotionReferenceMapping("CC_Base_L_Hand", "hand_left"),  # hand
-    ksim.MotionReferenceMapping("CC_Base_R_ThighTwist01", "thigh_right"),  # hip
-    ksim.MotionReferenceMapping("CC_Base_R_CalfTwist01", "shin_right"),  # knee
-    ksim.MotionReferenceMapping("CC_Base_R_Foot", "foot_right"),  # foot
-    ksim.MotionReferenceMapping("CC_Base_R_UpperarmTwist01", "upper_arm_right"),  # shoulder
-    ksim.MotionReferenceMapping("CC_Base_R_ForearmTwist01", "lower_arm_right"),  # elbow
-    ksim.MotionReferenceMapping("CC_Base_R_Hand", "hand_right"),  # hand
-)
+NUM_INPUTS = 2 + 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3
 
 
 class DefaultHumanoidRNNActor(eqx.Module):
@@ -220,11 +209,11 @@ class DefaultHumanoidDiscriminator(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        num_inputs: int,
         hidden_size: int,
         depth: int,
         num_frames: int,
     ) -> None:
-        num_inputs = NUM_JOINTS
         num_outputs = 1
 
         layers: list[Callable[[Array], Array]] = []
@@ -248,10 +237,9 @@ class DefaultHumanoidDiscriminator(eqx.Module):
             num_inputs = hidden_size
 
         layers += [
-            eqx.nn.Conv1d(
-                in_channels=num_inputs,
-                out_channels=num_outputs,
-                kernel_size=1,
+            eqx.nn.Linear(
+                in_features=num_inputs,
+                out_features=num_outputs,
                 key=key,
             )
         ]
@@ -263,6 +251,155 @@ class DefaultHumanoidDiscriminator(eqx.Module):
         for layer in self.layers:
             x_nt = layer(x_nt)
         return x_nt.squeeze(0)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class RandomMotionFrameReset(ksim.Reset):
+    """Reset that initialises the robot state from a random clip / frame of the reference motion."""
+
+    # Store reference motion positions/velocities as immutable (nested) tuples for better JIT friendliness.
+    positions: tuple[tuple[float, ...], ...]
+    velocities: tuple[tuple[float, ...], ...]
+    reset_pos: bool = attrs.field(default=False)
+
+    def __call__(self, data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> ksim.PhysicsData:
+        # Convert the stored tuples to JAX arrays for computation.
+        positions_arr = jnp.asarray(self.positions)
+        velocities_arr = jnp.asarray(self.velocities)
+
+        # Figures out how many frames we have.
+        num_frames = positions_arr.shape[0]
+
+        key_frame, rng = jax.random.split(rng)
+        frame_idx = jax.random.randint(key_frame, (), 0, num_frames)
+
+        # Extract the qpos and qvel for the selected frame.
+        qpos_ref = positions_arr[frame_idx]
+        qvel_ref = velocities_arr[frame_idx]
+
+        # Replace qpos and qvel in physics data.
+        new_qvel = qvel_ref
+        if self.reset_pos:
+            new_qpos = qpos_ref
+        else:
+            new_qpos = jnp.concatenate([data.qpos[:7], qpos_ref[7:]])
+
+        data = ksim.update_data_field(data, "qpos", new_qpos)
+        data = ksim.update_data_field(data, "qvel", new_qvel)
+        return data
+
+    @classmethod
+    def create(
+        cls,
+        positions: Array,  # (T, Nq)
+        velocities: Array,  # (T, Nq)
+        reset_pos: bool = False,
+    ) -> Self:
+        """Factory converting Arrays to nested tuples to avoid repeated hashing inside JIT."""
+        # Convert to Python nested tuples so they are static/immutable.
+        pos_tuple = tuple(tuple(map(float, frame)) for frame in np.asarray(positions).tolist())
+        vel_tuple = tuple(tuple(map(float, frame)) for frame in np.asarray(velocities).tolist())
+        return cls(positions=pos_tuple, velocities=vel_tuple, reset_pos=reset_pos)
+
+
+@attrs.define(kw_only=True)
+class LinearVelocityCommandMarker(ksim.Marker):
+    """Visualises the planar (x,y) linear velocity command."""
+
+    command_name: str = attrs.field()
+    size: float = attrs.field(default=0.03)
+    arrow_scale: float = attrs.field(default=0.3)
+    height: float = attrs.field(default=0.5)
+    base_length: float = attrs.field(default=0.15)
+
+    def update(self, trajectory: ksim.Trajectory) -> None:
+        cmd = trajectory.command[self.command_name]
+        vx, vy = float(cmd[0]), float(cmd[1])
+        speed = (vx * vx + vy * vy) ** 0.5
+
+        self.pos = (0.0, 0.0, self.height)
+
+        # Always show an arrow with base_length plus scaling by speed
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW
+        arrow_length = self.base_length + self.arrow_scale * speed
+        self.scale = (self.size, self.size, arrow_length)
+
+        # If command is near-zero, show grey arrow pointing +X.
+        if speed < 1e-4:
+            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
+            self.rgba = (0.8, 0.8, 0.8, 0.8)
+        else:
+            self.orientation = self.quat_from_direction((vx, vy, 0.0))
+            self.rgba = (0.2, 0.8, 0.2, 0.8)
+
+    @classmethod
+    def get(
+        cls,
+        command_name: str,
+        *,
+        arrow_scale: float = 0.3,
+        height: float = 0.5,
+        base_length: float = 0.15,
+    ) -> Self:
+        return cls(
+            command_name=command_name,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,
+            scale=(0.03, 0.03, base_length),
+            arrow_scale=arrow_scale,
+            height=height,
+            base_length=base_length,
+            track_rotation=True,
+        )
+
+
+@attrs.define(frozen=True)
+class LinearVelocityCommand(ksim.Command):
+    """Command to move the robot in a straight line.
+
+    By convention, X is forward and Y is left. The switching probability is the
+    probability of resampling the command at each step. The zero probability is
+    the probability of the command being zero - this can be used to turn off
+    any command.
+    """
+
+    x_range: tuple[float, float] = attrs.field()
+    y_range: tuple[float, float] = attrs.field()
+    x_zero_prob: float = attrs.field(default=0.0)
+    y_zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
+    vis_height: float = attrs.field(default=1.0)
+    vis_scale: float = attrs.field(default=0.05)
+
+    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
+        (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
+        x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
+        y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
+        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
+        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
+        return jnp.concatenate(
+            [
+                jnp.where(x_zero_mask, 0.0, x),
+                jnp.where(y_zero_mask, 0.0, y),
+            ]
+        )
+
+    def __call__(
+        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
+    def get_markers(self) -> Collection[ksim.vis.Marker]:
+        return [
+            LinearVelocityCommandMarker.get(
+                command_name=self.command_name,
+                height=0.5,
+            )
+        ]
 
 
 @dataclass
@@ -286,12 +423,12 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
         value=512,
         help="The hidden size for the discriminator.",
     )
-    discriminator_depth: int = xax.field(
-        value=2,
+    discriminator_depth: int = xax.field(  # This affects the perceptive field i think
+        value=3,
         help="The depth for the discriminator.",
     )
     num_frames: int = xax.field(
-        value=10,
+        value=2,
         help="The number of frames to use for the discriminator.",
     )
 
@@ -309,7 +446,7 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
         help="Maximum gradient norm for clipping.",
     )
     discriminator_learning_rate: float = xax.field(
-        value=1e-3,
+        value=1e-4,
         help="Learning rate for the discriminator.",
     )
 
@@ -337,50 +474,6 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
         help="The body id to track with the render camera.",
     )
 
-    # Refernece motion parameters.
-    reference_motion_path: str = xax.field(
-        value=str(Path(__file__).parent / "data" / "humanoid_amp_walk_ref.npz"),
-        help="The path to the reference motion file.",
-    )
-    bvh_path: str = xax.field(
-        value=str(Path(__file__).parent / "data" / "walk_normal_dh.bvh"),
-        help="The path to the BVH file.",
-    )
-    rotate_bvh_euler: tuple[float, float, float] = xax.field(
-        value=(0, 0, 0),
-        help="Optional rotation to ensure the BVH tree matches the Mujoco model.",
-    )
-    bvh_scaling_factor: float = xax.field(
-        value=1.0,
-        help="Scaling factor to ensure the BVH tree matches the Mujoco model.",
-    )
-    bvh_offset: tuple[float, float, float] = xax.field(
-        value=(0.0, 0.0, 0.0),
-        help="Offset to ensure the BVH tree matches the Mujoco model.",
-    )
-    mj_base_name: str = xax.field(
-        value="pelvis",
-        help="The Mujoco body name of the base of the humanoid",
-    )
-    constrained_joint_ids: tuple[int, ...] = xax.field(
-        value=(0, 1, 2, 3, 4, 5, 6),
-        help="The indices of the joints to constrain. By default, freejoints.",
-    )
-    reference_base_name: str = xax.field(
-        value="CC_Base_Pelvis",
-        help="The BVH joint name of the base of the humanoid",
-    )
-
-    # Visualization parameters.
-    visualize_reference_points: bool = xax.field(
-        value=False,
-        help="Whether to visualize the reference points.",
-    )
-    visualize_reference_motion: bool = xax.field(
-        value=False,
-        help="Whether to visualize the reference motion after running IK.",
-    )
-
 
 Config = TypeVar("Config", bound=HumanoidWalkingAMPTaskConfig)
 
@@ -390,7 +483,14 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def __init__(self, config: Config) -> None:
         super().__init__(config)
-        self.reference_motion = ksim.MotionReferenceData.load(self.config.reference_motion_path)
+
+        mj_model = self.get_mujoco_model()
+
+        self.hand_left_id = ksim.get_body_data_idx_from_name(mj_model, "hand_left")
+        self.hand_right_id = ksim.get_body_data_idx_from_name(mj_model, "hand_right")
+
+        self.foot_left_id = ksim.get_body_data_idx_from_name(mj_model, "foot_left")
+        self.foot_right_id = ksim.get_body_data_idx_from_name(mj_model, "foot_right")
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
@@ -427,21 +527,23 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            ksim.PushEvent(
-                x_linvel=1.0,
-                y_linvel=1.0,
-                z_linvel=0.0,
-                x_angvel=0.1,
-                y_angvel=0.1,
-                z_angvel=0.3,
-                interval_range=(0.25, 0.75),
-            ),
+            # ksim.PushEvent(
+            #     x_linvel=1.0,
+            #     y_linvel=1.0,
+            #     z_linvel=0.0,
+            #     x_angvel=0.1,
+            #     y_angvel=0.1,
+            #     z_angvel=0.3,
+            #     interval_range=(0.25, 0.75),
+            # ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
+        ref_motion = self.get_real_motions(self.get_mujoco_model())
+        ref_qpos = ref_motion["qpos"].squeeze(0)
+        ref_qvel = ref_motion["qvel"].squeeze(0)
         return [
-            ksim.RandomJointPositionReset(),
-            ksim.RandomJointVelocityReset(),
+            RandomMotionFrameReset.create(ref_qpos, ref_qvel, reset_pos=True),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -497,20 +599,29 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
-        return []
+        return [
+            LinearVelocityCommand(
+                x_range=(0.0, 1.0),
+                y_range=(0.0, 0.0),
+            )
+        ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.AMPReward(scale=1.0),
-            ksim.StayAliveReward(scale=1.0),
+            ksim.AMPReward(scale=5.0),
+            ksim.StayAliveReward(scale=100.0, balance=100.0),
             ksim.XYAngularVelocityPenalty(scale=-0.01),
-            ksim.NaiveForwardReward(clip_max=1.0, scale=1.0),
+            # ksim.NaiveForwardReward(clip_max=1.0, scale=1.0),
+            ksim.LinearVelocityTrackingReward(
+                linvel_obs_name="base_linear_velocity_observation",
+                scale=10.0,
+            ),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=1.6),
-            ksim.NotUprightTermination(max_radians=math.radians(30)),
+            ksim.NotUprightTermination(max_radians=math.radians(80)),
             ksim.HighVelocityTermination(),
             ksim.FarFromOriginTermination(max_dist=10.0),
         ]
@@ -542,8 +653,13 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         )
 
     def get_discriminator_model(self, key: PRNGKeyArray) -> DefaultHumanoidDiscriminator:
+        joint_inputs = NUM_JOINTS * 3  # sin, cos, velocity
+        hand_inputs = 3 * 2  # xyz, left right
+        feet_inputs = 3 * 2  # xyz, left right
+        base_inputs = 6  # lin vel, ang vel
         return DefaultHumanoidDiscriminator(
             key,
+            num_inputs=joint_inputs + hand_inputs + feet_inputs + base_inputs,
             hidden_size=self.config.discriminator_hidden_size,
             depth=self.config.discriminator_depth,
             num_frames=self.config.num_frames,
@@ -563,22 +679,168 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         )
         return optimizer
 
-    def call_discriminator(self, model: DefaultHumanoidDiscriminator, motion: Array) -> Array:
-        return model.forward(motion).squeeze()
+    def call_discriminator(
+        self,
+        model: DefaultHumanoidDiscriminator,
+        motion: xax.FrozenDict[str, Array],
+        rng: PRNGKeyArray,
+    ) -> Array:
+        """Prepare input for the discriminator."""
+        qpos = motion["qpos"]
+        qvel = motion["qvel"]
+        hand_pos = motion["hand_pos"]
+        feet_pos = motion["feet_pos"]
 
-    def get_real_motions(self, mj_model: mujoco.MjModel) -> Array:
-        reference_motion = ksim.MotionReferenceData.load(self.config.reference_motion_path)
-        # cartesian_poses = jax.tree.map(lambda x: np.asarray(x.array), reference_motion.cartesian_poses)
-        return jnp.array(reference_motion.qpos.array[None, ..., 7:])  # Remove the root joint absolute coordinates.
+        joints = qpos[..., 7:]
 
-    def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> Array:
-        # xpos = trajectory.xpos
-        qpos = trajectory.qpos[..., 7:]
-        return qpos
+        # Similar to the 6d joint encoding but simplified because angles are 1D.
+        sin_cos_joints = jnp.concatenate([joints, jnp.cos(joints)], axis=-1)
+
+        model_input = jnp.concatenate([sin_cos_joints, qvel, hand_pos, feet_pos], axis=-1)
+        return model.forward(model_input)
+
+    def get_real_motions(self, mj_model: mujoco.MjModel) -> xax.FrozenDict[str, Array]:
+        """Loads a trajectory from a .npz file and converts it to the (batch, T, 20) tensor expected by AMP.
+
+        Expected keys inside the .npz:
+          • 'qpos'            –  (T, Nq)
+          • optional 'frequency' –  sampling Hz (used for verification)
+        """
+        traj_path = Path(__file__).parent / "data" / "slow_fast_dh.npz"
+
+        npz = np.load(traj_path, allow_pickle=True)
+
+        qpos = jnp.array(npz["qpos"])[100:-70]
+
+        if float(npz["frequency"]) != 1 / self.config.ctrl_dt:
+            raise ValueError(f"Motion frequency {npz['frequency']} does not match ctrl_dt {self.config.ctrl_dt}")
+
+        # Compute hand positions relative to the robot root for each frame.
+        mj_data = mujoco.MjData(mj_model)
+        t_frames = qpos.shape[0]
+        hand_pos = np.zeros((t_frames, 6))  # left xyz, right xyz
+        feet_pos = np.zeros((t_frames, 6))  # left xyz, right xyz
+
+        for t_i in range(t_frames):
+            mj_data.qpos = np.array(qpos[t_i])
+            mujoco.mj_forward(mj_model, mj_data)
+
+            # Root world position and rotation matrix (flattened 3x3 in mj_data.xmat)
+            root_pos = mj_data.xpos[0]
+
+            # World positions of hands
+            left_hand_world = mj_data.xpos[self.hand_left_id]
+            right_hand_world = mj_data.xpos[self.hand_right_id]
+
+            # World positions of feet
+            left_foot_world = mj_data.xpos[self.foot_left_id]
+            right_foot_world = mj_data.xpos[self.foot_right_id]
+
+            # Convert to root–relative coordinates
+            left_hand_rel = left_hand_world - root_pos
+            right_hand_rel = right_hand_world - root_pos
+
+            left_feet_rel = left_foot_world - root_pos
+            right_feet_rel = right_foot_world - root_pos
+
+            hand_pos[t_i, 0:3] = left_hand_rel
+            hand_pos[t_i, 3:6] = right_hand_rel
+
+            feet_pos[t_i, 0:3] = left_feet_rel
+            feet_pos[t_i, 3:6] = right_feet_rel
+
+        hand_pos = jnp.array(hand_pos)
+        feet_pos = jnp.array(feet_pos)
+
+        joint_limits = ksim.get_position_limits(mj_model)
+        joint_names = ksim.get_joint_names_in_order(mj_model)
+
+        joint_mins = []
+        joint_maxs = []
+        for name in joint_names[1:]:  # skip freejoint
+            if name not in joint_limits:
+                raise KeyError(f"Joint '{name}' missing from joint limits dictionary")
+            j_min, j_max = joint_limits[name]
+            joint_mins.append(j_min)
+            joint_maxs.append(j_max)
+
+        joint_mins_arr = jnp.asarray(joint_mins)
+        joint_maxs_arr = jnp.asarray(joint_maxs)
+
+        # Separate freejoint (7) and articulated joints.
+        qpos_root = qpos[..., :7]
+        qpos_joints = qpos[..., 7:]
+
+        # Bring each angle into range by shifting with multiples of 2π.
+        two_pi = 2.0 * math.pi
+        center_arr = (joint_mins_arr + joint_maxs_arr) / 2.0  # (J,)
+
+        # Vectorised 2π-shifting about the joint-range centre.
+        qpos_orig = qpos_joints  # keep a copy for statistics
+        qpos_shifted = qpos_orig - jnp.round((qpos_orig - center_arr) / two_pi) * two_pi
+
+        # Final clipping (handles ranges narrower than 2π or numerical drift).
+        qpos_joints = jnp.clip(qpos_shifted, joint_mins_arr[None, :], joint_maxs_arr[None, :])
+
+        # Re-assemble the full qpos.
+        qpos = jnp.concatenate([qpos_root, qpos_joints], axis=-1)
+
+        adjust_mask = jnp.any(jnp.abs(qpos_joints - qpos_orig) > 1e-6, axis=-1)
+        num_adjusted = int(adjust_mask.sum())
+        if num_adjusted:
+            logger.info(
+                "Reference motion sanitisation: adjusted %d/%d frames (%.1f%%) via wrap/clip.",
+                num_adjusted,
+                t_frames,
+                100.0 * num_adjusted / t_frames,
+            )
+
+        # (batch, t, num_joints)
+
+        # Get qvel
+        joint_qvel = jnp.diff(qpos[:, 7:], prepend=qpos[:, 7:][:1], axis=0)
+
+        base_qvel = jnp.diff(qpos[:, :3], prepend=qpos[:, :3][:1], axis=0)
+
+        base_quat = qpos[..., 3:7]
+
+        base_euler = xax.quat_to_euler(base_quat)
+        base_ang_vel = jnp.diff(base_euler, prepend=base_euler[:1], axis=0)
+
+        qvel = jnp.concatenate([base_qvel, base_ang_vel, joint_qvel], axis=-1)
+        return xax.FrozenDict(
+            {"qpos": qpos[None], "qvel": qvel[None], "hand_pos": hand_pos[None], "feet_pos": feet_pos[None]}
+        )
+
+    def trajectory_to_motion(self, trajectory: ksim.Trajectory) -> xax.FrozenDict[str, Array]:
+        # Joint positions
+        qpos = trajectory.qpos
+
+        qvel = trajectory.qvel
+
+        # Root world position and rotation matrix
+        root_pos = trajectory.xpos[..., 0, :]
+
+        # Hand world positions
+        hand_left_world = trajectory.xpos[..., self.hand_left_id, :]
+        hand_right_world = trajectory.xpos[..., self.hand_right_id, :]
+
+        # Relative positions
+        hand_left_rel = hand_left_world - root_pos
+        hand_right_rel = hand_right_world - root_pos
+
+        feet_left_world = trajectory.xpos[..., self.foot_left_id, :]
+        feet_right_world = trajectory.xpos[..., self.foot_right_id, :]
+
+        feet_left_rel = feet_left_world - root_pos
+        feet_right_rel = feet_right_world - root_pos
+
+        hand_pos = jnp.concatenate([hand_left_rel, hand_right_rel], axis=-1)
+        feet_pos = jnp.concatenate([feet_left_rel, feet_right_rel], axis=-1)
+        return xax.FrozenDict({"qpos": qpos, "qvel": qvel, "hand_pos": hand_pos, "feet_pos": feet_pos})
 
     def motion_to_qpos(self, motion: Array) -> Array:
-        qpos_init = jnp.array([0.0, 0.0, 1.5, 1.0, 0.0, 0.0, 0.0])
-        return jnp.concatenate([jnp.broadcast_to(qpos_init, (*motion.shape[:-1], 7)), motion], axis=-1)
+        return motion["qpos"]
 
     def run_actor(
         self,
@@ -600,21 +862,23 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        lin_vel_cmd_2 = commands["linear_velocity_command"]
 
         obs_n = jnp.concatenate(
             [
+                lin_vel_cmd_2,  # 2
                 jnp.cos(timestep_1),  # 1
                 jnp.sin(timestep_1),  # 1
                 dh_joint_pos_j,  # NUM_JOINTS
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
                 com_vel_n,  # 96
-                proj_grav_3,  # 3
-                act_frc_obs_n / 100.0,  # NUM_JOINTS
+                proj_grav_3 / 8.0,  # 3
+                act_frc_obs_n,  # NUM_JOINTS
                 base_pos_3,  # 3
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
+                ang_vel_obs_3 / 200.0,  # 3
             ],
             axis=-1,
         )
@@ -641,9 +905,11 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        lin_vel_cmd_2 = commands["linear_velocity_command"]
 
         obs_n = jnp.concatenate(
             [
+                lin_vel_cmd_2,  # 2
                 jnp.cos(timestep_1),  # 1
                 jnp.sin(timestep_1),  # 1
                 dh_joint_pos_j,  # NUM_JOINTS
@@ -734,13 +1000,13 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.walking_reference_motion
+    #   python -m examples.walking_amp
     # To visualize the environment, use the following command:
-    #   python -m examples.walking_reference_motion run_mode=view
+    #   python -m examples.walking_amp run_mode=view
     # On MacOS or other devices with less memory, you can change the number
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
-    #   python -m examples.walking_reference_motion num_envs=8 num_batches=2
+    #   python -m examples.walking_amp num_envs=8 num_batches=2
     HumanoidWalkingAMPTask.launch(
         HumanoidWalkingAMPTaskConfig(
             num_envs=2048,
@@ -748,6 +1014,7 @@ if __name__ == "__main__":
             num_passes=10,
             epochs_per_log_step=1,
             valid_every_n_steps=10,
+            amp_grad_penalty_coef=1.0,
             # Simulation parameters.
             dt=0.005,
             ctrl_dt=0.02,
@@ -755,16 +1022,14 @@ if __name__ == "__main__":
             ls_iterations=5,
             rollout_length_seconds=8.0,
             # PPO parameters
-            gamma=0.97,
-            lam=0.95,
+            # gamma=0.97,
+            gamma=0.95,
+            # lam=0.95,
+            lam=0.98,
             entropy_coef=0.001,
-            learning_rate=3e-4,
+            learning_rate=1e-4,
             clip_param=0.3,
             global_grad_clip=1.0,
-            # Gait matching parameters.
-            rotate_bvh_euler=(0, np.pi / 2, 0),
-            bvh_scaling_factor=1 / 100,
-            mj_base_name="pelvis",
-            reference_base_name="CC_Base_Pelvis",
+            render_markers=True,
         ),
     )
