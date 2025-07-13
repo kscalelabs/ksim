@@ -813,20 +813,38 @@ class FeetAirTimeReward(StatefulReward):
             count_n, cooldown_n = carry
             contact_n, done = x
 
-            # There is a "cool down" period for each foot after it has been off the ground,
-            # equal to the amount of time that it has been off the ground.
+            # The logic for this algorithm is to reward the agent for having
+            # some foot off the ground for up to `threshold_steps` steps, but
+            # then don't reward it for some cooldown period after that.
             on_cooldown = cooldown_n > 0
-            cooldown_n = (cooldown_n - 1).clip(min=0)
 
-            # After touching the ground, reset the cooldown to `count`.
-            cooldown_n = jnp.where(contact_n, jnp.maximum(cooldown_n, count_n), cooldown_n)
+            cooldown_n = jnp.where(
+                done,
+                0,
+                jnp.where(
+                    on_cooldown,
+                    cooldown_n - 1,
+                    jnp.where(
+                        contact_n & (count_n > 0),
+                        threshold_steps,
+                        0,
+                    )
+                )
+            )
 
-            # If we're not on cooldown and not touching the ground, increment.
-            count_n = jnp.where(contact_n | on_cooldown, 0, count_n + 1)
-
-            # If we're done, reset the cooldown and count to zero.
-            count_n = jnp.where(done, 0, count_n)
-            cooldown_n = jnp.where(done, 0, cooldown_n)
+            count_n = jnp.where(
+                done,
+                0,
+                jnp.where(
+                    on_cooldown,
+                    0,
+                    jnp.where(
+                        contact_n,
+                        0,
+                        count_n + 1,
+                    ),
+                ),
+            )
 
             return (count_n, cooldown_n), count_n
 
@@ -835,4 +853,4 @@ class FeetAirTimeReward(StatefulReward):
         # Gradually increase reward until `threshold_steps`.
         reward_tn = jnp.where(count_tn >= threshold_steps, 0, count_tn)
 
-        return reward_tn.max(axis=-1).astype(jnp.float32), reward_carry
+        return (reward_tn.max(axis=-1) > 0).astype(jnp.float32), reward_carry
