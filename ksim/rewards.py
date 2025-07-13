@@ -378,9 +378,11 @@ class JointVelocityPenalty(Reward):
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        done = trajectory.done[..., None]
-        joint_vel = jnp.where(done, 0.0, trajectory.qvel[..., 6:])
-        return xax.get_norm(joint_vel, self.norm).mean(axis=-1)
+        qpos = trajectory.qpos[..., 7:]
+        qpos_zp = jnp.pad(qpos, ((1, 0), (0, 0)), mode="edge")
+        done = jnp.pad(trajectory.done, ((1, 0),), mode="edge")[..., :-1, None]
+        qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
+        return xax.get_norm(qvel, self.norm).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
