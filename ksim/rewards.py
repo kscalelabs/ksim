@@ -835,4 +835,4 @@ class FeetAirTimeReward(StatefulReward):
         # Gradually increase reward until `threshold_steps`.
         reward_tn = jnp.where(count_tn >= threshold_steps, 0, count_tn)
 
-        return reward_tn.max(axis=-1).astype(jnp.float32) * self.dt, reward_carry
+        return reward_tn.max(axis=-1).astype(jnp.float32), reward_carry
