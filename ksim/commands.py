@@ -221,6 +221,7 @@ class JoystickCommandMarker(Marker):
         self.rgba = [
             (1.0, 1.0, 1.0, 0.8),  # Stand still (white)
             (0.2, 0.8, 0.2, 0.8),  # Walk forward (green)
+            (0.8, 0.8, 0.2, 0.8),  # Run forward (yellow)
             (0.8, 0.2, 0.2, 0.8),  # Walk backward (red)
             (0.2, 0.2, 1.0, 0.8),  # Turn left (blue)
             (1.0, 0.5, 0.0, 0.8),  # Turn right (orange)
@@ -268,25 +269,26 @@ class JoystickCommand(Command):
 
         0 = stand still
         1 = walk forward
-        2 = walk backward
-        3 = turn left
-        4 = turn right
-        5 = strafe left
-        6 = strafe right
+        2 = run forward
+        3 = walk backward
+        4 = turn left
+        5 = turn right
+        6 = strafe left
+        7 = strafe right
 
     The joystick command is composed of two parts:
 
-    - A one-hot vector of length 7, which is the command to take.
+    - A one-hot vector of length 8, which is the command to take.
     - A 3 dimensional vector representing the target X, Y and yaw at some time.
     """
 
-    forward_speed: float = attrs.field()
-    backward_speed: float = attrs.field()
+    walk_speed: float = attrs.field()
+    run_speed: float = attrs.field()
     strafe_speed: float = attrs.field()
     rotation_speed: float = attrs.field()
     ctrl_dt: float = attrs.field()
-    sample_probs: tuple[float, float, float, float, float, float, float] = attrs.field(
-        default=(0.1, 0.4, 0.1, 0.1, 0.1, 0.1, 0.1),
+    sample_probs: tuple[float, float, float, float, float, float, float, float] = attrs.field(
+        default=(0.1, 0.3, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1),
         validator=sample_probs_validator,
     )
     marker_z_offset: float = attrs.field(default=0.5)
@@ -295,17 +297,22 @@ class JoystickCommand(Command):
     def _get_position_vector(self, physics_data: PhysicsData) -> Array:
         xpos = physics_data.qpos[..., 0]
         ypos = physics_data.qpos[..., 1]
-        yaw = physics_data.qpos[..., 5]
+
+        quat = physics_data.qpos[..., 3:7]
+        euler = xax.quat_to_euler(quat)
+        yaw = euler[..., 2]
+
         return jnp.array([xpos, ypos, yaw])
 
     def _update_position_vector(self, command: Array) -> Array:
-        command_ohe, position_vector = command[..., :7], command[..., 7:]
+        command_ohe, position_vector = command[..., :8], command[..., 8:]
 
         command_targets = jnp.array(
             [
                 [0.0, 0.0, 0.0],  # Stand still
-                [self.forward_speed, 0.0, 0.0],  # Walk forward
-                [-self.backward_speed, 0.0, 0.0],  # Walk backward
+                [self.walk_speed, 0.0, 0.0],  # Walk forward
+                [self.run_speed, 0.0, 0.0],  # Run forward
+                [-self.walk_speed, 0.0, 0.0],  # Walk backward
                 [0.0, 0.0, self.rotation_speed],  # Turn left
                 [0.0, 0.0, -self.rotation_speed],  # Turn right
                 [0.0, self.strafe_speed, 0.0],  # Strafe left

@@ -717,7 +717,10 @@ class JoystickReward(Reward):
 
         # Gets the target position and orientation.
         trg_x, trg_y, trg_yaw = position_vector[..., 0], position_vector[..., 1], position_vector[..., 2]
-        cur_x, cur_y, cur_yaw = trajectory.qpos[..., 0], trajectory.qpos[..., 1], trajectory.qpos[..., 5]
+        cur_x, cur_y = trajectory.qpos[..., 0], trajectory.qpos[..., 1]
+        quat = trajectory.qpos[..., 3:7]
+        euler = xax.quat_to_euler(quat)
+        cur_yaw = euler[..., 2]
 
         # Exponential kernel for the reward.
         linvel_x_rew = jnp.exp(-((trg_x - cur_x) ** 2) / self.lin_std**2)
