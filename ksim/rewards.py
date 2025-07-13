@@ -704,51 +704,25 @@ class JoystickReward(Reward):
     command_name: str = attrs.field(default="joystick_command")
     lin_vel_penalty_scale: float = attrs.field(default=1.0)
     ang_vel_penalty_scale: float = attrs.field(default=0.3)
-    std: float = attrs.field(default=0.5)
+    lin_std: float = attrs.field(default=0.5)
+    ang_std: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
         joystick_cmd = trajectory.command[self.command_name]
-        chex.assert_shape(joystick_cmd, (..., 7))
+        chex.assert_shape(joystick_cmd, (..., 10))
 
-        command_targets = jnp.array(
-            [
-                [0.0, 0.0, 0.0],  # Stand still
-                [self.forward_speed, 0.0, 0.0],  # Walk forward
-                [-self.backward_speed, 0.0, 0.0],  # Walk backward
-                [0.0, 0.0, self.rotation_speed],  # Turn left
-                [0.0, 0.0, -self.rotation_speed],  # Turn right
-                [0.0, self.strafe_speed, 0.0],  # Strafe left
-                [0.0, -self.strafe_speed, 0.0],  # Strafe right
-            ]
-        )
+        position_vector = joystick_cmd[..., -3:]
 
-        vel_tgt = jnp.einsum("...i,ij->...j", joystick_cmd, command_targets)
+        # Gets the target position and orientation.
+        trg_x, trg_y, trg_yaw = position_vector[..., 0], position_vector[..., 1], position_vector[..., 2]
+        cur_x, cur_y, cur_yaw = trajectory.qpos[..., 0], trajectory.qpos[..., 1], trajectory.qpos[..., 5]
 
-        # Use the absolute angular velocity as the target.
-        angvel_z_tgt = jnp.abs(vel_tgt[..., 2])
-
-        # Rotate the linear velocities to the robot frame.
-        base_euler = xax.quat_to_euler(trajectory.qpos[..., 3:7])
-        base_euler = base_euler.at[:, 2].set(0.0)
-        base_quat = xax.euler_to_quat(base_euler)
-        vel_cmd = jnp.zeros_like(vel_tgt).at[:, :2].set(vel_tgt[..., :2])
-        linvel_cmd = xax.rotate_vector_by_quat(vel_cmd, base_quat, inverse=False)
-        linvel_x_tgt = linvel_cmd[..., 0]
-        linvel_y_tgt = linvel_cmd[..., 1]
-
-        # Gets the linear and in the robot frame.
-        linvel = trajectory.qvel[..., 0:3]
-        angvel = trajectory.qvel[..., 3:6]
-
-        linvel_x = linvel[..., 0]
-        linvel_y = linvel[..., 1]
-        angvel_z = angvel[..., 2]
-
-        linvel_x_rew = jnp.exp(-((linvel_x_tgt - linvel_x) ** 2) / self.std**2)
-        linvel_y_rew = jnp.exp(-((linvel_y_tgt - linvel_y) ** 2) / self.std**2)
-        angvel_z_rew = jnp.exp(-((angvel_z_tgt - angvel_z) ** 2) / self.std**2)
+        # Exponential kernel for the reward.
+        linvel_x_rew = jnp.exp(-((trg_x - cur_x) ** 2) / self.lin_std**2)
+        linvel_y_rew = jnp.exp(-((trg_y - cur_y) ** 2) / self.lin_std**2)
+        angvel_z_rew = jnp.exp(-((trg_yaw - cur_yaw) ** 2) / self.ang_std**2)
 
         return (linvel_x_rew + linvel_y_rew) * self.lin_vel_penalty_scale + angvel_z_rew * self.ang_vel_penalty_scale
 
@@ -780,8 +754,8 @@ class ReachabilityPenalty(Reward):
 class FeetAirTimeReward(StatefulReward):
     """Reward for feet either touching or not touching the ground for some time."""
 
-    dt: float = attrs.field()
     threshold: float = attrs.field()
+    ctrl_dt: float = attrs.field()
     num_feet: int = attrs.field(default=2)
     contact_obs: str = attrs.field(default="feet_contact_observation")
     start_reward: float = attrs.field(
@@ -804,7 +778,7 @@ class FeetAirTimeReward(StatefulReward):
         sensor_data_tn = sensor_data_tcn.any(axis=-2)
         chex.assert_shape(sensor_data_tn, (..., self.num_feet))
 
-        threshold_steps = round(self.threshold / self.dt)
+        threshold_steps = round(self.threshold / self.ctrl_dt)
 
         def scan_fn(carry: tuple[Array, Array], x: tuple[Array, Array]) -> tuple[tuple[Array, Array], Array]:
             count_n, cooldown_n = carry

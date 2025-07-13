@@ -11,6 +11,8 @@ __all__ = [
 ]
 
 import functools
+import logging
+import math
 from abc import ABC, abstractmethod
 from typing import Collection, Self
 
@@ -24,6 +26,8 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
 from ksim.utils.validators import sample_probs_validator
 from ksim.vis import Marker
+
+logger = logging.getLogger(__name__)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -205,40 +209,24 @@ class JoystickCommandMarker(Marker):
     height: float = attrs.field(default=0.5)
 
     def update(self, trajectory: Trajectory) -> None:
-        """Update the marker geometry to reflect the active joystick command."""
-        cmd_vec = jnp.asarray(trajectory.command[self.command_name][..., :7])
-        cmd_idx: int = int(cmd_vec.argmax())
+        """Visualizes the joystick command target position and orientation."""
+        cmd = trajectory.command[self.command_name]
+        x, y, yaw = cmd[..., -3].item(), cmd[..., -2].item(), cmd[..., -1].item()
+        cmd_idx = cmd[..., :7].argmax().item()
 
-        self.pos = (0.0, 0.0, self.height)
-
-        if cmd_idx == 0:
-            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE  # pyright: ignore[reportAttributeAccessIssue]
-            self.scale = (self.radius, self.radius, self.radius)
-            self.rgba = (1.0, 1.0, 1.0, 0.8)
-
-        elif cmd_idx in (1, 2, 5, 6):
-            dir_map = {
-                1: (1.0, 0.0, 0.0),  # forward
-                2: (-1.0, 0.0, 0.0),  # backward
-                5: (0.0, 1.0, 0.0),  # strafe left
-                6: (0.0, -1.0, 0.0),  # strafe right
-            }
-            direction = dir_map[cmd_idx]
-            self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
-            self.scale = (self.size, self.size, self.arrow_len)
-            self.orientation = self.quat_from_direction(direction)
-            self.rgba = (0.2, 0.8, 0.2, 0.8)
-
-        else:
-            self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
-            self.scale = (self.size, self.size, self.arrow_len)
-
-            # Up for left-turn, down for right-turn (like right-hand rule).
-            direction = (0.0, 0.0, 1.0) if cmd_idx == 3 else (0.0, 0.0, -1.0)
-            self.orientation = self.quat_from_direction(direction)
-
-            # Blue for left-turn, orange for right-turn.
-            self.rgba = (0.2, 0.2, 1.0, 0.8) if cmd_idx == 3 else (1.0, 0.5, 0.0, 0.8)
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
+        self.scale = (self.size, self.size, self.arrow_len)
+        self.pos = (x, y, self.height)
+        self.orientation = self.quat_from_direction((math.cos(yaw), math.sin(yaw), 0.0))
+        self.rgba = [
+            (1.0, 1.0, 1.0, 0.8),  # Stand still (white)
+            (0.2, 0.8, 0.2, 0.8),  # Walk forward (green)
+            (0.8, 0.2, 0.2, 0.8),  # Walk backward (red)
+            (0.2, 0.2, 1.0, 0.8),  # Turn left (blue)
+            (1.0, 0.5, 0.0, 0.8),  # Turn right (orange)
+            (0.2, 1.0, 0.2, 0.8),  # Strafe left (light green)
+            (1.0, 0.2, 0.2, 0.8),  # Strafe right (light red)
+        ][cmd_idx]
 
     @classmethod
     def get(
@@ -249,7 +237,6 @@ class JoystickCommandMarker(Marker):
         arrow_len: float = 0.25,
         rgba: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 0.8),
         height: float = 0.5,
-        in_robot_frame: bool = False,
     ) -> Self:
         return cls(
             command_name=command_name,
@@ -261,7 +248,10 @@ class JoystickCommandMarker(Marker):
             radius=radius,
             rgba=rgba,
             height=height,
-            track_rotation=in_robot_frame,
+            track_x=False,
+            track_y=False,
+            track_z=True,
+            track_rotation=False,
         )
 
 
@@ -294,21 +284,18 @@ class JoystickCommand(Command):
     backward_speed: float = attrs.field()
     strafe_speed: float = attrs.field()
     rotation_speed: float = attrs.field()
-    dt: float = attrs.field()
+    ctrl_dt: float = attrs.field()
     sample_probs: tuple[float, float, float, float, float, float, float] = attrs.field(
-        default=(0.2, 0.3, 0.1, 0.15, 0.15, 0.05, 0.05),
+        default=(0.1, 0.4, 0.1, 0.1, 0.1, 0.1, 0.1),
         validator=sample_probs_validator,
     )
-    in_robot_frame: bool = attrs.field(default=False)
     marker_z_offset: float = attrs.field(default=0.5)
-    switch_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.005)
 
     def _get_position_vector(self, physics_data: PhysicsData) -> Array:
-        linpos = physics_data.qpos[..., 0:3]
-        angpos = physics_data.qpos[..., 3:6]
-        xpos = linpos[..., 0]
-        ypos = linpos[..., 1]
-        yaw = angpos[..., 2]
+        xpos = physics_data.qpos[..., 0]
+        ypos = physics_data.qpos[..., 1]
+        yaw = physics_data.qpos[..., 5]
         return jnp.array([xpos, ypos, yaw])
 
     def _update_position_vector(self, command: Array) -> Array:
@@ -335,7 +322,7 @@ class JoystickCommand(Command):
         command_targets = jnp.stack([cmd_x_rot, cmd_y_rot, cmd_yaw_rot], axis=-1)
 
         # Add to the position vector.
-        vel_tgt = jnp.einsum("...i,ij->...j", command_ohe, command_targets) * self.dt
+        vel_tgt = jnp.einsum("...i,ij->...j", command_ohe, command_targets) * self.ctrl_dt
         return jnp.concatenate([command_ohe, position_vector + vel_tgt], axis=-1)
 
     def initial_command(
@@ -374,7 +361,6 @@ class JoystickCommand(Command):
             JoystickCommandMarker.get(
                 self.command_name,
                 height=self.marker_z_offset,
-                in_robot_frame=self.in_robot_frame,
             )
         ]
 
