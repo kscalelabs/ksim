@@ -706,13 +706,9 @@ class JoystickReward(Reward):
     strafe_speed: float = attrs.field()
     rotation_speed: float = attrs.field()
     command_name: str = attrs.field(default="joystick_command")
-    lin_vel_penalty_scale: float = attrs.field(default=0.01)
-    ang_vel_penalty_scale: float = attrs.field(default=0.01)
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-    temp: float = attrs.field(default=0.1)
-    monotonic_fn: MonotonicFn = attrs.field(default="inv")
-    in_robot_frame: bool = attrs.field(default=False)
-    stand_base_reward: float = attrs.field(default=1.0)
+    lin_vel_penalty_scale: float = attrs.field(default=1.0)
+    ang_vel_penalty_scale: float = attrs.field(default=0.1)
+    std: float = attrs.field(default=0.5)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
@@ -720,47 +716,45 @@ class JoystickReward(Reward):
         joystick_cmd = trajectory.command[self.command_name]
         chex.assert_shape(joystick_cmd, (..., 7))
 
-        qvel = trajectory.qvel[..., :6]
-        linvel = qvel[..., :3]
-        angvel = qvel[..., 3:]
-
-        if self.in_robot_frame:
-            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
-
-        # Penalty to discourage movement in general.
-        linvel_norm = jnp.linalg.norm(linvel, axis=-1) * self.lin_vel_penalty_scale
-        angvel_norm = jnp.linalg.norm(angvel, axis=-1) * self.ang_vel_penalty_scale
-        vel_norm = linvel_norm + angvel_norm
-
-        def normalize(x: Array, scale: float) -> Array:
-            return x.clip(-scale, scale) / scale
-
-        # Computes each of the penalties.
-        stand_still_reward = self.stand_base_reward * jnp.ones_like(linvel[..., 0])
-        walk_forward_reward = normalize(linvel[..., 0], self.forward_speed)
-        walk_backward_reward = normalize(-linvel[..., 0], self.backward_speed)
-        turn_left_reward = normalize(angvel[..., 2], self.rotation_speed)
-        turn_right_reward = normalize(-angvel[..., 2], self.rotation_speed)
-        strafe_left_reward = normalize(linvel[..., 1], self.strafe_speed)
-        strafe_right_reward = normalize(-linvel[..., 1], self.strafe_speed)
-
-        all_rewards = jnp.stack(
+        command_targets = jnp.array(
             [
-                stand_still_reward,
-                walk_forward_reward,
-                walk_backward_reward,
-                turn_left_reward,
-                turn_right_reward,
-                strafe_left_reward,
-                strafe_right_reward,
-            ],
-            axis=-1,
+                [0.0, 0.0, 0.0],  # Stand still
+                [self.forward_speed, 0.0, 0.0],  # Walk forward
+                [-self.backward_speed, 0.0, 0.0],  # Walk backward
+                [0.0, 0.0, self.rotation_speed],  # Turn left
+                [0.0, 0.0, -self.rotation_speed],  # Turn right
+                [0.0, self.strafe_speed, 0.0],  # Strafe left
+                [0.0, -self.strafe_speed, 0.0],  # Strafe right
+            ]
         )
 
-        # Weights each of the rewards by the one-hot encoded command.
-        total_reward = jnp.einsum("...i,...i->...", joystick_cmd, all_rewards) - vel_norm
+        vel_tgt = jnp.einsum("...i,ij->...j", joystick_cmd, command_targets)
 
-        return total_reward
+        # Use the absolute angular velocity as the target.
+        angvel_z_tgt = jnp.abs(vel_tgt[..., 2])
+
+        # Rotate the linear velocities to the robot frame.
+        base_euler = xax.quat_to_euler(trajectory.xquat[..., 1, :])
+        base_euler = base_euler.at[:, 2].set(0.0)
+        base_quat = xax.euler_to_quat(base_euler)
+        vel_cmd = jnp.zeros_like(vel_tgt).at[:, :2].set(vel_tgt[..., :2])
+        linvel_cmd = xax.rotate_vector_by_quat(vel_cmd, base_quat, inverse=False)
+        linvel_x_tgt = linvel_cmd[..., 0]
+        linvel_y_tgt = linvel_cmd[..., 1]
+
+        # Gets the linear and in the robot frame.
+        linvel = trajectory.qvel[..., 0:3]
+        angvel = trajectory.qvel[..., 3:6]
+
+        linvel_x = linvel[..., 0]
+        linvel_y = linvel[..., 1]
+        angvel_z = angvel[..., 2]
+
+        linvel_x_rew = jnp.exp(-((linvel_x_tgt - linvel_x) ** 2) / self.std**2)
+        linvel_y_rew = jnp.exp(-((linvel_y_tgt - linvel_y) ** 2) / self.std**2)
+        angvel_z_rew = jnp.exp(-((angvel_z_tgt - angvel_z) ** 2) / self.std**2)
+
+        return (linvel_x_rew + linvel_y_rew) * self.lin_vel_penalty_scale + angvel_z_rew * self.ang_vel_penalty_scale
 
 
 @attrs.define(frozen=True, kw_only=True)
