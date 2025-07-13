@@ -352,7 +352,13 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.JoystickCommand(),
+            ksim.JoystickCommand(
+                forward_speed=self.config.target_linear_velocity,
+                backward_speed=self.config.target_linear_velocity / 2.0,
+                strafe_speed=self.config.target_linear_velocity / 2.0,
+                rotation_speed=self.config.target_angular_velocity,
+                ctrl_dt=self.config.ctrl_dt,
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -360,10 +366,6 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
             ksim.TeacherReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
             ksim.JoystickReward(
-                forward_speed=self.config.target_linear_velocity,
-                backward_speed=self.config.target_linear_velocity / 2.0,
-                strafe_speed=self.config.target_linear_velocity / 2.0,
-                rotation_speed=self.config.target_angular_velocity,
                 scale=1.0,
             ),
         ]
