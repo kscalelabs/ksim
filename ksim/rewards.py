@@ -37,7 +37,7 @@ __all__ = [
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Literal, Self
+from typing import Collection, Literal, Self, final
 
 import attrs
 import chex
@@ -135,6 +135,7 @@ class Reward(ABC):
 class StatefulReward(Reward):
     """Reward that requires state from the previous timestep."""
 
+    @final
     def get_reward(self, trajectory: Trajectory) -> Array:
         raise NotImplementedError("StatefulReward should use `get_reward_stateful` instead.")
 
@@ -702,9 +703,8 @@ class JoystickReward(Reward):
     """
 
     command_name: str = attrs.field(default="joystick_command")
-    lin_vel_penalty_scale: float = attrs.field(default=1.0)
-    ang_vel_penalty_scale: float = attrs.field(default=0.3)
-    lin_std: float = attrs.field(default=0.5)
+    ang_vel_penalty_ratio: float = attrs.field(default=0.5)
+    lin_std: float = attrs.field(default=0.25)
     ang_std: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -724,7 +724,9 @@ class JoystickReward(Reward):
         linvel_y_rew = jnp.exp(-((trg_y - cur_y) ** 2) / self.lin_std**2)
         angvel_z_rew = jnp.exp(-((trg_yaw - cur_yaw) ** 2) / self.ang_std**2)
 
-        return (linvel_x_rew + linvel_y_rew) * self.lin_vel_penalty_scale + angvel_z_rew * self.ang_vel_penalty_scale
+        # Normalize the rewards to sum to 1.
+        denom = 2.0 + self.ang_vel_penalty_ratio
+        return (linvel_x_rew / denom) + (linvel_y_rew / denom) + (angvel_z_rew * self.ang_vel_penalty_ratio / denom)
 
 
 @attrs.define(frozen=True, kw_only=True)
