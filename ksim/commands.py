@@ -292,6 +292,7 @@ class JoystickCommand(Command):
 
     in_robot_frame: bool = attrs.field(default=False)
     marker_z_offset: float = attrs.field(default=0.5)
+    switch_prob: float = attrs.field(default=0.0)
 
     def initial_command(
         self,
@@ -310,7 +311,10 @@ class JoystickCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        return prev_command
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
         """Get the visualizations for the command.
