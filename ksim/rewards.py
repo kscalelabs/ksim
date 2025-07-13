@@ -701,13 +701,9 @@ class JoystickReward(Reward):
     facing forward in the X direction.
     """
 
-    forward_speed: float = attrs.field()
-    backward_speed: float = attrs.field()
-    strafe_speed: float = attrs.field()
-    rotation_speed: float = attrs.field()
     command_name: str = attrs.field(default="joystick_command")
     lin_vel_penalty_scale: float = attrs.field(default=1.0)
-    ang_vel_penalty_scale: float = attrs.field(default=0.1)
+    ang_vel_penalty_scale: float = attrs.field(default=0.3)
     std: float = attrs.field(default=0.5)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -734,7 +730,7 @@ class JoystickReward(Reward):
         angvel_z_tgt = jnp.abs(vel_tgt[..., 2])
 
         # Rotate the linear velocities to the robot frame.
-        base_euler = xax.quat_to_euler(trajectory.xquat[..., 1, :])
+        base_euler = xax.quat_to_euler(trajectory.qpos[..., 3:7])
         base_euler = base_euler.at[:, 2].set(0.0)
         base_quat = xax.euler_to_quat(base_euler)
         vel_cmd = jnp.zeros_like(vel_tgt).at[:, :2].set(vel_tgt[..., :2])
@@ -788,6 +784,13 @@ class FeetAirTimeReward(StatefulReward):
     threshold: float = attrs.field()
     num_feet: int = attrs.field(default=2)
     contact_obs: str = attrs.field(default="feet_contact_observation")
+    start_reward: float = attrs.field(
+        default=0.1,
+        validator=attrs.validators.and_(
+            attrs.validators.ge(0.0),
+            attrs.validators.le(1.0),
+        ),
+    )
 
     def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (jnp.zeros(self.num_feet, dtype=jnp.int32), jnp.zeros(self.num_feet, dtype=jnp.int32))
@@ -844,8 +847,9 @@ class FeetAirTimeReward(StatefulReward):
 
         reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
 
-        # Slight upward slope as the steps get longer.
-        reward_tn = (count_tn.astype(jnp.float32) * 1.8 / threshold_steps) + 0.1
+        # Slight upward slope as the steps get longer. Make sure that the
+        # average value will be 1 after taking a full step.
+        reward_tn = (count_tn.astype(jnp.float32) / threshold_steps) * (2.0 - self.start_reward * 2) + self.start_reward
 
         # Gradually increase reward until `threshold_steps`.
         reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)

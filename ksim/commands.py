@@ -206,7 +206,7 @@ class JoystickCommandMarker(Marker):
 
     def update(self, trajectory: Trajectory) -> None:
         """Update the marker geometry to reflect the active joystick command."""
-        cmd_vec = jnp.asarray(trajectory.command[self.command_name])
+        cmd_vec = jnp.asarray(trajectory.command[self.command_name][..., :7])
         cmd_idx: int = int(cmd_vec.argmax())
 
         self.pos = (0.0, 0.0, self.height)
@@ -283,16 +283,60 @@ class JoystickCommand(Command):
         4 = turn right
         5 = strafe left
         6 = strafe right
+
+    The joystick command is composed of two parts:
+
+    - A one-hot vector of length 7, which is the command to take.
+    - A 3 dimensional vector representing the target X, Y and yaw at some time.
     """
 
+    forward_speed: float = attrs.field()
+    backward_speed: float = attrs.field()
+    strafe_speed: float = attrs.field()
+    rotation_speed: float = attrs.field()
+    dt: float = attrs.field()
     sample_probs: tuple[float, float, float, float, float, float, float] = attrs.field(
-        default=(0.1, 0.5, 0.1, 0.1, 0.1, 0.05, 0.05),
+        default=(0.2, 0.3, 0.1, 0.15, 0.15, 0.05, 0.05),
         validator=sample_probs_validator,
     )
-
     in_robot_frame: bool = attrs.field(default=False)
     marker_z_offset: float = attrs.field(default=0.5)
     switch_prob: float = attrs.field(default=0.0)
+
+    def _get_position_vector(self, physics_data: PhysicsData) -> Array:
+        linpos = physics_data.qpos[..., 0:3]
+        angpos = physics_data.qpos[..., 3:6]
+        xpos = linpos[..., 0]
+        ypos = linpos[..., 1]
+        yaw = angpos[..., 2]
+        return jnp.array([xpos, ypos, yaw])
+
+    def _update_position_vector(self, command: Array) -> Array:
+        command_ohe, position_vector = command[..., :7], command[..., 7:]
+
+        command_targets = jnp.array(
+            [
+                [0.0, 0.0, 0.0],  # Stand still
+                [self.forward_speed, 0.0, 0.0],  # Walk forward
+                [-self.backward_speed, 0.0, 0.0],  # Walk backward
+                [0.0, 0.0, self.rotation_speed],  # Turn left
+                [0.0, 0.0, -self.rotation_speed],  # Turn right
+                [0.0, self.strafe_speed, 0.0],  # Strafe left
+                [0.0, -self.strafe_speed, 0.0],  # Strafe right
+            ]
+        )
+
+        # Rotate the command target by the current yaw.
+        cmd_x, cmd_y, cmd_yaw = command_targets[..., 0], command_targets[..., 1], command_targets[..., 2]
+        yaw = position_vector[..., 2]
+        cmd_x_rot = cmd_x * jnp.cos(yaw) - cmd_y * jnp.sin(yaw)
+        cmd_y_rot = cmd_x * jnp.sin(yaw) + cmd_y * jnp.cos(yaw)
+        cmd_yaw_rot = cmd_yaw
+        command_targets = jnp.stack([cmd_x_rot, cmd_y_rot, cmd_yaw_rot], axis=-1)
+
+        # Add to the position vector.
+        vel_tgt = jnp.einsum("...i,ij->...j", command_ohe, command_targets) * self.dt
+        return jnp.concatenate([command_ohe, position_vector + vel_tgt], axis=-1)
 
     def initial_command(
         self,
@@ -302,7 +346,8 @@ class JoystickCommand(Command):
     ) -> Array:
         command = jax.random.choice(rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs))
         command_ohe = jax.nn.one_hot(command, num_classes=7)
-        return command_ohe
+        position_vector = self._get_position_vector(physics_data)
+        return jnp.concatenate([command_ohe, position_vector], axis=-1)
 
     def __call__(
         self,
@@ -314,7 +359,7 @@ class JoystickCommand(Command):
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
+        return self._update_position_vector(jnp.where(switch_mask, new_commands, prev_command))
 
     def get_markers(self) -> Collection[Marker]:
         """Get the visualizations for the command.
