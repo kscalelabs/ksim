@@ -826,10 +826,10 @@ class FeetAirTimeReward(StatefulReward):
                     cooldown_n - 1,
                     jnp.where(
                         contact_n & (count_n > 0),
-                        threshold_steps,
+                        jnp.minimum(count_n, threshold_steps),
                         0,
-                    )
-                )
+                    ),
+                ),
             )
 
             count_n = jnp.where(
@@ -850,7 +850,10 @@ class FeetAirTimeReward(StatefulReward):
 
         reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
 
-        # Gradually increase reward until `threshold_steps`.
-        reward_tn = jnp.where(count_tn >= threshold_steps, 0, count_tn)
+        # Slight upward slope as the steps get longer.
+        reward_tn = (count_tn.astype(jnp.float32) * 1.8 / threshold_steps) + 0.1
 
-        return (reward_tn.max(axis=-1) > 0).astype(jnp.float32), reward_carry
+        # Gradually increase reward until `threshold_steps`.
+        reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
+
+        return reward_tn.max(axis=-1), reward_carry
