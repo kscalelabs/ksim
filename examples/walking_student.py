@@ -352,7 +352,13 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.JoystickCommand(),
+            ksim.JoystickCommand(
+                run_speed=self.config.target_linear_velocity,
+                walk_speed=self.config.target_linear_velocity / 2.0,
+                strafe_speed=self.config.target_linear_velocity / 2.0,
+                rotation_speed=self.config.target_angular_velocity,
+                ctrl_dt=self.config.ctrl_dt,
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -360,10 +366,6 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
             ksim.TeacherReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
             ksim.JoystickReward(
-                forward_speed=self.config.target_linear_velocity,
-                backward_speed=self.config.target_linear_velocity / 2.0,
-                strafe_speed=self.config.target_linear_velocity / 2.0,
-                rotation_speed=self.config.target_angular_velocity,
                 scale=1.0,
             ),
         ]
@@ -403,7 +405,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        joystick_cmd_ohe_7 = commands["joystick_command"]
+        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
 
         obs_n = jnp.concatenate(
             [
@@ -412,7 +414,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
                 dh_joint_pos_j,  # NUM_JOINTS
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 proj_grav_3,  # 3
-                joystick_cmd_ohe_7,  # 7
+                joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )
@@ -438,7 +440,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_7 = commands["joystick_command"]
+        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
 
         obs_n = jnp.concatenate(
             [
@@ -454,7 +456,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_7,  # 7
+                joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )

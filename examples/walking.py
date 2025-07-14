@@ -18,7 +18,7 @@ import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 7
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 8
 
 ZEROS = [
     ("abdomen_z", 0.0),
@@ -341,20 +341,20 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.JoystickCommand(),
+            ksim.JoystickCommand(
+                run_speed=self.config.target_linear_velocity,
+                walk_speed=self.config.target_linear_velocity / 2.0,
+                strafe_speed=self.config.target_linear_velocity / 2.0,
+                rotation_speed=self.config.target_angular_velocity,
+                ctrl_dt=self.config.ctrl_dt,
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             ksim.StayAliveReward(scale=5.0),
-            ksim.JoystickReward(
-                forward_speed=self.config.target_linear_velocity,
-                backward_speed=self.config.target_linear_velocity / 2.0,
-                strafe_speed=self.config.target_linear_velocity / 2.0,
-                rotation_speed=self.config.target_angular_velocity,
-                scale=1.0,
-            ),
-            ksim.FeetAirTimeReward(dt=self.config.dt, threshold=0.6, scale=0.01),
+            ksim.JoystickReward(scale=1.0),
+            ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -401,7 +401,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_7 = commands["joystick_command"]
+        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
 
         obs_n = jnp.concatenate(
             [
@@ -417,7 +417,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_7,  # 7
+                joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )
@@ -442,7 +442,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_7 = commands["joystick_command"]
+        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
 
         obs_n = jnp.concatenate(
             [
@@ -458,7 +458,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_7,  # 7
+                joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )
@@ -539,6 +539,9 @@ if __name__ == "__main__":
             ls_iterations=5,
             action_latency_range=(0.005, 0.01),
             drop_action_prob=0.01,
+            # Visualization parameters.
+            render_track_body_id=0,
+            render_markers=True,
             # Checkpointing parameters.
             save_every_n_seconds=60,
         ),
