@@ -342,8 +342,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             ksim.JoystickCommand(
-                forward_speed=self.config.target_linear_velocity,
-                backward_speed=self.config.target_linear_velocity / 2.0,
+                run_speed=self.config.target_linear_velocity,
+                walk_speed=self.config.target_linear_velocity / 2.0,
                 strafe_speed=self.config.target_linear_velocity / 2.0,
                 rotation_speed=self.config.target_angular_velocity,
                 ctrl_dt=self.config.ctrl_dt,
