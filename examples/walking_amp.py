@@ -5,7 +5,7 @@ import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Collection, Generic, Self, TypeVar
+from typing import Collection, Generic, Self, TypeVar
 
 import attrs
 import distrax
@@ -200,10 +200,68 @@ class DefaultHumanoidRNNModel(eqx.Module):
         )
 
 
-class DefaultHumanoidDiscriminator(eqx.Module):
-    """Discriminator for the walking task, returns logit."""
+# class DefaultHumanoidDiscriminator(eqx.Module):
+#     """Discriminator for the walking task, returns logit."""
 
-    layers: list[Callable[[Array], Array]]
+#     layers: list[Callable[[Array], Array]]
+
+#     def __init__(
+#         self,
+#         key: PRNGKeyArray,
+#         *,
+#         num_inputs: int,
+#         hidden_size: int,
+#         depth: int,
+#         num_frames: int,
+#     ) -> None:
+#         num_outputs = 1
+
+#         layers: list[Callable[[Array], Array]] = []
+#         for _ in range(depth):
+#             key, subkey = jax.random.split(key)
+#             layers += [
+#                 eqx.nn.Conv1d(
+#                     in_channels=num_inputs,
+#                     out_channels=hidden_size,
+#                     kernel_size=num_frames,
+#                     # We left-pad the input so that the discriminator output
+#                     # at time T can be reasonably interpretted as the logit
+#                     # for the motion from time T - N to T. In other words, we
+#                     # this means that all the reward for time T will be based
+#                     # on the motion from the previous N frames.
+#                     padding=[(num_frames - 1, 0)],
+#                     key=subkey,
+#                 ),
+#                 jax.nn.relu,
+#             ]
+#             num_inputs = hidden_size
+
+#         layers += [
+#             eqx.nn.Linear(
+#                 in_features=num_inputs,
+#                 out_features=num_outputs,
+#                 key=key,
+#             )
+#         ]
+
+#         self.layers = layers
+
+#     def forward(self, x: Array) -> Array:
+#         x_nt = x.transpose(1, 0)
+#         for layer in self.layers:
+#             x_nt = layer(x_nt)
+#         return x_nt.squeeze(0)
+
+
+class DefaultHumanoidDiscriminator(eqx.Module):
+    """MLP that scores concatenated features from multiple frames.
+
+    Input : concat ( features(t_n-num_frames+1), ..., features(t_n) )
+    Output : 1 logit
+    """
+
+    mlp: eqx.nn.MLP
+    num_inputs: int = eqx.static_field()
 
     def __init__(
         self,
@@ -212,45 +270,20 @@ class DefaultHumanoidDiscriminator(eqx.Module):
         num_inputs: int,
         hidden_size: int,
         depth: int,
-        num_frames: int,
     ) -> None:
-        num_outputs = 1
-
-        layers: list[Callable[[Array], Array]] = []
-        for _ in range(depth):
-            key, subkey = jax.random.split(key)
-            layers += [
-                eqx.nn.Conv1d(
-                    in_channels=num_inputs,
-                    out_channels=hidden_size,
-                    kernel_size=num_frames,
-                    # We left-pad the input so that the discriminator output
-                    # at time T can be reasonably interpretted as the logit
-                    # for the motion from time T - N to T. In other words, we
-                    # this means that all the reward for time T will be based
-                    # on the motion from the previous N frames.
-                    padding=[(num_frames - 1, 0)],
-                    key=subkey,
-                ),
-                jax.nn.relu,
-            ]
-            num_inputs = hidden_size
-
-        layers += [
-            eqx.nn.Linear(
-                in_features=num_inputs,
-                out_features=num_outputs,
-                key=key,
-            )
-        ]
-
-        self.layers = layers
+        self.mlp = eqx.nn.MLP(
+            in_size=num_inputs,
+            out_size=1,
+            width_size=hidden_size,
+            depth=depth,
+            activation=jax.nn.relu,
+            key=key,
+        )
+        self.num_inputs = num_inputs
 
     def forward(self, x: Array) -> Array:
-        x_nt = x.transpose(1, 0)
-        for layer in self.layers:
-            x_nt = layer(x_nt)
-        return x_nt.squeeze(0)
+        """Compute discriminator probabilities."""
+        return self.mlp(x)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -601,7 +634,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             LinearVelocityCommand(
-                x_range=(0.0, 1.0),
+                x_range=(0.0, 0.5),
                 y_range=(0.0, 0.0),
             )
         ]
@@ -609,8 +642,9 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             ksim.AMPReward(scale=5.0),
-            ksim.StayAliveReward(scale=100.0, balance=100.0),
+            ksim.StayAliveReward(scale=1000.0, balance=1000.0),
             ksim.XYAngularVelocityPenalty(scale=-0.01),
+            ksim.UprightReward(scale=2.0),
             # ksim.NaiveForwardReward(clip_max=1.0, scale=1.0),
             ksim.LinearVelocityTrackingReward(
                 linvel_obs_name="base_linear_velocity_observation",
@@ -657,12 +691,12 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         hand_inputs = 3 * 2  # xyz, left right
         feet_inputs = 3 * 2  # xyz, left right
         base_inputs = 6  # lin vel, ang vel
+        features_per_frame = joint_inputs + hand_inputs + feet_inputs + base_inputs
         return DefaultHumanoidDiscriminator(
             key,
-            num_inputs=joint_inputs + hand_inputs + feet_inputs + base_inputs,
+            num_inputs=features_per_frame * self.config.num_frames,
             hidden_size=self.config.discriminator_hidden_size,
             depth=self.config.discriminator_depth,
-            num_frames=self.config.num_frames,
         )
 
     def get_policy_optimizer(self) -> optax.GradientTransformation:
@@ -685,7 +719,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         motion: xax.FrozenDict[str, Array],
         rng: PRNGKeyArray,
     ) -> Array:
-        """Prepare input for the discriminator."""
+        """Prepare input for the discriminator with multiple frames."""
         qpos = motion["qpos"]
         qvel = motion["qvel"]
         hand_pos = motion["hand_pos"]
@@ -694,10 +728,27 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         joints = qpos[..., 7:]
 
         # Similar to the 6d joint encoding but simplified because angles are 1D.
+        # NOTE: I was experimenting with the relative encoding but idrt it helps at all
+        # Delete this later
         sin_cos_joints = jnp.concatenate([joints, jnp.cos(joints)], axis=-1)
 
-        model_input = jnp.concatenate([sin_cos_joints, qvel, hand_pos, feet_pos], axis=-1)
-        return model.forward(model_input)
+        features_t = jnp.concatenate([sin_cos_joints, qvel, hand_pos, feet_pos], axis=-1)
+
+        num_frames = self.config.num_frames
+        timesteps = features_t.shape[0]
+
+        # Pad the beginning with the first frame repeated
+        padded_features = jnp.concatenate([jnp.tile(features_t[:1], (num_frames - 1, 1)), features_t], axis=0)
+
+        # Create sliding window of features
+        multi_frame_features = []
+        for t in range(timesteps):
+            frame_features = padded_features[t : t + num_frames].flatten()
+            multi_frame_features.append(frame_features)
+
+        multi_frame_features = jnp.stack(multi_frame_features)  # (T, num_frames * features_per_frame)
+        logits = jax.vmap(model.forward)(multi_frame_features)
+        return logits.squeeze(-1)  # There is a shape check to match traj.done which is (T,)
 
     def get_real_motions(self, mj_model: mujoco.MjModel) -> xax.FrozenDict[str, Array]:
         """Loads a trajectory from a .npz file and converts it to the (batch, T, 20) tensor expected by AMP.
@@ -1026,8 +1077,8 @@ if __name__ == "__main__":
             gamma=0.95,
             # lam=0.95,
             lam=0.98,
-            entropy_coef=0.001,
-            learning_rate=1e-4,
+            entropy_coef=0.0001,
+            learning_rate=3e-4,
             clip_param=0.3,
             global_grad_clip=1.0,
             render_markers=True,
