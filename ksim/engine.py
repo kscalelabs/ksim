@@ -38,35 +38,14 @@ EngineType = Literal["mjx", "mujoco"]
 class PhysicsEngine(eqx.Module, ABC):
     """The role of an engine is simple: reset and step. Decoupled from data."""
 
-    actuators: Actuators
-    resets: Collection[Reset]
-    events: Collection[Event]
-    phys_steps_per_ctrl_steps: int
-    min_action_latency_step: float
-    max_action_latency_step: float
-    drop_action_prob: float
-    phys_steps_per_actuator_step: int
-
-    def __init__(
-        self,
-        resets: Collection[Reset],
-        events: Collection[Event],
-        actuators: Actuators,
-        phys_steps_per_ctrl_steps: int,
-        min_action_latency_step: float,
-        max_action_latency_step: float,
-        drop_action_prob: float,
-        phys_steps_per_actuator_step: int,
-    ) -> None:
-        """Initialize the MJX engine with resetting and actuators."""
-        self.actuators = actuators
-        self.resets = resets
-        self.events = events
-        self.phys_steps_per_ctrl_steps = phys_steps_per_ctrl_steps
-        self.min_action_latency_step = min_action_latency_step
-        self.max_action_latency_step = max_action_latency_step
-        self.drop_action_prob = drop_action_prob
-        self.phys_steps_per_actuator_step = phys_steps_per_actuator_step
+    actuators: Actuators = eqx.field()
+    resets: tuple[Reset, ...] = eqx.field()
+    events: tuple[Event, ...] = eqx.field()
+    phys_steps_per_ctrl_steps: int = eqx.field()
+    min_action_latency_step: float = eqx.field()
+    max_action_latency_step: float = eqx.field()
+    drop_action_prob: float = eqx.field()
+    phys_steps_per_actuator_step: int = eqx.field()
 
     @abstractmethod
     def reset(self, physics_model: PhysicsModel, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsState:
@@ -374,8 +353,8 @@ def get_physics_engine(
     match engine_type:
         case "mujoco":
             return MujocoEngine(
-                resets=resets,
-                events=events,
+                resets=tuple(resets),
+                events=tuple(events),
                 actuators=actuators,
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
@@ -386,8 +365,8 @@ def get_physics_engine(
 
         case "mjx":
             return MjxEngine(
-                resets=resets,
-                events=events,
+                resets=tuple(resets),
+                events=tuple(events),
                 actuators=actuators,
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,

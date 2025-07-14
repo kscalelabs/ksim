@@ -207,6 +207,10 @@
     <framexaxis objtype="site" objname="right_foot" name="right_foot_upvector"/>
     <framepos objtype="site" objname="left_foot" name="left_foot_pos"/>
     <framepos objtype="site" objname="right_foot" name="right_foot_pos"/>
+    <force name="left_foot_force" site="left_foot" />
+    <force name="right_foot_force" site="right_foot" />
+    <touch name="left_foot_touch" site="left_foot" />
+    <touch name="right_foot_touch" site="right_foot" />
   </sensor>
 
   <keyframe>
