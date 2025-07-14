@@ -57,6 +57,7 @@ class Actor(eqx.Module):
             num_layers=depth,
             num_heads=hidden_size // 64,
             ff_dim=hidden_size,
+            causal=True,
             context_length=32,
             key=tf_key,
         )
@@ -82,8 +83,7 @@ class Actor(eqx.Module):
             obs_tn = obs_tn[None]
 
         x_tn = xax.vmap(self.input_proj)(obs_tn)
-        mask = self.transformer.init_mask(x_tn.shape[0])
-        x_tn, cache = self.transformer.forward(x_tn, self_mask=mask, cache=carry)
+        x_tn, cache = self.transformer.forward(x_tn, cache=carry)
         prediction_tn = xax.vmap(self.output_proj)(x_tn)
 
         # Splits the predictions into means, standard deviations, and logits.
@@ -139,6 +139,7 @@ class Critic(eqx.Module):
             num_layers=depth,
             num_heads=hidden_size // 64,
             ff_dim=hidden_size,
+            causal=True,
             context_length=32,
             key=tf_key,
         )
@@ -160,8 +161,7 @@ class Critic(eqx.Module):
             obs_tn = obs_tn[None]
 
         x_tn = xax.vmap(self.input_proj)(obs_tn)
-        mask = self.transformer.init_mask(x_tn.shape[0])
-        x_tn, cache = self.transformer.forward(x_tn, self_mask=mask, cache=carry)
+        x_tn, cache = self.transformer.forward(x_tn, cache=carry)
         out_tn = xax.vmap(self.output_proj)(x_tn)
 
         if add_batch_dim:
@@ -400,6 +400,7 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
             global_grad_clip=2.0,
+            learning_rate=1e-5,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,

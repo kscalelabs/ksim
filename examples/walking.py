@@ -189,6 +189,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=1e-3,
         help="Learning rate for PPO.",
     )
+    warmup_steps: int = xax.field(
+        value=100,
+        help="The number of steps to warm up the learning rate.",
+    )
     adam_weight_decay: float = xax.field(
         value=0.0,
         help="Weight decay for the Adam optimizer.",
@@ -224,10 +228,16 @@ Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 
 class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
-        return (
-            optax.adam(self.config.learning_rate)
-            if self.config.adam_weight_decay == 0.0
-            else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
+        return optax.chain(
+            optax.add_decayed_weights(self.config.adam_weight_decay),
+            optax.scale_by_adam(),
+            optax.scale_by_schedule(
+                optax.warmup_constant_schedule(
+                    init_value=0.0,
+                    peak_value=self.config.learning_rate,
+                    warmup_steps=self.config.warmup_steps,
+                )
+            ),
         )
 
     def get_mujoco_model(self) -> mujoco.MjModel:
