@@ -57,6 +57,7 @@ class Actor(eqx.Module):
             num_layers=depth,
             num_heads=hidden_size // 64,
             ff_dim=hidden_size,
+            causal=True,
             context_length=32,
             key=tf_key,
         )
@@ -138,6 +139,7 @@ class Critic(eqx.Module):
             num_layers=depth,
             num_heads=hidden_size // 64,
             ff_dim=hidden_size,
+            causal=True,
             context_length=32,
             key=tf_key,
         )
@@ -398,6 +400,7 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
             global_grad_clip=2.0,
+            learning_rate=1e-5,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
