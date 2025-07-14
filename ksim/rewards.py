@@ -704,8 +704,8 @@ class JoystickReward(Reward):
 
     command_name: str = attrs.field(default="joystick_command")
     ang_vel_penalty_ratio: float = attrs.field(default=0.5)
-    lin_std: float = attrs.field(default=0.25)
-    ang_std: float = attrs.field(default=0.25)
+    lin_slope: float = attrs.field(default=1.0)
+    ang_slope: float = attrs.field(default=1.0)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
@@ -723,9 +723,10 @@ class JoystickReward(Reward):
         cur_yaw = euler[..., 2]
 
         # Exponential kernel for the reward.
-        linvel_x_rew = jnp.exp(-((trg_x - cur_x) ** 2) / self.lin_std**2)
-        linvel_y_rew = jnp.exp(-((trg_y - cur_y) ** 2) / self.lin_std**2)
-        angvel_z_rew = jnp.exp(-((trg_yaw - cur_yaw) ** 2) / self.ang_std**2)
+        linvel_x_rew = 1.0 - jnp.abs(trg_x - cur_x) * self.lin_slope
+        linvel_y_rew = 1.0 - jnp.abs(trg_y - cur_y) * self.lin_slope
+        ang_diff = jnp.minimum(jnp.abs(trg_yaw - cur_yaw), jnp.abs(trg_yaw - cur_yaw + 2 * jnp.pi))
+        angvel_z_rew = 1.0 - ang_diff * self.ang_slope
 
         # Normalize the rewards to sum to 1.
         denom = 2.0 + self.ang_vel_penalty_ratio
