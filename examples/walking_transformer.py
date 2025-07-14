@@ -82,7 +82,8 @@ class Actor(eqx.Module):
             obs_tn = obs_tn[None]
 
         x_tn = xax.vmap(self.input_proj)(obs_tn)
-        x_tn, cache = self.transformer.forward(x_tn, cache=carry)
+        mask = self.transformer.init_mask(x_tn.shape[0])
+        x_tn, cache = self.transformer.forward(x_tn, self_mask=mask, cache=carry)
         prediction_tn = xax.vmap(self.output_proj)(x_tn)
 
         # Splits the predictions into means, standard deviations, and logits.
@@ -159,7 +160,8 @@ class Critic(eqx.Module):
             obs_tn = obs_tn[None]
 
         x_tn = xax.vmap(self.input_proj)(obs_tn)
-        x_tn, cache = self.transformer.forward(x_tn, cache=carry)
+        mask = self.transformer.init_mask(x_tn.shape[0])
+        x_tn, cache = self.transformer.forward(x_tn, self_mask=mask, cache=carry)
         out_tn = xax.vmap(self.output_proj)(x_tn)
 
         if add_batch_dim:
