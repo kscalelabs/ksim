@@ -711,7 +711,7 @@ class JoystickReward(Reward):
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
         joystick_cmd = trajectory.command[self.command_name]
-        chex.assert_shape(joystick_cmd, (..., 10))
+        chex.assert_shape(joystick_cmd, (..., 11))
 
         position_vector = joystick_cmd[..., -3:]
 

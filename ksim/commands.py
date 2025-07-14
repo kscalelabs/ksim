@@ -219,14 +219,14 @@ class JoystickCommandMarker(Marker):
         self.pos = (x, y, self.height)
         self.orientation = self.quat_from_direction((math.cos(yaw), math.sin(yaw), 0.0))
         self.rgba = [
-            (1.0, 1.0, 1.0, 0.8),  # Stand still (white)
-            (0.2, 0.8, 0.2, 0.8),  # Walk forward (green)
-            (0.8, 0.8, 0.2, 0.8),  # Run forward (yellow)
-            (0.8, 0.2, 0.2, 0.8),  # Walk backward (red)
-            (0.2, 0.2, 1.0, 0.8),  # Turn left (blue)
-            (1.0, 0.5, 0.0, 0.8),  # Turn right (orange)
-            (0.2, 1.0, 0.2, 0.8),  # Strafe left (light green)
-            (1.0, 0.2, 0.2, 0.8),  # Strafe right (light red)
+            (1.0, 1.0, 1.0, 1.0),  # Stand still (white)
+            (0.0, 1.0, 0.0, 1.0),  # Walk forward (green)
+            (0.0, 0.0, 1.0, 1.0),  # Run forward (blue)
+            (1.0, 0.0, 0.0, 1.0),  # Walk backward (red)
+            (1.0, 0.0, 1.0, 1.0),  # Turn left (purple)
+            (0.0, 0.0, 0.0, 1.0),  # Turn right (black)
+            (0.0, 1.0, 1.0, 1.0),  # Strafe left (cyan)
+            (1.0, 1.0, 0.0, 1.0),  # Strafe right (yellow)
         ][cmd_idx]
 
     @classmethod
@@ -339,7 +339,7 @@ class JoystickCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         command = jax.random.choice(rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs))
-        command_ohe = jax.nn.one_hot(command, num_classes=7)
+        command_ohe = jax.nn.one_hot(command, num_classes=8)
         position_vector = self._get_position_vector(physics_data)
         return jnp.concatenate([command_ohe, position_vector], axis=-1)
 
