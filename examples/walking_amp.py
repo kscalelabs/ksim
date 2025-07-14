@@ -518,7 +518,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             min_level_steps=self.config.min_level_steps,
         )
 
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def get_initial_model_carry(self, model: DefaultHumanoidRNNModel, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
@@ -688,7 +688,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
                 values=value.squeeze(-1),
             )
 
-            initial_carry = self.get_initial_model_carry(rng)
+            initial_carry = self.get_initial_model_carry(model, rng)
             next_carry = jax.tree.map(
                 lambda x, y: jnp.where(transition.done, x, y),
                 initial_carry,
