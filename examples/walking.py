@@ -18,7 +18,7 @@ import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 7
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 8
 
 ZEROS = [
     ("abdomen_z", 0.0),
@@ -401,7 +401,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_7 = commands["joystick_command"][..., :7]
+        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
 
         obs_n = jnp.concatenate(
             [
@@ -417,7 +417,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_7,  # 7
+                joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )
@@ -442,7 +442,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_7 = commands["joystick_command"][..., :7]
+        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
 
         obs_n = jnp.concatenate(
             [
@@ -458,7 +458,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_7,  # 7
+                joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )
