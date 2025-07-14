@@ -392,7 +392,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
             num_mixtures=self.config.num_mixtures,
         )
 
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
+    def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> None:
         return None
 
     def run_actor(

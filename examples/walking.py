@@ -379,7 +379,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             num_mixtures=self.config.num_mixtures,
         )
 
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
+    def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> None:
         return None
 
     def run_actor(
@@ -539,9 +539,6 @@ if __name__ == "__main__":
             ls_iterations=5,
             action_latency_range=(0.005, 0.01),
             drop_action_prob=0.01,
-            # Visualization parameters.
-            render_track_body_id=0,
-            render_markers=True,
             # Checkpointing parameters.
             save_every_n_seconds=60,
         ),
