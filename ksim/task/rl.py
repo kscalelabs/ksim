@@ -83,6 +83,15 @@ from ksim.vis import Marker, configure_scene
 logger = logging.getLogger(__name__)
 
 
+def assert_distinct(names: Collection[str]) -> None:
+    """Checks that the names are distinct."""
+    names = list(names)
+    names_set = set(names)
+    if len(names) != len(names_set):
+        duplicates = [name for name in names_set if names.count(name) > 1]
+        raise ValueError(f"Names are not distinct! Found duplicates: {duplicates}")
+
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class RolloutEnvState:
@@ -808,10 +817,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> PyTree | None:
+    def get_initial_model_carry(self, model: PyTree, rng: PRNGKeyArray) -> PyTree | None:
         """Returns the initial carry for the model.
 
         Args:
+            model: The model to get the initial carry for.
             rng: The random key to use.
 
         Returns:
@@ -999,7 +1009,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         next_model_carry = jax.lax.cond(
             terminated,
-            lambda: self.get_initial_model_carry(carry_rng),
+            lambda: self.get_initial_model_carry(policy_model, carry_rng),
             lambda: action.carry,
         )
 
@@ -1612,6 +1622,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rollout_constants=constants,
                 mj_model=mj_model,
                 physics_model=mj_model,
+                policy_model=models[0],
                 randomizers=randomizers,
             )
             shared_state = self._get_shared_state(
@@ -1865,6 +1876,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             raise ValueError("No terminations found! Must have at least one termination.")
         curriculum = self.get_curriculum(physics_model)
 
+        # Checks that the collections are distinct.
+        assert_distinct([observation.observation_name for observation in observations])
+        assert_distinct([command.command_name for command in commands])
+        assert_distinct([reward.reward_name for reward in rewards_terms])
+        assert_distinct([termination.termination_name for termination in terminations])
+
         return RolloutConstants(
             model_statics=model_statics,
             engine=engine,
@@ -1900,13 +1917,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rollout_constants: RolloutConstants,
         mj_model: mujoco.MjModel,
         physics_model: PhysicsModel,
+        policy_model: PyTree,
         randomizers: Collection[PhysicsRandomizer],
     ) -> RolloutEnvState:
         rng, carry_rng, command_rng, rand_rng, rollout_rng, curriculum_rng, reward_rng = jax.random.split(rng, 7)
 
         if isinstance(physics_model, mjx.Model):
             # Defines the vectorized initialization functions.
-            carry_fn = xax.vmap(self.get_initial_model_carry, in_axes=0, jit_level=JitLevel.INITIALIZATION)
+            carry_fn = xax.vmap(self.get_initial_model_carry, in_axes=(None, 0), jit_level=JitLevel.INITIALIZATION)
             command_fn = xax.vmap(get_initial_commands, in_axes=(0, 0, None, 0), jit_level=JitLevel.INITIALIZATION)
             reward_carry_fn = xax.vmap(get_initial_reward_carry, in_axes=(0, None), jit_level=JitLevel.INITIALIZATION)
             obs_carry_fn = xax.vmap(get_initial_obs_carry, in_axes=(0, None, None), jit_level=JitLevel.INITIALIZATION)
@@ -1940,7 +1958,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 ),
                 physics_state=physics_state,
                 randomization_dict=randomization_dict,
-                model_carry=carry_fn(jax.random.split(carry_rng, self.config.num_envs)),
+                model_carry=carry_fn(policy_model, jax.random.split(carry_rng, self.config.num_envs)),
                 reward_carry=reward_carry_fn(
                     jax.random.split(reward_rng, self.config.num_envs), rollout_constants.rewards
                 ),
@@ -1973,7 +1991,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 ),
                 physics_state=physics_state,
                 randomization_dict=randomization_dict,
-                model_carry=self.get_initial_model_carry(carry_rng),
+                model_carry=self.get_initial_model_carry(policy_model, carry_rng),
                 reward_carry=get_initial_reward_carry(reward_rng, rollout_constants.rewards),
                 obs_carry=get_initial_obs_carry(
                     rng=carry_rng, physics_state=physics_state, observations=rollout_constants.observations
@@ -2039,6 +2057,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rollout_constants=rollout_constants,
                 mj_model=mj_model,
                 physics_model=mjx_model,
+                policy_model=models[0],
                 randomizers=randomizations,
             )
             rollout_shared_state = self._get_shared_state(
@@ -2119,6 +2138,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rollout_constants=constants.constants,
                 mj_model=mj_model,
                 physics_model=mjx_model,
+                policy_model=models[0],
                 randomizers=randomizers,
             ),
             shared_state=self._get_shared_state(
