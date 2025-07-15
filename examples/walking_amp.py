@@ -5,7 +5,7 @@ import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Collection, Generic, Self, TypeVar
+from typing import Generic, Self, TypeVar
 
 import attrs
 import distrax
@@ -25,149 +25,82 @@ logger = logging.getLogger(__name__)
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3
+NUM_INPUTS = 2 + 1 + 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3
 
 
-class DefaultHumanoidRNNActor(eqx.Module):
-    """RNN-based actor for the walking task."""
+class DefaultHumanoidActor(eqx.Module):
+    """MLP-based actor for the walking task."""
 
-    input_proj: eqx.nn.Linear
-    rnns: tuple[eqx.nn.GRUCell, ...]
-    output_proj: eqx.nn.Linear
-    num_inputs: int = eqx.field(static=True)
-    num_outputs: int = eqx.field(static=True)
-    num_mixtures: int = eqx.field(static=True)
-    min_std: float = eqx.field(static=True)
-    max_std: float = eqx.field(static=True)
-    var_scale: float = eqx.field(static=True)
+    mlp: eqx.nn.MLP
+    num_inputs: int = eqx.static_field()
+    num_outputs: int = eqx.static_field()
 
     def __init__(
         self,
         key: PRNGKeyArray,
         *,
         num_inputs: int,
+        hidden_size: int,
+        depth: int,
         num_outputs: int,
-        num_mixtures: int,
-        min_std: float,
-        max_std: float,
-        var_scale: float,
+    ) -> None:
+        self.mlp = eqx.nn.MLP(
+            in_size=num_inputs,
+            out_size=num_outputs * 2,
+            width_size=hidden_size,
+            depth=depth,
+            activation=jax.nn.relu,
+            key=key,
+        )
+
+        self.num_outputs = num_outputs
+        self.num_inputs = num_inputs
+
+    def forward(self, obs_n: Array) -> distrax.Distribution:
+        prediction_n = self.mlp(obs_n)
+
+        # Converts the output to a distribution.
+        mean_nm = prediction_n[: self.num_outputs]
+        std_nm = prediction_n[self.num_outputs :]
+
+        # Softplus and clip to ensure positive standard deviations.
+        std_nm = jnp.clip(jax.nn.softplus(std_nm), max=10.0)
+        dist_n = distrax.Normal(mean_nm, std_nm)
+        return dist_n
+
+
+class DefaultHumanoidCritic(eqx.Module):
+    """MLP-based critic for the walking task."""
+
+    mlp: eqx.nn.MLP
+    num_inputs: int = eqx.static_field()
+
+    def __init__(
+        self,
+        key: PRNGKeyArray,
+        *,
+        num_inputs: int,
         hidden_size: int,
         depth: int,
     ) -> None:
-        # Project input to hidden size
-        key, input_proj_key = jax.random.split(key)
-        self.input_proj = eqx.nn.Linear(
-            in_features=num_inputs,
-            out_features=hidden_size,
-            key=input_proj_key,
-        )
-
-        # Create RNN layer
-        key, rnn_key = jax.random.split(key)
-        self.rnns = tuple(
-            [
-                eqx.nn.GRUCell(
-                    input_size=hidden_size,
-                    hidden_size=hidden_size,
-                    key=rnn_key,
-                )
-                for _ in range(depth)
-            ]
-        )
-
-        # Project to output
-        self.output_proj = eqx.nn.Linear(
-            in_features=hidden_size,
-            out_features=num_outputs * 3 * num_mixtures,
+        self.mlp = eqx.nn.MLP(
+            in_size=num_inputs,
+            out_size=1,
+            width_size=hidden_size,
+            depth=depth,
+            activation=jax.nn.relu,
             key=key,
         )
 
         self.num_inputs = num_inputs
-        self.num_outputs = num_outputs
-        self.num_mixtures = num_mixtures
-        self.min_std = min_std
-        self.max_std = max_std
-        self.var_scale = var_scale
 
-    def forward(self, obs_n: Array, carry: Array) -> tuple[distrax.Distribution, Array]:
-        x_n = self.input_proj(obs_n)
-        out_carries = []
-        for i, rnn in enumerate(self.rnns):
-            x_n = rnn(x_n, carry[i])
-            out_carries.append(x_n)
-        prediction_n = self.output_proj(x_n)
-
-        # Converts the output to a distribution.
-        slice_len = self.num_outputs * self.num_mixtures
-        mean_nm = prediction_n[:slice_len].reshape(NUM_JOINTS, self.num_mixtures)
-        std_nm = prediction_n[slice_len : slice_len * 2].reshape(NUM_JOINTS, self.num_mixtures)
-        logits_nm = prediction_n[slice_len * 2 :].reshape(NUM_JOINTS, self.num_mixtures)
-
-        # Softplus and clip to ensure positive standard deviations.
-        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
-        dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
-        return dist_n, jnp.stack(out_carries, axis=0)
+    def forward(self, obs_n: Array) -> Array:
+        return self.mlp(obs_n)
 
 
-class DefaultHumanoidRNNCritic(eqx.Module):
-    """RNN-based critic for the walking task."""
-
-    input_proj: eqx.nn.Linear
-    rnns: tuple[eqx.nn.GRUCell, ...]
-    output_proj: eqx.nn.Linear
-
-    def __init__(
-        self,
-        key: PRNGKeyArray,
-        *,
-        num_inputs: int,
-        hidden_size: int,
-        depth: int,
-    ) -> None:
-        num_outputs = 1
-
-        # Project input to hidden size
-        key, input_proj_key = jax.random.split(key)
-        self.input_proj = eqx.nn.Linear(
-            in_features=num_inputs,
-            out_features=hidden_size,
-            key=input_proj_key,
-        )
-
-        # Create RNN layer
-        key, rnn_key = jax.random.split(key)
-        self.rnns = tuple(
-            [
-                eqx.nn.GRUCell(
-                    input_size=hidden_size,
-                    hidden_size=hidden_size,
-                    key=rnn_key,
-                )
-                for _ in range(depth)
-            ]
-        )
-
-        # Project to output
-        self.output_proj = eqx.nn.Linear(
-            in_features=hidden_size,
-            out_features=num_outputs,
-            key=key,
-        )
-
-    def forward(self, obs_n: Array, carry: Array) -> tuple[Array, Array]:
-        x_n = self.input_proj(obs_n)
-        out_carries = []
-        for i, rnn in enumerate(self.rnns):
-            x_n = rnn(x_n, carry[i])
-            out_carries.append(x_n)
-        out_n = self.output_proj(x_n)
-
-        return out_n, jnp.stack(out_carries, axis=0)
-
-
-class DefaultHumanoidRNNModel(eqx.Module):
-    actor: DefaultHumanoidRNNActor
-    critic: DefaultHumanoidRNNCritic
+class DefaultHumanoidModel(eqx.Module):
+    actor: DefaultHumanoidActor
+    critic: DefaultHumanoidCritic
 
     def __init__(
         self,
@@ -181,76 +114,19 @@ class DefaultHumanoidRNNModel(eqx.Module):
         hidden_size: int,
         depth: int,
     ) -> None:
-        self.actor = DefaultHumanoidRNNActor(
+        self.actor = DefaultHumanoidActor(
             key,
             num_inputs=num_inputs,
             num_outputs=num_joints,
-            num_mixtures=num_mixtures,
-            min_std=min_std,
-            max_std=max_std,
-            var_scale=0.5,
             hidden_size=hidden_size,
             depth=depth,
         )
-        self.critic = DefaultHumanoidRNNCritic(
+        self.critic = DefaultHumanoidCritic(
             key,
             num_inputs=num_inputs,
             hidden_size=hidden_size,
             depth=depth,
         )
-
-
-# class DefaultHumanoidDiscriminator(eqx.Module):
-#     """Discriminator for the walking task, returns logit."""
-
-#     layers: list[Callable[[Array], Array]]
-
-#     def __init__(
-#         self,
-#         key: PRNGKeyArray,
-#         *,
-#         num_inputs: int,
-#         hidden_size: int,
-#         depth: int,
-#         num_frames: int,
-#     ) -> None:
-#         num_outputs = 1
-
-#         layers: list[Callable[[Array], Array]] = []
-#         for _ in range(depth):
-#             key, subkey = jax.random.split(key)
-#             layers += [
-#                 eqx.nn.Conv1d(
-#                     in_channels=num_inputs,
-#                     out_channels=hidden_size,
-#                     kernel_size=num_frames,
-#                     # We left-pad the input so that the discriminator output
-#                     # at time T can be reasonably interpretted as the logit
-#                     # for the motion from time T - N to T. In other words, we
-#                     # this means that all the reward for time T will be based
-#                     # on the motion from the previous N frames.
-#                     padding=[(num_frames - 1, 0)],
-#                     key=subkey,
-#                 ),
-#                 jax.nn.relu,
-#             ]
-#             num_inputs = hidden_size
-
-#         layers += [
-#             eqx.nn.Linear(
-#                 in_features=num_inputs,
-#                 out_features=num_outputs,
-#                 key=key,
-#             )
-#         ]
-
-#         self.layers = layers
-
-#     def forward(self, x: Array) -> Array:
-#         x_nt = x.transpose(1, 0)
-#         for layer in self.layers:
-#             x_nt = layer(x_nt)
-#         return x_nt.squeeze(0)
 
 
 class DefaultHumanoidDiscriminator(eqx.Module):
@@ -333,106 +209,6 @@ class RandomMotionFrameReset(ksim.Reset):
         pos_tuple = tuple(tuple(map(float, frame)) for frame in np.asarray(positions).tolist())
         vel_tuple = tuple(tuple(map(float, frame)) for frame in np.asarray(velocities).tolist())
         return cls(positions=pos_tuple, velocities=vel_tuple, reset_pos=reset_pos)
-
-
-@attrs.define(kw_only=True)
-class LinearVelocityCommandMarker(ksim.Marker):
-    """Visualises the planar (x,y) linear velocity command."""
-
-    command_name: str = attrs.field()
-    size: float = attrs.field(default=0.03)
-    arrow_scale: float = attrs.field(default=0.3)
-    height: float = attrs.field(default=0.5)
-    base_length: float = attrs.field(default=0.15)
-
-    def update(self, trajectory: ksim.Trajectory) -> None:
-        cmd = trajectory.command[self.command_name]
-        vx, vy = float(cmd[0]), float(cmd[1])
-        speed = (vx * vx + vy * vy) ** 0.5
-
-        self.pos = (0.0, 0.0, self.height)
-
-        # Always show an arrow with base_length plus scaling by speed
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-        arrow_length = self.base_length + self.arrow_scale * speed
-        self.scale = (self.size, self.size, arrow_length)
-
-        # If command is near-zero, show grey arrow pointing +X.
-        if speed < 1e-4:
-            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
-            self.rgba = (0.8, 0.8, 0.8, 0.8)
-        else:
-            self.orientation = self.quat_from_direction((vx, vy, 0.0))
-            self.rgba = (0.2, 0.8, 0.2, 0.8)
-
-    @classmethod
-    def get(
-        cls,
-        command_name: str,
-        *,
-        arrow_scale: float = 0.3,
-        height: float = 0.5,
-        base_length: float = 0.15,
-    ) -> Self:
-        return cls(
-            command_name=command_name,
-            target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_ARROW,
-            scale=(0.03, 0.03, base_length),
-            arrow_scale=arrow_scale,
-            height=height,
-            base_length=base_length,
-            track_rotation=True,
-        )
-
-
-@attrs.define(frozen=True)
-class LinearVelocityCommand(ksim.Command):
-    """Command to move the robot in a straight line.
-
-    By convention, X is forward and Y is left. The switching probability is the
-    probability of resampling the command at each step. The zero probability is
-    the probability of the command being zero - this can be used to turn off
-    any command.
-    """
-
-    x_range: tuple[float, float] = attrs.field()
-    y_range: tuple[float, float] = attrs.field()
-    x_zero_prob: float = attrs.field(default=0.0)
-    y_zero_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
-    vis_height: float = attrs.field(default=1.0)
-    vis_scale: float = attrs.field(default=0.05)
-
-    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
-        (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
-        x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
-        y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
-        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
-        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
-        return jnp.concatenate(
-            [
-                jnp.where(x_zero_mask, 0.0, x),
-                jnp.where(y_zero_mask, 0.0, y),
-            ]
-        )
-
-    def __call__(
-        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
-
-    def get_markers(self) -> Collection[ksim.vis.Marker]:
-        return [
-            LinearVelocityCommandMarker.get(
-                command_name=self.command_name,
-                height=0.5,
-            )
-        ]
 
 
 @dataclass
@@ -560,10 +336,10 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            # ksim.LinearPushEvent(
-            #     linvel=1.0,
-            #     interval_range=(0.25, 0.75),
-            # ),
+            ksim.LinearPushEvent(
+                linvel=0.3,
+                interval_range=(0.25, 0.75),
+            ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
@@ -628,22 +404,33 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            LinearVelocityCommand(
-                x_range=(0.0, 0.5),
+            ksim.LinearVelocityCommand(
+                x_range=(-0.15, 1.0),
                 y_range=(0.0, 0.0),
-            )
+                switch_prob=self.config.ctrl_dt / 4.0,  # on avg 3 seconds between switches
+            ),
+            ksim.FloatVectorCommand(  # angular velocity
+                ranges=((-0.3, 0.3),),
+                zero_prob=0.8,  # 80% of the time the command is zero
+                switch_prob=self.config.ctrl_dt / 4.0,  # on avg 3 seconds between switches
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.AMPReward(scale=5.0),
+            ksim.AMPReward(scale=20.0),
             ksim.StayAliveReward(scale=1000.0, balance=1000.0),
             ksim.XYAngularVelocityPenalty(scale=-0.01),
-            ksim.UprightReward(scale=2.0),
+            ksim.AngularVelocityTrackingReward(
+                index=("z"),
+                command_name="float_vector_command",
+                scale=5.0,
+            ),
+            # ksim.UprightReward(scale=2.0),
             # ksim.NaiveForwardReward(clip_max=1.0, scale=1.0),
             ksim.LinearVelocityTrackingReward(
                 linvel_obs_name="base_linear_velocity_observation",
-                scale=10.0,
+                scale=5.0,
             ),
         ]
 
@@ -663,14 +450,11 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             min_level_steps=self.config.min_level_steps,
         )
 
-    def get_initial_model_carry(self, model: DefaultHumanoidRNNModel, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        return (
-            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-        )
+    def get_initial_model_carry(self, model: DefaultHumanoidModel, rng: PRNGKeyArray) -> None:
+        return None
 
-    def get_policy_model(self, key: PRNGKeyArray) -> DefaultHumanoidRNNModel:
-        return DefaultHumanoidRNNModel(
+    def get_policy_model(self, key: PRNGKeyArray) -> DefaultHumanoidModel:
+        return DefaultHumanoidModel(
             key,
             num_inputs=NUM_INPUTS,
             num_joints=NUM_JOINTS,
@@ -682,7 +466,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         )
 
     def get_discriminator_model(self, key: PRNGKeyArray) -> DefaultHumanoidDiscriminator:
-        joint_inputs = NUM_JOINTS * 3  # sin, cos, velocity
+        joint_inputs = NUM_JOINTS * 2  # sin, cos, velocity (temp no velocity)
         hand_inputs = 3 * 2  # xyz, left right
         feet_inputs = 3 * 2  # xyz, left right
         base_inputs = 6  # lin vel, ang vel
@@ -727,7 +511,8 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         # Delete this later
         sin_cos_joints = jnp.concatenate([joints, jnp.cos(joints)], axis=-1)
 
-        features_t = jnp.concatenate([sin_cos_joints, qvel, hand_pos, feet_pos], axis=-1)
+        # features_t = jnp.concatenate([sin_cos_joints, qvel, hand_pos, feet_pos], axis=-1)
+        features_t = jnp.concatenate([sin_cos_joints, qvel[..., :6], hand_pos, feet_pos], axis=-1)
 
         num_frames = self.config.num_frames
         timesteps = features_t.shape[0]
@@ -890,11 +675,10 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def run_actor(
         self,
-        model: DefaultHumanoidRNNActor,
+        model: DefaultHumanoidActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry: Array,
-    ) -> tuple[distrax.Distribution, Array]:
+    ) -> distrax.Distribution:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
@@ -909,10 +693,12 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
+        ang_vel_cmd_1 = commands["float_vector_command"]
 
         obs_n = jnp.concatenate(
             [
                 lin_vel_cmd_2,  # 2
+                ang_vel_cmd_1,  # 1
                 jnp.cos(timestep_1),  # 1
                 jnp.sin(timestep_1),  # 1
                 dh_joint_pos_j,  # NUM_JOINTS
@@ -929,15 +715,14 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             axis=-1,
         )
 
-        return model.forward(obs_n, carry)
+        return model.forward(obs_n)
 
     def run_critic(
         self,
-        model: DefaultHumanoidRNNCritic,
+        model: DefaultHumanoidCritic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry: Array,
-    ) -> tuple[Array, Array]:
+    ) -> Array:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
@@ -952,10 +737,12 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
+        ang_vel_cmd_1 = commands["float_vector_command"]
 
         obs_n = jnp.concatenate(
             [
                 lin_vel_cmd_2,  # 2
+                ang_vel_cmd_1,  # 1
                 jnp.cos(timestep_1),  # 1
                 jnp.sin(timestep_1),  # 1
                 dh_joint_pos_j,  # NUM_JOINTS
@@ -972,56 +759,36 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             axis=-1,
         )
 
-        return model.forward(obs_n, carry)
+        return model.forward(obs_n)
 
     def get_ppo_variables(
         self,
-        model: DefaultHumanoidRNNModel,
+        model: DefaultHumanoidModel,
         trajectory: ksim.Trajectory,
-        model_carry: tuple[Array, Array],
+        model_carry: None,
         rng: PRNGKeyArray,
-    ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
-        def scan_fn(
-            actor_critic_carry: tuple[Array, Array], transition: ksim.Trajectory
-        ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
-            actor_carry, critic_carry = actor_critic_carry
-            actor_dist, next_actor_carry = self.run_actor(
-                model=model.actor,
-                observations=transition.obs,
-                commands=transition.command,
-                carry=actor_carry,
-            )
-            log_probs = actor_dist.log_prob(transition.action)
-            assert isinstance(log_probs, Array)
-            value, next_critic_carry = self.run_critic(
-                model=model.critic,
-                observations=transition.obs,
-                commands=transition.command,
-                carry=critic_carry,
-            )
+    ) -> tuple[ksim.PPOVariables, None]:
+        def get_log_prob(transition: ksim.Trajectory) -> Array:
+            action_dist_t = self.run_actor(model.actor, transition.obs, transition.command)
+            log_prob_t = action_dist_t.log_prob(transition.action)
+            assert isinstance(log_prob_t, Array)
+            return log_prob_t
 
-            transition_ppo_variables = ksim.PPOVariables(
-                log_probs=log_probs,
-                values=value.squeeze(-1),
-            )
+        log_probs_tj = jax.vmap(get_log_prob)(trajectory)
 
-            initial_carry = self.get_initial_model_carry(model, rng)
-            next_carry = jax.tree.map(
-                lambda x, y: jnp.where(transition.done, x, y),
-                initial_carry,
-                (next_actor_carry, next_critic_carry),
-            )
+        values_tj = jax.vmap(self.run_critic, in_axes=(None, 0, 0))(model.critic, trajectory.obs, trajectory.command)
 
-            return next_carry, transition_ppo_variables
+        ppo_variables = ksim.PPOVariables(
+            log_probs=log_probs_tj,
+            values=values_tj.squeeze(-1),
+        )
 
-        next_model_carry, ppo_variables = xax.scan(scan_fn, model_carry, trajectory, jit_level=ksim.JitLevel.RL_CORE)
-
-        return ppo_variables, next_model_carry
+        return ppo_variables, None
 
     def sample_action(
         self,
-        model: DefaultHumanoidRNNModel,
-        model_carry: tuple[Array, Array],
+        model: DefaultHumanoidModel,
+        model_carry: None,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
@@ -1029,19 +796,15 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
-        actor_carry_in, critic_carry_in = model_carry
-
-        # Runs the actor model to get the action distribution.
-        action_dist_j, actor_carry = self.run_actor(
+        action_dist_j = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
-            carry=actor_carry_in,
         )
 
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
 
-        return ksim.Action(action=action_j, carry=(actor_carry, critic_carry_in))
+        return ksim.Action(action=action_j, carry=None)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ __all__ = [
     "LinkJerkPenalty",
     "JoystickReward",
     "LinearVelocityTrackingReward",
+    "AngularVelocityTrackingReward",
     "ReachabilityPenalty",
     "FeetAirTimeReward",
 ]
@@ -767,35 +768,29 @@ class LinearVelocityTrackingReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class LinearVelocityTrackingReward(Reward):
-    """Reward for tracking the linear velocity."""
+class AngularVelocityTrackingReward(Reward):
+    """Reward for tracking the angular velocity."""
 
-    linvel_obs_name: str = attrs.field()
     index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
         default=("x", "y"), validator=dimension_index_tuple_validator
     )
     error_scale: float = attrs.field(default=0.25)
-    command_name: str = attrs.field(default="linear_velocity_command")
-    in_robot_frame: bool = attrs.field(default=True)
+    command_name: str = attrs.field(default="angular_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        if self.linvel_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
-
-        linvel = trajectory.obs[self.linvel_obs_name]
-        if self.in_robot_frame:
-            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
+        angvel = trajectory.qvel[..., 3:6]
 
         dims = index_to_dims(self.index)
 
-        linvel = linvel[..., dims]
-        robot_vel_cmd = trajectory.command[self.command_name]
-        robot_vel_cmd = robot_vel_cmd[..., dims]
+        angvel = angvel[..., dims]
+        robot_angvel_cmd = trajectory.command[self.command_name]
 
-        vel_error = xax.get_norm(linvel - robot_vel_cmd, self.norm).sum(axis=-1)
+        chex.assert_shape(robot_angvel_cmd, (..., len(dims)))
 
-        return jnp.exp(-vel_error / self.error_scale)
+        angvel_error = xax.get_norm(angvel - robot_angvel_cmd, self.norm).sum(axis=-1)
+
+        return jnp.exp(-angvel_error / self.error_scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
