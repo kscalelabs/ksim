@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: fast-check
+        name: Run Fast Check (ruff, mypy, pytest)
+        entry: make fast-check
+        language: system
+        types: [python]
