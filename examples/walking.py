@@ -18,7 +18,7 @@ import ksim
 
 NUM_JOINTS = 21
 
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 7
+NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 8
 
 ZEROS = [
     ("abdomen_z", 0.0),
@@ -49,10 +49,10 @@ class Actor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
-    min_std: float = eqx.static_field()
-    max_std: float = eqx.static_field()
-    var_scale: float = eqx.static_field()
-    num_mixtures: int = eqx.static_field()
+    min_std: float = eqx.field(static=True)
+    max_std: float = eqx.field(static=True)
+    var_scale: float = eqx.field(static=True)
+    num_mixtures: int = eqx.field(static=True)
 
     def __init__(
         self,
@@ -189,6 +189,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=1e-3,
         help="Learning rate for PPO.",
     )
+    warmup_steps: int = xax.field(
+        value=100,
+        help="The number of steps to warm up the learning rate.",
+    )
     adam_weight_decay: float = xax.field(
         value=0.0,
         help="Weight decay for the Adam optimizer.",
@@ -224,10 +228,16 @@ Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 
 class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
-        return (
-            optax.adam(self.config.learning_rate)
-            if self.config.adam_weight_decay == 0.0
-            else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
+        return optax.chain(
+            optax.add_decayed_weights(self.config.adam_weight_decay),
+            optax.scale_by_adam(),
+            optax.scale_by_schedule(
+                optax.warmup_constant_schedule(
+                    init_value=0.0,
+                    peak_value=self.config.learning_rate,
+                    warmup_steps=self.config.warmup_steps,
+                )
+            ),
         )
 
     def get_mujoco_model(self) -> mujoco.MjModel:
@@ -265,13 +275,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            ksim.PushEvent(
-                x_linvel=1.0,
-                y_linvel=1.0,
-                z_linvel=0.0,
-                x_angvel=0.1,
-                y_angvel=0.1,
-                z_angvel=0.3,
+            ksim.LinearPushEvent(
+                linvel=1.0,
                 interval_range=(2.0, 5.0),
             ),
             ksim.JumpEvent(
@@ -346,20 +351,20 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.JoystickCommand(),
+            ksim.JoystickCommand(
+                run_speed=self.config.target_linear_velocity,
+                walk_speed=self.config.target_linear_velocity / 2.0,
+                strafe_speed=self.config.target_linear_velocity / 2.0,
+                rotation_speed=self.config.target_angular_velocity,
+                ctrl_dt=self.config.ctrl_dt,
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.StayAliveReward(scale=1.0),
-            ksim.JoystickReward(
-                forward_speed=self.config.target_linear_velocity,
-                backward_speed=self.config.target_linear_velocity / 2.0,
-                strafe_speed=self.config.target_linear_velocity / 2.0,
-                rotation_speed=self.config.target_angular_velocity,
-                scale=1.0,
-            ),
-            ksim.CtrlPenalty.create(physics_model),
+            ksim.StayAliveReward(scale=5.0),
+            ksim.JoystickReward(scale=1.0),
+            ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -384,7 +389,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             num_mixtures=self.config.num_mixtures,
         )
 
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
+    def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> None:
         return None
 
     def run_actor(
@@ -406,7 +411,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_7 = commands["joystick_command"]
+        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
 
         obs_n = jnp.concatenate(
             [
@@ -422,7 +427,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_7,  # 7
+                joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )
@@ -447,7 +452,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_7 = commands["joystick_command"]
+        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
 
         obs_n = jnp.concatenate(
             [
@@ -463,7 +468,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_7,  # 7
+                joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )

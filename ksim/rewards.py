@@ -32,12 +32,13 @@ __all__ = [
     "JoystickReward",
     "LinearVelocityTrackingReward",
     "ReachabilityPenalty",
+    "FeetAirTimeReward",
 ]
 
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Literal, Self
+from typing import Collection, Literal, Self, final
 
 import attrs
 import chex
@@ -135,6 +136,7 @@ class Reward(ABC):
 class StatefulReward(Reward):
     """Reward that requires state from the previous timestep."""
 
+    @final
     def get_reward(self, trajectory: Trajectory) -> Array:
         raise NotImplementedError("StatefulReward should use `get_reward_stateful` instead.")
 
@@ -378,9 +380,11 @@ class JointVelocityPenalty(Reward):
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        done = trajectory.done[..., None]
-        joint_vel = jnp.where(done, 0.0, trajectory.qvel[..., 6:])
-        return xax.get_norm(joint_vel, self.norm).mean(axis=-1)
+        qpos = trajectory.qpos[..., 7:]
+        qpos_zp = jnp.pad(qpos, ((1, 0), (0, 0)), mode="edge")
+        done = jnp.pad(trajectory.done, ((1, 0),), mode="edge")[..., :-1, None]
+        qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
+        return xax.get_norm(qvel, self.norm).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -635,7 +639,8 @@ class LinkAccelerationPenalty(Reward):
         pos = trajectory.xpos[..., 1:, :]
         pos_zp = jnp.pad(pos, ((2, 0), (0, 0), (0, 0)), mode="edge")
         done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., :-1, None]
-        vel = jnp.where(done, 0.0, jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1))
+        vel: Array = jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1)
+        vel = jnp.where(done, 0.0, vel)
         acc = jnp.where(done[..., 1:, :], 0.0, vel[..., 1:, :] - vel[..., :-1, :])
         penalty = xax.get_norm(acc, self.norm).mean(axis=-1)
         return penalty
@@ -651,7 +656,8 @@ class LinkJerkPenalty(Reward):
         pos = trajectory.xpos[..., 1:, :]
         pos_zp = jnp.pad(pos, ((3, 0), (0, 0), (0, 0)), mode="edge")
         done = jnp.pad(trajectory.done, ((3, 0),), mode="edge")[..., :-1, None]
-        vel = jnp.where(done, 0.0, jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1))
+        vel: Array = jnp.linalg.norm(pos_zp[..., 1:, :, :] - pos_zp[..., :-1, :, :], axis=-1)
+        vel = jnp.where(done, 0.0, vel)
         acc = jnp.where(done[..., 1:, :], 0.0, vel[..., 1:, :] - vel[..., :-1, :])
         jerk = jnp.where(done[..., 2:, :], 0.0, acc[..., 1:, :] - acc[..., :-1, :])
         penalty = xax.get_norm(jerk, self.norm).mean(axis=-1)
@@ -697,66 +703,67 @@ class JoystickReward(Reward):
     facing forward in the X direction.
     """
 
-    forward_speed: float = attrs.field()
-    backward_speed: float = attrs.field()
-    strafe_speed: float = attrs.field()
-    rotation_speed: float = attrs.field()
     command_name: str = attrs.field(default="joystick_command")
-    lin_vel_penalty_scale: float = attrs.field(default=0.01)
-    ang_vel_penalty_scale: float = attrs.field(default=0.01)
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-    temp: float = attrs.field(default=0.1)
-    monotonic_fn: MonotonicFn = attrs.field(default="inv")
-    in_robot_frame: bool = attrs.field(default=False)
-    stand_base_reward: float = attrs.field(default=1.0)
+    ang_vel_penalty_ratio: float = attrs.field(default=0.5)
+    lin_slope: float = attrs.field(default=1.0)
+    ang_slope: float = attrs.field(default=1.0)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
         joystick_cmd = trajectory.command[self.command_name]
-        chex.assert_shape(joystick_cmd, (..., 7))
+        chex.assert_shape(joystick_cmd, (..., 11))
 
-        qvel = trajectory.qvel[..., :6]
-        linvel = qvel[..., :3]
-        angvel = qvel[..., 3:]
+        position_vector = joystick_cmd[..., -3:]
 
+        # Gets the target position and orientation.
+        trg_x, trg_y, trg_yaw = position_vector[..., 0], position_vector[..., 1], position_vector[..., 2]
+        cur_x, cur_y = trajectory.qpos[..., 0], trajectory.qpos[..., 1]
+        quat = trajectory.qpos[..., 3:7]
+        euler = xax.quat_to_euler(quat)
+        cur_yaw = euler[..., 2]
+
+        # Exponential kernel for the reward.
+        linvel_x_rew = 1.0 - jnp.abs(trg_x - cur_x) * self.lin_slope
+        linvel_y_rew = 1.0 - jnp.abs(trg_y - cur_y) * self.lin_slope
+        ang_diff = jnp.minimum(jnp.abs(trg_yaw - cur_yaw), jnp.abs(trg_yaw - cur_yaw + 2 * jnp.pi))
+        angvel_z_rew = 1.0 - ang_diff * self.ang_slope
+
+        # Normalize the rewards to sum to 1.
+        denom = 2.0 + self.ang_vel_penalty_ratio
+        return (linvel_x_rew / denom) + (linvel_y_rew / denom) + (angvel_z_rew * self.ang_vel_penalty_ratio / denom)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class LinearVelocityTrackingReward(Reward):
+    """Reward for tracking the linear velocity."""
+
+    linvel_obs_name: str = attrs.field()
+    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
+        default=("x", "y"), validator=dimension_index_tuple_validator
+    )
+    error_scale: float = attrs.field(default=0.25)
+    command_name: str = attrs.field(default="linear_velocity_command")
+    in_robot_frame: bool = attrs.field(default=True)
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        if self.linvel_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
+
+        linvel = trajectory.obs[self.linvel_obs_name]
         if self.in_robot_frame:
             linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
 
-        # Penalty to discourage movement in general.
-        linvel_norm = jnp.linalg.norm(linvel, axis=-1) * self.lin_vel_penalty_scale
-        angvel_norm = jnp.linalg.norm(angvel, axis=-1) * self.ang_vel_penalty_scale
-        vel_norm = linvel_norm + angvel_norm
+        dims = index_to_dims(self.index)
 
-        def normalize(x: Array, scale: float) -> Array:
-            return x.clip(-scale, scale) / scale
+        linvel = linvel[..., dims]
+        robot_vel_cmd = trajectory.command[self.command_name]
+        robot_vel_cmd = robot_vel_cmd[..., dims]
 
-        # Computes each of the penalties.
-        stand_still_reward = self.stand_base_reward * jnp.ones_like(linvel[..., 0])
-        walk_forward_reward = normalize(linvel[..., 0], self.forward_speed)
-        walk_backward_reward = normalize(-linvel[..., 0], self.backward_speed)
-        turn_left_reward = normalize(angvel[..., 2], self.rotation_speed)
-        turn_right_reward = normalize(-angvel[..., 2], self.rotation_speed)
-        strafe_left_reward = normalize(linvel[..., 1], self.strafe_speed)
-        strafe_right_reward = normalize(-linvel[..., 1], self.strafe_speed)
+        vel_error = xax.get_norm(linvel - robot_vel_cmd, self.norm).sum(axis=-1)
 
-        all_rewards = jnp.stack(
-            [
-                stand_still_reward,
-                walk_forward_reward,
-                walk_backward_reward,
-                turn_left_reward,
-                turn_right_reward,
-                strafe_left_reward,
-                strafe_right_reward,
-            ],
-            axis=-1,
-        )
-
-        # Weights each of the rewards by the one-hot encoded command.
-        total_reward = jnp.einsum("...i,...i->...", joystick_cmd, all_rewards) - vel_norm
-
-        return total_reward
+        return jnp.exp(-vel_error / self.error_scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -812,3 +819,84 @@ class ReachabilityPenalty(Reward):
         penalty_t = per_joint.sum(axis=-1)
 
         return penalty_t
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetAirTimeReward(StatefulReward):
+    """Reward for feet either touching or not touching the ground for some time."""
+
+    threshold: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    num_feet: int = attrs.field(default=2)
+    contact_obs: str = attrs.field(default="feet_contact_observation")
+    start_reward: float = attrs.field(
+        default=0.1,
+        validator=attrs.validators.and_(
+            attrs.validators.ge(0.0),
+            attrs.validators.le(1.0),
+        ),
+    )
+
+    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return (jnp.zeros(self.num_feet, dtype=jnp.int32), jnp.zeros(self.num_feet, dtype=jnp.int32))
+
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: tuple[Array, Array],
+    ) -> tuple[Array, tuple[Array, Array]]:
+        sensor_data_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        sensor_data_tn = sensor_data_tcn.any(axis=-2)
+        chex.assert_shape(sensor_data_tn, (..., self.num_feet))
+
+        threshold_steps = round(self.threshold / self.ctrl_dt)
+
+        def scan_fn(carry: tuple[Array, Array], x: tuple[Array, Array]) -> tuple[tuple[Array, Array], Array]:
+            count_n, cooldown_n = carry
+            contact_n, done = x
+
+            # The logic for this algorithm is to reward the agent for having
+            # some foot off the ground for up to `threshold_steps` steps, but
+            # then don't reward it for some cooldown period after that.
+            on_cooldown = cooldown_n > 0
+
+            cooldown_n = jnp.where(
+                done,
+                0,
+                jnp.where(
+                    on_cooldown,
+                    cooldown_n - 1,
+                    jnp.where(
+                        contact_n & (count_n > 0),
+                        jnp.minimum(count_n, threshold_steps),
+                        0,
+                    ),
+                ),
+            )
+
+            count_n = jnp.where(
+                done,
+                0,
+                jnp.where(
+                    on_cooldown,
+                    0,
+                    jnp.where(
+                        contact_n,
+                        0,
+                        count_n + 1,
+                    ),
+                ),
+            )
+
+            return (count_n, cooldown_n), count_n
+
+        reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
+
+        # Slight upward slope as the steps get longer. Make sure that the
+        # average value will be 1 after taking a full step.
+        reward_tn = (count_tn.astype(jnp.float32) / threshold_steps) * (2.0 - self.start_reward * 2) + self.start_reward
+
+        # Gradually increase reward until `threshold_steps`.
+        reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
+
+        return reward_tn.max(axis=-1), reward_carry

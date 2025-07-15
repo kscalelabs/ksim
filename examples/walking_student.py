@@ -52,10 +52,10 @@ class Actor(eqx.Module):
     """Actor for the walking task."""
 
     mlp: eqx.nn.MLP
-    min_std: float = eqx.static_field()
-    max_std: float = eqx.static_field()
-    var_scale: float = eqx.static_field()
-    num_mixtures: int = eqx.static_field()
+    min_std: float = eqx.field(static=True)
+    max_std: float = eqx.field(static=True)
+    var_scale: float = eqx.field(static=True)
+    num_mixtures: int = eqx.field(static=True)
 
     def __init__(
         self,
@@ -286,13 +286,8 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            ksim.PushEvent(
-                x_linvel=1.0,
-                y_linvel=0.0,
-                z_linvel=0.0,
-                x_angvel=0.1,
-                y_angvel=0.1,
-                z_angvel=0.3,
+            ksim.LinearPushEvent(
+                linvel=1.0,
                 interval_range=(0.25, 0.75),
             ),
         ]
@@ -357,7 +352,13 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.JoystickCommand(),
+            ksim.JoystickCommand(
+                run_speed=self.config.target_linear_velocity,
+                walk_speed=self.config.target_linear_velocity / 2.0,
+                strafe_speed=self.config.target_linear_velocity / 2.0,
+                rotation_speed=self.config.target_angular_velocity,
+                ctrl_dt=self.config.ctrl_dt,
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -365,10 +366,6 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
             ksim.TeacherReward(scale=1.0),
             ksim.StayAliveReward(scale=1.0),
             ksim.JoystickReward(
-                forward_speed=self.config.target_linear_velocity,
-                backward_speed=self.config.target_linear_velocity / 2.0,
-                strafe_speed=self.config.target_linear_velocity / 2.0,
-                rotation_speed=self.config.target_angular_velocity,
                 scale=1.0,
             ),
         ]
@@ -395,7 +392,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
             num_mixtures=self.config.num_mixtures,
         )
 
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> None:
+    def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> None:
         return None
 
     def run_actor(
@@ -408,7 +405,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        joystick_cmd_ohe_7 = commands["joystick_command"]
+        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
 
         obs_n = jnp.concatenate(
             [
@@ -417,7 +414,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
                 dh_joint_pos_j,  # NUM_JOINTS
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 proj_grav_3,  # 3
-                joystick_cmd_ohe_7,  # 7
+                joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )
@@ -443,7 +440,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_7 = commands["joystick_command"]
+        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
 
         obs_n = jnp.concatenate(
             [
@@ -459,7 +456,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                joystick_cmd_ohe_7,  # 7
+                joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )

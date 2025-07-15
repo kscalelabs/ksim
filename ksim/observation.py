@@ -181,15 +181,23 @@ class BaseOrientationObservation(Observation):
 
 @attrs.define(frozen=True, kw_only=True)
 class BaseLinearVelocityObservation(Observation):
+    in_robot_frame: bool = attrs.field(default=False)
+
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         qvel = state.physics_state.data.qvel[0:3]  # (3,)
+        if self.in_robot_frame:
+            qvel = xax.rotate_vector_by_quat(qvel, state.physics_state.data.qpos[3:7], inverse=True)
         return qvel
 
 
 @attrs.define(frozen=True, kw_only=True)
 class BaseAngularVelocityObservation(Observation):
+    in_robot_frame: bool = attrs.field(default=False)
+
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         qvel = state.physics_state.data.qvel[3:6]  # (3,)
+        if self.in_robot_frame:
+            qvel = xax.rotate_vector_by_quat(qvel, state.physics_state.data.qpos[3:7], inverse=True)
         return qvel
 
 
