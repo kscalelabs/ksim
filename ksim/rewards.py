@@ -30,6 +30,7 @@ __all__ = [
     "LinkAccelerationPenalty",
     "LinkJerkPenalty",
     "JoystickReward",
+    "LinearVelocityTrackingReward",
     "ReachabilityPenalty",
     "FeetAirTimeReward",
 ]
@@ -731,6 +732,38 @@ class JoystickReward(Reward):
         # Normalize the rewards to sum to 1.
         denom = 2.0 + self.ang_vel_penalty_ratio
         return (linvel_x_rew / denom) + (linvel_y_rew / denom) + (angvel_z_rew * self.ang_vel_penalty_ratio / denom)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class LinearVelocityTrackingReward(Reward):
+    """Reward for tracking the linear velocity."""
+
+    linvel_obs_name: str = attrs.field()
+    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
+        default=("x", "y"), validator=dimension_index_tuple_validator
+    )
+    error_scale: float = attrs.field(default=0.25)
+    command_name: str = attrs.field(default="linear_velocity_command")
+    in_robot_frame: bool = attrs.field(default=True)
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        if self.linvel_obs_name not in trajectory.obs:
+            raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
+
+        linvel = trajectory.obs[self.linvel_obs_name]
+        if self.in_robot_frame:
+            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
+
+        dims = index_to_dims(self.index)
+
+        linvel = linvel[..., dims]
+        robot_vel_cmd = trajectory.command[self.command_name]
+        robot_vel_cmd = robot_vel_cmd[..., dims]
+
+        vel_error = xax.get_norm(linvel - robot_vel_cmd, self.norm).sum(axis=-1)
+
+        return jnp.exp(-vel_error / self.error_scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
