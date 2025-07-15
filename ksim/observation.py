@@ -190,7 +190,7 @@ class HistoryObservation(StatefulObservation):
             obs_carry=None,
         )
 
-        sample_val = jax.vmap(self.observation.observe, in_axes=(0, None, None))(dummy_input, jnp.asarray(0.0), rng)
+        sample_val = self.observation.observe(dummy_input, jnp.asarray(0.0), rng)
         repeat_shape = (self.history_length,) + sample_val.shape
         return jnp.zeros(repeat_shape, dtype=sample_val.dtype)
 
