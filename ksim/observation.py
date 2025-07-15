@@ -4,6 +4,7 @@ __all__ = [
     "ObservationInput",
     "Observation",
     "StatefulObservation",
+    "HistoryObservation",
     "BasePositionObservation",
     "BaseOrientationObservation",
     "BaseLinearVelocityObservation",
@@ -166,6 +167,7 @@ class StatefulObservation(Observation):
         """
 
 
+@attrs.define(frozen=True, kw_only=True)
 class HistoryObservation(StatefulObservation):
     """Wraps another *non-stateful* observation and returns a rolling history buffer of its values."""
 
@@ -176,8 +178,21 @@ class HistoryObservation(StatefulObservation):
         return f"historical_{self.observation.get_name()}"
 
     def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
-        """Return None – buffer is initialised on the first step."""
-        return None
+        """Create a zero-filled history buffer.
+
+        We evaluate the wrapped observation once (with empty commands) purely
+        to discover the output shape and dtype, then create a buffer of zeros
+        with shape ``(history_length, *obs_shape)``.
+        """
+        dummy_input = ObservationInput(
+            commands=xax.FrozenDict(),
+            physics_state=physics_state,
+            obs_carry=None,
+        )
+
+        sample_val = jax.vmap(self.observation.observe, in_axes=(0, None, None))(dummy_input, jnp.asarray(0.0), rng)
+        repeat_shape = (self.history_length,) + sample_val.shape
+        return jnp.zeros(repeat_shape, dtype=sample_val.dtype)
 
     def observe_stateful(
         self,
@@ -197,9 +212,6 @@ class HistoryObservation(StatefulObservation):
         current_val = self.observation.observe(state, curriculum_level, obs_rng)
 
         buffer = state.obs_carry
-
-        if buffer is None:
-            buffer = jnp.zeros((self.history_length,) + current_val.shape, dtype=current_val.dtype)
 
         new_buffer = jnp.roll(buffer, shift=-1, axis=0)
         new_buffer = new_buffer.at[-1].set(current_val)
