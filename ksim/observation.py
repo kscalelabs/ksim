@@ -28,6 +28,7 @@ __all__ = [
     "FeetOrientationObservation",
     "TimestepObservation",
     "ActPosObservation",
+    "HistoryObservation",
 ]
 
 import functools
@@ -163,6 +164,49 @@ class StatefulObservation(Observation):
             physics_state: The current physics state
             rng: A PRNGKeyArray to use for the noise
         """
+
+
+class HistoryObservation(StatefulObservation):
+    """Wraps another *non-stateful* observation and returns a rolling history buffer of its values."""
+
+    observation: Observation = attrs.field()
+    history_length: int = attrs.field(default=1, validator=attrs.validators.ge(1))
+
+    def get_name(self) -> str:
+        return f"historical_{self.observation.get_name()}"
+
+    def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
+        """Return None – buffer is initialised on the first step."""
+        return None
+
+    def observe_stateful(
+        self,
+        state: ObservationInput,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, PyTree]:
+        """Return the history buffer and the updated carry.
+
+        1.  Shift the existing buffer one step towards the front.
+        2.  Insert the newly computed observation at the last position.
+        3.  Return the **updated** buffer (flattened) as the observation and the
+            buffer itself as the next carry.
+        """
+        rng, obs_rng = jax.random.split(rng)
+
+        current_val = self.observation.observe(state, curriculum_level, obs_rng)
+
+        buffer = state.obs_carry
+
+        if buffer is None:
+            buffer = jnp.zeros((self.history_length,) + current_val.shape, dtype=current_val.dtype)
+
+        new_buffer = jnp.roll(buffer, shift=-1, axis=0)
+        new_buffer = new_buffer.at[-1].set(current_val)
+
+        history_flat = jnp.ravel(new_buffer)
+
+        return history_flat, new_buffer
 
 
 @attrs.define(frozen=True, kw_only=True)
