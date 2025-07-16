@@ -29,7 +29,6 @@ __all__ = [
     "FeetOrientationObservation",
     "TimestepObservation",
     "ActPosObservation",
-    "HistoryObservation",
 ]
 
 import functools
@@ -178,12 +177,7 @@ class HistoryObservation(StatefulObservation):
         return f"historical_{self.observation.get_name()}"
 
     def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
-        """Create a zero-filled history buffer.
-
-        We evaluate the wrapped observation once (with empty commands) purely
-        to discover the output shape and dtype, then create a buffer of zeros
-        with shape ``(history_length, *obs_shape)``.
-        """
+        """Create a zero-filled history buffer by evaluating with a dummy input."""
         dummy_input = ObservationInput(
             commands=xax.FrozenDict(),
             physics_state=physics_state,
@@ -204,7 +198,7 @@ class HistoryObservation(StatefulObservation):
 
         1.  Shift the existing buffer one step towards the front.
         2.  Insert the newly computed observation at the last position.
-        3.  Return the **updated** buffer (flattened) as the observation and the
+        3.  Return the updated buffer (flattened) as the observation and the
             buffer itself as the next carry.
         """
         rng, obs_rng = jax.random.split(rng)
