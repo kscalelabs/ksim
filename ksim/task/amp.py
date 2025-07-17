@@ -468,14 +468,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
-        # Split RNGs: one for real motion sampling, one for simulated trajectory subsampling,
-        # one for discriminator noise, and one (optionally) for probabilistic update gating.
         rng, rng_disc, rng_noise, rng_update = jax.random.split(rng, 4)
 
-        # Further split the discriminator RNG so that real-motion and simulated-trajectory
-        # sampling use different keys. This avoids correlation between the two draws while
-        # preserving determinism under JIT.
-        rng_real, rng_sim = jax.random.split(rng_disc)
         carry, metrics, logged_traj = super()._single_step(
             trajectories=trajectories,
             rewards=rewards,
@@ -536,7 +530,6 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
             return (new_model_arr_i, new_opt_state_i), merged_metrics_i
 
-        # Prepare RNGs for each discriminator pass.
         pass_rngs = jax.random.split(rng_disc, self.config.disc_num_passes)
 
         (new_model_arr, new_opt_state), disc_metrics_all = xax.scan(
