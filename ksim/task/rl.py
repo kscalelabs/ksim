@@ -280,7 +280,6 @@ def get_commands(
         rng, cmd_rng = jax.random.split(rng)
         command_name = command_generator.command_name
         prev_command = prev_commands[command_name]
-        assert isinstance(prev_command, Array)
         command_val = command_generator(prev_command, physics_state.data, curriculum_level, cmd_rng)
         command_dict[command_name] = command_val
     return xax.FrozenDict(command_dict)

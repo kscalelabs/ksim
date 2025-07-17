@@ -387,7 +387,10 @@ class JoystickCommand(Command):
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jax.tree.map(lambda x, y: jnp.where(switch_mask, x, y), new_commands, prev_command)
+        return {
+            "command": jnp.where(switch_mask, new_commands["command"], prev_command["command"]),
+            "vels": jnp.where(switch_mask, new_commands["vels"], prev_command["vels"]),
+        }
 
     def get_markers(self) -> Collection[Marker]:
         """Get the visualizations for the command.
