@@ -706,6 +706,8 @@ class JoystickReward(Reward):
     pos_y_scale: float = attrs.field(default=0.25)
     rot_z_scale: float = attrs.field(default=0.25)
     ang_penalty_ratio: float = attrs.field(default=2.0)
+    smoothing_sigma: float = attrs.field(default=3.0)
+    smoothing_window_size: int = attrs.field(default=25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
@@ -716,10 +718,10 @@ class JoystickReward(Reward):
         # Gets the target X, Y, and Yaw velocities.
         tgts = joystick_cmd[..., -3:]
 
-        def smooth_kernel(x_t: Array, window_size: int = 25, sigma: float = 3.0) -> Array:
-            x_t = jnp.pad(x_t, ((window_size - 1, 0),), mode="edge")
-            inds = jnp.arange(-window_size, 0)  # Only look to the left
-            kernel = jnp.exp(-(inds**2) / (2 * sigma**2))
+        def smooth_kernel(x_t: Array) -> Array:
+            x_t = jnp.pad(x_t, ((self.smoothing_window_size - 1, 0),), mode="edge")
+            inds = jnp.arange(-self.smoothing_window_size, 0)  # Only look to the left
+            kernel = jnp.exp(-(inds**2) / (2 * self.smoothing_sigma**2))
             kernel = kernel / kernel.sum()
             return jnp.convolve(x_t, kernel, mode="valid")
 
