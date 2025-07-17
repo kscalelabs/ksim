@@ -47,8 +47,8 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.debugging import JitLevel
 from ksim.commands import JoystickCommandValue
+from ksim.debugging import JitLevel
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
 from ksim.utils.validators import (
