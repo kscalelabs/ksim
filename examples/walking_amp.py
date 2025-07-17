@@ -27,6 +27,8 @@ NUM_JOINTS = 21
 
 NUM_INPUTS = 2 + 1 + 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3
 
+NUM_INPUTS += NUM_JOINTS * 2  # history of joint positions
+
 
 class DefaultHumanoidActor(eqx.Module):
     """MLP-based actor for the walking task."""
@@ -64,7 +66,7 @@ class DefaultHumanoidActor(eqx.Module):
         std_nm = prediction_n[self.num_outputs :]
 
         # Softplus and clip to ensure positive standard deviations.
-        std_nm = jnp.clip(jax.nn.softplus(std_nm), max=10.0)
+        std_nm = jnp.clip(jax.nn.softplus(std_nm + 1.0), max=10.0)
         dist_n = distrax.Normal(mean_nm, std_nm)
         return dist_n
 
@@ -219,7 +221,7 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
         help="The number of mixtures for the actor.",
     )
     hidden_size: int = xax.field(
-        value=512,
+        value=1024,
         help="The hidden size for the MLPs.",
     )
     depth: int = xax.field(
@@ -233,7 +235,7 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
         help="The hidden size for the discriminator.",
     )
     discriminator_depth: int = xax.field(  # This affects the perceptive field i think
-        value=3,
+        value=2,
         help="The depth for the discriminator.",
     )
     num_frames: int = xax.field(
@@ -247,8 +249,12 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
         help="Learning rate for PPO.",
     )
     adam_weight_decay: float = xax.field(
-        value=0.0,
+        value=5e-4,
         help="Weight decay for the Adam optimizer.",
+    )
+    disc_adam_weight_decay: float = xax.field(
+        value=5e-4,
+        help="Weight decay for the Adam optimizer for the discriminator.",
     )
     max_discriminator_grad_norm: float = xax.field(
         value=2.0,
@@ -303,13 +309,16 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
-        return mujoco.MjModel.from_xml_path(mjcf_path)
+        model = mujoco.MjModel.from_xml_path(mjcf_path)
+        names_to_idxs = ksim.get_geom_data_idx_by_name(model)
+        model.geom_priority[names_to_idxs["floor"]] = 2.0
+        return model
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
         return ksim.Metadata.from_model(
             mj_model,
-            kp=1.0,
-            kd=0.1,
+            kp=10.0,
+            kd=1.0,
             armature=1e-2,
             friction=1e-6,
         )
@@ -327,19 +336,22 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
-            ksim.StaticFrictionRandomizer(),
-            ksim.ArmatureRandomizer(),
-            ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "torso"),
-            ksim.JointDampingRandomizer(),
-            ksim.JointZeroPositionRandomizer(),
+            # ksim.StaticFrictionRandomizer(),
+            # ksim.ArmatureRandomizer(),
+            # ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "torso"),
+            # ksim.JointDampingRandomizer(),
+            # ksim.JointZeroPositionRandomizer(),
+            ksim.FloorFrictionRandomizer.from_geom_name(
+                model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=0.9
+            ),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            ksim.LinearPushEvent(
-                linvel=0.3,
-                interval_range=(0.25, 0.75),
-            ),
+            # ksim.LinearPushEvent(
+            #     linvel=0.3,
+            #     interval_range=(0.25, 0.75),
+            # ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
@@ -353,6 +365,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             ksim.JointPositionObservation(),
+            ksim.HistoryObservation(observation=ksim.JointPositionObservation(), history_length=3),
             ksim.JointVelocityObservation(),
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
@@ -418,13 +431,13 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.AMPReward(scale=20.0),
-            ksim.StayAliveReward(scale=1000.0, balance=1000.0),
-            ksim.XYAngularVelocityPenalty(scale=-0.01),
+            ksim.AMPReward(scale=10.0),
+            # ksim.StayAliveReward(scale=10.0, balance=10.0),
+            # ksim.XYAngularVelocityPenalty(scale=-0.01),
             ksim.AngularVelocityTrackingReward(
                 index=("z"),
                 command_name="float_vector_command",
-                scale=5.0,
+                scale=2.0,
             ),
             # ksim.UprightReward(scale=2.0),
             # ksim.NaiveForwardReward(clip_max=1.0, scale=1.0),
@@ -466,10 +479,10 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         )
 
     def get_discriminator_model(self, key: PRNGKeyArray) -> DefaultHumanoidDiscriminator:
-        joint_inputs = NUM_JOINTS * 2  # sin, cos, velocity (temp no velocity)
+        joint_inputs = NUM_JOINTS * 3  # sin, cos, velocity (temp no velocity)
         hand_inputs = 3 * 2  # xyz, left right
         feet_inputs = 3 * 2  # xyz, left right
-        base_inputs = 6  # lin vel, ang vel
+        base_inputs = 7  # lin vel, ang vel
         features_per_frame = joint_inputs + hand_inputs + feet_inputs + base_inputs
         return DefaultHumanoidDiscriminator(
             key,
@@ -490,6 +503,12 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
             optax.clip_by_global_norm(self.config.max_discriminator_grad_norm),
             optax.adam(self.config.discriminator_learning_rate),
         )
+
+        if self.config.disc_adam_weight_decay > 0.0:
+            optimizer = optax.chain(
+                optax.clip_by_global_norm(self.config.max_discriminator_grad_norm),
+                optax.adamw(self.config.discriminator_learning_rate, weight_decay=self.config.disc_adam_weight_decay),
+            )
         return optimizer
 
     def call_discriminator(
@@ -511,8 +530,8 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         # Delete this later
         sin_cos_joints = jnp.concatenate([joints, jnp.cos(joints)], axis=-1)
 
-        # features_t = jnp.concatenate([sin_cos_joints, qvel, hand_pos, feet_pos], axis=-1)
-        features_t = jnp.concatenate([sin_cos_joints, qvel[..., :6], hand_pos, feet_pos], axis=-1)
+        features_t = jnp.concatenate([sin_cos_joints, qvel, hand_pos, feet_pos, qpos[..., 2:3]], axis=-1)
+        # features_t = jnp.concatenate([sin_cos_joints, qvel[..., :6], hand_pos, feet_pos], axis=-1)
 
         num_frames = self.config.num_frames
         timesteps = features_t.shape[0]
@@ -542,6 +561,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         npz = np.load(traj_path, allow_pickle=True)
 
         qpos = jnp.array(npz["qpos"])[100:-70]
+        qpos = qpos.at[:, 2].add(-0.15)
 
         if float(npz["frequency"]) != 1 / self.config.ctrl_dt:
             raise ValueError(f"Motion frequency {npz['frequency']} does not match ctrl_dt {self.config.ctrl_dt}")
@@ -680,7 +700,8 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
     ) -> distrax.Distribution:
         timestep_1 = observations["timestep_observation"]
-        dh_joint_pos_j = observations["joint_position_observation"]
+        # dh_joint_pos_j = observations["joint_position_observation"]
+        dh_joint_pos_j = observations["historical_joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
@@ -724,7 +745,8 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, Array],
     ) -> Array:
         timestep_1 = observations["timestep_observation"]
-        dh_joint_pos_j = observations["joint_position_observation"]
+        # dh_joint_pos_j = observations["joint_position_observation"]
+        dh_joint_pos_j = observations["historical_joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
         com_vel_n = observations["center_of_mass_velocity_observation"]
@@ -829,13 +851,15 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             iterations=3,
             ls_iterations=5,
-            rollout_length_seconds=8.0,
+            rollout_length_seconds=4.0,
+            render_length_seconds=8.0,
             # PPO parameters
-            # gamma=0.97,
-            gamma=0.95,
-            # lam=0.95,
-            lam=0.98,
-            entropy_coef=0.0001,
+            # gamma=0.95,
+            # lam=0.98,
+            gamma=0.99,
+            lam=0.95,
+            # entropy_coef=0.0001,
+            entropy_coef=0.01,
             learning_rate=3e-4,
             clip_param=0.3,
             global_grad_clip=1.0,

@@ -459,7 +459,9 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
-        rng, rng_disc, rng_noise = jax.random.split(rng, 3)
+        # Split the RNG so that we can independently decide whether to update the
+        # discriminator this step (1/16 probability).
+        rng, rng_disc, rng_noise, rng_update = jax.random.split(rng, 4)
         carry, metrics, logged_traj = super()._single_step(
             trajectories=trajectories,
             rewards=rewards,
@@ -496,13 +498,28 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             rng=rng_noise,
         )
 
-        # Applies the gradients with clipping.
+        # Use RNG to give a 1/16 probabilistic chance of actually applying the
+        # discriminator update. When `should_update` is False we zero-out the
+        # gradients so that the optimiser performs a no-op update while keeping
+        # shapes intact for JIT compilation.
+        # should_update = jax.random.randint(rng_update, (), 0, 16) == 0
+
+        # gated_grads = jax.tree_util.tree_map(
+        #     lambda g: jnp.where(should_update, g, jnp.zeros_like(g)),
+        #     grads,
+        # )
+
+        gated_grads = grads
+
+        # Applies the (possibly gated) gradients with clipping.
         new_model_arr, new_opt_state, disc_grad_metrics = self.apply_gradients_with_clipping(
             model_arr=model_arr,
-            grads=grads,
+            grads=gated_grads,
             optimizer=optimizer,
             opt_state=opt_state,
         )
+
+        # disc_metrics = xax.FrozenDict(disc_metrics.unfreeze() | {"disc_update": should_update.astype(jnp.float32)})
 
         # Updates the carry with the new model and optimizer states.
         carry = replace(
@@ -546,8 +563,10 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-    @staticmethod  # ensure consistent calling convention
+    # Note: using an instance method (instead of staticmethod) so we can access
+    # configuration parameters such as ``amp_reference_noise``.
     def _make_real_batch(
+        self,
         motions: PyTree,
         window_t: int,
         batch_b: int,
@@ -565,10 +584,11 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             A PyTree with the same structure as ``motions`` whose leaves have
             shape (batch_b, window_t, ...).
         """
+        # Split keys for clip selection, per 0sample selection and noise generation.
         num_motions = jax.tree_util.tree_leaves(motions)[0].shape[0]
 
-        keys = jax.random.split(rng, batch_b + 1)
-        clip_key, sample_keys = keys[0], keys[1:]
+        keys = jax.random.split(rng, batch_b + 2)  # +1 for clip_key, +1 for noise
+        clip_key, *sample_keys, noise_key = keys
 
         # Sample which clip each element in the batch comes from.
         clip_idx = jax.random.randint(clip_key, (batch_b,), 0, num_motions)
@@ -582,4 +602,23 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             start = jax.random.randint(rng_key, (), 0, t_real)  # unbiased start index
             return jax.tree_util.tree_map(lambda arr: _loop_slice(arr, start, window_t), clip)
 
-        return jax.vmap(_sample_single)(batch_clips, sample_keys)
+        batch = jax.vmap(_sample_single)(batch_clips, jnp.stack(sample_keys))
+
+        # Optionally add small Gaussian noise to mitigate discriminator overfitting.
+        noise_std = self.config.amp_reference_noise
+        if noise_std > 0:
+            # Generate a matching noise PyTree.
+            def _add_noise(arr: Array, key: PRNGKeyArray) -> Array:
+                noise = jax.random.normal(key, shape=arr.shape, dtype=arr.dtype)
+                return arr + noise * noise_std
+
+            # Create a tree of keys matching the structure.
+            flat, treedef = jax.tree_util.tree_flatten(batch)
+            noise_keys = jax.random.split(noise_key, len(flat))
+            noised_flat = [
+                _add_noise(arr, k) if arr.dtype in (jnp.float32, jnp.float64) else arr
+                for arr, k in zip(flat, noise_keys, strict=False)
+            ]
+            batch = jax.tree_util.tree_unflatten(treedef, noised_flat)
+
+        return batch

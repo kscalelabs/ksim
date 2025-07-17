@@ -1927,7 +1927,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             carry_fn = xax.vmap(self.get_initial_model_carry, in_axes=(None, 0), jit_level=JitLevel.INITIALIZATION)
             command_fn = xax.vmap(get_initial_commands, in_axes=(0, 0, None, 0), jit_level=JitLevel.INITIALIZATION)
             reward_carry_fn = xax.vmap(get_initial_reward_carry, in_axes=(0, None), jit_level=JitLevel.INITIALIZATION)
-            obs_carry_fn = xax.vmap(get_initial_obs_carry, in_axes=(0, None, None), jit_level=JitLevel.INITIALIZATION)
+            obs_carry_fn = xax.vmap(get_initial_obs_carry, in_axes=(0, 0, None), jit_level=JitLevel.INITIALIZATION)
 
             # Gets the initial curriculum state.
             curriculum_fn = rollout_constants.curriculum.get_initial_state
