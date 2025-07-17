@@ -181,7 +181,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=1e-3,
+        value=3e-4,
         help="Learning rate for PPO.",
     )
     warmup_steps: int = xax.field(
@@ -189,7 +189,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The number of steps to warm up the learning rate.",
     )
     adam_weight_decay: float = xax.field(
-        value=0.0,
+        value=1e-5,
         help="Weight decay for the Adam optimizer.",
     )
 
@@ -224,8 +224,7 @@ Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         return optax.chain(
-            optax.add_decayed_weights(self.config.adam_weight_decay),
-            optax.scale_by_adam(),
+            optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay),
             optax.scale_by_schedule(
                 optax.warmup_constant_schedule(
                     init_value=0.0,
