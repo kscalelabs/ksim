@@ -244,8 +244,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             mj_model,
             kp=100.0,
             kd=5.0,
-            armature=1e-4,
-            friction=1e-6,
+            armature=0.01,
+            friction=0.1,
         )
 
     def get_actuators(
@@ -356,9 +356,9 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.StayAliveReward(scale=5.0),
+            ksim.StayAliveReward(scale=25.0),
             ksim.JoystickReward(scale=1.0),
-            ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
+            # ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:

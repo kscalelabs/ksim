@@ -726,6 +726,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> Metadata:  # pyright: ignore[reportAttributeAccessIssue]
         return Metadata.from_model(mj_model)
 
+    def update_mj_model(self, mj_model: mujoco.MjModel, metadata: Metadata) -> None:  # pyright: ignore[reportAttributeAccessIssue]
+        joint_ids = {joint_name: i for i, joint_name in enumerate(get_joint_names_in_order(mj_model))}
+        for joint_name, joint_metadata in metadata.joint_name_to_metadata.items():
+            joint_id = joint_ids[joint_name]
+            dof_id = mj_model.jnt_dofadr[joint_id]
+            if joint_metadata.armature is not None:
+                mj_model.dof_armature[dof_id] = joint_metadata.armature
+            if joint_metadata.friction is not None:
+                mj_model.dof_frictionloss[dof_id] = joint_metadata.friction
+
     def get_mjx_model(self, mj_model: mujoco.MjModel) -> mjx.Model:  # pyright: ignore[reportAttributeAccessIssue]
         """Convert a mujoco model to an mjx model.
 
@@ -1636,6 +1646,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
+            self.update_mj_model(mj_model, metadata)
             log_joint_config_table(mj_model, metadata, self.logger)
 
             randomizers = self.get_physics_randomizers(mj_model)
@@ -1653,7 +1664,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             constants = self._get_constants(
-                mj_model=mj_model,
+                metadata=metadata,
                 physics_model=mj_model,
                 model_statics=model_statics,
                 argmax_action=argmax_action,
@@ -1900,7 +1911,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def _get_constants(
         self,
         *,
-        mj_model: mujoco.MjModel,  # pyright: ignore[reportAttributeAccessIssue]
+        metadata: Metadata,
         physics_model: PhysicsModel,
         model_statics: tuple[PyTree, ...],
         argmax_action: bool,
@@ -1908,7 +1919,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if len(model_statics) < 1:
             raise ValueError("No models found")
 
-        metadata = self.get_mujoco_model_metadata(mj_model)
         engine = self.get_engine(physics_model, metadata)
         observations = self.get_observations(physics_model)
         commands = self.get_commands(physics_model)
@@ -2099,6 +2109,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model: PhysicsModel = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
+            self.update_mj_model(mj_model, metadata)
             log_joint_config_table(mj_model, metadata, self.logger)
 
             mjx_model = self.get_mjx_model(mj_model)
@@ -2120,7 +2131,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 save_path = self.exp_dir / f"dataset_{state.num_steps}.npz"
 
             rollout_constants = self._get_constants(
-                mj_model=mj_model,
+                metadata=metadata,
                 physics_model=mjx_model,
                 model_statics=model_statics,
                 argmax_action=argmax_action,
@@ -2169,6 +2180,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def initialize_rl_training(
         self,
         mj_model: PhysicsModel,
+        metadata: Metadata,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopConstants, RLLoopCarry, xax.State]:
         # Gets the model and optimizer variables.
@@ -2204,7 +2216,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         constants = RLLoopConstants(
             optimizer=tuple(optimizers),
             constants=self._get_constants(
-                mj_model=mj_model,
+                metadata=metadata,
                 physics_model=mjx_model,
                 model_statics=model_statics,
                 argmax_action=False,
@@ -2269,9 +2281,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             mj_model: PhysicsModel = self.get_mujoco_model()
             mj_model = self.set_mujoco_model_opts(mj_model)
             metadata = self.get_mujoco_model_metadata(mj_model)
+            self.update_mj_model(mj_model, metadata)
             log_joint_config_table(mj_model, metadata, self.logger)
 
-            constants, carry, state = self.initialize_rl_training(mj_model, rng)
+            constants, carry, state = self.initialize_rl_training(mj_model, metadata, rng)
 
             for name, leaf in xax.get_named_leaves(carry, max_depth=3):
                 aval = get_aval(leaf)

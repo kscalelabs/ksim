@@ -234,7 +234,7 @@ class JoystickCommandMarker(Marker):
 
     def _update_cylinder(self) -> None:
         self.geom = mujoco.mjtGeom.mjGEOM_CYLINDER  # pyright: ignore[reportAttributeAccessIssue]
-        self.scale = (self.size, self.size, self.arrow_len)
+        self.scale = (self.size, self.size, self.size)
         self.orientation = self.quat_from_direction((0.0, 0.0, 1.0))
 
     def update(self, trajectory: Trajectory) -> None:
