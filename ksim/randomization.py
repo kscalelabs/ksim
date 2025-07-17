@@ -285,13 +285,16 @@ class IMUAlignmentRandomizer(PhysicsRandomizer):
 
         # Apply rotation offset to IMU site.
         site_id = get_site_data_idx_by_name(model)[self.site_name]
-        new_site_quat = model.site_quat.at[site_id].set(xax.quat_mul(q_offset, model.site_quat[site_id]))
+        new_site_quat = model.site_quat.copy()
+        new_site_quat[site_id] = xax.quat_mul(q_offset, new_site_quat[site_id])
         updates = {"site_quat": new_site_quat}
 
         # Translation noise.
         if self.translate_std_m is not None and self.translate_std_m > 0.0:
             rng, sub = jax.random.split(rng)
             dpos = jax.random.normal(sub, (3,)) * self.translate_std_m
-            updates["site_pos"] = model.site_pos.at[site_id].add(dpos)
+            new_site_pos = model.site_pos.copy()
+            new_site_pos[site_id] += dpos
+            updates["site_pos"] = new_site_pos
 
         return updates
