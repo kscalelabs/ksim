@@ -59,15 +59,6 @@
       <default class="knee">
         <joint pos="0 0 .02" axis="0 -1 0" range="-160 2"/>
       </default>
-      <default class="ankle">
-        <joint range="-50 50"/>
-        <default class="ankle_y">
-          <joint pos="0 0 .08" axis="0 1 0" stiffness="6"/>
-        </default>
-        <default class="ankle_x">
-          <joint pos="0 0 .04" stiffness="3"/>
-        </default>
-      </default>
       <default class="shoulder">
         <joint range="-85 60"/>
       </default>
@@ -106,10 +97,8 @@
             <body name="shin_right" pos="0 .01 -.4">
               <joint name="knee_right" class="knee"/>
               <geom name="shin_right" class="shin"/>
-              <body name="foot_right" pos="0.05 0.02 -.39">
+              <body name="foot_right" pos="0.0 0.0 -.39">
                 <site name="right_foot" />
-                <joint name="ankle_y_right" class="ankle_y"/>
-                <joint name="ankle_x_right" class="ankle_x" axis="1 0 .5"/>
                 <geom name="foot_right" type="sphere" size="0.05" pos="0 0 0"/>
               </body>
             </body>
@@ -122,10 +111,8 @@
             <body name="shin_left" pos="0 -.01 -.4">
               <joint name="knee_left" class="knee"/>
               <geom name="shin_left" fromto="0 0 0 0 0 -.3" class="shin"/>
-              <body name="foot_left" pos="0.05 -0.02 -.39">
+              <body name="foot_left" pos="0.0 0.0 -.39">
                 <site name="left_foot" />
-                <joint name="ankle_y_left" class="ankle_y"/>
-                <joint name="ankle_x_left" class="ankle_x" axis="-1 0 -.5"/>
                 <geom name="foot_left" type="sphere" size="0.05" pos="0 0 0"/>
               </body>
             </body>
@@ -175,14 +162,10 @@
     <motor name="hip_z_right_ctrl"     gear="40"  joint="hip_z_right"/>
     <motor name="hip_y_right_ctrl"     gear="120" joint="hip_y_right"/>
     <motor name="knee_right_ctrl"      gear="80"  joint="knee_right"/>
-    <motor name="ankle_x_right_ctrl"   gear="20"  joint="ankle_x_right"/>
-    <motor name="ankle_y_right_ctrl"   gear="20"  joint="ankle_y_right"/>
     <motor name="hip_x_left_ctrl"      gear="40"  joint="hip_x_left"/>
     <motor name="hip_z_left_ctrl"      gear="40"  joint="hip_z_left"/>
     <motor name="hip_y_left_ctrl"      gear="120" joint="hip_y_left"/>
     <motor name="knee_left_ctrl"       gear="80"  joint="knee_left"/>
-    <motor name="ankle_x_left_ctrl"    gear="20"  joint="ankle_x_left"/>
-    <motor name="ankle_y_left_ctrl"    gear="20"  joint="ankle_y_left"/>
     <motor name="shoulder1_right_ctrl" gear="20"  joint="shoulder1_right"/>
     <motor name="shoulder2_right_ctrl" gear="20"  joint="shoulder2_right"/>
     <motor name="elbow_right_ctrl"     gear="40"  joint="elbow_right"/>
@@ -212,10 +195,4 @@
     <touch name="left_foot_touch" site="left_foot" />
     <touch name="right_foot_touch" site="right_foot" />
   </sensor>
-
-  <keyframe>
-    <key name="boxer" qpos='0 0 1.4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'/>
-    <key name="relaxed" qpos='0 0 1.4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.71797 -0.52222 -1.54867 0.71797 -0.52222 -1.54867'/>
-    <key name="tpose" qpos='0 0 1.4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.813285 -0.49691 -1.745 -0.813285 -0.49691 -1.745'/>
-  </keyframe>
 </mujoco>

@@ -724,10 +724,12 @@ class JoystickReward(Reward):
             return jnp.convolve(x_t, kernel, mode="valid")
 
         # Smooths the target velocities.
-        trg_x, trg_y, trg_yaw = xax.vmap(smooth_kernel, in_axes=0, jit_level=JitLevel.HELPER_FUNCTIONS)(tgts.T)
+        trg_x, trg_y, trg_yaw = tgts.T
 
         # Gets the robot's current velocities and applies a smoothing kernel.
-        cur_x, cur_y, cur_yaw = trajectory.qvel[..., 0], trajectory.qvel[..., 1], trajectory.qvel[..., 5]
+        vels = jnp.stack([trajectory.qvel[..., 0], trajectory.qvel[..., 1], trajectory.qvel[..., 5]], axis=-1)
+        vels = xax.vmap(smooth_kernel, in_axes=0, jit_level=JitLevel.HELPER_FUNCTIONS)(vels.T)
+        cur_x, cur_y, cur_yaw = vels
 
         # Exponential kernel for the reward.
         pos_x_rew = jnp.exp(-jnp.abs(trg_x - cur_x) / self.pos_x_scale)

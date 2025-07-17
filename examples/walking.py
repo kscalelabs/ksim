@@ -15,7 +15,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 import ksim
 
-NUM_JOINTS = 21
+NUM_JOINTS = 17
 
 NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 8
 
@@ -27,14 +27,10 @@ ZEROS = [
     ("hip_z_right", 0.0),
     ("hip_y_right", math.radians(-25.0)),
     ("knee_right", math.radians(-50.0)),
-    ("ankle_y_right", math.radians(-25.0)),
-    ("ankle_x_right", 0.0),
     ("hip_x_left", 0.0),
     ("hip_z_left", 0.0),
     ("hip_y_left", math.radians(-25.0)),
     ("knee_left", math.radians(-50.0)),
-    ("ankle_y_left", math.radians(-25.0)),
-    ("ankle_x_left", 0.0),
     ("shoulder1_right", 0.0),
     ("shoulder2_right", 0.0),
     ("elbow_right", 0.0),
