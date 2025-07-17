@@ -13,7 +13,6 @@ __all__ = [
 
 import functools
 import logging
-import math
 from abc import ABC, abstractmethod
 from typing import Collection, Self
 
@@ -22,7 +21,7 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import xax
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
 from ksim.utils.validators import sample_probs_validator
@@ -41,7 +40,7 @@ class Command(ABC):
         physics_data: PhysicsData,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> Array:
+    ) -> PyTree:
         """Returns the initial command.
 
         Args:
@@ -61,7 +60,7 @@ class Command(ABC):
         physics_data: PhysicsData,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> Array:
+    ) -> PyTree:
         """Updates the command.
 
         Args:
@@ -222,25 +221,52 @@ class JoystickCommandMarker(Marker):
     arrow_len: float = attrs.field(default=0.25)
     height: float = attrs.field(default=0.5)
 
+    def _update_arrow(self, cmd_x: float, cmd_y: float) -> None:
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
+        mag = (cmd_x * cmd_x + cmd_y * cmd_y) ** 0.5
+        cmd_x, cmd_y = cmd_x / mag, cmd_y / mag
+        self.orientation = self.quat_from_direction((cmd_x, cmd_y, 0.0))
+        self.scale = (self.size, self.size, self.arrow_len * mag)
+
+    def _update_circle(self) -> None:
+        self.geom = mujoco.mjtGeom.mjGEOM_SPHERE  # pyright: ignore[reportAttributeAccessIssue]
+        self.scale = (self.size, self.size, self.size)
+
+    def _update_cylinder(self) -> None:
+        self.geom = mujoco.mjtGeom.mjGEOM_CYLINDER  # pyright: ignore[reportAttributeAccessIssue]
+        self.scale = (self.size, self.size, self.arrow_len)
+        self.orientation = self.quat_from_direction((0.0, 0.0, 1.0))
+
     def update(self, trajectory: Trajectory) -> None:
         """Visualizes the joystick command target position and orientation."""
         cmd = trajectory.command[self.command_name]
-        cmd_idx = cmd[..., :7].argmax().item()
+        cmd_idx, cmd_vel = cmd[..., :8].argmax().item(), cmd[..., 8:]
 
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
-        self.scale = (self.size, self.size, self.arrow_len)
-        self.pos = (0, 0, self.height)
-        self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
-        self.rgba = [
-            (1.0, 1.0, 1.0, 1.0),  # Stand still (white)
-            (0.0, 1.0, 0.0, 1.0),  # Walk forward (green)
-            (0.0, 0.0, 1.0, 1.0),  # Run forward (blue)
-            (1.0, 0.0, 0.0, 1.0),  # Walk backward (red)
-            (1.0, 0.0, 1.0, 1.0),  # Turn left (purple)
-            (0.0, 0.0, 0.0, 1.0),  # Turn right (black)
-            (0.0, 1.0, 1.0, 1.0),  # Strafe left (cyan)
-            (1.0, 1.0, 0.0, 1.0),  # Strafe right (yellow)
+        # Updates the marker color.
+        r, g, b = [
+            (1.0, 1.0, 1.0),  # Stand still (white)
+            (0.0, 1.0, 0.0),  # Walk forward (green)
+            (0.0, 0.0, 1.0),  # Run forward (blue)
+            (1.0, 0.0, 0.0),  # Walk backward (red)
+            (1.0, 0.0, 1.0),  # Turn left (purple)
+            (0.0, 0.0, 0.0),  # Turn right (black)
+            (0.0, 1.0, 1.0),  # Strafe left (cyan)
+            (1.0, 1.0, 0.0),  # Strafe right (yellow)
         ][cmd_idx]
+        self.rgba = (r, g, b, 1.0)
+
+        cmd_x, cmd_y = cmd_vel[..., 0], cmd_vel[..., 1]
+        self.pos = (0, 0, self.height)
+
+        match cmd_idx:
+            case 0:
+                self._update_circle()
+            case 1 | 2 | 3 | 6 | 7:
+                self._update_arrow(cmd_x, cmd_y)
+            case 4 | 5:
+                self._update_cylinder()
+            case _:
+                pass
 
     @classmethod
     def get(
@@ -313,7 +339,7 @@ class JoystickCommand(Command):
         cur_yaw = euler[..., 2]
 
         # Gets the target X, Y, and Yaw targets.
-        cmd_x, cmd_y, cmd_yaw = jnp.array(
+        cmd_tgts = jnp.array(
             [
                 [0.0, 0.0, 0.0],  # Stand still
                 [self.walk_speed, 0.0, 0.0],  # Walk forward
@@ -324,13 +350,16 @@ class JoystickCommand(Command):
                 [0.0, self.strafe_speed, 0.0],  # Strafe left
                 [0.0, -self.strafe_speed, 0.0],  # Strafe right
             ]
-        )[command]
+        )
+
+        cmd_tgt = cmd_tgts[command]
+        cmd_x, cmd_y, cmd_yaw = cmd_tgt[..., 0], cmd_tgt[..., 1], cmd_tgt[..., 2]
 
         # Rotates the command X and Y velocities to the robot's current yaw.
         cmd_x_rot = cmd_x * jnp.cos(cur_yaw) - cmd_y * jnp.sin(cur_yaw)
         cmd_y_rot = cmd_x * jnp.sin(cur_yaw) + cmd_y * jnp.cos(cur_yaw)
 
-        return jnp.array([cmd_x_rot, cmd_y_rot, cmd_yaw])
+        return jnp.stack([cmd_x_rot, cmd_y_rot, cmd_yaw], axis=-1)
 
     def initial_command(
         self,
@@ -340,7 +369,8 @@ class JoystickCommand(Command):
     ) -> Array:
         command = jax.random.choice(rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs))
         command_ohe = jax.nn.one_hot(command, num_classes=8)
-        return command_ohe
+        vel_tgts = self._get_vel_tgts(physics_data, command)
+        return jnp.concatenate([command_ohe, vel_tgts], axis=-1)
 
     def __call__(
         self,
@@ -390,7 +420,7 @@ class LinearVelocityCommandMarker(Marker):
         self.pos = (0.0, 0.0, self.height)
 
         # Always show an arrow with base_length plus scaling by speed
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
         arrow_length = self.base_length + self.arrow_scale * speed
         self.scale = (self.size, self.size, arrow_length)
 
@@ -414,7 +444,7 @@ class LinearVelocityCommandMarker(Marker):
         return cls(
             command_name=command_name,
             target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_ARROW,
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,  # pyright: ignore[reportAttributeAccessIssue]
             scale=(0.03, 0.03, base_length),
             arrow_scale=arrow_scale,
             height=height,

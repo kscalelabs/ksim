@@ -8,11 +8,17 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import xax
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 import ksim
 
-from .walking import NUM_INPUTS, NUM_JOINTS, ZEROS, HumanoidWalkingTask, HumanoidWalkingTaskConfig
+from .walking import (
+    NUM_INPUTS,
+    NUM_JOINTS,
+    ZEROS,
+    HumanoidWalkingTask,
+    HumanoidWalkingTaskConfig,
+)
 
 
 class Actor(eqx.Module):
@@ -231,8 +237,8 @@ class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config
     def run_actor(
         self,
         model: Actor,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
         carry: xax.TransformerCache,
         add_batch_dim: bool,
     ) -> tuple[xax.Distribution, xax.TransformerCache]:
@@ -277,8 +283,8 @@ class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config
     def run_critic(
         self,
         model: Critic,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
         carry: xax.TransformerCache,
         add_batch_dim: bool,
     ) -> tuple[Array, xax.TransformerCache]:
@@ -367,8 +373,8 @@ class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config
         model_carry: tuple[xax.TransformerCache, xax.TransformerCache],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:

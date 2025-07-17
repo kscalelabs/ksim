@@ -15,7 +15,7 @@ import mujoco
 import numpy as np
 import optax
 import xax
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 import ksim
 
@@ -306,14 +306,14 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         self.foot_left_id = ksim.get_body_data_idx_from_name(mj_model, "foot_left")
         self.foot_right_id = ksim.get_body_data_idx_from_name(mj_model, "foot_right")
 
-    def get_mujoco_model(self) -> mujoco.MjModel:
+    def get_mujoco_model(self) -> mujoco.MjModel:  # pyright: ignore[reportAttributeAccessIssue]
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
-        model = mujoco.MjModel.from_xml_path(mjcf_path)
+        model = mujoco.MjModel.from_xml_path(mjcf_path)  # pyright: ignore[reportAttributeAccessIssue]
         names_to_idxs = ksim.get_geom_data_idx_by_name(model)
         model.geom_priority[names_to_idxs["floor"]] = 2.0
         return model
 
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:  # pyright: ignore[reportAttributeAccessIssue]
         return ksim.Metadata.from_model(
             mj_model,
             kp=10.0,
@@ -695,9 +695,10 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
     def run_actor(
         self,
         model: DefaultHumanoidActor,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
-    ) -> xax.Distribution:
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
+        carry: Array,
+    ) -> tuple[xax.Distribution, Array]:
         timestep_1 = observations["timestep_observation"]
         # dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_pos_j = observations["historical_joint_position_observation"]
@@ -740,9 +741,10 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
     def run_critic(
         self,
         model: DefaultHumanoidCritic,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
-    ) -> Array:
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
+        carry: Array,
+    ) -> tuple[Array, Array]:
         timestep_1 = observations["timestep_observation"]
         # dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_pos_j = observations["historical_joint_position_observation"]
@@ -812,8 +814,8 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         model_carry: None,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
