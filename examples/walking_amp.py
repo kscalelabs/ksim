@@ -840,9 +840,9 @@ if __name__ == "__main__":
     #   python -m examples.walking_amp num_envs=8 num_batches=2
     HumanoidWalkingAMPTask.launch(
         HumanoidWalkingAMPTaskConfig(
-            num_envs=2048,
-            batch_size=256,
-            num_passes=10,
+            num_envs=8192,
+            batch_size=512,
+            num_passes=4,
             epochs_per_log_step=1,
             valid_every_n_steps=10,
             amp_grad_penalty_coef=1.0,
@@ -851,13 +851,16 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             iterations=3,
             ls_iterations=5,
-            rollout_length_seconds=4.0,
+            rollout_length_seconds=0.5,
             render_length_seconds=8.0,
             # PPO parameters
             # gamma=0.95,
             # lam=0.98,
             gamma=0.99,
             lam=0.95,
+            amp_reference_noise=0.0,
+            amp_reference_batch_size=512,
+            disc_num_passes=4,
             # entropy_coef=0.0001,
             entropy_coef=0.01,
             learning_rate=3e-4,

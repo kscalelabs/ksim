@@ -431,9 +431,14 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         disc_loss = real_disc_loss + sim_disc_loss + gp_loss
 
         disc_metrics = {
-            "real_logits": real_disc_logits,
-            "sim_logits": sim_disc_logits,
-            "gp_loss": gp_loss,
+            "disc_loss": disc_loss,
+            "disc_real_loss": real_disc_loss,
+            "disc_sim_loss": sim_disc_loss,
+            "disc_gp_loss": gp_loss,
+            "disc_real_logits_mean": real_disc_logits.mean(),
+            "disc_real_logits_std": real_disc_logits.std(),
+            "disc_sim_logits_mean": sim_disc_logits.mean(),
+            "disc_sim_logits_std": sim_disc_logits.std(),
         }
 
         return disc_loss, xax.FrozenDict(disc_metrics)
@@ -490,7 +495,9 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         sim_t = trajectories.done.shape[-1]
 
-        def disc_pass_fn(state: tuple[PyTree, optax.OptState], pass_rng: PRNGKeyArray):
+        def disc_pass_fn(
+            state: tuple[PyTree, optax.OptState], pass_rng: PRNGKeyArray
+        ) -> tuple[PyTree, xax.FrozenDict[str, Array]]:
             """Run a single discriminator gradient step."""
             model_arr_i, opt_state_i = state
 
@@ -539,8 +546,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             jit_level=JitLevel.RL_CORE,
         )
 
-        # Take metrics from the *last* discriminator pass.
-        disc_metrics = jax.tree.map(lambda x: x[-1], disc_metrics_all)
+        disc_metrics = jax.tree.map(lambda x: x.mean(0), disc_metrics_all)
 
         # Updates the carry with the new model and optimizer states.
         carry = replace(
@@ -553,9 +559,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         )
 
         # Combine metrics.
-        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(
-            metrics.unfreeze() | disc_metrics
-        )
+        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(metrics.unfreeze() | disc_metrics.unfreeze())
 
         return carry, metrics, logged_traj
 
@@ -663,9 +667,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         num_envs = trajectories.done.shape[0]
 
         if num_envs % batch_b != 0:
-            raise ValueError(
-                f"amp_reference_batch_size ({batch_b}) must divide num_envs ({num_envs})."
-            )
+            raise ValueError(f"amp_reference_batch_size ({batch_b}) must divide batch_size ({num_envs}).")
 
         indices = jax.random.permutation(rng, num_envs)[:batch_b]
 
