@@ -399,15 +399,9 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
     def run_actor(
         self,
         model: Actor,
-<<<<<<< HEAD
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
-    ) -> xax.Distribution:
-=======
         observations: xax.FrozenDict[str, PyTree],
         commands: xax.FrozenDict[str, PyTree],
-    ) -> distrax.Distribution:
->>>>>>> 4aebb57 (back to joystick velocity command)
+    ) -> xax.Distribution:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
