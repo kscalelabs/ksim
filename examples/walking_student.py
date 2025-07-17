@@ -402,7 +402,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
+        joystick_cmd_ohe_8 = commands["joystick_command"]["command"]
 
         obs_n = jnp.concatenate(
             [
@@ -437,7 +437,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
+        joystick_cmd_ohe_8 = commands["joystick_command"]["command"]
 
         obs_n = jnp.concatenate(
             [

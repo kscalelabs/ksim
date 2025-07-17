@@ -48,6 +48,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.debugging import JitLevel
+from ksim.commands import JoystickCommandValue
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
 from ksim.utils.validators import (
@@ -707,16 +708,15 @@ class JoystickReward(Reward):
     rot_z_scale: float = attrs.field(default=0.25)
     ang_penalty_ratio: float = attrs.field(default=2.0)
     smoothing_sigma: float = attrs.field(default=3.0)
-    smoothing_window_size: int = attrs.field(default=25)
+    smoothing_window_size: int = attrs.field(default=10)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
-        joystick_cmd = trajectory.command[self.command_name]
-        chex.assert_shape(joystick_cmd, (..., 11))
+        joystick_cmd: JoystickCommandValue = trajectory.command[self.command_name]
 
         # Gets the target X, Y, and Yaw velocities.
-        tgts = joystick_cmd[..., -3:]
+        tgts = joystick_cmd["vels"]
 
         def smooth_kernel(x_t: Array) -> Array:
             x_t = jnp.pad(x_t, ((self.smoothing_window_size - 1, 0),), mode="edge")
@@ -729,8 +729,8 @@ class JoystickReward(Reward):
         trg_x, trg_y, trg_yaw = tgts.T
 
         # Gets the robot's current velocities and applies a smoothing kernel.
-        vels = jnp.stack([trajectory.qvel[..., 0], trajectory.qvel[..., 1], trajectory.qvel[..., 5]], axis=-1)
-        vels = xax.vmap(smooth_kernel, in_axes=0, jit_level=JitLevel.HELPER_FUNCTIONS)(vels.T)
+        vels = jnp.stack([trajectory.qvel[..., 0], trajectory.qvel[..., 1], trajectory.qvel[..., 5]], axis=-1).T
+        vels = xax.vmap(smooth_kernel, in_axes=0, jit_level=JitLevel.HELPER_FUNCTIONS)(vels)
         cur_x, cur_y, cur_yaw = vels
 
         # Exponential kernel for the reward.

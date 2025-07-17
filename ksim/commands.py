@@ -14,7 +14,7 @@ __all__ = [
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Self
+from typing import Collection, Self, TypedDict
 
 import attrs
 import jax
@@ -56,7 +56,7 @@ class Command(ABC):
     @abstractmethod
     def __call__(
         self,
-        prev_command: Array,
+        prev_command: PyTree,
         physics_data: PhysicsData,
         curriculum_level: Array,
         rng: PRNGKeyArray,
@@ -295,6 +295,11 @@ class JoystickCommandMarker(Marker):
         )
 
 
+class JoystickCommandValue(TypedDict):
+    command: Array
+    vels: Array
+
+
 @attrs.define(frozen=True, kw_only=True)
 class JoystickCommand(Command):
     """Provides joystick-like controls for the robot.
@@ -366,23 +371,23 @@ class JoystickCommand(Command):
         physics_data: PhysicsData,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> Array:
+    ) -> JoystickCommandValue:
         command = jax.random.choice(rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs))
         command_ohe = jax.nn.one_hot(command, num_classes=8)
         vel_tgts = self._get_vel_tgts(physics_data, command)
-        return jnp.concatenate([command_ohe, vel_tgts], axis=-1)
+        return {"command": command_ohe, "vels": vel_tgts}
 
     def __call__(
         self,
-        prev_command: Array,
+        prev_command: JoystickCommandValue,
         physics_data: PhysicsData,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> Array:
+    ) -> JoystickCommandValue:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
+        return jax.tree.map(lambda x, y: jnp.where(switch_mask, x, y), new_commands, prev_command)
 
     def get_markers(self) -> Collection[Marker]:
         """Get the visualizations for the command.
@@ -486,7 +491,11 @@ class LinearVelocityCommand(Command):
         )
 
     def __call__(
-        self, prev_command: Array, physics_data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
     ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
