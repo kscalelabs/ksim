@@ -716,7 +716,7 @@ class JoystickReward(Reward):
         # Gets the target X, Y, and Yaw velocities.
         tgts = joystick_cmd[..., -3:]
 
-        def smooth_kernel(x_t: Array, window_size: int = 10, sigma: float = 3.0) -> Array:
+        def smooth_kernel(x_t: Array, window_size: int = 25, sigma: float = 3.0) -> Array:
             x_t = jnp.pad(x_t, ((window_size - 1, 0),), mode="edge")
             inds = jnp.arange(-window_size, 0)  # Only look to the left
             kernel = jnp.exp(-(inds**2) / (2 * sigma**2))
