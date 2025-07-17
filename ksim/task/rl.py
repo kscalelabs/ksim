@@ -669,7 +669,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if self.config.render_length_seconds > self.config.rollout_length_seconds:
             logger.info(
                 "The render length %ss is greater than the rollout length %ss! "
-                "Real algorithm metrics will not be logged. "
+                "Algorithm metrics will not be logged because the rendered trajectory was not used for training. "
                 "To log algorithm metrics, set the render length to be equal or less than the rollout length.",
                 self.config.render_length_seconds,
                 self.config.rollout_length_seconds,
