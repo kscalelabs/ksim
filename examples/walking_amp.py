@@ -231,7 +231,7 @@ class HumanoidWalkingAMPTaskConfig(ksim.AMPConfig):
 
     # Disciminator parameters.
     discriminator_hidden_size: int = xax.field(
-        value=512,
+        value=1024,
         help="The hidden size for the discriminator.",
     )
     discriminator_depth: int = xax.field(  # This affects the perceptive field i think
@@ -479,7 +479,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         )
 
     def get_discriminator_model(self, key: PRNGKeyArray) -> DefaultHumanoidDiscriminator:
-        joint_inputs = NUM_JOINTS * 3  # sin, cos, velocity (temp no velocity)
+        joint_inputs = NUM_JOINTS * 2  # sin, cos, velocity (temp no velocity)
         hand_inputs = 3 * 2  # xyz, left right
         feet_inputs = 3 * 2  # xyz, left right
         base_inputs = 7  # lin vel, ang vel
@@ -530,8 +530,8 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         # Delete this later
         sin_cos_joints = jnp.concatenate([joints, jnp.cos(joints)], axis=-1)
 
-        features_t = jnp.concatenate([sin_cos_joints, qvel, hand_pos, feet_pos, qpos[..., 2:3]], axis=-1)
-        # features_t = jnp.concatenate([sin_cos_joints, qvel[..., :6], hand_pos, feet_pos], axis=-1)
+        # features_t = jnp.concatenate([sin_cos_joints, qvel, hand_pos, feet_pos, qpos[..., 2:3]], axis=-1)
+        features_t = jnp.concatenate([sin_cos_joints, qvel[..., :6], hand_pos, feet_pos, qpos[..., 2:3]], axis=-1)
 
         num_frames = self.config.num_frames
         timesteps = features_t.shape[0]
@@ -841,7 +841,7 @@ if __name__ == "__main__":
     HumanoidWalkingAMPTask.launch(
         HumanoidWalkingAMPTaskConfig(
             num_envs=8192,
-            batch_size=512,
+            batch_size=1024,
             num_passes=4,
             epochs_per_log_step=1,
             valid_every_n_steps=10,
@@ -859,8 +859,8 @@ if __name__ == "__main__":
             gamma=0.99,
             lam=0.95,
             amp_reference_noise=0.0,
-            amp_reference_batch_size=512,
-            disc_num_passes=4,
+            amp_reference_batch_size=1024,
+            disc_num_passes=2,
             # entropy_coef=0.0001,
             entropy_coef=0.01,
             learning_rate=3e-4,
