@@ -1230,8 +1230,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Emojis are used in order to prevent conflicts with user-specified namespaces.
         for namespace, arr_dict in (
-            ("👀 obs images", logged_traj.trajectory.obs),
-            ("🕹️ command images", logged_traj.trajectory.command),
+            ("👀 obs images", xax.get_pytree_mapping(logged_traj.trajectory.obs)),
+            ("🕹️ command images", xax.get_pytree_mapping(logged_traj.trajectory.command)),
             ("🏃 action images", {"action": logged_traj.trajectory.action}),
             ("💀 termination images", logged_traj.trajectory.termination_components),
             ("🗓️ event images", logged_traj.trajectory.event_state),
