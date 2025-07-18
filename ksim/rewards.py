@@ -707,7 +707,7 @@ class JoystickReward(Reward):
     pos_y_scale: float = attrs.field(default=0.25)
     rot_z_scale: float = attrs.field(default=0.25)
     ang_penalty_ratio: float = attrs.field(default=2.0)
-    smoothing_sigma: float = attrs.field(default=3.0)
+    smoothing_sigma: float = attrs.field(default=5.0)
     smoothing_window_size: int = attrs.field(default=10)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -718,19 +718,19 @@ class JoystickReward(Reward):
         # Gets the target X, Y, and Yaw velocities.
         tgts = joystick_cmd["vels"]
 
-        # def smooth_kernel(x_t: Array) -> Array:
-        #     x_t = jnp.pad(x_t, ((self.smoothing_window_size - 1, 0),), mode="edge")
-        #     inds = jnp.arange(-self.smoothing_window_size, 0)  # Only look to the left
-        #     kernel = jnp.exp(-(inds**2) / (2 * self.smoothing_sigma**2))
-        #     kernel = kernel / kernel.sum()
-        #     return jnp.convolve(x_t, kernel, mode="valid")
+        def smooth_kernel(x_t: Array) -> Array:
+            x_t = jnp.pad(x_t, ((self.smoothing_window_size - 1, 0),), mode="edge")
+            inds = jnp.arange(-self.smoothing_window_size, 0)  # Only look to the left
+            kernel = jnp.exp(-(inds**2) / (2 * self.smoothing_sigma**2))
+            kernel = kernel / kernel.sum()
+            return jnp.convolve(x_t, kernel, mode="valid")
 
         # Smooths the target velocities.
         trg_x, trg_y, trg_yaw = tgts.T
 
         # Gets the robot's current velocities and applies a smoothing kernel.
         vels = jnp.stack([trajectory.qvel[..., 0], trajectory.qvel[..., 1], trajectory.qvel[..., 5]], axis=-1).T
-        # vels = xax.vmap(smooth_kernel, in_axes=0, jit_level=JitLevel.HELPER_FUNCTIONS)(vels)
+        vels = xax.vmap(smooth_kernel, in_axes=0, jit_level=JitLevel.HELPER_FUNCTIONS)(vels)
         cur_x, cur_y, cur_yaw = vels
 
         # Exponential kernel for the reward.
@@ -738,7 +738,13 @@ class JoystickReward(Reward):
         pos_y_rew = jnp.exp(-jnp.abs(trg_y - cur_y) / self.pos_y_scale)
         rot_z_rew = jnp.exp(-jnp.abs(trg_yaw - cur_yaw) / self.rot_z_scale)
 
-        return (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
+        reward = (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
+
+        # This hack seems to be required, for some reason, although it is not
+        # clear where the NaNs are coming from or how to reproduce them.
+        reward = jnp.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
+
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
