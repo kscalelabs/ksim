@@ -13,7 +13,7 @@ static-checks:
 	@ruff check ksim tests examples
 	@echo ""
 	@echo "=== Running MyPy ==="
-	@mypy --install-types --non-interactive ksim tests examples
+	@mypy ksim tests examples
 .PHONY: lint
 
 test:

@@ -4,6 +4,7 @@ import chex
 import distrax
 import jax
 import jax.numpy as jnp
+import pytest
 from jaxtyping import Array
 
 import ksim
@@ -88,6 +89,7 @@ def test_unit_interval_to_range_bijector() -> None:
     chex.assert_trees_all_close(log_det, -log_det_inv, atol=1e-6)
 
 
+@pytest.mark.slow
 def test_double_unit_interval_to_range_bijector() -> None:
     rng = jax.random.PRNGKey(1)
     mean = jax.random.uniform(rng, (DISTRIBUTION_SIZE,), minval=-1.0, maxval=1.0)

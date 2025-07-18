@@ -438,39 +438,24 @@ def solve_multi_body_ik(
     xtol: float = 1e-8,
     max_nfev: int = 2000,
     verbose: bool = False,
+    initial_guess: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Solves the IK for the multi-body system.
-
-    Args:
-        model: The Mujoco model
-        data: The Mujoco data
-        mj_base_id: The ID of the Mujoco base
-        constrained_jnt_mask: In order of the qpos array, 1 = fix to neutral pos
-        cartesian_pose: The Cartesian position with respect to the base
-        neutral_qpos: The neutral qpos
-        prev_qpos: The previous qpos
-        neutral_similarity_weight: The weight of the neutral similarity term
-        temporal_consistency_weight: The weight of the temporal consistency term
-        n_restarts: The number of random restarts to try
-        error_acceptance_threshold: The threshold for the error
-        ftol: The tolerance for the function value
-        xtol: The tolerance for the solution
-        max_nfev: The maximum number of function evaluations
-        verbose: Whether to print verbose output
-
-    Returns:
-        The complete qpos array after solving inverse kinematics.
-    """
+    """Solves the IK for the multi-body system."""
     best_result = None
     best_cost = float("inf")
 
-    for _ in range(n_restarts):
-        qpos = data.qpos[~constrained_jnt_mask]
-        initial_guess = qpos + np.random.normal(0, 0.1, size=qpos.shape)
+    for i in range(n_restarts):
+        # Determine the initial guess for the current restart
+        if i == 0 and initial_guess is not None:
+            current_initial_guess = initial_guess
+        else:
+            # For subsequent restarts, or if no initial_guess was provided, generate a random normal guess
+            qpos_unconstrained = data.qpos[~constrained_jnt_mask]
+            current_initial_guess = qpos_unconstrained + np.random.normal(0, 0.1, size=qpos_unconstrained.shape)
 
         result = least_squares(
             multi_body_ik_error,
-            initial_guess,
+            current_initial_guess,
             kwargs={
                 "model": model,
                 "data": data,
@@ -599,6 +584,7 @@ def generate_reference_motion(
             xtol=xtol,
             max_nfev=max_nfev,
             verbose=verbose,
+            initial_guess=previous_qpos[~constrained_jnt_mask],
         )
         qpos_reference_motion.append(qpos)
         previous_qpos = qpos  # Update previous qpos for the next frame
