@@ -83,6 +83,15 @@ from ksim.vis import Marker, configure_scene
 logger = logging.getLogger(__name__)
 
 
+def assert_distinct(names: Collection[str]) -> None:
+    """Checks that the names are distinct."""
+    names = list(names)
+    names_set = set(names)
+    if len(names) != len(names_set):
+        duplicates = [name for name in names_set if names.count(name) > 1]
+        raise ValueError(f"Names are not distinct! Found duplicates: {duplicates}")
+
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class RolloutEnvState:
@@ -456,7 +465,7 @@ class RLConfig(xax.Config):
         value=640,
         help="The height of the rendered images during the validation phase.",
     )
-    render_length_seconds: float | None = xax.field(
+    render_length_seconds: float = xax.field(
         value=5.0,
         help="The number of seconds to rollout each environment during evaluation.",
     )
@@ -554,6 +563,10 @@ class RLConfig(xax.Config):
         value=4,
         help="Size of the rolling buffer for computing live rewards",
     )
+    viewer_timeout_secs: float = xax.field(
+        value=10.0,
+        help="The timeout for the QT viewer.",
+    )
 
 
 Config = TypeVar("Config", bound=RLConfig)
@@ -582,6 +595,7 @@ def get_qt_viewer(
         camera_elevation=config.render_elevation,
         camera_lookat=config.render_lookat,
         track_body_id=config.render_track_body_id,
+        timeout_secs=config.viewer_timeout_secs,
     )
 
 
@@ -650,6 +664,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             raise ValueError(
                 f"The number of environments ({self.config.num_envs}) must be divisible by "
                 f"the batch size ({self.config.batch_size})"
+            )
+
+        if self.config.render_length_seconds > self.config.rollout_length_seconds:
+            logger.info(
+                "The render length %ss is greater than the rollout length %ss! "
+                "Algorithm metrics will not be logged because the rendered trajectory was not used for training. "
+                "To log algorithm metrics, set the render length to be equal or less than the rollout length.",
+                self.config.render_length_seconds,
+                self.config.rollout_length_seconds,
             )
 
     @functools.cached_property
@@ -803,10 +826,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def get_initial_model_carry(self, rng: PRNGKeyArray) -> PyTree | None:
+    def get_initial_model_carry(self, model: PyTree, rng: PRNGKeyArray) -> PyTree | None:
         """Returns the initial carry for the model.
 
         Args:
+            model: The model to get the initial carry for.
             rng: The random key to use.
 
         Returns:
@@ -859,6 +883,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     @property
     def rollout_length_steps(self) -> int:
         return round(self.config.rollout_length_seconds / self.config.ctrl_dt)
+
+    @property
+    def render_length_steps(self) -> int:
+        return round(self.config.render_length_seconds / self.config.ctrl_dt)
 
     @property
     def rollout_num_samples(self) -> int:
@@ -994,7 +1022,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         next_model_carry = jax.lax.cond(
             terminated,
-            lambda: self.get_initial_model_carry(carry_rng),
+            lambda: self.get_initial_model_carry(policy_model, carry_rng),
             lambda: action.carry,
         )
 
@@ -1160,7 +1188,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             log_callback: A callable function to run to log a given image.
         """
         # Clips the trajectory to the desired length.
-        if self.config.render_length_seconds is not None:
+        if self.config.render_length_seconds < self.config.rollout_length_seconds:
             logged_traj = self._crop_to_length(logged_traj, self.config.render_length_seconds)
 
         def create_plot_image(
@@ -1250,7 +1278,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             key: The logging key to use.
         """
         # Clips the trajectory to the desired length.
-        if self.config.render_length_seconds is not None:
+        if self.config.render_length_seconds < self.config.rollout_length_seconds:
             logged_traj = self._crop_to_length(logged_traj, self.config.render_length_seconds)
 
         # Logs the video of the trajectory.
@@ -1379,12 +1407,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> Trajectory:
         return trajectory
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.UNROLL)
+    @xax.jit(static_argnames=["self", "constants", "num_steps"], jit_level=JitLevel.UNROLL)
     def _single_unroll(
         self,
         constants: RolloutConstants,
         env_state: RolloutEnvState,
         shared_state: RolloutSharedState,
+        num_steps: int,
     ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
         # Applies randomizations to the model.
         shared_state = replace(
@@ -1404,7 +1433,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         env_state, trajectory = xax.scan(
             scan_fn,
             env_state,
-            length=self.rollout_length_steps,
+            length=num_steps,
             jit_level=JitLevel.UNROLL,
         )
 
@@ -1456,13 +1485,14 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             # Rolls out a new trajectory.
             vmapped_unroll = xax.vmap(
                 self._single_unroll,
-                in_axes=(None, 0, None),
+                in_axes=(None, 0, None, None),
                 jit_level=JitLevel.UNROLL,
             )
             trajectories, rewards, env_state = vmapped_unroll(
                 constants.constants,
                 carry_i.env_states,
                 carry_i.shared_state,
+                self.rollout_length_steps,
             )
 
             # Runs update on the previous trajectory.
@@ -1607,6 +1637,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rollout_constants=constants,
                 mj_model=mj_model,
                 physics_model=mj_model,
+                policy_model=models[0],
                 randomizers=randomizers,
             )
             shared_state = self._get_shared_state(
@@ -1860,6 +1891,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             raise ValueError("No terminations found! Must have at least one termination.")
         curriculum = self.get_curriculum(physics_model)
 
+        # Checks that the collections are distinct.
+        assert_distinct([observation.observation_name for observation in observations])
+        assert_distinct([command.command_name for command in commands])
+        assert_distinct([reward.reward_name for reward in rewards_terms])
+        assert_distinct([termination.termination_name for termination in terminations])
+
         return RolloutConstants(
             model_statics=model_statics,
             engine=engine,
@@ -1895,16 +1932,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         rollout_constants: RolloutConstants,
         mj_model: mujoco.MjModel,
         physics_model: PhysicsModel,
+        policy_model: PyTree,
         randomizers: Collection[PhysicsRandomizer],
     ) -> RolloutEnvState:
         rng, carry_rng, command_rng, rand_rng, rollout_rng, curriculum_rng, reward_rng = jax.random.split(rng, 7)
 
         if isinstance(physics_model, mjx.Model):
             # Defines the vectorized initialization functions.
-            carry_fn = xax.vmap(self.get_initial_model_carry, in_axes=0, jit_level=JitLevel.INITIALIZATION)
+            carry_fn = xax.vmap(self.get_initial_model_carry, in_axes=(None, 0), jit_level=JitLevel.INITIALIZATION)
             command_fn = xax.vmap(get_initial_commands, in_axes=(0, 0, None, 0), jit_level=JitLevel.INITIALIZATION)
             reward_carry_fn = xax.vmap(get_initial_reward_carry, in_axes=(0, None), jit_level=JitLevel.INITIALIZATION)
-            obs_carry_fn = xax.vmap(get_initial_obs_carry, in_axes=(0, None, None), jit_level=JitLevel.INITIALIZATION)
+            obs_carry_fn = xax.vmap(get_initial_obs_carry, in_axes=(0, 0, None), jit_level=JitLevel.INITIALIZATION)
 
             # Gets the initial curriculum state.
             curriculum_fn = rollout_constants.curriculum.get_initial_state
@@ -1935,7 +1973,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 ),
                 physics_state=physics_state,
                 randomization_dict=randomization_dict,
-                model_carry=carry_fn(jax.random.split(carry_rng, self.config.num_envs)),
+                model_carry=carry_fn(policy_model, jax.random.split(carry_rng, self.config.num_envs)),
                 reward_carry=reward_carry_fn(
                     jax.random.split(reward_rng, self.config.num_envs), rollout_constants.rewards
                 ),
@@ -1968,7 +2006,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 ),
                 physics_state=physics_state,
                 randomization_dict=randomization_dict,
-                model_carry=self.get_initial_model_carry(carry_rng),
+                model_carry=self.get_initial_model_carry(policy_model, carry_rng),
                 reward_carry=get_initial_reward_carry(reward_rng, rollout_constants.rewards),
                 obs_carry=get_initial_obs_carry(
                     rng=carry_rng, physics_state=physics_state, observations=rollout_constants.observations
@@ -2034,6 +2072,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rollout_constants=rollout_constants,
                 mj_model=mj_model,
                 physics_model=mjx_model,
+                policy_model=models[0],
                 randomizers=randomizations,
             )
             rollout_shared_state = self._get_shared_state(
@@ -2050,10 +2089,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
                 vmapped_unroll = xax.vmap(
                     self._single_unroll,
-                    in_axes=(None, 0, None),
+                    in_axes=(None, 0, None, None),
                     jit_level=JitLevel.UNROLL,
                 )
-                return vmapped_unroll(rollout_constants, rollout_env_state, rollout_shared_state)
+                return vmapped_unroll(
+                    rollout_constants, rollout_env_state, rollout_shared_state, self.rollout_length_steps
+                )
 
             with TrajectoryDataset.writer(save_path, num_batches * self.batch_size) as writer:
                 for _ in tqdm.trange(num_batches):
@@ -2114,6 +2155,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rollout_constants=constants.constants,
                 mj_model=mj_model,
                 physics_model=mjx_model,
+                policy_model=models[0],
                 randomizers=randomizers,
             ),
             shared_state=self._get_shared_state(
@@ -2224,13 +2266,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         if valid_step:
                             cur_time = time.monotonic()
                             full_render = cur_time - last_full_render_time > self.config.render_full_every_n_seconds
-                            self._log_logged_trajectory_video(
-                                logged_traj=logged_traj,
-                                markers=markers,
-                                viewer=viewer,
-                                key="full trajectory" if full_render else "trajectory",
-                            )
+
                             if full_render:
+                                if self.config.render_length_seconds > self.config.rollout_length_seconds:
+                                    long_traj, rewards, _ = self._single_unroll(
+                                        constants=constants.constants,
+                                        env_state=jax.tree.map(lambda arr: arr[-1], carry.env_states),
+                                        shared_state=carry.shared_state,
+                                        num_steps=self.render_length_steps,
+                                    )
+                                    logged_traj = LoggedTrajectory(
+                                        trajectory=long_traj, rewards=rewards, metrics=xax.FrozenDict()
+                                    )
+
                                 self._log_logged_trajectory_graphs(
                                     logged_traj=logged_traj,
                                     log_callback=lambda key, value, namespace: self.logger.log_image(
@@ -2239,7 +2287,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                         namespace=namespace,
                                     ),
                                 )
+
                                 last_full_render_time = cur_time
+
+                            self._log_logged_trajectory_video(
+                                logged_traj=logged_traj,
+                                markers=markers,
+                                viewer=viewer,
+                                key="trajectory",
+                            )
 
                         # Updates the step and sample counts.
                         num_steps = self.config.epochs_per_log_step

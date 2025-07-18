@@ -5,12 +5,15 @@ __all__ = [
     "FloatVectorCommand",
     "IntVectorCommand",
     "JoystickCommand",
+    "LinearVelocityCommand",
     "StartPositionCommand",
     "StartQuaternionCommand",
     "PositionCommand",
 ]
 
 import functools
+import logging
+import math
 from abc import ABC, abstractmethod
 from typing import Collection, Self
 
@@ -24,6 +27,8 @@ from jaxtyping import Array, PRNGKeyArray
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
 from ksim.utils.validators import sample_probs_validator
 from ksim.vis import Marker
+
+logger = logging.getLogger(__name__)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -205,40 +210,25 @@ class JoystickCommandMarker(Marker):
     height: float = attrs.field(default=0.5)
 
     def update(self, trajectory: Trajectory) -> None:
-        """Update the marker geometry to reflect the active joystick command."""
-        cmd_vec = jnp.asarray(trajectory.command[self.command_name])
-        cmd_idx: int = int(cmd_vec.argmax())
+        """Visualizes the joystick command target position and orientation."""
+        cmd = trajectory.command[self.command_name]
+        x, y, yaw = cmd[..., -3].item(), cmd[..., -2].item(), cmd[..., -1].item()
+        cmd_idx = cmd[..., :7].argmax().item()
 
-        self.pos = (0.0, 0.0, self.height)
-
-        if cmd_idx == 0:
-            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
-            self.scale = (self.radius, self.radius, self.radius)
-            self.rgba = (1.0, 1.0, 1.0, 0.8)
-
-        elif cmd_idx in (1, 2, 5, 6):
-            dir_map = {
-                1: (1.0, 0.0, 0.0),  # forward
-                2: (-1.0, 0.0, 0.0),  # backward
-                5: (0.0, 1.0, 0.0),  # strafe left
-                6: (0.0, -1.0, 0.0),  # strafe right
-            }
-            direction = dir_map[cmd_idx]
-            self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-            self.scale = (self.size, self.size, self.arrow_len)
-            self.orientation = self.quat_from_direction(direction)
-            self.rgba = (0.2, 0.8, 0.2, 0.8)
-
-        else:
-            self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-            self.scale = (self.size, self.size, self.arrow_len)
-
-            # Up for left-turn, down for right-turn (like right-hand rule).
-            direction = (0.0, 0.0, 1.0) if cmd_idx == 3 else (0.0, 0.0, -1.0)
-            self.orientation = self.quat_from_direction(direction)
-
-            # Blue for left-turn, orange for right-turn.
-            self.rgba = (0.2, 0.2, 1.0, 0.8) if cmd_idx == 3 else (1.0, 0.5, 0.0, 0.8)
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
+        self.scale = (self.size, self.size, self.arrow_len)
+        self.pos = (x, y, self.height)
+        self.orientation = self.quat_from_direction((math.cos(yaw), math.sin(yaw), 0.0))
+        self.rgba = [
+            (1.0, 1.0, 1.0, 1.0),  # Stand still (white)
+            (0.0, 1.0, 0.0, 1.0),  # Walk forward (green)
+            (0.0, 0.0, 1.0, 1.0),  # Run forward (blue)
+            (1.0, 0.0, 0.0, 1.0),  # Walk backward (red)
+            (1.0, 0.0, 1.0, 1.0),  # Turn left (purple)
+            (0.0, 0.0, 0.0, 1.0),  # Turn right (black)
+            (0.0, 1.0, 1.0, 1.0),  # Strafe left (cyan)
+            (1.0, 1.0, 0.0, 1.0),  # Strafe right (yellow)
+        ][cmd_idx]
 
     @classmethod
     def get(
@@ -249,19 +239,21 @@ class JoystickCommandMarker(Marker):
         arrow_len: float = 0.25,
         rgba: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 0.8),
         height: float = 0.5,
-        in_robot_frame: bool = False,
     ) -> Self:
         return cls(
             command_name=command_name,
             target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_SPHERE,
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,  # pyright: ignore[reportAttributeAccessIssue]
             scale=(radius, radius, radius),
             size=size,
             arrow_len=arrow_len,
             radius=radius,
             rgba=rgba,
             height=height,
-            track_rotation=in_robot_frame,
+            track_x=False,
+            track_y=False,
+            track_z=True,
+            track_rotation=False,
         )
 
 
@@ -278,20 +270,68 @@ class JoystickCommand(Command):
 
         0 = stand still
         1 = walk forward
-        2 = walk backward
-        3 = turn left
-        4 = turn right
-        5 = strafe left
-        6 = strafe right
+        2 = run forward
+        3 = walk backward
+        4 = turn left
+        5 = turn right
+        6 = strafe left
+        7 = strafe right
+
+    The joystick command is composed of two parts:
+
+    - A one-hot vector of length 8, which is the command to take.
+    - A 3 dimensional vector representing the target X, Y and yaw at some time.
     """
 
-    sample_probs: tuple[float, float, float, float, float, float, float] = attrs.field(
-        default=(0.1, 0.5, 0.1, 0.1, 0.1, 0.05, 0.05),
+    walk_speed: float = attrs.field()
+    run_speed: float = attrs.field()
+    strafe_speed: float = attrs.field()
+    rotation_speed: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    sample_probs: tuple[float, float, float, float, float, float, float, float] = attrs.field(
+        default=(0.1, 0.3, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1),
         validator=sample_probs_validator,
     )
-
-    in_robot_frame: bool = attrs.field(default=False)
     marker_z_offset: float = attrs.field(default=0.5)
+    switch_prob: float = attrs.field(default=0.005)
+
+    def _get_position_vector(self, physics_data: PhysicsData) -> Array:
+        xpos = physics_data.qpos[..., 0]
+        ypos = physics_data.qpos[..., 1]
+
+        quat = physics_data.qpos[..., 3:7]
+        euler = xax.quat_to_euler(quat)
+        yaw = euler[..., 2]
+
+        return jnp.array([xpos, ypos, yaw])
+
+    def _update_position_vector(self, command: Array) -> Array:
+        command_ohe, position_vector = command[..., :8], command[..., 8:]
+
+        command_targets = jnp.array(
+            [
+                [0.0, 0.0, 0.0],  # Stand still
+                [self.walk_speed, 0.0, 0.0],  # Walk forward
+                [self.run_speed, 0.0, 0.0],  # Run forward
+                [-self.walk_speed, 0.0, 0.0],  # Walk backward
+                [0.0, 0.0, self.rotation_speed],  # Turn left
+                [0.0, 0.0, -self.rotation_speed],  # Turn right
+                [0.0, self.strafe_speed, 0.0],  # Strafe left
+                [0.0, -self.strafe_speed, 0.0],  # Strafe right
+            ]
+        )
+
+        # Rotate the command target by the current yaw.
+        cmd_x, cmd_y, cmd_yaw = command_targets[..., 0], command_targets[..., 1], command_targets[..., 2]
+        yaw = position_vector[..., 2]
+        cmd_x_rot = cmd_x * jnp.cos(yaw) - cmd_y * jnp.sin(yaw)
+        cmd_y_rot = cmd_x * jnp.sin(yaw) + cmd_y * jnp.cos(yaw)
+        cmd_yaw_rot = cmd_yaw
+        command_targets = jnp.stack([cmd_x_rot, cmd_y_rot, cmd_yaw_rot], axis=-1)
+
+        # Add to the position vector.
+        vel_tgt = jnp.einsum("...i,ij->...j", command_ohe, command_targets) * self.ctrl_dt
+        return jnp.concatenate([command_ohe, position_vector + vel_tgt], axis=-1)
 
     def initial_command(
         self,
@@ -300,8 +340,9 @@ class JoystickCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         command = jax.random.choice(rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs))
-        command_ohe = jax.nn.one_hot(command, num_classes=7)
-        return command_ohe
+        command_ohe = jax.nn.one_hot(command, num_classes=8)
+        position_vector = self._get_position_vector(physics_data)
+        return jnp.concatenate([command_ohe, position_vector], axis=-1)
 
     def __call__(
         self,
@@ -310,7 +351,10 @@ class JoystickCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array:
-        return prev_command
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return self._update_position_vector(jnp.where(switch_mask, new_commands, prev_command))
 
     def get_markers(self) -> Collection[Marker]:
         """Get the visualizations for the command.
@@ -325,7 +369,107 @@ class JoystickCommand(Command):
             JoystickCommandMarker.get(
                 self.command_name,
                 height=self.marker_z_offset,
-                in_robot_frame=self.in_robot_frame,
+            )
+        ]
+
+
+@attrs.define(kw_only=True)
+class LinearVelocityCommandMarker(Marker):
+    """Visualises the planar (x,y) linear velocity command."""
+
+    command_name: str = attrs.field()
+    size: float = attrs.field(default=0.03)
+    arrow_scale: float = attrs.field(default=0.3)
+    height: float = attrs.field(default=0.5)
+    base_length: float = attrs.field(default=0.15)
+    zero_threshold: float = attrs.field(default=1e-4)
+
+    def update(self, trajectory: Trajectory) -> None:
+        cmd = trajectory.command[self.command_name]
+        vx, vy = float(cmd[0]), float(cmd[1])
+        speed = (vx * vx + vy * vy) ** 0.5
+
+        self.pos = (0.0, 0.0, self.height)
+
+        # Always show an arrow with base_length plus scaling by speed
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW
+        arrow_length = self.base_length + self.arrow_scale * speed
+        self.scale = (self.size, self.size, arrow_length)
+
+        # If command is near-zero, show grey arrow pointing +X.
+        if speed < self.zero_threshold:
+            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
+            self.rgba = (0.8, 0.8, 0.8, 0.8)
+        else:
+            self.orientation = self.quat_from_direction((vx, vy, 0.0))
+            self.rgba = (0.2, 0.8, 0.2, 0.8)
+
+    @classmethod
+    def get(
+        cls,
+        command_name: str,
+        *,
+        arrow_scale: float = 0.3,
+        height: float = 0.5,
+        base_length: float = 0.15,
+    ) -> Self:
+        return cls(
+            command_name=command_name,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,
+            scale=(0.03, 0.03, base_length),
+            arrow_scale=arrow_scale,
+            height=height,
+            base_length=base_length,
+            track_rotation=True,
+        )
+
+
+@attrs.define(frozen=True)
+class LinearVelocityCommand(Command):
+    """Command to move the robot in a straight line.
+
+    By convention, X is forward and Y is left. The switching probability is the
+    probability of resampling the command at each step. The zero probability is
+    the probability of the command being zero - this can be used to turn off
+    any command.
+    """
+
+    x_range: tuple[float, float] = attrs.field()
+    y_range: tuple[float, float] = attrs.field()
+    x_zero_prob: float = attrs.field(default=0.0)
+    y_zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
+    vis_height: float = attrs.field(default=1.0)
+    vis_scale: float = attrs.field(default=0.05)
+
+    def initial_command(self, physics_data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
+        (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
+        x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
+        y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
+        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
+        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
+        return jnp.concatenate(
+            [
+                jnp.where(x_zero_mask, 0.0, x),
+                jnp.where(y_zero_mask, 0.0, y),
+            ]
+        )
+
+    def __call__(
+        self, prev_command: Array, physics_data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
+    def get_markers(self) -> Collection[Marker]:
+        return [
+            LinearVelocityCommandMarker.get(
+                command_name=self.command_name,
+                height=0.5,
             )
         ]
 
@@ -349,7 +493,7 @@ class PositionCommandMarker(Marker):
         return cls(
             command_name=command_name,
             target_name=base_name,
-            geom=mujoco.mjtGeom.mjGEOM_SPHERE,
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,  # pyright: ignore[reportAttributeAccessIssue]
             scale=(radius, radius, radius),
             rgba=rgba,
         )
@@ -376,7 +520,12 @@ class PositionCommand(Command):
     unique_name: str | None = attrs.field(default=None)
     curriculum_scale: float = attrs.field(default=0.1)
 
-    def _sample_box(self, rng: PRNGKeyArray, physics_data: PhysicsData, curriculum_level: Array) -> Array:
+    def _sample_box(
+        self,
+        rng: PRNGKeyArray,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+    ) -> Array:
         min_coords = jnp.array(self.box_min)
         max_coords = jnp.array(self.box_max)
 
@@ -408,7 +557,12 @@ class PositionCommand(Command):
         # Sample initial target and speed
         rng_target, rng_speed = jax.random.split(rng)
         target = self._sample_box(rng_target, physics_data, curriculum_level)
-        speed = jax.random.uniform(rng_speed, (), minval=self.min_speed, maxval=self.max_speed)
+        speed = jax.random.uniform(
+            rng_speed,
+            (),
+            minval=self.min_speed,
+            maxval=self.max_speed,
+        )
 
         # Return [current_x, current_y, current_z, target_x, target_y, target_z, speed]
         return jnp.concatenate([target, target, jnp.array([speed])])
@@ -434,14 +588,23 @@ class PositionCommand(Command):
 
         # Sample new target and speed if reached
         new_target = self._sample_box(rng_a, physics_data, curriculum_level)
-        new_speed = jax.random.uniform(rng_b, (), minval=self.min_speed, maxval=self.max_speed)
+        new_speed = jax.random.uniform(
+            rng_b,
+            (),
+            minval=self.min_speed,
+            maxval=self.max_speed,
+        )
 
         switch_mask = jax.random.bernoulli(rng_c, self.switch_prob)
 
         jump_mask = jax.random.bernoulli(rng_c, self.jump_prob)
 
         # Update target and speed if reached
-        target = jnp.where((reached_target & switch_mask) | jump_mask, new_target, target)
+        target = jnp.where(
+            (reached_target & switch_mask) | jump_mask,
+            new_target,
+            target,
+        )
         speed = jnp.where((reached_target & switch_mask) | jump_mask, new_speed, speed)
 
         # Calculate step size based on speed and timestep
@@ -460,7 +623,14 @@ class PositionCommand(Command):
         return jnp.concatenate([new_current, target, jnp.array([speed])])
 
     def get_markers(self) -> Collection[Marker]:
-        return [PositionCommandMarker.get(self.command_name, self.base_name, self.vis_radius, self.vis_color)]
+        return [
+            PositionCommandMarker.get(
+                self.command_name,
+                self.base_name,
+                self.vis_radius,
+                self.vis_color,
+            )
+        ]
 
     def get_name(self) -> str:
         name = super().get_name()

@@ -75,6 +75,10 @@ class AMPConfig(PPOConfig):
         value=32,
         help="The batch size for reference motion batching in AMP training.",
     )
+    amp_grad_penalty_coef: float = xax.field(
+        value=10.0,
+        help="The coefficient for the gradient penalty in AMP training.",
+    )
     amp_reference_noise: float = xax.field(
         value=0.01,
         help="The noise to add to the reference motion batch in AMP training.",
@@ -100,7 +104,7 @@ class AMPReward(Reward):
             )
 
         discriminator_logits = trajectory.aux_outputs[DISCRIMINATOR_OUTPUT_KEY]
-        reward = discriminator_logits + 1.0
+        reward = jnp.maximum(0.0, 1.0 - 0.25 * jnp.square(discriminator_logits - 1.0))
         return reward
 
 
@@ -357,6 +361,30 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         sim_disc_loss = jnp.mean((sim_disc_logits + 1) ** 2)
         return real_disc_loss, sim_disc_loss
 
+    def _grad_penalty(
+        self,
+        disc_model: PyTree,
+        real_motions: PyTree,  # (B, T, ...)
+        rng: PRNGKeyArray,
+    ) -> Array:
+        """R1 gradient penalty  (w.r.t. the *input* features)."""
+
+        def disc_on_motion(motion: PyTree, key: PRNGKeyArray) -> Array:
+            return self.call_discriminator(disc_model, motion, key).sum()
+
+        grad_fn = jax.grad(disc_on_motion, argnums=0)
+
+        batch_size = jax.tree_util.tree_leaves(real_motions)[0].shape[0]
+        keys = jax.random.split(rng, batch_size)
+        grads = jax.vmap(grad_fn)(real_motions, keys)
+
+        def leaf_sqnorm(leaf: Array) -> Array:
+            return jnp.sum(jnp.square(leaf), axis=tuple(range(1, leaf.ndim)))
+
+        per_sample_sq = sum(jax.tree_util.tree_leaves(jax.tree_util.tree_map(leaf_sqnorm, grads)))  # (B,)
+
+        return jnp.mean(per_sample_sq)
+
     @xax.jit(static_argnames=["self", "model_static"], jit_level=JitLevel.RL_CORE)
     def _get_amp_disc_loss_and_metrics(
         self,
@@ -387,18 +415,21 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         # Computes the discriminator loss.
         disc_fn = xax.vmap(self.call_discriminator, in_axes=(None, 0, 0), jit_level=JitLevel.RL_CORE)
-        real_disc_rng, sim_disc_rng = jax.random.split(rng)
+        real_disc_rng, sim_disc_rng, gp_rng = jax.random.split(rng, 3)
         real_batch = jax.tree_util.tree_leaves(real_motions)[0].shape[0]
         sim_batch = jax.tree_util.tree_leaves(sim_motions)[0].shape[0]
         real_disc_logits = disc_fn(model, real_motions, jax.random.split(real_disc_rng, real_batch))
         sim_disc_logits = disc_fn(model, sim_motions, jax.random.split(sim_disc_rng, sim_batch))
         real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
 
-        disc_loss = real_disc_loss + sim_disc_loss
+        gp_loss = self.config.amp_grad_penalty_coef / 2 * self._grad_penalty(model, real_motions, gp_rng)
+
+        disc_loss = real_disc_loss + sim_disc_loss + gp_loss
 
         disc_metrics = {
             "real_logits": real_disc_logits,
             "sim_logits": sim_disc_logits,
+            "gp_loss": gp_loss,
         }
 
         return disc_loss, xax.FrozenDict(disc_metrics)
@@ -446,7 +477,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         real_motions_full = carry.shared_state.aux_values[REAL_MOTIONS_KEY]
 
-        sim_t = trajectories.done.shape[0]  # match sim horizon
+        sim_t = trajectories.done.shape[-1]
 
         real_batch = self._make_real_batch(
             motions=real_motions_full,

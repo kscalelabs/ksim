@@ -1,5 +1,5 @@
 # mypy: disable-error-code="override"
-"""Defines simple task for training a walking policy for the default humanoid using an RNN actor."""
+"""Defines simple task for training a walking policy for the default humanoid using an transformer actor."""
 
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -13,20 +13,14 @@ from jaxtyping import Array, PRNGKeyArray
 
 import ksim
 
-from .walking import (
-    NUM_INPUTS,
-    NUM_JOINTS,
-    ZEROS,
-    HumanoidWalkingTask,
-    HumanoidWalkingTaskConfig,
-)
+from .walking import NUM_INPUTS, NUM_JOINTS, ZEROS, HumanoidWalkingTask, HumanoidWalkingTaskConfig
 
 
 class Actor(eqx.Module):
     """RNN-based actor for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnns: tuple[eqx.nn.GRUCell, ...]
+    transformer: xax.TransformerStack
     output_proj: eqx.nn.Linear
     num_inputs: int = eqx.field(static=True)
     num_outputs: int = eqx.field(static=True)
@@ -56,18 +50,16 @@ class Actor(eqx.Module):
             key=input_proj_key,
         )
 
-        # Create RNN layer
-        key, rnn_key = jax.random.split(key)
-        rnn_keys = jax.random.split(rnn_key, depth)
-        self.rnns = tuple(
-            [
-                eqx.nn.GRUCell(
-                    input_size=hidden_size,
-                    hidden_size=hidden_size,
-                    key=rnn_key,
-                )
-                for rnn_key in rnn_keys
-            ]
+        # Create transformer layer
+        key, tf_key = jax.random.split(key)
+        self.transformer = xax.TransformerStack(
+            embed_dim=hidden_size,
+            num_layers=depth,
+            num_heads=hidden_size // 64,
+            ff_dim=hidden_size,
+            causal=True,
+            context_length=32,
+            key=tf_key,
         )
 
         # Project to output
@@ -84,35 +76,42 @@ class Actor(eqx.Module):
         self.var_scale = var_scale
         self.num_mixtures = num_mixtures
 
-    def forward(self, obs_n: Array, carry: Array) -> tuple[distrax.Distribution, Array]:
-        x_n = self.input_proj(obs_n)
-        out_carries = []
-        for i, rnn in enumerate(self.rnns):
-            x_n = rnn(x_n, carry[i])
-            out_carries.append(x_n)
-        prediction_n = self.output_proj(x_n)
+    def forward(
+        self, obs_tn: Array, carry: xax.TransformerCache, add_batch_dim: bool
+    ) -> tuple[distrax.Distribution, xax.TransformerCache]:
+        if add_batch_dim:
+            obs_tn = obs_tn[None]
+
+        x_tn = xax.vmap(self.input_proj)(obs_tn)
+        x_tn, cache = self.transformer.forward(x_tn, cache=carry)
+        prediction_tn = xax.vmap(self.output_proj)(x_tn)
 
         # Splits the predictions into means, standard deviations, and logits.
         slice_len = NUM_JOINTS * self.num_mixtures
-        mean_nm = prediction_n[:slice_len].reshape(NUM_JOINTS, self.num_mixtures)
-        std_nm = prediction_n[slice_len : slice_len * 2].reshape(NUM_JOINTS, self.num_mixtures)
-        logits_nm = prediction_n[slice_len * 2 :].reshape(NUM_JOINTS, self.num_mixtures)
+        mean_tnm = prediction_tn[:, :slice_len].reshape(-1, NUM_JOINTS, self.num_mixtures)
+        std_tnm = prediction_tn[:, slice_len : slice_len * 2].reshape(-1, NUM_JOINTS, self.num_mixtures)
+        logits_tnm = prediction_tn[:, slice_len * 2 :].reshape(-1, NUM_JOINTS, self.num_mixtures)
 
         # Softplus and clip to ensure positive standard deviations.
-        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
+        std_tnm = jnp.clip((jax.nn.softplus(std_tnm) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Apply bias to the means.
-        mean_nm = mean_nm + jnp.array([v for _, v in ZEROS])[:, None]
+        mean_tnm = mean_tnm + jnp.array([v for _, v in ZEROS])[None, :, None]
 
-        dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
-        return dist_n, jnp.stack(out_carries, axis=0)
+        if add_batch_dim:
+            mean_tnm = mean_tnm.squeeze(0)
+            std_tnm = std_tnm.squeeze(0)
+            logits_tnm = logits_tnm.squeeze(0)
+
+        dist_tn = ksim.MixtureOfGaussians(means_nm=mean_tnm, stds_nm=std_tnm, logits_nm=logits_tnm)
+        return dist_tn, cache
 
 
 class Critic(eqx.Module):
     """RNN-based critic for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnns: tuple[eqx.nn.GRUCell, ...]
+    transformer: xax.TransformerStack
     output_proj: eqx.nn.Linear
 
     def __init__(
@@ -134,17 +133,15 @@ class Critic(eqx.Module):
         )
 
         # Create RNN layer
-        key, rnn_key = jax.random.split(key)
-        rnn_keys = jax.random.split(rnn_key, depth)
-        self.rnns = tuple(
-            [
-                eqx.nn.GRUCell(
-                    input_size=hidden_size,
-                    hidden_size=hidden_size,
-                    key=rnn_key,
-                )
-                for rnn_key in rnn_keys
-            ]
+        key, tf_key = jax.random.split(key)
+        self.transformer = xax.TransformerStack(
+            embed_dim=hidden_size,
+            num_layers=depth,
+            num_heads=hidden_size // 64,
+            ff_dim=hidden_size,
+            causal=True,
+            context_length=32,
+            key=tf_key,
         )
 
         # Project to output
@@ -154,15 +151,23 @@ class Critic(eqx.Module):
             key=key,
         )
 
-    def forward(self, obs_n: Array, carry: Array) -> tuple[Array, Array]:
-        x_n = self.input_proj(obs_n)
-        out_carries = []
-        for i, rnn in enumerate(self.rnns):
-            x_n = rnn(x_n, carry[i])
-            out_carries.append(x_n)
-        out_n = self.output_proj(x_n)
+    def forward(
+        self,
+        obs_tn: Array,
+        carry: xax.TransformerCache,
+        add_batch_dim: bool,
+    ) -> tuple[Array, xax.TransformerCache]:
+        if add_batch_dim:
+            obs_tn = obs_tn[None]
 
-        return out_n, jnp.stack(out_carries, axis=0)
+        x_tn = xax.vmap(self.input_proj)(obs_tn)
+        x_tn, cache = self.transformer.forward(x_tn, cache=carry)
+        out_tn = xax.vmap(self.output_proj)(x_tn)
+
+        if add_batch_dim:
+            out_tn = out_tn.squeeze(0)
+
+        return out_tn, cache
 
 
 class Model(eqx.Module):
@@ -201,14 +206,14 @@ class Model(eqx.Module):
 
 
 @dataclass
-class HumanoidWalkingRNNTaskConfig(HumanoidWalkingTaskConfig):
+class HumanoidWalkingTransformerTaskConfig(HumanoidWalkingTaskConfig):
     pass
 
 
-Config = TypeVar("Config", bound=HumanoidWalkingRNNTaskConfig)
+Config = TypeVar("Config", bound=HumanoidWalkingTransformerTaskConfig)
 
 
-class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
+class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> Model:
         return Model(
             key,
@@ -226,8 +231,9 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         model: Actor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry: Array,
-    ) -> tuple[distrax.Distribution, Array]:
+        carry: xax.TransformerCache,
+        add_batch_dim: bool,
+    ) -> tuple[distrax.Distribution, xax.TransformerCache]:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
@@ -262,15 +268,18 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             axis=-1,
         )
 
-        return model.forward(obs_n, carry)
+        dist_tn, carry = model.forward(obs_n, carry, add_batch_dim)
+
+        return dist_tn, carry
 
     def run_critic(
         self,
         model: Critic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry: Array,
-    ) -> tuple[Array, Array]:
+        carry: xax.TransformerCache,
+        add_batch_dim: bool,
+    ) -> tuple[Array, xax.TransformerCache]:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
@@ -305,62 +314,55 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             axis=-1,
         )
 
-        return model.forward(obs_n, carry)
+        return model.forward(obs_n, carry, add_batch_dim)
 
     def get_ppo_variables(
         self,
         model: Model,
         trajectory: ksim.Trajectory,
-        model_carry: tuple[Array, Array],
+        model_carry: tuple[xax.TransformerCache, xax.TransformerCache],
         rng: PRNGKeyArray,
-    ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
-        def scan_fn(
-            actor_critic_carry: tuple[Array, Array],
-            transition: ksim.Trajectory,
-        ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
-            actor_carry, critic_carry = actor_critic_carry
-            actor_dist, next_actor_carry = self.run_actor(
-                model=model.actor,
-                observations=transition.obs,
-                commands=transition.command,
-                carry=actor_carry,
-            )
-            log_probs = actor_dist.log_prob(transition.action)
-            assert isinstance(log_probs, Array)
-            value, next_critic_carry = self.run_critic(
-                model=model.critic,
-                observations=transition.obs,
-                commands=transition.command,
-                carry=critic_carry,
-            )
+    ) -> tuple[ksim.PPOVariables, tuple[xax.TransformerCache, xax.TransformerCache]]:
+        actor_carry, critic_carry = model_carry
 
-            transition_ppo_variables = ksim.PPOVariables(
-                log_probs=log_probs,
-                values=value.squeeze(-1),
-            )
+        actor_dist, next_actor_carry = self.run_actor(
+            model=model.actor,
+            observations=trajectory.obs,
+            commands=trajectory.command,
+            carry=actor_carry,
+            add_batch_dim=False,
+        )
+        log_probs = actor_dist.log_prob(trajectory.action)
+        assert isinstance(log_probs, Array)
+        value, next_critic_carry = self.run_critic(
+            model=model.critic,
+            observations=trajectory.obs,
+            commands=trajectory.command,
+            carry=critic_carry,
+            add_batch_dim=False,
+        )
 
-            next_carry = jax.tree.map(
-                lambda x, y: jnp.where(transition.done, x, y),
-                self.get_initial_model_carry(model, rng),
-                (next_actor_carry, next_critic_carry),
-            )
+        ppo_variables = ksim.PPOVariables(
+            log_probs=log_probs,
+            values=value.squeeze(-1),
+        )
 
-            return next_carry, transition_ppo_variables
+        next_carry = (next_actor_carry, next_critic_carry)
 
-        next_model_carry, ppo_variables = xax.scan(scan_fn, model_carry, trajectory, jit_level=ksim.JitLevel.RL_CORE)
+        return ppo_variables, next_carry
 
-        return ppo_variables, next_model_carry
-
-    def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def get_initial_model_carry(
+        self, model: Model, rng: PRNGKeyArray
+    ) -> tuple[xax.TransformerCache, xax.TransformerCache]:
         return (
-            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+            model.actor.transformer.init_cache(dtype=jnp.float32),
+            model.critic.transformer.init_cache(dtype=jnp.float32),
         )
 
     def sample_action(
         self,
         model: Model,
-        model_carry: tuple[Array, Array],
+        model_carry: tuple[xax.TransformerCache, xax.TransformerCache],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
@@ -376,6 +378,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
             observations=observations,
             commands=commands,
             carry=actor_carry_in,
+            add_batch_dim=True,
         )
 
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
@@ -385,11 +388,11 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
 
 if __name__ == "__main__":
     # To run training, use the following command:
-    #   python -m examples.walking_rnn
+    #   python -m examples.walking_transformer
     # To visualize the environment, use the following command:
-    #   python -m examples.walking_rnn run_mode=view
-    HumanoidWalkingRNNTask.launch(
-        HumanoidWalkingRNNTaskConfig(
+    #   python -m examples.walking_transformer run_mode=view
+    HumanoidWalkingTransformerTask.launch(
+        HumanoidWalkingTransformerTaskConfig(
             # Training parameters.
             num_envs=2048,
             batch_size=256,
@@ -397,6 +400,7 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
             global_grad_clip=2.0,
+            learning_rate=1e-5,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,

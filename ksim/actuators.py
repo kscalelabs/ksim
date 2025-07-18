@@ -75,7 +75,7 @@ class TorqueActuators(Actuators):
         super().__init__()
 
         self.noise = noise
-        self.noise_type = noise_type
+        self.noise_type: NoiseType = noise_type
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
         """Just use the action as the torque, the simplest actuator model."""
@@ -135,9 +135,9 @@ class PositionActuators(Actuators):
         self.ctrl_clip = jnp.array(ctrl_clip_list)
 
         self.action_noise = action_noise
-        self.action_noise_type = action_noise_type
+        self.action_noise_type: NoiseType = action_noise_type
         self.torque_noise = torque_noise
-        self.torque_noise_type = torque_noise_type
+        self.torque_noise_type: NoiseType = torque_noise_type
 
         if any(self.kps < 0) or any(self.kds < 0):
             raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
@@ -153,6 +153,8 @@ class PositionActuators(Actuators):
         pos_rng, tor_rng = jax.random.split(rng)
         current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
         current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
+
+        # Clamp target positions to joint limits
         target_velocities = jnp.zeros_like(action)
         pos_delta = self.add_noise(self.action_noise, self.action_noise_type, action - current_pos, pos_rng)
         vel_delta = target_velocities - current_vel
@@ -190,7 +192,7 @@ class PositionVelocityActuator(PositionActuators):
         )
 
         self.vel_action_noise = vel_action_noise
-        self.vel_action_noise_type = vel_action_noise_type
+        self.vel_action_noise_type: NoiseType = vel_action_noise_type
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
         """Get the control signal from the (position and velocity) action vector."""
@@ -199,10 +201,12 @@ class PositionVelocityActuator(PositionActuators):
         current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
         current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
 
-        # Adds position and velocity noise.
+        # Extract position and velocity targets
         target_position = action[: len(current_pos)]
         target_velocity = action[len(current_pos) :]
         chex.assert_equal_shape([current_pos, target_position, current_vel, target_velocity])
+
+        # Add position and velocity noise
         target_position = self.add_noise(self.action_noise, self.action_noise_type, target_position, pos_rng)
         target_velocity = self.add_noise(self.vel_action_noise, self.vel_action_noise_type, target_velocity, vel_rng)
 
