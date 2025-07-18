@@ -240,7 +240,7 @@ class JoystickCommandMarker(Marker):
     def update(self, trajectory: Trajectory) -> None:
         """Visualizes the joystick command target position and orientation."""
         cmd = trajectory.command[self.command_name]
-        cmd_idx, cmd_vel = cmd[..., :8].argmax().item(), cmd[..., 8:]
+        cmd_idx, cmd_vel = cmd["command"].argmax().item(), cmd["vels"]
 
         # Updates the marker color.
         r, g, b = [
