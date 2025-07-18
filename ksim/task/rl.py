@@ -420,7 +420,7 @@ class RLConfig(xax.Config):
         help="Run first validation after N seconds",
     )
     render_full_every_n_seconds: float = xax.field(
-        value=60.0 * 30.0,
+        value=60.0 * 3.0,
         help="Render the trajectory (without associated graphs) every N seconds",
     )
 
@@ -2294,7 +2294,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 logged_traj=logged_traj,
                                 markers=markers,
                                 viewer=viewer,
-                                key="trajectory",
+                                key="full trajectory" if full_render else "trajectory",
                             )
 
                         # Updates the step and sample counts.

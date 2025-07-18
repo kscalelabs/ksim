@@ -29,6 +29,7 @@ __all__ = [
     "FeetOrientationObservation",
     "TimestepObservation",
     "ActPosObservation",
+    "HistoryObservation",
 ]
 
 import functools
@@ -183,7 +184,6 @@ class HistoryObservation(StatefulObservation):
             physics_state=physics_state,
             obs_carry=None,
         )
-
         sample_val = self.observation.observe(dummy_input, jnp.asarray(0.0), rng)
         repeat_shape = (self.history_length,) + sample_val.shape
         return jnp.zeros(repeat_shape, dtype=sample_val.dtype)

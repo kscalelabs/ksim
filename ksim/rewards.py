@@ -31,6 +31,7 @@ __all__ = [
     "LinkJerkPenalty",
     "JoystickReward",
     "LinearVelocityTrackingReward",
+    "AngularVelocityTrackingReward",
     "ReachabilityPenalty",
     "FeetAirTimeReward",
 ]
@@ -764,6 +765,32 @@ class LinearVelocityTrackingReward(Reward):
         vel_error = xax.get_norm(linvel - robot_vel_cmd, self.norm).sum(axis=-1)
 
         return jnp.exp(-vel_error / self.error_scale)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AngularVelocityTrackingReward(Reward):
+    """Reward for tracking the angular velocity."""
+
+    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
+        default=("x", "y"), validator=dimension_index_tuple_validator
+    )
+    error_scale: float = attrs.field(default=0.25)
+    command_name: str = attrs.field(default="angular_velocity_command")
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        angvel = trajectory.qvel[..., 3:6]
+
+        dims = index_to_dims(self.index)
+
+        angvel = angvel[..., dims]
+        robot_angvel_cmd = trajectory.command[self.command_name]
+
+        chex.assert_shape(robot_angvel_cmd, (..., len(dims)))
+
+        angvel_error = xax.get_norm(angvel - robot_angvel_cmd, self.norm).sum(axis=-1)
+
+        return jnp.exp(-angvel_error / self.error_scale)
 
 
 @attrs.define(frozen=True, kw_only=True)

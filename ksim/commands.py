@@ -101,10 +101,13 @@ class FloatVectorCommand(Command):
 
     The commands update to some new commands with some probability. They can
     be used to represent any vector, such as target position, velocity, etc.
+
+    The zero_prob can be used to set the command to zero with some probability.
     """
 
     ranges: tuple[tuple[float, float], ...] = attrs.field()
     switch_prob: float = attrs.field(default=0.0)
+    zero_prob: float = attrs.field(default=0.0)
 
     def initial_command(
         self,
@@ -113,7 +116,10 @@ class FloatVectorCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         ranges = jnp.array(self.ranges)  # (N, 2)
-        return jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
+        zero_mask = jax.random.bernoulli(rng, self.zero_prob)
+        return jnp.where(
+            zero_mask, 0.0, jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
+        )
 
     def __call__(
         self,
@@ -130,10 +136,14 @@ class FloatVectorCommand(Command):
 
 @attrs.define(frozen=True, kw_only=True)
 class IntVectorCommand(Command):
-    """Samples an integer vector uniformly within some bounding box."""
+    """Samples an integer vector uniformly within some bounding box.
+
+    The zero_prob can be used to set the command to zero with some probability.
+    """
 
     ranges: tuple[tuple[int, int], ...] = attrs.field()
     switch_prob: float = attrs.field(default=0.0)
+    zero_prob: float = attrs.field(default=0.0)
 
     def initial_command(
         self,
@@ -142,7 +152,10 @@ class IntVectorCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         ranges = jnp.array(self.ranges)  # (N, 2)
-        return jax.random.randint(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1] + 1)
+        zero_mask = jax.random.bernoulli(rng, self.zero_prob)
+        return jnp.where(
+            zero_mask, 0.0, jax.random.randint(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1] + 1)
+        )
 
     def __call__(
         self,
