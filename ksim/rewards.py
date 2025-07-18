@@ -718,19 +718,19 @@ class JoystickReward(Reward):
         # Gets the target X, Y, and Yaw velocities.
         tgts = joystick_cmd["vels"]
 
-        def smooth_kernel(x_t: Array) -> Array:
-            x_t = jnp.pad(x_t, ((self.smoothing_window_size - 1, 0),), mode="edge")
-            inds = jnp.arange(-self.smoothing_window_size, 0)  # Only look to the left
-            kernel = jnp.exp(-(inds**2) / (2 * self.smoothing_sigma**2))
-            kernel = kernel / kernel.sum()
-            return jnp.convolve(x_t, kernel, mode="valid")
+        # def smooth_kernel(x_t: Array) -> Array:
+        #     x_t = jnp.pad(x_t, ((self.smoothing_window_size - 1, 0),), mode="edge")
+        #     inds = jnp.arange(-self.smoothing_window_size, 0)  # Only look to the left
+        #     kernel = jnp.exp(-(inds**2) / (2 * self.smoothing_sigma**2))
+        #     kernel = kernel / kernel.sum()
+        #     return jnp.convolve(x_t, kernel, mode="valid")
 
         # Smooths the target velocities.
         trg_x, trg_y, trg_yaw = tgts.T
 
         # Gets the robot's current velocities and applies a smoothing kernel.
         vels = jnp.stack([trajectory.qvel[..., 0], trajectory.qvel[..., 1], trajectory.qvel[..., 5]], axis=-1).T
-        vels = xax.vmap(smooth_kernel, in_axes=0, jit_level=JitLevel.HELPER_FUNCTIONS)(vels)
+        # vels = xax.vmap(smooth_kernel, in_axes=0, jit_level=JitLevel.HELPER_FUNCTIONS)(vels)
         cur_x, cur_y, cur_yaw = vels
 
         # Exponential kernel for the reward.
