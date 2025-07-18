@@ -361,8 +361,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         real_disc_logits: Array,
         sim_disc_logits: Array,
     ) -> tuple[Array, Array]:
-        real_disc_loss = jnp.mean((real_disc_logits - 1) ** 2)
-        sim_disc_loss = jnp.mean((sim_disc_logits + 1) ** 2)
+        real_disc_loss = 0.5 * jnp.sum((real_disc_logits - 1) ** 2)
+        sim_disc_loss = 0.5 * jnp.sum((sim_disc_logits + 1) ** 2)
         return real_disc_loss, sim_disc_loss
 
     def _grad_penalty(
