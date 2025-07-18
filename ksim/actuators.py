@@ -18,7 +18,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import Metadata, PhysicsData, PhysicsModel
-from ksim.utils.mujoco import get_ctrl_data_idx_by_name, get_position_limits
+from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ class TorqueActuators(Actuators):
         super().__init__()
 
         self.noise = noise
-        self.noise_type = noise_type
+        self.noise_type: NoiseType = noise_type
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
         """Just use the action as the torque, the simplest actuator model."""
@@ -99,13 +99,10 @@ class PositionActuators(Actuators):
         kps_list = [-1.0] * len(ctrl_name_to_idx)
         kds_list = [-1.0] * len(ctrl_name_to_idx)
         ctrl_clip_list = [jnp.inf] * len(ctrl_name_to_idx)
-        joint_min_list = [-jnp.inf] * len(ctrl_name_to_idx)
-        joint_max_list = [jnp.inf] * len(ctrl_name_to_idx)
 
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is required for MITPositionActuators")
         joint_name_to_metadata = metadata.joint_name_to_metadata
-        joint_limits = get_position_limits(physics_model)
 
         for joint_name, params in joint_name_to_metadata.items():
             actuator_name = self.get_actuator_name(joint_name)
@@ -125,14 +122,6 @@ class PositionActuators(Actuators):
                     raise ValueError(f"Soft torque limit for joint {joint_name} is negative: {ctrl_clip}")
                 ctrl_clip_list[actuator_idx] = ctrl_clip
 
-            # Extract joint limits
-            if joint_name in joint_limits:
-                joint_min, joint_max = joint_limits[joint_name]
-                joint_min_list[actuator_idx] = joint_min
-                joint_max_list[actuator_idx] = joint_max
-            else:
-                logger.warning("Joint %s has no position limits in model. Using infinite limits.", joint_name)
-
             kps_list[actuator_idx] = kp
             kds_list[actuator_idx] = kd
 
@@ -144,13 +133,11 @@ class PositionActuators(Actuators):
         self.kps = jnp.array(kps_list)
         self.kds = jnp.array(kds_list)
         self.ctrl_clip = jnp.array(ctrl_clip_list)
-        self.joint_min = jnp.array(joint_min_list)
-        self.joint_max = jnp.array(joint_max_list)
 
         self.action_noise = action_noise
-        self.action_noise_type = action_noise_type
+        self.action_noise_type: NoiseType = action_noise_type
         self.torque_noise = torque_noise
-        self.torque_noise_type = torque_noise_type
+        self.torque_noise_type: NoiseType = torque_noise_type
 
         if any(self.kps < 0) or any(self.kds < 0):
             raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
@@ -161,10 +148,6 @@ class PositionActuators(Actuators):
         # This can be overridden if necessary.
         return f"{joint_name}_ctrl"
 
-    def clamp_position_targets(self, target_positions: Array) -> Array:
-        """Clamp target positions to be within joint limits."""
-        return jnp.clip(target_positions, self.joint_min, self.joint_max)
-
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
         """Get the control signal from the (position) action vector."""
         pos_rng, tor_rng = jax.random.split(rng)
@@ -172,9 +155,8 @@ class PositionActuators(Actuators):
         current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
 
         # Clamp target positions to joint limits
-        clamped_action = self.clamp_position_targets(action)
-        target_velocities = jnp.zeros_like(clamped_action)
-        pos_delta = self.add_noise(self.action_noise, self.action_noise_type, clamped_action - current_pos, pos_rng)
+        target_velocities = jnp.zeros_like(action)
+        pos_delta = self.add_noise(self.action_noise, self.action_noise_type, action - current_pos, pos_rng)
         vel_delta = target_velocities - current_vel
 
         ctrl = self.kps * pos_delta + self.kds * vel_delta
@@ -210,7 +192,7 @@ class PositionVelocityActuator(PositionActuators):
         )
 
         self.vel_action_noise = vel_action_noise
-        self.vel_action_noise_type = vel_action_noise_type
+        self.vel_action_noise_type: NoiseType = vel_action_noise_type
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData, rng: PRNGKeyArray) -> Array:
         """Get the control signal from the (position and velocity) action vector."""
@@ -223,9 +205,6 @@ class PositionVelocityActuator(PositionActuators):
         target_position = action[: len(current_pos)]
         target_velocity = action[len(current_pos) :]
         chex.assert_equal_shape([current_pos, target_position, current_vel, target_velocity])
-
-        # Clamp target positions to joint limits
-        target_position = self.clamp_position_targets(target_position)
 
         # Add position and velocity noise
         target_position = self.add_noise(self.action_noise, self.action_noise_type, target_position, pos_rng)
