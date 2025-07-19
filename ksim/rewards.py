@@ -46,6 +46,8 @@ import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+from ksim.commands import JoystickCommandValue
+from ksim.debugging import JitLevel
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
 from ksim.utils.validators import (
@@ -697,41 +699,51 @@ class SymmetryReward(Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class JoystickReward(Reward):
-    """Reward for tracking the joystick commands.
-
-    This reward uses global coordinates, so the robot should always start
-    facing forward in the X direction.
-    """
+    """Reward for following the joystick command."""
 
     command_name: str = attrs.field(default="joystick_command")
-    ang_vel_penalty_ratio: float = attrs.field(default=0.5)
-    lin_slope: float = attrs.field(default=1.0)
-    ang_slope: float = attrs.field(default=1.0)
+    pos_x_scale: float = attrs.field(default=0.25)
+    pos_y_scale: float = attrs.field(default=0.25)
+    rot_z_scale: float = attrs.field(default=0.25)
+    ang_penalty_ratio: float = attrs.field(default=2.0)
+    smoothing_sigma: float = attrs.field(default=5.0)
+    smoothing_window_size: int = attrs.field(default=10)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
-        joystick_cmd = trajectory.command[self.command_name]
-        chex.assert_shape(joystick_cmd, (..., 11))
+        joystick_cmd: JoystickCommandValue = trajectory.command[self.command_name]
 
-        position_vector = joystick_cmd[..., -3:]
+        # Gets the target X, Y, and Yaw velocities.
+        tgts = joystick_cmd["vels"]
 
-        # Gets the target position and orientation.
-        trg_x, trg_y, trg_yaw = position_vector[..., 0], position_vector[..., 1], position_vector[..., 2]
-        cur_x, cur_y = trajectory.qpos[..., 0], trajectory.qpos[..., 1]
-        quat = trajectory.qpos[..., 3:7]
-        euler = xax.quat_to_euler(quat)
-        cur_yaw = euler[..., 2]
+        def smooth_kernel(x_t: Array) -> Array:
+            x_t = jnp.pad(x_t, ((self.smoothing_window_size - 1, 0),), mode="edge")
+            inds = jnp.arange(-self.smoothing_window_size, 0)  # Only look to the left
+            kernel = jnp.exp(-(inds**2) / (2 * self.smoothing_sigma**2))
+            kernel = kernel / kernel.sum()
+            return jnp.convolve(x_t, kernel, mode="valid")
+
+        # Smooths the target velocities.
+        trg_x, trg_y, trg_yaw = tgts.T
+
+        # Gets the robot's current velocities and applies a smoothing kernel.
+        vels = jnp.stack([trajectory.qvel[..., 0], trajectory.qvel[..., 1], trajectory.qvel[..., 5]], axis=-1).T
+        vels = xax.vmap(smooth_kernel, in_axes=0, jit_level=JitLevel.HELPER_FUNCTIONS)(vels)
+        cur_x, cur_y, cur_yaw = vels
 
         # Exponential kernel for the reward.
-        linvel_x_rew = 1.0 - jnp.abs(trg_x - cur_x) * self.lin_slope
-        linvel_y_rew = 1.0 - jnp.abs(trg_y - cur_y) * self.lin_slope
-        ang_diff = jnp.minimum(jnp.abs(trg_yaw - cur_yaw), jnp.abs(trg_yaw - cur_yaw + 2 * jnp.pi))
-        angvel_z_rew = 1.0 - ang_diff * self.ang_slope
+        pos_x_rew = jnp.exp(-jnp.abs(trg_x - cur_x) / self.pos_x_scale)
+        pos_y_rew = jnp.exp(-jnp.abs(trg_y - cur_y) / self.pos_y_scale)
+        rot_z_rew = jnp.exp(-jnp.abs(trg_yaw - cur_yaw) / self.rot_z_scale)
 
-        # Normalize the rewards to sum to 1.
-        denom = 2.0 + self.ang_vel_penalty_ratio
-        return (linvel_x_rew / denom) + (linvel_y_rew / denom) + (angvel_z_rew * self.ang_vel_penalty_ratio / denom)
+        reward = (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
+
+        # This hack seems to be required, for some reason, although it is not
+        # clear where the NaNs are coming from or how to reproduce them.
+        reward = jnp.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
+
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -797,74 +809,35 @@ class FeetAirTimeReward(StatefulReward):
     ctrl_dt: float = attrs.field()
     num_feet: int = attrs.field(default=2)
     contact_obs: str = attrs.field(default="feet_contact_observation")
-    start_reward: float = attrs.field(
-        default=0.1,
-        validator=attrs.validators.and_(
-            attrs.validators.ge(0.0),
-            attrs.validators.le(1.0),
-        ),
-    )
 
-    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        return (jnp.zeros(self.num_feet, dtype=jnp.int32), jnp.zeros(self.num_feet, dtype=jnp.int32))
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(self.num_feet, dtype=jnp.int32)
 
     def get_reward_stateful(
         self,
         trajectory: Trajectory,
-        reward_carry: tuple[Array, Array],
-    ) -> tuple[Array, tuple[Array, Array]]:
+        reward_carry: Array,
+    ) -> tuple[Array, Array]:
         sensor_data_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
         sensor_data_tn = sensor_data_tcn.any(axis=-2)
         chex.assert_shape(sensor_data_tn, (..., self.num_feet))
 
         threshold_steps = round(self.threshold / self.ctrl_dt)
 
-        def scan_fn(carry: tuple[Array, Array], x: tuple[Array, Array]) -> tuple[tuple[Array, Array], Array]:
-            count_n, cooldown_n = carry
-            contact_n, done = x
-
-            # The logic for this algorithm is to reward the agent for having
-            # some foot off the ground for up to `threshold_steps` steps, but
-            # then don't reward it for some cooldown period after that.
-            on_cooldown = cooldown_n > 0
-
-            cooldown_n = jnp.where(
-                done,
-                0,
-                jnp.where(
-                    on_cooldown,
-                    cooldown_n - 1,
-                    jnp.where(
-                        contact_n & (count_n > 0),
-                        jnp.minimum(count_n, threshold_steps),
-                        0,
-                    ),
-                ),
-            )
-
-            count_n = jnp.where(
-                done,
-                0,
-                jnp.where(
-                    on_cooldown,
-                    0,
-                    jnp.where(
-                        contact_n,
-                        0,
-                        count_n + 1,
-                    ),
-                ),
-            )
-
-            return (count_n, cooldown_n), count_n
+        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+            count_n, (contact_n, done) = carry, x
+            count_n = jnp.where(done | contact_n, 0, count_n + 1)
+            return count_n, count_n
 
         reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
 
-        # Slight upward slope as the steps get longer. Make sure that the
-        # average value will be 1 after taking a full step.
-        reward_tn = (count_tn.astype(jnp.float32) / threshold_steps) * (2.0 - self.start_reward * 2) + self.start_reward
-
         # Gradually increase reward until `threshold_steps`.
+        reward_tn = count_tn.astype(jnp.float32) / threshold_steps
         reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
 
-        return reward_tn.max(axis=-1), reward_carry
+        # Only reward the foot with the lowest reward. The idea here is that we
+        # want to encourage the agent to learn to lift all feet off the ground,
+        # not just favoring one foot.
+        reward_n = reward_tn[..., reward_tn.sum(axis=0).argmin()]
+
+        return reward_n, reward_carry

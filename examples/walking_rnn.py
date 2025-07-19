@@ -9,7 +9,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import xax
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 import ksim
 
@@ -224,8 +224,8 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
     def run_actor(
         self,
         model: Actor,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
         carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
         timestep_1 = observations["timestep_observation"]
@@ -241,7 +241,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
+        joystick_cmd_ohe_8 = commands["joystick_command"]["command"]
 
         obs_n = jnp.concatenate(
             [
@@ -267,8 +267,8 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
     def run_critic(
         self,
         model: Critic,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
         carry: Array,
     ) -> tuple[Array, Array]:
         timestep_1 = observations["timestep_observation"]
@@ -284,7 +284,7 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
+        joystick_cmd_ohe_8 = commands["joystick_command"]["command"]
 
         obs_n = jnp.concatenate(
             [
@@ -363,8 +363,8 @@ class HumanoidWalkingRNNTask(HumanoidWalkingTask[Config], Generic[Config]):
         model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:

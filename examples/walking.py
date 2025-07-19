@@ -12,11 +12,11 @@ import jax.numpy as jnp
 import mujoco
 import optax
 import xax
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 import ksim
 
-NUM_JOINTS = 21
+NUM_JOINTS = 17
 
 NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 8
 
@@ -28,14 +28,10 @@ ZEROS = [
     ("hip_z_right", 0.0),
     ("hip_y_right", math.radians(-25.0)),
     ("knee_right", math.radians(-50.0)),
-    ("ankle_y_right", math.radians(-25.0)),
-    ("ankle_x_right", 0.0),
     ("hip_x_left", 0.0),
     ("hip_z_left", 0.0),
     ("hip_y_left", math.radians(-25.0)),
     ("knee_left", math.radians(-50.0)),
-    ("ankle_y_left", math.radians(-25.0)),
-    ("ankle_x_left", 0.0),
     ("shoulder1_right", 0.0),
     ("shoulder2_right", 0.0),
     ("elbow_right", 0.0),
@@ -186,7 +182,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=1e-3,
+        value=3e-4,
         help="Learning rate for PPO.",
     )
     warmup_steps: int = xax.field(
@@ -194,7 +190,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The number of steps to warm up the learning rate.",
     )
     adam_weight_decay: float = xax.field(
-        value=0.0,
+        value=1e-5,
         help="Weight decay for the Adam optimizer.",
     )
 
@@ -229,8 +225,7 @@ Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         return optax.chain(
-            optax.add_decayed_weights(self.config.adam_weight_decay),
-            optax.scale_by_adam(),
+            optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay),
             optax.scale_by_schedule(
                 optax.warmup_constant_schedule(
                     init_value=0.0,
@@ -240,17 +235,15 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ),
         )
 
-    def get_mujoco_model(self) -> mujoco.MjModel:
+    def get_mujoco_model(self) -> mujoco.MjModel:  # pyright: ignore[reportAttributeAccessIssue]
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
-        return mujoco.MjModel.from_xml_path(mjcf_path)
+        return mujoco.MjModel.from_xml_path(mjcf_path)  # pyright: ignore[reportAttributeAccessIssue]
 
-    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
+    def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:  # pyright: ignore[reportAttributeAccessIssue]
         return ksim.Metadata.from_model(
             mj_model,
             kp=100.0,
             kd=5.0,
-            armature=1e-4,
-            friction=1e-6,
         )
 
     def get_actuators(
@@ -295,6 +288,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.RandomJointPositionReset.create(physics_model, zeros={"abdomen_z": 0.0}),
             ksim.RandomJointVelocityReset(),
+            ksim.RandomHeadingReset(),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -356,13 +350,12 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 walk_speed=self.config.target_linear_velocity / 2.0,
                 strafe_speed=self.config.target_linear_velocity / 2.0,
                 rotation_speed=self.config.target_angular_velocity,
-                ctrl_dt=self.config.ctrl_dt,
             ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.StayAliveReward(scale=5.0),
+            ksim.StayAliveReward(scale=25.0),
             ksim.JoystickReward(scale=1.0),
             ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
         ]
@@ -395,8 +388,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def run_actor(
         self,
         model: Actor,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
     ) -> distrax.Distribution:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
@@ -411,7 +404,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
+        joystick_cmd_ohe_8 = commands["joystick_command"]["command"]
 
         obs_n = jnp.concatenate(
             [
@@ -436,8 +429,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def run_critic(
         self,
         model: Critic,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
     ) -> Array:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
@@ -452,7 +445,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_8 = commands["joystick_command"][..., :8]
+        joystick_cmd_ohe_8 = commands["joystick_command"]["command"]
 
         obs_n = jnp.concatenate(
             [
@@ -508,8 +501,8 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         model_carry: None,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
