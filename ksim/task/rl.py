@@ -1266,6 +1266,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                     if processed_value.shape[1] > 1:
                         ax.legend()
+                    if (nan_cnt := np.isnan(processed_value).sum()) > 0:
+                        key = f"{key} ({nan_cnt} nan)"
                     ax.set_title(key)
 
                 # Create and log the image
