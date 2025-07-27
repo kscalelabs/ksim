@@ -409,9 +409,13 @@ class RLConfig(xax.Config):
         value=1,
         help="The number of trajectories to process in each minibatch during gradient updates.",
     )
-    rollout_length_seconds: float = xax.field(
-        value=MISSING,
+    rollout_length_seconds: float | None = xax.field(
+        value=None,
         help="The number of seconds to rollout each environment during training.",
+    )
+    rollout_length_frames: int | None = xax.field(
+        value=None,
+        help="The number of frames to rollout each environment during training.",
     )
 
     # Validation timing parameters.
@@ -669,15 +673,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 f"the batch size ({self.config.batch_size})"
             )
 
-        if self.config.render_length_seconds > self.config.rollout_length_seconds:
-            logger.info(
-                "The render length %ss is greater than the rollout length %ss! "
-                "Algorithm metrics will not be logged because the rendered trajectory was not used for training. "
-                "To log algorithm metrics, set the render length to be equal or less than the rollout length.",
-                self.config.render_length_seconds,
-                self.config.rollout_length_seconds,
-            )
-
     @functools.cached_property
     def batch_size(self) -> int:
         return self.config.batch_size
@@ -899,17 +894,32 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             The action to take, the next carry, and any auxiliary outputs.
         """
 
-    @property
-    def rollout_length_steps(self) -> int:
-        return round(self.config.rollout_length_seconds / self.config.ctrl_dt)
+    @functools.cached_property
+    def rollout_length_frames(self) -> int:
+        if self.config.rollout_length_seconds is not None and self.config.rollout_length_frames is not None:
+            raise ValueError("Either rollout_length_seconds or rollout_length_frames must be set")
+        if self.config.rollout_length_seconds is not None:
+            return round(self.config.rollout_length_seconds / self.config.dt)
+        if self.config.rollout_length_frames is not None:
+            return self.config.rollout_length_frames
+        raise ValueError("Either rollout_length_seconds or rollout_length_frames must be set")
 
-    @property
-    def render_length_steps(self) -> int:
-        return round(self.config.render_length_seconds / self.config.ctrl_dt)
+    @functools.cached_property
+    def render_length_frames(self) -> int:
+        render_length_frames = round(self.config.render_length_seconds / self.config.ctrl_dt)
+        if render_length_frames > self.rollout_length_frames:
+            logger.info(
+                "The render length %s is greater than the rollout length %s! "
+                "Algorithm metrics will not be logged because the rendered trajectory was not used for training. "
+                "To log algorithm metrics, set the render length to be equal or less than the rollout length.",
+                render_length_frames,
+                self.rollout_length_frames,
+            )
+        return render_length_frames
 
     @property
     def rollout_num_samples(self) -> int:
-        return self.rollout_length_steps * self.config.num_envs
+        return self.rollout_length_frames * self.config.num_envs
 
     def get_mujoco_model_info(self, mj_model: mujoco.MjModel) -> dict:  # pyright: ignore[reportAttributeAccessIssue]
         return {
@@ -1196,8 +1206,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return np.stack(frame_list, axis=0), fps
 
-    def _crop_to_length(self, logged_traj: LoggedTrajectory, length: float) -> LoggedTrajectory:
-        render_frames = round(length / self.config.ctrl_dt)
+    def _crop_to_length(self, logged_traj: LoggedTrajectory, render_frames: int) -> LoggedTrajectory:
         return jax.tree.map(lambda arr: arr[:render_frames] if arr.ndim > 0 else arr, logged_traj)
 
     def _log_logged_trajectory_graphs(
@@ -1212,8 +1221,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             log_callback: A callable function to run to log a given image.
         """
         # Clips the trajectory to the desired length.
-        if self.config.render_length_seconds < self.config.rollout_length_seconds:
-            logged_traj = self._crop_to_length(logged_traj, self.config.render_length_seconds)
+        if self.render_length_frames < self.rollout_length_frames:
+            logged_traj = self._crop_to_length(logged_traj, self.render_length_frames)
 
         def create_plot_image(
             fig_size: tuple[float, float],
@@ -1315,8 +1324,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             key: The logging key to use.
         """
         # Clips the trajectory to the desired length.
-        if self.config.render_length_seconds < self.config.rollout_length_seconds:
-            logged_traj = self._crop_to_length(logged_traj, self.config.render_length_seconds)
+        if self.render_length_frames < self.rollout_length_frames:
+            logged_traj = self._crop_to_length(logged_traj, self.render_length_frames)
 
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(
@@ -1529,7 +1538,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 constants.constants,
                 carry_i.env_states,
                 carry_i.shared_state,
-                self.rollout_length_steps,
+                self.rollout_length_frames,
             )
 
             # Runs update on the previous trajectory.
@@ -2163,7 +2172,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     jit_level=JitLevel.UNROLL,
                 )
                 return vmapped_unroll(
-                    rollout_constants, rollout_env_state, rollout_shared_state, self.rollout_length_steps
+                    rollout_constants, rollout_env_state, rollout_shared_state, self.rollout_length_frames
                 )
 
             with TrajectoryDataset.writer(save_path, num_batches * self.batch_size) as writer:
@@ -2354,12 +2363,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             num_valid_steps += 1
 
                             if full_render:
-                                if self.config.render_length_seconds > self.config.rollout_length_seconds:
+                                if self.render_length_frames > self.rollout_length_frames:
                                     long_traj, rewards, _ = self._single_unroll(
                                         constants=constants.constants,
                                         env_state=jax.tree.map(lambda arr: arr[-1], carry.env_states),
                                         shared_state=carry.shared_state,
-                                        num_steps=self.render_length_steps,
+                                        num_steps=self.render_length_frames,
                                     )
                                     logged_traj = LoggedTrajectory(
                                         trajectory=long_traj, rewards=rewards, metrics=xax.FrozenDict()

@@ -15,10 +15,6 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 import ksim
 
-NUM_JOINTS = 17
-
-NUM_INPUTS = 2 + NUM_JOINTS + NUM_JOINTS + 160 + 96 + 3 + NUM_JOINTS + 3 + 4 + 3 + 3 + 8
-
 ZEROS = [
     ("abdomen_z", 0.0),
     ("abdomen_y", 0.0),
@@ -45,7 +41,8 @@ class Actor(eqx.Module):
 
     input_proj: eqx.nn.Linear
     rnns: tuple[eqx.nn.GRUCell, ...]
-    output_proj: eqx.nn.Linear
+    output_proj: eqx.nn.MLP
+    num_joints: int = eqx.field(static=True)
     num_inputs: int = eqx.field(static=True)
     num_outputs: int = eqx.field(static=True)
     min_std: float = eqx.field(static=True)
@@ -59,11 +56,13 @@ class Actor(eqx.Module):
         *,
         num_inputs: int,
         num_outputs: int,
+        num_joints: int,
         min_std: float,
         max_std: float,
         var_scale: float,
         hidden_size: int,
         depth: int,
+        num_hidden_layers: int,
         num_mixtures: int,
     ) -> None:
         # Project input to hidden size
@@ -89,12 +88,17 @@ class Actor(eqx.Module):
         )
 
         # Project to output
-        self.output_proj = eqx.nn.Linear(
-            in_features=hidden_size,
-            out_features=num_outputs * 3 * num_mixtures,
+        self.output_proj = eqx.nn.MLP(
+            in_size=hidden_size,
+            out_size=num_outputs * 3 * num_mixtures,
+            width_size=hidden_size,
+            depth=num_hidden_layers,
+            activation=jax.nn.elu,
+            use_final_bias=False,
             key=key,
         )
 
+        self.num_joints = num_joints
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
         self.min_std = min_std
@@ -111,10 +115,10 @@ class Actor(eqx.Module):
         prediction_n = self.output_proj(x_n)
 
         # Splits the predictions into means, standard deviations, and logits.
-        slice_len = NUM_JOINTS * self.num_mixtures
-        mean_nm = prediction_n[:slice_len].reshape(NUM_JOINTS, self.num_mixtures)
-        std_nm = prediction_n[slice_len : slice_len * 2].reshape(NUM_JOINTS, self.num_mixtures)
-        logits_nm = prediction_n[slice_len * 2 :].reshape(NUM_JOINTS, self.num_mixtures)
+        slice_len = self.num_joints * self.num_mixtures
+        mean_nm = prediction_n[:slice_len].reshape(self.num_joints, self.num_mixtures)
+        std_nm = prediction_n[slice_len : slice_len * 2].reshape(self.num_joints, self.num_mixtures)
+        logits_nm = prediction_n[slice_len * 2 :].reshape(self.num_joints, self.num_mixtures)
 
         # Softplus and clip to ensure positive standard deviations.
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
@@ -131,7 +135,7 @@ class Critic(eqx.Module):
 
     input_proj: eqx.nn.Linear
     rnns: tuple[eqx.nn.GRUCell, ...]
-    output_proj: eqx.nn.Linear
+    output_proj: eqx.nn.MLP
 
     def __init__(
         self,
@@ -140,6 +144,7 @@ class Critic(eqx.Module):
         num_inputs: int,
         hidden_size: int,
         depth: int,
+        num_hidden_layers: int,
     ) -> None:
         num_outputs = 1
 
@@ -165,10 +170,14 @@ class Critic(eqx.Module):
             ]
         )
 
-        # Project to output
-        self.output_proj = eqx.nn.Linear(
-            in_features=hidden_size,
-            out_features=num_outputs,
+        # Create MLP
+        self.output_proj = eqx.nn.MLP(
+            in_size=hidden_size,
+            out_size=num_outputs,
+            width_size=hidden_size,
+            depth=num_hidden_layers,
+            activation=jax.nn.elu,
+            use_final_bias=False,
             key=key,
         )
 
@@ -193,28 +202,33 @@ class Model(eqx.Module):
         *,
         min_std: float,
         max_std: float,
-        num_inputs: int,
+        num_actor_inputs: int,
+        num_critic_inputs: int,
         num_joints: int,
         hidden_size: int,
         depth: int,
+        num_hidden_layers: int,
         num_mixtures: int,
     ) -> None:
         self.actor = Actor(
             key,
-            num_inputs=num_inputs,
+            num_inputs=num_actor_inputs,
             num_outputs=num_joints,
+            num_joints=num_joints,
             min_std=min_std,
             max_std=max_std,
             var_scale=0.5,
             hidden_size=hidden_size,
             depth=depth,
+            num_hidden_layers=num_hidden_layers,
             num_mixtures=num_mixtures,
         )
         self.critic = Critic(
             key,
-            num_inputs=num_inputs,
+            num_inputs=num_critic_inputs,
             hidden_size=hidden_size,
             depth=depth,
+            num_hidden_layers=num_hidden_layers,
         )
 
 
@@ -224,12 +238,16 @@ class WalkingConfig(ksim.PPOConfig):
 
     # Model parameters.
     hidden_size: int = xax.field(
-        value=128,
+        value=512,
         help="The hidden size for the MLPs.",
     )
     depth: int = xax.field(
-        value=5,
+        value=2,
         help="The depth for the MLPs.",
+    )
+    num_hidden_layers: int = xax.field(
+        value=2,
+        help="The number of hidden layers for the MLPs.",
     )
     num_mixtures: int = xax.field(
         value=5,
@@ -422,8 +440,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             ksim.StayAliveReward(scale=25.0),
-            ksim.JoystickReward(scale=1.0),
-            ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
+            # ksim.JoystickReward(scale=1.0),
+            # ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -443,12 +461,14 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> Model:
         return Model(
             key,
-            num_inputs=NUM_INPUTS,
-            num_joints=NUM_JOINTS,
+            num_actor_inputs=48,
+            num_critic_inputs=331,
+            num_joints=17,
             min_std=0.01,
             max_std=1.0,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
+            num_hidden_layers=self.config.num_hidden_layers,
             num_mixtures=self.config.num_mixtures,
         )
 
@@ -465,35 +485,18 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, PyTree],
         carry: Array,
     ) -> tuple[xax.Distribution, Array]:
-        timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        # imu_acc_3 = observations["sensor_observation_imu_acc"]
-        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        act_frc_obs_n = observations["actuator_force_observation"]
-        base_pos_3 = observations["base_position_observation"]
-        base_quat_4 = observations["base_orientation_observation"]
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         joystick_cmd_ohe_8 = commands["joystick_command"]["command"]
 
         obs_n = jnp.concatenate(
             [
-                jnp.cos(timestep_1),  # 1
-                jnp.sin(timestep_1),  # 1
                 dh_joint_pos_j,  # NUM_JOINTS
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
-                com_inertia_n,  # 160
-                com_vel_n,  # 96
                 proj_grav_3,  # 3
-                act_frc_obs_n / 100.0,  # NUM_JOINTS
-                base_pos_3,  # 3
-                base_quat_4,  # 4
-                lin_vel_obs_3,  # 3
-                ang_vel_obs_3,  # 3
+                imu_gyro_3,  # 3
                 joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
@@ -508,7 +511,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, PyTree],
         carry: Array,
     ) -> tuple[Array, Array]:
-        timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         com_inertia_n = observations["center_of_mass_inertia_observation"]
@@ -525,8 +527,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
         obs_n = jnp.concatenate(
             [
-                jnp.cos(timestep_1),  # 1
-                jnp.sin(timestep_1),  # 1
                 dh_joint_pos_j,  # NUM_JOINTS
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
@@ -630,7 +630,7 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=2,
             epochs_per_log_step=1,
-            rollout_length_seconds=8.0,
+            rollout_length_frames=24,
             global_grad_clip=2.0,
             # Simulation parameters.
             dt=0.002,
