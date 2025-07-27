@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
 
-import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -81,7 +80,7 @@ class Actor(eqx.Module):
         self.var_scale = var_scale
         self.num_mixtures = num_mixtures
 
-    def forward(self, obs_n: Array) -> distrax.Distribution:
+    def forward(self, obs_n: Array) -> xax.Distribution:
         prediction_n = self.mlp(obs_n)
 
         # Splits the predictions into means, standard deviations, and logits.
@@ -96,7 +95,7 @@ class Actor(eqx.Module):
         # Apply bias to the means.
         mean_nm = mean_nm + jnp.array([v for _, v in ZEROS])[:, None]
 
-        dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
+        dist_n = xax.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
         return dist_n
 
 
@@ -397,7 +396,7 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         model: Actor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-    ) -> distrax.Distribution:
+    ) -> xax.Distribution:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]

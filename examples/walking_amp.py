@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Generic, Self, TypeVar
 
 import attrs
-import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -58,7 +57,7 @@ class DefaultHumanoidActor(eqx.Module):
         self.num_outputs = num_outputs
         self.num_inputs = num_inputs
 
-    def forward(self, obs_n: Array) -> distrax.Distribution:
+    def forward(self, obs_n: Array) -> xax.Distribution:
         prediction_n = self.mlp(obs_n)
 
         # Converts the output to a distribution.
@@ -67,7 +66,7 @@ class DefaultHumanoidActor(eqx.Module):
 
         # Softplus and clip to ensure positive standard deviations.
         std_nm = jnp.clip(jax.nn.softplus(std_nm + 1.0), max=10.0)
-        dist_n = distrax.Normal(mean_nm, std_nm)
+        dist_n = xax.Normal(mean_nm, std_nm)
         return dist_n
 
 
@@ -698,7 +697,7 @@ class HumanoidWalkingAMPTask(ksim.AMPTask[Config], Generic[Config]):
         model: DefaultHumanoidActor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-    ) -> distrax.Distribution:
+    ) -> xax.Distribution:
         timestep_1 = observations["timestep_observation"]
         # dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_pos_j = observations["historical_joint_position_observation"]
