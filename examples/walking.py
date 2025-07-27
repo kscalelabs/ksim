@@ -41,9 +41,13 @@ ZEROS = [
 
 
 class Actor(eqx.Module):
-    """Actor for the walking task."""
+    """RNN-based actor for the walking task."""
 
-    mlp: eqx.nn.MLP
+    input_proj: eqx.nn.Linear
+    rnns: tuple[eqx.nn.GRUCell, ...]
+    output_proj: eqx.nn.Linear
+    num_inputs: int = eqx.field(static=True)
+    num_outputs: int = eqx.field(static=True)
     min_std: float = eqx.field(static=True)
     max_std: float = eqx.field(static=True)
     var_scale: float = eqx.field(static=True)
@@ -53,6 +57,8 @@ class Actor(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        num_inputs: int,
+        num_outputs: int,
         min_std: float,
         max_std: float,
         var_scale: float,
@@ -60,24 +66,49 @@ class Actor(eqx.Module):
         depth: int,
         num_mixtures: int,
     ) -> None:
-        num_inputs = NUM_INPUTS
-        num_outputs = NUM_JOINTS
-
-        self.mlp = eqx.nn.MLP(
-            in_size=num_inputs,
-            out_size=num_outputs * 3 * num_mixtures,
-            width_size=hidden_size,
-            depth=depth,
-            key=key,
-            activation=jax.nn.relu,
+        # Project input to hidden size
+        key, input_proj_key = jax.random.split(key)
+        self.input_proj = eqx.nn.Linear(
+            in_features=num_inputs,
+            out_features=hidden_size,
+            key=input_proj_key,
         )
+
+        # Create RNN layer
+        key, rnn_key = jax.random.split(key)
+        rnn_keys = jax.random.split(rnn_key, depth)
+        self.rnns = tuple(
+            [
+                eqx.nn.GRUCell(
+                    input_size=hidden_size,
+                    hidden_size=hidden_size,
+                    key=rnn_key,
+                )
+                for rnn_key in rnn_keys
+            ]
+        )
+
+        # Project to output
+        self.output_proj = eqx.nn.Linear(
+            in_features=hidden_size,
+            out_features=num_outputs * 3 * num_mixtures,
+            key=key,
+        )
+
+        self.num_inputs = num_inputs
+        self.num_outputs = num_outputs
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
         self.num_mixtures = num_mixtures
 
-    def forward(self, obs_n: Array) -> xax.Distribution:
-        prediction_n = self.mlp(obs_n)
+    def forward(self, obs_n: Array, carry: Array) -> tuple[xax.Distribution, Array]:
+        x_n = self.input_proj(obs_n)
+        out_carries = []
+        for i, rnn in enumerate(self.rnns):
+            x_n = rnn(x_n, carry[i])
+            out_carries.append(x_n)
+        prediction_n = self.output_proj(x_n)
 
         # Splits the predictions into means, standard deviations, and logits.
         slice_len = NUM_JOINTS * self.num_mixtures
@@ -92,35 +123,64 @@ class Actor(eqx.Module):
         mean_nm = mean_nm + jnp.array([v for _, v in ZEROS])[:, None]
 
         dist_n = xax.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
-        return dist_n
+        return dist_n, jnp.stack(out_carries, axis=0)
 
 
 class Critic(eqx.Module):
-    """Critic for the walking task."""
+    """RNN-based critic for the walking task."""
 
-    mlp: eqx.nn.MLP
+    input_proj: eqx.nn.Linear
+    rnns: tuple[eqx.nn.GRUCell, ...]
+    output_proj: eqx.nn.Linear
 
     def __init__(
         self,
         key: PRNGKeyArray,
         *,
+        num_inputs: int,
         hidden_size: int,
         depth: int,
     ) -> None:
-        num_inputs = NUM_INPUTS
         num_outputs = 1
 
-        self.mlp = eqx.nn.MLP(
-            in_size=num_inputs,
-            out_size=num_outputs,
-            width_size=hidden_size,
-            depth=depth,
-            key=key,
-            activation=jax.nn.relu,
+        # Project input to hidden size
+        key, input_proj_key = jax.random.split(key)
+        self.input_proj = eqx.nn.Linear(
+            in_features=num_inputs,
+            out_features=hidden_size,
+            key=input_proj_key,
         )
 
-    def forward(self, obs_n: Array) -> Array:
-        return self.mlp(obs_n)
+        # Create RNN layer
+        key, rnn_key = jax.random.split(key)
+        rnn_keys = jax.random.split(rnn_key, depth)
+        self.rnns = tuple(
+            [
+                eqx.nn.GRUCell(
+                    input_size=hidden_size,
+                    hidden_size=hidden_size,
+                    key=rnn_key,
+                )
+                for rnn_key in rnn_keys
+            ]
+        )
+
+        # Project to output
+        self.output_proj = eqx.nn.Linear(
+            in_features=hidden_size,
+            out_features=num_outputs,
+            key=key,
+        )
+
+    def forward(self, obs_n: Array, carry: Array) -> tuple[Array, Array]:
+        x_n = self.input_proj(obs_n)
+        out_carries = []
+        for i, rnn in enumerate(self.rnns):
+            x_n = rnn(x_n, carry[i])
+            out_carries.append(x_n)
+        out_n = self.output_proj(x_n)
+
+        return out_n, jnp.stack(out_carries, axis=0)
 
 
 class Model(eqx.Module):
@@ -131,14 +191,20 @@ class Model(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        min_std: float,
+        max_std: float,
+        num_inputs: int,
+        num_joints: int,
         hidden_size: int,
         depth: int,
         num_mixtures: int,
     ) -> None:
         self.actor = Actor(
             key,
-            min_std=0.01,
-            max_std=1.0,
+            num_inputs=num_inputs,
+            num_outputs=num_joints,
+            min_std=min_std,
+            max_std=max_std,
             var_scale=0.5,
             hidden_size=hidden_size,
             depth=depth,
@@ -146,13 +212,14 @@ class Model(eqx.Module):
         )
         self.critic = Critic(
             key,
+            num_inputs=num_inputs,
             hidden_size=hidden_size,
             depth=depth,
         )
 
 
 @dataclass
-class HumanoidWalkingTaskConfig(ksim.PPOConfig):
+class WalkingConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
     # Model parameters.
@@ -218,10 +285,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
 
-Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
+Config = TypeVar("Config", bound=WalkingConfig)
 
 
-class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
+class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         return optax.chain(
             optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay),
@@ -376,20 +443,28 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_model(self, key: PRNGKeyArray) -> Model:
         return Model(
             key,
+            num_inputs=NUM_INPUTS,
+            num_joints=NUM_JOINTS,
+            min_std=0.01,
+            max_std=1.0,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
             num_mixtures=self.config.num_mixtures,
         )
 
-    def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> None:
-        return None
+    def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return (
+            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+        )
 
     def run_actor(
         self,
         model: Actor,
         observations: xax.FrozenDict[str, PyTree],
         commands: xax.FrozenDict[str, PyTree],
-    ) -> xax.Distribution:
+        carry: Array,
+    ) -> tuple[xax.Distribution, Array]:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
@@ -423,14 +498,16 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ],
             axis=-1,
         )
-        return model.forward(obs_n)
+
+        return model.forward(obs_n, carry)
 
     def run_critic(
         self,
         model: Critic,
         observations: xax.FrozenDict[str, PyTree],
         commands: xax.FrozenDict[str, PyTree],
-    ) -> Array:
+        carry: Array,
+    ) -> tuple[Array, Array]:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
@@ -465,39 +542,56 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
             axis=-1,
         )
 
-        return model.forward(obs_n)
+        return model.forward(obs_n, carry)
 
     def get_ppo_variables(
         self,
         model: Model,
         trajectory: ksim.Trajectory,
-        model_carry: None,
+        model_carry: tuple[Array, Array],
         rng: PRNGKeyArray,
-    ) -> tuple[ksim.PPOVariables, None]:
-        # Vectorize over the time dimensions.
-        def get_log_prob(transition: ksim.Trajectory) -> Array:
-            action_dist_tj = self.run_actor(model.actor, transition.obs, transition.command)
-            log_probs_tj = action_dist_tj.log_prob(transition.action)
-            assert isinstance(log_probs_tj, Array)
-            return log_probs_tj
+    ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
+        def scan_fn(
+            actor_critic_carry: tuple[Array, Array],
+            transition: ksim.Trajectory,
+        ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
+            actor_carry, critic_carry = actor_critic_carry
+            actor_dist, next_actor_carry = self.run_actor(
+                model=model.actor,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=actor_carry,
+            )
+            log_probs = actor_dist.log_prob(transition.action)
+            assert isinstance(log_probs, Array)
+            value, next_critic_carry = self.run_critic(
+                model=model.critic,
+                observations=transition.obs,
+                commands=transition.command,
+                carry=critic_carry,
+            )
 
-        log_probs_tj = jax.vmap(get_log_prob)(trajectory)
-        assert isinstance(log_probs_tj, Array)
+            transition_ppo_variables = ksim.PPOVariables(
+                log_probs=log_probs,
+                values=value.squeeze(-1),
+            )
 
-        # Vectorize over the time dimensions.
-        values_tj = jax.vmap(self.run_critic, in_axes=(None, 0, 0))(model.critic, trajectory.obs, trajectory.command)
+            next_carry = jax.tree.map(
+                lambda x, y: jnp.where(transition.done, x, y),
+                self.get_initial_model_carry(model, rng),
+                (next_actor_carry, next_critic_carry),
+            )
 
-        ppo_variables = ksim.PPOVariables(
-            log_probs=log_probs_tj,
-            values=values_tj.squeeze(-1),
-        )
+            return next_carry, transition_ppo_variables
 
-        return ppo_variables, None
+        next_model_carry, ppo_variables = xax.scan(scan_fn, model_carry, trajectory, jit_level=ksim.JitLevel.RL_CORE)
+
+        return ppo_variables, next_model_carry
 
     def sample_action(
         self,
         model: Model,
-        model_carry: None,
+        model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, PyTree],
@@ -505,13 +599,19 @@ class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
-        action_dist_j = self.run_actor(
+        actor_carry_in, critic_carry_in = model_carry
+
+        # Runs the actor model to get the action distribution.
+        action_dist_j, actor_carry = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
+            carry=actor_carry_in,
         )
+
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(rng)
-        return ksim.Action(action=action_j, carry=None)
+
+        return ksim.Action(action=action_j, carry=(actor_carry, critic_carry_in))
 
 
 if __name__ == "__main__":
@@ -523,8 +623,8 @@ if __name__ == "__main__":
     # of environments and batch size to reduce memory usage. Here's an example
     # from the command line:
     #   python -m examples.walking num_envs=8 batch_size=4
-    HumanoidWalkingTask.launch(
-        HumanoidWalkingTaskConfig(
+    WalkingTask.launch(
+        WalkingConfig(
             # Training parameters.
             num_envs=2048,
             batch_size=256,
@@ -532,16 +632,10 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
             global_grad_clip=2.0,
-            # Logging parameters.
-            valid_first_n_steps=1,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
             iterations=3,
             ls_iterations=5,
-            action_latency_range=(0.005, 0.01),
-            drop_action_prob=0.01,
-            # Checkpointing parameters.
-            save_every_n_seconds=60,
         ),
     )
