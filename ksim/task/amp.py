@@ -519,18 +519,10 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
                 rng=rng_noise_i,
             )
 
-            new_model_arr_i, new_opt_state_i, disc_grad_metrics_i = self.apply_gradients_with_clipping(
-                model_arr=model_arr_i,
-                grads=grads_i,
-                optimizer=optimizer,
-                opt_state=opt_state_i,
-            )
+            updates, new_opt_state_i = optimizer.update(grads_i, opt_state_i, model_arr_i)
+            new_model_arr_i = eqx.apply_updates(model_arr_i, updates)
 
-            merged_metrics_i: xax.FrozenDict[str, Array] = xax.FrozenDict(
-                disc_metrics_i.unfreeze() | disc_grad_metrics_i
-            )
-
-            return (new_model_arr_i, new_opt_state_i), merged_metrics_i
+            return (new_model_arr_i, new_opt_state_i), disc_metrics_i
 
         pass_rngs = jax.random.split(rng_disc, self.config.disc_num_passes)
 

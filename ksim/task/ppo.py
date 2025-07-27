@@ -566,13 +566,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-        # Applies the gradients with clipping.
-        new_model_arr, new_opt_state, grad_metrics = self.apply_gradients_with_clipping(
-            model_arr=model_arr,
-            grads=grads,
-            optimizer=optimizer,
-            opt_state=opt_state,
-        )
+        # Applies the gradients.
+        updates, new_opt_state = optimizer.update(grads, opt_state, model_arr)
+        new_model_arr = eqx.apply_updates(model_arr, updates)
 
         # Updates the carry with the new model and optimizer states.
         carry = replace(
@@ -584,10 +580,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             opt_state=xax.tuple_insert(carry.opt_state, 0, new_opt_state),
         )
 
-        # Gets the metrics dictionary.
-        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(ppo_metrics.unfreeze() | grad_metrics)
-
-        return carry, metrics, logged_trajectory
+        return carry, ppo_metrics, logged_trajectory
 
     def update_model(
         self,
