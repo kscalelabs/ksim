@@ -352,12 +352,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 jump_height_range=(1.0, 2.0),
                 interval_range=(2.0, 5.0),
             ),
-            ksim.JointPerturbationEvent(
-                std=50.0,
-                mask_prct=0.9,
-                interval_range=(0.1, 0.15),
-                curriculum_range=(1.0, 1.0),
-            ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:

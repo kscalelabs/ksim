@@ -2316,7 +2316,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             state = self.on_training_start(state)
 
-            is_first_step = True
+            num_compiled_steps = 0
             last_full_render_time = 0.0
             num_valid_steps = 0
 
@@ -2393,27 +2393,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             )
 
                         # Updates the step and sample counts.
-                        num_steps = self.config.epochs_per_log_step
-                        num_samples = self.rollout_num_samples * self.config.epochs_per_log_step
-
-                        state = state.replace(
-                            num_steps=state.num_steps + num_steps,
-                            num_samples=state.num_samples + num_samples,
-                        )
-
                         self.write_logs(state)
 
                     # Update  state with the elapsed time.
                     elapsed_time = timer.elapsed_time
                     state = state.replace(
+                        num_steps=state.num_steps + self.config.epochs_per_log_step,
+                        num_samples=state.num_samples + self.rollout_num_samples * self.config.epochs_per_log_step,
                         elapsed_time_s=state.elapsed_time_s + elapsed_time,
                     )
 
-                    if is_first_step:
-                        is_first_step = False
+                    if num_compiled_steps < 3:
+                        num_compiled_steps += 1
                         logger.log(
                             xax.LOG_STATUS,
-                            "First step time: %s",
+                            "Step %d time: %s",
+                            num_compiled_steps,
                             xax.format_timedelta(datetime.timedelta(seconds=elapsed_time), short=True),
                         )
 
