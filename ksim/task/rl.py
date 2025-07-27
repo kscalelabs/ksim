@@ -400,6 +400,7 @@ class RLConfig(xax.Config):
         value=[],
         help="If provided, exclude these components from the combined reward plot.",
     )
+
     # Training parameters.
     num_envs: int = xax.field(
         value=MISSING,
@@ -562,6 +563,10 @@ class RLConfig(xax.Config):
     reward_clip_max: float | None = xax.field(
         value=None,
         help="The maximum value of the reward.",
+    )
+    action_clip_max: float = xax.field(
+        value=1e3,
+        help="The maximum value of the action.",
     )
     render_markers: bool = xax.field(
         value=False,
@@ -934,7 +939,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         constants: RolloutConstants,
         env_states: RolloutEnvState,
         shared_state: RolloutSharedState,
-    ) -> tuple[Trajectory, RolloutEnvState]:
+    ) -> tuple[Trajectory, RolloutEnvState, xax.FrozenDict[str, Array]]:
         """Runs a single step of the physics engine.
 
         Args:
@@ -972,6 +977,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             commands=env_states.commands,
             rng=act_rng,
             argmax=constants.argmax_action,
+        )
+
+        # Converts NaN actions to zeros.
+        is_nan = jnp.isnan(action.action)
+        clean_action = jnp.where(is_nan, 0.0, action.action)
+        clean_action = jnp.clip(clean_action, -self.config.action_clip_max, self.config.action_clip_max)
+
+        action = replace(
+            action,
+            action=clean_action,
         )
 
         # Steps the physics engine.
@@ -1067,7 +1082,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-        return transition, next_env_state
+        metrics = {
+            "num_nan_actions": jnp.sum(is_nan),
+        }
+
+        return transition, next_env_state, xax.FrozenDict(metrics)
 
     def get_dataset(self, phase: xax.Phase) -> Dataset:
         raise NotImplementedError("RL tasks do not require datasets, since trajectory histories are stored in-memory.")
@@ -1460,23 +1479,26 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         env_state: RolloutEnvState,
         shared_state: RolloutSharedState,
         num_steps: int,
-    ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
+    ) -> tuple[Trajectory, RewardState, RolloutEnvState, xax.FrozenDict[str, Array]]:
         # Applies randomizations to the model.
         shared_state = replace(
             shared_state,
             physics_model=shared_state.physics_model.tree_replace(env_state.randomization_dict),  # pyright: ignore[reportArgumentType]
         )
 
-        def scan_fn(env_state: RolloutEnvState, _: None) -> tuple[RolloutEnvState, Trajectory]:
-            trajectory, env_state = self.step_engine(
+        def scan_fn(
+            env_state: RolloutEnvState,
+            _: None,
+        ) -> tuple[RolloutEnvState, tuple[Trajectory, xax.FrozenDict[str, Array]]]:
+            trajectory, env_state, metrics = self.step_engine(
                 constants=constants,
                 env_states=env_state,
                 shared_state=shared_state,
             )
-            return env_state, trajectory
+            return env_state, (trajectory, metrics)
 
         # Scans the engine for the desired number of steps.
-        env_state, trajectory = xax.scan(
+        env_state, (trajectory, metrics) = xax.scan(
             scan_fn,
             env_state,
             length=num_steps,
@@ -1512,7 +1534,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-        return trajectory, reward, env_state
+        return trajectory, reward, env_state, metrics
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.OUTER_LOOP)
     def _rl_train_loop_step(
@@ -1534,7 +1556,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 in_axes=(None, 0, None, None),
                 jit_level=JitLevel.UNROLL,
             )
-            trajectories, rewards, env_state = vmapped_unroll(
+            trajectories, rewards, env_state, unroll_metrics = vmapped_unroll(
                 constants.constants,
                 carry_i.env_states,
                 carry_i.shared_state,
@@ -1552,7 +1574,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             # Store all the metrics to log.
             metrics = Metrics(
-                train=train_metrics,
+                train=xax.FrozenDict(train_metrics.unfreeze() | unroll_metrics.unfreeze()),
                 reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
                 termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
                 curriculum_level=carry_i.env_states.curriculum_state.level,
@@ -2165,19 +2187,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             @xax.jit(jit_level=JitLevel.UNROLL)
             def get_batch(
                 rollout_env_state: RolloutEnvState,
-            ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
+            ) -> tuple[Trajectory, RewardState, RolloutEnvState, xax.FrozenDict[str, Array]]:
                 vmapped_unroll = xax.vmap(
                     self._single_unroll,
                     in_axes=(None, 0, None, None),
                     jit_level=JitLevel.UNROLL,
                 )
                 return vmapped_unroll(
-                    rollout_constants, rollout_env_state, rollout_shared_state, self.rollout_length_frames
+                    rollout_constants,
+                    rollout_env_state,
+                    rollout_shared_state,
+                    self.rollout_length_frames,
                 )
 
             with TrajectoryDataset.writer(save_path, num_batches * self.batch_size) as writer:
                 for _ in tqdm.trange(num_batches):
-                    trajectories, rewards, rollout_env_state = get_batch(rollout_env_state)
+                    trajectories, rewards, rollout_env_state, _ = get_batch(rollout_env_state)
 
                     # Splits trajectories and rewards into a list of `batch_size` samples.
                     for i in range(0, len(trajectories.done), self.batch_size):
@@ -2364,14 +2389,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                             if full_render:
                                 if self.render_length_frames > self.rollout_length_frames:
-                                    long_traj, rewards, _ = self._single_unroll(
+                                    long_traj, rewards, _, _ = self._single_unroll(
                                         constants=constants.constants,
                                         env_state=jax.tree.map(lambda arr: arr[-1], carry.env_states),
                                         shared_state=carry.shared_state,
                                         num_steps=self.render_length_frames,
                                     )
                                     logged_traj = LoggedTrajectory(
-                                        trajectory=long_traj, rewards=rewards, metrics=xax.FrozenDict()
+                                        trajectory=long_traj,
+                                        rewards=rewards,
+                                        metrics=xax.FrozenDict(),
                                     )
 
                                 self._log_logged_trajectory_graphs(

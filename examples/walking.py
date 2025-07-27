@@ -203,6 +203,7 @@ class Model(eqx.Module):
         *,
         min_std: float,
         max_std: float,
+        var_scale: float,
         num_actor_inputs: int,
         num_critic_inputs: int,
         num_joints: int,
@@ -218,7 +219,7 @@ class Model(eqx.Module):
             num_joints=num_joints,
             min_std=min_std,
             max_std=max_std,
-            var_scale=0.5,
+            var_scale=var_scale,
             hidden_size=hidden_size,
             depth=depth,
             num_hidden_layers=num_hidden_layers,
@@ -309,7 +310,10 @@ Config = TypeVar("Config", bound=WalkingConfig)
 
 class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
-        return optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
+        return optax.chain(
+            optax.clip_by_global_norm(self.config.global_grad_clip),
+            optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay),
+        )
 
     def get_mujoco_model(self) -> mujoco.MjModel:  # pyright: ignore[reportAttributeAccessIssue]
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
@@ -426,8 +430,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             ksim.StayAliveReward(scale=25.0),
-            # ksim.JoystickReward(scale=1.0),
-            # ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
+            ksim.JoystickReward(scale=1.0),
+            ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -452,6 +456,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             num_joints=17,
             min_std=0.01,
             max_std=1.0,
+            var_scale=0.25,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
             num_hidden_layers=self.config.num_hidden_layers,
@@ -622,8 +627,8 @@ if __name__ == "__main__":
     WalkingTask.launch(
         WalkingConfig(
             # Training parameters.
-            num_envs=2048,
-            batch_size=256,
+            num_envs=4096,
+            batch_size=512,
             num_passes=4,
             epochs_per_log_step=1,
             rollout_length_frames=24,
