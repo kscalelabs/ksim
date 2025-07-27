@@ -505,7 +505,7 @@ class HumanoidWalkingTask(ksim.StudentTask[Config], Generic[Config]):
             observations=observations,
             commands=commands,
         )
-        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
+        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(rng)
         return ksim.Action(action=action_j, carry=None)
 
 

@@ -383,7 +383,7 @@ class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config
             add_batch_dim=True,
         )
 
-        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
+        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(rng)
 
         return ksim.Action(action=action_j, carry=(actor_carry, critic_carry_in))
 
