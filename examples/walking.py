@@ -1,5 +1,6 @@
 """Defines simple task for training a walking policy for the default humanoid."""
 
+import functools
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -308,16 +309,7 @@ Config = TypeVar("Config", bound=WalkingConfig)
 
 class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
-        return optax.chain(
-            optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay),
-            optax.scale_by_schedule(
-                optax.warmup_constant_schedule(
-                    init_value=0.0,
-                    peak_value=self.config.learning_rate,
-                    warmup_steps=self.config.warmup_steps,
-                )
-            ),
-        )
+        return optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
 
     def get_mujoco_model(self) -> mujoco.MjModel:  # pyright: ignore[reportAttributeAccessIssue]
         mjcf_path = (Path(__file__).parent / "data" / "scene.mjcf").resolve().as_posix()
@@ -326,8 +318,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:  # pyright: ignore[reportAttributeAccessIssue]
         return ksim.Metadata.from_model(
             mj_model,
-            kp=100.0,
-            kd=5.0,
+            kp=10.0,
+            kd=0.1,
         )
 
     def get_actuators(
@@ -544,6 +536,42 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
         return model.forward(obs_n, carry)
 
+    def _scan_fn(
+        self,
+        actor_critic_carry: tuple[Array, Array],
+        xs: tuple[ksim.Trajectory, PRNGKeyArray],
+        model: Model,
+    ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
+        transition, rng = xs
+        actor_carry, critic_carry = actor_critic_carry
+        actor_dist, next_actor_carry = self.run_actor(
+            model=model.actor,
+            observations=transition.obs,
+            commands=transition.command,
+            carry=actor_carry,
+        )
+        log_probs = actor_dist.log_prob(transition.action)
+        assert isinstance(log_probs, Array)
+        value, next_critic_carry = self.run_critic(
+            model=model.critic,
+            observations=transition.obs,
+            commands=transition.command,
+            carry=critic_carry,
+        )
+
+        transition_ppo_variables = ksim.PPOVariables(
+            log_probs=log_probs,
+            values=value.squeeze(-1),
+        )
+
+        next_carry = jax.tree.map(
+            lambda x, y: jnp.where(transition.done, x, y),
+            self.get_initial_model_carry(model, rng),
+            (next_actor_carry, next_critic_carry),
+        )
+
+        return next_carry, transition_ppo_variables
+
     def get_ppo_variables(
         self,
         model: Model,
@@ -551,40 +579,14 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         model_carry: tuple[Array, Array],
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
-        def scan_fn(
-            actor_critic_carry: tuple[Array, Array],
-            transition: ksim.Trajectory,
-        ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
-            actor_carry, critic_carry = actor_critic_carry
-            actor_dist, next_actor_carry = self.run_actor(
-                model=model.actor,
-                observations=transition.obs,
-                commands=transition.command,
-                carry=actor_carry,
-            )
-            log_probs = actor_dist.log_prob(transition.action)
-            assert isinstance(log_probs, Array)
-            value, next_critic_carry = self.run_critic(
-                model=model.critic,
-                observations=transition.obs,
-                commands=transition.command,
-                carry=critic_carry,
-            )
-
-            transition_ppo_variables = ksim.PPOVariables(
-                log_probs=log_probs,
-                values=value.squeeze(-1),
-            )
-
-            next_carry = jax.tree.map(
-                lambda x, y: jnp.where(transition.done, x, y),
-                self.get_initial_model_carry(model, rng),
-                (next_actor_carry, next_critic_carry),
-            )
-
-            return next_carry, transition_ppo_variables
-
-        next_model_carry, ppo_variables = xax.scan(scan_fn, model_carry, trajectory, jit_level=ksim.JitLevel.RL_CORE)
+        scan_fn = functools.partial(self._scan_fn, model=model)
+        rngs = jax.random.split(rng, trajectory.done.shape[0])
+        next_model_carry, ppo_variables = xax.scan(
+            scan_fn,
+            model_carry,
+            (trajectory, rngs),
+            jit_level=ksim.JitLevel.RL_CORE,
+        )
 
         return ppo_variables, next_model_carry
 
@@ -628,7 +630,7 @@ if __name__ == "__main__":
             # Training parameters.
             num_envs=2048,
             batch_size=256,
-            num_passes=2,
+            num_passes=4,
             epochs_per_log_step=1,
             rollout_length_frames=24,
             global_grad_clip=2.0,
