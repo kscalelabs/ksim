@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Generic, TypeVar
 
 import attrs
-import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -66,7 +65,7 @@ class TeacherReward(Reward):
         teacher_dist = trajectory.aux_outputs[TEACHER_OUTPUT_KEY]
         student_action = trajectory.action
 
-        assert isinstance(teacher_dist, distrax.Distribution)
+        assert isinstance(teacher_dist, xax.Distribution)
 
         log_prob = teacher_dist.log_prob(student_action)
         log_prob_max = teacher_dist.log_prob(teacher_dist.mode())  # value at mode
@@ -93,7 +92,7 @@ class StudentTask(PPOTask[Config], Generic[Config], ABC):
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
-    def run_teacher(self, obs: xax.FrozenDict[str, Array], cmd: xax.FrozenDict[str, Array]) -> distrax.Distribution:
+    def run_teacher(self, obs: xax.FrozenDict[str, Array], cmd: xax.FrozenDict[str, Array]) -> xax.Distribution:
         """Run the teacher model.
 
         obs and cmd have shape (timesteps, ...)

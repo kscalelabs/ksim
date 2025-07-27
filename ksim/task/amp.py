@@ -75,6 +75,10 @@ class AMPConfig(PPOConfig):
         value=32,
         help="The batch size for reference motion batching in AMP training.",
     )
+    disc_num_passes: int = xax.field(
+        value=1,
+        help="Number of discriminator gradient passes per PPO update.",
+    )
     amp_grad_penalty_coef: float = xax.field(
         value=10.0,
         help="The coefficient for the gradient penalty in AMP training.",
@@ -357,8 +361,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         real_disc_logits: Array,
         sim_disc_logits: Array,
     ) -> tuple[Array, Array]:
-        real_disc_loss = jnp.mean((real_disc_logits - 1) ** 2)
-        sim_disc_loss = jnp.mean((sim_disc_logits + 1) ** 2)
+        real_disc_loss = 0.5 * jnp.sum((real_disc_logits - 1) ** 2)
+        sim_disc_loss = 0.5 * jnp.sum((sim_disc_logits + 1) ** 2)
         return real_disc_loss, sim_disc_loss
 
     def _grad_penalty(
@@ -427,9 +431,14 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         disc_loss = real_disc_loss + sim_disc_loss + gp_loss
 
         disc_metrics = {
-            "real_logits": real_disc_logits,
-            "sim_logits": sim_disc_logits,
-            "gp_loss": gp_loss,
+            "disc_loss": disc_loss,
+            "disc_real_loss": real_disc_loss,
+            "disc_sim_loss": sim_disc_loss,
+            "disc_gp_loss": gp_loss,
+            "disc_real_logits_mean": real_disc_logits.mean(),
+            "disc_real_logits_std": real_disc_logits.std(),
+            "disc_sim_logits_mean": sim_disc_logits.mean(),
+            "disc_sim_logits_std": sim_disc_logits.std(),
         }
 
         return disc_loss, xax.FrozenDict(disc_metrics)
@@ -459,7 +468,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
-        rng, rng_disc, rng_noise = jax.random.split(rng, 3)
+        rng, rng_disc, rng_noise, rng_update = jax.random.split(rng, 4)
+
         carry, metrics, logged_traj = super()._single_step(
             trajectories=trajectories,
             rewards=rewards,
@@ -479,30 +489,59 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         sim_t = trajectories.done.shape[-1]
 
-        real_batch = self._make_real_batch(
-            motions=real_motions_full,
-            window_t=sim_t,
-            batch_b=self.config.amp_reference_batch_size,
-            rng=rng_disc,
+        def disc_pass_fn(
+            state: tuple[PyTree, optax.OptState], pass_rng: PRNGKeyArray
+        ) -> tuple[PyTree, xax.FrozenDict[str, Array]]:
+            """Run a single discriminator gradient step."""
+            model_arr_i, opt_state_i = state
+
+            rng_real_i, rng_sim_i, rng_noise_i = jax.random.split(pass_rng, 3)
+
+            real_batch_i = self._make_real_batch(
+                motions=real_motions_full,
+                window_t=sim_t,
+                batch_b=self.config.amp_reference_batch_size,
+                rng=rng_real_i,
+            )
+
+            sim_traj_i = self._make_sim_batch(
+                trajectories=trajectories,
+                batch_b=self.config.amp_reference_batch_size,
+                rng=rng_sim_i,
+            )
+
+            disc_metrics_i, grads_i = self._get_disc_metrics_and_grads(
+                model_arr=model_arr_i,
+                model_static=model_static,
+                trajectories=sim_traj_i,
+                real_motions=real_batch_i,
+                carry=carry,
+                rng=rng_noise_i,
+            )
+
+            new_model_arr_i, new_opt_state_i, disc_grad_metrics_i = self.apply_gradients_with_clipping(
+                model_arr=model_arr_i,
+                grads=grads_i,
+                optimizer=optimizer,
+                opt_state=opt_state_i,
+            )
+
+            merged_metrics_i: xax.FrozenDict[str, Array] = xax.FrozenDict(
+                disc_metrics_i.unfreeze() | disc_grad_metrics_i
+            )
+
+            return (new_model_arr_i, new_opt_state_i), merged_metrics_i
+
+        pass_rngs = jax.random.split(rng_disc, self.config.disc_num_passes)
+
+        (new_model_arr, new_opt_state), disc_metrics_all = xax.scan(
+            disc_pass_fn,
+            (model_arr, opt_state),
+            pass_rngs,
+            jit_level=JitLevel.RL_CORE,
         )
 
-        # Computes the metrics and PPO gradients.
-        disc_metrics, grads = self._get_disc_metrics_and_grads(
-            model_arr=model_arr,
-            model_static=model_static,
-            trajectories=trajectories,
-            real_motions=real_batch,
-            carry=carry,
-            rng=rng_noise,
-        )
-
-        # Applies the gradients with clipping.
-        new_model_arr, new_opt_state, disc_grad_metrics = self.apply_gradients_with_clipping(
-            model_arr=model_arr,
-            grads=grads,
-            optimizer=optimizer,
-            opt_state=opt_state,
-        )
+        disc_metrics = jax.tree.map(lambda x: x.mean(0), disc_metrics_all)
 
         # Updates the carry with the new model and optimizer states.
         carry = replace(
@@ -514,10 +553,8 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             opt_state=xax.tuple_insert(carry.opt_state, 1, new_opt_state),
         )
 
-        # Gets the metrics dictionary.
-        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(
-            metrics.unfreeze() | disc_metrics.unfreeze() | disc_grad_metrics
-        )
+        # Combine metrics.
+        metrics = xax.FrozenDict(metrics.unfreeze() | disc_metrics.unfreeze())
 
         return carry, metrics, logged_traj
 
@@ -546,8 +583,10 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-    @staticmethod  # ensure consistent calling convention
+    # Note: using an instance method (instead of staticmethod) so we can access
+    # configuration parameters such as ``amp_reference_noise``.
     def _make_real_batch(
+        self,
         motions: PyTree,
         window_t: int,
         batch_b: int,
@@ -565,10 +604,11 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             A PyTree with the same structure as ``motions`` whose leaves have
             shape (batch_b, window_t, ...).
         """
+        # Split keys for clip selection, per 0sample selection and noise generation.
         num_motions = jax.tree_util.tree_leaves(motions)[0].shape[0]
 
-        keys = jax.random.split(rng, batch_b + 1)
-        clip_key, sample_keys = keys[0], keys[1:]
+        keys = jax.random.split(rng, batch_b + 2)  # +1 for clip_key, +1 for noise
+        clip_key, *sample_keys, noise_key = keys
 
         # Sample which clip each element in the batch comes from.
         clip_idx = jax.random.randint(clip_key, (batch_b,), 0, num_motions)
@@ -577,9 +617,53 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         def _sample_single(clip: PyTree, rng_key: PRNGKeyArray) -> PyTree:
             """Samples an unbiased window from a single motion clip."""
-            # Length of the real clip (may differ across clips).
             t_real = jax.tree_util.tree_leaves(clip)[0].shape[0]
-            start = jax.random.randint(rng_key, (), 0, t_real)  # unbiased start index
+            start = jax.random.randint(rng_key, (), 0, t_real)
             return jax.tree_util.tree_map(lambda arr: _loop_slice(arr, start, window_t), clip)
 
-        return jax.vmap(_sample_single)(batch_clips, sample_keys)
+        batch = jax.vmap(_sample_single)(batch_clips, jnp.stack(sample_keys))
+
+        # # Optionally add small Gaussian noise to mitigate discriminator overfitting.
+        # noise_std = self.config.amp_reference_noise
+        # if noise_std > 0:
+        #     # Generate a matching noise PyTree.
+        #     def _add_noise(arr: Array, key: PRNGKeyArray) -> Array:
+        #         noise = jax.random.normal(key, shape=arr.shape, dtype=arr.dtype)
+        #         return arr + noise * noise_std
+
+        #     # Create a tree of keys matching the structure.
+        #     flat, treedef = jax.tree_util.tree_flatten(batch)
+        #     noise_keys = jax.random.split(noise_key, len(flat))
+        #     noised_flat = [
+        #         _add_noise(arr, k) if arr.dtype in (jnp.float32, jnp.float64) else arr
+        #         for arr, k in zip(flat, noise_keys, strict=False)
+        #     ]
+        #     batch = jax.tree_util.tree_unflatten(treedef, noised_flat)
+
+        return batch
+
+    def _make_sim_batch(
+        self,
+        *,
+        trajectories: Trajectory,
+        batch_b: int,
+        rng: PRNGKeyArray,
+    ) -> Trajectory:
+        """Sample a batch of trajectories for the discriminator.
+
+        Args:
+            trajectories: Rollout trajectories with leading dimension ``(num_envs,)``.
+            batch_b: Desired batch size.
+            rng: PRNG key used for sampling.
+
+        Returns:
+            A trajectory PyTree with the same structure but leading dimension ``(batch_b,)``.
+        """
+        num_envs = trajectories.done.shape[0]
+
+        if num_envs % batch_b != 0:
+            raise ValueError(f"amp_reference_batch_size ({batch_b}) must divide batch_size ({num_envs}).")
+
+        indices = jax.random.permutation(rng, num_envs)[:batch_b]
+
+        return jax.tree.map(lambda x: x[indices], trajectories)

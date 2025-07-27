@@ -423,6 +423,10 @@ class RLConfig(xax.Config):
         value=60.0 * 30.0,
         help="Render the trajectory (without associated graphs) every N seconds",
     )
+    render_full_first_n_valid: int = xax.field(
+        value=10,
+        help="For the first N validation steps, render the full trajectory",
+    )
 
     # Rendering parameters.
     max_values_per_plot: int = xax.field(
@@ -2227,6 +2231,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             is_first_step = True
             last_full_render_time = 0.0
+            num_valid_steps = 0
 
             try:
                 while self._is_running and not self.is_training_over(state):
@@ -2265,7 +2270,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         if valid_step:
                             cur_time = time.monotonic()
-                            full_render = cur_time - last_full_render_time > self.config.render_full_every_n_seconds
+                            full_render = (
+                                cur_time - last_full_render_time > self.config.render_full_every_n_seconds
+                            ) or (num_valid_steps < self.config.render_full_first_n_valid)
+                            num_valid_steps += 1
 
                             if full_render:
                                 if self.config.render_length_seconds > self.config.rollout_length_seconds:
@@ -2294,7 +2302,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 logged_traj=logged_traj,
                                 markers=markers,
                                 viewer=viewer,
-                                key="trajectory",
+                                key="full trajectory" if full_render else "trajectory",
                             )
 
                         # Updates the step and sample counts.

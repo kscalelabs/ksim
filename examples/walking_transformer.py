@@ -4,7 +4,6 @@
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
-import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -77,8 +76,11 @@ class Actor(eqx.Module):
         self.num_mixtures = num_mixtures
 
     def forward(
-        self, obs_tn: Array, carry: xax.TransformerCache, add_batch_dim: bool
-    ) -> tuple[distrax.Distribution, xax.TransformerCache]:
+        self,
+        obs_tn: Array,
+        carry: xax.TransformerCache,
+        add_batch_dim: bool,
+    ) -> tuple[xax.Distribution, xax.TransformerCache]:
         if add_batch_dim:
             obs_tn = obs_tn[None]
 
@@ -103,7 +105,7 @@ class Actor(eqx.Module):
             std_tnm = std_tnm.squeeze(0)
             logits_tnm = logits_tnm.squeeze(0)
 
-        dist_tn = ksim.MixtureOfGaussians(means_nm=mean_tnm, stds_nm=std_tnm, logits_nm=logits_tnm)
+        dist_tn = xax.MixtureOfGaussians(means_nm=mean_tnm, stds_nm=std_tnm, logits_nm=logits_tnm)
         return dist_tn, cache
 
 
@@ -233,7 +235,7 @@ class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config
         commands: xax.FrozenDict[str, Array],
         carry: xax.TransformerCache,
         add_batch_dim: bool,
-    ) -> tuple[distrax.Distribution, xax.TransformerCache]:
+    ) -> tuple[xax.Distribution, xax.TransformerCache]:
         timestep_1 = observations["timestep_observation"]
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
@@ -381,7 +383,7 @@ class HumanoidWalkingTransformerTask(HumanoidWalkingTask[Config], Generic[Config
             add_batch_dim=True,
         )
 
-        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
+        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(rng)
 
         return ksim.Action(action=action_j, carry=(actor_carry, critic_carry_in))
 
