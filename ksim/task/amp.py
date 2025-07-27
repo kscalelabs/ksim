@@ -526,9 +526,9 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
                 opt_state=opt_state_i,
             )
 
-            merged_metrics_i = xax.FrozenDict(disc_metrics_i.unfreeze() | disc_grad_metrics_i)
+            disc_metrics_i = xax.FrozenDict(disc_metrics_i.unfreeze() | disc_grad_metrics_i)
 
-            return (new_model_arr_i, new_opt_state_i), merged_metrics_i
+            return (new_model_arr_i, new_opt_state_i), disc_metrics_i
 
         pass_rngs = jax.random.split(rng_disc, self.config.disc_num_passes)
 
@@ -552,7 +552,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         )
 
         # Combine metrics.
-        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(metrics.unfreeze() | disc_metrics.unfreeze())
+        metrics = xax.FrozenDict(metrics.unfreeze() | disc_metrics.unfreeze())
 
         return carry, metrics, logged_traj
 
