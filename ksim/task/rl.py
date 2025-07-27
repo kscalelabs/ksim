@@ -1618,34 +1618,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return self.get_histogram(x)
         return x
 
-    def run_environment_step(
-        self,
-        constants: RolloutConstants,
-        env_states: RolloutEnvState,
-        shared_state: RolloutSharedState,
-    ) -> tuple[Array, Array, tuple[Trajectory, RolloutEnvState] | None]:
-        """Runs a single step of the environment.
-
-        Args:
-            constants: The constants
-            env_states: The environment states
-            shared_state: The shared state
-
-        Returns:
-            A tuple containing the qpos, qvel, and optionally the
-            transition and env_states.
-        """
-        transition, env_states = self.step_engine(
-            constants=constants,
-            env_states=env_states,
-            shared_state=shared_state,
-        )
-
-        qpos = env_states.physics_state.data.qpos
-        qvel = env_states.physics_state.data.qvel
-
-        return qpos, qvel, (transition, env_states)
-
     def run_model_viewer(
         self,
         num_steps: int | None = None,
@@ -1747,7 +1719,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     )
                     env_states = replace(env_states, commands=new_commands)
 
-                    transition, env_states = self.step_engine(
+                    transition, env_states, _ = self.step_engine(
                         constants=constants,
                         env_states=env_states,
                         shared_state=shared_state,
