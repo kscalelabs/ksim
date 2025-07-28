@@ -529,7 +529,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             disc_pass_fn,
             (model_arr, opt_state),
             pass_rngs,
-            jit_level=JitLevel.RL_CORE,
+            jit_level=JitLevel.HELPER_FUNCTIONS,
         )
 
         disc_metrics = jax.tree.map(lambda x: x.mean(0), disc_metrics_all)

@@ -644,7 +644,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             update_model_across_batches,
             carry,
             xs=jax.random.split(rng, self.config.num_passes),
-            jit_level=JitLevel.RL_CORE,
+            jit_level=JitLevel.HELPER_FUNCTIONS,
         )
 
         if carry.env_states.model_carry is not None:

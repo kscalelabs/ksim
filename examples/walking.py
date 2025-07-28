@@ -140,6 +140,7 @@ class Actor(eqx.Module):
         mean_nm = mean_nm + jnp.array([v for _, v in ZEROS])[:, None]
 
         dist_n = xax.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
+
         return dist_n, jnp.stack(out_carries, axis=0)
 
 
@@ -296,6 +297,16 @@ class WalkingConfig(ksim.PPOConfig):
         help="Gradient clip for the Adam optimizer.",
     )
 
+    # Curriculum parameters.
+    curriculum_step_size: float = xax.field(
+        value=0.01,
+        help="The step size for the curriculum.",
+    )
+    curriculum_step_every_n_epochs: int = xax.field(
+        value=100,
+        help="The number of steps to take before updating the curriculum.",
+    )
+
     # Rendering parameters.
     render_track_body_id: int | None = xax.field(
         value=0,
@@ -315,6 +326,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         )
 
         return optax.chain(
+            optax.zero_nans(),
             optax.clip_by_global_norm(self.config.grad_clip),
             optax.scale_by_adam(),
             optax.scale_by_schedule(scheduler),
@@ -448,7 +460,10 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.ConstantCurriculum()
+        return ksim.LinearCurriculum(
+            step_size=self.config.curriculum_step_size,
+            step_every_n_epochs=self.config.curriculum_step_every_n_epochs,
+        )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
         return Model(

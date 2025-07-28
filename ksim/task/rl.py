@@ -1544,7 +1544,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return trajectory, reward, env_state, metrics
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.OUTER_LOOP)
+    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _rl_train_loop_step(
         self,
         carry: RLLoopCarry,
@@ -1610,7 +1610,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return carry_i, metrics
 
         rngs = jax.random.split(rng, self.config.epochs_per_log_step)
-        new_carry, metrics = xax.scan(single_step_fn, carry, rngs, jit_level=JitLevel.OUTER_LOOP)
+        new_carry, metrics = xax.scan(single_step_fn, carry, rngs, jit_level=JitLevel.RL_CORE)
 
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(self._histogram_fn, metrics)
@@ -2268,6 +2268,53 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             state=state,
         )
 
+    @xax.jit(static_argnames=["self", "constants", "num_steps"], jit_level=JitLevel.OUTER_LOOP)
+    def _jit_training_loop(
+        self,
+        carry: RLLoopCarry,
+        constants: RLLoopConstants,
+        state: xax.State,
+        rng: PRNGKeyArray,
+        num_steps: int,
+    ) -> tuple[RLLoopCarry, xax.State, Metrics]:
+        """JIT-compiled training loop that runs multiple steps."""
+
+        def training_step_fn(
+            carry_and_state: tuple[RLLoopCarry, xax.State],
+            rng: PRNGKeyArray,
+        ) -> tuple[tuple[RLLoopCarry, xax.State], Metrics]:
+            carry, state = carry_and_state
+
+            # Run a single training step
+            new_carry, metrics = self._rl_train_loop_step(
+                carry=carry,
+                constants=constants,
+                state=state,
+                rng=rng,
+            )
+
+            # Update state
+            new_state = state.replace(
+                num_steps=state.num_steps + 1,
+                num_samples=state.num_samples + self.rollout_num_samples,
+            )
+
+            return (new_carry, new_state), metrics
+
+        # Run the training loop for num_steps
+        rngs = jax.random.split(rng, num_steps)
+        (final_carry, final_state), all_metrics = xax.scan(
+            training_step_fn,
+            (carry, state),
+            rngs,
+            jit_level=JitLevel.OUTER_LOOP,
+        )
+
+        # Aggregate metrics across all steps
+        aggregated_metrics = jax.tree.map(lambda x: x.mean(0), all_metrics)
+
+        return final_carry, final_state, aggregated_metrics
+
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
 
@@ -2330,11 +2377,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         rng, update_rng = jax.random.split(rng)
 
-                        new_carry, metrics = self._rl_train_loop_step(
+                        # Use JIT-compiled training loop for efficiency
+                        # Run multiple training steps in a single JIT compilation
+                        steps_per_batch = min(10, max(1, self.config.epochs_per_log_step))
+
+                        new_carry, new_state, metrics = self._jit_training_loop(
                             carry=carry,
                             constants=constants,
                             state=state,
                             rng=update_rng,
+                            num_steps=steps_per_batch,
                         )
 
                         if num_compiled_steps < self.config.num_compiled_steps_to_log:
@@ -2344,6 +2396,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 raise ValueError(f"Carry changed during training loop step:\n{diff_str}")
 
                         carry = new_carry
+                        state = new_state
 
                         if self.config.profile_memory:
                             carry = jax.block_until_ready(carry)
@@ -2389,11 +2442,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         # Updates the step and sample counts.
                         self.write_logs(state)
 
-                    # Update  state with the elapsed time.
+                    # Update state with the elapsed time.
                     elapsed_time = timer.elapsed_time
                     state = state.replace(
-                        num_steps=state.num_steps + self.config.epochs_per_log_step,
-                        num_samples=state.num_samples + self.rollout_num_samples * self.config.epochs_per_log_step,
                         elapsed_time_s=state.elapsed_time_s + elapsed_time,
                     )
 
