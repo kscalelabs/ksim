@@ -581,7 +581,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         policy_model = eqx.combine(policy_model_arr, policy_model_static)
 
         # Runs the policy model on the trajectory to get the PPO variables.
-        on_policy_rngs = jax.random.split(rng, self.config.num_envs)
+        on_policy_rngs = jax.random.split(rng, trajectories.done.shape[0])
         ppo_fn = xax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0), jit_level=JitLevel.RL_CORE)
         on_policy_variables, _ = ppo_fn(policy_model, trajectories, carry.env_states.model_carry, on_policy_rngs)
         on_policy_variables = jax.tree.map(lambda x: jax.lax.stop_gradient(x), on_policy_variables)
@@ -626,14 +626,14 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             shuffle_rng, batch_rng = jax.random.split(rng)
 
             # Shuffle the indices so that minibatch updates are different.
-            indices = jnp.arange(trajectories.done.shape[0])  # (num_envs)
+            indices = jnp.arange(trajectories.done.shape[0])
             indices = jax.random.permutation(shuffle_rng, indices, independent=False)
-            indices_by_batch = indices.reshape(self.num_batches, self.batch_size)  # (num_batches, rollouts per batch)
+            indices_by_batch = indices.reshape(-1, min(self.batch_size, indices.shape[0]))
 
             carry, metrics = xax.scan(
                 update_model_in_batch,
                 carry,
-                (indices_by_batch, jax.random.split(batch_rng, self.num_batches)),
+                (indices_by_batch, jax.random.split(batch_rng, indices_by_batch.shape[0])),
                 jit_level=JitLevel.RL_CORE,
             )
 
@@ -659,7 +659,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             # after updating the model, the model carry will be new and the
             # previous rollout's model carry will be incorrect. This does perform
             # some additional computation, but the impact is small.
-            off_policy_rngs = jax.random.split(rng, self.config.num_envs)
+            off_policy_rngs = jax.random.split(rng, trajectories.done.shape[0])
             _, next_model_carrys = ppo_fn(
                 policy_model,
                 trajectories,

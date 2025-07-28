@@ -2388,14 +2388,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 num_steps=self.render_length_frames,
                             )
 
-                            # Burn-in the carry.
+                            # Burn-in the optimizer state.
                             if is_first_step:
                                 multi_env_states = jax.tree.map(lambda arr: arr[None], single_env_states)
+                                multi_traj = jax.tree.map(lambda arr: arr[None], long_traj)
+                                multi_rewards = jax.tree.map(lambda arr: arr[None], rewards)
                                 new_carry, _ = self.update_model(
                                     constants=constants,
                                     carry=replace(carry, env_states=multi_env_states),
-                                    trajectories=long_traj,
-                                    rewards=rewards,
+                                    trajectories=multi_traj,
+                                    rewards=multi_rewards,
                                     rng=rng,
                                 )
                                 carry = replace(carry, opt_state=new_carry.opt_state)
