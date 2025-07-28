@@ -21,7 +21,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter, deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, is_dataclass, replace
 from pathlib import Path
 from threading import Thread
 from types import FrameType
@@ -95,6 +95,80 @@ def assert_distinct(names: Collection[str]) -> None:
     if len(names) != len(names_set):
         duplicates = [name for name in names_set if names.count(name) > 1]
         raise ValueError(f"Names are not distinct! Found duplicates: {duplicates}")
+
+
+def check_no_weak_aval(thing: PyTree, throw_on_weak_type: bool) -> None:
+    for name, leaf in xax.get_named_leaves(thing, max_depth=5):
+        aval = get_aval(leaf)
+        if aval.weak_type:  # pyright: ignore[reportAttributeAccessIssue]
+            if throw_on_weak_type:
+                raise ValueError(f"Found weak type: '{name}' This could slow down compilation time")
+            logger.warning("Found weak type: '%s' This could slow down compilation time", name)
+
+
+def diff_pytree(tree_a: PyTree, tree_b: PyTree, prefix: str = "") -> list[str]:
+    diffs = []
+
+    # Handle dict-like objects
+    if isinstance(tree_a, (dict, xax.FrozenDict)) and isinstance(tree_b, (dict, xax.FrozenDict)):
+        keys_a, keys_b = set(tree_a.keys()), set(tree_b.keys())
+        for k in keys_a - keys_b:
+            diffs.append(f"{prefix}{k}: present in A only")
+        for k in keys_b - keys_a:
+            diffs.append(f"{prefix}{k}: present in B only")
+        for k in keys_a & keys_b:
+            diffs.extend(diff_pytree(tree_a[k], tree_b[k], prefix + f"{k}."))
+        return diffs
+
+    # Handle tuple/list
+    elif isinstance(tree_a, (list, tuple)) and isinstance(tree_b, (list, tuple)):
+        if len(tree_a) != len(tree_b):
+            diffs.append(f"{prefix}: different lengths {len(tree_a)} vs {len(tree_b)}")
+        for i, (a_i, b_i) in enumerate(zip(tree_a, tree_b, strict=False)):
+            diffs.extend(diff_pytree(a_i, b_i, prefix + f"[{i}]."))
+        return diffs
+
+    # Handles dataclasses.
+    elif is_dataclass(tree_a) and is_dataclass(tree_b):
+        for field in fields(tree_a):
+            diffs.extend(
+                diff_pytree(
+                    getattr(tree_a, field.name),
+                    getattr(tree_b, field.name),
+                    prefix + f"{field.name}.",
+                )
+            )
+        return diffs
+
+    # Handles basic types.
+    elif isinstance(tree_a, (int, float, bool, str, type(None), np.number, np.bool, bytes)):
+        if tree_a != tree_b:
+            diffs.append(f"{prefix}: {tree_a!r} vs {tree_b!r}")
+        return diffs
+
+    # Handles Numpy arrays.
+    elif isinstance(tree_a, np.ndarray) and isinstance(tree_b, np.ndarray):
+        if tree_a.shape != tree_b.shape:
+            diffs.append(f"{prefix}: shape {tree_a.shape} vs {tree_b.shape}")
+        if tree_a.dtype != tree_b.dtype:
+            diffs.append(f"{prefix}: dtype {tree_a.dtype} vs {tree_b.dtype}")
+        return diffs
+
+    # Handle arrays (check shape/dtype)
+    elif isinstance(tree_a, jnp.ndarray) and isinstance(tree_b, jnp.ndarray):
+        if tree_a.shape != tree_b.shape:
+            diffs.append(f"{prefix}: shape {tree_a.shape} vs {tree_b.shape}")
+        if tree_a.dtype != tree_b.dtype:
+            diffs.append(f"{prefix}: dtype {tree_a.dtype} vs {tree_b.dtype}")
+        return diffs
+
+    # Handle mismatched types
+    elif type(tree_a) is not type(tree_b):
+        diffs.append(f"{prefix}: type {type(tree_a)} vs {type(tree_b)}")
+        return diffs
+
+    else:
+        raise ValueError(f"Unknown type: {type(tree_a)}")
 
 
 @jax.tree_util.register_dataclass
@@ -418,10 +492,18 @@ class RLConfig(xax.Config):
         value=None,
         help="The number of frames to rollout each environment during training.",
     )
+    throw_on_weak_type: bool = xax.field(
+        value=True,
+        help="If true, throw an error if a weak type is found.",
+    )
 
     # Validation timing parameters.
+    valid_first_n_steps: int = xax.field(
+        value=1,
+        help="For the first N validation steps, run the full validation",
+    )
     valid_every_n_seconds: float | None = xax.field(
-        value=150.0,
+        value=150.0,  # Every 2.5 minutes
         help="Run full validation (render trajectory and all graphs) every N seconds",
     )
     valid_first_n_seconds: float | None = xax.field(
@@ -429,7 +511,7 @@ class RLConfig(xax.Config):
         help="Run first validation after N seconds",
     )
     render_full_every_n_seconds: float = xax.field(
-        value=60.0 * 30.0,
+        value=1800.0,  # Every 30 minutes
         help="Render the trajectory (without associated graphs) every N seconds",
     )
     render_full_first_n_valid: int = xax.field(
@@ -478,8 +560,8 @@ class RLConfig(xax.Config):
         value=640,
         help="The height of the rendered images during the validation phase.",
     )
-    render_length_seconds: float = xax.field(
-        value=5.0,
+    render_length_seconds: float | None = xax.field(
+        value=None,
         help="The number of seconds to rollout each environment during evaluation.",
     )
     render_fps: int | None = xax.field(
@@ -915,6 +997,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     @functools.cached_property
     def render_length_frames(self) -> int:
+        if self.config.render_length_seconds is None:
+            return self.rollout_length_frames
         render_length_frames = round(self.config.render_length_seconds / self.config.ctrl_dt)
         if render_length_frames > self.rollout_length_frames:
             logger.info(
@@ -2296,11 +2380,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             log_joint_config_table(mj_model, metadata, self.logger)
 
             constants, carry, state = self.initialize_rl_training(mj_model, metadata, rng)
-
-            for name, leaf in xax.get_named_leaves(carry, max_depth=3):
-                aval = get_aval(leaf)
-                if aval.weak_type:  # pyright: ignore[reportAttributeAccessIssue]
-                    logger.warning("Found weak type: '%s' This could slow down compilation time", name)
+            check_no_weak_aval(carry, self.config.throw_on_weak_type)
 
             # Creates the markers.
             markers = self.get_markers(
@@ -2316,6 +2396,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             state = self.on_training_start(state)
+            check_no_weak_aval(state, self.config.throw_on_weak_type)
 
             num_compiled_steps = 0
             last_full_render_time = 0.0
@@ -2335,12 +2416,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         rng, update_rng = jax.random.split(rng)
 
-                        carry, metrics, logged_traj = self._rl_train_loop_step(
+                        new_carry, metrics, logged_traj = self._rl_train_loop_step(
                             carry=carry,
                             constants=constants,
                             state=state,
                             rng=update_rng,
                         )
+
+                        if num_compiled_steps < self.config.num_compiled_steps_to_log:
+                            diffs = diff_pytree(carry, new_carry)
+                            if diffs:
+                                raise ValueError(f"Carry changed during training loop step: {diffs}")
+
+                        carry = new_carry
 
                         if self.config.profile_memory:
                             carry = jax.block_until_ready(carry)

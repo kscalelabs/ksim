@@ -121,9 +121,6 @@ class Actor(eqx.Module):
         std_nm = prediction_n[slice_len : slice_len * 2].reshape(self.num_joints, self.num_mixtures)
         logits_nm = prediction_n[slice_len * 2 :].reshape(self.num_joints, self.num_mixtures)
 
-        # Clip logits to prevent NaN issues.
-        logits_nm = jnp.clip(logits_nm, -10.0, 10.0)
-
         # Softplus and clip to ensure positive standard deviations.
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
 
@@ -271,11 +268,11 @@ class WalkingConfig(ksim.PPOConfig):
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=3e-4,
+        value=1e-3,
         help="Learning rate for PPO.",
     )
     warmup_steps: int = xax.field(
-        value=100,
+        value=25,
         help="The number of steps to warm up the learning rate.",
     )
     adam_weight_decay: float = xax.field(
@@ -285,24 +282,6 @@ class WalkingConfig(ksim.PPOConfig):
     grad_clip: float = xax.field(
         value=2.0,
         help="Gradient clip for the Adam optimizer.",
-    )
-
-    # Curriculum parameters.
-    num_curriculum_levels: int = xax.field(
-        value=10,
-        help="The number of curriculum levels to use.",
-    )
-    increase_threshold: float = xax.field(
-        value=3.0,
-        help="Increase the curriculum level when the mean trajectory length is above this threshold.",
-    )
-    decrease_threshold: float = xax.field(
-        value=1.0,
-        help="Decrease the curriculum level when the mean trajectory length is below this threshold.",
-    )
-    min_level_steps: int = xax.field(
-        value=50,
-        help="The minimum number of steps to wait before changing the curriculum level.",
     )
 
     # Rendering parameters.
@@ -447,7 +426,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.StayAliveReward(scale=25.0),
             ksim.NaiveForwardReward(scale=1.0),
             # ksim.JoystickReward(scale=1.0),
-            # ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
+            ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -458,12 +437,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.EpisodeLengthCurriculum(
-            num_levels=self.config.num_curriculum_levels,
-            increase_threshold=self.config.increase_threshold,
-            decrease_threshold=self.config.decrease_threshold,
-            min_level_steps=self.config.min_level_steps,
-        )
+        return ksim.ConstantCurriculum()
 
     def get_model(self, key: PRNGKeyArray) -> Model:
         return Model(
