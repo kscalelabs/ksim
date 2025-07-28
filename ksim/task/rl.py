@@ -1549,6 +1549,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         return trajectory, reward, env_state, metrics
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
+    def _burn_in_carry(
+        self,
+        carry: RLLoopCarry,
+        constants: RLLoopConstants,
+        rng: PRNGKeyArray,
+        long_traj: Trajectory,
+        rewards: RewardState,
+        single_env_state: RolloutEnvState,
+    ) -> RLLoopCarry:
+        multi_env_states = jax.tree.map(lambda arr: arr[None], single_env_state)
+        multi_traj = jax.tree.map(lambda arr: arr[None], long_traj)
+        multi_rewards = jax.tree.map(lambda arr: arr[None], rewards)
+        new_carry, _ = self.update_model(
+            constants=constants,
+            carry=replace(carry, env_states=multi_env_states),
+            trajectories=multi_traj,
+            rewards=multi_rewards,
+            rng=rng,
+        )
+        return replace(carry, opt_state=new_carry.opt_state)
+
+    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _rl_train_loop_step(
         self,
         carry: RLLoopCarry,
@@ -2388,19 +2410,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 num_steps=self.render_length_frames,
                             )
 
-                            # Burn-in the optimizer state.
+                            # Burn-in the carry to avoid subsequent Jax recompilation.
                             if is_first_step:
-                                multi_env_states = jax.tree.map(lambda arr: arr[None], single_env_states)
-                                multi_traj = jax.tree.map(lambda arr: arr[None], long_traj)
-                                multi_rewards = jax.tree.map(lambda arr: arr[None], rewards)
-                                new_carry, _ = self.update_model(
+                                carry = self._burn_in_carry(
+                                    carry=carry,
                                     constants=constants,
-                                    carry=replace(carry, env_states=multi_env_states),
-                                    trajectories=multi_traj,
-                                    rewards=multi_rewards,
                                     rng=rng,
+                                    long_traj=long_traj,
+                                    rewards=rewards,
+                                    single_env_state=single_env_states,
                                 )
-                                carry = replace(carry, opt_state=new_carry.opt_state)
 
                             logged_traj = LoggedTrajectory(
                                 trajectory=long_traj,
