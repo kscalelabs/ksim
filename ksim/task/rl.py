@@ -99,11 +99,15 @@ def assert_distinct(names: Collection[str]) -> None:
 
 def check_no_weak_aval(thing: PyTree, throw_on_weak_type: bool) -> None:
     for name, leaf in xax.get_named_leaves(thing, max_depth=5):
+        # Check for weak aval.
         aval = get_aval(leaf)
         if aval.weak_type:  # pyright: ignore[reportAttributeAccessIssue]
             if throw_on_weak_type:
                 raise ValueError(f"Found weak type: '{name}' This could slow down compilation time")
             logger.warning("Found weak type: '%s' This could slow down compilation time", name)
+        # Check for unspecified value.
+        if isinstance(leaf, jnp.ndarray):
+            assert leaf.sharding is not None, f"Found unspecified value: '{name}'"
 
 
 @jax.tree_util.register_dataclass
@@ -2268,14 +2272,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             state=state,
         )
 
-    @xax.jit(static_argnames=["self", "constants", "num_steps"], jit_level=JitLevel.OUTER_LOOP)
+    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.OUTER_LOOP)
     def _jit_training_loop(
         self,
         carry: RLLoopCarry,
         constants: RLLoopConstants,
         state: xax.State,
         rng: PRNGKeyArray,
-        num_steps: int,
     ) -> tuple[RLLoopCarry, xax.State, Metrics]:
         """JIT-compiled training loop that runs multiple steps."""
 
@@ -2302,7 +2305,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             return (new_carry, new_state), metrics
 
         # Run the training loop for num_steps
-        rngs = jax.random.split(rng, num_steps)
+        rngs = jax.random.split(rng, self.config.epochs_per_log_step)
         (final_carry, final_state), all_metrics = xax.scan(
             training_step_fn,
             (carry, state),
@@ -2365,8 +2368,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             try:
                 while self._is_running and not self.is_training_over(state):
-                    # Runs the training loop.
                     with xax.ContextTimer() as timer:
+                        is_first_step = num_compiled_steps == 0
                         valid_step = self.valid_step_timer(state)
 
                         state = state.replace(
@@ -2375,49 +2378,28 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         state = self.on_step_start(state)
 
-                        rng, update_rng = jax.random.split(rng)
-
-                        # Use JIT-compiled training loop for efficiency
-                        # Run multiple training steps in a single JIT compilation
-                        steps_per_batch = min(10, max(1, self.config.epochs_per_log_step))
-
-                        new_carry, new_state, metrics = self._jit_training_loop(
-                            carry=carry,
-                            constants=constants,
-                            state=state,
-                            rng=update_rng,
-                            num_steps=steps_per_batch,
-                        )
-
-                        if num_compiled_steps < self.config.num_compiled_steps_to_log:
-                            diffs = xax.diff_pytree(carry, new_carry)
-                            if diffs:
-                                diff_str = "\n".join(diffs)
-                                raise ValueError(f"Carry changed during training loop step:\n{diff_str}")
-
-                        carry = new_carry
-                        state = new_state
-
-                        if self.config.profile_memory:
-                            carry = jax.block_until_ready(carry)
-                            metrics = jax.block_until_ready(metrics)
-                            jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
-
-                        self.log_train_metrics(metrics)
-                        self.log_state_timers(state)
-
-                        if self.should_checkpoint(state):
-                            self._save(constants=constants, carry=carry, state=state)
-
-                        state = self.on_step_end(state)
-
-                        if valid_step:
+                        # Runs a validation step.
+                        if valid_step or is_first_step:
+                            single_env_states = jax.tree.map(lambda arr: arr[-1], carry.env_states)
                             long_traj, rewards, _, _ = self._single_unroll(
                                 constants=constants.constants,
-                                env_state=jax.tree.map(lambda arr: arr[-1], carry.env_states),
+                                env_state=single_env_states,
                                 shared_state=carry.shared_state,
                                 num_steps=self.render_length_frames,
                             )
+
+                            # Burn-in the carry.
+                            if is_first_step:
+                                multi_env_states = jax.tree.map(lambda arr: arr[None], single_env_states)
+                                new_carry, _ = self.update_model(
+                                    constants=constants,
+                                    carry=replace(carry, env_states=multi_env_states),
+                                    trajectories=long_traj,
+                                    rewards=rewards,
+                                    rng=rng,
+                                )
+                                carry = replace(carry, opt_state=new_carry.opt_state)
+
                             logged_traj = LoggedTrajectory(
                                 trajectory=long_traj,
                                 rewards=rewards,
@@ -2438,6 +2420,29 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 viewer=viewer,
                                 key="trajectory",
                             )
+
+                        # Runs the training loop.
+                        rng, update_rng = jax.random.split(rng)
+
+                        carry, state, metrics = self._jit_training_loop(
+                            carry=carry,
+                            constants=constants,
+                            state=state,
+                            rng=update_rng,
+                        )
+
+                        if self.config.profile_memory:
+                            carry = jax.block_until_ready(carry)
+                            metrics = jax.block_until_ready(metrics)
+                            jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
+
+                        self.log_train_metrics(metrics)
+                        self.log_state_timers(state)
+
+                        if self.should_checkpoint(state):
+                            self._save(constants=constants, carry=carry, state=state)
+
+                        state = self.on_step_end(state)
 
                         # Updates the step and sample counts.
                         self.write_logs(state)
