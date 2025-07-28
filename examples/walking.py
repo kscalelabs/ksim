@@ -268,7 +268,7 @@ class WalkingConfig(ksim.PPOConfig):
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=1e-3,
+        value=3e-4,
         help="Learning rate for PPO.",
     )
     warmup_steps: int = xax.field(
@@ -424,9 +424,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             ksim.StayAliveReward(scale=25.0),
-            ksim.NaiveForwardReward(scale=1.0),
-            # ksim.JoystickReward(scale=1.0),
-            ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
+            ksim.JoystickReward(scale=1.0),
+            ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=1.0),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:

@@ -21,7 +21,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter, deque
-from dataclasses import dataclass, fields, is_dataclass, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Thread
 from types import FrameType
@@ -104,71 +104,6 @@ def check_no_weak_aval(thing: PyTree, throw_on_weak_type: bool) -> None:
             if throw_on_weak_type:
                 raise ValueError(f"Found weak type: '{name}' This could slow down compilation time")
             logger.warning("Found weak type: '%s' This could slow down compilation time", name)
-
-
-def diff_pytree(tree_a: PyTree, tree_b: PyTree, prefix: str = "") -> list[str]:
-    diffs = []
-
-    # Handle dict-like objects
-    if isinstance(tree_a, (dict, xax.FrozenDict)) and isinstance(tree_b, (dict, xax.FrozenDict)):
-        keys_a, keys_b = set(tree_a.keys()), set(tree_b.keys())
-        for k in keys_a - keys_b:
-            diffs.append(f"{prefix}{k}: present in A only")
-        for k in keys_b - keys_a:
-            diffs.append(f"{prefix}{k}: present in B only")
-        for k in keys_a & keys_b:
-            diffs.extend(diff_pytree(tree_a[k], tree_b[k], prefix + f"{k}."))
-        return diffs
-
-    # Handle tuple/list
-    elif isinstance(tree_a, (list, tuple)) and isinstance(tree_b, (list, tuple)):
-        if len(tree_a) != len(tree_b):
-            diffs.append(f"{prefix}: different lengths {len(tree_a)} vs {len(tree_b)}")
-        for i, (a_i, b_i) in enumerate(zip(tree_a, tree_b, strict=False)):
-            diffs.extend(diff_pytree(a_i, b_i, prefix + f"[{i}]."))
-        return diffs
-
-    # Handles dataclasses.
-    elif is_dataclass(tree_a) and is_dataclass(tree_b):
-        for field in fields(tree_a):
-            diffs.extend(
-                diff_pytree(
-                    getattr(tree_a, field.name),
-                    getattr(tree_b, field.name),
-                    prefix + f"{field.name}.",
-                )
-            )
-        return diffs
-
-    # Handles basic types.
-    elif isinstance(tree_a, (int, float, bool, str, type(None), np.number, np.bool, bytes)):
-        if tree_a != tree_b:
-            diffs.append(f"{prefix}: {tree_a!r} vs {tree_b!r}")
-        return diffs
-
-    # Handles Numpy arrays.
-    elif isinstance(tree_a, np.ndarray) and isinstance(tree_b, np.ndarray):
-        if tree_a.shape != tree_b.shape:
-            diffs.append(f"{prefix}: shape {tree_a.shape} vs {tree_b.shape}")
-        if tree_a.dtype != tree_b.dtype:
-            diffs.append(f"{prefix}: dtype {tree_a.dtype} vs {tree_b.dtype}")
-        return diffs
-
-    # Handle arrays (check shape/dtype)
-    elif isinstance(tree_a, jnp.ndarray) and isinstance(tree_b, jnp.ndarray):
-        if tree_a.shape != tree_b.shape:
-            diffs.append(f"{prefix}: shape {tree_a.shape} vs {tree_b.shape}")
-        if tree_a.dtype != tree_b.dtype:
-            diffs.append(f"{prefix}: dtype {tree_a.dtype} vs {tree_b.dtype}")
-        return diffs
-
-    # Handle mismatched types
-    elif type(tree_a) is not type(tree_b):
-        diffs.append(f"{prefix}: type {type(tree_a)} vs {type(tree_b)}")
-        return diffs
-
-    else:
-        raise ValueError(f"Unknown type: {type(tree_a)}")
 
 
 @jax.tree_util.register_dataclass
@@ -510,19 +445,15 @@ class RLConfig(xax.Config):
         value=None,
         help="Run first validation after N seconds",
     )
-    render_full_every_n_seconds: float = xax.field(
-        value=1800.0,  # Every 30 minutes
-        help="Render the trajectory (without associated graphs) every N seconds",
-    )
-    render_full_first_n_valid: int = xax.field(
-        value=10,
-        help="For the first N validation steps, render the full trajectory",
-    )
 
     # Rendering parameters.
     max_values_per_plot: int = xax.field(
         value=8,
         help="The maximum number of values to plot for each key.",
+    )
+    log_all_images: bool = xax.field(
+        value=False,
+        help="If true, log all images.",
     )
     plot_figsize: tuple[float, float] = xax.field(
         value=(8, 4),
@@ -561,7 +492,7 @@ class RLConfig(xax.Config):
         help="The height of the rendered images during the validation phase.",
     )
     render_length_seconds: float | None = xax.field(
-        value=None,
+        value=5.0,
         help="The number of seconds to rollout each environment during evaluation.",
     )
     render_fps: int | None = xax.field(
@@ -659,7 +590,7 @@ class RLConfig(xax.Config):
         help="The name or id of the camera to use in rendering.",
     )
     num_compiled_steps_to_log: int = xax.field(
-        value=3,
+        value=2,
         help="The number of compiled steps to log.",
     )
     live_reward_buffer_size: int = xax.field(
@@ -1347,18 +1278,26 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             buf.seek(0)
             return Image.open(buf)
 
+        arrs = (
+            (
+                ("👀 obs images", xax.get_pytree_mapping(logged_traj.trajectory.obs)),
+                ("🕹️ command images", xax.get_pytree_mapping(logged_traj.trajectory.command)),
+                ("🏃 action images", {"action": logged_traj.trajectory.action}),
+                ("💀 termination images", logged_traj.trajectory.termination_components),
+                ("🗓️ event images", logged_traj.trajectory.event_state),
+                ("🎁 reward images", logged_traj.rewards.components),
+                ("🎁 reward images", {"total": logged_traj.rewards.total}),
+            )
+            if self.config.log_all_images
+            else (
+                ("🎁 reward images", logged_traj.rewards.components),
+                ("🎁 reward images", {"total": logged_traj.rewards.total}),
+            )
+        )
+
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Emojis are used in order to prevent conflicts with user-specified namespaces.
-        for namespace, arr_dict in (
-            ("👀 obs images", xax.get_pytree_mapping(logged_traj.trajectory.obs)),
-            ("🕹️ command images", xax.get_pytree_mapping(logged_traj.trajectory.command)),
-            ("🏃 action images", {"action": logged_traj.trajectory.action}),
-            ("💀 termination images", logged_traj.trajectory.termination_components),
-            ("🗓️ event images", logged_traj.trajectory.event_state),
-            ("🎁 reward images", logged_traj.rewards.components),
-            ("🎁 reward images", {"total": logged_traj.rewards.total}),
-            ("📈 metrics images", logged_traj.metrics),
-        ):
+        for namespace, arr_dict in arrs:
             for key, value in arr_dict.items():
 
                 def plot_individual_component(
@@ -1458,11 +1397,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: RewardState,
         rng: PRNGKeyArray,
-    ) -> tuple[
-        RLLoopCarry,
-        xax.FrozenDict[str, Array],
-        LoggedTrajectory,
-    ]:
+    ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array]]:
         """Updates the model on the given trajectory.
 
         This function should be implemented according to the specific RL method
@@ -1476,9 +1411,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng: The random seed.
 
         Returns:
-            A tuple containing the next carry, metrics to log, and the single
-            trajectory to log. If a metric has a single element it is logged as
-            a scalar, otherwise it is logged as a histogram.
+            A tuple containing the next carry, and metrics to log. If a metric
+            has a single element it is logged as a scalar, otherwise it is
+            logged as a histogram.
         """
 
     def get_histogram(self, arr: Array, bins: int = 100) -> Histogram:
@@ -1631,13 +1566,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         constants: RLLoopConstants,
         state: xax.State,
         rng: PRNGKeyArray,
-    ) -> tuple[RLLoopCarry, Metrics, LoggedTrajectory]:
+    ) -> tuple[RLLoopCarry, Metrics]:
         """Runs a single step of the RL training loop."""
 
         def single_step_fn(
             carry_i: RLLoopCarry,
             rng: PRNGKeyArray,
-        ) -> tuple[RLLoopCarry, tuple[Metrics, LoggedTrajectory]]:
+        ) -> tuple[RLLoopCarry, Metrics]:
             # Rolls out a new trajectory.
             vmapped_unroll = xax.vmap(
                 self._single_unroll,
@@ -1652,7 +1587,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             )
 
             # Runs update on the previous trajectory.
-            carry_i, train_metrics, logged_traj = self.update_model(
+            carry_i, train_metrics = self.update_model(
                 constants=constants,
                 carry=carry_i,
                 trajectories=trajectories,
@@ -1687,18 +1622,15 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 ),
             )
 
-            return carry_i, (metrics, logged_traj)
+            return carry_i, metrics
 
         rngs = jax.random.split(rng, self.config.epochs_per_log_step)
-        carry, (metrics, logged_traj) = xax.scan(single_step_fn, carry, rngs, jit_level=JitLevel.OUTER_LOOP)
+        new_carry, metrics = xax.scan(single_step_fn, carry, rngs, jit_level=JitLevel.OUTER_LOOP)
 
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(self._histogram_fn, metrics)
 
-        # Only get final trajectory and rewards.
-        logged_traj = jax.tree.map(lambda arr: arr[-1], logged_traj)
-
-        return carry, metrics, logged_traj
+        return new_carry, metrics
 
     @xax.jit(static_argnums=(0,), jit_level=JitLevel.HELPER_FUNCTIONS)
     def _histogram_fn(self, x: Any) -> Any:  # noqa: ANN401
@@ -1935,7 +1867,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     logged_traj=LoggedTrajectory(
                         trajectory=trajectory,
                         rewards=reward_state,
-                        metrics=xax.FrozenDict({}),
                     ),
                     log_callback=lambda name, value, _: value.save(save_path / f"{name}.png"),
                 )
@@ -2399,8 +2330,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             check_no_weak_aval(state, self.config.throw_on_weak_type)
 
             num_compiled_steps = 0
-            last_full_render_time = 0.0
-            num_valid_steps = 0
 
             try:
                 while self._is_running and not self.is_training_over(state):
@@ -2416,7 +2345,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                         rng, update_rng = jax.random.split(rng)
 
-                        new_carry, metrics, logged_traj = self._rl_train_loop_step(
+                        new_carry, metrics = self._rl_train_loop_step(
                             carry=carry,
                             constants=constants,
                             state=state,
@@ -2424,16 +2353,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         )
 
                         if num_compiled_steps < self.config.num_compiled_steps_to_log:
-                            diffs = diff_pytree(carry, new_carry)
+                            diffs = xax.diff_pytree(carry, new_carry)
                             if diffs:
-                                raise ValueError(f"Carry changed during training loop step: {diffs}")
+                                diff_str = "\n".join(diffs)
+                                raise ValueError(f"Carry changed during training loop step:\n{diff_str}")
 
                         carry = new_carry
 
                         if self.config.profile_memory:
                             carry = jax.block_until_ready(carry)
                             metrics = jax.block_until_ready(metrics)
-                            logged_traj = jax.block_until_ready(logged_traj)
                             jax.profiler.save_device_memory_profile(self.exp_dir / "train_loop_step.prof")
 
                         self.log_train_metrics(metrics)
@@ -2445,42 +2374,31 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         state = self.on_step_end(state)
 
                         if valid_step:
-                            cur_time = time.monotonic()
-                            full_render = (
-                                cur_time - last_full_render_time > self.config.render_full_every_n_seconds
-                            ) or (num_valid_steps < self.config.render_full_first_n_valid)
-                            num_valid_steps += 1
+                            long_traj, rewards, _, _ = self._single_unroll(
+                                constants=constants.constants,
+                                env_state=jax.tree.map(lambda arr: arr[-1], carry.env_states),
+                                shared_state=carry.shared_state,
+                                num_steps=self.render_length_frames,
+                            )
+                            logged_traj = LoggedTrajectory(
+                                trajectory=long_traj,
+                                rewards=rewards,
+                            )
 
-                            if full_render:
-                                if self.render_length_frames > self.rollout_length_frames:
-                                    long_traj, rewards, _, _ = self._single_unroll(
-                                        constants=constants.constants,
-                                        env_state=jax.tree.map(lambda arr: arr[-1], carry.env_states),
-                                        shared_state=carry.shared_state,
-                                        num_steps=self.render_length_frames,
-                                    )
-                                    logged_traj = LoggedTrajectory(
-                                        trajectory=long_traj,
-                                        rewards=rewards,
-                                        metrics=xax.FrozenDict(),
-                                    )
-
-                                self._log_logged_trajectory_graphs(
-                                    logged_traj=logged_traj,
-                                    log_callback=lambda key, value, namespace: self.logger.log_image(
-                                        key=key,
-                                        value=value,
-                                        namespace=namespace,
-                                    ),
-                                )
-
-                                last_full_render_time = cur_time
+                            self._log_logged_trajectory_graphs(
+                                logged_traj=logged_traj,
+                                log_callback=lambda key, value, namespace: self.logger.log_image(
+                                    key=key,
+                                    value=value,
+                                    namespace=namespace,
+                                ),
+                            )
 
                             self._log_logged_trajectory_video(
                                 logged_traj=logged_traj,
                                 markers=markers,
                                 viewer=viewer,
-                                key="full trajectory" if full_render else "trajectory",
+                                key="trajectory",
                             )
 
                         # Updates the step and sample counts.

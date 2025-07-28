@@ -32,7 +32,6 @@ from ksim.debugging import JitLevel
 from ksim.rewards import Reward
 from ksim.task.ppo import PPOConfig, PPOTask, PPOVariables
 from ksim.task.rl import (
-    LoggedTrajectory,
     RewardState,
     RLLoopCarry,
     RLLoopConstants,
@@ -467,10 +466,10 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         carry: RLLoopCarry,
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
-    ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array], LoggedTrajectory]:
-        rng, rng_disc, rng_noise, rng_update = jax.random.split(rng, 4)
+    ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array]]:
+        rng, rng_disc = jax.random.split(rng, 2)
 
-        carry, metrics, logged_traj = super()._single_step(
+        carry, metrics = super()._single_step(
             trajectories=trajectories,
             rewards=rewards,
             constants=constants,
@@ -548,7 +547,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         # Combine metrics.
         metrics = xax.FrozenDict(metrics.unfreeze() | disc_metrics.unfreeze())
 
-        return carry, metrics, logged_traj
+        return carry, metrics
 
     def update_model(
         self,
@@ -558,11 +557,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         trajectories: Trajectory,
         rewards: RewardState,
         rng: PRNGKeyArray,
-    ) -> tuple[
-        RLLoopCarry,
-        xax.FrozenDict[str, Array],
-        LoggedTrajectory,
-    ]:
+    ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array]]:
         # Checks that AMPReward is used.
         if not any(isinstance(r, AMPReward) for r in constants.constants.rewards):
             raise ValueError("AMPReward is not used! This is required for AMP training.")
