@@ -121,6 +121,9 @@ class Actor(eqx.Module):
         std_nm = prediction_n[slice_len : slice_len * 2].reshape(self.num_joints, self.num_mixtures)
         logits_nm = prediction_n[slice_len * 2 :].reshape(self.num_joints, self.num_mixtures)
 
+        # Clip logits to prevent NaN issues.
+        logits_nm = jnp.clip(logits_nm, -10.0, 10.0)
+
         # Softplus and clip to ensure positive standard deviations.
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
 
@@ -279,6 +282,10 @@ class WalkingConfig(ksim.PPOConfig):
         value=1e-5,
         help="Weight decay for the Adam optimizer.",
     )
+    grad_clip: float = xax.field(
+        value=2.0,
+        help="Gradient clip for the Adam optimizer.",
+    )
 
     # Curriculum parameters.
     num_curriculum_levels: int = xax.field(
@@ -310,9 +317,17 @@ Config = TypeVar("Config", bound=WalkingConfig)
 
 class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
+        scheduler = optax.warmup_constant_schedule(
+            init_value=self.config.learning_rate * 0.01,
+            peak_value=self.config.learning_rate,
+            warmup_steps=self.config.warmup_steps,
+        )
+
         return optax.chain(
-            optax.clip_by_global_norm(self.config.global_grad_clip),
-            optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay),
+            optax.clip_by_global_norm(self.config.grad_clip),
+            optax.scale_by_adam(),
+            optax.scale_by_schedule(scheduler),
+            optax.scale(-1.0),
         )
 
     def get_mujoco_model(self) -> mujoco.MjModel:  # pyright: ignore[reportAttributeAccessIssue]
@@ -353,7 +368,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 interval_range=(2.0, 5.0),
             ),
             ksim.JumpEvent(
-                jump_height_range=(1.0, 2.0),
+                jump_height_range=(0.1, 0.5),
                 interval_range=(2.0, 5.0),
             ),
         ]
@@ -362,7 +377,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.RandomJointPositionReset.create(physics_model, zeros={"abdomen_z": 0.0}),
             ksim.RandomJointVelocityReset(),
-            ksim.RandomHeadingReset(),
+            # ksim.RandomHeadingReset(),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -430,13 +445,15 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             ksim.StayAliveReward(scale=25.0),
-            ksim.JoystickReward(scale=1.0),
-            ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
+            ksim.NaiveForwardReward(scale=1.0),
+            # ksim.JoystickReward(scale=1.0),
+            # ksim.FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=5.0),
+            ksim.BadZTermination(unhealthy_z_lower=0.9, unhealthy_z_upper=3.0),
+            ksim.BadVelocityTermination(max_vel=100.0),
             ksim.FarFromOriginTermination(max_dist=10.0),
         ]
 
@@ -456,7 +473,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             num_joints=17,
             min_std=0.01,
             max_std=1.0,
-            var_scale=0.25,
+            var_scale=0.5,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
             num_hidden_layers=self.config.num_hidden_layers,
@@ -632,7 +649,6 @@ if __name__ == "__main__":
             num_passes=4,
             epochs_per_log_step=1,
             rollout_length_frames=24,
-            global_grad_clip=2.0,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,

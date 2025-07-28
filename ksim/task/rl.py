@@ -576,6 +576,10 @@ class RLConfig(xax.Config):
         value=None,
         help="The name or id of the camera to use in rendering.",
     )
+    num_compiled_steps_to_log: int = xax.field(
+        value=3,
+        help="The number of compiled steps to log.",
+    )
     live_reward_buffer_size: int = xax.field(
         value=4,
         help="Size of the rolling buffer for computing live rewards",
@@ -2402,7 +2406,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         elapsed_time_s=state.elapsed_time_s + elapsed_time,
                     )
 
-                    if num_compiled_steps < 3:
+                    if num_compiled_steps < self.config.num_compiled_steps_to_log:
                         num_compiled_steps += 1
                         logger.log(
                             xax.LOG_STATUS,
