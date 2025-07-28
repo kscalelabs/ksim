@@ -590,7 +590,7 @@ class RLConfig(xax.Config):
         help="The name or id of the camera to use in rendering.",
     )
     num_compiled_steps_to_log: int = xax.field(
-        value=2,
+        value=3,
         help="The number of compiled steps to log.",
     )
     live_reward_buffer_size: int = xax.field(
@@ -931,14 +931,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         if self.config.render_length_seconds is None:
             return self.rollout_length_frames
         render_length_frames = round(self.config.render_length_seconds / self.config.ctrl_dt)
-        if render_length_frames > self.rollout_length_frames:
-            logger.info(
-                "The render length %s is greater than the rollout length %s! "
-                "Algorithm metrics will not be logged because the rendered trajectory was not used for training. "
-                "To log algorithm metrics, set the render length to be equal or less than the rollout length.",
-                render_length_frames,
-                self.rollout_length_frames,
-            )
         return render_length_frames
 
     @property
@@ -1258,9 +1250,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             logged_traj: The single trajectory to log.
             log_callback: A callable function to run to log a given image.
         """
-        # Clips the trajectory to the desired length.
-        if self.render_length_frames < self.rollout_length_frames:
-            logged_traj = self._crop_to_length(logged_traj, self.render_length_frames)
 
         def create_plot_image(
             fig_size: tuple[float, float],
@@ -1369,10 +1358,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             viewer: The Mujoco viewer to render the scene with.
             key: The logging key to use.
         """
-        # Clips the trajectory to the desired length.
-        if self.render_length_frames < self.rollout_length_frames:
-            logged_traj = self._crop_to_length(logged_traj, self.render_length_frames)
-
         # Logs the video of the trajectory.
         frames, fps = self.render_trajectory_video(
             trajectory=logged_traj.trajectory,
