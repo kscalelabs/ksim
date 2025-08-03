@@ -411,12 +411,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             metrics[f"loss_{name}"] = loss
         if off_policy_variables.entropy is not None:
             metrics["entropy"] = off_policy_variables.entropy
-        if off_policy_variables.aux_losses is not None:
-            for (
-                aux_loss_name,
-                aux_loss_value,
-            ) in off_policy_variables.aux_losses.items():
-                metrics[aux_loss_name] = aux_loss_value
         return metrics
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=JitLevel.RL_CORE)
