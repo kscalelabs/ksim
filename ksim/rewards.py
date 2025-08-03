@@ -43,14 +43,12 @@ from typing import Collection, Literal, Self, final
 
 import attrs
 import chex
-import jax
 import jax.numpy as jnp
 import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.commands import JoystickCommandValue
-from ksim.debugging import JitLevel
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
 from ksim.utils.validators import (
@@ -765,19 +763,11 @@ class JoystickReward(Reward):
         # Gets the target X, Y, and Yaw velocities.
         tgts = joystick_cmd["vels"]
 
-        def smooth_kernel(x_t: Array) -> Array:
-            x_t = jnp.pad(x_t, ((self.smoothing_window_size - 1, 0),), mode="edge")
-            inds = jnp.arange(-self.smoothing_window_size, 0)  # Only look to the left
-            kernel = jnp.exp(-(inds**2) / (2 * self.smoothing_sigma**2))
-            kernel = kernel / kernel.sum()
-            return jnp.convolve(x_t, kernel, mode="valid")
-
         # Smooths the target velocities.
         trg_xvel, trg_yvel, trg_yawvel = tgts.T
 
         # Gets the robot's current velocities and applies a smoothing kernel.
         vels = jnp.stack([trajectory.qvel[..., 0], trajectory.qvel[..., 1], trajectory.qvel[..., 5]], axis=-1).T
-        vels = xax.vmap(smooth_kernel, in_axes=0, jit_level=JitLevel.HELPER_FUNCTIONS)(vels)
         cur_xvel, cur_yvel, cur_yawvel = vels
 
         # Gets the robot's current yaw.

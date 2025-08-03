@@ -27,7 +27,6 @@ from threading import Thread
 from types import FrameType
 from typing import Any, Callable, Collection, Dict, Generic, TypeVar, cast
 
-import equinox as eqx
 import chex
 import equinox as eqx
 import jax
@@ -2345,27 +2344,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         return final_carry, final_state, aggregated_metrics
 
-    @xax.jit(static_argnames=["self"], jit_level=JitLevel.HELPER_FUNCTIONS)
-    def is_bad_trajectory(self, logged_traj: LoggedTrajectory) -> Array:
-        return jnp.logical_or(
-            jnp.isnan(logged_traj.rewards.total).any(),
-            jnp.isnan(logged_traj.trajectory.qpos).any(),
-            jnp.isnan(logged_traj.trajectory.qvel).any(),
-            jnp.isnan(logged_traj.trajectory.xpos).any(),
-            jnp.isnan(logged_traj.trajectory.xquat).any(),
-            jnp.isnan(logged_traj.trajectory.ctrl).any(),
-        )
-
-    def terminate_on_bad_trajectory(self, logged_traj: LoggedTrajectory) -> None:
-        if not self.is_bad_trajectory(logged_traj):
-            return
-
-        # Saves the bad trajectory.
-        path = self.exp_dir / "bad_trajectory.bin"
-        eqx.tree_serialise_leaves(path, logged_traj)
-
-        raise xax.TrainingFinishedError(f"Saved bad trajectory to {path}")
-
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
 
@@ -2467,8 +2445,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 viewer=viewer,
                                 key="trajectory",
                             )
-
-                            self.terminate_on_bad_trajectory(logged_traj)
 
                         # Runs the training loop.
                         rng, update_rng = jax.random.split(rng)
