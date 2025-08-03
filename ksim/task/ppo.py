@@ -566,6 +566,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return carry, ppo_metrics
 
+    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def update_model(
         self,
         *,

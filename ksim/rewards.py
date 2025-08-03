@@ -44,6 +44,7 @@ from typing import Collection, Literal, Self, final
 import attrs
 import chex
 import jax.numpy as jnp
+import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
@@ -698,6 +699,51 @@ class SymmetryReward(Reward):
         )
 
 
+@attrs.define(kw_only=True)
+class JoystickRewardMarker(Marker):
+    radius: float = attrs.field(default=0.05)
+    size: float = attrs.field(default=0.03)
+    arrow_len: float = attrs.field(default=0.25)
+    height: float = attrs.field(default=0.5)
+
+    def _update_arrow(self, cmd_x: float, cmd_y: float) -> None:
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
+        mag = (cmd_x * cmd_x + cmd_y * cmd_y) ** 0.5
+        cmd_x, cmd_y = cmd_x / mag, cmd_y / mag
+        self.orientation = self.quat_from_direction((cmd_x, cmd_y, 0.0))
+        self.scale = (self.size, self.size, self.arrow_len * mag)
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the joystick command target position and orientation."""
+        cur_xvel, cur_yvel = trajectory.qvel[..., 0].item(), trajectory.qvel[..., 1].item()
+        self.pos = (0, 0, self.height)
+        self._update_arrow(cur_xvel, cur_yvel)
+
+    @classmethod
+    def get(
+        cls,
+        radius: float = 0.05,
+        size: float = 0.03,
+        arrow_len: float = 0.25,
+        rgba: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0),
+        height: float = 0.6,
+    ) -> Self:
+        return cls(
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(radius, radius, radius),
+            size=size,
+            arrow_len=arrow_len,
+            radius=radius,
+            rgba=rgba,
+            height=height,
+            track_x=True,
+            track_y=True,
+            track_z=True,
+            track_rotation=True,
+        )
+
+
 @attrs.define(frozen=True, kw_only=True)
 class JoystickReward(Reward):
     """Reward for following the joystick command."""
@@ -726,25 +772,33 @@ class JoystickReward(Reward):
             return jnp.convolve(x_t, kernel, mode="valid")
 
         # Smooths the target velocities.
-        trg_x, trg_y, trg_yaw = tgts.T
+        trg_xvel, trg_yvel, trg_yawvel = tgts.T
 
         # Gets the robot's current velocities and applies a smoothing kernel.
         vels = jnp.stack([trajectory.qvel[..., 0], trajectory.qvel[..., 1], trajectory.qvel[..., 5]], axis=-1).T
         vels = xax.vmap(smooth_kernel, in_axes=0, jit_level=JitLevel.HELPER_FUNCTIONS)(vels)
-        cur_x, cur_y, cur_yaw = vels
+        cur_xvel, cur_yvel, cur_yawvel = vels
+
+        # Gets the robot's current yaw.
+        quat = trajectory.qpos[..., 3:7]
+        euler = xax.quat_to_euler(quat)
+        cur_yaw = euler[..., 2]
+
+        # Rotates the command X and Y velocities to the robot's current yaw.
+        trg_xvel_rot = trg_xvel * jnp.cos(cur_yaw) - trg_yvel * jnp.sin(cur_yaw)
+        trg_yvel_rot = trg_xvel * jnp.sin(cur_yaw) + trg_yvel * jnp.cos(cur_yaw)
 
         # Exponential kernel for the reward.
-        pos_x_rew = jnp.exp(-jnp.abs(trg_x - cur_x) / self.pos_x_scale)
-        pos_y_rew = jnp.exp(-jnp.abs(trg_y - cur_y) / self.pos_y_scale)
-        rot_z_rew = jnp.exp(-jnp.abs(trg_yaw - cur_yaw) / self.rot_z_scale)
+        pos_x_rew = jnp.exp(-jnp.abs(trg_xvel_rot - cur_xvel) / self.pos_x_scale)
+        pos_y_rew = jnp.exp(-jnp.abs(trg_yvel_rot - cur_yvel) / self.pos_y_scale)
+        rot_z_rew = jnp.exp(-jnp.abs(trg_yawvel - cur_yawvel) / self.rot_z_scale)
 
         reward = (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
 
-        # This hack seems to be required, for some reason, although it is not
-        # clear where the NaNs are coming from or how to reproduce them.
-        reward = jnp.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
-
         return reward
+
+    def get_markers(self) -> Collection[Marker]:
+        return [JoystickRewardMarker.get()]
 
 
 @attrs.define(frozen=True, kw_only=True)

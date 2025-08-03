@@ -306,6 +306,10 @@ class WalkingConfig(ksim.PPOConfig):
         value=100,
         help="The number of steps to take before updating the curriculum.",
     )
+    curriculum_delay_steps: int = xax.field(
+        value=1000,
+        help="The number of steps to delay the curriculum.",
+    )
 
     # Rendering parameters.
     render_track_body_id: int | None = xax.field(
@@ -442,6 +446,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 walk_speed=self.config.target_linear_velocity / 2.0,
                 strafe_speed=self.config.target_linear_velocity / 2.0,
                 rotation_speed=self.config.target_angular_velocity,
+                sample_probs=(0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
             ),
         ]
 
@@ -463,6 +468,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return ksim.LinearCurriculum(
             step_size=self.config.curriculum_step_size,
             step_every_n_epochs=self.config.curriculum_step_every_n_epochs,
+            delay_steps=self.config.curriculum_delay_steps,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:

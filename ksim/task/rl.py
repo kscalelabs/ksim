@@ -1568,7 +1568,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rewards=multi_rewards,
             rng=rng,
         )
-        return replace(carry, opt_state=new_carry.opt_state)
+        return replace(
+            carry,
+            opt_state=new_carry.opt_state,
+            shared_state=new_carry.shared_state,
+        )
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _rl_train_loop_step(

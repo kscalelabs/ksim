@@ -256,13 +256,23 @@ class JoystickCommandMarker(Marker):
         self.rgba = (r, g, b, 1.0)
 
         cmd_x, cmd_y = cmd_vel[..., 0], cmd_vel[..., 1]
+
+        # Gets the robot's current yaw.
+        quat = trajectory.qpos[..., 3:7]
+        euler = xax.quat_to_euler(quat)
+        cur_yaw = euler[..., 2]
+
+        # Rotates the command X and Y velocities to the robot's current yaw.
+        cmd_x_rot = cmd_x * jnp.cos(cur_yaw) - cmd_y * jnp.sin(cur_yaw)
+        cmd_y_rot = cmd_x * jnp.sin(cur_yaw) + cmd_y * jnp.cos(cur_yaw)
+
         self.pos = (0, 0, self.height)
 
         match cmd_idx:
             case 0:
                 self._update_circle()
             case 1 | 2 | 3 | 6 | 7:
-                self._update_arrow(cmd_x, cmd_y)
+                self._update_arrow(cmd_x_rot, cmd_y_rot)
             case 4 | 5:
                 self._update_cylinder()
             case _:
@@ -338,11 +348,6 @@ class JoystickCommand(Command):
     switch_prob: float = attrs.field(default=0.005)
 
     def _get_vel_tgts(self, physics_data: PhysicsData, command: Array) -> Array:
-        # Gets the robot's current yaw.
-        quat = physics_data.qpos[..., 3:7]
-        euler = xax.quat_to_euler(quat)
-        cur_yaw = euler[..., 2]
-
         # Gets the target X, Y, and Yaw targets.
         cmd_tgts = jnp.array(
             [
@@ -360,11 +365,7 @@ class JoystickCommand(Command):
         cmd_tgt = cmd_tgts[command]
         cmd_x, cmd_y, cmd_yaw = cmd_tgt[..., 0], cmd_tgt[..., 1], cmd_tgt[..., 2]
 
-        # Rotates the command X and Y velocities to the robot's current yaw.
-        cmd_x_rot = cmd_x * jnp.cos(cur_yaw) - cmd_y * jnp.sin(cur_yaw)
-        cmd_y_rot = cmd_x * jnp.sin(cur_yaw) + cmd_y * jnp.cos(cur_yaw)
-
-        return jnp.stack([cmd_x_rot, cmd_y_rot, cmd_yaw], axis=-1)
+        return jnp.stack([cmd_x, cmd_y, cmd_yaw], axis=-1)
 
     def initial_command(
         self,
