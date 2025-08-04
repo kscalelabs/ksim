@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from typing import Generic, Mapping, TypeVar
 
 import chex
+import optax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -538,6 +539,21 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rng,
         )
         return metrics, logged_trajectory, grads
+    
+    def _apply_gradients(
+        self,
+        model_arr: PyTree,
+        grads: PyTree,
+        optimizer: optax.GradientTransformation,
+        opt_state: PyTree,
+    ) -> tuple[PyTree, PyTree, xax.FrozenDict[str, Array]]:        
+        # Update optim and parameters
+        updates, new_opt_state = optimizer.update(grads, opt_state, params=model_arr)
+        new_model_arr = eqx.apply_updates(model_arr, updates)
+
+        grad_metrics = xax.FrozenDict({}) # left metrics empty for now
+
+        return new_model_arr, new_opt_state, grad_metrics
 
     @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
     def _single_step(
@@ -566,8 +582,8 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-        # Applies the gradients with clipping.
-        new_model_arr, new_opt_state, grad_metrics = self.apply_gradients_with_clipping(
+        # Applies the gradients.
+        new_model_arr, new_opt_state, grad_metrics = self._apply_gradients(
             model_arr=model_arr,
             grads=grads,
             optimizer=optimizer,
@@ -585,7 +601,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         )
 
         # Gets the metrics dictionary.
-        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(ppo_metrics.unfreeze() | grad_metrics)
+        metrics: xax.FrozenDict[str, Array] = xax.FrozenDict({**ppo_metrics.unfreeze(), **grad_metrics.unfreeze()})
 
         return carry, metrics, logged_trajectory
 

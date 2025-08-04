@@ -196,6 +196,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.0,
         help="Weight decay for the Adam optimizer.",
     )
+    global_grad_clip: float = xax.field(
+        value=2.0,
+        help="Global l2-norm threshold for gradient clipping. "
+    )
 
     # Curriculum parameters.
     num_curriculum_levels: int = xax.field(
@@ -228,6 +232,7 @@ Config = TypeVar("Config", bound=HumanoidWalkingTaskConfig)
 class HumanoidWalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_optimizer(self) -> optax.GradientTransformation:
         return optax.chain(
+            optax.clip_by_global_norm(self.config.global_grad_clip),
             optax.add_decayed_weights(self.config.adam_weight_decay),
             optax.scale_by_adam(),
             optax.scale_by_schedule(
