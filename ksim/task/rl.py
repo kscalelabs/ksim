@@ -1640,7 +1640,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     @xax.jit(
         static_argnames=["self", "constants"],
-        donate_argnames=["carry"],
+        donate_argnames=["carry", "state"],
         jit_level=JitLevel.RL_CORE,
     )
     def _burn_in_carry(
@@ -1650,7 +1650,8 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         long_traj: Trajectory,
         rewards: RewardState,
         single_env_state: RolloutEnvState,
-    ) -> RLLoopCarry:
+        state: xax.State,
+    ) -> tuple[RLLoopCarry, xax.State]:
         multi_env_states = jax.tree.map(lambda arr: arr[None], single_env_state)
         multi_traj = jax.tree.map(lambda arr: arr[None], long_traj)
         multi_rewards = jax.tree.map(lambda arr: arr[None], rewards)
@@ -1665,7 +1666,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng=update_rng,
         )
 
-        return replace(
+        out_carry = replace(
             carry,
             opt_state=new_carry.opt_state,
             shared_state=replace(
@@ -1673,6 +1674,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 rng=rng,
             ),
         )
+
+        out_state = state.replace(
+            num_steps=state.num_steps + 1,
+            num_samples=state.num_samples + 1,
+        )
+
+        return out_carry, out_state
 
     @xax.jit(
         static_argnames=["self", "constants"],
@@ -2518,12 +2526,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                             # Burn-in the carry to avoid subsequent Jax recompilation.
                             if is_first_step:
-                                carry = self._burn_in_carry(
+                                carry, state = self._burn_in_carry(
                                     carry=carry,
                                     constants=constants,
                                     long_traj=long_traj,
                                     rewards=rewards,
                                     single_env_state=single_env_states,
+                                    state=state,
                                 )
 
                             logged_traj = LoggedTrajectory(
