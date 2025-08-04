@@ -62,6 +62,7 @@ class Actor(eqx.Module):
     max_std: float = eqx.field()
     var_scale: float = eqx.field()
     max_acceleration: float = eqx.field()
+    max_velocity: float = eqx.field()
     ctrl_dt: float = eqx.field()
 
     def __init__(
@@ -78,6 +79,7 @@ class Actor(eqx.Module):
         depth: int,
         num_hidden_layers: int,
         max_acceleration: float,
+        max_velocity: float,
         ctrl_dt: float,
     ) -> None:
         # Project input to hidden size
@@ -120,6 +122,7 @@ class Actor(eqx.Module):
         self.max_std = max_std
         self.var_scale = var_scale
         self.max_acceleration = max_acceleration
+        self.max_velocity = max_velocity
         self.ctrl_dt = ctrl_dt
 
     def forward(
@@ -151,6 +154,7 @@ class Actor(eqx.Module):
             acceleration=mean_n,
             params=filter_params,
             ctrl_dt=self.ctrl_dt,
+            max_velocity=self.max_velocity,
         )
         mean_n = filter_params.position
 
@@ -239,6 +243,7 @@ class Model(eqx.Module):
         depth: int,
         num_hidden_layers: int,
         max_acceleration: float,
+        max_velocity: float,
         ctrl_dt: float,
     ) -> None:
         self.actor = Actor(
@@ -253,6 +258,7 @@ class Model(eqx.Module):
             depth=depth,
             num_hidden_layers=num_hidden_layers,
             max_acceleration=max_acceleration,
+            max_velocity=max_velocity,
             ctrl_dt=ctrl_dt,
         )
         self.critic = Critic(
@@ -284,6 +290,10 @@ class WalkingConfig(ksim.PPOConfig):
     max_acceleration: float = xax.field(
         value=10.0,
         help="The maximum acceleration for the actor.",
+    )
+    max_velocity: float = xax.field(
+        value=2.0,
+        help="The maximum velocity for the actor.",
     )
 
     # Reward parameters.
@@ -501,6 +511,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             depth=self.config.depth,
             num_hidden_layers=self.config.num_hidden_layers,
             max_acceleration=self.config.max_acceleration,
+            max_velocity=self.config.max_velocity,
             ctrl_dt=self.config.ctrl_dt,
         )
 
