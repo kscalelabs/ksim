@@ -300,11 +300,13 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
     def _get_shared_state(
         self,
         *,
+        rng: PRNGKeyArray,
         mj_model: mujoco.MjModel,
         physics_model: PhysicsModel,
         model_arrs: tuple[PyTree, ...],
     ) -> RolloutSharedState:
         shared_state = super()._get_shared_state(
+            rng=rng,
             mj_model=mj_model,
             physics_model=physics_model,
             model_arrs=model_arrs,
