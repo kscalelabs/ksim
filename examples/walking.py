@@ -126,8 +126,8 @@ class Actor(eqx.Module):
         self,
         obs_n: Array,
         carry: Array,
-        filter_params: ksim.ClipAccelerationParams,
-    ) -> tuple[xax.Distribution, Array, ksim.ClipAccelerationParams]:
+        filter_params: ksim.IntegrateAccelerationParams,
+    ) -> tuple[xax.Distribution, Array, ksim.IntegrateAccelerationParams]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -143,14 +143,13 @@ class Actor(eqx.Module):
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
-        # Apply bias to the means.
-        mean_n = mean_n + jnp.array([v for _, v in ZEROS])
+        # Clips the means to the minimum and maximum acceleration.
+        mean_n = jnp.tanh(mean_n) * self.max_acceleration
 
         # Apply acceleration clipping.
-        filter_params = ksim.clip_acceleration(
-            action=mean_n,
+        filter_params = ksim.integrate_acceleration(
+            acceleration=mean_n,
             params=filter_params,
-            max_acceleration=self.max_acceleration,
             ctrl_dt=self.ctrl_dt,
         )
         mean_n = filter_params.position
@@ -509,11 +508,11 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         self,
         model: Model,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, ksim.ClipAccelerationParams]:
+    ) -> tuple[Array, Array, ksim.IntegrateAccelerationParams]:
         return (
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-            ksim.ClipAccelerationParams.initialize_from(jnp.array([v for _, v in ZEROS])),
+            ksim.IntegrateAccelerationParams.initialize_from(jnp.array([v for _, v in ZEROS])),
         )
 
     def run_actor(
@@ -522,8 +521,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, PyTree],
         commands: xax.FrozenDict[str, PyTree],
         carry: Array,
-        filter_params: ksim.ClipAccelerationParams,
-    ) -> tuple[xax.Distribution, Array, ksim.ClipAccelerationParams]:
+        filter_params: ksim.IntegrateAccelerationParams,
+    ) -> tuple[xax.Distribution, Array, ksim.IntegrateAccelerationParams]:
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
@@ -585,10 +584,10 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def _scan_fn(
         self,
-        actor_critic_carry: tuple[Array, Array, ksim.ClipAccelerationParams],
+        actor_critic_carry: tuple[Array, Array, ksim.IntegrateAccelerationParams],
         xs: tuple[ksim.Trajectory, PRNGKeyArray],
         model: Model,
-    ) -> tuple[tuple[Array, Array, ksim.ClipAccelerationParams], ksim.PPOVariables]:
+    ) -> tuple[tuple[Array, Array, ksim.IntegrateAccelerationParams], ksim.PPOVariables]:
         transition, rng = xs
         actor_carry, critic_carry, filter_params = actor_critic_carry
         actor_dist, next_actor_carry, filter_params = self.run_actor(
@@ -624,9 +623,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         self,
         model: Model,
         trajectory: ksim.Trajectory,
-        model_carry: tuple[Array, Array, ksim.ClipAccelerationParams],
+        model_carry: tuple[Array, Array, ksim.IntegrateAccelerationParams],
         rng: PRNGKeyArray,
-    ) -> tuple[ksim.PPOVariables, tuple[Array, Array, ksim.ClipAccelerationParams]]:
+    ) -> tuple[ksim.PPOVariables, tuple[Array, Array, ksim.IntegrateAccelerationParams]]:
         scan_fn = functools.partial(self._scan_fn, model=model)
         rngs = jax.random.split(rng, trajectory.done.shape[0])
         next_model_carry, ppo_variables = xax.scan(
@@ -641,7 +640,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: Model,
-        model_carry: tuple[Array, Array, ksim.ClipAccelerationParams],
+        model_carry: tuple[Array, Array, ksim.IntegrateAccelerationParams],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, PyTree],
