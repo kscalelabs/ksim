@@ -216,9 +216,9 @@ class StartQuaternionCommand(Command):
 @attrs.define(kw_only=True)
 class JoystickCommandMarker(Marker):
     command_name: str = attrs.field()
-    radius: float = attrs.field(default=0.05)
+    radius: float = attrs.field(default=0.1)
     size: float = attrs.field(default=0.03)
-    arrow_len: float = attrs.field(default=0.25)
+    arrow_len: float = attrs.field(default=1.0)
     height: float = attrs.field(default=0.5)
 
     def _update_arrow(self, cmd_x: float, cmd_y: float) -> None:

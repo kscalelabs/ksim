@@ -133,6 +133,7 @@ class RolloutSharedState:
     physics_model: PhysicsModel
     model_arrs: tuple[PyTree, ...]
     aux_values: xax.FrozenDict[str, PyTree]
+    rng: PRNGKeyArray
 
 
 @jax.tree_util.register_dataclass
@@ -1635,14 +1636,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
     @xax.jit(
         static_argnames=["self", "constants"],
-        donate_argnames=["carry", "rng"],
+        donate_argnames=["carry"],
         jit_level=JitLevel.RL_CORE,
     )
     def _burn_in_carry(
         self,
         carry: RLLoopCarry,
         constants: RLLoopConstants,
-        rng: PRNGKeyArray,
         long_traj: Trajectory,
         rewards: RewardState,
         single_env_state: RolloutEnvState,
@@ -1650,22 +1650,29 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         multi_env_states = jax.tree.map(lambda arr: arr[None], single_env_state)
         multi_traj = jax.tree.map(lambda arr: arr[None], long_traj)
         multi_rewards = jax.tree.map(lambda arr: arr[None], rewards)
+
+        rng, update_rng = jax.random.split(carry.shared_state.rng)
+
         new_carry, _ = self.update_model(
             constants=constants,
             carry=replace(carry, env_states=multi_env_states),
             trajectories=multi_traj,
             rewards=multi_rewards,
-            rng=rng,
+            rng=update_rng,
         )
+
         return replace(
             carry,
             opt_state=new_carry.opt_state,
-            shared_state=new_carry.shared_state,
+            shared_state=replace(
+                new_carry.shared_state,
+                rng=rng,
+            ),
         )
 
     @xax.jit(
         static_argnames=["self", "constants"],
-        donate_argnames=["carry", "rng"],
+        donate_argnames=["carry", "state"],
         jit_level=JitLevel.RL_CORE,
     )
     def _rl_train_loop_step(
@@ -1673,8 +1680,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         carry: RLLoopCarry,
         constants: RLLoopConstants,
         state: xax.State,
-        rng: PRNGKeyArray,
-    ) -> tuple[RLLoopCarry, Metrics]:
+    ) -> tuple[xax.State, RLLoopCarry, Metrics]:
         """Runs a single step of the RL training loop.
 
         Args:
@@ -1684,8 +1690,12 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng: The random number generator.
 
         Returns:
-            A tuple containing the new carry state and the metrics for the step.
+            A tuple containing the new state, carry state and the metrics
+            for the step.
         """
+        rng = carry.shared_state.rng
+        rng, update_rng = jax.random.split(rng)
+
         # Rolls out a new trajectory.
         vmapped_unroll = xax.vmap(
             self._single_unroll,
@@ -1705,7 +1715,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             carry=carry,
             trajectories=trajectories,
             rewards=rewards,
-            rng=rng,
+            rng=update_rng,
         )
 
         # Store all the metrics to log.
@@ -1733,12 +1743,22 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 env_state,
                 curriculum_state=curriculum_state,
             ),
+            shared_state=replace(
+                new_carry.shared_state,
+                rng=rng,
+            ),
         )
 
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(self._histogram_fn, metrics)
 
-        return new_carry, metrics
+        # Update state
+        new_state = state.replace(
+            num_steps=state.num_steps + 1,
+            num_samples=state.num_samples + self.rollout_num_samples,
+        )
+
+        return new_state, new_carry, metrics
 
     @xax.jit(static_argnums=(0,), jit_level=JitLevel.HELPER_FUNCTIONS)
     def _histogram_fn(self, x: Any) -> Any:  # noqa: ANN401
@@ -1801,15 +1821,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 model_statics=model_statics,
                 argmax_action=argmax_action,
             )
+
+            rng, env_rng = jax.random.split(rng)
             env_states = self._get_env_state(
-                rng=rng,
+                rng=env_rng,
                 rollout_constants=constants,
                 mj_model=mj_model,
                 physics_model=mj_model,
                 policy_model=models[0],
                 randomizers=randomizers,
             )
+
+            rng, shared_rng = jax.random.split(rng)
             shared_state = self._get_shared_state(
+                rng=shared_rng,
                 mj_model=mj_model,
                 physics_model=mj_model,
                 model_arrs=model_arrs,
@@ -2082,6 +2107,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     def _get_shared_state(
         self,
         *,
+        rng: PRNGKeyArray,
         mj_model: mujoco.MjModel,  # pyright: ignore[reportAttributeAccessIssue]
         physics_model: PhysicsModel,
         model_arrs: tuple[PyTree, ...],
@@ -2093,6 +2119,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             physics_model=physics_model,
             model_arrs=model_arrs,
             aux_values=xax.FrozenDict({}),
+            rng=rng,
         )
 
     def _get_env_state(
@@ -2267,15 +2294,20 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 model_statics=model_statics,
                 argmax_action=argmax_action,
             )
+
+            rng, env_rng = jax.random.split(rng)
             rollout_env_state = self._get_env_state(
-                rng=rng,
+                rng=env_rng,
                 rollout_constants=rollout_constants,
                 mj_model=mj_model,
                 physics_model=mjx_model,
                 policy_model=models[0],
                 randomizers=randomizations,
             )
+
+            rng, shared_rng = jax.random.split(rng)
             rollout_shared_state = self._get_shared_state(
+                rng=shared_rng,
                 mj_model=mj_model,
                 physics_model=mjx_model,
                 model_arrs=model_arrs,
@@ -2315,8 +2347,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         self,
         mj_model: PhysicsModel,
         metadata: Metadata,
-        rng: PRNGKeyArray,
     ) -> tuple[RLLoopConstants, RLLoopCarry, xax.State]:
+        rng = self.prng_key()
+
         # Gets the model and optimizer variables.
         rng, model_rng = jax.random.split(rng)
         models, optimizers, opt_states, state = self.load_initial_state(model_rng, load_optimizer=True)
@@ -2357,10 +2390,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             ),
         )
 
+        env_rng, shared_rng = jax.random.split(rng)
         carry = RLLoopCarry(
             opt_state=tuple(opt_states),
             env_states=self._get_env_state(
-                rng=rng,
+                rng=env_rng,
                 rollout_constants=constants.constants,
                 mj_model=mj_model,
                 physics_model=mjx_model,
@@ -2368,6 +2402,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                 randomizers=randomizers,
             ),
             shared_state=self._get_shared_state(
+                rng=shared_rng,
                 mj_model=mj_model,
                 physics_model=mjx_model,
                 model_arrs=model_arrs,
@@ -2404,7 +2439,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         signal.signal(signal.SIGTERM, on_exit)
 
         with self:
-            rng = self.prng_key()
             self.set_loggers()
             self._is_running = True
 
@@ -2418,7 +2452,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             self.update_mj_model(mj_model, metadata)
             log_joint_config_table(mj_model, metadata, self.logger)
 
-            constants, carry, state = self.initialize_rl_training(mj_model, metadata, rng)
+            constants, carry, state = self.initialize_rl_training(mj_model, metadata)
             check_no_weak_aval(carry, self.config.throw_on_weak_type)
 
             # Creates the markers.
@@ -2463,11 +2497,9 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                             # Burn-in the carry to avoid subsequent Jax recompilation.
                             if is_first_step:
-                                rng, burn_in_rng = jax.random.split(rng)
                                 carry = self._burn_in_carry(
                                     carry=carry,
                                     constants=constants,
-                                    rng=burn_in_rng,
                                     long_traj=long_traj,
                                     rewards=rewards,
                                     single_env_state=single_env_states,
@@ -2495,18 +2527,10 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                             )
 
                         # Run a single training step
-                        rng, update_rng = jax.random.split(rng)
-                        carry, metrics = self._rl_train_loop_step(
+                        state, carry, metrics = self._rl_train_loop_step(
                             carry=carry,
                             constants=constants,
                             state=state,
-                            rng=update_rng,
-                        )
-
-                        # Update state
-                        state = state.replace(
-                            num_steps=state.num_steps + 1,
-                            num_samples=state.num_samples + self.rollout_num_samples,
                         )
 
                         if self.config.profile_memory:

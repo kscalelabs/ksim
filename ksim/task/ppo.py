@@ -579,7 +579,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             xs: tuple[Array, PRNGKeyArray],
         ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array]]:
             batch_indices, rng = xs
-            rng, batch_rng = jax.random.split(rng)
 
             # Gets the current batch of trajectories and rewards.
             trajectory_batch = jax.tree.map(lambda x: x[batch_indices], trajectories)
@@ -593,7 +592,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
                 constants=constants,
                 carry=replace(carry, env_states=env_states_batch),
                 on_policy_variables=on_policy_variables_batch,
-                rng=batch_rng,
+                rng=rng,
             )
 
             # Update the carry's shared states.

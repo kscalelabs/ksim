@@ -271,7 +271,7 @@ class WalkingConfig(ksim.PPOConfig):
 
     # Reward parameters.
     target_linear_velocity: float = xax.field(
-        value=2.0,
+        value=4.0,
         help="The linear velocity for the joystick command.",
     )
     target_angular_velocity: float = xax.field(
