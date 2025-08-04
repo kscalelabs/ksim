@@ -767,13 +767,13 @@ class JoystickReward(Reward):
         trg_xvel, trg_yvel, trg_yawvel = tgts.T
 
         # Gets the robot's current velocities and applies a smoothing kernel.
-        vels = jnp.stack([trajectory.qvel[..., 0], trajectory.qvel[..., 1], trajectory.qvel[..., 5]], axis=-1).T
-        cur_xvel, cur_yvel, cur_yawvel = vels
+        cur_xvel = trajectory.qvel[..., 0]
+        cur_yvel = trajectory.qvel[..., 1]
+        cur_yawvel = trajectory.qvel[..., 5]
 
         # Gets the robot's current yaw.
         quat = trajectory.qpos[..., 3:7]
-        euler = xax.quat_to_euler(quat)
-        cur_yaw = euler[..., 2]
+        cur_yaw = xax.quat_to_yaw(quat)
 
         # Rotates the command X and Y velocities to the robot's current yaw.
         trg_xvel_rot = trg_xvel * jnp.cos(cur_yaw) - trg_yvel * jnp.sin(cur_yaw)
