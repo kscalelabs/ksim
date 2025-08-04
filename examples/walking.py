@@ -55,13 +55,14 @@ class Actor(eqx.Module):
     input_proj: eqx.nn.Linear
     rnns: tuple[eqx.nn.GRUCell, ...]
     output_proj: eqx.nn.MLP
-    num_joints: int = eqx.field(static=True)
-    num_inputs: int = eqx.field(static=True)
-    num_outputs: int = eqx.field(static=True)
-    min_std: float = eqx.field(static=True)
-    max_std: float = eqx.field(static=True)
-    var_scale: float = eqx.field(static=True)
-    num_mixtures: int = eqx.field(static=True)
+    num_joints: int = eqx.field()
+    num_inputs: int = eqx.field()
+    num_outputs: int = eqx.field()
+    min_std: float = eqx.field()
+    max_std: float = eqx.field()
+    var_scale: float = eqx.field()
+    max_acceleration: float = eqx.field()
+    ctrl_dt: float = eqx.field()
 
     def __init__(
         self,
@@ -76,7 +77,8 @@ class Actor(eqx.Module):
         hidden_size: int,
         depth: int,
         num_hidden_layers: int,
-        num_mixtures: int,
+        max_acceleration: float,
+        ctrl_dt: float,
     ) -> None:
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
@@ -103,10 +105,10 @@ class Actor(eqx.Module):
         # Project to output
         self.output_proj = eqx.nn.MLP(
             in_size=hidden_size,
-            out_size=num_outputs * 3 * num_mixtures,
+            out_size=num_outputs * 2,
             width_size=hidden_size,
             depth=num_hidden_layers,
-            activation=jax.nn.elu,
+            activation=jax.nn.gelu,
             use_final_bias=False,
             key=key,
         )
@@ -117,9 +119,15 @@ class Actor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
-        self.num_mixtures = num_mixtures
+        self.max_acceleration = max_acceleration
+        self.ctrl_dt = ctrl_dt
 
-    def forward(self, obs_n: Array, carry: Array) -> tuple[xax.Distribution, Array]:
+    def forward(
+        self,
+        obs_n: Array,
+        carry: Array,
+        filter_params: ksim.ClipAccelerationParams,
+    ) -> tuple[xax.Distribution, Array, ksim.ClipAccelerationParams]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -128,20 +136,28 @@ class Actor(eqx.Module):
         prediction_n = self.output_proj(x_n)
 
         # Splits the predictions into means, standard deviations, and logits.
-        slice_len = self.num_joints * self.num_mixtures
-        mean_nm = prediction_n[:slice_len].reshape(self.num_joints, self.num_mixtures)
-        std_nm = prediction_n[slice_len : slice_len * 2].reshape(self.num_joints, self.num_mixtures)
-        logits_nm = prediction_n[slice_len * 2 :].reshape(self.num_joints, self.num_mixtures)
+        slice_len = self.num_joints
+        mean_n = prediction_n[:slice_len]
+        std_n = prediction_n[slice_len:]
 
         # Softplus and clip to ensure positive standard deviations.
-        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
+        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Apply bias to the means.
-        mean_nm = mean_nm + jnp.array([v for _, v in ZEROS])[:, None]
+        mean_n = mean_n + jnp.array([v for _, v in ZEROS])
 
-        dist_n = xax.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
+        # Apply acceleration clipping.
+        filter_params = ksim.clip_acceleration(
+            action=mean_n,
+            params=filter_params,
+            max_acceleration=self.max_acceleration,
+            ctrl_dt=self.ctrl_dt,
+        )
+        mean_n = filter_params.position
 
-        return dist_n, jnp.stack(out_carries, axis=0)
+        dist_n = xax.Normal(mean_n, std_n)
+
+        return dist_n, jnp.stack(out_carries, axis=0), filter_params
 
 
 class Critic(eqx.Module):
@@ -223,7 +239,8 @@ class Model(eqx.Module):
         hidden_size: int,
         depth: int,
         num_hidden_layers: int,
-        num_mixtures: int,
+        max_acceleration: float,
+        ctrl_dt: float,
     ) -> None:
         self.actor = Actor(
             key,
@@ -236,7 +253,8 @@ class Model(eqx.Module):
             hidden_size=hidden_size,
             depth=depth,
             num_hidden_layers=num_hidden_layers,
-            num_mixtures=num_mixtures,
+            max_acceleration=max_acceleration,
+            ctrl_dt=ctrl_dt,
         )
         self.critic = Critic(
             key,
@@ -264,9 +282,9 @@ class WalkingConfig(ksim.PPOConfig):
         value=2,
         help="The number of hidden layers for the MLPs.",
     )
-    num_mixtures: int = xax.field(
-        value=5,
-        help="The number of mixtures for the actor.",
+    max_acceleration: float = xax.field(
+        value=10.0,
+        help="The maximum acceleration for the actor.",
     )
 
     # Reward parameters.
@@ -483,13 +501,19 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
             num_hidden_layers=self.config.num_hidden_layers,
-            num_mixtures=self.config.num_mixtures,
+            max_acceleration=self.config.max_acceleration,
+            ctrl_dt=self.config.ctrl_dt,
         )
 
-    def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def get_initial_model_carry(
+        self,
+        model: Model,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, Array, ksim.ClipAccelerationParams]:
         return (
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
             jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+            ksim.ClipAccelerationParams.initialize_from(jnp.array([v for _, v in ZEROS])),
         )
 
     def run_actor(
@@ -498,7 +522,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         observations: xax.FrozenDict[str, PyTree],
         commands: xax.FrozenDict[str, PyTree],
         carry: Array,
-    ) -> tuple[xax.Distribution, Array]:
+        filter_params: ksim.ClipAccelerationParams,
+    ) -> tuple[xax.Distribution, Array, ksim.ClipAccelerationParams]:
         dh_joint_pos_j = observations["joint_position_observation"]
         dh_joint_vel_j = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
@@ -516,7 +541,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             axis=-1,
         )
 
-        return model.forward(obs_n, carry)
+        return model.forward(obs_n, carry, filter_params)
 
     def run_critic(
         self,
@@ -560,17 +585,18 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def _scan_fn(
         self,
-        actor_critic_carry: tuple[Array, Array],
+        actor_critic_carry: tuple[Array, Array, ksim.ClipAccelerationParams],
         xs: tuple[ksim.Trajectory, PRNGKeyArray],
         model: Model,
-    ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
+    ) -> tuple[tuple[Array, Array, ksim.ClipAccelerationParams], ksim.PPOVariables]:
         transition, rng = xs
-        actor_carry, critic_carry = actor_critic_carry
-        actor_dist, next_actor_carry = self.run_actor(
+        actor_carry, critic_carry, filter_params = actor_critic_carry
+        actor_dist, next_actor_carry, filter_params = self.run_actor(
             model=model.actor,
             observations=transition.obs,
             commands=transition.command,
             carry=actor_carry,
+            filter_params=filter_params,
         )
         log_probs = actor_dist.log_prob(transition.action)
         assert isinstance(log_probs, Array)
@@ -589,7 +615,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         next_carry = jax.tree.map(
             lambda x, y: jnp.where(transition.done, x, y),
             self.get_initial_model_carry(model, rng),
-            (next_actor_carry, next_critic_carry),
+            (next_actor_carry, next_critic_carry, filter_params),
         )
 
         return next_carry, transition_ppo_variables
@@ -598,9 +624,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         self,
         model: Model,
         trajectory: ksim.Trajectory,
-        model_carry: tuple[Array, Array],
+        model_carry: tuple[Array, Array, ksim.ClipAccelerationParams],
         rng: PRNGKeyArray,
-    ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
+    ) -> tuple[ksim.PPOVariables, tuple[Array, Array, ksim.ClipAccelerationParams]]:
         scan_fn = functools.partial(self._scan_fn, model=model)
         rngs = jax.random.split(rng, trajectory.done.shape[0])
         next_model_carry, ppo_variables = xax.scan(
@@ -615,7 +641,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: Model,
-        model_carry: tuple[Array, Array],
+        model_carry: tuple[Array, Array, ksim.ClipAccelerationParams],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, PyTree],
@@ -623,19 +649,20 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
-        actor_carry_in, critic_carry_in = model_carry
+        actor_carry_in, critic_carry_in, filter_params = model_carry
 
         # Runs the actor model to get the action distribution.
-        action_dist_j, actor_carry = self.run_actor(
+        action_dist_j, actor_carry, filter_params = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
             carry=actor_carry_in,
+            filter_params=filter_params,
         )
 
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(rng)
 
-        return ksim.Action(action=action_j, carry=(actor_carry, critic_carry_in))
+        return ksim.Action(action=action_j, carry=(actor_carry, critic_carry_in, filter_params))
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from .dataset import *
 from .debugging import *
 from .engine import *
 from .events import *
+from .filters import *
 from .observation import *
 from .randomization import *
 from .resets import *
