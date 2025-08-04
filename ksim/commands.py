@@ -259,8 +259,7 @@ class JoystickCommandMarker(Marker):
 
         # Gets the robot's current yaw.
         quat = trajectory.qpos[..., 3:7]
-        euler = xax.quat_to_euler(quat)
-        cur_yaw = euler[..., 2]
+        cur_yaw = xax.quat_to_yaw(quat)
 
         # Rotates the command X and Y velocities to the robot's current yaw.
         cmd_x_rot = cmd_x * jnp.cos(cur_yaw) - cmd_y * jnp.sin(cur_yaw)

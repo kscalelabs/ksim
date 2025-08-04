@@ -401,10 +401,6 @@ class RLConfig(xax.Config):
         value=True,
         help="If true, log train metrics.",
     )
-    epochs_per_log_step: int = xax.field(
-        value=1,
-        help="The number of epochs between logging steps.",
-    )
     profile_memory: bool = xax.field(
         value=False,
         help="If true, profile memory usage.",
@@ -948,25 +944,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             "torque_limits": get_torque_limits(mj_model),
         }
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.ENGINE)
-    def step_engine(
+    @xax.jit(
+        static_argnames=["self", "constants"],
+        donate_argnames=["rng"],
+        jit_level=JitLevel.UNROLL,
+    )
+    def _sample_action(
         self,
-        constants: RolloutConstants,
         env_states: RolloutEnvState,
         shared_state: RolloutSharedState,
-    ) -> tuple[Trajectory, RolloutEnvState, xax.FrozenDict[str, Array]]:
-        """Runs a single step of the physics engine.
-
-        Args:
-            constants: The constants for the engine.
-            env_states: The environment variables for the engine.
-            shared_state: The control variables for the engine.
-
-        Returns:
-            A tuple containing the trajectory and the next engine variables.
-        """
-        rng = env_states.rng
-        rng, obs_rng, cmd_rng, act_rng, reset_rng, carry_rng, physics_rng = jax.random.split(rng, 7)
+        constants: RolloutConstants,
+        rng: PRNGKeyArray,
+    ) -> tuple[Action, xax.FrozenDict[str, PyTree], xax.FrozenDict[str, PyTree]]:
+        obs_rng, act_rng = jax.random.split(rng, 2)
 
         # Recombines the mutable and static parts of the model.
         policy_model_arr = shared_state.model_arrs[0]
@@ -1004,14 +994,38 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             action=clean_action,
         )
 
-        # Steps the physics engine.
-        next_physics_state: PhysicsState = constants.engine.step(
-            action=action.action,
-            physics_model=shared_state.physics_model,
-            physics_state=env_states.physics_state,
-            curriculum_level=env_states.curriculum_state.level,
-            rng=physics_rng,
-        )
+        return action, observations, next_obs_carry
+
+    @xax.jit(
+        static_argnames=["self", "constants"],
+        donate_argnames=[
+            "env_states",
+            "shared_state",
+            "action",
+            "observations",
+            "next_obs_carry",
+            "next_physics_state",
+            "rng",
+        ],
+        jit_level=JitLevel.UNROLL,
+    )
+    def _get_step_env_state(
+        self,
+        env_states: RolloutEnvState,
+        shared_state: RolloutSharedState,
+        constants: RolloutConstants,
+        action: Action,
+        observations: xax.FrozenDict[str, PyTree],
+        next_obs_carry: xax.FrozenDict[str, PyTree],
+        next_physics_state: PhysicsState,
+        rng: PRNGKeyArray,
+    ) -> tuple[Trajectory, RolloutEnvState]:
+        cmd_rng, carry_rng, reset_rng, next_rng = jax.random.split(rng, 4)
+
+        # Recombines the mutable and static parts of the model.
+        policy_model_arr = shared_state.model_arrs[0]
+        policy_model_static = constants.model_statics[0]
+        policy_model = eqx.combine(policy_model_arr, policy_model_static)
 
         # Gets termination components and a single termination boolean.
         terminations = get_terminations(
@@ -1094,14 +1108,82 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             physics_state=next_physics_state,
             model_carry=next_model_carry,
             obs_carry=next_obs_carry,
+            rng=next_rng,
+        )
+
+        return transition, next_env_state
+
+    @xax.jit(
+        static_argnames=["self", "constants"],
+        donate_argnames=["rng"],
+        jit_level=JitLevel.ENGINE,
+    )
+    def _step_physics(
+        self,
+        constants: RolloutConstants,
+        env_states: RolloutEnvState,
+        shared_state: RolloutSharedState,
+        action: Action,
+        rng: PRNGKeyArray,
+    ) -> PhysicsState:
+        return constants.engine.step(
+            action=action.action,
+            physics_model=shared_state.physics_model,
+            physics_state=env_states.physics_state,
+            curriculum_level=env_states.curriculum_state.level,
             rng=rng,
         )
 
-        metrics = {
-            "num_nan_actions": jnp.sum(is_nan),
-        }
+    @xax.jit(
+        static_argnames=["self", "constants"],
+        donate_argnames=["env_states"],
+        jit_level=JitLevel.ENGINE,
+    )
+    def step_engine(
+        self,
+        constants: RolloutConstants,
+        env_states: RolloutEnvState,
+        shared_state: RolloutSharedState,
+    ) -> tuple[Trajectory, RolloutEnvState]:
+        """Runs a single step of the physics engine.
 
-        return transition, next_env_state, xax.FrozenDict(metrics)
+        Args:
+            constants: The constants for the engine.
+            env_states: The environment variables for the engine.
+            shared_state: The control variables for the engine.
+
+        Returns:
+            A tuple containing the trajectory and the next engine variables.
+        """
+        action_rng, physics_rng, state_rng = jax.random.split(env_states.rng, 3)
+
+        action, observations, next_obs_carry = self._sample_action(
+            env_states=env_states,
+            shared_state=shared_state,
+            constants=constants,
+            rng=action_rng,
+        )
+
+        next_physics_state = self._step_physics(
+            constants=constants,
+            env_states=env_states,
+            shared_state=shared_state,
+            action=action,
+            rng=physics_rng,
+        )
+
+        transition, next_env_state = self._get_step_env_state(
+            env_states=env_states,
+            shared_state=shared_state,
+            constants=constants,
+            action=action,
+            observations=observations,
+            next_obs_carry=next_obs_carry,
+            next_physics_state=next_physics_state,
+            rng=state_rng,
+        )
+
+        return transition, next_env_state
 
     def get_dataset(self, phase: xax.Phase) -> Dataset:
         raise NotImplementedError("RL tasks do not require datasets, since trajectory histories are stored in-memory.")
@@ -1484,14 +1566,17 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
     ) -> Trajectory:
         return trajectory
 
-    @xax.jit(static_argnames=["self", "constants", "num_steps"], jit_level=JitLevel.UNROLL)
+    @xax.jit(
+        static_argnames=["self", "constants", "num_steps"],
+        jit_level=JitLevel.UNROLL,
+    )
     def _single_unroll(
         self,
         constants: RolloutConstants,
         env_state: RolloutEnvState,
         shared_state: RolloutSharedState,
         num_steps: int,
-    ) -> tuple[Trajectory, RewardState, RolloutEnvState, xax.FrozenDict[str, Array]]:
+    ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
         # Applies randomizations to the model.
         shared_state = replace(
             shared_state,
@@ -1501,16 +1586,16 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         def scan_fn(
             env_state: RolloutEnvState,
             _: None,
-        ) -> tuple[RolloutEnvState, tuple[Trajectory, xax.FrozenDict[str, Array]]]:
-            trajectory, env_state, metrics = self.step_engine(
+        ) -> tuple[RolloutEnvState, Trajectory]:
+            trajectory, env_state = self.step_engine(
                 constants=constants,
                 env_states=env_state,
                 shared_state=shared_state,
             )
-            return env_state, (trajectory, metrics)
+            return env_state, trajectory
 
         # Scans the engine for the desired number of steps.
-        env_state, (trajectory, metrics) = xax.scan(
+        env_state, trajectory = xax.scan(
             scan_fn,
             env_state,
             length=num_steps,
@@ -1546,9 +1631,13 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             rng=rng,
         )
 
-        return trajectory, reward, env_state, metrics
+        return trajectory, reward, env_state
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
+    @xax.jit(
+        static_argnames=["self", "constants"],
+        donate_argnames=["carry", "rng"],
+        jit_level=JitLevel.RL_CORE,
+    )
     def _burn_in_carry(
         self,
         carry: RLLoopCarry,
@@ -1574,7 +1663,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             shared_state=new_carry.shared_state,
         )
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
+    @xax.jit(
+        static_argnames=["self", "constants"],
+        donate_argnames=["carry", "rng"],
+        jit_level=JitLevel.RL_CORE,
+    )
     def _rl_train_loop_step(
         self,
         carry: RLLoopCarry,
@@ -1582,65 +1675,65 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
         state: xax.State,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, Metrics]:
-        """Runs a single step of the RL training loop."""
+        """Runs a single step of the RL training loop.
 
-        def single_step_fn(
-            carry_i: RLLoopCarry,
-            rng: PRNGKeyArray,
-        ) -> tuple[RLLoopCarry, Metrics]:
-            # Rolls out a new trajectory.
-            vmapped_unroll = xax.vmap(
-                self._single_unroll,
-                in_axes=(None, 0, None, None),
-                jit_level=JitLevel.UNROLL,
-            )
-            trajectories, rewards, env_state, unroll_metrics = vmapped_unroll(
-                constants.constants,
-                carry_i.env_states,
-                carry_i.shared_state,
-                self.rollout_length_frames,
-            )
+        Args:
+            carry: The current carry state.
+            constants: The constants for the task.
+            state: The current state of the task.
+            rng: The random number generator.
 
-            # Runs update on the previous trajectory.
-            carry_i, train_metrics = self.update_model(
-                constants=constants,
-                carry=carry_i,
-                trajectories=trajectories,
-                rewards=rewards,
-                rng=rng,
-            )
+        Returns:
+            A tuple containing the new carry state and the metrics for the step.
+        """
+        # Rolls out a new trajectory.
+        vmapped_unroll = xax.vmap(
+            self._single_unroll,
+            in_axes=(None, 0, None, None),
+            jit_level=JitLevel.UNROLL,
+        )
+        trajectories, rewards, env_state = vmapped_unroll(
+            constants.constants,
+            carry.env_states,
+            carry.shared_state,
+            self.rollout_length_frames,
+        )
 
-            # Store all the metrics to log.
-            metrics = Metrics(
-                train=xax.FrozenDict(train_metrics.unfreeze() | unroll_metrics.unfreeze()),
-                reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
-                termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
-                curriculum_level=carry_i.env_states.curriculum_state.level,
-            )
+        # Runs update on the previous trajectory.
+        new_carry, train_metrics = self.update_model(
+            constants=constants,
+            carry=carry,
+            trajectories=trajectories,
+            rewards=rewards,
+            rng=rng,
+        )
 
-            # Steps the curriculum.
-            curriculum_state = constants.constants.curriculum(
-                trajectory=trajectories,
-                rewards=rewards,
-                training_state=state,
-                prev_state=carry_i.env_states.curriculum_state,
-            )
+        # Store all the metrics to log.
+        metrics = Metrics(
+            train=train_metrics,
+            reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
+            termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
+            curriculum_level=new_carry.env_states.curriculum_state.level,
+        )
 
-            # Update the environment states *after* doing the model update -
-            # the model needs to be updated using the same environment states
-            # that were used to generate the trajectory.
-            carry_i = replace(
-                carry_i,
-                env_states=replace(
-                    env_state,
-                    curriculum_state=curriculum_state,
-                ),
-            )
+        # Steps the curriculum.
+        curriculum_state = constants.constants.curriculum(
+            trajectory=trajectories,
+            rewards=rewards,
+            training_state=state,
+            prev_state=new_carry.env_states.curriculum_state,
+        )
 
-            return carry_i, metrics
-
-        rngs = jax.random.split(rng, self.config.epochs_per_log_step)
-        new_carry, metrics = xax.scan(single_step_fn, carry, rngs, jit_level=JitLevel.RL_CORE)
+        # Update the environment states *after* doing the model update -
+        # the model needs to be updated using the same environment states
+        # that were used to generate the trajectory.
+        new_carry = replace(
+            new_carry,
+            env_states=replace(
+                env_state,
+                curriculum_state=curriculum_state,
+            ),
+        )
 
         # Convert any array with more than one element to a histogram.
         metrics = jax.tree.map(self._histogram_fn, metrics)
@@ -1754,7 +1847,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                     )
                     env_states = replace(env_states, commands=new_commands)
 
-                    transition, env_states, _ = self.step_engine(
+                    transition, env_states = self.step_engine(
                         constants=constants,
                         env_states=env_states,
                         shared_state=shared_state,
@@ -2193,7 +2286,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             @xax.jit(jit_level=JitLevel.UNROLL)
             def get_batch(
                 rollout_env_state: RolloutEnvState,
-            ) -> tuple[Trajectory, RewardState, RolloutEnvState, xax.FrozenDict[str, Array]]:
+            ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
                 vmapped_unroll = xax.vmap(
                     self._single_unroll,
                     in_axes=(None, 0, None, None),
@@ -2208,7 +2301,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
             with TrajectoryDataset.writer(save_path, num_batches * self.batch_size) as writer:
                 for _ in tqdm.trange(num_batches):
-                    trajectories, rewards, rollout_env_state, _ = get_batch(rollout_env_state)
+                    trajectories, rewards, rollout_env_state = get_batch(rollout_env_state)
 
                     # Splits trajectories and rewards into a list of `batch_size` samples.
                     for i in range(0, len(trajectories.done), self.batch_size):
@@ -2298,52 +2391,6 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             state=state,
         )
 
-    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.OUTER_LOOP)
-    def _jit_training_loop(
-        self,
-        carry: RLLoopCarry,
-        constants: RLLoopConstants,
-        state: xax.State,
-        rng: PRNGKeyArray,
-    ) -> tuple[RLLoopCarry, xax.State, Metrics]:
-        """JIT-compiled training loop that runs multiple steps."""
-
-        def training_step_fn(
-            carry_and_state: tuple[RLLoopCarry, xax.State],
-            rng: PRNGKeyArray,
-        ) -> tuple[tuple[RLLoopCarry, xax.State], Metrics]:
-            carry, state = carry_and_state
-
-            # Run a single training step
-            new_carry, metrics = self._rl_train_loop_step(
-                carry=carry,
-                constants=constants,
-                state=state,
-                rng=rng,
-            )
-
-            # Update state
-            new_state = state.replace(
-                num_steps=state.num_steps + 1,
-                num_samples=state.num_samples + self.rollout_num_samples,
-            )
-
-            return (new_carry, new_state), metrics
-
-        # Run the training loop for num_steps
-        rngs = jax.random.split(rng, self.config.epochs_per_log_step)
-        (final_carry, final_state), all_metrics = xax.scan(
-            training_step_fn,
-            (carry, state),
-            rngs,
-            jit_level=JitLevel.OUTER_LOOP,
-        )
-
-        # Aggregate metrics across all steps
-        aggregated_metrics = jax.tree.map(lambda x: x.mean(0), all_metrics)
-
-        return final_carry, final_state, aggregated_metrics
-
     def run_training(self) -> None:
         """Wraps the training loop and provides clean XAX integration."""
 
@@ -2407,7 +2454,7 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                         # Runs a validation step.
                         if valid_step or is_first_step:
                             single_env_states = jax.tree.map(lambda arr: arr[-1], carry.env_states)
-                            long_traj, rewards, _, _ = self._single_unroll(
+                            long_traj, rewards, _ = self._single_unroll(
                                 constants=constants.constants,
                                 env_state=single_env_states,
                                 shared_state=carry.shared_state,
@@ -2416,10 +2463,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
                             # Burn-in the carry to avoid subsequent Jax recompilation.
                             if is_first_step:
+                                rng, burn_in_rng = jax.random.split(rng)
                                 carry = self._burn_in_carry(
                                     carry=carry,
                                     constants=constants,
-                                    rng=rng,
+                                    rng=burn_in_rng,
                                     long_traj=long_traj,
                                     rewards=rewards,
                                     single_env_state=single_env_states,
@@ -2446,14 +2494,19 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
                                 key="trajectory",
                             )
 
-                        # Runs the training loop.
+                        # Run a single training step
                         rng, update_rng = jax.random.split(rng)
-
-                        carry, state, metrics = self._jit_training_loop(
+                        carry, metrics = self._rl_train_loop_step(
                             carry=carry,
                             constants=constants,
                             state=state,
                             rng=update_rng,
+                        )
+
+                        # Update state
+                        state = state.replace(
+                            num_steps=state.num_steps + 1,
+                            num_samples=state.num_samples + self.rollout_num_samples,
                         )
 
                         if self.config.profile_memory:

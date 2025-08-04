@@ -724,7 +724,7 @@ class JoystickRewardMarker(Marker):
         radius: float = 0.05,
         size: float = 0.03,
         arrow_len: float = 0.25,
-        rgba: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0),
+        rgba: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
         height: float = 0.6,
     ) -> Self:
         return cls(
@@ -739,7 +739,7 @@ class JoystickRewardMarker(Marker):
             track_x=True,
             track_y=True,
             track_z=True,
-            track_rotation=True,
+            track_rotation=False,
         )
 
 

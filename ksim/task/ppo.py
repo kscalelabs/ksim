@@ -413,7 +413,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             metrics["entropy"] = off_policy_variables.entropy
         return metrics
 
-    @xax.jit(static_argnames=["self", "model_static"], jit_level=JitLevel.RL_CORE)
+    @xax.jit(
+        static_argnames=["self", "model_static"],
+        donate_argnames=["trajectories", "rewards", "on_policy_variables", "rng"],
+        jit_level=JitLevel.RL_CORE,
+    )
     def _get_ppo_loss_and_metrics(
         self,
         model_arr: PyTree,
@@ -495,35 +499,11 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
 
         return loss.mean(), metrics
 
-    @xax.jit(static_argnames=["self", "model_static"], jit_level=JitLevel.RL_CORE)
-    def _get_ppo_metrics_and_grads(
-        self,
-        model_arr: PyTree,
-        model_static: PyTree,
-        trajectories: Trajectory,
-        rewards: RewardState,
-        init_carry: PyTree,
-        on_policy_variables: PPOVariables,
-        rng: PRNGKeyArray,
-    ) -> tuple[xax.FrozenDict[str, Array], PyTree]:
-        loss_fn = xax.grad(
-            self._get_ppo_loss_and_metrics,
-            argnums=0,
-            has_aux=True,
-            jit_level=JitLevel.RL_CORE,
-        )
-        grads, metrics = loss_fn(
-            model_arr,
-            model_static,
-            trajectories,
-            rewards,
-            init_carry,
-            on_policy_variables,
-            rng,
-        )
-        return metrics, grads
-
-    @xax.jit(static_argnames=["self", "constants"], jit_level=JitLevel.RL_CORE)
+    @xax.jit(
+        static_argnames=["self", "constants"],
+        donate_argnames=["trajectories", "rewards", "carry", "on_policy_variables", "rng"],
+        jit_level=JitLevel.RL_CORE,
+    )
     def _single_step(
         self,
         trajectories: Trajectory,
@@ -540,14 +520,20 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         opt_state = carry.opt_state[0]
 
         # Computes the metrics and PPO gradients.
-        ppo_metrics, grads = self._get_ppo_metrics_and_grads(
-            model_arr=model_arr,
-            model_static=model_static,
-            trajectories=trajectories,
-            rewards=rewards,
-            init_carry=carry.env_states.model_carry,
-            on_policy_variables=on_policy_variables,
-            rng=rng,
+        loss_fn = xax.grad(
+            self._get_ppo_loss_and_metrics,
+            argnums=0,
+            has_aux=True,
+            jit_level=JitLevel.RL_CORE,
+        )
+        grads, ppo_metrics = loss_fn(
+            model_arr,
+            model_static,
+            trajectories,
+            rewards,
+            carry.env_states.model_carry,
+            on_policy_variables,
+            rng,
         )
 
         # Applies the gradients.
