@@ -46,14 +46,14 @@ class ClipAccelerationParams:
 
 
 @xax.jit(
-    static_argnames=["ctrl_dt"],
+    static_argnames=["ctrl_dt", "max_acceleration"],
     donate_argnames=["params"],
     jit_level=JitLevel.HELPER_FUNCTIONS,
 )
 def clip_acceleration(
     target_position: Array,
     params: ClipAccelerationParams,
-    max_acceleration: Array,
+    max_acceleration: float,
     ctrl_dt: float,
 ) -> ClipAccelerationParams:
     """Clips the maximum acceleration of an action.

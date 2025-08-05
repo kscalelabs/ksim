@@ -43,6 +43,7 @@ from typing import Collection, Literal, Self, final
 
 import attrs
 import chex
+import jax
 import jax.numpy as jnp
 import mujoco
 import xax
@@ -904,10 +905,6 @@ class FeetAirTimeReward(StatefulReward):
         # Gradually increase reward until `threshold_steps`.
         reward_tn = count_tn.astype(jnp.float32) / threshold_steps
         reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
+        reward_t = reward_tn.sum(axis=-1)
 
-        # Only reward the foot with the lowest reward. The idea here is that we
-        # want to encourage the agent to learn to lift all feet off the ground,
-        # not just favoring one foot.
-        reward_n = reward_tn[..., reward_tn.sum(axis=0).argmin()]
-
-        return reward_n, reward_carry
+        return reward_t, reward_carry
