@@ -32,6 +32,7 @@ from ksim.debugging import JitLevel
 from ksim.rewards import Reward
 from ksim.task.ppo import PPOConfig, PPOTask, PPOVariables
 from ksim.task.rl import (
+    InitParams,
     RewardState,
     RLLoopCarry,
     RLLoopConstants,
@@ -212,16 +213,18 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
                 self._save_viewer_video(frames, save_path)
 
     @abstractmethod
-    def get_policy_model(self, key: PRNGKeyArray) -> PyTree:
+    def get_policy_model(self, params: InitParams) -> PyTree:
         """Returns the policy model."""
 
     @abstractmethod
-    def get_discriminator_model(self, key: PRNGKeyArray) -> PyTree:
+    def get_discriminator_model(self, params: InitParams) -> PyTree:
         """Returns the discriminator model."""
 
-    def get_model(self, key: PRNGKeyArray) -> tuple[PyTree, PyTree]:
-        policy_key, discriminator_key = jax.random.split(key)
-        return self.get_policy_model(policy_key), self.get_discriminator_model(discriminator_key)
+    def get_model(self, params: InitParams) -> tuple[PyTree, PyTree]:
+        policy_key, discriminator_key = jax.random.split(params.key)
+        policy_params = replace(params, key=policy_key)
+        discriminator_params = replace(params, key=discriminator_key)
+        return self.get_policy_model(policy_params), self.get_discriminator_model(discriminator_params)
 
     @abstractmethod
     def get_policy_optimizer(self) -> optax.GradientTransformation:

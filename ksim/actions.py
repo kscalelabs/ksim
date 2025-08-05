@@ -177,16 +177,16 @@ def integrate_acceleration(
 
 
 class ClipPositions(eqx.Module):
-    min_ranges: xax.HashableArray = eqx.field()
-    max_ranges: xax.HashableArray = eqx.field()
+    min_ranges: tuple[float, ...] = eqx.field()
+    max_ranges: tuple[float, ...] = eqx.field()
     num_joints: int = eqx.field()
 
     def __init__(self, ranges: list[tuple[float, float]]) -> None:
         super().__init__()
 
-        min_ranges, max_ranges = jnp.array(ranges).transpose()
-        self.min_ranges = xax.HashableArray(min_ranges)
-        self.max_ranges = xax.HashableArray(max_ranges)
+        min_ranges, max_ranges = zip(*ranges, strict=True)
+        self.min_ranges = tuple(min_ranges)
+        self.max_ranges = tuple(max_ranges)
         self.num_joints = len(ranges)
 
     @classmethod
@@ -197,4 +197,4 @@ class ClipPositions(eqx.Module):
 
     def clip(self, positions: Array) -> Array:
         chex.assert_shape(positions, (..., self.num_joints))
-        return jnp.clip(positions, self.min_ranges.array, self.max_ranges.array)
+        return jnp.clip(positions, jnp.array(self.min_ranges), jnp.array(self.max_ranges))

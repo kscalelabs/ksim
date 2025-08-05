@@ -481,7 +481,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 walk_speed=self.config.target_linear_velocity / 2.0,
                 strafe_speed=self.config.target_linear_velocity / 2.0,
                 rotation_speed=self.config.target_angular_velocity,
-                sample_probs=(0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
             ),
         ]
 
