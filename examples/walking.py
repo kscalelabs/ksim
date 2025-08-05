@@ -55,6 +55,7 @@ class Actor(eqx.Module):
     input_proj: eqx.nn.Linear
     rnns: tuple[eqx.nn.GRUCell, ...]
     output_proj: eqx.nn.MLP
+    clip_positions: ksim.ClipPositions
     num_joints: int = eqx.field()
     num_inputs: int = eqx.field()
     num_outputs: int = eqx.field()
@@ -69,6 +70,7 @@ class Actor(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        physics_model: ksim.PhysicsModel,
         num_inputs: int,
         num_outputs: int,
         num_joints: int,
@@ -118,6 +120,7 @@ class Actor(eqx.Module):
         self.num_joints = num_joints
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
+        self.clip_positions = ksim.ClipPositions.from_physics_model(physics_model)
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
@@ -149,7 +152,7 @@ class Actor(eqx.Module):
         # Clips the means to the minimum and maximum acceleration.
         mean_n = jnp.tanh(mean_n) * self.max_acceleration
 
-        # Apply acceleration clipping.
+        # Apply acceleration clipping to get the target positions.
         filter_params = ksim.integrate_acceleration(
             acceleration=mean_n,
             params=filter_params,
@@ -157,6 +160,9 @@ class Actor(eqx.Module):
             max_velocity=self.max_velocity,
         )
         mean_n = filter_params.position
+
+        # Clip the target positions to the minimum and maximum ranges.
+        mean_n = self.clip_positions.clip(mean_n)
 
         dist_n = xax.Normal(mean_n, std_n)
 
@@ -233,6 +239,7 @@ class Model(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        physics_model: ksim.PhysicsModel,
         min_std: float,
         max_std: float,
         var_scale: float,
@@ -248,6 +255,7 @@ class Model(eqx.Module):
     ) -> None:
         self.actor = Actor(
             key,
+            physics_model=physics_model,
             num_inputs=num_actor_inputs,
             num_outputs=num_joints,
             num_joints=num_joints,
@@ -288,7 +296,7 @@ class WalkingConfig(ksim.PPOConfig):
         help="The number of hidden layers for the MLPs.",
     )
     max_acceleration: float = xax.field(
-        value=10.0,
+        value=2.0,
         help="The maximum acceleration for the actor.",
     )
     max_velocity: float = xax.field(
@@ -498,9 +506,10 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             delay_steps=self.config.curriculum_delay_steps,
         )
 
-    def get_model(self, key: PRNGKeyArray) -> Model:
+    def get_model(self, params: ksim.InitParams) -> Model:
         return Model(
-            key,
+            params.key,
+            physics_model=params.physics_model,
             num_actor_inputs=48,
             num_critic_inputs=331,
             num_joints=17,

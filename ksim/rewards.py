@@ -43,6 +43,7 @@ from typing import Collection, Literal, Self, final
 
 import attrs
 import chex
+import jax
 import jax.numpy as jnp
 import mujoco
 import xax
@@ -752,8 +753,6 @@ class JoystickReward(Reward):
     pos_y_scale: float = attrs.field(default=0.25)
     rot_z_scale: float = attrs.field(default=0.25)
     ang_penalty_ratio: float = attrs.field(default=2.0)
-    smoothing_sigma: float = attrs.field(default=5.0)
-    smoothing_window_size: int = attrs.field(default=10)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
@@ -766,7 +765,7 @@ class JoystickReward(Reward):
         # Smooths the target velocities.
         trg_xvel, trg_yvel, trg_yawvel = tgts.T
 
-        # Gets the robot's current velocities and applies a smoothing kernel.
+        # Gets the robot's current velocities.
         cur_xvel = trajectory.qvel[..., 0]
         cur_yvel = trajectory.qvel[..., 1]
         cur_yawvel = trajectory.qvel[..., 5]

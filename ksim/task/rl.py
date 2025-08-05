@@ -6,6 +6,7 @@ __all__ = [
     "RolloutConstants",
     "RolloutSharedState",
     "RolloutEnvState",
+    "InitParams",
 ]
 
 import bdb
@@ -684,7 +685,13 @@ class RLLoopCarry:
     shared_state: RolloutSharedState
 
 
-class RLTask(xax.Task[Config], Generic[Config], ABC):
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class InitParams(xax.InitParams):
+    physics_model: PhysicsModel
+
+
+class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
     """Base class for reinforcement learning tasks."""
 
     def __init__(self, config: Config) -> None:
@@ -1833,7 +1840,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             randomizers = self.get_physics_randomizers(mj_model)
 
             rng, model_rng = jax.random.split(rng)
-            models, _ = self.load_initial_state(model_rng, load_optimizer=False)
+            params = InitParams(
+                key=model_rng,
+                physics_model=mj_model,
+            )
+            models, _ = self.load_initial_state(params, load_optimizer=False)
 
             # Partitions the models into mutable and static parts.
             model_arrs, model_statics = (
@@ -2303,7 +2314,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
             randomizations = self.get_physics_randomizers(mjx_model)
 
             rng, model_rng = jax.random.split(rng)
-            models, state = self.load_initial_state(model_rng, load_optimizer=False)
+            params = InitParams(
+                key=model_rng,
+                physics_model=mj_model,
+            )
+            models, state = self.load_initial_state(params, load_optimizer=False)
 
             # Partitions the models into mutable and static parts.
             model_arrs, model_statics = (
@@ -2381,7 +2396,11 @@ class RLTask(xax.Task[Config], Generic[Config], ABC):
 
         # Gets the model and optimizer variables.
         rng, model_rng = jax.random.split(rng)
-        models, optimizers, opt_states, state = self.load_initial_state(model_rng, load_optimizer=True)
+        params = InitParams(
+            key=model_rng,
+            physics_model=mj_model,
+        )
+        models, optimizers, opt_states, state = self.load_initial_state(params, load_optimizer=True)
 
         # Logs model and optimizer information.
         for i, (model, opt_state) in enumerate(zip(models, opt_states, strict=True), 1):

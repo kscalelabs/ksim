@@ -7,17 +7,21 @@ __all__ = [
     "IntegrateVelocityParams",
     "integrate_acceleration",
     "IntegrateAccelerationParams",
+    "ClipPositions",
 ]
 
 from dataclasses import dataclass
 from typing import Self
 
+import chex
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import xax
 from jaxtyping import Array
 
 from ksim.debugging import JitLevel
+from ksim.types import PhysicsModel
 
 
 @jax.tree_util.register_dataclass
@@ -98,7 +102,7 @@ def integrate_velocity(
     velocity: Array,
     params: IntegrateVelocityParams,
     ctrl_dt: float,
-    backprop: bool = False,
+    backprop: bool = True,
 ) -> IntegrateVelocityParams:
     """Integrates a velocity to a position.
 
@@ -149,7 +153,7 @@ def integrate_acceleration(
     params: IntegrateAccelerationParams,
     ctrl_dt: float,
     max_velocity: float = 10.0,
-    backprop: bool = False,
+    backprop: bool = True,
 ) -> IntegrateAccelerationParams:
     """Clips the maximum acceleration of an action.
 
@@ -170,3 +174,27 @@ def integrate_acceleration(
     cur_velocity = jnp.clip(prev_velocity + acceleration * ctrl_dt, -max_velocity, max_velocity)
     cur_position = prev_position + cur_velocity * ctrl_dt
     return IntegrateAccelerationParams(cur_position, cur_velocity)
+
+
+class ClipPositions(eqx.Module):
+    min_ranges: xax.HashableArray = eqx.field()
+    max_ranges: xax.HashableArray = eqx.field()
+    num_joints: int = eqx.field()
+
+    def __init__(self, ranges: list[tuple[float, float]]) -> None:
+        super().__init__()
+
+        min_ranges, max_ranges = jnp.array(ranges).transpose()
+        self.min_ranges = xax.HashableArray(min_ranges)
+        self.max_ranges = xax.HashableArray(max_ranges)
+        self.num_joints = len(ranges)
+
+    @classmethod
+    def from_physics_model(cls, physics_model: PhysicsModel) -> Self:
+        ranges = physics_model.jnt_range
+        ranges_list = [(minv, maxv) for minv, maxv in ranges.tolist()[1:]]
+        return cls(ranges_list)
+
+    def clip(self, positions: Array) -> Array:
+        chex.assert_shape(positions, (..., self.num_joints))
+        return jnp.clip(positions, self.min_ranges.array, self.max_ranges.array)
