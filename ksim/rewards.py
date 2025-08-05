@@ -43,7 +43,6 @@ from typing import Collection, Literal, Self, final
 
 import attrs
 import chex
-import jax
 import jax.numpy as jnp
 import mujoco
 import xax
