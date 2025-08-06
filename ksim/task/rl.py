@@ -1599,11 +1599,8 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             env_state: RolloutEnvState,
             _: None,
         ) -> tuple[RolloutEnvState, Trajectory]:
-            trajectory, env_state = self.step_engine(
-                constants=constants,
-                env_states=env_state,
-                shared_state=shared_state,
-            )
+            vmapped_step_fn = xax.vmap(self.step_engine, in_axes=(None, 0, None))
+            trajectory, env_state = vmapped_step_fn(constants, env_state, shared_state)
             return env_state, trajectory
 
         # Scans the engine for the desired number of steps.
@@ -1614,16 +1611,13 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             jit_level=JitLevel.UNROLL,
         )
 
+        breakpoint()
+
         rng, reward_rng, postprocess_rng = jax.random.split(env_state.rng, 3)
 
         # Post-processes the trajectory.
-        trajectory = self.postprocess_trajectory(
-            constants=constants,
-            env_states=env_state,
-            shared_state=shared_state,
-            trajectory=trajectory,
-            rng=postprocess_rng,
-        )
+        vmapped_postprocess_fn = xax.vmap(self.postprocess_trajectory, in_axes=(None, 0, None, None, None))
+        trajectory = vmapped_postprocess_fn(constants, env_state, shared_state, trajectory, postprocess_rng)
 
         # Gets the rewards.
         reward = get_rewards(
@@ -1689,7 +1683,6 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
 
         return out_carry, out_state
 
-    @chex.chexify
     @xax.jit(
         static_argnames=["self", "constants"],
         donate_argnames=["carry", "state"],
@@ -1724,12 +1717,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             rng, update_rng = jax.random.split(rng)
 
             # Rolls out a new trajectory.
-            vmapped_unroll = xax.vmap(
-                self._single_unroll,
-                in_axes=(None, 0, None, None),
-                jit_level=JitLevel.UNROLL,
-            )
-            trajectories, rewards, env_state = vmapped_unroll(
+            trajectories, rewards, env_state = self._single_unroll(
                 constants.constants,
                 carry.env_states,
                 carry.shared_state,
@@ -2364,12 +2352,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             def get_batch(
                 rollout_env_state: RolloutEnvState,
             ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
-                vmapped_unroll = xax.vmap(
-                    self._single_unroll,
-                    in_axes=(None, 0, None, None),
-                    jit_level=JitLevel.UNROLL,
-                )
-                return vmapped_unroll(
+                return self._single_unroll(
                     rollout_constants,
                     rollout_env_state,
                     rollout_shared_state,
@@ -2536,13 +2519,15 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
 
                         # Runs a validation step.
                         if valid_step or is_first_step:
-                            single_env_states = jax.tree.map(lambda arr: arr[-1], carry.env_states)
-                            long_traj, rewards, _ = chex.chexify(self._single_unroll)(
+                            single_env_states = jax.tree.map(lambda arr: arr[-1:], carry.env_states)
+                            long_traj, rewards, _ = self._single_unroll(
                                 constants=constants.constants,
                                 env_state=single_env_states,
                                 shared_state=carry.shared_state,
                                 num_steps=self.render_length_frames,
                             )
+
+                            breakpoint()
 
                             # Burn-in the carry to avoid subsequent Jax recompilation.
                             if is_first_step:
