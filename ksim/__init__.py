@@ -1,6 +1,6 @@
 """Defines the main ksim API."""
 
-__version__ = "0.1.100"
+__version__ = "0.2.0"
 
 from .actions import *
 from .actuators import *
