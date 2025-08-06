@@ -1664,17 +1664,13 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         single_env_state: RolloutEnvState,
         state: xax.State,
     ) -> tuple[RLLoopCarry, xax.State]:
-        multi_env_states = jax.tree.map(lambda arr: arr[None], single_env_state)
-        multi_traj = jax.tree.map(lambda arr: arr[None], long_traj)
-        multi_rewards = jax.tree.map(lambda arr: arr[None], rewards)
-
         rng, update_rng = jax.random.split(carry.shared_state.rng)
 
         new_carry, _ = self.update_model(
             constants=constants,
-            carry=replace(carry, env_states=multi_env_states),
-            trajectories=multi_traj,
-            rewards=multi_rewards,
+            carry=replace(carry, env_states=single_env_state),
+            trajectories=long_traj,
+            rewards=rewards,
             rng=update_rng,
         )
 
@@ -2553,6 +2549,9 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                                 trajectory=long_traj,
                                 rewards=rewards,
                             )
+
+                            # Remove batch dimension.
+                            logged_traj = jax.tree.map(lambda arr: arr[0], logged_traj)
 
                             self._log_logged_trajectory_graphs(
                                 logged_traj=logged_traj,

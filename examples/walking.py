@@ -333,7 +333,7 @@ class WalkingConfig(ksim.PPOConfig):
         help="The number of steps to take before updating the curriculum.",
     )
     curriculum_delay_steps: int = xax.field(
-        value=1000,
+        value=5000,
         help="The number of steps to delay the curriculum.",
     )
 

@@ -898,36 +898,18 @@ class FeetAirTimeReward(StatefulReward):
         sensor_data_tn = sensor_data_tcn.any(axis=-2)
         chex.assert_shape(sensor_data_tn, (..., self.num_feet))
 
-        done_tn = trajectory.done  # shape: [T, ...]
         threshold_steps = round(self.threshold / self.ctrl_dt)
 
-        # Reshape for broadcasting
-        done_tn = jnp.broadcast_to(done_tn[..., None], sensor_data_tn.shape)
+        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+            count_n, (contact_n, done) = carry, x
+            count_n = jnp.where(done | contact_n, 0, count_n + 1)
+            return count_n, count_n
 
-        # Mask where contact or done is True
-        reset_mask_tn = sensor_data_tn | done_tn
+        reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
 
-        # Compute running counts of consecutive non-contact steps.
-        # At resets, mask out by multiplying with (1 - reset_mask)
-        # To support episode continuation, prepend reward_carry as the initial step
-        initial = reward_carry[None, ...]
-        reset_mask_padded = jnp.concatenate([jnp.zeros_like(initial, dtype=bool), reset_mask_tn], axis=0)
-        not_reset_mask_padded = ~reset_mask_padded
-
-        # Cumulative count of non-contact steps with reset at each contact/done
-        ones = jnp.ones_like(not_reset_mask_padded, dtype=jnp.int32)
-        counts_padded = ones * not_reset_mask_padded
-        counts_padded = jnp.cumsum(counts_padded, axis=0)
-        counts_padded = counts_padded * not_reset_mask_padded
-        count_tn = counts_padded[1:]  # remove the prepended initial
-
-        # Gradually increase reward until threshold_steps
+        # Gradually increase reward until `threshold_steps`.
         reward_tn = count_tn.astype(jnp.float32) / threshold_steps
         reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
         reward_t = reward_tn.sum(axis=-1)
-
-        # Carry over the last count (zeroed if contact/done)
-        final_mask = reset_mask_tn[-1]
-        reward_carry = jnp.where(final_mask, 0, count_tn[-1])
 
         return reward_t, reward_carry
