@@ -479,7 +479,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.StayAliveReward(scale=100.0),
             ksim.JoystickReward(scale=1.0),
-            # ksim.NaiveForwardReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
             FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=1.0),
         ]
@@ -694,7 +693,7 @@ if __name__ == "__main__":
             # Simulation parameters.
             dt=0.004,
             ctrl_dt=0.02,
-            iterations=3,
-            ls_iterations=5,
+            iterations=8,
+            ls_iterations=8,
         ),
     )
