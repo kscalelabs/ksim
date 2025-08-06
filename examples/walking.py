@@ -291,7 +291,7 @@ class WalkingConfig(ksim.PPOConfig):
         help="The number of hidden layers for the MLPs.",
     )
     max_acceleration: float = xax.field(
-        value=2.0,
+        value=25.0,
         help="The maximum acceleration for the actor.",
     )
 
@@ -479,6 +479,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.StayAliveReward(scale=100.0),
             ksim.JoystickReward(scale=1.0),
+            # ksim.NaiveForwardReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
             FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=1.0),
         ]
@@ -691,7 +692,7 @@ if __name__ == "__main__":
             num_passes=4,
             rollout_length_frames=24,
             # Simulation parameters.
-            dt=0.002,
+            dt=0.004,
             ctrl_dt=0.02,
             iterations=3,
             ls_iterations=5,

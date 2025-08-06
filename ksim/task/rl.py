@@ -430,10 +430,6 @@ class RLConfig(xax.Config):
         value=None,
         help="The number of frames to rollout each environment during training.",
     )
-    updates_per_logging_step: int = xax.field(
-        value=1,
-        help="The number of updates to perform between logging steps.",
-    )
     throw_on_weak_type: bool = xax.field(
         value=True,
         help="If true, throw an error if a weak type is found.",
@@ -533,11 +529,11 @@ class RLConfig(xax.Config):
 
     # Engine parameters.
     ctrl_dt: float = xax.field(
-        value=0.02,
+        value=MISSING,
         help="The time step of the control loop.",
     )
     dt: float = xax.field(
-        value=0.002,
+        value=MISSING,
         help="The time step of the physics loop.",
     )
     tolerance: float = xax.field(
@@ -1605,20 +1601,14 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             return env_state, trajectory
 
         # Scans the engine for the desired number of steps.
-        env_state, trajectory = xax.scan(
-            scan_fn,
-            env_state,
-            length=num_steps,
-            jit_level=JitLevel.UNROLL,
-        )
+        env_state, trajectory = xax.scan(scan_fn, env_state, length=num_steps, jit_level=JitLevel.UNROLL)
 
-        def get_traj_and_reward(
+        def get_trajectory(
             trajectory: Trajectory,
             env_state: RolloutEnvState,
             shared_state: RolloutSharedState,
-        ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
-            rng, traj_rng, reward_rng = jax.random.split(env_state.rng, 3)
-
+        ) -> tuple[Trajectory, RolloutEnvState]:
+            rng, traj_rng = jax.random.split(env_state.rng)
             trajectory = self.postprocess_trajectory(
                 constants=constants,
                 env_states=env_state,
@@ -1626,8 +1616,15 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                 trajectory=trajectory,
                 rng=traj_rng,
             )
+            return trajectory, replace(env_state, rng=rng)
 
-            # Gets the rewards.
+        trajectory, env_state = xax.vmap(get_trajectory, in_axes=(1, 0, None))(trajectory, env_state, shared_state)
+
+        def get_reward(
+            trajectory: Trajectory,
+            env_state: RolloutEnvState,
+        ) -> tuple[RewardState, RolloutEnvState]:
+            rng, reward_rng = jax.random.split(env_state.rng)
             reward = get_rewards(
                 trajectory=trajectory,
                 rewards=constants.rewards,
@@ -1645,10 +1642,11 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                 rng=rng,
             )
 
-            return trajectory, reward, env_state
+            return reward, env_state
 
-        vmapped_traj_rew_fn = xax.vmap(get_traj_and_reward, in_axes=(1, 0, None))
-        return vmapped_traj_rew_fn(trajectory, env_state, shared_state)
+        reward, env_state = xax.vmap(get_reward, in_axes=(0, 0))(trajectory, env_state)
+
+        return trajectory, reward, env_state
 
     @xax.jit(
         static_argnames=["self", "constants"],
@@ -1693,6 +1691,71 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
     @xax.jit(
         static_argnames=["self", "constants"],
         donate_argnames=["carry", "state"],
+        jit_level=JitLevel.UNROLL,
+    )
+    def _single_update(
+        self,
+        carry: RLLoopCarry,
+        constants: RLLoopConstants,
+        env_state: RolloutEnvState,
+        state: xax.State,
+        trajectories: Trajectory,
+        rewards: RewardState,
+    ) -> tuple[xax.State, RLLoopCarry, Metrics]:
+        rng = carry.shared_state.rng
+        rng, update_rng = jax.random.split(rng)
+
+        # Runs update on the previous trajectory.
+        new_carry, train_metrics = self.update_model(
+            constants=constants,
+            carry=carry,
+            trajectories=trajectories,
+            rewards=rewards,
+            rng=update_rng,
+        )
+
+        # Store all the metrics to log.
+        metrics = Metrics(
+            train=train_metrics,
+            reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
+            termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
+            curriculum_level=new_carry.env_states.curriculum_state.level,
+        )
+
+        # Steps the curriculum.
+        curriculum_state = constants.constants.curriculum(
+            trajectory=trajectories,
+            rewards=rewards,
+            training_state=state,
+            prev_state=new_carry.env_states.curriculum_state,
+        )
+
+        # Update the environment states *after* doing the model update -
+        # the model needs to be updated using the same environment states
+        # that were used to generate the trajectory.
+        new_carry = replace(
+            new_carry,
+            env_states=replace(
+                env_state,
+                curriculum_state=curriculum_state,
+            ),
+            shared_state=replace(
+                new_carry.shared_state,
+                rng=rng,
+            ),
+        )
+
+        # Update state
+        new_state = state.replace(
+            num_steps=state.num_steps + 1,
+            num_samples=state.num_samples + self.rollout_num_samples,
+        )
+
+        return new_state, new_carry, metrics
+
+    @xax.jit(
+        static_argnames=["self", "constants"],
+        donate_argnames=["carry", "state"],
         jit_level=JitLevel.OUTER_LOOP,
     )
     def _rl_train_loop_step(
@@ -1713,82 +1776,26 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             A tuple containing the new state, carry state and the metrics
             for the step.
         """
+        # Rolls out a new trajectory.
+        trajectories, rewards, env_state = self._single_unroll(
+            constants.constants,
+            carry.env_states,
+            carry.shared_state,
+            self.rollout_length_frames,
+        )
 
-        def _inner_fn(
-            carry_and_state: tuple[RLLoopCarry, xax.State],
-            _: None,
-        ) -> tuple[tuple[RLLoopCarry, xax.State], Metrics]:
-            carry, state = carry_and_state
-
-            rng = carry.shared_state.rng
-            rng, update_rng = jax.random.split(rng)
-
-            # Rolls out a new trajectory.
-            trajectories, rewards, env_state = self._single_unroll(
-                constants.constants,
-                carry.env_states,
-                carry.shared_state,
-                self.rollout_length_frames,
-            )
-
-            # Runs update on the previous trajectory.
-            new_carry, train_metrics = self.update_model(
-                constants=constants,
-                carry=carry,
-                trajectories=trajectories,
-                rewards=rewards,
-                rng=update_rng,
-            )
-
-            # Store all the metrics to log.
-            metrics = Metrics(
-                train=train_metrics,
-                reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
-                termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
-                curriculum_level=new_carry.env_states.curriculum_state.level,
-            )
-
-            # Steps the curriculum.
-            curriculum_state = constants.constants.curriculum(
-                trajectory=trajectories,
-                rewards=rewards,
-                training_state=state,
-                prev_state=new_carry.env_states.curriculum_state,
-            )
-
-            # Update the environment states *after* doing the model update -
-            # the model needs to be updated using the same environment states
-            # that were used to generate the trajectory.
-            new_carry = replace(
-                new_carry,
-                env_states=replace(
-                    env_state,
-                    curriculum_state=curriculum_state,
-                ),
-                shared_state=replace(
-                    new_carry.shared_state,
-                    rng=rng,
-                ),
-            )
-
-            # Update state
-            new_state = state.replace(
-                num_steps=state.num_steps + 1,
-                num_samples=state.num_samples + self.rollout_num_samples,
-            )
-
-            return (new_carry, new_state), metrics
-
-        (new_carry, new_state), all_metrics = xax.scan(
-            _inner_fn,
-            (carry, state),
-            None,
-            length=self.config.updates_per_logging_step,
-            jit_level=JitLevel.OUTER_LOOP,
+        # Updates the model on the new trajectory.
+        new_state, new_carry, metrics = self._single_update(
+            carry=carry,
+            constants=constants,
+            env_state=env_state,
+            state=state,
+            trajectories=trajectories,
+            rewards=rewards,
         )
 
         # Convert any array with more than one element to a histogram.
-        metrics = jax.tree.map(self._histogram_fn, all_metrics)
+        metrics = jax.tree.map(self._histogram_fn, metrics)
 
         return new_state, new_carry, metrics
 
@@ -2355,10 +2362,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
 
             state = self.on_training_start(state)
 
-            @xax.jit(jit_level=JitLevel.UNROLL)
-            def get_batch(
-                rollout_env_state: RolloutEnvState,
-            ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
+            def get_batch(rollout_env_state: RolloutEnvState) -> tuple[Trajectory, RewardState, RolloutEnvState]:
                 return self._single_unroll(
                     rollout_constants,
                     rollout_env_state,
