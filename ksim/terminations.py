@@ -6,8 +6,7 @@ __all__ = [
     "MinimumHeightTermination",
     "IllegalContactTermination",
     "BadZTermination",
-    "HighVelocityTermination",
-    "HighRootVelocityTermination",
+    "BadVelocityTermination",
     "FarFromOriginTermination",
     "EpisodeLengthTermination",
 ]
@@ -142,30 +141,14 @@ class BadZTermination(Termination):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class HighVelocityTermination(Termination):
-    """Terminates the episode if the robot is moving too fast."""
-
-    # Good default value for Mujoco physics errors.
-    max_lin_vel: float = attrs.field(default=100.0)
-    max_ang_vel: float = attrs.field(default=100.0)
-
-    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        lin_vel = jnp.linalg.norm(state.cvel[..., :3], axis=-1)
-        ang_vel = jnp.linalg.norm(state.cvel[..., 3:], axis=-1)
-        return jnp.where((lin_vel > self.max_lin_vel).any() | (ang_vel > self.max_ang_vel).any(), -1, 0)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class HighRootVelocityTermination(Termination):
+class BadVelocityTermination(Termination):
     """Terminates the episode if the robot's root is moving too fast."""
 
-    max_lin_vel: float = attrs.field()
-    max_ang_vel: float = attrs.field()
+    max_vel: float = attrs.field()
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        lin_vel = jnp.linalg.norm(state.qvel[..., :3], axis=-1)
-        ang_vel = jnp.linalg.norm(state.qvel[..., 3:6], axis=-1)
-        return jnp.where((lin_vel > self.max_lin_vel) | (ang_vel > self.max_ang_vel), -1, 0)
+        lin_vel = jnp.linalg.norm(state.qvel[..., 0:3], axis=-1)
+        return jnp.where(lin_vel > self.max_vel, -1, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)

@@ -63,7 +63,7 @@ NoiseType = Literal["gaussian", "uniform"]
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class ObservationInput:
-    commands: xax.FrozenDict[str, Array]
+    commands: xax.FrozenDict[str, PyTree]
     physics_state: PhysicsState
     obs_carry: PyTree
 

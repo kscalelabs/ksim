@@ -111,14 +111,22 @@ class MjxEngine(PhysicsEngine):
             ),
         )
 
-    @xax.jit(static_argnames=["self"], jit_level=JitLevel.MJX)
+    @xax.jit(
+        static_argnames=["self"],
+        donate_argnames=["data"],
+        jit_level=JitLevel.MJX,
+    )
     def _physics_step(self, physics_model: mjx.Model, data: mjx.Data) -> mjx.Data:
         # Just performs the MJX step, but wraps it in it's own JIT which can be
         # cached to prevent heavy recompilation every time the rewards or
         # events change.
         return mjx.step(physics_model, data)
 
-    @xax.jit(static_argnames=["self"], jit_level=JitLevel.ENGINE)
+    @xax.jit(
+        static_argnames=["self"],
+        donate_argnames=["physics_state", "rng"],
+        jit_level=JitLevel.ENGINE,
+    )
     def step(
         self,
         action: Array,

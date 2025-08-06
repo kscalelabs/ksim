@@ -120,7 +120,6 @@ class Metrics:
 class LoggedTrajectory:
     trajectory: Trajectory
     rewards: RewardState
-    metrics: xax.FrozenDict[str, Array]
 
 
 def _parse_float(value: str | None) -> float | None:

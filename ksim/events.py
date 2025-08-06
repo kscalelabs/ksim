@@ -4,7 +4,6 @@ __all__ = [
     "Event",
     "LinearPushEvent",
     "JumpEvent",
-    "JointPerturbationEvent",
 ]
 
 import functools
@@ -177,75 +176,6 @@ class JumpEvent(Event):
         minval, maxval = self.interval_range
         time_remaining = jax.random.uniform(trng, (), minval=minval, maxval=maxval)
 
-        return updated_data, time_remaining
-
-    def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
-        minval, maxval = self.interval_range
-        return jax.random.uniform(rng, (), minval=minval, maxval=maxval)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class JointPerturbationEvent(Event):
-    """Randomly adds some velocity to each joint."""
-
-    std: float = attrs.field(validator=attrs.validators.gt(0.0))
-    mask_prct: float = attrs.field(
-        default=0.0,
-        validator=attrs.validators.and_(
-            attrs.validators.ge(0.0),
-            attrs.validators.le(1.0),
-        ),
-    )
-    interval_range: tuple[float, float] = attrs.field()
-    curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
-
-    def __call__(
-        self,
-        model: PhysicsModel,
-        data: PhysicsData,
-        event_state: Array,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> tuple[PhysicsData, Array]:
-        # Decrement by physics timestep.
-        dt = jnp.float32(model.opt.timestep)
-        time_remaining = event_state - dt
-
-        # Update the data if the time remaining is less than 0.
-        updated_data, time_remaining = jax.lax.cond(
-            time_remaining <= 0.0,
-            lambda: self._apply_random_velocity(data, curriculum_level, rng),
-            lambda: (data, time_remaining),
-        )
-
-        return updated_data, time_remaining
-
-    def _apply_random_velocity(
-        self,
-        data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> tuple[PhysicsData, Array]:
-        urng, mrng, trng = jax.random.split(rng, 3)
-
-        # Scales the curriculum level range.
-        curriculum_min, curriculum_max = self.curriculum_range
-        curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
-
-        # Randomly applies a velocity to a single joint.
-        std = self.std
-        nomask_prct = 1.0 - self.mask_prct
-        qfrc_applied = data.qfrc_applied[..., 6:]
-        random_vels = jax.random.normal(urng, shape=qfrc_applied.shape) * std
-        random_flip = jax.random.bernoulli(urng, p=0.5, shape=qfrc_applied.shape).astype(random_vels.dtype) * 2 - 1
-        random_mask = jax.random.bernoulli(mrng, p=nomask_prct, shape=qfrc_applied.shape).astype(random_vels.dtype)
-        random_vels = random_vels * curriculum_level * random_flip * random_mask
-        qfrc_applied = slice_update(data, "qfrc_applied", slice(6, None), qfrc_applied + random_vels)
-        updated_data = update_data_field(data, "qfrc_applied", qfrc_applied)
-
-        # Chooses a new remaining interval.
-        minval, maxval = self.interval_range
-        time_remaining = jax.random.uniform(trng, (), minval=minval, maxval=maxval)
         return updated_data, time_remaining
 
     def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:

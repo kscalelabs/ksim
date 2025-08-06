@@ -2,6 +2,7 @@
 
 __version__ = "0.1.99"
 
+from .actions import *
 from .actuators import *
 from .commands import *
 from .curriculum import *

@@ -77,6 +77,7 @@ class LinearCurriculum(Curriculum[None]):
     step_size: float = attrs.field(default=0.01, validator=attrs.validators.ge(0.0))
     step_every_n_epochs: int = attrs.field(default=1, validator=attrs.validators.ge(1))
     min_level: float = attrs.field(default=0.0, validator=attrs.validators.ge(0.0))
+    delay_steps: int = attrs.field(default=0, validator=attrs.validators.ge(0))
 
     def __call__(
         self,
@@ -85,7 +86,7 @@ class LinearCurriculum(Curriculum[None]):
         training_state: xax.State,
         prev_state: CurriculumState[None],
     ) -> CurriculumState[None]:
-        level = (training_state.num_steps // self.step_every_n_epochs) * self.step_size
+        level = (training_state.num_steps - self.delay_steps) // self.step_every_n_epochs * self.step_size
         level = jnp.clip(level, self.min_level, 1.0)
         level = jnp.full_like(prev_state.level, level)
         return CurriculumState(level=level, state=None)
