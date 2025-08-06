@@ -420,8 +420,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         real_disc_logits = disc_fn(model, real_motions)
         sim_disc_logits = disc_fn(model, sim_motions)
         real_disc_loss, sim_disc_loss = self.get_disc_losses(real_disc_logits, sim_disc_logits)
-
-        gp_loss = self.config.amp_grad_penalty_coef / 2 * self._grad_penalty(model, real_motions, gp_rng)
+        gp_loss = self.config.amp_grad_penalty_coef / 2 * self._grad_penalty(model, real_motions, rng)
 
         disc_loss = real_disc_loss + sim_disc_loss + gp_loss
 
