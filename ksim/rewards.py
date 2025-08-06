@@ -49,6 +49,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.commands import JoystickCommandValue
+from ksim.debugging import JitLevel
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
 from ksim.utils.validators import (
@@ -753,6 +754,7 @@ class JoystickReward(Reward):
     rot_z_scale: float = attrs.field(default=0.25)
     ang_penalty_ratio: float = attrs.field(default=2.0)
 
+    @xax.jit(static_argnames=["self"], jit_level=JitLevel.UNROLL)
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
@@ -763,6 +765,7 @@ class JoystickReward(Reward):
 
         # Smooths the target velocities.
         trg_xvel, trg_yvel, trg_yawvel = tgts.T
+        chex.assert_tree_all_finite(tgts)
 
         # Gets the robot's current velocities.
         cur_xvel = trajectory.qvel[..., 0]
@@ -772,15 +775,27 @@ class JoystickReward(Reward):
         # Gets the robot's current yaw.
         quat = trajectory.qpos[..., 3:7]
         cur_yaw = xax.quat_to_yaw(quat)
+        chex.assert_tree_all_finite(quat)
+        chex.assert_tree_all_finite(cur_yaw)
 
         # Rotates the command X and Y velocities to the robot's current yaw.
         trg_xvel_rot = trg_xvel * jnp.cos(cur_yaw) - trg_yvel * jnp.sin(cur_yaw)
         trg_yvel_rot = trg_xvel * jnp.sin(cur_yaw) + trg_yvel * jnp.cos(cur_yaw)
 
         # Exponential kernel for the reward.
-        pos_x_rew = jnp.exp(-jnp.abs(trg_xvel_rot - cur_xvel) / self.pos_x_scale)
-        pos_y_rew = jnp.exp(-jnp.abs(trg_yvel_rot - cur_yvel) / self.pos_y_scale)
-        rot_z_rew = jnp.exp(-jnp.abs(trg_yawvel - cur_yawvel) / self.rot_z_scale)
+        x_rew_diff = trg_xvel_rot - cur_xvel
+        y_rew_diff = trg_yvel_rot - cur_yvel
+        z_rew_diff = trg_yawvel - cur_yawvel
+        chex.assert_tree_all_finite(x_rew_diff)
+        chex.assert_tree_all_finite(y_rew_diff)
+        chex.assert_tree_all_finite(z_rew_diff)
+
+        pos_x_rew = jnp.exp(-jnp.abs(x_rew_diff) / self.pos_x_scale)
+        pos_y_rew = jnp.exp(-jnp.abs(y_rew_diff) / self.pos_y_scale)
+        rot_z_rew = jnp.exp(-jnp.abs(z_rew_diff) / self.rot_z_scale)
+        chex.assert_tree_all_finite(pos_x_rew)
+        chex.assert_tree_all_finite(pos_y_rew)
+        chex.assert_tree_all_finite(rot_z_rew)
 
         reward = (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
 

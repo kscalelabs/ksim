@@ -1689,6 +1689,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
 
         return out_carry, out_state
 
+    @chex.chexify
     @xax.jit(
         static_argnames=["self", "constants"],
         donate_argnames=["carry", "state"],
@@ -2536,7 +2537,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                         # Runs a validation step.
                         if valid_step or is_first_step:
                             single_env_states = jax.tree.map(lambda arr: arr[-1], carry.env_states)
-                            long_traj, rewards, _ = self._single_unroll(
+                            long_traj, rewards, _ = chex.chexify(self._single_unroll)(
                                 constants=constants.constants,
                                 env_state=single_env_states,
                                 shared_state=carry.shared_state,
