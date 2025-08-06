@@ -205,9 +205,10 @@ def get_rewards(
         reward_carry = rewards_carry[reward_name]
 
         if isinstance(reward, StatefulReward):
+            reward_initial_carry = reward.initial_carry(rng)
             reward_carry = jax.tree.map(
                 lambda new, old: jnp.where(trajectory.done[..., -1], new, old),
-                reward.initial_carry(rng),
+                reward_initial_carry,
                 reward_carry,
             )
             reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
@@ -1169,6 +1170,12 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         """
         action_rng, physics_rng, state_rng = jax.random.split(env_states.rng, 3)
 
+        # Applies the event randomizations to the shared state.
+        shared_state = replace(
+            shared_state,
+            physics_model=shared_state.physics_model.tree_replace(env_states.randomization_dict),  # pyright: ignore[reportArgumentType]
+        )
+
         action, observations, next_obs_carry = self._sample_action(
             env_states=env_states,
             shared_state=shared_state,
@@ -1589,12 +1596,6 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         shared_state: RolloutSharedState,
         num_steps: int,
     ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
-        # Applies randomizations to the model.
-        shared_state = replace(
-            shared_state,
-            physics_model=shared_state.physics_model.tree_replace(env_state.randomization_dict),  # pyright: ignore[reportArgumentType]
-        )
-
         def scan_fn(
             env_state: RolloutEnvState,
             _: None,
@@ -1611,33 +1612,43 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             jit_level=JitLevel.UNROLL,
         )
 
-        breakpoint()
+        def get_traj_and_reward(
+            trajectory: Trajectory,
+            env_state: RolloutEnvState,
+            shared_state: RolloutSharedState,
+        ) -> tuple[Trajectory, RewardState, RolloutEnvState]:
+            rng, traj_rng, reward_rng = jax.random.split(env_state.rng, 3)
 
-        rng, reward_rng, postprocess_rng = jax.random.split(env_state.rng, 3)
+            trajectory = self.postprocess_trajectory(
+                constants=constants,
+                env_states=env_state,
+                shared_state=shared_state,
+                trajectory=trajectory,
+                rng=traj_rng,
+            )
 
-        # Post-processes the trajectory.
-        vmapped_postprocess_fn = xax.vmap(self.postprocess_trajectory, in_axes=(None, 0, None, None, None))
-        trajectory = vmapped_postprocess_fn(constants, env_state, shared_state, trajectory, postprocess_rng)
+            # Gets the rewards.
+            reward = get_rewards(
+                trajectory=trajectory,
+                rewards=constants.rewards,
+                rewards_carry=env_state.reward_carry,
+                curriculum_level=env_state.curriculum_state.level,
+                rng=reward_rng,
+                clip_min=self.config.reward_clip_min,
+                clip_max=self.config.reward_clip_max,
+            )
 
-        # Gets the rewards.
-        reward = get_rewards(
-            trajectory=trajectory,
-            rewards=constants.rewards,
-            rewards_carry=env_state.reward_carry,
-            curriculum_level=env_state.curriculum_state.level,
-            rng=reward_rng,
-            clip_min=self.config.reward_clip_min,
-            clip_max=self.config.reward_clip_max,
-        )
+            # Updates the reward carry in the environment state.
+            env_state = replace(
+                env_state,
+                reward_carry=reward.carry,
+                rng=rng,
+            )
 
-        # Updates the reward carry in the environment state.
-        env_state = replace(
-            env_state,
-            reward_carry=reward.carry,
-            rng=rng,
-        )
+            return trajectory, reward, env_state
 
-        return trajectory, reward, env_state
+        vmapped_traj_rew_fn = xax.vmap(get_traj_and_reward, in_axes=(1, 0, None))
+        return vmapped_traj_rew_fn(trajectory, env_state, shared_state)
 
     @xax.jit(
         static_argnames=["self", "constants"],
@@ -1870,7 +1881,6 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             )
 
             live_reward_transition_buffer: deque[Trajectory] = deque(maxlen=self.config.live_reward_buffer_size)
-            viewer_rng = rng
 
             # Creates the markers.
             markers = self.get_markers(
@@ -1911,7 +1921,8 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                     # Build a window of transitions to compute live rewards
                     live_reward_transition_buffer.append(transition)
                     traj_small = jax.tree.map(lambda *xs: jnp.stack(xs), *live_reward_transition_buffer)
-                    viewer_rng, traj_rng, step_rng = jax.random.split(viewer_rng, 3)
+
+                    rng, traj_rng, reward_rng = jax.random.split(rng, 3)
                     traj_small = self.postprocess_trajectory(
                         constants=constants,
                         env_states=env_states,
@@ -1924,7 +1935,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                         rewards=constants.rewards,
                         rewards_carry=env_states.reward_carry,
                         curriculum_level=env_states.curriculum_state.level,
-                        rng=step_rng,
+                        rng=reward_rng,
                         clip_min=self.config.reward_clip_min,
                         clip_max=self.config.reward_clip_max,
                     )
@@ -2003,7 +2014,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                 logger.warning("Trajectory is empty!")
                 return
 
-            rng, postprocess_rng, reward_rng = jax.random.split(rng, 3)
+            rng, traj_rng, reward_rng = jax.random.split(rng, 3)
 
             trajectory = jax.tree.map(lambda *xs: jnp.stack(xs), *transitions)
             trajectory = self.postprocess_trajectory(
@@ -2011,7 +2022,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                 env_states=env_states,
                 shared_state=shared_state,
                 trajectory=trajectory,
-                rng=postprocess_rng,
+                rng=traj_rng,
             )
 
             reward_state = get_rewards(
@@ -2526,8 +2537,6 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                                 shared_state=carry.shared_state,
                                 num_steps=self.render_length_frames,
                             )
-
-                            breakpoint()
 
                             # Burn-in the carry to avoid subsequent Jax recompilation.
                             if is_first_step:

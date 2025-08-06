@@ -254,14 +254,13 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def call_discriminator(self, model: PyTree, motion: PyTree, rng: PRNGKeyArray) -> Array:
+    def call_discriminator(self, model: PyTree, motion: PyTree) -> Array:
         """Calls the discriminator on a given motion.
 
         Args:
             model: The model returned by `get_model`
             motion: The motion in question, either the real motion from the
                 dataset or a motion derived from a trajectory.
-            rng: The random number generator.
 
         Returns:
             The discriminator logits, as an array with with shape (T). We
@@ -333,14 +332,12 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         trajectory: Trajectory,
         rng: PRNGKeyArray,
     ) -> Trajectory:
-        disc_rng, postprocess_rng = jax.random.split(rng)
-
         trajectory = super().postprocess_trajectory(
             constants=constants,
             env_states=env_states,
             shared_state=shared_state,
             trajectory=trajectory,
-            rng=postprocess_rng,
+            rng=rng,
         )
 
         # Recombines the mutable and static parts of the discriminator model.
@@ -350,7 +347,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
 
         # Runs the discriminator on the trajectory.
         motion = self.trajectory_to_motion(trajectory)
-        discriminator_logits = self.call_discriminator(disc_model, motion, disc_rng)
+        discriminator_logits = self.call_discriminator(disc_model, motion)
         chex.assert_equal_shape([discriminator_logits, trajectory.done])
 
         # Adds the discriminator output to the auxiliary outputs.

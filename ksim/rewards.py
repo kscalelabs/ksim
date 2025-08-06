@@ -765,7 +765,6 @@ class JoystickReward(Reward):
 
         # Smooths the target velocities.
         trg_xvel, trg_yvel, trg_yawvel = tgts.T
-        chex.assert_tree_all_finite(tgts)
 
         # Gets the robot's current velocities.
         cur_xvel = trajectory.qvel[..., 0]
@@ -775,8 +774,6 @@ class JoystickReward(Reward):
         # Gets the robot's current yaw.
         quat = trajectory.qpos[..., 3:7]
         cur_yaw = xax.quat_to_yaw(quat)
-        chex.assert_tree_all_finite(quat)
-        chex.assert_tree_all_finite(cur_yaw)
 
         # Rotates the command X and Y velocities to the robot's current yaw.
         trg_xvel_rot = trg_xvel * jnp.cos(cur_yaw) - trg_yvel * jnp.sin(cur_yaw)
@@ -786,16 +783,10 @@ class JoystickReward(Reward):
         x_rew_diff = trg_xvel_rot - cur_xvel
         y_rew_diff = trg_yvel_rot - cur_yvel
         z_rew_diff = trg_yawvel - cur_yawvel
-        chex.assert_tree_all_finite(x_rew_diff)
-        chex.assert_tree_all_finite(y_rew_diff)
-        chex.assert_tree_all_finite(z_rew_diff)
 
         pos_x_rew = jnp.exp(-jnp.abs(x_rew_diff) / self.pos_x_scale)
         pos_y_rew = jnp.exp(-jnp.abs(y_rew_diff) / self.pos_y_scale)
         rot_z_rew = jnp.exp(-jnp.abs(z_rew_diff) / self.rot_z_scale)
-        chex.assert_tree_all_finite(pos_x_rew)
-        chex.assert_tree_all_finite(pos_y_rew)
-        chex.assert_tree_all_finite(rot_z_rew)
 
         reward = (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
 
@@ -907,18 +898,36 @@ class FeetAirTimeReward(StatefulReward):
         sensor_data_tn = sensor_data_tcn.any(axis=-2)
         chex.assert_shape(sensor_data_tn, (..., self.num_feet))
 
+        done_tn = trajectory.done  # shape: [T, ...]
         threshold_steps = round(self.threshold / self.ctrl_dt)
 
-        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
-            count_n, (contact_n, done) = carry, x
-            count_n = jnp.where(done | contact_n, 0, count_n + 1)
-            return count_n, count_n
+        # Reshape for broadcasting
+        done_tn = jnp.broadcast_to(done_tn[..., None], sensor_data_tn.shape)
 
-        reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
+        # Mask where contact or done is True
+        reset_mask_tn = sensor_data_tn | done_tn
 
-        # Gradually increase reward until `threshold_steps`.
+        # Compute running counts of consecutive non-contact steps.
+        # At resets, mask out by multiplying with (1 - reset_mask)
+        # To support episode continuation, prepend reward_carry as the initial step
+        initial = reward_carry[None, ...]
+        reset_mask_padded = jnp.concatenate([jnp.zeros_like(initial, dtype=bool), reset_mask_tn], axis=0)
+        not_reset_mask_padded = ~reset_mask_padded
+
+        # Cumulative count of non-contact steps with reset at each contact/done
+        ones = jnp.ones_like(not_reset_mask_padded, dtype=jnp.int32)
+        counts_padded = ones * not_reset_mask_padded
+        counts_padded = jnp.cumsum(counts_padded, axis=0)
+        counts_padded = counts_padded * not_reset_mask_padded
+        count_tn = counts_padded[1:]  # remove the prepended initial
+
+        # Gradually increase reward until threshold_steps
         reward_tn = count_tn.astype(jnp.float32) / threshold_steps
         reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
         reward_t = reward_tn.sum(axis=-1)
+
+        # Carry over the last count (zeroed if contact/done)
+        final_mask = reset_mask_tn[-1]
+        reward_carry = jnp.where(final_mask, 0, count_tn[-1])
 
         return reward_t, reward_carry

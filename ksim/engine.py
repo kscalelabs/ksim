@@ -207,7 +207,6 @@ class MjxEngine(PhysicsEngine):
                 jnp.zeros_like(physics_state.data.ctrl),
             ),
             length=phys_steps_per_ctrl_steps,
-            unroll=True,  # TODO: Maybe this is not needed?
             jit_level=JitLevel.ENGINE,
         )
 
