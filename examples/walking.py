@@ -146,6 +146,9 @@ class Actor(eqx.Module):
         # Softplus and clip to ensure positive standard deviations.
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
+        # Adds zero bias.
+        mean_n = mean_n + jnp.array([v for _, v in ZEROS])
+
         # Apply acceleration clipping to get the target positions.
         filter_params = ksim.clip_acceleration(
             target_position=mean_n,
