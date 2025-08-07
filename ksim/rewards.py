@@ -39,6 +39,8 @@ __all__ = [
 import functools
 import logging
 from abc import ABC, abstractmethod
+import jax
+from dataclasses import dataclass
 from typing import Collection, Literal, Self, final
 
 import attrs
@@ -913,3 +915,33 @@ class FeetAirTimeReward(StatefulReward):
         reward_t = reward_tn.sum(axis=-1)
 
         return reward_t, reward_carry
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class SinusoidalGaitCarry:
+    moving_flag: Array
+    phase: Array
+
+
+@attrs.define(frozen=True, kw_only=True)
+class SinusoidalGaitReward(StatefulReward):
+    """Reward for following a sinusoidal gait."""
+
+    length: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    pos_obs: str = attrs.field(default="feet_position_observation")
+    num_feet: int = attrs.field(default=2)
+
+    def initial_carry(self, rng: PRNGKeyArray) -> SinusoidalGaitCarry:
+        return SinusoidalGaitCarry(
+            moving_flag=jnp.zeros((), dtype=jnp.bool_),
+            phase=jnp.zeros((), dtype=jnp.float32),
+        )
+
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: SinusoidalGaitCarry,
+    ) -> tuple[Array, SinusoidalGaitCarry]:
+        pass
