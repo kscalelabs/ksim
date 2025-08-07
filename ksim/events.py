@@ -105,7 +105,7 @@ class LinearPushEvent(Event):
         push_theta = jax.random.uniform(urng, (), minval=0.0, maxval=2.0 * jnp.pi)
         push_theta = jnp.array([jnp.cos(push_theta), jnp.sin(push_theta), 0.0])
 
-        push_mag = jax.random.uniform(urng, (), minval=self.vel_range[0], maxval=self.vel_range[1])
+        push_mag = jax.random.uniform(brng, (), minval=self.vel_range[0], maxval=self.vel_range[1])
         push_vel = push_theta * push_mag * curriculum_level
         new_qvel = slice_update(data, "qvel", slice(0, 3), data.qvel[:3] + push_vel)
         updated_data = update_data_field(data, "qvel", new_qvel)
