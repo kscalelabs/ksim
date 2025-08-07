@@ -62,7 +62,7 @@ class Actor(eqx.Module):
     min_std: float = eqx.field()
     max_std: float = eqx.field()
     var_scale: float = eqx.field()
-    max_acceleration: float = eqx.field()
+    num_mixtures: int = eqx.field()
     ctrl_dt: float = eqx.field()
 
     def __init__(
@@ -79,7 +79,7 @@ class Actor(eqx.Module):
         hidden_size: int,
         depth: int,
         num_hidden_layers: int,
-        max_acceleration: float,
+        num_mixtures: int,
         ctrl_dt: float,
     ) -> None:
         # Project input to hidden size
@@ -107,7 +107,7 @@ class Actor(eqx.Module):
         # Project to output
         self.output_proj = eqx.nn.MLP(
             in_size=hidden_size,
-            out_size=num_outputs * 2,
+            out_size=num_outputs * 3 * num_mixtures,
             width_size=hidden_size,
             depth=num_hidden_layers,
             activation=jax.nn.gelu,
@@ -122,7 +122,7 @@ class Actor(eqx.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
-        self.max_acceleration = max_acceleration
+        self.num_mixtures = num_mixtures
         self.ctrl_dt = ctrl_dt
 
     def forward(
@@ -139,29 +139,21 @@ class Actor(eqx.Module):
         prediction_n = self.output_proj(x_n)
 
         # Splits the predictions into means, standard deviations, and logits.
-        slice_len = self.num_joints
-        mean_n = prediction_n[:slice_len]
-        std_n = prediction_n[slice_len:]
+        slice_len = self.num_joints * self.num_mixtures
+        mean_nm = prediction_n[:slice_len].reshape(self.num_joints, self.num_mixtures)
+        std_nm = prediction_n[slice_len : 2 * slice_len].reshape(self.num_joints, self.num_mixtures)
+        logits_nm = prediction_n[2 * slice_len :].reshape(self.num_joints, self.num_mixtures)
 
         # Softplus and clip to ensure positive standard deviations.
-        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
+        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Adds zero bias.
-        mean_n = mean_n + jnp.array([v for _, v in ZEROS])
-
-        # Apply acceleration clipping to get the target positions.
-        filter_params = ksim.clip_acceleration(
-            target_position=mean_n,
-            params=filter_params,
-            max_acceleration=self.max_acceleration,
-            ctrl_dt=self.ctrl_dt,
-        )
-        mean_n = filter_params.position
+        mean_nm = mean_nm + jnp.array([v for _, v in ZEROS])[:, None]
 
         # Clip the target positions to the minimum and maximum ranges.
-        mean_n = self.clip_positions.clip(mean_n)
+        mean_nm = jax.vmap(self.clip_positions.clip, in_axes=-1, out_axes=-1)(mean_nm)
 
-        dist_n = xax.Normal(mean_n, std_n)
+        dist_n = xax.MixtureOfGaussians(mean_nm, std_nm, logits_nm)
 
         return dist_n, jnp.stack(out_carries, axis=0), filter_params
 
@@ -246,7 +238,7 @@ class Model(eqx.Module):
         hidden_size: int,
         depth: int,
         num_hidden_layers: int,
-        max_acceleration: float,
+        num_mixtures: int,
         ctrl_dt: float,
     ) -> None:
         self.actor = Actor(
@@ -261,7 +253,7 @@ class Model(eqx.Module):
             hidden_size=hidden_size,
             depth=depth,
             num_hidden_layers=num_hidden_layers,
-            max_acceleration=max_acceleration,
+            num_mixtures=num_mixtures,
             ctrl_dt=ctrl_dt,
         )
         self.critic = Critic(
@@ -290,9 +282,9 @@ class WalkingConfig(ksim.PPOConfig):
         value=2,
         help="The number of hidden layers for the MLPs.",
     )
-    max_acceleration: float = xax.field(
-        value=2.0,
-        help="The maximum acceleration for the actor.",
+    num_mixtures: int = xax.field(
+        value=10,
+        help="The number of mixtures for the actor.",
     )
 
     # Reward parameters.
@@ -311,7 +303,7 @@ class WalkingConfig(ksim.PPOConfig):
         help="Learning rate for PPO.",
     )
     warmup_steps: int = xax.field(
-        value=25,
+        value=100,
         help="The number of steps to warm up the learning rate.",
     )
     adam_weight_decay: float = xax.field(
@@ -333,7 +325,7 @@ class WalkingConfig(ksim.PPOConfig):
         help="The number of steps to take before updating the curriculum.",
     )
     curriculum_delay_steps: int = xax.field(
-        value=1000,
+        value=5000,
         help="The number of steps to delay the curriculum.",
     )
 
@@ -358,6 +350,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return optax.chain(
             optax.zero_nans(),
             optax.clip_by_global_norm(self.config.grad_clip),
+            optax.add_decayed_weights(self.config.adam_weight_decay),
             optax.scale_by_adam(),
             optax.scale_by_schedule(scheduler),
             optax.scale(-1.0),
@@ -477,7 +470,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            ksim.StayAliveReward(scale=25.0),
+            ksim.StayAliveReward(scale=100.0),
             ksim.JoystickReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
             FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=1.0),
@@ -510,7 +503,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
             num_hidden_layers=self.config.num_hidden_layers,
-            max_acceleration=self.config.max_acceleration,
+            num_mixtures=self.config.num_mixtures,
             ctrl_dt=self.config.ctrl_dt,
         )
 
@@ -691,9 +684,9 @@ if __name__ == "__main__":
             num_passes=4,
             rollout_length_frames=24,
             # Simulation parameters.
-            dt=0.002,
+            dt=0.004,
             ctrl_dt=0.02,
-            iterations=3,
-            ls_iterations=5,
+            iterations=8,
+            ls_iterations=8,
         ),
     )

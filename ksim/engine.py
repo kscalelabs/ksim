@@ -145,16 +145,17 @@ class MjxEngine(PhysicsEngine):
         action = jnp.where(drop_action, prev_action, action)
 
         def move_physics(
-            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree, Array],
-            rng: PRNGKeyArray,
-        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree, Array], None]:
-            data, step_num, event_states, actuator_state, last_torques = carry
+            carry: tuple[mjx.Data, Array, PRNGKeyArray, xax.FrozenDict[str, PyTree], PyTree, Array],
+            _: None,
+        ) -> tuple[tuple[mjx.Data, Array, PRNGKeyArray, xax.FrozenDict[str, PyTree], PyTree, Array], None]:
+            data, step_num, rng, event_states, actuator_state, last_torques = carry
 
             # Randomly apply the action with some latency.
             prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
             ctrl = prev_action * (1.0 - prct) + action * prct
 
             should_update = jnp.mod(step_num, self.phys_steps_per_actuator_step) == 0
+            rng, rng_update = jax.random.split(rng)
 
             def update_actuators(prev_actuator_state: PyTree) -> tuple[Array, PyTree]:
                 if isinstance(self.actuators, StatefulActuators):
@@ -162,10 +163,10 @@ class MjxEngine(PhysicsEngine):
                         action=ctrl,
                         physics_data=data,
                         actuator_state=prev_actuator_state,
-                        rng=rng,
+                        rng=rng_update,
                     )
                 else:
-                    torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
+                    torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng_update)
                     actuator_state = prev_actuator_state
                 return torques, actuator_state
 
@@ -180,18 +181,18 @@ class MjxEngine(PhysicsEngine):
             # Apply the events.
             new_event_states = {}
             for event in self.events:
-                rng, event_rng = jax.random.split(rng)
+                rng, rng_event = jax.random.split(rng)
                 data, new_event_state = event(
                     model=physics_model,
                     data=data,
                     event_state=event_states[event.event_name],
                     curriculum_level=curriculum_level,
-                    rng=event_rng,
+                    rng=rng_event,
                 )
                 new_event_states[event.event_name] = new_event_state
 
             new_data = self._physics_step(physics_model, data)
-            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state, torques), None
+            return (new_data, step_num + 1.0, rng, xax.FrozenDict(new_event_states), actuator_state, torques), None
 
         # Runs the model for N steps.
         (mjx_data, *_, event_info, actuator_state_final, _), _ = xax.scan(
@@ -200,11 +201,12 @@ class MjxEngine(PhysicsEngine):
             (
                 mjx_data,
                 jnp.array(0.0),
+                rng,
                 physics_state.event_states,
                 physics_state.actuator_state,
                 jnp.zeros_like(physics_state.data.ctrl),
             ),
-            jax.random.split(rng, phys_steps_per_ctrl_steps),
+            length=phys_steps_per_ctrl_steps,
             jit_level=JitLevel.ENGINE,
         )
 

@@ -49,6 +49,7 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.commands import JoystickCommandValue
+from ksim.debugging import JitLevel
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
 from ksim.utils.validators import (
@@ -753,6 +754,7 @@ class JoystickReward(Reward):
     rot_z_scale: float = attrs.field(default=0.25)
     ang_penalty_ratio: float = attrs.field(default=2.0)
 
+    @xax.jit(static_argnames=["self"], jit_level=JitLevel.UNROLL)
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
@@ -778,9 +780,13 @@ class JoystickReward(Reward):
         trg_yvel_rot = trg_xvel * jnp.sin(cur_yaw) + trg_yvel * jnp.cos(cur_yaw)
 
         # Exponential kernel for the reward.
-        pos_x_rew = jnp.exp(-jnp.abs(trg_xvel_rot - cur_xvel) / self.pos_x_scale)
-        pos_y_rew = jnp.exp(-jnp.abs(trg_yvel_rot - cur_yvel) / self.pos_y_scale)
-        rot_z_rew = jnp.exp(-jnp.abs(trg_yawvel - cur_yawvel) / self.rot_z_scale)
+        x_rew_diff = trg_xvel_rot - cur_xvel
+        y_rew_diff = trg_yvel_rot - cur_yvel
+        z_rew_diff = trg_yawvel - cur_yawvel
+
+        pos_x_rew = jnp.exp(-jnp.abs(x_rew_diff) / self.pos_x_scale)
+        pos_y_rew = jnp.exp(-jnp.abs(y_rew_diff) / self.pos_y_scale)
+        rot_z_rew = jnp.exp(-jnp.abs(z_rew_diff) / self.rot_z_scale)
 
         reward = (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
 
