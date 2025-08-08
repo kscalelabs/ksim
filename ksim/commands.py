@@ -737,7 +737,9 @@ class SinusoidalGaitCommand(Command):
 
         # Smooth foot lift trajectory: half-sine (or use poly for asymmetry)
         swing_height = jnp.sin(jnp.pi * swing_progress)  # ∈ [0, 1]
-        return jnp.where(swing_phase, self.max_height * swing_height, 0.0) + self.height_offset
+        target_height = jnp.where(swing_phase, self.max_height * swing_height, 0.0) + self.height_offset
+
+        return target_height
 
     def _get_height(self, phase: Array) -> Array:
         foot_phase_offsets = jnp.linspace(0.0, 1.0, self.num_feet, endpoint=False)
@@ -750,7 +752,7 @@ class SinusoidalGaitCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> SinusoidalGaitCommandValue:
-        moving_flag = jnp.zeros((), dtype=jnp.bool_)
+        moving_flag = jnp.ones((), dtype=jnp.bool_)
         phase = jnp.zeros((), dtype=jnp.float32)
         return {
             "moving_flag": moving_flag,

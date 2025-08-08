@@ -297,7 +297,7 @@ class WalkingConfig(ksim.PPOConfig):
         help="The angular velocity for the joystick command.",
     )
     max_foot_height: float = xax.field(
-        value=0.3,
+        value=0.5,
         help="The maximum height for the sinusoidal gait command.",
     )
 
@@ -474,7 +474,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 gait_period=1.0,
                 ctrl_dt=self.config.ctrl_dt,
                 max_height=self.config.max_foot_height,
-                height_offset=0.145,
+                height_offset=0.04,
             ),
         ]
 

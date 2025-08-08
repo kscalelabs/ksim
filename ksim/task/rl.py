@@ -464,10 +464,6 @@ class RLConfig(xax.Config):
         value=(8, 4),
         help="The size of the figure for each plot.",
     )
-    render_with_glfw: bool | None = xax.field(
-        value=None,
-        help="Explicitly toggle GLFW rendering; if not specified, use GLFW when rendering on-screen",
-    )
     render_shadow: bool = xax.field(
         value=False,
         help="If true, render shadows.",
@@ -611,7 +607,6 @@ def get_qt_viewer(
     *,
     mj_model: mujoco.MjModel,  # pyright: ignore[reportAttributeAccessIssue]
     config: RLConfig,
-    mj_data: mujoco.MjData | None = None,  # pyright: ignore[reportAttributeAccessIssue]
     save_path: str | Path | None = None,
     mode: RenderMode | None = None,
 ) -> QtViewer:
@@ -1895,7 +1890,6 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             viewer = get_qt_viewer(
                 mj_model=mj_model,
                 config=self.config,
-                mj_data=env_states.physics_state.data,
                 save_path=save_path,
             )
 

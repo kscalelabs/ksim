@@ -951,10 +951,10 @@ class SinusoidalGaitTargetMarker(Marker):
             obs_name=obs_name,
             cmd_name=cmd_name,
             rgba=(1.0, 0.0, 0.0, 1.0),  # Red
-            track_x=True,
-            track_y=True,
+            track_x=False,
+            track_y=False,
             track_z=False,
-            track_rotation=True,
+            track_rotation=False,
         )
 
 
@@ -987,10 +987,10 @@ class SinusoidalGaitPositionMarker(Marker):
             radius=radius,
             obs_name=obs_name,
             rgba=(0.0, 1.0, 0.0, 1.0),  # Green
-            track_x=True,
-            track_y=True,
+            track_x=False,
+            track_y=False,
             track_z=False,
-            track_rotation=True,
+            track_rotation=False,
         )
 
 
