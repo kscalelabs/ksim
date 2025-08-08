@@ -219,6 +219,13 @@ class StartQuaternionCommand(Command):
         return prev_command
 
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class JoystickCommandValue:
+    command: Array
+    vels: Array
+
+
 @attrs.define(kw_only=True)
 class JoystickCommandMarker(Marker):
     command_name: str = attrs.field()
@@ -245,7 +252,11 @@ class JoystickCommandMarker(Marker):
 
     def update(self, trajectory: Trajectory) -> None:
         """Visualizes the joystick command target position and orientation."""
-        cmd = trajectory.command[self.command_name]
+        cmd: JoystickCommandValue = trajectory.command[self.command_name]
+        self._update_for(cmd, trajectory)
+
+    def _update_for(self, cmd: JoystickCommandValue, trajectory: Trajectory) -> None:
+        """Update the marker position and rotation."""
         cmd_idx, cmd_vel = cmd.command.argmax().item(), cmd.vels
 
         # Updates the marker color.
@@ -308,13 +319,6 @@ class JoystickCommandMarker(Marker):
             track_z=True,
             track_rotation=False,
         )
-
-
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class JoystickCommandValue:
-    command: Array
-    vels: Array
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -404,20 +408,7 @@ class JoystickCommand(Command):
         )
 
     def get_markers(self) -> Collection[Marker]:
-        """Get the visualizations for the command.
-
-        Args:
-            command: The command to get the visualizations for.
-
-        Returns:
-            The visualizations to add to the scene.
-        """
-        return [
-            JoystickCommandMarker.get(
-                self.command_name,
-                height=self.marker_z_offset,
-            )
-        ]
+        return [JoystickCommandMarker.get(self.command_name, height=self.marker_z_offset)]
 
 
 @attrs.define(kw_only=True)
@@ -812,6 +803,15 @@ class EasyJoystickCommandValue:
     joystick: JoystickCommandValue
 
 
+@attrs.define(kw_only=True)
+class EasyJoystickCommandMarker(JoystickCommandMarker):
+    command_name: str = attrs.field()
+
+    def update(self, trajectory: Trajectory) -> None:
+        cmd: EasyJoystickCommandValue = trajectory.command[self.command_name]
+        self._update_for(cmd.joystick, trajectory)
+
+
 @attrs.define(frozen=True, kw_only=True)
 class EasyJoystickCommand(Command):
     gait: SinusoidalGaitCommand = attrs.field()
@@ -844,4 +844,4 @@ class EasyJoystickCommand(Command):
         )
 
     def get_markers(self) -> Collection[Marker]:
-        return self.joystick.get_markers()
+        return [EasyJoystickCommandMarker.get(self.command_name, height=self.joystick.marker_z_offset)]
