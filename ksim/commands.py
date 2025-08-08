@@ -9,6 +9,7 @@ __all__ = [
     "StartPositionCommand",
     "StartQuaternionCommand",
     "PositionCommand",
+    "SinusoidalGaitCommand",
 ]
 
 import functools
@@ -708,3 +709,83 @@ class PositionCommand(Command):
             jump_prob=jump_prob,
             curriculum_scale=curriculum_scale,
         )
+
+
+class SinusoidalGaitCommandValue(TypedDict):
+    moving_flag: Array
+    phase: Array
+    height: Array
+
+
+@attrs.define(frozen=True, kw_only=True)
+class SinusoidalGaitCommand(Command):
+    gait_period: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    max_height: float = attrs.field()
+    height_offset: float = attrs.field(default=0.0)
+    num_feet: int = attrs.field(default=2)
+    stance_ratio: float = attrs.field(default=0.6)
+
+    def _foot_height_profile(self, phase: Array) -> Array:
+        """Computes foot height as a function of phase in [0, 1)."""
+        # Define stance/swing phase cutoff
+        swing_phase = phase >= self.stance_ratio
+
+        # Normalize swing phase ∈ [0, 1]
+        swing_progress = (phase - self.stance_ratio) / (1.0 - self.stance_ratio)
+        swing_progress = jnp.clip(swing_progress, 0.0, 1.0)
+
+        # Smooth foot lift trajectory: half-sine (or use poly for asymmetry)
+        swing_height = jnp.sin(jnp.pi * swing_progress)  # ∈ [0, 1]
+        return jnp.where(swing_phase, self.max_height * swing_height, 0.0) + self.height_offset
+
+    def _get_height(self, phase: Array) -> Array:
+        foot_phase_offsets = jnp.linspace(0.0, 1.0, self.num_feet, endpoint=False)
+        per_foot_phase = (phase + foot_phase_offsets) % 1.0
+        return self._foot_height_profile(per_foot_phase)
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> SinusoidalGaitCommandValue:
+        moving_flag = jnp.zeros((), dtype=jnp.bool_)
+        phase = jnp.zeros((), dtype=jnp.float32)
+        return {
+            "moving_flag": moving_flag,
+            "phase": phase,
+            "height": self._get_height(phase),
+        }
+
+    def set_moving(self, moving_flag: bool, command: SinusoidalGaitCommandValue) -> SinusoidalGaitCommandValue:
+        # Can use this method to toggle the robot to be moving or not moving
+        # according to some requirements of the command. Turning off the moving
+        # flag just disables the reward and resets the phase.
+        moving_flag_arr = jnp.full_like(command["moving_flag"], moving_flag)
+        phase_arr = jnp.where(moving_flag_arr, command["phase"], 0.0)
+        return {
+            "moving_flag": moving_flag_arr,
+            "phase": phase_arr,
+            "height": self._get_height(phase_arr),
+        }
+
+    def __call__(
+        self,
+        prev_command: SinusoidalGaitCommandValue,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> SinusoidalGaitCommandValue:
+        moving_flag = prev_command["moving_flag"]
+        phase = prev_command["phase"]
+
+        # Compute delta phase: dt / period
+        dphase = self.ctrl_dt / self.gait_period
+        new_phase = jnp.where(moving_flag, (phase + dphase) % 1.0, 0.0)
+
+        return {
+            "moving_flag": moving_flag,
+            "phase": new_phase,
+            "height": self._get_height(new_phase),
+        }

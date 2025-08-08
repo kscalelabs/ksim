@@ -34,17 +34,18 @@ __all__ = [
     "AngularVelocityTrackingReward",
     "ReachabilityPenalty",
     "FeetAirTimeReward",
+    "SinusoidalGaitReward",
 ]
 
 import functools
 import logging
 from abc import ABC, abstractmethod
-import jax
 from dataclasses import dataclass
 from typing import Collection, Literal, Self, final
 
 import attrs
 import chex
+import jax
 import jax.numpy as jnp
 import mujoco
 import xax
@@ -917,6 +918,82 @@ class FeetAirTimeReward(StatefulReward):
         return reward_t, reward_carry
 
 
+@attrs.define(kw_only=True)
+class SinusoidalGaitTargetMarker(Marker):
+    foot_id: int = attrs.field()
+    radius: float = attrs.field(default=0.1)
+    size: float = attrs.field(default=0.03)
+    obs_name: str = attrs.field(default="feet_position_observation")
+    cmd_name: str = attrs.field(default="sinusoidal_gait_command")
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        obs_x, obs_y, _ = trajectory.obs[self.obs_name][..., self.foot_id, :].tolist()
+        cmd = trajectory.command[self.cmd_name]["height"][..., self.foot_id].item()
+        self.pos = (obs_x, obs_y, cmd)
+
+    @classmethod
+    def get(
+        cls,
+        foot_id: int,
+        radius: float = 0.05,
+        size: float = 0.03,
+        obs_name: str = "feet_position_observation",
+        cmd_name: str = "sinusoidal_gait_command",
+    ) -> Self:
+        return cls(
+            foot_id=foot_id,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(radius, radius, radius),
+            size=size,
+            radius=radius,
+            obs_name=obs_name,
+            cmd_name=cmd_name,
+            rgba=(1.0, 0.0, 0.0, 1.0),  # Red
+            track_x=True,
+            track_y=True,
+            track_z=False,
+            track_rotation=True,
+        )
+
+
+@attrs.define(kw_only=True)
+class SinusoidalGaitPositionMarker(Marker):
+    foot_id: int = attrs.field()
+    radius: float = attrs.field(default=0.1)
+    size: float = attrs.field(default=0.03)
+    obs_name: str = attrs.field(default="feet_position_observation")
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        x, y, z = trajectory.obs[self.obs_name][..., self.foot_id, :].tolist()
+        self.pos = (x, y, z)
+
+    @classmethod
+    def get(
+        cls,
+        foot_id: int,
+        obs_name: str = "feet_position_observation",
+        radius: float = 0.05,
+        size: float = 0.03,
+    ) -> Self:
+        return cls(
+            foot_id=foot_id,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(radius, radius, radius),
+            size=size,
+            radius=radius,
+            obs_name=obs_name,
+            rgba=(0.0, 1.0, 0.0, 1.0),  # Green
+            track_x=True,
+            track_y=True,
+            track_z=False,
+            track_rotation=True,
+        )
+
+
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class SinusoidalGaitCarry:
@@ -925,23 +1002,27 @@ class SinusoidalGaitCarry:
 
 
 @attrs.define(frozen=True, kw_only=True)
-class SinusoidalGaitReward(StatefulReward):
-    """Reward for following a sinusoidal gait."""
+class SinusoidalGaitReward(Reward):
+    """Reward for a biped following a sinusoidal gait."""
 
     length: float = attrs.field()
     ctrl_dt: float = attrs.field()
     pos_obs: str = attrs.field(default="feet_position_observation")
+    pos_cmd: str = attrs.field(default="sinusoidal_gait_command")
     num_feet: int = attrs.field(default=2)
 
-    def initial_carry(self, rng: PRNGKeyArray) -> SinusoidalGaitCarry:
-        return SinusoidalGaitCarry(
-            moving_flag=jnp.zeros((), dtype=jnp.bool_),
-            phase=jnp.zeros((), dtype=jnp.float32),
-        )
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        obs = trajectory.obs[self.pos_obs][..., 2]
+        cmd = trajectory.command[self.pos_cmd]["height"]
+        reward = jnp.exp(-xax.get_norm(obs - cmd, "l2").sum(axis=-1))
+        return reward
 
-    def get_reward_stateful(
-        self,
-        trajectory: Trajectory,
-        reward_carry: SinusoidalGaitCarry,
-    ) -> tuple[Array, SinusoidalGaitCarry]:
-        pass
+    def get_markers(self) -> Collection[Marker]:
+        return [
+            marker
+            for foot_id in range(self.num_feet)
+            for marker in (
+                SinusoidalGaitPositionMarker.get(foot_id, obs_name=self.pos_obs),
+                SinusoidalGaitTargetMarker.get(foot_id, obs_name=self.pos_obs, cmd_name=self.pos_cmd),
+            )
+        ]

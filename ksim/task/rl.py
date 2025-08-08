@@ -333,6 +333,17 @@ def get_physics_randomizers(
     return xax.FrozenDict({k: v for d in all_randomizations.values() for k, v in d.items()})
 
 
+def _tree_replace(physics_model: PhysicsModel, randomizations: xax.FrozenDict[str, Array]) -> PhysicsModel:
+    if isinstance(physics_model, mjx.Model):
+        physics_model = physics_model.tree_replace(cast(Dict[str, ArrayLike | None], randomizations))
+    elif isinstance(physics_model, mujoco.MjModel):  # pyright: ignore[reportAttributeAccessIssue]
+        for k, v in randomizations.items():
+            setattr(physics_model, k, v)
+    else:
+        raise ValueError(f"Unknown physics model type: {type(physics_model)}")
+    return physics_model
+
+
 def apply_randomizations(
     physics_model: PhysicsModel,
     engine: PhysicsEngine,
@@ -342,16 +353,7 @@ def apply_randomizations(
 ) -> tuple[xax.FrozenDict[str, Array], PhysicsState]:
     rand_rng, reset_rng = jax.random.split(rng)
     randomizations = get_physics_randomizers(physics_model, randomizers, rand_rng)
-
-    # Applies the randomizations to the model.
-    if isinstance(physics_model, mjx.Model):
-        physics_model = physics_model.tree_replace(cast(Dict[str, ArrayLike | None], randomizations))
-    elif isinstance(physics_model, mujoco.MjModel):  # pyright: ignore[reportAttributeAccessIssue]
-        for k, v in randomizations.items():
-            setattr(physics_model, k, v)
-    else:
-        raise ValueError(f"Unknown physics model type: {type(physics_model)}")
-
+    physics_model = _tree_replace(physics_model, randomizations)
     physics_state = engine.reset(physics_model, curriculum_level, reset_rng)
     return randomizations, physics_state
 
@@ -1166,11 +1168,8 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         """
         action_rng, physics_rng, state_rng = jax.random.split(env_states.rng, 3)
 
-        # Applies the event randomizations to the shared state.
-        shared_state = replace(
-            shared_state,
-            physics_model=shared_state.physics_model.tree_replace(env_states.randomization_dict),  # pyright: ignore[reportArgumentType]
-        )
+        physics_model = _tree_replace(shared_state.physics_model, env_states.randomization_dict)
+        shared_state = replace(shared_state, physics_model=physics_model)
 
         action, observations, next_obs_carry = self._sample_action(
             env_states=env_states,
@@ -1960,12 +1959,8 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                     viewer.push_plot_metrics(reward_scalars, group="reward")
 
                     # Send observations
-                    obs_dict = jax.tree_util.tree_map(
-                        lambda x: np.asarray(jax.device_get(x)),
-                        transition.obs,
-                    )
-                    for obs_name, obs_value in obs_dict.items():
-                        flat_obs = obs_value.reshape(-1)
+                    for obs_name, obs_value in xax.get_pytree_mapping(transition.obs).items():
+                        flat_obs = np.asarray(jax.device_get(obs_value)).reshape(-1)
                         obs_scalars = {f"{obs_name}_{i}": float(v) for i, v in enumerate(flat_obs)}
                         viewer.push_plot_metrics(obs_scalars, group=f"Observations/{obs_name}")
 
@@ -1981,7 +1976,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
 
                     # Send commands
                     command_scalars = {}
-                    for cmd_name, cmd_val in env_states.commands.items():
+                    for cmd_name, cmd_val in xax.get_pytree_mapping(env_states.commands).items():
                         cmd_arr = np.asarray(jax.device_get(cmd_val))
                         command_scalars.update(
                             {f"{cmd_name}_{i}": float(val) for i, val in enumerate(cmd_arr.flatten())}

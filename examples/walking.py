@@ -296,6 +296,10 @@ class WalkingConfig(ksim.PPOConfig):
         value=math.radians(90.0),
         help="The angular velocity for the joystick command.",
     )
+    max_foot_height: float = xax.field(
+        value=0.3,
+        help="The maximum height for the sinusoidal gait command.",
+    )
 
     # Optimizer parameters.
     learning_rate: float = xax.field(
@@ -466,6 +470,12 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 strafe_speed=self.config.target_linear_velocity / 2.0,
                 rotation_speed=self.config.target_angular_velocity,
             ),
+            ksim.SinusoidalGaitCommand(
+                gait_period=1.0,
+                ctrl_dt=self.config.ctrl_dt,
+                max_height=self.config.max_foot_height,
+                height_offset=0.145,
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -474,6 +484,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.JoystickReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
             FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=1.0),
+            ksim.SinusoidalGaitReward(scale=1.0, length=1.0, ctrl_dt=self.config.ctrl_dt),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
