@@ -452,8 +452,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             on_policy_variables: PPOVariables,
             rng: PRNGKeyArray,
         ) -> tuple[Array, xax.FrozenDict[str, Array]]:
-            rng, rng2 = jax.random.split(rng)
-            off_policy_variables, _ = self.get_ppo_variables(model, trajectory, init_model_carry, rng2)
+            off_policy_variables, _ = self.get_ppo_variables(model, trajectory, init_model_carry, rng)
 
             ppo_inputs = compute_ppo_inputs(
                 values_t=jax.lax.stop_gradient(off_policy_variables.values),
@@ -566,13 +565,15 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rewards: RewardState,
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array]]:
+        rng, onp_rng, passes_rng = jax.random.split(rng, 3)
+
         # Gets the policy model.
         policy_model_arr = carry.shared_state.model_arrs[0]
         policy_model_static = constants.constants.model_statics[0]
         policy_model = eqx.combine(policy_model_arr, policy_model_static)
 
         # Runs the policy model on the trajectory to get the PPO variables.
-        on_policy_rngs = jax.random.split(rng, trajectories.done.shape[0])
+        on_policy_rngs = jax.random.split(onp_rng, trajectories.done.shape[0])
         ppo_fn = xax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0), jit_level=JitLevel.RL_CORE)
         on_policy_variables, _ = ppo_fn(policy_model, trajectories, carry.env_states.model_carry, on_policy_rngs)
         on_policy_variables = jax.tree.map(lambda x: jax.lax.stop_gradient(x), on_policy_variables)
@@ -633,7 +634,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         carry, metrics = xax.scan(
             update_model_across_batches,
             carry,
-            xs=jax.random.split(rng, self.config.num_passes),
+            xs=jax.random.split(passes_rng, self.config.num_passes),
             jit_level=JitLevel.HELPER_FUNCTIONS,
         )
 
