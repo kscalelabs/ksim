@@ -488,12 +488,11 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return [
             ksim.StayAliveReward(scale=100.0),
             ksim.EasyJoystickReward(
-                joystick=ksim.JoystickReward(scale=1.0),
                 gait=ksim.SinusoidalGaitReward(
-                    scale=1.0,
-                    length=1.0,
+                    scale=5.0,
                     ctrl_dt=self.config.ctrl_dt,
                 ),
+                joystick=ksim.JoystickReward(scale=1.0),
                 airtime=ksim.FeetAirTimeReward(
                     threshold=self.config.gait_period / 2.0,
                     ctrl_dt=self.config.ctrl_dt,

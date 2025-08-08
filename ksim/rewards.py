@@ -999,7 +999,6 @@ class SinusoidalGaitPositionMarker(Marker):
 class SinusoidalGaitReward(Reward):
     """Reward for a biped following a sinusoidal gait."""
 
-    length: float = attrs.field()
     ctrl_dt: float = attrs.field()
     pos_obs: str = attrs.field(default="feet_position_observation")
     pos_cmd: str = attrs.field(default="sinusoidal_gait_command")
