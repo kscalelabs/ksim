@@ -44,7 +44,7 @@ class FeetAirTimeReward(ksim.FeetAirTimeReward):
         reward_carry: Array,
     ) -> tuple[Array, Array]:
         reward_n, reward_carry = super().get_reward_stateful(trajectory, reward_carry)
-        cmd = trajectory.command["joystick_command"]["command"]
+        cmd = trajectory.command["joystick_command"].command
         reward_n = jnp.where(cmd.argmax(axis=-1) == 0, 0.0, reward_n)
         return reward_n, reward_carry
 
@@ -296,8 +296,12 @@ class WalkingConfig(ksim.PPOConfig):
         value=math.radians(90.0),
         help="The angular velocity for the joystick command.",
     )
+    gait_period: float = xax.field(
+        value=1.0,
+        help="The period for the sinusoidal gait command.",
+    )
     max_foot_height: float = xax.field(
-        value=0.5,
+        value=0.2,
         help="The maximum height for the sinusoidal gait command.",
     )
 
@@ -471,7 +475,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 rotation_speed=self.config.target_angular_velocity,
             ),
             ksim.SinusoidalGaitCommand(
-                gait_period=1.0,
+                gait_period=self.config.gait_period,
                 ctrl_dt=self.config.ctrl_dt,
                 max_height=self.config.max_foot_height,
                 height_offset=0.04,
@@ -483,7 +487,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.StayAliveReward(scale=100.0),
             ksim.JoystickReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
-            FeetAirTimeReward(threshold=0.6, ctrl_dt=self.config.ctrl_dt, scale=1.0),
+            FeetAirTimeReward(threshold=self.config.gait_period / 2.0, ctrl_dt=self.config.ctrl_dt, scale=1.0),
             ksim.SinusoidalGaitReward(scale=1.0, length=1.0, ctrl_dt=self.config.ctrl_dt),
         ]
 
@@ -506,7 +510,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             params.key,
             physics_model=params.physics_model,
             num_actor_inputs=48,
-            num_critic_inputs=331,
+            num_critic_inputs=333,
             num_joints=17,
             min_std=0.01,
             max_std=1.0,
@@ -541,7 +545,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        joystick_cmd_ohe_8 = commands["joystick_command"]["command"]
+        joystick_cmd_ohe_8 = commands["joystick_command"].command
 
         obs_n = jnp.concatenate(
             [
@@ -575,7 +579,12 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_8 = commands["joystick_command"]["command"]
+        joystick_cmd_ohe_8 = commands["joystick_command"].command
+
+        # Foot height difference.
+        foot_height_2 = observations["feet_position_observation"][..., 2]
+        foot_tgt_height_2 = commands["sinusoidal_gait_command"].height
+        foot_height_diff_2 = foot_height_2 - foot_tgt_height_2
 
         obs_n = jnp.concatenate(
             [
@@ -589,6 +598,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
+                foot_height_diff_2,  # 2
                 joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
@@ -648,7 +658,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             (trajectory, rngs),
             jit_level=ksim.JitLevel.RL_CORE,
         )
-
         return ppo_variables, next_model_carry
 
     def sample_action(

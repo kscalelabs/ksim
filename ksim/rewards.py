@@ -764,7 +764,7 @@ class JoystickReward(Reward):
         joystick_cmd: JoystickCommandValue = trajectory.command[self.command_name]
 
         # Gets the target X, Y, and Yaw velocities.
-        tgts = joystick_cmd["vels"]
+        tgts = joystick_cmd.vels
 
         # Smooths the target velocities.
         trg_xvel, trg_yvel, trg_yawvel = tgts.T
@@ -929,7 +929,7 @@ class SinusoidalGaitTargetMarker(Marker):
     def update(self, trajectory: Trajectory) -> None:
         """Visualizes the sinusoidal gait."""
         obs_x, obs_y, _ = trajectory.obs[self.obs_name][..., self.foot_id, :].tolist()
-        cmd = trajectory.command[self.cmd_name]["height"][..., self.foot_id].item()
+        cmd = trajectory.command[self.cmd_name].height[..., self.foot_id].item()
         self.pos = (obs_x, obs_y, cmd)
 
     @classmethod
@@ -1013,7 +1013,7 @@ class SinusoidalGaitReward(Reward):
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         obs = trajectory.obs[self.pos_obs][..., 2]
-        cmd = trajectory.command[self.pos_cmd]["height"]
+        cmd = trajectory.command[self.pos_cmd].height
         reward = jnp.exp(-xax.get_norm(obs - cmd, "l2").sum(axis=-1))
         return reward
 

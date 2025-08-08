@@ -10,12 +10,14 @@ __all__ = [
     "StartQuaternionCommand",
     "PositionCommand",
     "SinusoidalGaitCommand",
+    "SinusoidalGaitJoystickCommand",
 ]
 
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Self, TypedDict
+from dataclasses import dataclass
+from typing import Collection, Self
 
 import attrs
 import jax
@@ -241,7 +243,7 @@ class JoystickCommandMarker(Marker):
     def update(self, trajectory: Trajectory) -> None:
         """Visualizes the joystick command target position and orientation."""
         cmd = trajectory.command[self.command_name]
-        cmd_idx, cmd_vel = cmd["command"].argmax().item(), cmd["vels"]
+        cmd_idx, cmd_vel = cmd.command.argmax().item(), cmd.vels
 
         # Updates the marker color.
         r, g, b = [
@@ -305,7 +307,9 @@ class JoystickCommandMarker(Marker):
         )
 
 
-class JoystickCommandValue(TypedDict):
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class JoystickCommandValue:
     command: Array
     vels: Array
 
@@ -376,7 +380,10 @@ class JoystickCommand(Command):
         command = jax.random.choice(rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs))
         command_ohe = jax.nn.one_hot(command, num_classes=8)
         vel_tgts = self._get_vel_tgts(physics_data, command)
-        return {"command": command_ohe, "vels": vel_tgts}
+        return JoystickCommandValue(
+            command=command_ohe,
+            vels=vel_tgts,
+        )
 
     def __call__(
         self,
@@ -388,10 +395,10 @@ class JoystickCommand(Command):
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return {
-            "command": jnp.where(switch_mask, new_commands["command"], prev_command["command"]),
-            "vels": jnp.where(switch_mask, new_commands["vels"], prev_command["vels"]),
-        }
+        return JoystickCommandValue(
+            command=jnp.where(switch_mask, new_commands.command, prev_command.command),
+            vels=jnp.where(switch_mask, new_commands.vels, prev_command.vels),
+        )
 
     def get_markers(self) -> Collection[Marker]:
         """Get the visualizations for the command.
@@ -711,7 +718,9 @@ class PositionCommand(Command):
         )
 
 
-class SinusoidalGaitCommandValue(TypedDict):
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class SinusoidalGaitCommandValue:
     moving_flag: Array
     phase: Array
     height: Array
@@ -754,23 +763,23 @@ class SinusoidalGaitCommand(Command):
     ) -> SinusoidalGaitCommandValue:
         moving_flag = jnp.ones((), dtype=jnp.bool_)
         phase = jnp.zeros((), dtype=jnp.float32)
-        return {
-            "moving_flag": moving_flag,
-            "phase": phase,
-            "height": self._get_height(phase),
-        }
+        return SinusoidalGaitCommandValue(
+            moving_flag=moving_flag,
+            phase=phase,
+            height=self._get_height(phase),
+        )
 
-    def set_moving(self, moving_flag: bool, command: SinusoidalGaitCommandValue) -> SinusoidalGaitCommandValue:
+    def set_moving(self, moving_flag: bool | Array, command: SinusoidalGaitCommandValue) -> SinusoidalGaitCommandValue:
         # Can use this method to toggle the robot to be moving or not moving
         # according to some requirements of the command. Turning off the moving
         # flag just disables the reward and resets the phase.
-        moving_flag_arr = jnp.full_like(command["moving_flag"], moving_flag)
-        phase_arr = jnp.where(moving_flag_arr, command["phase"], 0.0)
-        return {
-            "moving_flag": moving_flag_arr,
-            "phase": phase_arr,
-            "height": self._get_height(phase_arr),
-        }
+        moving_flag_arr = jnp.full_like(command.moving_flag, moving_flag)
+        phase_arr = jnp.where(moving_flag_arr, command.phase, 0.0)
+        return SinusoidalGaitCommandValue(
+            moving_flag=moving_flag_arr,
+            phase=phase_arr,
+            height=self._get_height(phase_arr),
+        )
 
     def __call__(
         self,
@@ -779,15 +788,54 @@ class SinusoidalGaitCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> SinusoidalGaitCommandValue:
-        moving_flag = prev_command["moving_flag"]
-        phase = prev_command["phase"]
+        moving_flag = prev_command.moving_flag
+        phase = prev_command.phase
 
         # Compute delta phase: dt / period
         dphase = self.ctrl_dt / self.gait_period
         new_phase = jnp.where(moving_flag, (phase + dphase) % 1.0, 0.0)
 
-        return {
-            "moving_flag": moving_flag,
-            "phase": new_phase,
-            "height": self._get_height(new_phase),
-        }
+        return SinusoidalGaitCommandValue(
+            moving_flag=moving_flag,
+            phase=new_phase,
+            height=self._get_height(new_phase),
+        )
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class SinusoidalGaitJoystickCommandValue:
+    gait: SinusoidalGaitCommandValue
+    joystick: JoystickCommandValue
+
+
+@attrs.define(frozen=True, kw_only=True)
+class SinusoidalGaitJoystickCommand(Command):
+    gait_cmd: SinusoidalGaitCommand = attrs.field()
+    joystick_cmd: JoystickCommand = attrs.field()
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> SinusoidalGaitJoystickCommandValue:
+        return SinusoidalGaitJoystickCommandValue(
+            gait=self.gait_cmd.initial_command(physics_data, curriculum_level, rng),
+            joystick=self.joystick_cmd.initial_command(physics_data, curriculum_level, rng),
+        )
+
+    def __call__(
+        self,
+        prev_command: SinusoidalGaitJoystickCommandValue,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> SinusoidalGaitJoystickCommandValue:
+        joystick_command = self.joystick_cmd(prev_command.joystick, physics_data, curriculum_level, rng)
+        gait_command = self.gait_cmd(prev_command.gait, physics_data, curriculum_level, rng)
+        gait_command = self.gait_cmd.set_moving(joystick_command.command.argmax(axis=-1) != 0, gait_command)
+        return SinusoidalGaitJoystickCommandValue(
+            gait=gait_command,
+            joystick=joystick_command,
+        )
