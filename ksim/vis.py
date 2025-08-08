@@ -293,4 +293,5 @@ def configure_scene(
     vopt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTFORCE] = contact_force
     vopt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = contact_point
     vopt.flags[mujoco.mjtVisFlag.mjVIS_INERTIA] = inertia
+
     return scene
