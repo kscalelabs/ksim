@@ -37,18 +37,6 @@ ZEROS = [
 ]
 
 
-class FeetAirTimeReward(ksim.FeetAirTimeReward):
-    def get_reward_stateful(
-        self,
-        trajectory: ksim.Trajectory,
-        reward_carry: Array,
-    ) -> tuple[Array, Array]:
-        reward_n, reward_carry = super().get_reward_stateful(trajectory, reward_carry)
-        cmd = trajectory.command["joystick_command"].command
-        reward_n = jnp.where(cmd.argmax(axis=-1) == 0, 0.0, reward_n)
-        return reward_n, reward_carry
-
-
 class Actor(eqx.Module):
     """RNN-based actor for the walking task."""
 
