@@ -14,6 +14,7 @@ __all__ = [
     "SinusoidalGaitCommandValue",
     "EasyJoystickCommand",
     "EasyJoystickCommandValue",
+    "BaseHeightCommand",
 ]
 
 import functools
@@ -845,3 +846,28 @@ class EasyJoystickCommand(Command):
 
     def get_markers(self) -> Collection[Marker]:
         return [EasyJoystickCommandMarker.get(self.command_name, height=self.joystick.marker_z_offset)]
+
+
+@attrs.define(frozen=True, kw_only=True)
+class BaseHeightCommand(Command):
+    min_height: float = attrs.field()
+    max_height: float = attrs.field()
+    switch_prob: float = attrs.field(default=0.005)
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        return jax.random.uniform(rng, (), minval=self.min_height, maxval=self.max_height)
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        new_height = jax.random.uniform(rng, (), minval=self.min_height, maxval=self.max_height)
+        return jnp.where(jax.random.bernoulli(rng, self.switch_prob), new_height, prev_command)

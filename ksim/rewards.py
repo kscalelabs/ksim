@@ -36,6 +36,7 @@ __all__ = [
     "FeetAirTimeReward",
     "SinusoidalGaitReward",
     "EasyJoystickReward",
+    "BaseHeightTrackingReward",
 ]
 
 import functools
@@ -751,9 +752,6 @@ class JoystickReward(Reward):
     """Reward for following the joystick command."""
 
     command_name: str = attrs.field(default="joystick_command")
-    pos_x_scale: float = attrs.field(default=0.25)
-    pos_y_scale: float = attrs.field(default=0.25)
-    rot_z_scale: float = attrs.field(default=0.25)
     ang_penalty_ratio: float = attrs.field(default=2.0)
 
     @xax.jit(static_argnames=["self"], jit_level=JitLevel.UNROLL)
@@ -782,14 +780,10 @@ class JoystickReward(Reward):
         trg_xvel_rot = trg_xvel * jnp.cos(cur_yaw) - trg_yvel * jnp.sin(cur_yaw)
         trg_yvel_rot = trg_xvel * jnp.sin(cur_yaw) + trg_yvel * jnp.cos(cur_yaw)
 
-        # Exponential kernel for the reward.
-        x_rew_diff = trg_xvel_rot - cur_xvel
-        y_rew_diff = trg_yvel_rot - cur_yvel
-        z_rew_diff = trg_yawvel - cur_yawvel
-
-        pos_x_rew = jnp.exp(-jnp.abs(x_rew_diff) / self.pos_x_scale)
-        pos_y_rew = jnp.exp(-jnp.abs(y_rew_diff) / self.pos_y_scale)
-        rot_z_rew = jnp.exp(-jnp.abs(z_rew_diff) / self.rot_z_scale)
+        # Linear reward for tracking the target velocities.
+        pos_x_rew = -jnp.abs(trg_xvel_rot - cur_xvel)
+        pos_y_rew = -jnp.abs(trg_yvel_rot - cur_yvel)
+        rot_z_rew = -jnp.abs(trg_yawvel - cur_yawvel)
 
         reward = (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
 
@@ -888,6 +882,7 @@ class FeetAirTimeReward(StatefulReward):
     ctrl_dt: float = attrs.field()
     num_feet: int = attrs.field(default=2)
     contact_obs: str = attrs.field(default="feet_contact_observation")
+    bias: float = attrs.field(default=0.0)
 
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
         return jnp.zeros(self.num_feet, dtype=jnp.int32)
@@ -911,7 +906,7 @@ class FeetAirTimeReward(StatefulReward):
         reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
 
         # Gradually increase reward until `threshold_steps`.
-        reward_tn = count_tn.astype(jnp.float32) / threshold_steps
+        reward_tn = (count_tn.astype(jnp.float32) / threshold_steps) + self.bias
         reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
         reward_t = reward_tn.sum(axis=-1)
 
@@ -1083,3 +1078,17 @@ class EasyJoystickReward(StatefulReward):
                 EasyJoystickGaitTargetMarker.get(foot_id, obs_name=self.gait.pos_obs, cmd_name=self.command_name),
             )
         ] + [JoystickRewardMarker.get()]
+
+
+@attrs.define(frozen=True, kw_only=True)
+class BaseHeightTrackingReward(Reward):
+    """Penalty for deviating from the base height target."""
+
+    command_name: str = attrs.field(default="base_height_command")
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        if self.command_name not in trajectory.command:
+            raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
+        cmd = trajectory.command[self.command_name]
+        trg = trajectory.qpos[..., 2]
+        return -jnp.abs(cmd - trg)
