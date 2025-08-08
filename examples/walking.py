@@ -297,7 +297,7 @@ class WalkingConfig(ksim.PPOConfig):
         help="The angular velocity for the joystick command.",
     )
     gait_period: float = xax.field(
-        value=1.0,
+        value=0.6,
         help="The period for the sinusoidal gait command.",
     )
     max_foot_height: float = xax.field(
