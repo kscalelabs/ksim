@@ -54,11 +54,7 @@ from ksim.commands import Command
 from ksim.curriculum import Curriculum, CurriculumState
 from ksim.dataset import TrajectoryDataset
 from ksim.debugging import JitLevel
-from ksim.engine import (
-    PhysicsEngine,
-    engine_type_from_physics_model,
-    get_physics_engine,
-)
+from ksim.engine import PhysicsEngine, engine_type_from_physics_model, get_physics_engine
 from ksim.events import Event
 from ksim.observation import Observation, ObservationInput, StatefulObservation
 from ksim.randomization import PhysicsRandomizer
@@ -181,7 +177,6 @@ def get_observation(
 
         observation_dict[observation.observation_name] = observation_val
         next_obs_carry[observation.observation_name] = new_carry
-        rng = jax.random.split(rng)[1]
 
     return xax.FrozenDict(observation_dict), xax.FrozenDict(next_obs_carry)
 
@@ -205,7 +200,8 @@ def get_rewards(
         reward_carry = rewards_carry[reward_name]
 
         if isinstance(reward, StatefulReward):
-            reward_initial_carry = reward.initial_carry(rng)
+            rng, reward_rng = jax.random.split(rng)
+            reward_initial_carry = reward.initial_carry(reward_rng)
             reward_carry = jax.tree.map(
                 lambda new, old: jnp.where(trajectory.done[..., -1], new, old),
                 reward_initial_carry,
@@ -1026,7 +1022,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         next_physics_state: PhysicsState,
         rng: PRNGKeyArray,
     ) -> tuple[Trajectory, RolloutEnvState]:
-        cmd_rng, carry_rng, reset_rng, next_rng = jax.random.split(rng, 4)
+        cmd_rng, carry_rng, obs_carry_rng, reset_rng, next_rng = jax.random.split(rng, 5)
 
         # Recombines the mutable and static parts of the model.
         policy_model_arr = shared_state.model_arrs[0]
@@ -1094,7 +1090,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         next_obs_carry = jax.lax.cond(
             terminated,
             lambda: get_initial_obs_carry(
-                rng=carry_rng,
+                rng=obs_carry_rng,
                 physics_state=next_physics_state,
                 observations=constants.observations,
             ),
@@ -2166,13 +2162,14 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
     ) -> RolloutEnvState:
         (
             rng,
-            carry_rng,
+            carry_model_rng,
+            carry_obs_rng,
             command_rng,
             rand_rng,
             rollout_rng,
             curriculum_rng,
             reward_rng,
-        ) = jax.random.split(rng, 7)
+        ) = jax.random.split(rng, 8)
 
         if isinstance(physics_model, mjx.Model):
             # Defines the vectorized initialization functions.
@@ -2226,13 +2223,13 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                 ),
                 physics_state=physics_state,
                 randomization_dict=randomization_dict,
-                model_carry=carry_fn(policy_model, jax.random.split(carry_rng, self.config.num_envs)),
+                model_carry=carry_fn(policy_model, jax.random.split(carry_model_rng, self.config.num_envs)),
                 reward_carry=reward_carry_fn(
                     jax.random.split(reward_rng, self.config.num_envs),
                     rollout_constants.rewards,
                 ),
                 obs_carry=obs_carry_fn(
-                    jax.random.split(carry_rng, self.config.num_envs),
+                    jax.random.split(carry_obs_rng, self.config.num_envs),
                     physics_state,
                     rollout_constants.observations,
                 ),
@@ -2262,10 +2259,10 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                 ),
                 physics_state=physics_state,
                 randomization_dict=randomization_dict,
-                model_carry=self.get_initial_model_carry(policy_model, carry_rng),
+                model_carry=self.get_initial_model_carry(policy_model, carry_model_rng),
                 reward_carry=get_initial_reward_carry(reward_rng, rollout_constants.rewards),
                 obs_carry=get_initial_obs_carry(
-                    rng=carry_rng,
+                    rng=carry_obs_rng,
                     physics_state=physics_state,
                     observations=rollout_constants.observations,
                 ),
