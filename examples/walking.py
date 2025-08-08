@@ -508,7 +508,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return Model(
             params.key,
             physics_model=params.physics_model,
-            num_actor_inputs=48,
+            num_actor_inputs=49,
             num_critic_inputs=333,
             num_joints=17,
             min_std=0.01,
@@ -549,12 +549,16 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         sgj_cmd: ksim.EasyJoystickCommandValue = commands["easy_joystick_command"]
         joystick_cmd_ohe_8 = sgj_cmd.joystick.command
 
+        # Phase is required in order to follow the gait command.
+        gait_phase_1 = sgj_cmd.gait.phase[..., None]
+
         obs_n = jnp.concatenate(
             [
                 dh_joint_pos_j,  # NUM_JOINTS
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 proj_grav_3,  # 3
                 imu_gyro_3,  # 3
+                gait_phase_1,  # 1
                 joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
