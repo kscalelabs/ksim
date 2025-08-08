@@ -842,3 +842,6 @@ class EasyJoystickCommand(Command):
             gait=gait_command,
             joystick=joystick_command,
         )
+
+    def get_markers(self) -> Collection[Marker]:
+        return self.joystick.get_markers()

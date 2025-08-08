@@ -487,7 +487,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             ksim.StayAliveReward(scale=100.0),
-            ksim.UprightReward(scale=1.0),
             ksim.EasyJoystickReward(
                 joystick=ksim.JoystickReward(scale=1.0),
                 gait=ksim.SinusoidalGaitReward(
