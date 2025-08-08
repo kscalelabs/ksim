@@ -288,7 +288,7 @@ class JoystickCommandMarker(Marker):
             case 0:
                 self._update_circle()
             case 1 | 2 | 3 | 6 | 7:
-                self._update_arrow(cmd_x_rot, cmd_y_rot)
+                self._update_arrow(cmd_x_rot.item(), cmd_y_rot.item())
             case 4 | 5:
                 self._update_cylinder()
             case _:
