@@ -513,8 +513,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return Model(
             params.key,
             physics_model=params.physics_model,
-            num_actor_inputs=49,
-            num_critic_inputs=333,
+            num_actor_inputs=50,
+            num_critic_inputs=334,
             num_joints=17,
             min_std=0.01,
             max_std=1.0,
@@ -557,6 +557,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         # Phase is required in order to follow the gait command.
         gait_phase_1 = sgj_cmd.gait.phase[..., None]
 
+        base_height_1 = commands["base_height_command"][..., None]
+
         obs_n = jnp.concatenate(
             [
                 dh_joint_pos_j,  # NUM_JOINTS
@@ -564,6 +566,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 proj_grav_3,  # 3
                 imu_gyro_3,  # 3
                 gait_phase_1,  # 1
+                base_height_1,  # 1
                 joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
@@ -600,6 +603,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         foot_tgt_height_2 = sgj_cmd.gait.height
         foot_height_diff_2 = foot_height_2 - foot_tgt_height_2
 
+        base_height_1 = commands["base_height_command"][..., None]
+
         obs_n = jnp.concatenate(
             [
                 dh_joint_pos_j,  # NUM_JOINTS
@@ -613,6 +618,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
                 foot_height_diff_2,  # 2
+                base_height_1,  # 1
                 joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
