@@ -35,23 +35,22 @@ __all__ = [
     "ReachabilityPenalty",
     "FeetAirTimeReward",
     "SinusoidalGaitReward",
+    "EasyJoystickReward",
 ]
 
 import functools
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Collection, Literal, Self, final
 
 import attrs
 import chex
-import jax
 import jax.numpy as jnp
 import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.commands import JoystickCommandValue
+from ksim.commands import EasyJoystickCommandValue, JoystickCommandValue, SinusoidalGaitCommandValue
 from ksim.debugging import JitLevel
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
@@ -761,8 +760,9 @@ class JoystickReward(Reward):
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
-        joystick_cmd: JoystickCommandValue = trajectory.command[self.command_name]
+        return self._get_reward_for(trajectory.command[self.command_name], trajectory)
 
+    def _get_reward_for(self, joystick_cmd: JoystickCommandValue, trajectory: Trajectory) -> Array:
         # Gets the target X, Y, and Yaw velocities.
         tgts = joystick_cmd.vels
 
@@ -929,8 +929,9 @@ class SinusoidalGaitTargetMarker(Marker):
     def update(self, trajectory: Trajectory) -> None:
         """Visualizes the sinusoidal gait."""
         obs_x, obs_y, _ = trajectory.obs[self.obs_name][..., self.foot_id, :].tolist()
-        cmd = trajectory.command[self.cmd_name].height[..., self.foot_id].item()
-        self.pos = (obs_x, obs_y, cmd)
+        cmd: SinusoidalGaitCommandValue = trajectory.command[self.cmd_name]
+        cmd_h = cmd.height[..., self.foot_id].item()
+        self.pos = (obs_x, obs_y, cmd_h)
 
     @classmethod
     def get(
@@ -994,13 +995,6 @@ class SinusoidalGaitPositionMarker(Marker):
         )
 
 
-@jax.tree_util.register_dataclass
-@dataclass(frozen=True)
-class SinusoidalGaitCarry:
-    moving_flag: Array
-    phase: Array
-
-
 @attrs.define(frozen=True, kw_only=True)
 class SinusoidalGaitReward(Reward):
     """Reward for a biped following a sinusoidal gait."""
@@ -1012,8 +1006,13 @@ class SinusoidalGaitReward(Reward):
     num_feet: int = attrs.field(default=2)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
+        if self.pos_cmd not in trajectory.command:
+            raise ValueError(f"Command {self.pos_cmd} not found! Ensure that it is in the task.")
+        return self._get_reward_for(trajectory.command[self.pos_cmd], trajectory)
+
+    def _get_reward_for(self, gait_cmd: SinusoidalGaitCommandValue, trajectory: Trajectory) -> Array:
         obs = trajectory.obs[self.pos_obs][..., 2]
-        cmd = trajectory.command[self.pos_cmd].height
+        cmd = gait_cmd.height
         reward = jnp.exp(-xax.get_norm(obs - cmd, "l2").sum(axis=-1))
         return reward
 
@@ -1026,3 +1025,61 @@ class SinusoidalGaitReward(Reward):
                 SinusoidalGaitTargetMarker.get(foot_id, obs_name=self.pos_obs, cmd_name=self.pos_cmd),
             )
         ]
+
+
+@attrs.define(kw_only=True)
+class EasyJoystickGaitTargetMarker(SinusoidalGaitTargetMarker):
+    cmd_name: str = attrs.field(default="easy_joystick_command")
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        obs_x, obs_y, _ = trajectory.obs[self.obs_name][..., self.foot_id, :].tolist()
+        cmd: EasyJoystickCommandValue = trajectory.command[self.cmd_name]
+        cmd_h = cmd.gait.height[..., self.foot_id].item()
+        self.pos = (obs_x, obs_y, cmd_h)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class EasyJoystickReward(StatefulReward):
+    """Provides an easy-to-learn joystick reward.
+
+    When training joystick control policies, there's a bunch of tricky stuff
+    you need to do to get them to train well, compared with something like
+    NaiveForwardReward. This reward combines a few other rewards, with the
+    goal of providing a "one-shot" reward that you can put into your policy to
+    give your robot the ability to follow joystick commands.
+    """
+
+    gait: SinusoidalGaitReward = attrs.field()
+    joystick: JoystickReward = attrs.field()
+    airtime: FeetAirTimeReward = attrs.field()
+    scale: float = attrs.field(default=1.0)
+    command_name: str = attrs.field(default="easy_joystick_command")
+
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return self.airtime.initial_carry(rng)
+
+    def get_reward_stateful(self, trajectory: Trajectory, reward_carry: Array) -> tuple[Array, Array]:
+        if self.command_name not in trajectory.command:
+            raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
+
+        cmd: EasyJoystickCommandValue = trajectory.command[self.command_name]
+        joystick_reward = self.joystick._get_reward_for(cmd.joystick, trajectory) * self.joystick.scale
+        gait_reward = self.gait._get_reward_for(cmd.gait, trajectory) * self.gait.scale
+        airtime_reward, airtime_carry = self.airtime.get_reward_stateful(trajectory, reward_carry)
+
+        # Mask out airtime reward when the robot is not moving.
+        airtime_reward = jnp.where(cmd.joystick.command.argmax(axis=-1) == 0, 0.0, airtime_reward)
+
+        total_reward = joystick_reward + gait_reward + airtime_reward * self.airtime.scale
+        return total_reward, airtime_carry
+
+    def get_markers(self) -> Collection[Marker]:
+        return [
+            marker
+            for foot_id in range(self.gait.num_feet)
+            for marker in (
+                SinusoidalGaitPositionMarker.get(foot_id, obs_name=self.gait.pos_obs),
+                EasyJoystickGaitTargetMarker.get(foot_id, obs_name=self.gait.pos_obs, cmd_name=self.command_name),
+            )
+        ] + [JoystickRewardMarker.get()]

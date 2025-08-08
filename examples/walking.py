@@ -468,27 +468,39 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.JoystickCommand(
-                run_speed=self.config.target_linear_velocity,
-                walk_speed=self.config.target_linear_velocity / 2.0,
-                strafe_speed=self.config.target_linear_velocity / 2.0,
-                rotation_speed=self.config.target_angular_velocity,
-            ),
-            ksim.SinusoidalGaitCommand(
-                gait_period=self.config.gait_period,
-                ctrl_dt=self.config.ctrl_dt,
-                max_height=self.config.max_foot_height,
-                height_offset=0.04,
+            ksim.EasyJoystickCommand(
+                gait=ksim.SinusoidalGaitCommand(
+                    gait_period=self.config.gait_period,
+                    ctrl_dt=self.config.ctrl_dt,
+                    max_height=self.config.max_foot_height,
+                    height_offset=0.04,
+                ),
+                joystick=ksim.JoystickCommand(
+                    run_speed=self.config.target_linear_velocity,
+                    walk_speed=self.config.target_linear_velocity / 2.0,
+                    strafe_speed=self.config.target_linear_velocity / 2.0,
+                    rotation_speed=self.config.target_angular_velocity,
+                ),
             ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             ksim.StayAliveReward(scale=100.0),
-            ksim.JoystickReward(scale=1.0),
             ksim.UprightReward(scale=1.0),
-            FeetAirTimeReward(threshold=self.config.gait_period / 2.0, ctrl_dt=self.config.ctrl_dt, scale=1.0),
-            ksim.SinusoidalGaitReward(scale=1.0, length=1.0, ctrl_dt=self.config.ctrl_dt),
+            ksim.EasyJoystickReward(
+                joystick=ksim.JoystickReward(scale=1.0),
+                gait=ksim.SinusoidalGaitReward(
+                    scale=1.0,
+                    length=1.0,
+                    ctrl_dt=self.config.ctrl_dt,
+                ),
+                airtime=ksim.FeetAirTimeReward(
+                    threshold=self.config.gait_period / 2.0,
+                    ctrl_dt=self.config.ctrl_dt,
+                    scale=1.0,
+                ),
+            ),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -545,7 +557,10 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        joystick_cmd_ohe_8 = commands["joystick_command"].command
+
+        # Sinusoidal gait joystick command.
+        sgj_cmd: ksim.EasyJoystickCommandValue = commands["easy_joystick_command"]
+        joystick_cmd_ohe_8 = sgj_cmd.joystick.command
 
         obs_n = jnp.concatenate(
             [
@@ -579,11 +594,14 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         base_quat_4 = observations["base_orientation_observation"]
         lin_vel_obs_3 = observations["base_linear_velocity_observation"]
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
-        joystick_cmd_ohe_8 = commands["joystick_command"].command
+
+        # Sinusoidal gait joystick command.
+        sgj_cmd: ksim.EasyJoystickCommandValue = commands["easy_joystick_command"]
+        joystick_cmd_ohe_8 = sgj_cmd.joystick.command
 
         # Foot height difference.
         foot_height_2 = observations["feet_position_observation"][..., 2]
-        foot_tgt_height_2 = commands["sinusoidal_gait_command"].height
+        foot_tgt_height_2 = sgj_cmd.gait.height
         foot_height_diff_2 = foot_height_2 - foot_tgt_height_2
 
         obs_n = jnp.concatenate(

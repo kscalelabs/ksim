@@ -5,12 +5,15 @@ __all__ = [
     "FloatVectorCommand",
     "IntVectorCommand",
     "JoystickCommand",
+    "JoystickCommandValue",
     "LinearVelocityCommand",
     "StartPositionCommand",
     "StartQuaternionCommand",
     "PositionCommand",
     "SinusoidalGaitCommand",
-    "SinusoidalGaitJoystickCommand",
+    "SinusoidalGaitCommandValue",
+    "EasyJoystickCommand",
+    "EasyJoystickCommandValue",
 ]
 
 import functools
@@ -804,38 +807,38 @@ class SinusoidalGaitCommand(Command):
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
-class SinusoidalGaitJoystickCommandValue:
+class EasyJoystickCommandValue:
     gait: SinusoidalGaitCommandValue
     joystick: JoystickCommandValue
 
 
 @attrs.define(frozen=True, kw_only=True)
-class SinusoidalGaitJoystickCommand(Command):
-    gait_cmd: SinusoidalGaitCommand = attrs.field()
-    joystick_cmd: JoystickCommand = attrs.field()
+class EasyJoystickCommand(Command):
+    gait: SinusoidalGaitCommand = attrs.field()
+    joystick: JoystickCommand = attrs.field()
 
     def initial_command(
         self,
         physics_data: PhysicsData,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> SinusoidalGaitJoystickCommandValue:
-        return SinusoidalGaitJoystickCommandValue(
-            gait=self.gait_cmd.initial_command(physics_data, curriculum_level, rng),
-            joystick=self.joystick_cmd.initial_command(physics_data, curriculum_level, rng),
+    ) -> EasyJoystickCommandValue:
+        return EasyJoystickCommandValue(
+            gait=self.gait.initial_command(physics_data, curriculum_level, rng),
+            joystick=self.joystick.initial_command(physics_data, curriculum_level, rng),
         )
 
     def __call__(
         self,
-        prev_command: SinusoidalGaitJoystickCommandValue,
+        prev_command: EasyJoystickCommandValue,
         physics_data: PhysicsData,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> SinusoidalGaitJoystickCommandValue:
-        joystick_command = self.joystick_cmd(prev_command.joystick, physics_data, curriculum_level, rng)
-        gait_command = self.gait_cmd(prev_command.gait, physics_data, curriculum_level, rng)
-        gait_command = self.gait_cmd.set_moving(joystick_command.command.argmax(axis=-1) != 0, gait_command)
-        return SinusoidalGaitJoystickCommandValue(
+    ) -> EasyJoystickCommandValue:
+        joystick_command = self.joystick(prev_command.joystick, physics_data, curriculum_level, rng)
+        gait_command = self.gait(prev_command.gait, physics_data, curriculum_level, rng)
+        gait_command = self.gait.set_moving(joystick_command.command.argmax(axis=-1) != 0, gait_command)
+        return EasyJoystickCommandValue(
             gait=gait_command,
             joystick=joystick_command,
         )
