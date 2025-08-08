@@ -1003,6 +1003,7 @@ class SinusoidalGaitReward(Reward):
     pos_obs: str = attrs.field(default="feet_position_observation")
     pos_cmd: str = attrs.field(default="sinusoidal_gait_command")
     num_feet: int = attrs.field(default=2)
+    max_height: float = attrs.field(default=0.0)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.pos_cmd not in trajectory.command:
@@ -1012,7 +1013,7 @@ class SinusoidalGaitReward(Reward):
     def _get_reward_for(self, gait_cmd: SinusoidalGaitCommandValue, trajectory: Trajectory) -> Array:
         obs = trajectory.obs[self.pos_obs][..., 2]
         cmd = gait_cmd.height
-        reward = jnp.exp(-xax.get_norm(obs - cmd, "l2").sum(axis=-1))
+        reward = self.max_height - jnp.abs(obs - cmd).sum(axis=-1)
         return reward
 
     def get_markers(self) -> Collection[Marker]:

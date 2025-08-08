@@ -479,6 +479,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 gait=ksim.SinusoidalGaitReward(
                     scale=5.0,
                     ctrl_dt=self.config.ctrl_dt,
+                    max_height=self.config.max_foot_height,
                 ),
                 joystick=ksim.JoystickReward(scale=1.0),
                 airtime=ksim.FeetAirTimeReward(
