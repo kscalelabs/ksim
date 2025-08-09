@@ -788,13 +788,13 @@ class JoystickReward(Reward):
         # Reward for tracking the direction (cosine similarity).
         cur_xy = linvel[..., :2]
         trg_xy = tgts[..., :2]
-        denom_xy = jnp.linalg.norm(cur_xy, axis=-1) * jnp.linalg.norm(trg_xy, axis=-1)
+        cur_norm = jnp.linalg.norm(cur_xy, axis=-1)
+        trg_norm = jnp.linalg.norm(trg_xy, axis=-1)
+        denom_xy = cur_norm * trg_norm
         xy_cos_sim = (cur_xy * trg_xy).sum(axis=-1) / denom_xy.clip(min=1e-6)
 
         # Reward for tracking the magnitude, in the direction of the target.
-        cur_mag = jnp.linalg.norm(cur_xy, axis=-1)
-        trg_mag = jnp.linalg.norm(trg_xy, axis=-1)
-        xy_mag_rew = 1.0 - jnp.where(trg_mag < 1e-6, cur_mag, jnp.abs(cur_mag - trg_mag) / trg_mag.clip(min=1e-6))
+        xy_mag_rew = 1.0 - jnp.where(trg_norm < 1e-6, cur_norm, jnp.abs(cur_norm - trg_norm) / trg_norm.clip(min=1e-6))
 
         # Reward for tracking the yaw.
         cur_yaw = yawvel
