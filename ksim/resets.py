@@ -320,7 +320,8 @@ class RandomHeadingReset(Reset):
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         angle = jax.random.uniform(rng, data.qpos.shape[:-1], minval=-jnp.pi, maxval=jnp.pi)
         euler = jnp.stack([jnp.zeros_like(angle), jnp.zeros_like(angle), angle], axis=-1)
-        quat = xax.euler_to_quat(euler)
+        new_quat = xax.euler_to_quat(euler)
+        quat = xax.quat_mul(data.qpos[..., 3:7], new_quat)
         qpos = slice_update(data, "qpos", slice(3, 7), quat)
         data = update_data_field(data, "qpos", qpos)
         return data
