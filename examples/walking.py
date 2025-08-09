@@ -360,7 +360,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return ksim.Metadata.from_model(
             mj_model,
             kp=50.0,
-            kd=5.0,
+            kd=1.0,
         )
 
     def get_actuators(
@@ -509,7 +509,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             params.key,
             physics_model=params.physics_model,
             num_actor_inputs=49,
-            num_critic_inputs=333,
+            num_critic_inputs=336,
             num_joints=17,
             min_std=0.01,
             max_std=1.0,
@@ -589,6 +589,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         # Sinusoidal gait joystick command.
         sgj_cmd: ksim.EasyJoystickCommandValue = commands["easy_joystick_command"]
         joystick_cmd_ohe_8 = sgj_cmd.joystick.command
+        joystick_vel_tgts_3 = sgj_cmd.joystick.vels
 
         # Foot height difference.
         foot_height_2 = observations["feet_position_observation"][..., 2]
@@ -609,6 +610,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 ang_vel_obs_3,  # 3
                 foot_height_diff_2,  # 2
                 joystick_cmd_ohe_8,  # 8
+                joystick_vel_tgts_3,  # 3
             ],
             axis=-1,
         )
