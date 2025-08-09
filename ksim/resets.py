@@ -345,12 +345,15 @@ class RandomHeightReset(Reset):
 class RandomPitchRollReset(Reset):
     """Resets the pitch and roll of the robot to a random value."""
 
-    magnitude: float = attrs.field(default=0.01)
+    pitch_range: tuple[float, float] = attrs.field(default=(-0.1, 0.1))
+    roll_range: tuple[float, float] = attrs.field(default=(-0.1, 0.1))
 
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         qpos = data.qpos
-        pitch = jax.random.uniform(rng, qpos[..., 0].shape, minval=-self.magnitude, maxval=self.magnitude)
-        roll = jax.random.uniform(rng, qpos[..., 0].shape, minval=-self.magnitude, maxval=self.magnitude)
+        min_pitch, max_pitch = self.pitch_range
+        min_roll, max_roll = self.roll_range
+        pitch = jax.random.uniform(rng, qpos[..., 0].shape, minval=min_pitch, maxval=max_pitch)
+        roll = jax.random.uniform(rng, qpos[..., 0].shape, minval=min_roll, maxval=max_roll)
         quat = xax.euler_to_quat(jnp.stack([roll, pitch, jnp.zeros_like(pitch)], axis=-1))
         new_quat = xax.quat_mul(data.qpos[..., 3:7], quat)
         qpos = slice_update(data, "qpos", slice(3, 7), new_quat)
