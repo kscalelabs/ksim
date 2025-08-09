@@ -757,6 +757,9 @@ class JoystickReward(Reward):
     """Reward for following the joystick command."""
 
     command_name: str = attrs.field(default="joystick_command")
+    dir_scale: float = attrs.field(default=1.0)
+    mag_scale: float = attrs.field(default=1.0)
+    yaw_scale: float = attrs.field(default=1.0)
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         if self.command_name not in trajectory.command:
@@ -776,33 +779,32 @@ class JoystickReward(Reward):
         # Gets the target X, Y, and Yaw velocities.
         tgts = joystick_cmd.vels
 
-        # Smooths the target velocities.
-        trg_xvel, trg_yvel, trg_yawvel = tgts.T
-
         # Gets the robot's current velocities.
         quat = self.get_quat(trajectory)
         linvel = trajectory.qvel[..., :3]
         linvel = xax.rotate_vector_by_quat(linvel, quat, inverse=True)
         yawvel = trajectory.qvel[..., 5]
 
-        def _reward_fn(tgt: Array, cur: Array) -> Array:
-            error = jnp.abs(cur - tgt)
-            tgt_mag = jnp.abs(tgt).clip(min=1e-6)
-            normalized_error = error / tgt_mag
-            return (1.0 - normalized_error).clip(min=0.0)
+        # Reward for tracking the direction (cosine similarity).
+        cur_xy = linvel[..., :2]
+        trg_xy = tgts[..., :2]
+        denom_xy = jnp.linalg.norm(cur_xy, axis=-1) * jnp.linalg.norm(trg_xy, axis=-1)
+        xy_cos_sim = (cur_xy * trg_xy).sum(axis=-1) / denom_xy.clip(min=1e-6)
 
-        def _reward_fn_with_zero_handling(tgt: Array, cur: Array) -> Array:
-            return jnp.where(jnp.abs(tgt) < 1e-6, (1.0 - jnp.abs(cur) * 5.0).clip(min=0.0), _reward_fn(tgt, cur))
+        # Reward for tracking the magnitude.
+        cur_mag = jnp.linalg.norm(cur_xy, axis=-1)
+        trg_mag = jnp.linalg.norm(trg_xy, axis=-1)
+        xy_mag_rew = 1.0 - jnp.abs(cur_mag - trg_mag)
 
-        # Reward for tracking the target velocities.
-        pos_x_rew = _reward_fn_with_zero_handling(trg_xvel, linvel[..., 0])
-        pos_y_rew = _reward_fn_with_zero_handling(trg_yvel, linvel[..., 1])
-        rot_z_rew = _reward_fn_with_zero_handling(trg_yawvel, yawvel)
+        # Reward for tracking the yaw.
+        cur_yaw = yawvel
+        trg_yaw = tgts[..., 2]
+        yaw_mag_rew = 1.0 - jnp.abs(cur_yaw - trg_yaw)
 
         return {
-            "x": pos_x_rew,
-            "y": pos_y_rew,
-            "yaw": rot_z_rew,
+            "dir": xy_cos_sim * self.dir_scale,
+            "mag": xy_mag_rew * self.mag_scale,
+            "yaw": yaw_mag_rew * self.yaw_scale,
         }
 
     def get_markers(self) -> Collection[Marker]:
@@ -1087,7 +1089,7 @@ class EasyJoystickReward(StatefulReward):
             "airtime": airtime_reward * self.airtime.scale,
         }
         for k, v in joystick_reward.items():
-            total_reward[f"joystick_{k}"] = v * self.joystick.scale
+            total_reward[f"joystick/{k}"] = v * self.joystick.scale
 
         return total_reward, airtime_carry
 
