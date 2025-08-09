@@ -722,9 +722,11 @@ class JoystickRewardMarker(Marker):
 
     def update(self, trajectory: Trajectory) -> None:
         """Visualizes the joystick command target position and orientation."""
-        cur_xvel, cur_yvel = trajectory.qvel[..., 0].item(), trajectory.qvel[..., 1].item()
+        quat = JoystickReward.get_quat(trajectory)
+        linvel = trajectory.qvel[..., :3]
+        linvel = xax.rotate_vector_by_quat(linvel, quat, inverse=True)
         self.pos = (0, 0, self.height)
-        self._update_arrow(cur_xvel, cur_yvel)
+        self._update_arrow(linvel[..., 0].item(), linvel[..., 1].item())
 
     @classmethod
     def get(
@@ -764,6 +766,15 @@ class JoystickReward(Reward):
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
         return self._get_reward_for(trajectory.command[self.command_name], trajectory)
 
+    @classmethod
+    def get_quat(cls, trajectory: Trajectory) -> Array:
+        quat = trajectory.qpos[..., 3:7]
+        yaw = xax.quat_to_yaw(quat)
+        zeros = jnp.zeros_like(yaw)
+        euler = jnp.stack([zeros, zeros, yaw], axis=-1)
+        quat = xax.euler_to_quat(euler)
+        return quat
+
     def _get_reward_for(self, joystick_cmd: JoystickCommandValue, trajectory: Trajectory) -> Array:
         # Gets the target X, Y, and Yaw velocities.
         tgts = joystick_cmd.vels
@@ -772,26 +783,19 @@ class JoystickReward(Reward):
         trg_xvel, trg_yvel, trg_yawvel = tgts.T
 
         # Gets the robot's current velocities.
-        cur_xvel = trajectory.qvel[..., 0]
-        cur_yvel = trajectory.qvel[..., 1]
-        cur_yawvel = trajectory.qvel[..., 5]
-
-        # Gets the robot's current yaw.
-        quat = trajectory.qpos[..., 3:7]
-        cur_yaw = xax.quat_to_yaw(quat)
-
-        # Rotates the command X and Y velocities to the robot's current yaw.
-        trg_xvel_rot = trg_xvel * jnp.cos(cur_yaw) - trg_yvel * jnp.sin(cur_yaw)
-        trg_yvel_rot = trg_xvel * jnp.sin(cur_yaw) + trg_yvel * jnp.cos(cur_yaw)
+        quat = self.get_quat(trajectory)
+        linvel = trajectory.qvel[..., :3]
+        linvel = xax.rotate_vector_by_quat(linvel, quat, inverse=True)
+        yawvel = trajectory.qvel[..., 5]
 
         def _reward_fn(tgt: Array, cur: Array) -> Array:
             sgn, abs_tgt = jnp.sign(tgt), jnp.abs(tgt).clip(min=1e-6)
             return jnp.where(sgn == 0, 0.0, (sgn * cur).clip(max=abs_tgt) / abs_tgt)
 
         # Linear reward for tracking the target velocities.
-        pos_x_rew = _reward_fn(trg_xvel_rot, cur_xvel)
-        pos_y_rew = _reward_fn(trg_yvel_rot, cur_yvel)
-        rot_z_rew = _reward_fn(trg_yawvel, cur_yawvel)
+        pos_x_rew = _reward_fn(trg_xvel, linvel[..., 0])
+        pos_y_rew = _reward_fn(trg_yvel, linvel[..., 1])
+        rot_z_rew = _reward_fn(trg_yawvel, yawvel)
 
         reward = (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
 

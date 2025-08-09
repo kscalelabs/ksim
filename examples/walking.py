@@ -359,8 +359,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:  # pyright: ignore[reportAttributeAccessIssue]
         return ksim.Metadata.from_model(
             mj_model,
-            kp=10.0,
-            kd=0.1,
+            kp=50.0,
+            kd=5.0,
         )
 
     def get_actuators(
