@@ -352,7 +352,7 @@ class RandomPitchRollReset(Reset):
         pitch = jax.random.uniform(rng, qpos[..., 0].shape, minval=-self.magnitude, maxval=self.magnitude)
         roll = jax.random.uniform(rng, qpos[..., 0].shape, minval=-self.magnitude, maxval=self.magnitude)
         quat = xax.euler_to_quat(jnp.stack([roll, pitch, jnp.zeros_like(pitch)], axis=-1))
-        new_quat = xax.quat_mul(quat, data.qpos[..., 3:7])
+        new_quat = xax.quat_mul(data.qpos[..., 3:7], quat)
         qpos = slice_update(data, "qpos", slice(3, 7), new_quat)
         data = update_data_field(data, "qpos", qpos)
         return data
