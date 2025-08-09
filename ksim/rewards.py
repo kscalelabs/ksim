@@ -42,7 +42,7 @@ __all__ = [
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Literal, Self, final
+from typing import Collection, Literal, Mapping, Self, final
 
 import attrs
 import chex
@@ -52,7 +52,6 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.commands import EasyJoystickCommandValue, JoystickCommandValue, SinusoidalGaitCommandValue
-from ksim.debugging import JitLevel
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
 from ksim.utils.validators import (
@@ -117,7 +116,7 @@ class Reward(ABC):
     scale_by_curriculum: bool = attrs.field(default=False)
 
     @abstractmethod
-    def get_reward(self, trajectory: Trajectory) -> Array:
+    def get_reward(self, trajectory: Trajectory) -> Array | Mapping[str, Array]:
         """Get the reward for a single trajectory.
 
         Args:
@@ -158,7 +157,11 @@ class StatefulReward(Reward):
         """
 
     @abstractmethod
-    def get_reward_stateful(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: PyTree,
+    ) -> tuple[Array | Mapping[str, Array], PyTree]:
         """Get the reward for a single trajectory.
 
         This is the same as `get_reward`, but it also takes in the reward carry
@@ -718,9 +721,11 @@ class JoystickRewardMarker(Marker):
 
     def update(self, trajectory: Trajectory) -> None:
         """Visualizes the joystick command target position and orientation."""
-        cur_xvel, cur_yvel = trajectory.qvel[..., 0].item(), trajectory.qvel[..., 1].item()
+        quat = JoystickReward.get_quat(trajectory)
+        linvel = trajectory.qvel[..., :3]
+        linvel = xax.rotate_vector_by_quat(linvel, quat, inverse=True)
         self.pos = (0, 0, self.height)
-        self._update_arrow(cur_xvel, cur_yvel)
+        self._update_arrow(linvel[..., 0].item(), linvel[..., 1].item())
 
     @classmethod
     def get(
@@ -752,42 +757,55 @@ class JoystickReward(Reward):
     """Reward for following the joystick command."""
 
     command_name: str = attrs.field(default="joystick_command")
-    ang_penalty_ratio: float = attrs.field(default=2.0)
+    dir_scale: float = attrs.field(default=1.0)
+    mag_scale: float = attrs.field(default=1.0)
+    yaw_scale: float = attrs.field(default=1.0)
 
-    @xax.jit(static_argnames=["self"], jit_level=JitLevel.UNROLL)
-    def get_reward(self, trajectory: Trajectory) -> Array:
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
         return self._get_reward_for(trajectory.command[self.command_name], trajectory)
 
-    def _get_reward_for(self, joystick_cmd: JoystickCommandValue, trajectory: Trajectory) -> Array:
+    @classmethod
+    def get_quat(cls, trajectory: Trajectory) -> Array:
+        quat = trajectory.qpos[..., 3:7]
+        yaw = xax.quat_to_yaw(quat)
+        zeros = jnp.zeros_like(yaw)
+        euler = jnp.stack([zeros, zeros, yaw], axis=-1)
+        quat = xax.euler_to_quat(euler)
+        return quat
+
+    def _get_reward_for(self, joystick_cmd: JoystickCommandValue, trajectory: Trajectory) -> dict[str, Array]:
         # Gets the target X, Y, and Yaw velocities.
         tgts = joystick_cmd.vels
 
-        # Smooths the target velocities.
-        trg_xvel, trg_yvel, trg_yawvel = tgts.T
-
         # Gets the robot's current velocities.
-        cur_xvel = trajectory.qvel[..., 0]
-        cur_yvel = trajectory.qvel[..., 1]
-        cur_yawvel = trajectory.qvel[..., 5]
+        quat = self.get_quat(trajectory)
+        linvel = trajectory.qvel[..., :3]
+        linvel = xax.rotate_vector_by_quat(linvel, quat, inverse=True)
+        yawvel = trajectory.qvel[..., 5]
 
-        # Gets the robot's current yaw.
-        quat = trajectory.qpos[..., 3:7]
-        cur_yaw = xax.quat_to_yaw(quat)
+        # Reward for tracking the direction (cosine similarity).
+        cur_xy = linvel[..., :2]
+        trg_xy = tgts[..., :2]
+        cur_norm = jnp.linalg.norm(cur_xy, axis=-1)
+        trg_norm = jnp.linalg.norm(trg_xy, axis=-1)
+        denom_xy = cur_norm * trg_norm
+        xy_cos_sim = (cur_xy * trg_xy).sum(axis=-1) / denom_xy.clip(min=1e-6)
 
-        # Rotates the command X and Y velocities to the robot's current yaw.
-        trg_xvel_rot = trg_xvel * jnp.cos(cur_yaw) - trg_yvel * jnp.sin(cur_yaw)
-        trg_yvel_rot = trg_xvel * jnp.sin(cur_yaw) + trg_yvel * jnp.cos(cur_yaw)
+        # Reward for tracking the magnitude, in the direction of the target.
+        xy_mag_rew = 1.0 - jnp.where(trg_norm < 1e-6, cur_norm, jnp.abs(cur_norm - trg_norm) / trg_norm.clip(min=1e-6))
 
-        # Linear reward for tracking the target velocities.
-        pos_x_rew = -jnp.abs(trg_xvel_rot - cur_xvel)
-        pos_y_rew = -jnp.abs(trg_yvel_rot - cur_yvel)
-        rot_z_rew = -jnp.abs(trg_yawvel - cur_yawvel)
+        # Reward for tracking the yaw.
+        cur_yaw = yawvel
+        trg_yaw = tgts[..., 2]
+        yaw_mag_rew = 1.0 - jnp.abs(cur_yaw - trg_yaw)
 
-        reward = (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
-
-        return reward
+        return {
+            "dir": xy_cos_sim * self.dir_scale,
+            "mag": xy_mag_rew * self.mag_scale,
+            "yaw": yaw_mag_rew * self.yaw_scale,
+        }
 
     def get_markers(self) -> Collection[Marker]:
         return [JoystickRewardMarker.get()]
@@ -1054,19 +1072,25 @@ class EasyJoystickReward(StatefulReward):
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
         return self.airtime.initial_carry(rng)
 
-    def get_reward_stateful(self, trajectory: Trajectory, reward_carry: Array) -> tuple[Array, Array]:
+    def get_reward_stateful(self, trajectory: Trajectory, reward_carry: Array) -> tuple[dict[str, Array], Array]:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
 
         cmd: EasyJoystickCommandValue = trajectory.command[self.command_name]
-        joystick_reward = self.joystick._get_reward_for(cmd.joystick, trajectory) * self.joystick.scale
-        gait_reward = self.gait._get_reward_for(cmd.gait, trajectory) * self.gait.scale
+        joystick_reward = self.joystick._get_reward_for(cmd.joystick, trajectory)
+        gait_reward = self.gait._get_reward_for(cmd.gait, trajectory)
         airtime_reward, airtime_carry = self.airtime.get_reward_stateful(trajectory, reward_carry)
 
         # Mask out airtime reward when the robot is not moving.
         airtime_reward = jnp.where(cmd.joystick.command.argmax(axis=-1) == 0, 0.0, airtime_reward)
 
-        total_reward = joystick_reward + gait_reward + airtime_reward * self.airtime.scale
+        total_reward = {
+            "gait": gait_reward * self.gait.scale,
+            "airtime": airtime_reward * self.airtime.scale,
+        }
+        for k, v in joystick_reward.items():
+            total_reward[f"joystick/{k}"] = v * self.joystick.scale
+
         return total_reward, airtime_carry
 
     def get_markers(self) -> Collection[Marker]:

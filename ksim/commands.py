@@ -274,22 +274,13 @@ class JoystickCommandMarker(Marker):
         self.rgba = (r, g, b, 1.0)
 
         cmd_x, cmd_y = cmd_vel[..., 0], cmd_vel[..., 1]
-
-        # Gets the robot's current yaw.
-        quat = trajectory.qpos[..., 3:7]
-        cur_yaw = xax.quat_to_yaw(quat)
-
-        # Rotates the command X and Y velocities to the robot's current yaw.
-        cmd_x_rot = cmd_x * jnp.cos(cur_yaw) - cmd_y * jnp.sin(cur_yaw)
-        cmd_y_rot = cmd_x * jnp.sin(cur_yaw) + cmd_y * jnp.cos(cur_yaw)
-
         self.pos = (0, 0, self.height)
 
         match cmd_idx:
             case 0:
                 self._update_circle()
             case 1 | 2 | 3 | 6 | 7:
-                self._update_arrow(cmd_x_rot.item(), cmd_y_rot.item())
+                self._update_arrow(cmd_x.item(), cmd_y.item())
             case 4 | 5:
                 self._update_cylinder()
             case _:
@@ -359,7 +350,7 @@ class JoystickCommand(Command):
     marker_z_offset: float = attrs.field(default=0.5)
     switch_prob: float = attrs.field(default=0.005)
 
-    def _get_vel_tgts(self, physics_data: PhysicsData, command: Array) -> Array:
+    def _get_vel_tgts(self, command: Array) -> Array:
         # Gets the target X, Y, and Yaw targets.
         cmd_tgts = jnp.array(
             [
@@ -385,9 +376,9 @@ class JoystickCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> JoystickCommandValue:
-        command = jax.random.choice(rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs))
-        command_ohe = jax.nn.one_hot(command, num_classes=8)
-        vel_tgts = self._get_vel_tgts(physics_data, command)
+        command = jax.random.choice(rng, len(self.sample_probs), p=jnp.array(self.sample_probs))
+        command_ohe = jax.nn.one_hot(command, num_classes=len(self.sample_probs))
+        vel_tgts = self._get_vel_tgts(command)
         return JoystickCommandValue(
             command=command_ohe,
             vels=vel_tgts,
