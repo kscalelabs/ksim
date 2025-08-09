@@ -26,12 +26,7 @@ from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
 from ksim.types import PhysicsData, PhysicsModel
-from ksim.utils.mujoco import (
-    get_joint_names_in_order,
-    get_position_limits,
-    slice_update,
-    update_data_field,
-)
+from ksim.utils.mujoco import get_joint_names_in_order, get_position_limits, slice_update, update_data_field
 from ksim.utils.priors import MotionReferenceData
 
 logger = logging.getLogger(__name__)
@@ -176,7 +171,13 @@ class RandomJointPositionReset(Reset):
                 if value < joint_min or value > joint_max:
                     raise ValueError(f"Zero value {value} for joint {name} is out of range {joint_min}, {joint_max}")
                 zeros_values[index] = value
-        return cls(scale=scale, zeros=tuple(zeros_values), mins=tuple(mins), maxs=tuple(maxs), scale_by_curriculum=scale_by_curriculum,)
+        return cls(
+            scale=scale,
+            zeros=tuple(zeros_values),
+            mins=tuple(mins),
+            maxs=tuple(maxs),
+            scale_by_curriculum=scale_by_curriculum,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
