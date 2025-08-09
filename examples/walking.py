@@ -470,10 +470,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                     rotation_speed=self.config.target_angular_velocity,
                 ),
             ),
-            ksim.BaseHeightCommand(
-                min_height=0.9,
-                max_height=1.4,
-            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -492,7 +488,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                     scale=1.0,
                 ),
             ),
-            ksim.BaseHeightTrackingReward(scale=5.0),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:

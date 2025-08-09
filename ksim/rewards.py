@@ -780,10 +780,14 @@ class JoystickReward(Reward):
         trg_xvel_rot = trg_xvel * jnp.cos(cur_yaw) - trg_yvel * jnp.sin(cur_yaw)
         trg_yvel_rot = trg_xvel * jnp.sin(cur_yaw) + trg_yvel * jnp.cos(cur_yaw)
 
+        def _reward_fn(tgt: Array, cur: Array) -> Array:
+            sgn, abs_tgt = jnp.sign(tgt), jnp.abs(tgt).clip(min=1e-6)
+            return jnp.where(sgn == 0, 0.0, (sgn * cur).clip(max=abs_tgt) / abs_tgt)
+
         # Linear reward for tracking the target velocities.
-        pos_x_rew = -jnp.abs(trg_xvel_rot - cur_xvel)
-        pos_y_rew = -jnp.abs(trg_yvel_rot - cur_yvel)
-        rot_z_rew = -jnp.abs(trg_yawvel - cur_yawvel)
+        pos_x_rew = _reward_fn(trg_xvel_rot, cur_xvel)
+        pos_y_rew = _reward_fn(trg_yvel_rot, cur_yvel)
+        rot_z_rew = _reward_fn(trg_yawvel, cur_yawvel)
 
         reward = (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
 
