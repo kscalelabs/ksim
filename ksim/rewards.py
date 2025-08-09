@@ -42,7 +42,7 @@ __all__ = [
 import functools
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Literal, Self, final
+from typing import Collection, Literal, Mapping, Self, final
 
 import attrs
 import chex
@@ -117,7 +117,7 @@ class Reward(ABC):
     scale_by_curriculum: bool = attrs.field(default=False)
 
     @abstractmethod
-    def get_reward(self, trajectory: Trajectory) -> Array:
+    def get_reward(self, trajectory: Trajectory) -> Array | Mapping[str, Array]:
         """Get the reward for a single trajectory.
 
         Args:
@@ -158,7 +158,11 @@ class StatefulReward(Reward):
         """
 
     @abstractmethod
-    def get_reward_stateful(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: PyTree,
+    ) -> tuple[Array | Mapping[str, Array], PyTree]:
         """Get the reward for a single trajectory.
 
         This is the same as `get_reward`, but it also takes in the reward carry
@@ -1058,19 +1062,24 @@ class EasyJoystickReward(StatefulReward):
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
         return self.airtime.initial_carry(rng)
 
-    def get_reward_stateful(self, trajectory: Trajectory, reward_carry: Array) -> tuple[Array, Array]:
+    def get_reward_stateful(self, trajectory: Trajectory, reward_carry: Array) -> tuple[dict[str, Array], Array]:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
 
         cmd: EasyJoystickCommandValue = trajectory.command[self.command_name]
-        joystick_reward = self.joystick._get_reward_for(cmd.joystick, trajectory) * self.joystick.scale
-        gait_reward = self.gait._get_reward_for(cmd.gait, trajectory) * self.gait.scale
+        joystick_reward = self.joystick._get_reward_for(cmd.joystick, trajectory)
+        gait_reward = self.gait._get_reward_for(cmd.gait, trajectory)
         airtime_reward, airtime_carry = self.airtime.get_reward_stateful(trajectory, reward_carry)
 
         # Mask out airtime reward when the robot is not moving.
         airtime_reward = jnp.where(cmd.joystick.command.argmax(axis=-1) == 0, 0.0, airtime_reward)
 
-        total_reward = joystick_reward + gait_reward + airtime_reward * self.airtime.scale
+        total_reward = {
+            "joystick": joystick_reward * self.joystick.scale,
+            "gait": gait_reward * self.gait.scale,
+            "airtime": airtime_reward * self.airtime.scale,
+        }
+
         return total_reward, airtime_carry
 
     def get_markers(self) -> Collection[Marker]:

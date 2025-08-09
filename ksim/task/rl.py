@@ -26,7 +26,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Thread
 from types import FrameType
-from typing import Any, Callable, Collection, Dict, Generic, TypeVar, cast
+from typing import Any, Callable, Collection, Dict, Generic, Mapping, TypeVar, cast
 
 import chex
 import equinox as eqx
@@ -210,14 +210,18 @@ def get_rewards(
             reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
         else:
             reward_val = reward.get_reward(trajectory)
-        reward_val = reward_val * reward.scale
+        if isinstance(reward_val, Mapping):
+            reward_val = {f"{reward_name}/{k}": v * reward.scale for k, v in reward_val.items()}
+        else:
+            reward_val = {reward_name: reward_val * reward.scale}
         if reward.scale_by_curriculum:
-            reward_val = reward_val * curriculum_level
+            reward_val = {k: v * curriculum_level for k, v in reward_val.items()}
 
-        if reward_val.shape != trajectory.done.shape:
-            raise AssertionError(f"Reward {reward_name} shape {reward_val.shape} does not match {target_shape}")
+        for k, v in reward_val.items():
+            if v.shape != trajectory.done.shape:
+                raise AssertionError(f"Reward {k} shape {v.shape} does not match {target_shape}")
 
-        reward_dict[reward_name] = reward_val
+        reward_dict.update(reward_val)
         next_reward_carry[reward_name] = reward_carry
 
     total_reward = jax.tree.reduce(jnp.add, list(reward_dict.values()))
