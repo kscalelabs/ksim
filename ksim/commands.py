@@ -114,6 +114,7 @@ class FloatVectorCommand(Command):
     ranges: tuple[tuple[float, float], ...] = attrs.field()
     switch_prob: float = attrs.field(default=0.0)
     zero_prob: float = attrs.field(default=0.0)
+    unique_name: str | None = attrs.field(default=None)
 
     def initial_command(
         self,
@@ -126,6 +127,11 @@ class FloatVectorCommand(Command):
         return jnp.where(
             zero_mask, 0.0, jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
         )
+
+    def get_name(self) -> str:
+        if self.unique_name is not None:
+            return f"{self.unique_name}_{super().get_name()}"
+        return super().get_name()
 
     def __call__(
         self,

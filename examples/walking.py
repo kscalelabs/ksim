@@ -456,19 +456,31 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.EasyJoystickCommand(
-                gait=ksim.SinusoidalGaitCommand(
-                    gait_period=self.config.gait_period,
-                    ctrl_dt=self.config.ctrl_dt,
-                    max_height=self.config.max_foot_height,
-                    height_offset=0.04,
-                ),
-                joystick=ksim.JoystickCommand(
-                    run_speed=self.config.target_linear_velocity,
-                    walk_speed=self.config.target_linear_velocity / 2.0,
-                    strafe_speed=self.config.target_linear_velocity / 2.0,
-                    rotation_speed=self.config.target_angular_velocity,
-                ),
+            # ksim.EasyJoystickCommand(
+            #     gait=ksim.SinusoidalGaitCommand(
+            #         gait_period=self.config.gait_period,
+            #         ctrl_dt=self.config.ctrl_dt,
+            #         max_height=self.config.max_foot_height,
+            #         height_offset=0.04,
+            #     ),
+            #     joystick=ksim.JoystickCommand(
+            #         run_speed=self.config.target_linear_velocity,
+            #         walk_speed=self.config.target_linear_velocity / 2.0,
+            #         strafe_speed=self.config.target_linear_velocity / 2.0,
+            #         rotation_speed=self.config.target_angular_velocity,
+            #     ),
+            # ),
+            ksim.FloatVectorCommand(
+                ranges = ((-0.5, 0.5), (-0.5, 0.5)),
+                switch_prob=0.005,
+                unique_name="target_velocity",
+                zero_prob=0.2,
+            ),
+            ksim.FloatVectorCommand(
+                ranges = ((-0.5, 0.5),),
+                switch_prob=0.005,
+                unique_name="target_yaw_rate",
+                zero_prob=0.2,
             ),
             ksim.BaseHeightCommand(
                 min_height=0.9,
@@ -479,18 +491,30 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             ksim.StayAliveReward(scale=100.0),
-            ksim.EasyJoystickReward(
-                gait=ksim.SinusoidalGaitReward(
-                    scale=5.0,
-                    ctrl_dt=self.config.ctrl_dt,
-                    max_height=self.config.max_foot_height,
-                ),
-                joystick=ksim.JoystickReward(scale=1.0),
-                airtime=ksim.FeetAirTimeReward(
-                    threshold=self.config.gait_period / 2.0,
-                    ctrl_dt=self.config.ctrl_dt,
-                    scale=1.0,
-                ),
+            # ksim.EasyJoystickReward(
+            #     gait=ksim.SinusoidalGaitReward(
+            #         scale=5.0,
+            #         ctrl_dt=self.config.ctrl_dt,
+            #         max_height=self.config.max_foot_height,
+            #     ),
+            #     joystick=ksim.JoystickReward(scale=1.0),
+            #     airtime=ksim.FeetAirTimeReward(
+            #         threshold=self.config.gait_period / 2.0,
+            #         ctrl_dt=self.config.ctrl_dt,
+            #         scale=1.0,
+            #     ),
+            # ),
+            ksim.LinearVelocityTrackingReward(
+                linvel_obs_name="base_linear_velocity_observation",
+                index=("x", "y"),
+                command_name="target_velocity_float_vector_command",
+                in_robot_frame=True,
+                scale=1.0,
+            ),
+            ksim.AngularVelocityTrackingReward(
+                index=("z",),
+                command_name="target_yaw_rate_float_vector_command",
+                scale=1.0,
             ),
             ksim.BaseHeightTrackingReward(scale=5.0),
         ]
@@ -513,8 +537,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return Model(
             params.key,
             physics_model=params.physics_model,
-            num_actor_inputs=50,
-            num_critic_inputs=334,
+            num_actor_inputs=44,#50,
+            num_critic_inputs=327,# 334,
             num_joints=17,
             min_std=0.01,
             max_std=1.0,
@@ -551,11 +575,14 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
 
         # Sinusoidal gait joystick command.
-        sgj_cmd: ksim.EasyJoystickCommandValue = commands["easy_joystick_command"]
-        joystick_cmd_ohe_8 = sgj_cmd.joystick.command
+        # sgj_cmd: ksim.EasyJoystickCommandValue = commands["easy_joystick_command"]
+        # joystick_cmd_ohe_8 = sgj_cmd.joystick.command
 
         # Phase is required in order to follow the gait command.
-        gait_phase_1 = sgj_cmd.gait.phase[..., None]
+        # gait_phase_1 = sgj_cmd.gait.phase[..., None]
+
+        target_velocity_2 = commands["target_velocity_float_vector_command"]
+        target_yaw_rate_1 = commands["target_yaw_rate_float_vector_command"]
 
         base_height_1 = commands["base_height_command"][..., None]
 
@@ -565,9 +592,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 proj_grav_3,  # 3
                 imu_gyro_3,  # 3
-                gait_phase_1,  # 1
+                target_velocity_2,  # 2
+                target_yaw_rate_1,  # 1
                 base_height_1,  # 1
-                joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )
@@ -595,15 +622,18 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ang_vel_obs_3 = observations["base_angular_velocity_observation"]
 
         # Sinusoidal gait joystick command.
-        sgj_cmd: ksim.EasyJoystickCommandValue = commands["easy_joystick_command"]
-        joystick_cmd_ohe_8 = sgj_cmd.joystick.command
+        # sgj_cmd: ksim.EasyJoystickCommandValue = commands["easy_joystick_command"]
+        # joystick_cmd_ohe_8 = sgj_cmd.joystick.command
 
         # Foot height difference.
         foot_height_2 = observations["feet_position_observation"][..., 2]
-        foot_tgt_height_2 = sgj_cmd.gait.height
-        foot_height_diff_2 = foot_height_2 - foot_tgt_height_2
+        # foot_tgt_height_2 = sgj_cmd.gait.height
+        # foot_height_diff_2 = foot_height_2 - foot_tgt_height_2
 
         base_height_1 = commands["base_height_command"][..., None]
+
+        target_velocity_2 = commands["target_velocity_float_vector_command"]
+        target_yaw_rate_1 = commands["target_yaw_rate_float_vector_command"]
 
         obs_n = jnp.concatenate(
             [
@@ -617,9 +647,11 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                foot_height_diff_2,  # 2
+                target_velocity_2,  # 2
+                target_yaw_rate_1,  # 1
+                # foot_height_diff_2,  # 2
                 base_height_1,  # 1
-                joystick_cmd_ohe_8,  # 8
+                # joystick_cmd_ohe_8,  # 8
             ],
             axis=-1,
         )
