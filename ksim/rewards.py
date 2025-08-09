@@ -52,7 +52,6 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.commands import EasyJoystickCommandValue, JoystickCommandValue, SinusoidalGaitCommandValue
-from ksim.debugging import JitLevel
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
 from ksim.utils.validators import (
@@ -758,10 +757,8 @@ class JoystickReward(Reward):
     """Reward for following the joystick command."""
 
     command_name: str = attrs.field(default="joystick_command")
-    ang_penalty_ratio: float = attrs.field(default=2.0)
 
-    @xax.jit(static_argnames=["self"], jit_level=JitLevel.UNROLL)
-    def get_reward(self, trajectory: Trajectory) -> Array:
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
         return self._get_reward_for(trajectory.command[self.command_name], trajectory)
@@ -775,7 +772,7 @@ class JoystickReward(Reward):
         quat = xax.euler_to_quat(euler)
         return quat
 
-    def _get_reward_for(self, joystick_cmd: JoystickCommandValue, trajectory: Trajectory) -> Array:
+    def _get_reward_for(self, joystick_cmd: JoystickCommandValue, trajectory: Trajectory) -> dict[str, Array]:
         # Gets the target X, Y, and Yaw velocities.
         tgts = joystick_cmd.vels
 
@@ -789,17 +786,24 @@ class JoystickReward(Reward):
         yawvel = trajectory.qvel[..., 5]
 
         def _reward_fn(tgt: Array, cur: Array) -> Array:
-            sgn, abs_tgt = jnp.sign(tgt), jnp.abs(tgt).clip(min=1e-6)
-            return jnp.where(sgn == 0, 0.0, (sgn * cur).clip(max=abs_tgt) / abs_tgt)
+            error = jnp.abs(cur - tgt)
+            tgt_mag = jnp.abs(tgt).clip(min=1e-6)
+            normalized_error = error / tgt_mag
+            return (1.0 - normalized_error).clip(min=0.0)
 
-        # Linear reward for tracking the target velocities.
-        pos_x_rew = _reward_fn(trg_xvel, linvel[..., 0])
-        pos_y_rew = _reward_fn(trg_yvel, linvel[..., 1])
-        rot_z_rew = _reward_fn(trg_yawvel, yawvel)
+        def _reward_fn_with_zero_handling(tgt: Array, cur: Array) -> Array:
+            return jnp.where(jnp.abs(tgt) < 1e-6, (1.0 - jnp.abs(cur) * 5.0).clip(min=0.0), _reward_fn(tgt, cur))
 
-        reward = (pos_x_rew + pos_y_rew + rot_z_rew) / 3.0
+        # Reward for tracking the target velocities.
+        pos_x_rew = _reward_fn_with_zero_handling(trg_xvel, linvel[..., 0])
+        pos_y_rew = _reward_fn_with_zero_handling(trg_yvel, linvel[..., 1])
+        rot_z_rew = _reward_fn_with_zero_handling(trg_yawvel, yawvel)
 
-        return reward
+        return {
+            "x": pos_x_rew,
+            "y": pos_y_rew,
+            "yaw": rot_z_rew,
+        }
 
     def get_markers(self) -> Collection[Marker]:
         return [JoystickRewardMarker.get()]
@@ -1079,10 +1083,11 @@ class EasyJoystickReward(StatefulReward):
         airtime_reward = jnp.where(cmd.joystick.command.argmax(axis=-1) == 0, 0.0, airtime_reward)
 
         total_reward = {
-            "joystick": joystick_reward * self.joystick.scale,
             "gait": gait_reward * self.gait.scale,
             "airtime": airtime_reward * self.airtime.scale,
         }
+        for k, v in joystick_reward.items():
+            total_reward[f"joystick_{k}"] = v * self.joystick.scale
 
         return total_reward, airtime_carry
 
