@@ -11,6 +11,7 @@ __all__ = [
     "get_xy_position_reset",
     "RandomHeadingReset",
     "RandomHeightReset",
+    "RandomPitchRollReset",
 ]
 
 import functools
@@ -336,5 +337,22 @@ class RandomHeightReset(Reset):
         min_height, max_height = self.range
         new_z = jax.random.uniform(rng, qpos[..., 2:3].shape, minval=min_height, maxval=max_height)
         qpos = slice_update(data, "qpos", slice(2, 3), qpos[..., 2:3] + new_z)
+        data = update_data_field(data, "qpos", qpos)
+        return data
+
+
+@attrs.define(frozen=True, kw_only=True)
+class RandomPitchRollReset(Reset):
+    """Resets the pitch and roll of the robot to a random value."""
+
+    magnitude: float = attrs.field(default=0.01)
+
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
+        qpos = data.qpos
+        pitch = jax.random.uniform(rng, qpos[..., 0].shape, minval=-self.magnitude, maxval=self.magnitude)
+        roll = jax.random.uniform(rng, qpos[..., 0].shape, minval=-self.magnitude, maxval=self.magnitude)
+        quat = xax.euler_to_quat(jnp.stack([roll, pitch, jnp.zeros_like(pitch)], axis=-1))
+        new_quat = xax.quat_mul(quat, data.qpos[..., 3:7])
+        qpos = slice_update(data, "qpos", slice(3, 7), new_quat)
         data = update_data_field(data, "qpos", qpos)
         return data
