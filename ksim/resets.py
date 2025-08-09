@@ -26,12 +26,7 @@ from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
 from ksim.types import PhysicsData, PhysicsModel
-from ksim.utils.mujoco import (
-    get_joint_names_in_order,
-    get_position_limits,
-    slice_update,
-    update_data_field,
-)
+from ksim.utils.mujoco import get_joint_names_in_order, get_position_limits, slice_update, update_data_field
 from ksim.utils.priors import MotionReferenceData
 
 logger = logging.getLogger(__name__)
@@ -136,14 +131,22 @@ class RandomJointPositionReset(Reset):
     """Resets the joint positions of the robot to random values."""
 
     scale: float = attrs.field(default=0.01)
+    scale_by_curriculum: bool = attrs.field(default=True)
     zeros: tuple[float, ...] | None = attrs.field(default=None)
+    mins: tuple[float, ...] | None = attrs.field(default=None)
+    maxs: tuple[float, ...] | None = attrs.field(default=None)
 
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
-        pos = jax.random.uniform(rng, data.qpos[7:].shape, minval=-self.scale, maxval=self.scale) * curriculum_level
+        pos = jax.random.uniform(rng, data.qpos[7:].shape, minval=-self.scale, maxval=self.scale)
+        if self.scale_by_curriculum:
+            pos = pos * curriculum_level
         if self.zeros is not None:
             pos = pos + jnp.array(self.zeros)
-        new_qpos = data.qpos[7:] + pos
-        new_qpos = jnp.concatenate([data.qpos[:7], new_qpos])
+        if self.mins is not None:
+            pos = jnp.clip(pos, min=jnp.array(self.mins))
+        if self.maxs is not None:
+            pos = jnp.clip(pos, max=jnp.array(self.maxs))
+        new_qpos = jnp.concatenate([data.qpos[:7], pos])
         data = update_data_field(data, "qpos", new_qpos)
         return data
 
@@ -153,19 +156,28 @@ class RandomJointPositionReset(Reset):
         physics_model: PhysicsModel,
         zeros: dict[str, float] | None = None,
         scale: float = 0.01,
+        scale_by_curriculum: bool = True,
     ) -> "RandomJointPositionReset":
         joint_names = get_joint_names_in_order(physics_model)[1:]  # Remove the first joint (root)
+        joint_limits = get_position_limits(physics_model)
         zeros_values = [0.0 for _ in range(len(joint_names))]
+        mins = [joint_limits[name][0] for name in joint_names]
+        maxs = [joint_limits[name][1] for name in joint_names]
         if zeros is not None:
-            joint_limits = get_position_limits(physics_model)
             for name, value in zeros.items():
                 if (index := joint_names.index(name)) < 0:
                     raise ValueError(f"Joint {name} not found in model. Choices are: {joint_names}")
-                joint_min, joint_max = joint_limits[name]
+                joint_min, joint_max = mins[index], maxs[index]
                 if value < joint_min or value > joint_max:
                     raise ValueError(f"Zero value {value} for joint {name} is out of range {joint_min}, {joint_max}")
                 zeros_values[index] = value
-        return cls(scale=scale, zeros=tuple(zeros_values))
+        return cls(
+            scale=scale,
+            zeros=tuple(zeros_values),
+            mins=tuple(mins),
+            maxs=tuple(maxs),
+            scale_by_curriculum=scale_by_curriculum,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -173,11 +185,13 @@ class RandomJointVelocityReset(Reset):
     """Resets the joint velocities of the robot to random values."""
 
     scale: float = attrs.field(default=0.01)
+    scale_by_curriculum: bool = attrs.field(default=True)
 
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
-        noise = jax.random.uniform(rng, data.qvel[6:].shape, minval=-self.scale, maxval=self.scale) * curriculum_level
-        new_qvel = data.qvel[6:] + noise
-        new_qvel = jnp.concatenate([data.qvel[:6], new_qvel])
+        noise = jax.random.uniform(rng, data.qvel[6:].shape, minval=-self.scale, maxval=self.scale)
+        if self.scale_by_curriculum:
+            noise = noise * curriculum_level
+        new_qvel = jnp.concatenate([data.qvel[:6], noise])
         data = update_data_field(data, "qvel", new_qvel)
         return data
 
