@@ -11,6 +11,7 @@ __all__ = [
     "get_xy_position_reset",
     "RandomHeadingReset",
     "RandomHeightReset",
+    "RandomPitchRollReset",
 ]
 
 import functools
@@ -319,7 +320,8 @@ class RandomHeadingReset(Reset):
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         angle = jax.random.uniform(rng, data.qpos.shape[:-1], minval=-jnp.pi, maxval=jnp.pi)
         euler = jnp.stack([jnp.zeros_like(angle), jnp.zeros_like(angle), angle], axis=-1)
-        quat = xax.euler_to_quat(euler)
+        new_quat = xax.euler_to_quat(euler)
+        quat = xax.quat_mul(data.qpos[..., 3:7], new_quat)
         qpos = slice_update(data, "qpos", slice(3, 7), quat)
         data = update_data_field(data, "qpos", qpos)
         return data
@@ -336,5 +338,25 @@ class RandomHeightReset(Reset):
         min_height, max_height = self.range
         new_z = jax.random.uniform(rng, qpos[..., 2:3].shape, minval=min_height, maxval=max_height)
         qpos = slice_update(data, "qpos", slice(2, 3), qpos[..., 2:3] + new_z)
+        data = update_data_field(data, "qpos", qpos)
+        return data
+
+
+@attrs.define(frozen=True, kw_only=True)
+class RandomPitchRollReset(Reset):
+    """Resets the pitch and roll of the robot to a random value."""
+
+    pitch_range: tuple[float, float] = attrs.field(default=(-0.1, 0.1))
+    roll_range: tuple[float, float] = attrs.field(default=(-0.1, 0.1))
+
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
+        qpos = data.qpos
+        min_pitch, max_pitch = self.pitch_range
+        min_roll, max_roll = self.roll_range
+        pitch = jax.random.uniform(rng, qpos[..., 0].shape, minval=min_pitch, maxval=max_pitch)
+        roll = jax.random.uniform(rng, qpos[..., 0].shape, minval=min_roll, maxval=max_roll)
+        quat = xax.euler_to_quat(jnp.stack([roll, pitch, jnp.zeros_like(pitch)], axis=-1))
+        new_quat = xax.quat_mul(data.qpos[..., 3:7], quat)
+        qpos = slice_update(data, "qpos", slice(3, 7), new_quat)
         data = update_data_field(data, "qpos", qpos)
         return data
