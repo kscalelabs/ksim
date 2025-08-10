@@ -147,7 +147,7 @@ class RolloutConstants:
     curriculum: Curriculum
     argmax_action: bool
     aux_constants: xax.FrozenDict[str, PyTree]
-    command_metric_fns: tuple[tuple[str, Callable[[PyTree, PhysicsData], dict[str, Array]]], ...] = ()
+    command_metric_fns: tuple[tuple[str, Callable[[PyTree, PhysicsData], xax.FrozenDict[str, Array]]], ...] = ()
 
 
 def get_observation(
@@ -1053,7 +1053,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             for met_name, met_val in metrics_dict.items():
                 key = f"{cmd_name}/{met_name}"
                 pairs_list.append((key, jnp.atleast_1d(jnp.asarray(met_val))))
-        command_metrics = xax.FrozenDict(dict(pairs_list))
+        command_metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(dict(pairs_list))
 
         # Combines all the relevant data into a single object. Lives up here to
         # avoid accidentally incorporating information it shouldn't access to.

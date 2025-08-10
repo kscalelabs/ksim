@@ -96,7 +96,7 @@ class Command(ABC):
         """Get the name of the command."""
         return xax.camelcase_to_snakecase(self.__class__.__name__)
 
-    def get_metrics(self, command: PyTree, physics_data: PhysicsData) -> xax.FrozenDict[str, float]:
+    def get_metrics(self, command: PyTree, physics_data: PhysicsData) -> xax.FrozenDict[str, Array]:
         """Get the metrics for the command."""
         return xax.FrozenDict({})
 
@@ -511,7 +511,7 @@ class LinearVelocityCommand(Command):
             )
         ]
 
-    def get_metrics(self, command: Array, physics_data: PhysicsData) -> xax.FrozenDict[str, float | Array]:
+    def get_metrics(self, command: Array, physics_data: PhysicsData) -> xax.FrozenDict[str, Array]:
         target_vel = jnp.asarray(command)[..., :2]
         current_vel = jnp.asarray(physics_data.qvel)[..., :2]
         error_vel = target_vel - current_vel
