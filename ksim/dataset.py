@@ -152,6 +152,7 @@ class TrajectoryDataset(Dataset[tuple[Trajectory, RewardState], tuple[Trajectory
                 ctrl=arrs["ctrl"],
                 obs=_dict("obs"),
                 command=_dict("command"),
+                command_metrics=_dict("command_metrics"),
                 event_state=_dict("event_state"),
                 action=arrs["action"],
                 done=arrs["done"],

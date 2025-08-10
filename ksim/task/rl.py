@@ -147,6 +147,7 @@ class RolloutConstants:
     curriculum: Curriculum
     argmax_action: bool
     aux_constants: xax.FrozenDict[str, PyTree]
+    command_metric_fns: tuple[tuple[str, Callable[[PyTree, PhysicsData], xax.FrozenDict[str, Array]]], ...] = ()
 
 
 def get_observation(
@@ -1044,6 +1045,16 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         terminated = jax.tree.reduce(jnp.logical_or, [t != 0 for t in terminations.values()])
         success = jax.tree.reduce(jnp.logical_and, [t != -1 for t in terminations.values()]) & terminated
 
+        # Compute command metrics for this step
+        pairs_list: list[tuple[str, Array]] = []
+        for cmd_name, metrics_fn in constants.command_metric_fns:
+            cmd_value = env_states.commands[cmd_name]
+            metrics_dict = metrics_fn(cmd_value, next_physics_state.data)
+            for met_name, met_val in metrics_dict.items():
+                key = f"{cmd_name}/{met_name}"
+                pairs_list.append((key, jnp.atleast_1d(jnp.asarray(met_val))))
+        command_metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(dict(pairs_list))
+
         # Combines all the relevant data into a single object. Lives up here to
         # avoid accidentally incorporating information it shouldn't access to.
         transition = Trajectory(
@@ -1060,6 +1071,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             success=success,
             timestep=next_physics_state.data.time,
             termination_components=terminations,
+            command_metrics=command_metrics,
             aux_outputs=action.aux_outputs,
         )
 
@@ -1238,12 +1250,16 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             rollout_length: The length of the rollout.
         """
         if self.config.log_train_metrics:
-            for namespace, metric, secondary in (
+            groups = [
                 ("🚂 train", metrics.train, True),
                 ("🎁 reward", metrics.reward, False),
                 ("💀 termination", metrics.termination, True),
                 ("🔄 curriculum", {"level": metrics.curriculum_level}, True),
-            ):
+            ]
+            if metrics.command is not None:
+                groups.append(("👣 command", metrics.command, True))
+
+            for namespace, metric, secondary in groups:
                 for key, value in metric.items():
                     if isinstance(value, Histogram):
                         self.logger.log_histogram_raw(
@@ -1366,6 +1382,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             (
                 ("👀 obs images", xax.get_pytree_mapping(logged_traj.trajectory.obs)),
                 ("🕹️ command images", xax.get_pytree_mapping(logged_traj.trajectory.command)),
+                ("👣 command metrics", xax.get_pytree_mapping(logged_traj.trajectory.command_metrics)),
                 ("🏃 action images", {"action": logged_traj.trajectory.action}),
                 ("💀 termination images", logged_traj.trajectory.termination_components),
                 ("🗓️ event images", logged_traj.trajectory.event_state),
@@ -1550,6 +1567,20 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             **{f"prct/{key}": ((value != 0).sum() / num_terminations) for key, value in kvs},
         }
 
+    def get_command_metrics(self, trajectories: Trajectory) -> dict[str, Array]:
+        """Gets the command metrics aggregated over the rollout.
+
+        This surfaces per-step command metric arrays so they can be logged as
+        histograms (and scalar means) alongside rewards and train metrics.
+
+        Args:
+            trajectories: The trajectories containing command_metrics.
+
+        Returns:
+            A mapping from metric name to array.
+        """
+        return {key: value for key, value in trajectories.command_metrics.items()}
+
     def get_markers(
         self,
         commands: Collection[Command],
@@ -1714,6 +1745,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
             termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
             curriculum_level=new_carry.env_states.curriculum_state.level,
+            command=xax.FrozenDict(self.get_command_metrics(trajectories)),
         )
 
         # Steps the curriculum.
@@ -1977,6 +2009,16 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                         )
                     viewer.push_plot_metrics(command_scalars, group="command")
 
+                    # Send command metrics
+                    metric_scalars = {}
+                    for met_name, met_val in xax.get_pytree_mapping(transition.command_metrics).items():
+                        met_arr = np.asarray(jax.device_get(met_val))
+                        metric_scalars.update(
+                            {f"{met_name}_{i}": float(val) for i, val in enumerate(met_arr.flatten())}
+                        )
+                    if len(metric_scalars) > 0:
+                        viewer.push_plot_metrics(metric_scalars, group="command_metrics")
+
                     # Recieve pushes from the viewer
                     xfrc = viewer.drain_control_pipe()
                     if xfrc is not None:
@@ -2134,6 +2176,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             curriculum=curriculum,
             argmax_action=argmax_action,
             aux_constants=xax.FrozenDict({}),
+            command_metric_fns=tuple((cmd.command_name, cmd.get_metrics) for cmd in commands),
         )
 
     def _get_shared_state(
