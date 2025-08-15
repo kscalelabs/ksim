@@ -64,7 +64,6 @@ class Event(ABC):
 class LinearPushEvent(Event):
     """Randomly push the robot in a linear direction."""
 
-    linvel: float = attrs.field()
     vel_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
     interval_range: tuple[float, float] = attrs.field()
     curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))

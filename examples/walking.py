@@ -386,7 +386,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.LinearPushEvent(
-                linvel=1.0,
                 interval_range=(2.0, 5.0),
             ),
             ksim.JumpEvent(
