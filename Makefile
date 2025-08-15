@@ -1,6 +1,30 @@
 # Makefile
+.DEFAULT_GOAL := help # Sets default action to be help
 
-format:
+define PRINT_HELP_PYSCRIPT # start of Python section
+import re, sys
+
+help_lines = []
+max_len = 0
+
+# Collect matching lines and calculate max target length
+for line in sys.stdin:
+    match = re.match(r'^([a-zA-Z_-]+):.*?## (.*)$$', line)
+    if match:
+        target, help = match.groups()
+        help_lines.append((target, help))
+        max_len = max(max_len, len(target))
+
+# Format and print help
+for target, help in sorted(help_lines):
+    print(f"{target.ljust(max_len + 2)}{help}")
+endef
+export PRINT_HELP_PYSCRIPT # End of python section
+
+help: ## Show help
+	@python -c "$$PRINT_HELP_PYSCRIPT" < $(MAKEFILE_LIST)
+
+format: ## Format code with Ruff
 	@echo "=== Running Ruff Formatting ==="
 	@ruff format ksim tests examples
 	@echo ""
@@ -8,7 +32,7 @@ format:
 	@ruff check --fix ksim tests examples
 .PHONY: format
 
-static-checks:
+static-checks: ## Perform static checks with Ruff and MyPy
 	@echo "=== Running Ruff Checks ==="
 	@ruff check ksim tests examples
 	@echo ""
@@ -16,6 +40,6 @@ static-checks:
 	@mypy --install-types --non-interactive ksim tests examples
 .PHONY: lint
 
-test:
+test: ## Run tests
 	python -m pytest
 .PHONY: test
