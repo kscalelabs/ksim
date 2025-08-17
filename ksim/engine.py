@@ -67,7 +67,7 @@ class PhysicsEngine(eqx.Module, ABC):
         for name, event in self.events.items():
             rng, event_rng = jax.random.split(rng)
             event_states[name] = event.get_initial_event_state(event_rng)
-        return xax.FrozenDict(event_states)
+        return xax.freeze_dict(event_states)
 
 
 class MjxEngine(PhysicsEngine):
@@ -192,7 +192,7 @@ class MjxEngine(PhysicsEngine):
                 new_event_states[name] = new_event_state
 
             new_data = self._physics_step(physics_model, data)
-            return (new_data, step_num + 1.0, rng, xax.FrozenDict(new_event_states), actuator_state, torques), None
+            return (new_data, step_num + 1.0, rng, xax.freeze_dict(new_event_states), actuator_state, torques), None
 
         # Runs the model for N steps.
         (mjx_data, *_, event_info, actuator_state_final, _), _ = xax.scan(
@@ -213,7 +213,7 @@ class MjxEngine(PhysicsEngine):
         return PhysicsState(
             data=mjx_data,
             most_recent_action=action,
-            event_states=xax.FrozenDict(event_info),
+            event_states=xax.freeze_dict(event_info),
             actuator_state=actuator_state_final,
             action_latency=physics_state.action_latency,
         )
@@ -313,7 +313,7 @@ class MujocoEngine(PhysicsEngine):
                     rng=rng,
                 )
                 new_event_states[name] = new_event_state
-            event_states = xax.FrozenDict(new_event_states)
+            event_states = xax.freeze_dict(new_event_states)
 
             mujoco.mj_step(physics_model, data)
 

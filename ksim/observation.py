@@ -4,7 +4,6 @@ __all__ = [
     "ObservationInput",
     "Observation",
     "StatefulObservation",
-    "HistoryObservation",
     "BasePositionObservation",
     "BaseOrientationObservation",
     "BaseLinearVelocityObservation",
@@ -29,7 +28,6 @@ __all__ = [
     "FeetOrientationObservation",
     "TimestepObservation",
     "ActPosObservation",
-    "HistoryObservation",
 ]
 
 from abc import ABC, abstractmethod
@@ -123,51 +121,6 @@ class StatefulObservation(Observation):
             physics_state: The current physics state
             rng: A PRNGKeyArray to use for the noise
         """
-
-
-@attrs.define(frozen=True, kw_only=True)
-class HistoryObservation(StatefulObservation):
-    """Wraps another *non-stateful* observation and returns a rolling history buffer of its values."""
-
-    observation: Observation = attrs.field()
-    history_length: int = attrs.field(default=1, validator=attrs.validators.ge(1))
-
-    def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
-        """Create a zero-filled history buffer by evaluating with a dummy input."""
-        dummy_input = ObservationInput(
-            commands=xax.FrozenDict(),
-            physics_state=physics_state,
-            obs_carry=None,
-        )
-        sample_val = self.observation.observe(dummy_input, jnp.asarray(0.0), rng)
-        repeat_shape = (self.history_length,) + sample_val.shape
-        return jnp.zeros(repeat_shape, dtype=sample_val.dtype)
-
-    def observe_stateful(
-        self,
-        state: ObservationInput,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, PyTree]:
-        """Return the history buffer and the updated carry.
-
-        1.  Shift the existing buffer one step towards the front.
-        2.  Insert the newly computed observation at the last position.
-        3.  Return the updated buffer (flattened) as the observation and the
-            buffer itself as the next carry.
-        """
-        rng, obs_rng = jax.random.split(rng)
-
-        current_val = self.observation.observe(state, curriculum_level, obs_rng)
-
-        buffer = state.obs_carry
-
-        new_buffer = jnp.roll(buffer, shift=-1, axis=0)
-        new_buffer = new_buffer.at[-1].set(current_val)
-
-        history_flat = jnp.ravel(new_buffer)
-
-        return history_flat, new_buffer
 
 
 @attrs.define(frozen=True, kw_only=True)
