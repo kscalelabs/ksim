@@ -91,7 +91,7 @@ class RewardState:
 class Action:
     action: Array
     carry: PyTree | None = None
-    aux_outputs: xax.FrozenDict[str, PyTree] = xax.freeze_dict()
+    aux_outputs: xax.FrozenDict[str, PyTree] = xax.FrozenDict()
 
 
 @jax.tree_util.register_dataclass
