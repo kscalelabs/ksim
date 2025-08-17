@@ -32,7 +32,6 @@ __all__ = [
     "HistoryObservation",
 ]
 
-import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Collection, Self
@@ -358,19 +357,9 @@ class ProjectedGravityObservation(StatefulObservation):
 
     framequat_idx_range: tuple[int, int | None] = attrs.field()
     gravity: tuple[float, float, float] = attrs.field()
-    lag_range: tuple[float, float] = attrs.field(
-        default=(0.001, 0.005),
-        validator=attrs.validators.deep_iterable(
-            attrs.validators.and_(
-                attrs.validators.ge(0.0),
-                attrs.validators.lt(1.0),
-            ),
-        ),
-    )
-    bias: float = attrs.field(
-        default=math.radians(2.0),
-        validator=attrs.validators.ge(0.0),
-    )
+    min_lag: float = attrs.field(validator=attrs.validators.and_(attrs.validators.ge(0.0), attrs.validators.lt(1.0)))
+    max_lag: float = attrs.field(validator=attrs.validators.and_(attrs.validators.ge(0.0), attrs.validators.lt(1.0)))
+    bias: float = attrs.field(validator=attrs.validators.ge(0.0))
 
     @classmethod
     def create(
@@ -378,8 +367,9 @@ class ProjectedGravityObservation(StatefulObservation):
         *,
         physics_model: PhysicsModel,
         framequat_name: str,
-        lag_range: tuple[float, float] = (0.001, 0.005),
-        bias: float = math.radians(2.0),
+        min_lag: float = 0.0,
+        max_lag: float = 0.0,
+        bias: float = 0.0,
         noise: Noise | None = None,
     ) -> Self:
         """Create a projected gravity observation from a physics model.
@@ -387,7 +377,9 @@ class ProjectedGravityObservation(StatefulObservation):
         Args:
             physics_model: MuJoCo physics model
             framequat_name: The name of the framequat sensor
-            lag_range: The range of EMA factors to use, to approximate the
+            min_lag: The minimum EMA factor to use, to approximate the
+                variation in the amount of smoothing of the Kalman filter.
+            max_lag: The maximum EMA factor to use, to approximate the
                 variation in the amount of smoothing of the Kalman filter.
             bias: The bias of the gravity vector, in radians.
             noise: The observation noise.
@@ -402,15 +394,15 @@ class ProjectedGravityObservation(StatefulObservation):
         return cls(
             framequat_idx_range=sensor_name_to_idx_range[framequat_name],
             gravity=(float(gx), float(gy), float(gz)),
-            lag_range=lag_range,
+            min_lag=min_lag,
+            max_lag=max_lag,
             noise=noise,
             bias=bias,
         )
 
     def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> ProjectedGravityCarry:
-        minval, maxval = self.lag_range
         lrng, brng = jax.random.split(rng)
-        lag = jax.random.uniform(lrng, (1,), minval=minval, maxval=maxval)
+        lag = jax.random.uniform(lrng, (1,), minval=self.min_lag, maxval=self.max_lag)
         bias = jax.random.uniform(brng, (3,), minval=-self.bias, maxval=self.bias)
         return ProjectedGravityCarry(x=jnp.zeros((3,)), lag=lag, bias=bias)
 

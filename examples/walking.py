@@ -443,16 +443,17 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             "base_orientation": ksim.BaseOrientationObservation(),
             "base_linear_velocity": ksim.BaseLinearVelocityObservation(),
             "base_angular_velocity": ksim.BaseAngularVelocityObservation(),
-            "projected_gravity": ksim.ProjectedGravityObservation.create(
+            "imu_projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="orientation",
                 noise=ksim.AdditiveGaussianNoise(std=0.01),
+                min_lag=0.001,
+                max_lag=0.005,
+                bias=math.radians(2.0),
             ),
-            "clean_projected_gravity": ksim.ProjectedGravityObservation.create(
+            "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="orientation",
-                lag_range=(0.0, 0.0),
-                bias=0.0,
             ),
             "actuator_acceleration": ksim.ActuatorAccelerationObservation(),
             "imu_acc": ksim.SensorObservation.create(
@@ -580,7 +581,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     ) -> tuple[xax.Distribution, Array, ksim.ClipAccelerationParams]:
         dh_joint_pos_j = observations["noisy_joint_position"]
         dh_joint_vel_j = observations["noisy_joint_velocity"]
-        proj_grav_3 = observations["noisy_projected_gravity"]
+        proj_grav_3 = observations["noisy_imu_projected_gravity"]
         imu_gyro_3 = observations["noisy_imu_gyro"]
 
         # Command tensors.

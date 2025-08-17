@@ -360,13 +360,11 @@ def get_physics_engine(
     else:
         phys_steps_per_actuator_step = 1
 
-    events = xax.FrozenDict(events)
-
     match engine_type:
         case "mujoco":
             return MujocoEngine(
                 resets=tuple(resets),
-                events=xax.FrozenDict(events),
+                events=xax.freeze_dict(events),
                 actuators=actuators,
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
@@ -378,7 +376,7 @@ def get_physics_engine(
         case "mjx":
             return MjxEngine(
                 resets=tuple(resets),
-                events=xax.FrozenDict(events),
+                events=xax.freeze_dict(events),
                 actuators=actuators,
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
