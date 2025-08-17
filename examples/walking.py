@@ -455,7 +455,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 physics_model=physics_model,
                 framequat_name="orientation",
             ),
-            "actuator_acceleration": ksim.ActuatorAccelerationObservation(),
             "imu_acc": ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_acc",
