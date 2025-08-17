@@ -519,7 +519,13 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
-                threshold=self.config.gait_period / 2.0,
+                period=self.config.gait_period / 2.0,
+                contact_obs="feet_contact",
+                scale=1.0,
+            ),
+            "foot_height": ksim.FeetHeightReward(
+                ctrl_dt=self.config.ctrl_dt,
+                period=self.config.gait_period / 2.0,
                 contact_obs="feet_contact",
                 position_obs="feet_position",
                 height=self.config.max_foot_height,
@@ -527,11 +533,11 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             "foot_force": ksim.FeetForcePenalty(
                 force_obs="feet_force",
-                scale=-0.1,
+                scale=-1e-6,
             ),
             "foot_torque": ksim.FeetTorquePenalty(
                 torque_obs="feet_torque",
-                scale=-0.1,
+                scale=-1e-7,
             ),
         }
 
