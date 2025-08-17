@@ -25,6 +25,8 @@ __all__ = [
     "SiteOrientationObservation",
     "FeetContactObservation",
     "FeetPositionObservation",
+    "FeetForceObservation",
+    "FeetTorqueObservation",
     "FeetOrientationObservation",
     "TimestepObservation",
     "ActPosObservation",
@@ -485,6 +487,62 @@ class FeetPositionObservation(Observation):
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         foot_left_pos = state.physics_state.data.xpos[self.foot_left]
         foot_right_pos = state.physics_state.data.xpos[self.foot_right]
+        return jnp.stack([foot_left_pos, foot_right_pos], axis=-2)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetForceObservation(Observation):
+    foot_left: int = attrs.field()
+    foot_right: int = attrs.field()
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        foot_left_body_name: str,
+        foot_right_body_name: str,
+        noise: Noise | None = None,
+    ) -> Self:
+        foot_left_idx = get_body_data_idx_from_name(physics_model, foot_left_body_name)
+        foot_right_idx = get_body_data_idx_from_name(physics_model, foot_right_body_name)
+        return cls(
+            foot_left=foot_left_idx,
+            foot_right=foot_right_idx,
+            noise=noise,
+        )
+
+    def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        foot_left_pos = state.physics_state.data.cfrc_ext[self.foot_left][..., :3]
+        foot_right_pos = state.physics_state.data.cfrc_ext[self.foot_right][..., :3]
+        return jnp.stack([foot_left_pos, foot_right_pos], axis=-2)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetTorqueObservation(Observation):
+    foot_left: int = attrs.field()
+    foot_right: int = attrs.field()
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        foot_left_body_name: str,
+        foot_right_body_name: str,
+        noise: Noise | None = None,
+    ) -> Self:
+        foot_left_idx = get_body_data_idx_from_name(physics_model, foot_left_body_name)
+        foot_right_idx = get_body_data_idx_from_name(physics_model, foot_right_body_name)
+        return cls(
+            foot_left=foot_left_idx,
+            foot_right=foot_right_idx,
+            noise=noise,
+        )
+
+    def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        foot_left_pos = state.physics_state.data.cfrc_ext[self.foot_left][..., 3:]
+        foot_right_pos = state.physics_state.data.cfrc_ext[self.foot_right][..., 3:]
         return jnp.stack([foot_left_pos, foot_right_pos], axis=-2)
 
 

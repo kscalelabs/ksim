@@ -26,8 +26,9 @@ __all__ = [
     "LinkAccelerationPenalty",
     "LinkJerkPenalty",
     "ReachabilityPenalty",
-    "FeetHeightReward",
     "FeetAirTimeReward",
+    "FeetForcePenalty",
+    "FeetTorquePenalty",
     "SinusoidalGaitReward",
     "BaseHeightTrackingReward",
 ]
@@ -725,65 +726,30 @@ class ReachabilityPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class FeetHeightReward(StatefulReward):
-    """Reward for having the foot above the ground some amount."""
-
-    height: float = attrs.field()
-    position_obs: str = attrs.field()
-    contact_obs: str = attrs.field()
-    num_feet: int = attrs.field(default=2)
-
-    def initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(self.num_feet, dtype=jnp.float32)
-
-    def get_reward_stateful(
-        self,
-        trajectory: Trajectory,
-        reward_carry: Array,
-    ) -> tuple[Array, Array]:
-        contact_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
-        contact_tn = contact_tcn.any(axis=-2)
-        chex.assert_shape(contact_tn, (..., self.num_feet))
-
-        position_tn3 = trajectory.obs[self.position_obs]
-        chex.assert_shape(position_tn3, (..., self.num_feet, 3))
-
-        # Give a sparse reward once the foot contacts the ground, equal to the
-        # maximum height of the foot since the last contact, thresholded at the
-        # target height.
-        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
-            contact_n, position_n3 = x
-            height_n = position_n3[..., 2]
-            reward_n = jnp.where(contact_n, carry, 0.0).clip(max=self.height)
-            max_height_n = jnp.maximum(carry, height_n)
-            carry = jnp.where(contact_n, 0.0, max_height_n)
-            return carry, reward_n
-
-        reward_carry, reward_tn = xax.scan(scan_fn, reward_carry, (contact_tn, position_tn3))
-        reward_t = reward_tn.max(axis=-1)
-        return reward_t, reward_carry
-
-
-@attrs.define(frozen=True, kw_only=True)
 class FeetAirTimeReward(StatefulReward):
     """Reward for feet either touching or not touching the ground for some time."""
 
     threshold: float = attrs.field()
     ctrl_dt: float = attrs.field()
     contact_obs: str = attrs.field()
+    position_obs: str = attrs.field()
+    height: float = attrs.field()
     num_feet: int = attrs.field(default=2)
     bias: float = attrs.field(default=0.0)
     linvel_moving_threshold: float = attrs.field(default=0.05)
     angvel_moving_threshold: float = attrs.field(default=0.05)
 
-    def initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(self.num_feet, dtype=jnp.int32)
+    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return (
+            jnp.zeros(self.num_feet, dtype=jnp.int32),
+            jnp.zeros(self.num_feet, dtype=jnp.float32),
+        )
 
     def get_reward_stateful(
         self,
         trajectory: Trajectory,
-        reward_carry: Array,
-    ) -> tuple[Array, Array]:
+        reward_carry: tuple[Array, Array],
+    ) -> tuple[Array, tuple[Array, Array]]:
         not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
         not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
         not_moving = not_moving_lin & not_moving_ang
@@ -792,21 +758,63 @@ class FeetAirTimeReward(StatefulReward):
         sensor_data_tn = sensor_data_tcn.any(axis=-2)
         chex.assert_shape(sensor_data_tn, (..., self.num_feet))
 
+        position_tn3 = trajectory.obs[self.position_obs]
+        chex.assert_shape(position_tn3, (..., self.num_feet, 3))
+
         threshold_steps = round(self.threshold / self.ctrl_dt)
 
-        def scan_fn(carry: Array, x: tuple[Array, Array, Array]) -> tuple[Array, Array]:
-            count_n, (contact_n, not_moving, done) = carry, x
-            count_n = jnp.where(done | not_moving | contact_n, 0, count_n + 1)
-            return count_n, count_n
+        def scan_fn(
+            carry: tuple[Array, Array],
+            x: tuple[Array, Array, Array, Array],
+        ) -> tuple[tuple[Array, Array], tuple[Array, Array]]:
+            (count_n, max_height_n), (contact_n, position_n3, not_moving, done) = carry, x
+            reset = done | not_moving | contact_n
+            count_n = jnp.where(reset, 0, count_n + 1)
 
-        reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, not_moving, trajectory.done))
+            height_n = position_n3[..., 2]
+            max_height_n = jnp.where(reset, 0.0, jnp.maximum(max_height_n, height_n))
+
+            return (count_n, max_height_n), (count_n, max_height_n)
+
+        reward_carry, (count_tn, max_height_tn) = xax.scan(
+            scan_fn,
+            reward_carry,
+            (sensor_data_tn, position_tn3, not_moving, trajectory.done),
+        )
 
         # Gradually increase reward until `threshold_steps`.
         reward_tn = (count_tn.astype(jnp.float32) / threshold_steps) + self.bias
         reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
+
+        # Scale the reward according to the max height.
+        reward_tn = reward_tn * max_height_tn.clip(max=self.height) / self.height
+
         reward_t = reward_tn.sum(axis=-1)
 
         return reward_t, reward_carry
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetForcePenalty(Reward):
+    """Reward for reducing the force on the feet."""
+
+    force_obs: str = attrs.field()
+    bias: float = attrs.field(default=0.0)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        force_t = (jnp.linalg.norm(trajectory.obs[self.force_obs], axis=-1) - self.bias).clip(min=0.0)
+        return force_t.sum(axis=-1) ** 2
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetTorquePenalty(Reward):
+    """Reward for reducing the force on the feet."""
+
+    torque_obs: str = attrs.field()
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        torque_t = jnp.linalg.norm(trajectory.obs[self.torque_obs], axis=-1)
+        return torque_t.sum(axis=-1) ** 2
 
 
 @attrs.define(kw_only=True)
