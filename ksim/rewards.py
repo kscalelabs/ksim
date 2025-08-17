@@ -734,14 +734,14 @@ class FeetHeightReward(StatefulReward):
     num_feet: int = attrs.field(default=2)
     min_steps_no_contact: int = attrs.field(default=5)
 
-    def initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(self.num_feet, dtype=jnp.float32)
+    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return (jnp.zeros(self.num_feet, dtype=jnp.float32), jnp.zeros(self.num_feet, dtype=jnp.int32))
 
     def get_reward_stateful(
         self,
         trajectory: Trajectory,
-        reward_carry: Array,
-    ) -> tuple[Array, Array]:
+        reward_carry: tuple[Array, Array],
+    ) -> tuple[Array, tuple[Array, Array]]:
         contact_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
         contact_tn = contact_tcn.any(axis=-2)
         chex.assert_shape(contact_tn, (..., self.num_feet))
@@ -752,13 +752,16 @@ class FeetHeightReward(StatefulReward):
         # Give a sparse reward once the foot contacts the ground, equal to the
         # maximum height of the foot since the last contact, thresholded at the
         # target height.
-        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+        def scan_fn(carry: tuple[Array, Array], x: tuple[Array, Array]) -> tuple[tuple[Array, Array], Array]:
+            max_height_n, steps_since_contact_n = carry
             contact_n, position_n3 = x
             height_n = position_n3[..., 2]
-            max_height_n = jnp.maximum(carry, height_n)
-            carry = jnp.where(contact_n, height_n, max_height_n)
-            reward_n = jnp.where(contact_n, max_height_n, 0.0).clip(max=self.height)
-            return carry, reward_n
+            max_height_n = jnp.maximum(max_height_n, height_n)
+            next_max_height_n = jnp.where(contact_n, height_n, max_height_n)
+            steps_since_contact_n = jnp.where(contact_n, 0, steps_since_contact_n + 1)
+            has_reward = contact_n & (steps_since_contact_n > self.min_steps_no_contact)
+            reward_n = jnp.where(has_reward, max_height_n, 0.0).clip(max=self.height)
+            return (next_max_height_n, steps_since_contact_n), reward_n
 
         reward_carry, reward_tn = xax.scan(scan_fn, reward_carry, (contact_tn, position_tn3))
         reward_t = reward_tn.max(axis=-1)
