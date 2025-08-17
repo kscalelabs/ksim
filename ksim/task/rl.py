@@ -1365,8 +1365,8 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             return Image.open(buf)
 
         arrs: list[tuple[str, Mapping[str, Array]]] = [
-            ("🎁 reward images", {f"|{k}": v for k, v in logged_traj.rewards.components.items()}),
-            ("🎁 reward images", {"total": logged_traj.rewards.total}),
+            ("🎁 reward images", logged_traj.rewards.components),
+            ("🎁 reward images", {"_total": logged_traj.rewards.total}),
         ]
         if self.config.log_all_images:
             arrs += [
@@ -1434,7 +1434,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             self.config.plot_figsize[1],
         )
         img = create_plot_image(combined_rewards_figsize, plot_combined_rewards)
-        log_callback("components", img, "🎁 reward images")
+        log_callback("_components", img, "🎁 reward images")
 
     def _log_logged_trajectory_video(
         self,
@@ -1524,8 +1524,8 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             rewards: The rewards to get the metrics for.
         """
         return {
-            "total": rewards.total,
-            **{f"|{key}": value for key, value in rewards.components.items()},
+            "_total": rewards.total,
+            **rewards.components,
         }
 
     def get_termination_metrics(self, trajectories: Trajectory) -> dict[str, Array]:
@@ -1945,8 +1945,8 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
 
                     # Send rewards
                     reward_scalars = {
-                        "total": float(jax.device_get(reward_state.total[-1])),
-                        **{f"|{k}": float(jax.device_get(v[-1])) for k, v in reward_state.components.items()},
+                        "_total": float(jax.device_get(reward_state.total[-1])),
+                        **{k: float(jax.device_get(v[-1])) for k, v in reward_state.components.items()},
                     }
                     viewer.push_plot_metrics(reward_scalars, group="reward")
 
