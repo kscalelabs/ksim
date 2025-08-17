@@ -832,7 +832,11 @@ class FeetHeightReward(StatefulReward):
 
 @attrs.define(frozen=True, kw_only=True)
 class ForcePenalty(StatefulReward):
-    """Reward for reducing the force on the feet."""
+    """Reward for reducing the force on some body.
+
+    This is modeled with a low-pass filter to simulate compliance, since when
+    using stiff contacts the force can sometimes be very high.
+    """
 
     force_obs: str = attrs.field()
     ctrl_dt: float = attrs.field()
