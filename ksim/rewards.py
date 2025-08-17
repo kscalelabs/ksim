@@ -732,7 +732,6 @@ class FeetHeightReward(StatefulReward):
     position_obs: str = attrs.field()
     contact_obs: str = attrs.field()
     num_feet: int = attrs.field(default=2)
-    min_steps_no_contact: int = attrs.field(default=5)
 
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
         return jnp.zeros(self.num_feet, dtype=jnp.float32)
