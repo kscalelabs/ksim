@@ -911,7 +911,7 @@ class FeetForcePenalty(StatefulReward):
     ) -> tuple[Array, Array]:
         alpha = jnp.exp(-self.ctrl_dt / self.ema_time)
         obs = (jnp.linalg.norm(trajectory.obs[self.force_obs], axis=-1) - self.bias).clip(min=0)
-        ema_fn = alpha * reward_carry + (1 - alpha) * 
+        ema_fn = alpha * reward_carry + (1 - alpha) * obs
         reward_penalty = -jnp.log1p(self.ema_scale * ema_fn)
         return reward_penalty, ema_fn
 
