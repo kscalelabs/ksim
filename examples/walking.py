@@ -481,11 +481,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 foot_left_body_name="foot_left",
                 foot_right_body_name="foot_right",
             ),
-            "feet_torque": ksim.FeetTorqueObservation.create(
-                physics_model=physics_model,
-                foot_left_body_name="foot_left",
-                foot_right_body_name="foot_right",
-            ),
         }
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
@@ -524,20 +519,16 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=1.0,
             ),
             "foot_height": ksim.FeetHeightReward(
-                ctrl_dt=self.config.ctrl_dt,
-                period=self.config.gait_period / 2.0,
                 contact_obs="feet_contact",
                 position_obs="feet_position",
                 height=self.config.max_foot_height,
                 scale=1.0,
             ),
-            "foot_force": ksim.FeetForcePenalty(
+            "foot_force": ksim.ForcePenalty(
                 force_obs="feet_force",
-                scale=-1e-6,
-            ),
-            "foot_torque": ksim.FeetTorquePenalty(
-                torque_obs="feet_torque",
-                scale=-1e-7,
+                ctrl_dt=self.config.ctrl_dt,
+                bias=100.0,
+                scale=-1e-1,
             ),
         }
 
@@ -560,7 +551,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             params.key,
             physics_model=params.physics_model,
             num_actor_inputs=43,
-            num_critic_inputs=346,
+            num_critic_inputs=340,
             num_joints=17,
             min_std=0.01,
             max_std=1.0,
@@ -638,11 +629,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         lin_vel_obs_3 = observations["base_linear_velocity"]
         ang_vel_obs_3 = observations["base_angular_velocity"]
         feet_force_obs_23 = observations["feet_force"]
-        feet_torque_obs_23 = observations["feet_torque"]
 
         # Flattens the last two dimensions.
         feet_force_obs_6 = feet_force_obs_23.reshape(*feet_force_obs_23.shape[:-2], 6)
-        feet_torque_obs_6 = feet_torque_obs_23.reshape(*feet_torque_obs_23.shape[:-2], 6)
 
         # Command tensors.
         linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
@@ -667,7 +656,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
                 feet_force_obs_6,  # 6
-                feet_torque_obs_6,  # 6
                 linvel_cmd_4,  # 4
                 angvel_cmd_1,  # 1
             ],

@@ -28,8 +28,7 @@ __all__ = [
     "ReachabilityPenalty",
     "FeetAirTimeReward",
     "FeetHeightReward",
-    "FeetForcePenalty",
-    "FeetTorquePenalty",
+    "ForcePenalty",
     "SinusoidalGaitReward",
     "BaseHeightTrackingReward",
 ]
@@ -778,8 +777,6 @@ class FeetAirTimeReward(StatefulReward):
 class FeetHeightReward(StatefulReward):
     """Reward for feet either touching or not touching the ground for some time."""
 
-    period: float = attrs.field()
-    ctrl_dt: float = attrs.field()
     contact_obs: str = attrs.field()
     position_obs: str = attrs.field()
     height: float = attrs.field()
@@ -787,17 +784,14 @@ class FeetHeightReward(StatefulReward):
     linvel_moving_threshold: float = attrs.field(default=0.05)
     angvel_moving_threshold: float = attrs.field(default=0.05)
 
-    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        return (
-            jnp.zeros(self.num_feet, dtype=jnp.float32),
-            jnp.zeros(self.num_feet, dtype=jnp.float32),
-        )
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(self.num_feet, dtype=jnp.float32)
 
     def get_reward_stateful(
         self,
         trajectory: Trajectory,
-        reward_carry: tuple[Array, Array],
-    ) -> tuple[Array, tuple[Array, Array]]:
+        reward_carry: Array,
+    ) -> tuple[Array, Array]:
         not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
         not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
         not_moving = not_moving_lin & not_moving_ang
@@ -812,16 +806,14 @@ class FeetHeightReward(StatefulReward):
         # Give a sparse reward once the foot contacts the ground, equal to the
         # maximum height of the foot since the last contact, thresholded at the
         # target height.
-        def scan_fn(carry: tuple[Array, Array], x: tuple[Array, Array, Array]) -> tuple[tuple[Array, Array], Array]:
-            (elapsed_time_n, max_height_n), (contact_n, position_n3, not_moving) = carry, x
+        def scan_fn(carry: Array, x: tuple[Array, Array, Array]) -> tuple[Array, Array]:
+            max_height_n, (contact_n, position_n3, not_moving) = carry, x
             height_n = position_n3[..., 2]
-            scale = (elapsed_time_n / self.period).clip(max=1.0)
             reset = not_moving | contact_n
-            reward_n = jnp.where(reset, max_height_n, 0.0).clip(max=self.height) * scale
+            reward_n = jnp.where(reset, max_height_n, 0.0).clip(max=self.height)
             max_height_n = jnp.maximum(max_height_n, height_n)
             max_height_n = jnp.where(reset, 0.0, max_height_n)
-            elapsed_time_n = jnp.where(reset, 0.0, elapsed_time_n + self.ctrl_dt)
-            return (elapsed_time_n, max_height_n), reward_n
+            return max_height_n, reward_n
 
         reward_carry, reward_tn = xax.scan(
             scan_fn,
@@ -833,26 +825,39 @@ class FeetHeightReward(StatefulReward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class FeetForcePenalty(Reward):
-    """Reward for reducing the force on the feet."""
+class ForcePenalty(StatefulReward):
+    """Reward for reducing the force on some body.
+
+    This is modeled with a low-pass filter to simulate compliance, since when
+    using stiff contacts the force can sometimes be very high.
+    """
 
     force_obs: str = attrs.field()
+    ctrl_dt: float = attrs.field()
+    ema_time: float = attrs.field(default=0.03)
+    ema_scale: float = attrs.field(default=0.001)
+    num_feet: int = attrs.field(default=2)
     bias: float = attrs.field(default=0.0)
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        force_t = (jnp.linalg.norm(trajectory.obs[self.force_obs], axis=-1) - self.bias).clip(min=0.0)
-        return force_t.sum(axis=-1) ** 2
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(self.num_feet, dtype=jnp.float32)
 
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: Array,
+    ) -> tuple[Array, Array]:
+        alpha = jnp.exp(-self.ctrl_dt / self.ema_time)
+        obs = (jnp.linalg.norm(trajectory.obs[self.force_obs], axis=-1) - self.bias).clip(min=0)
 
-@attrs.define(frozen=True, kw_only=True)
-class FeetTorquePenalty(Reward):
-    """Reward for reducing the force on the feet."""
+        def scan_fn(carry: Array, x: Array) -> tuple[Array, Array]:
+            ema_n, obs_n = carry, x
+            ema_n = alpha * ema_n + (1 - alpha) * obs_n
+            return ema_n, ema_n
 
-    torque_obs: str = attrs.field()
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        torque_t = jnp.linalg.norm(trajectory.obs[self.torque_obs], axis=-1)
-        return torque_t.sum(axis=-1) ** 2
+        ema_fn, ema_acc = xax.scan(scan_fn, reward_carry, obs)
+        penalty = jnp.log1p(self.ema_scale * ema_acc).sum(axis=-1)
+        return penalty, ema_fn
 
 
 @attrs.define(kw_only=True)
