@@ -25,9 +25,11 @@ __all__ = [
     "UprightReward",
     "LinkAccelerationPenalty",
     "LinkJerkPenalty",
+    "SymmetryReward",
     "ReachabilityPenalty",
     "FeetAirTimeReward",
     "FeetHeightReward",
+    "MotionlessAtRestPenalty",
     "ForcePenalty",
     "SinusoidalGaitReward",
     "BaseHeightTrackingReward",
@@ -822,6 +824,24 @@ class FeetHeightReward(StatefulReward):
         )
         reward_t = reward_tn.max(axis=-1)
         return reward_t, reward_carry
+
+
+@attrs.define(frozen=True, kw_only=True)
+class MotionlessAtRestPenalty(Reward):
+    """Reward for feet either touching or not touching the ground for some time."""
+
+    linvel_moving_threshold: float = attrs.field(default=0.05)
+    angvel_moving_threshold: float = attrs.field(default=0.05)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
+        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
+        not_moving = not_moving_lin & not_moving_ang
+
+        joint_vel = trajectory.qvel[..., 6:]
+        joint_vel_norm = jnp.linalg.norm(joint_vel, axis=-1)
+        penalty = jnp.where(not_moving, joint_vel_norm, 0.0)
+        return penalty
 
 
 @attrs.define(frozen=True, kw_only=True)
