@@ -286,7 +286,7 @@ class LinearVelocityCommand(Command):
     zero_prob: float = attrs.field(default=0.0)
     backward_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
-    vis_height: float = attrs.field(default=1.0)
+    vis_height: float = attrs.field(default=0.5)
     vis_scale: float = attrs.field(default=0.05)
 
     def initial_command(
@@ -332,7 +332,7 @@ class LinearVelocityCommand(Command):
         )
 
     def get_markers(self, name: str) -> Collection[Marker]:
-        return [LinearVelocityCommandMarker.get(command_name=name, height=0.5)]
+        return [LinearVelocityCommandMarker.get(command_name=name, height=self.vis_height)]
 
 
 @jax.tree_util.register_dataclass
