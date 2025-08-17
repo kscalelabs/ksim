@@ -1365,7 +1365,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             return Image.open(buf)
 
         arrs: list[tuple[str, Mapping[str, Array]]] = [
-            ("🎁 reward images", {f">{k}": v for k, v in logged_traj.rewards.components.items()}),
+            ("🎁 reward images", {f"|{k}": v for k, v in logged_traj.rewards.components.items()}),
             ("🎁 reward images", {"total": logged_traj.rewards.total}),
         ]
         if self.config.log_all_images:
@@ -1525,7 +1525,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         """
         return {
             "total": rewards.total,
-            **{f">{key}": value for key, value in rewards.components.items()},
+            **{f"|{key}": value for key, value in rewards.components.items()},
         }
 
     def get_termination_metrics(self, trajectories: Trajectory) -> dict[str, Array]:
@@ -1946,7 +1946,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                     # Send rewards
                     reward_scalars = {
                         "total": float(jax.device_get(reward_state.total[-1])),
-                        **{f">{k}": float(jax.device_get(v[-1])) for k, v in reward_state.components.items()},
+                        **{f"|{k}": float(jax.device_get(v[-1])) for k, v in reward_state.components.items()},
                     }
                     viewer.push_plot_metrics(reward_scalars, group="reward")
 
