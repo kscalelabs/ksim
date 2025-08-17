@@ -45,13 +45,6 @@ class DummyModel:
         self.hfield_data = jnp.zeros((10, 10))
 
 
-def test_reset_name() -> None:
-    """Test that reset names are correctly generated."""
-    reset = DummyReset()
-    assert reset.get_name() == "dummy_reset"
-    assert reset.reset_name == "dummy_reset"
-
-
 class TestXYPositionResetBuilder:
     """Tests for the XYPositionResetBuilder class."""
 

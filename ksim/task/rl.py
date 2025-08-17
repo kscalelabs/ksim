@@ -140,32 +140,31 @@ class RolloutConstants:
 
     model_statics: tuple[PyTree, ...]
     engine: PhysicsEngine
-    observations: Collection[Observation]
-    commands: Collection[Command]
-    rewards: Collection[Reward]
-    terminations: Collection[Termination]
+    observations: xax.FrozenDict[str, Observation]
+    commands: xax.FrozenDict[str, Command]
+    rewards: xax.FrozenDict[str, Reward]
+    terminations: xax.FrozenDict[str, Termination]
     curriculum: Curriculum
     argmax_action: bool
     aux_constants: xax.FrozenDict[str, PyTree]
-    command_metric_fns: tuple[tuple[str, Callable[[PyTree, PhysicsData], xax.FrozenDict[str, Array]]], ...] = ()
 
 
 def get_observation(
     rollout_env_state: RolloutEnvState,
-    observations: Collection[Observation],
+    observations: xax.FrozenDict[str, Observation],
     obs_carry: PyTree,
     curriculum_level: Array,
     rng: PRNGKeyArray,
-) -> tuple[xax.FrozenDict[str, Array], xax.FrozenDict[str, PyTree]]:
+) -> tuple[xax.FrozenDict[str, PyTree], xax.FrozenDict[str, PyTree]]:
     """Get the observation and carry from the physics state."""
     observation_dict: dict[str, Array] = {}
     next_obs_carry: dict[str, PyTree] = {}
-    for observation in observations:
+    for name, observation in observations.items():
         rng, obs_rng, noise_rng = jax.random.split(rng, 3)
         observation_state = ObservationInput(
             commands=rollout_env_state.commands,
             physics_state=rollout_env_state.physics_state,
-            obs_carry=obs_carry[observation.observation_name],
+            obs_carry=obs_carry[name],
         )
 
         # Calls the observation function.
@@ -174,17 +173,19 @@ def get_observation(
         else:
             observation_val = observation.observe(observation_state, curriculum_level, obs_rng)
             new_carry = observation_state.obs_carry
-        observation_val = observation.add_noise(observation_val, curriculum_level, noise_rng)
+        observation_dict[name] = observation_val
+        next_obs_carry[name] = new_carry
 
-        observation_dict[observation.observation_name] = observation_val
-        next_obs_carry[observation.observation_name] = new_carry
+        # Adds the noisy observations as well.
+        noisy_observation_val = observation.add_noise(observation_val, curriculum_level, noise_rng)
+        observation_dict[f"noisy_{name}"] = noisy_observation_val
 
-    return xax.FrozenDict(observation_dict), xax.FrozenDict(next_obs_carry)
+    return xax.freeze_dict(observation_dict), xax.freeze_dict(next_obs_carry)
 
 
 def get_rewards(
     trajectory: Trajectory,
-    rewards: Collection[Reward],
+    rewards: xax.FrozenDict[str, Reward],
     rewards_carry: xax.FrozenDict[str, PyTree],
     curriculum_level: Array,
     rng: PRNGKeyArray,
@@ -196,9 +197,8 @@ def get_rewards(
     next_reward_carry: dict[str, PyTree] = {}
     target_shape = trajectory.done.shape
 
-    for reward in rewards:
-        reward_name = reward.reward_name
-        reward_carry = rewards_carry[reward_name]
+    for name, reward in rewards.items():
+        reward_carry = rewards_carry[name]
 
         if isinstance(reward, StatefulReward):
             rng, reward_rng = jax.random.split(rng)
@@ -212,9 +212,9 @@ def get_rewards(
         else:
             reward_val = reward.get_reward(trajectory)
         if isinstance(reward_val, Mapping):
-            reward_val = {f"{reward_name}/{k}": v * reward.scale for k, v in reward_val.items()}
+            reward_val = {f"{name}/{k}": v * reward.scale for k, v in reward_val.items()}
         else:
-            reward_val = {reward_name: reward_val * reward.scale}
+            reward_val = {name: reward_val * reward.scale}
         if reward.scale_by_curriculum:
             reward_val = {k: v * curriculum_level for k, v in reward_val.items()}
 
@@ -223,7 +223,7 @@ def get_rewards(
                 raise AssertionError(f"Reward {k} shape {v.shape} does not match {target_shape}")
 
         reward_dict.update(reward_val)
-        next_reward_carry[reward_name] = reward_carry
+        next_reward_carry[name] = reward_carry
 
     total_reward = jax.tree.reduce(jnp.add, list(reward_dict.values()))
     if clip_min is not None:
@@ -233,105 +233,100 @@ def get_rewards(
 
     return RewardState(
         total=total_reward,
-        components=xax.FrozenDict(reward_dict),
-        carry=xax.FrozenDict(next_reward_carry),
+        components=xax.freeze_dict(reward_dict),
+        carry=xax.freeze_dict(next_reward_carry),
     )
 
 
 def get_initial_obs_carry(
     rng: PRNGKeyArray,
     physics_state: PhysicsState,
-    observations: Collection[Observation],
+    observations: xax.FrozenDict[str, Observation],
 ) -> xax.FrozenDict[str, PyTree]:
     """Get the initial observation carry."""
     rngs = jax.random.split(rng, len(observations))
-    return xax.FrozenDict(
+    return xax.freeze_dict(
         {
-            obs.observation_name: (
-                obs.initial_carry(physics_state, rng) if isinstance(obs, StatefulObservation) else None
-            )
-            for obs, rng in zip(observations, rngs, strict=True)
+            name: (obs.initial_carry(physics_state, rng) if isinstance(obs, StatefulObservation) else None)
+            for (name, obs), rng in zip(observations.items(), rngs, strict=True)
         }
     )
 
 
 def get_initial_reward_carry(
     rng: PRNGKeyArray,
-    rewards: Collection[Reward],
+    rewards: xax.FrozenDict[str, Reward],
 ) -> xax.FrozenDict[str, PyTree]:
     """Get the initial reward carry."""
     rngs = jax.random.split(rng, len(rewards))
-    return xax.FrozenDict(
+    return xax.freeze_dict(
         {
-            reward.reward_name: (reward.initial_carry(rng) if isinstance(reward, StatefulReward) else None)
-            for reward, rng in zip(rewards, rngs, strict=True)
+            name: (reward.initial_carry(rng) if isinstance(reward, StatefulReward) else None)
+            for (name, reward), rng in zip(rewards.items(), rngs, strict=True)
         }
     )
 
 
 def get_terminations(
     physics_state: PhysicsState,
-    terminations: Collection[Termination],
+    terminations: xax.FrozenDict[str, Termination],
     curriculum_level: Array,
 ) -> xax.FrozenDict[str, Array]:
     """Get the terminations from the physics state."""
     termination_dict = {}
-    for termination in terminations:
+    for name, termination in terminations.items():
         termination_val = termination(physics_state.data, curriculum_level)
         chex.assert_type(termination_val, int)
-        name = termination.termination_name
         termination_dict[name] = termination_val
-    return xax.FrozenDict(termination_dict)
+    return xax.freeze_dict(termination_dict)
 
 
 def get_commands(
     prev_commands: xax.FrozenDict[str, PyTree],
     physics_state: PhysicsState,
     rng: PRNGKeyArray,
-    commands: Collection[Command],
+    commands: xax.FrozenDict[str, Command],
     curriculum_level: Array,
-) -> xax.FrozenDict[str, Array]:
+) -> xax.FrozenDict[str, PyTree]:
     """Get the commands from the physics state."""
     command_dict = {}
-    for command_generator in commands:
+    for command_name, command_generator in commands.items():
         rng, cmd_rng = jax.random.split(rng)
-        command_name = command_generator.command_name
         prev_command = prev_commands[command_name]
         command_val = command_generator(prev_command, physics_state.data, curriculum_level, cmd_rng)
         command_dict[command_name] = command_val
-    return xax.FrozenDict(command_dict)
+    return xax.freeze_dict(command_dict)
 
 
 def get_initial_commands(
     rng: PRNGKeyArray,
     physics_data: PhysicsData,
-    commands: Collection[Command],
+    commands: xax.FrozenDict[str, Command],
     curriculum_level: Array,
-) -> xax.FrozenDict[str, Array]:
+) -> xax.FrozenDict[str, PyTree]:
     """Get the initial commands from the physics state."""
     command_dict = {}
-    for command_generator in commands:
+    for command_name, command_generator in commands.items():
         rng, cmd_rng = jax.random.split(rng)
-        command_name = command_generator.command_name
         command_val = command_generator.initial_command(physics_data, curriculum_level, cmd_rng)
         command_dict[command_name] = command_val
-    return xax.FrozenDict(command_dict)
+    return xax.freeze_dict(command_dict)
 
 
 def get_physics_randomizers(
     physics_model: PhysicsModel,
-    randomizers: Collection[PhysicsRandomizer],
+    randomizers: xax.FrozenDict[str, PhysicsRandomizer],
     rng: PRNGKeyArray,
 ) -> xax.FrozenDict[str, Array]:
     all_randomizations: dict[str, dict[str, Array]] = {}
-    for randomizer in randomizers:
+    for name, randomizer in randomizers.items():
         rng, randomization_rng = jax.random.split(rng)
-        all_randomizations[randomizer.randomization_name] = randomizer(physics_model, randomization_rng)
+        all_randomizations[name] = randomizer(physics_model, randomization_rng)
     for name, count in Counter([k for d in all_randomizations.values() for k in d.keys()]).items():
         if count > 1:
             name_to_keys = {k: set(v.keys()) for k, v in all_randomizations.items()}
             raise ValueError(f"Found duplicate randomization keys: {name}. Randomizations: {name_to_keys}")
-    return xax.FrozenDict({k: v for d in all_randomizations.values() for k, v in d.items()})
+    return xax.freeze_dict({k: v for d in all_randomizations.values() for k, v in d.items()})
 
 
 def _tree_replace(physics_model: PhysicsModel, randomizations: xax.FrozenDict[str, Array]) -> PhysicsModel:
@@ -348,7 +343,7 @@ def _tree_replace(physics_model: PhysicsModel, randomizations: xax.FrozenDict[st
 def apply_randomizations(
     physics_model: PhysicsModel,
     engine: PhysicsEngine,
-    randomizers: Collection[PhysicsRandomizer],
+    randomizers: xax.FrozenDict[str, PhysicsRandomizer],
     curriculum_level: Array,
     rng: PRNGKeyArray,
 ) -> tuple[xax.FrozenDict[str, Array], PhysicsState]:
@@ -788,14 +783,21 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         )
 
     @abstractmethod
-    def get_physics_randomizers(self, physics_model: PhysicsModel) -> Collection[PhysicsRandomizer]:
+    def get_actuators(
+        self,
+        physics_model: PhysicsModel,
+        metadata: Metadata | None = None,
+    ) -> Actuators: ...
+
+    @abstractmethod
+    def get_physics_randomizers(self, physics_model: PhysicsModel) -> Mapping[str, PhysicsRandomizer]:
         """Returns randomizers, for randomizing each environment.
 
         Args:
             physics_model: The physics model to get the randomization for.
 
         Returns:
-            A collection of randomization generators.
+            A mapping of names to randomization generators.
         """
 
     @abstractmethod
@@ -810,62 +812,58 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         """
 
     @abstractmethod
-    def get_events(self, physics_model: PhysicsModel) -> Collection[Event]:
+    def get_events(self, physics_model: PhysicsModel) -> Mapping[str, Event]:
         """Returns the event generators for the current task.
 
         Args:
             physics_model: The physics model to get the events for.
+
+        Returns:
+            A mapping of names to event generators.
         """
 
     @abstractmethod
-    def get_actuators(
-        self,
-        physics_model: PhysicsModel,
-        metadata: Metadata | None = None,
-    ) -> Actuators: ...
-
-    @abstractmethod
-    def get_observations(self, physics_model: PhysicsModel) -> Collection[Observation]:
+    def get_observations(self, physics_model: PhysicsModel) -> Mapping[str, Observation]:
         """Returns the observation generators for the current task.
 
         Args:
             physics_model: The physics model to get the observations for.
 
         Returns:
-            A collection of observation generators.
+            A mapping of names to observation generators.
         """
 
     @abstractmethod
-    def get_commands(self, physics_model: PhysicsModel) -> Collection[Command]:
+    def get_commands(self, physics_model: PhysicsModel) -> Mapping[str, Command]:
         """Returns the command generators for the current task.
 
         Args:
             physics_model: The physics model to get the commands for.
 
         Returns:
-            A collection of command generators.
+            A mapping of names to command generators.
         """
 
     @abstractmethod
-    def get_rewards(self, physics_model: PhysicsModel) -> Collection[Reward]:
+    def get_rewards(self, physics_model: PhysicsModel) -> Mapping[str, Reward]:
         """Returns the reward generators for the current task.
 
         Args:
             physics_model: The physics model to get the rewards for.
 
         Returns:
-            A collection of reward generators.
+            A mapping of names to reward generators.
         """
 
     @abstractmethod
-    def get_terminations(self, physics_model: PhysicsModel) -> Collection[Termination]:
+    def get_terminations(self, physics_model: PhysicsModel) -> Mapping[str, Termination]:
         """Returns the termination generators for the current task.
 
         Args:
             physics_model: The physics model to get the terminations for.
 
         Returns:
-            A collection of termination generators.
+            A mapping of names to termination generators.
         """
 
     @abstractmethod
@@ -1045,16 +1043,6 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         terminated = jax.tree.reduce(jnp.logical_or, [t != 0 for t in terminations.values()])
         success = jax.tree.reduce(jnp.logical_and, [t != -1 for t in terminations.values()]) & terminated
 
-        # Compute command metrics for this step
-        pairs_list: list[tuple[str, Array]] = []
-        for cmd_name, metrics_fn in constants.command_metric_fns:
-            cmd_value = env_states.commands[cmd_name]
-            metrics_dict = metrics_fn(cmd_value, next_physics_state.data)
-            for met_name, met_val in metrics_dict.items():
-                key = f"{cmd_name}/{met_name}"
-                pairs_list.append((key, jnp.atleast_1d(jnp.asarray(met_val))))
-        command_metrics: xax.FrozenDict[str, Array] = xax.FrozenDict(dict(pairs_list))
-
         # Combines all the relevant data into a single object. Lives up here to
         # avoid accidentally incorporating information it shouldn't access to.
         transition = Trajectory(
@@ -1071,7 +1059,6 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             success=success,
             timestep=next_physics_state.data.time,
             termination_components=terminations,
-            command_metrics=command_metrics,
             aux_outputs=action.aux_outputs,
         )
 
@@ -1256,8 +1243,6 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                 ("💀 termination", metrics.termination, True),
                 ("🔄 curriculum", {"level": metrics.curriculum_level}, True),
             ]
-            if metrics.command is not None:
-                groups.append(("👣 command", metrics.command, True))
 
             for namespace, metric, secondary in groups:
                 for key, value in metric.items():
@@ -1382,7 +1367,6 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             (
                 ("👀 obs images", xax.get_pytree_mapping(logged_traj.trajectory.obs)),
                 ("🕹️ command images", xax.get_pytree_mapping(logged_traj.trajectory.command)),
-                ("👣 command metrics", xax.get_pytree_mapping(logged_traj.trajectory.command_metrics)),
                 ("🏃 action images", {"action": logged_traj.trajectory.action}),
                 ("💀 termination images", logged_traj.trajectory.termination_components),
                 ("🗓️ event images", logged_traj.trajectory.event_state),
@@ -1567,33 +1551,19 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             **{f"prct/{key}": ((value != 0).sum() / num_terminations) for key, value in kvs},
         }
 
-    def get_command_metrics(self, trajectories: Trajectory) -> dict[str, Array]:
-        """Gets the command metrics aggregated over the rollout.
-
-        This surfaces per-step command metric arrays so they can be logged as
-        histograms (and scalar means) alongside rewards and train metrics.
-
-        Args:
-            trajectories: The trajectories containing command_metrics.
-
-        Returns:
-            A mapping from metric name to array.
-        """
-        return {key: value for key, value in trajectories.command_metrics.items()}
-
     def get_markers(
         self,
-        commands: Collection[Command],
-        observations: Collection[Observation],
-        rewards: Collection[Reward],
+        commands: xax.FrozenDict[str, Command],
+        observations: xax.FrozenDict[str, Observation],
+        rewards: xax.FrozenDict[str, Reward],
     ) -> Collection[Marker]:
         markers: list[Marker] = []
-        for command in commands:
-            markers.extend(command.get_markers())
-        for observation in observations:
-            markers.extend(observation.get_markers())
-        for reward in rewards:
-            markers.extend(reward.get_markers())
+        for name, command in commands.items():
+            markers.extend(command.get_markers(name))
+        for name, observation in observations.items():
+            markers.extend(observation.get_markers(name))
+        for name, reward in rewards.items():
+            markers.extend(reward.get_markers(name))
         return markers
 
     def postprocess_trajectory(
@@ -1742,10 +1712,9 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         # Store all the metrics to log.
         metrics = Metrics(
             train=train_metrics,
-            reward=xax.FrozenDict(self.get_reward_metrics(trajectories, rewards)),
-            termination=xax.FrozenDict(self.get_termination_metrics(trajectories)),
+            reward=xax.freeze_dict(self.get_reward_metrics(trajectories, rewards)),
+            termination=xax.freeze_dict(self.get_termination_metrics(trajectories)),
             curriculum_level=new_carry.env_states.curriculum_state.level,
-            command=xax.FrozenDict(self.get_command_metrics(trajectories)),
         )
 
         # Steps the curriculum.
@@ -1866,7 +1835,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             self.update_mj_model(mj_model, metadata)
             log_joint_config_table(mj_model, metadata, self.logger)
 
-            randomizers = self.get_physics_randomizers(mj_model)
+            randomizers = xax.freeze_dict(self.get_physics_randomizers(mj_model))
 
             rng, model_rng = jax.random.split(rng)
             params = InitParams(
@@ -2009,16 +1978,6 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                         )
                     viewer.push_plot_metrics(command_scalars, group="command")
 
-                    # Send command metrics
-                    metric_scalars = {}
-                    for met_name, met_val in xax.get_pytree_mapping(transition.command_metrics).items():
-                        met_arr = np.asarray(jax.device_get(met_val))
-                        metric_scalars.update(
-                            {f"{met_name}_{i}": float(val) for i, val in enumerate(met_arr.flatten())}
-                        )
-                    if len(metric_scalars) > 0:
-                        viewer.push_plot_metrics(metric_scalars, group="command_metrics")
-
                     # Recieve pushes from the viewer
                     xfrc = viewer.drain_control_pipe()
                     if xfrc is not None:
@@ -2082,7 +2041,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
 
     def get_viewer_commands(
         self,
-        commands: Collection[Command],
+        commands: xax.FrozenDict[str, Command],
         prev_command_inputs: xax.FrozenDict[str, Array],
     ) -> xax.FrozenDict[str, Array]:
         """Get the commands when running with run_mode == "view".
@@ -2100,28 +2059,30 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         match vid_save_path.suffix.lower():
             case ".mp4":
                 try:
-                    import imageio.v2 as imageio  # noqa: PLC0415
+                    import mediapy as media  # noqa: PLC0415
+
+                    # Convert frames to the format mediapy expects (H, W, C) with uint8 values
+                    # Ensure frames are in the correct format for video writing
+                    video_frames = []
+                    for frame in frames:
+                        if frame.dtype != np.uint8:
+                            # Normalize to 0-255 range if needed
+                            if frame.max() <= 1.0:
+                                frame = (frame * 255).astype(np.uint8)
+                            else:
+                                frame = frame.astype(np.uint8)
+                        video_frames.append(frame)
+
+                    # Save video using mediapy
+                    media.write_video(str(vid_save_path), video_frames, fps=fps)
 
                 except ImportError as err:
                     raise RuntimeError(
-                        "Failed to save video - note that saving .mp4 videos with imageio usually "
-                        "requires the FFMPEG backend, which can be installed using `pip install "
-                        "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
-                        "your system."
+                        "Failed to save video - mediapy is required for MP4 video saving. "
+                        "Install it with: pip install mediapy"
                     ) from err
-
-                try:
-                    with imageio.get_writer(vid_save_path, mode="I", fps=fps) as writer:
-                        for frame in frames:
-                            writer.append_data(frame)  # pyright: ignore[reportAttributeAccessIssue]
-
                 except Exception as e:
-                    raise RuntimeError(
-                        "Failed to save video - note that saving .mp4 videos with imageio usually "
-                        "requires the FFMPEG backend, which can be installed using `pip install "
-                        "'imageio[ffmpeg]'`. Note that this also requires FFMPEG to be installed in "
-                        "your system."
-                    ) from e
+                    raise RuntimeError(f"Failed to save video: {e}. Ensure mediapy is properly installed.") from e
 
             case ".gif":
                 images = [Image.fromarray(frame) for frame in frames]
@@ -2160,23 +2121,16 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             raise ValueError("No terminations found! Must have at least one termination.")
         curriculum = self.get_curriculum(physics_model)
 
-        # Checks that the collections are distinct.
-        assert_distinct([observation.observation_name for observation in observations])
-        assert_distinct([command.command_name for command in commands])
-        assert_distinct([reward.reward_name for reward in rewards_terms])
-        assert_distinct([termination.termination_name for termination in terminations])
-
         return RolloutConstants(
             model_statics=model_statics,
             engine=engine,
-            observations=tuple(observations),
-            commands=tuple(commands),
-            rewards=tuple(rewards_terms),
-            terminations=tuple(terminations),
+            observations=xax.freeze_dict(observations),
+            commands=xax.freeze_dict(commands),
+            rewards=xax.freeze_dict(rewards_terms),
+            terminations=xax.freeze_dict(terminations),
             curriculum=curriculum,
             argmax_action=argmax_action,
-            aux_constants=xax.FrozenDict({}),
-            command_metric_fns=tuple((cmd.command_name, cmd.get_metrics) for cmd in commands),
+            aux_constants=xax.freeze_dict({}),
         )
 
     def _get_shared_state(
@@ -2193,7 +2147,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         return RolloutSharedState(
             physics_model=physics_model,
             model_arrs=model_arrs,
-            aux_values=xax.FrozenDict({}),
+            aux_values=xax.freeze_dict({}),
             rng=rng,
         )
 
@@ -2205,7 +2159,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         mj_model: mujoco.MjModel,  # pyright: ignore[reportAttributeAccessIssue]
         physics_model: PhysicsModel,
         policy_model: PyTree,
-        randomizers: Collection[PhysicsRandomizer],
+        randomizers: xax.FrozenDict[str, PhysicsRandomizer],
     ) -> RolloutEnvState:
         (
             rng,
@@ -2347,7 +2301,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             log_joint_config_table(mj_model, metadata, self.logger)
 
             mjx_model = self.get_mjx_model(mj_model)
-            randomizations = self.get_physics_randomizers(mjx_model)
+            randomizations = xax.freeze_dict(self.get_physics_randomizers(mjx_model))
 
             rng, model_rng = jax.random.split(rng)
             params = InitParams(
@@ -2454,7 +2408,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
 
         # Loads the MJX model, and initializes the loop variables.
         mjx_model = self.get_mjx_model(mj_model)
-        randomizers = self.get_physics_randomizers(mjx_model)
+        randomizers = xax.freeze_dict(self.get_physics_randomizers(mjx_model))
 
         constants = RLLoopConstants(
             optimizer=tuple(optimizers),

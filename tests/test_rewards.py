@@ -45,7 +45,6 @@ def create_test_trajectory(
         ctrl=dummy_ctrl,
         obs=xax.FrozenDict({}),
         command=xax.FrozenDict({}),
-        command_metrics=xax.FrozenDict({}),
         event_state=xax.FrozenDict({}),
         action=actions,
         done=done,

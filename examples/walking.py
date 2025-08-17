@@ -4,7 +4,7 @@ import functools
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Generic, TypedDict, TypeVar
 
 import equinox as eqx
 import jax
@@ -276,13 +276,33 @@ class WalkingConfig(ksim.PPOConfig):
     )
 
     # Reward parameters.
-    target_linear_velocity: float = xax.field(
-        value=4.0,
-        help="The linear velocity for the joystick command.",
+    linear_velocity_range: tuple[float, float] = xax.field(
+        value=(1.0, 4.0),
+        help="The range for the linear velocity command.",
     )
-    target_angular_velocity: float = xax.field(
-        value=math.radians(90.0),
-        help="The angular velocity for the joystick command.",
+    linear_velocity_max_yaw: float = xax.field(
+        value=math.pi / 4.0,
+        help="The maximum yaw for the linear velocity command.",
+    )
+    linear_velocity_zero_prob: float = xax.field(
+        value=0.2,
+        help="The probability of the linear velocity command being zero.",
+    )
+    linear_velocity_switch_prob: float = xax.field(
+        value=0.001,
+        help="The probability of the linear velocity command being switched.",
+    )
+    angular_velocity_range: tuple[float, float] = xax.field(
+        value=(-0.2, 0.2),
+        help="The range for the angular velocity command.",
+    )
+    angular_velocity_zero_prob: float = xax.field(
+        value=0.2,
+        help="The probability of the angular velocity command being zero.",
+    )
+    angular_velocity_switch_prob: float = xax.field(
+        value=0.001,
+        help="The probability of the angular velocity command being switched.",
     )
     gait_period: float = xax.field(
         value=0.6,
@@ -332,6 +352,12 @@ class WalkingConfig(ksim.PPOConfig):
     )
 
 
+class Carry(TypedDict):
+    actor: Array
+    critic: Array
+    filter_params: ksim.ClipAccelerationParams
+
+
 Config = TypeVar("Config", bound=WalkingConfig)
 
 
@@ -374,26 +400,26 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             metadata=metadata,
         )
 
-    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
-        return [
-            ksim.StaticFrictionRandomizer(),
-            ksim.ArmatureRandomizer(),
-            ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "torso"),
-            ksim.JointDampingRandomizer(),
-            ksim.JointZeroPositionRandomizer(),
-        ]
+    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.PhysicsRandomizer]:
+        return {
+            "static_friction": ksim.StaticFrictionRandomizer(),
+            "armature": ksim.ArmatureRandomizer(),
+            "mass_multiplication": ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "torso"),
+            "joint_damping": ksim.JointDampingRandomizer(),
+            "joint_zero_position": ksim.JointZeroPositionRandomizer(),
+        }
 
-    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.LinearPushEvent(
+    def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
+        return {
+            "push": ksim.LinearPushEvent(
                 linvel=1.0,
                 interval_range=(2.0, 5.0),
             ),
-            ksim.JumpEvent(
+            "jump": ksim.JumpEvent(
                 jump_height_range=(0.1, 0.5),
                 interval_range=(2.0, 5.0),
             ),
-        ]
+        }
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
@@ -402,101 +428,110 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ksim.RandomHeadingReset(),
         ]
 
-    def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
-        return [
-            ksim.JointPositionObservation(),
-            ksim.JointVelocityObservation(),
-            ksim.ActuatorForceObservation(),
-            ksim.CenterOfMassInertiaObservation(),
-            ksim.CenterOfMassVelocityObservation(),
-            ksim.BasePositionObservation(),
-            ksim.BaseOrientationObservation(),
-            ksim.BaseLinearVelocityObservation(),
-            ksim.BaseAngularVelocityObservation(),
-            ksim.BaseLinearAccelerationObservation(),
-            ksim.BaseAngularAccelerationObservation(),
-            ksim.ProjectedGravityObservation.create(
+    def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
+        return {
+            "joint_position": ksim.JointPositionObservation(),
+            "joint_velocity": ksim.JointVelocityObservation(),
+            "actuator_force": ksim.ActuatorForceObservation(),
+            "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
+            "center_of_mass_velocity": ksim.CenterOfMassVelocityObservation(),
+            "base_position": ksim.BasePositionObservation(),
+            "base_orientation": ksim.BaseOrientationObservation(),
+            "base_linear_velocity": ksim.BaseLinearVelocityObservation(),
+            "base_angular_velocity": ksim.BaseAngularVelocityObservation(),
+            "base_linear_acceleration": ksim.BaseLinearAccelerationObservation(),
+            "base_angular_acceleration": ksim.BaseAngularAccelerationObservation(),
+            "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="orientation",
             ),
-            ksim.ActuatorAccelerationObservation(),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="local_linvel"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="forwardvector"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_linvel"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_angvel"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="position"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="orientation"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_global_linvel"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_global_linvel"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_upvector"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_upvector"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_pos"),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_pos"),
-            ksim.FeetContactObservation.create(
+            "actuator_acceleration": ksim.ActuatorAccelerationObservation(),
+            "imu_acc": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
+            "imu_gyro": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
+            "local_linvel": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="local_linvel"),
+            "upvector": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector"),
+            "forwardvector": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="forwardvector"),
+            "global_linvel": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_linvel"),
+            "global_angvel": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_angvel"),
+            "position": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="position"),
+            "orientation": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="orientation"),
+            "left_foot_pos": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_pos"),
+            "right_foot_pos": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_pos"),
+            "feet_contact": ksim.FeetContactObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names=["foot_left"],
                 foot_right_geom_names=["foot_right"],
                 floor_geom_names=["floor"],
             ),
-            ksim.FeetPositionObservation.create(
+            "feet_position": ksim.FeetPositionObservation.create(
                 physics_model=physics_model,
                 foot_left_body_name="foot_left",
                 foot_right_body_name="foot_right",
             ),
-            ksim.FeetOrientationObservation.create_from_feet(
+            "feet_orientation": ksim.FeetOrientationObservation.create_from_feet(
                 physics_model=physics_model,
                 foot_left_body_name="foot_left",
                 foot_right_body_name="foot_right",
             ),
-            ksim.TimestepObservation(),
-        ]
+            "timestep": ksim.TimestepObservation(),
+        }
 
-    def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
-        return [
-            ksim.EasyJoystickCommand(
-                gait=ksim.SinusoidalGaitCommand(
-                    gait_period=self.config.gait_period,
-                    ctrl_dt=self.config.ctrl_dt,
-                    max_height=self.config.max_foot_height,
-                    height_offset=0.08,
-                ),
-                joystick=ksim.JoystickCommand(
-                    run_speed=self.config.target_linear_velocity,
-                    walk_speed=self.config.target_linear_velocity / 2.0,
-                    strafe_speed=self.config.target_linear_velocity / 2.0,
-                    rotation_speed=self.config.target_angular_velocity,
-                ),
+    def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
+        return {
+            "gait": ksim.SinusoidalGaitCommand(
+                gait_period=self.config.gait_period,
+                ctrl_dt=self.config.ctrl_dt,
+                max_height=self.config.max_foot_height,
+                height_offset=0.08,
             ),
-        ]
-
-    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
-            ksim.StayAliveReward(scale=100.0),
-            ksim.UprightReward(scale=5.0),
-            ksim.EasyJoystickReward(
-                gait=ksim.SinusoidalGaitReward(
-                    scale=5.0,
-                    ctrl_dt=self.config.ctrl_dt,
-                    max_height=self.config.max_foot_height,
-                ),
-                joystick=ksim.JoystickReward(scale=1.0),
-                airtime=ksim.FeetAirTimeReward(
-                    threshold=self.config.gait_period / 2.0,
-                    ctrl_dt=self.config.ctrl_dt,
-                    scale=1.0,
-                ),
+            "linvel": ksim.LinearVelocityCommand(
+                min_vel=self.config.linear_velocity_range[0],
+                max_vel=self.config.linear_velocity_range[1],
+                max_yaw=self.config.linear_velocity_max_yaw,
+                zero_prob=self.config.linear_velocity_zero_prob,
+                switch_prob=self.config.linear_velocity_switch_prob,
             ),
-        ]
+            "angvel": ksim.AngularVelocityCommand(
+                min_vel=self.config.angular_velocity_range[0],
+                max_vel=self.config.angular_velocity_range[1],
+                zero_prob=self.config.angular_velocity_zero_prob,
+                switch_prob=self.config.angular_velocity_switch_prob,
+            ),
+        }
 
-    def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
-        return [
-            ksim.BadZTermination(unhealthy_z_lower=0.5, unhealthy_z_upper=3.0),
-            ksim.BadVelocityTermination(max_vel=100.0),
-            ksim.FarFromOriginTermination(max_dist=10.0),
-        ]
+    def get_rewards(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Reward]:
+        return {
+            "stay_alive": ksim.StayAliveReward(scale=100.0),
+            "upright": ksim.UprightReward(scale=5.0),
+            "gait": ksim.SinusoidalGaitReward(
+                ctrl_dt=self.config.ctrl_dt,
+                max_height=self.config.max_foot_height,
+                pos_obs="feet_position",
+                pos_cmd="gait",
+                scale=5.0,
+            ),
+            "linvel": ksim.LinearVelocityPenalty(
+                cmd="linvel",
+                scale=-0.1,
+            ),
+            "angvel": ksim.AngularVelocityPenalty(
+                cmd="angvel",
+                scale=-0.1,
+            ),
+            "airtime": ksim.FeetAirTimeReward(
+                ctrl_dt=self.config.ctrl_dt,
+                threshold=self.config.gait_period / 2.0,
+                contact_obs="feet_contact",
+                scale=1.0,
+            ),
+        }
+
+    def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
+        return {
+            "bad_z": ksim.BadZTermination(unhealthy_z_lower=0.5, unhealthy_z_upper=3.0),
+            "bad_velocity": ksim.BadVelocityTermination(max_vel=100.0),
+            "far_from_origin": ksim.FarFromOriginTermination(max_dist=10.0),
+        }
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.LinearCurriculum(
@@ -509,8 +544,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return Model(
             params.key,
             physics_model=params.physics_model,
-            num_actor_inputs=49,
-            num_critic_inputs=336,
+            num_actor_inputs=44,
+            num_critic_inputs=330,
             num_joints=17,
             min_std=0.01,
             max_std=1.0,
@@ -526,12 +561,12 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         self,
         model: Model,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, Array, ksim.ClipAccelerationParams]:
-        return (
-            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-            ksim.ClipAccelerationParams.initialize_from(jnp.array([v for _, v in ZEROS])),
-        )
+    ) -> Carry:
+        return {
+            "actor": jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+            "critic": jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+            "filter_params": ksim.ClipAccelerationParams.initialize_from(jnp.array([v for _, v in ZEROS])),
+        }
 
     def run_actor(
         self,
@@ -541,17 +576,20 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         carry: Array,
         filter_params: ksim.ClipAccelerationParams,
     ) -> tuple[xax.Distribution, Array, ksim.ClipAccelerationParams]:
-        dh_joint_pos_j = observations["joint_position_observation"]
-        dh_joint_vel_j = observations["joint_velocity_observation"]
-        proj_grav_3 = observations["projected_gravity_observation"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        dh_joint_pos_j = observations["noisy_joint_position"]
+        dh_joint_vel_j = observations["noisy_joint_velocity"]
+        proj_grav_3 = observations["noisy_projected_gravity"]
+        imu_gyro_3 = observations["noisy_imu_gyro"]
 
-        # Sinusoidal gait joystick command.
-        sgj_cmd: ksim.EasyJoystickCommandValue = commands["easy_joystick_command"]
-        joystick_cmd_ohe_8 = sgj_cmd.joystick.command
+        # Command tensors.
+        gait_cmd: ksim.SinusoidalGaitCommandValue = commands["gait"]
+        linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
+        angvel_cmd: ksim.AngularVelocityCommandValue = commands["angvel"]
 
-        # Phase is required in order to follow the gait command.
-        gait_phase_1 = sgj_cmd.gait.phase[..., None]
+        # Stacks into tensors.
+        linvel_cmd_2 = jnp.stack([linvel_cmd.vel, linvel_cmd.yaw], axis=-1)
+        angvel_cmd_1 = jnp.stack([angvel_cmd.vel], axis=-1)
+        gait_phase_1 = jnp.stack([gait_cmd.phase], axis=-1)
 
         obs_n = jnp.concatenate(
             [
@@ -560,7 +598,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 proj_grav_3,  # 3
                 imu_gyro_3,  # 3
                 gait_phase_1,  # 1
-                joystick_cmd_ohe_8,  # 8
+                linvel_cmd_2,  # 2
+                angvel_cmd_1,  # 1
             ],
             axis=-1,
         )
@@ -574,27 +613,31 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         commands: xax.FrozenDict[str, PyTree],
         carry: Array,
     ) -> tuple[Array, Array]:
-        dh_joint_pos_j = observations["joint_position_observation"]
-        dh_joint_vel_j = observations["joint_velocity_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        # imu_acc_3 = observations["sensor_observation_imu_acc"]
-        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        proj_grav_3 = observations["projected_gravity_observation"]
-        act_frc_obs_n = observations["actuator_force_observation"]
-        base_pos_3 = observations["base_position_observation"]
-        base_quat_4 = observations["base_orientation_observation"]
-        lin_vel_obs_3 = observations["base_linear_velocity_observation"]
-        ang_vel_obs_3 = observations["base_angular_velocity_observation"]
+        dh_joint_pos_j = observations["joint_position"]
+        dh_joint_vel_j = observations["joint_velocity"]
+        com_inertia_n = observations["center_of_mass_inertia"]
+        com_vel_n = observations["center_of_mass_velocity"]
+        # imu_acc_3 = observations["imu_acc"]
+        # imu_gyro_3 = observations["imu_gyro"]
+        proj_grav_3 = observations["projected_gravity"]
+        act_frc_obs_n = observations["actuator_force"]
+        base_pos_3 = observations["base_position"]
+        base_quat_4 = observations["base_orientation"]
+        lin_vel_obs_3 = observations["base_linear_velocity"]
+        ang_vel_obs_3 = observations["base_angular_velocity"]
 
-        # Sinusoidal gait joystick command.
-        sgj_cmd: ksim.EasyJoystickCommandValue = commands["easy_joystick_command"]
-        joystick_cmd_ohe_8 = sgj_cmd.joystick.command
-        joystick_vel_tgts_3 = sgj_cmd.joystick.vels
+        # Command tensors.
+        gait_cmd: ksim.SinusoidalGaitCommandValue = commands["gait"]
+        linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
+        angvel_cmd: ksim.AngularVelocityCommandValue = commands["angvel"]
+
+        # Stacks into tensors.
+        linvel_cmd_4 = jnp.stack([linvel_cmd.vel, linvel_cmd.yaw, linvel_cmd.xvel, linvel_cmd.yvel], axis=-1)
+        angvel_cmd_1 = jnp.stack([angvel_cmd.vel], axis=-1)
 
         # Foot height difference.
-        foot_height_2 = observations["feet_position_observation"][..., 2]
-        foot_tgt_height_2 = sgj_cmd.gait.height
+        foot_height_2 = observations["feet_position"][..., 2]
+        foot_tgt_height_2 = gait_cmd.height
         foot_height_diff_2 = foot_height_2 - foot_tgt_height_2
 
         obs_n = jnp.concatenate(
@@ -610,8 +653,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
                 foot_height_diff_2,  # 2
-                joystick_cmd_ohe_8,  # 8
-                joystick_vel_tgts_3,  # 3
+                linvel_cmd_4,  # 4
+                angvel_cmd_1,  # 1
             ],
             axis=-1,
         )
@@ -620,12 +663,14 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def _scan_fn(
         self,
-        actor_critic_carry: tuple[Array, Array, ksim.ClipAccelerationParams],
+        actor_critic_carry: Carry,
         xs: tuple[ksim.Trajectory, PRNGKeyArray],
         model: Model,
-    ) -> tuple[tuple[Array, Array, ksim.ClipAccelerationParams], ksim.PPOVariables]:
+    ) -> tuple[Carry, ksim.PPOVariables]:
         transition, rng = xs
-        actor_carry, critic_carry, filter_params = actor_critic_carry
+        actor_carry = actor_critic_carry["actor"]
+        critic_carry = actor_critic_carry["critic"]
+        filter_params = actor_critic_carry["filter_params"]
         actor_dist, next_actor_carry, filter_params = self.run_actor(
             model=model.actor,
             observations=transition.obs,
@@ -650,7 +695,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         next_carry = jax.tree.map(
             lambda x, y: jnp.where(transition.done, x, y),
             self.get_initial_model_carry(model, rng),
-            (next_actor_carry, next_critic_carry, filter_params),
+            {"actor": next_actor_carry, "critic": next_critic_carry, "filter_params": filter_params},
         )
 
         return next_carry, transition_ppo_variables
@@ -659,9 +704,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         self,
         model: Model,
         trajectory: ksim.Trajectory,
-        model_carry: tuple[Array, Array, ksim.ClipAccelerationParams],
+        model_carry: Carry,
         rng: PRNGKeyArray,
-    ) -> tuple[ksim.PPOVariables, tuple[Array, Array, ksim.ClipAccelerationParams]]:
+    ) -> tuple[ksim.PPOVariables, Carry]:
         scan_fn = functools.partial(self._scan_fn, model=model)
         rngs = jax.random.split(rng, trajectory.done.shape[0])
         next_model_carry, ppo_variables = xax.scan(
@@ -675,7 +720,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def sample_action(
         self,
         model: Model,
-        model_carry: tuple[Array, Array, ksim.ClipAccelerationParams],
+        model_carry: Carry,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, PyTree],
@@ -683,7 +728,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
-        actor_carry_in, critic_carry_in, filter_params = model_carry
+        actor_carry_in = model_carry["actor"]
+        critic_carry_in = model_carry["critic"]
+        filter_params = model_carry["filter_params"]
 
         # Runs the actor model to get the action distribution.
         action_dist_j, actor_carry, filter_params = self.run_actor(
@@ -696,7 +743,10 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(rng)
 
-        return ksim.Action(action=action_j, carry=(actor_carry, critic_carry_in, filter_params))
+        return ksim.Action(
+            action=action_j,
+            carry={"actor": actor_carry, "critic": critic_carry_in, "filter_params": filter_params},
+        )
 
 
 if __name__ == "__main__":

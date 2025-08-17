@@ -14,7 +14,6 @@ __all__ = [
     "RandomPitchRollReset",
 ]
 
-import functools
 import logging
 from abc import ABC, abstractmethod
 
@@ -40,13 +39,6 @@ class Reset(ABC):
     @abstractmethod
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         """Resets the environment."""
-
-    def get_name(self) -> str:
-        return xax.camelcase_to_snakecase(self.__class__.__name__)
-
-    @functools.cached_property
-    def reset_name(self) -> str:
-        return self.get_name()
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -276,7 +268,7 @@ def get_xy_position_reset(
             raise ValueError("No heightfield or plane geom found in the model. MuJoCo scene missing floor!")
         floor_idx = plane_indices[0]
         x_bound, y_bound = 5.0, 5.0
-        z_pos = physics_model.geom_pos[floor_idx][2]
+        z_pos = float(physics_model.geom_pos[floor_idx][2])
         logger.info("Using plane based floor with bounds: %s, %s, %s", x_bound, y_bound, z_pos)
         padded_bounds = compute_padded_bounds(x_bound, y_bound, x_edge_padding, y_edge_padding)
         return PlaneXYPositionReset(

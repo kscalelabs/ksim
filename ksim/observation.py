@@ -32,7 +32,6 @@ __all__ = [
     "HistoryObservation",
 ]
 
-import functools
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -119,16 +118,8 @@ class Observation(ABC):
         """
         return add_noise(observation, rng, self.noise_type, self.noise, curriculum_level)
 
-    def get_markers(self) -> Collection[Marker]:
+    def get_markers(self, name: str) -> Collection[Marker]:
         return []
-
-    def get_name(self) -> str:
-        """Get the name of the observation."""
-        return xax.camelcase_to_snakecase(self.__class__.__name__)
-
-    @functools.cached_property
-    def observation_name(self) -> str:
-        return self.get_name()
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -173,9 +164,6 @@ class HistoryObservation(StatefulObservation):
 
     observation: Observation = attrs.field()
     history_length: int = attrs.field(default=1, validator=attrs.validators.ge(1))
-
-    def get_name(self) -> str:
-        return f"historical_{self.observation.get_name()}"
 
     def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> PyTree:
         """Create a zero-filled history buffer by evaluating with a dummy input."""
@@ -368,9 +356,6 @@ class SensorObservation(Observation):
             sensor_idx_range=sensor_name_to_idx_range[sensor_name],
         )
 
-    def get_name(self) -> str:
-        return f"{super().get_name()}_{self.sensor_name}"
-
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         start, end = self.sensor_idx_range
         sensor_data = state.physics_state.data.sensordata[start:end].ravel()
@@ -516,12 +501,6 @@ class ContactObservation(Observation):
         contact = geoms_colliding(state.physics_state.data, geom_idxs, geom_idxs).any(axis=-1)
         return contact
 
-    def get_name(self) -> str:
-        if self.contact_group is not None:
-            return f"{super().get_name()}_{self.contact_group}"
-        else:
-            return super().get_name()
-
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetContactObservation(Observation):
@@ -615,9 +594,6 @@ class BodyOrientationObservation(Observation):
             noise=noise,
         )
 
-    def get_name(self) -> str:
-        return self.name
-
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         quats = state.physics_state.data.xquat[jnp.asarray(self.body_ids)]
         return quats
@@ -643,9 +619,6 @@ class SiteOrientationObservation(Observation):
             name=name,
             noise=noise,
         )
-
-    def get_name(self) -> str:
-        return self.name
 
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         rot_mats = state.physics_state.data.site_xmat[jnp.asarray(self.site_ids)].reshape(-1, 3, 3)
@@ -686,10 +659,6 @@ class FeetOrientationObservation(BodyOrientationObservation):
             noise=noise,
         )
 
-    def get_name(self) -> str:
-        """Get the name of the observation."""
-        return xax.camelcase_to_snakecase(self.__class__.__name__)
-
 
 @attrs.define(frozen=True, kw_only=True)
 class TimestepObservation(Observation):
@@ -729,10 +698,6 @@ class ActPosObservation(Observation):
             ctrl_idx=ctrl_idx,
             qpos_idx=qpos_idx,
         )
-
-    def get_name(self) -> str:
-        """Get the name of the observation with joint details."""
-        return f"apo_q{self.qpos_idx}_a{self.ctrl_idx}_{self.joint_name}"
 
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         action_val = state.physics_state.most_recent_action[self.ctrl_idx]
