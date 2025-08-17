@@ -277,7 +277,7 @@ class WalkingConfig(ksim.PPOConfig):
 
     # Reward parameters.
     linear_velocity_range: tuple[float, float] = xax.field(
-        value=(1.0, 4.0),
+        value=(1.0, 3.0),
         help="The range for the linear velocity command.",
     )
     linear_velocity_max_yaw: float = xax.field(
