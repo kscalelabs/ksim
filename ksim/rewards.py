@@ -92,9 +92,7 @@ def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) 
         raise ValueError(f"Reward function {reward_name} does not end with 'Reward' or 'Penalty': {value}")
 
 
-def index_to_dims(
-    index: CartesianIndex | tuple[CartesianIndex, ...],
-) -> tuple[int, ...]:
+def index_to_dims(index: CartesianIndex | tuple[CartesianIndex, ...]) -> tuple[int, ...]:
     indices = index if isinstance(index, tuple) else (index,)
     return tuple(cartesian_index_to_dim(index) for index in indices)
 
@@ -302,11 +300,7 @@ class BaseHeightReward(Reward):
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
-        reward = norm_to_reward(
-            xax.get_norm(base_height - self.height_target, self.norm),
-            self.temp,
-            self.monotonic_fn,
-        )
+        reward = norm_to_reward(xax.get_norm(base_height - self.height_target, self.norm), self.temp, self.monotonic_fn)
         return reward
 
 
