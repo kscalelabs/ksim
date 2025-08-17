@@ -533,11 +533,11 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             "foot_force": ksim.FeetForcePenalty(
                 force_obs="feet_force",
-                scale=-0.1,
+                scale=-1e-6,
             ),
             "foot_torque": ksim.FeetTorquePenalty(
                 torque_obs="feet_torque",
-                scale=-0.1,
+                scale=-1e-7,
             ),
         }
 
