@@ -43,16 +43,15 @@ def create_test_trajectory(
         xpos=dummy_xpos,
         xquat=dummy_xquat,
         ctrl=dummy_ctrl,
-        obs=xax.FrozenDict({}),
-        command=xax.FrozenDict({}),
-        command_metrics=xax.FrozenDict({}),
-        event_state=xax.FrozenDict({}),
+        obs=xax.freeze_dict({}),
+        command=xax.freeze_dict({}),
+        event_state=xax.freeze_dict({}),
         action=actions,
         done=done,
         success=dummy_success,
         timestep=dummy_timestep,
-        termination_components=xax.FrozenDict({}),
-        aux_outputs=xax.FrozenDict({}),
+        termination_components=xax.freeze_dict({}),
+        aux_outputs=xax.freeze_dict({}),
     )
 
 

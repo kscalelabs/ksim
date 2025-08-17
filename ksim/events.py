@@ -6,13 +6,11 @@ __all__ = [
     "JumpEvent",
 ]
 
-import functools
 from abc import ABC, abstractmethod
 
 import attrs
 import jax
 import jax.numpy as jnp
-import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsData, PhysicsModel
@@ -47,13 +45,6 @@ class Event(ABC):
         Returns:
             The updated data and event state.
         """
-
-    def get_name(self) -> str:
-        return xax.camelcase_to_snakecase(self.__class__.__name__)
-
-    @functools.cached_property
-    def event_name(self) -> str:
-        return self.get_name()
 
     @abstractmethod
     def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:

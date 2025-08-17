@@ -6,13 +6,9 @@ __all__ = [
     "Reward",
     "StatefulReward",
     "StayAliveReward",
-    "LinearVelocityReward",
     "LinearVelocityPenalty",
-    "NaiveForwardReward",
-    "NaiveForwardOrientationReward",
-    "AngularVelocityReward",
     "AngularVelocityPenalty",
-    "XYAngularVelocityPenalty",
+    "AngularVelocityPenalty",
     "BaseHeightReward",
     "BaseHeightRangeReward",
     "ActionVelocityPenalty",
@@ -29,17 +25,13 @@ __all__ = [
     "UprightReward",
     "LinkAccelerationPenalty",
     "LinkJerkPenalty",
-    "JoystickReward",
-    "LinearVelocityTrackingReward",
-    "AngularVelocityTrackingReward",
     "ReachabilityPenalty",
+    "FeetHeightReward",
     "FeetAirTimeReward",
     "SinusoidalGaitReward",
-    "EasyJoystickReward",
     "BaseHeightTrackingReward",
 ]
 
-import functools
 import logging
 from abc import ABC, abstractmethod
 from typing import Collection, Literal, Mapping, Self, final
@@ -51,13 +43,12 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.commands import EasyJoystickCommandValue, JoystickCommandValue, SinusoidalGaitCommandValue
+from ksim.commands import AngularVelocityCommandValue, LinearVelocityCommandValue, SinusoidalGaitCommandValue
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
 from ksim.utils.validators import (
     CartesianIndex,
     cartesian_index_to_dim,
-    dimension_index_tuple_validator,
     norm_validator,
 )
 from ksim.vis import Marker
@@ -93,14 +84,15 @@ def norm_to_reward(value: Array, temp: float = 1.0, monotonic_fn: MonotonicFn = 
 def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) -> None:
     # Reward function classes should end with either "Reward" or "Penalty",
     # which we use here to check if the scale is positive or negative.
-    if inst.reward_name.lower().endswith("reward"):
+    reward_name = inst.__class__.__name__
+    if reward_name.lower().endswith("reward"):
         if value < 0:
-            raise RuntimeError(f"Reward function {inst.reward_name} has a negative scale {value}")
-    elif inst.reward_name.lower().endswith("penalty"):
+            raise RuntimeError(f"Reward function {reward_name} has a negative scale {value}")
+    elif reward_name.lower().endswith("penalty"):
         if value > 0:
-            raise RuntimeError(f"Penalty function {inst.reward_name} has a positive scale {value}")
+            raise RuntimeError(f"Penalty function {reward_name} has a positive scale {value}")
     else:
-        logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", inst.reward_name, value)
+        raise ValueError(f"Reward function {reward_name} does not end with 'Reward' or 'Penalty': {value}")
 
 
 def index_to_dims(index: CartesianIndex | tuple[CartesianIndex, ...]) -> tuple[int, ...]:
@@ -126,16 +118,9 @@ class Reward(ABC):
             An array of shape (time) containing the reward for each timestep.
         """
 
-    def get_markers(self) -> Collection[Marker]:
+    def get_markers(self, name: str) -> Collection[Marker]:
         """Get the markers for the reward, optionally overridable."""
         return []
-
-    def get_name(self) -> str:
-        return xax.camelcase_to_snakecase(self.__class__.__name__)
-
-    @functools.cached_property
-    def reward_name(self) -> str:
-        return self.get_name()
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -186,7 +171,7 @@ class StayAliveReward(Reward):
     value will increase the relative penalty for termination.
     """
 
-    balance: float = attrs.field(default=10.0)
+    balance: float = attrs.field(default=100.0)
     success_reward: float | None = attrs.field(default=None)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -202,95 +187,109 @@ class StayAliveReward(Reward):
         return reward
 
 
+@attrs.define(kw_only=True)
+class LinearVelocityPenaltyMarker(Marker):
+    size: float = attrs.field(default=0.03)
+    arrow_scale: float = attrs.field(default=0.3)
+    height: float = attrs.field(default=0.5)
+    base_length: float = attrs.field(default=0.15)
+    zero_threshold: float = attrs.field(default=1e-4)
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        linvel = trajectory.qvel[..., :3]
+        linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
+        xy = linvel[..., :2]
+        x = float(xy[..., 0])
+        y = float(xy[..., 1])
+        speed = float(jnp.linalg.norm(xy, axis=-1))
+        direction = (x / speed, y / speed, 0.0)
+
+        self.pos = (0.0, 0.0, self.height)
+
+        # Always show an arrow with base_length plus scaling by speed
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
+        arrow_length = self.base_length + self.arrow_scale * speed
+        self.scale = (self.size, self.size, arrow_length)
+
+        # If command is near-zero, show grey arrow pointing +X.
+        if speed < self.zero_threshold:
+            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
+            self.rgba = (0.8, 0.8, 0.8, 0.8)
+        else:
+            self.orientation = self.quat_from_direction(direction)
+            self.rgba = (0.2, 0.2, 0.8, 0.8)
+
+    @classmethod
+    def get(
+        cls,
+        *,
+        arrow_scale: float = 0.3,
+        height: float = 0.5,
+        base_length: float = 0.15,
+    ) -> Self:
+        return cls(
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(0.03, 0.03, base_length),
+            arrow_scale=arrow_scale,
+            height=height,
+            base_length=base_length,
+            track_rotation=True,
+        )
+
+
 @attrs.define(frozen=True, kw_only=True)
-class LinearVelocityReward(Reward):
+class LinearVelocityPenalty(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(validator=dimension_index_tuple_validator)
-    clip_min: float | None = attrs.field(default=None)
-    clip_max: float | None = attrs.field(default=None)
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-    in_robot_frame: bool = attrs.field(default=True)
+    cmd: str = attrs.field()
+    zero_threshold: float = attrs.field(default=0.01)
+    vis_height: float = attrs.field(default=0.6)
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        dims = index_to_dims(self.index)
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
+        cmd: LinearVelocityCommandValue = trajectory.command[self.cmd]
+
+        # Gets the linear velocity in the robot's frame.
         linvel = trajectory.qvel[..., :3]
-        if self.in_robot_frame:
-            # Same as reading from a velocimeter attached to base.
-            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
-        dimvel = linvel[..., dims].clip(self.clip_min, self.clip_max).mean(axis=-1)
-        return xax.get_norm(dimvel, self.norm)
+        linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
+        xy = linvel[..., :2]
+        vel = jnp.linalg.norm(xy, axis=-1)
+        x = xy[..., 0]
+        y = xy[..., 1]
+        yaw = jnp.arctan2(y, x)
 
-    def get_name(self) -> str:
-        indices = self.index if isinstance(self.index, tuple) else (self.index,)
-        return f"{''.join(indices)}_{super().get_name()}"
+        # Don't reward if the command is zero.
+        is_zero = jnp.abs(cmd.vel) < self.zero_threshold
 
+        return {
+            "l1_vel": xax.get_norm(vel - cmd.vel, "l1"),
+            "l2_vel": xax.get_norm(vel - cmd.vel, "l2"),
+            "l1_yaw": jnp.where(is_zero, 0.0, xax.get_norm(yaw - cmd.yaw, "l1")),
+            "l2_yaw": jnp.where(is_zero, 0.0, xax.get_norm(yaw - cmd.yaw, "l2")),
+            "l1_x": xax.get_norm(x - cmd.xvel, "l1"),
+            "l2_x": xax.get_norm(x - cmd.xvel, "l2"),
+            "l1_y": xax.get_norm(y - cmd.yvel, "l1"),
+            "l2_y": xax.get_norm(y - cmd.yvel, "l2"),
+        }
 
-@attrs.define(frozen=True, kw_only=True)
-class LinearVelocityPenalty(LinearVelocityReward): ...
-
-
-@attrs.define(frozen=True, kw_only=True)
-class NaiveForwardReward(Reward):
-    """Simple reward for moving forward in the X-direction."""
-
-    clip_min: float | None = attrs.field(default=None)
-    clip_max: float | None = attrs.field(default=None)
-    in_robot_frame: bool = attrs.field(default=True)
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        linvel = trajectory.qvel[..., :3]
-        if self.in_robot_frame:
-            # Same as reading from a velocimeter attached to base.
-            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
-        dimvel = linvel[..., 0].clip(self.clip_min, self.clip_max)
-        return dimvel
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [LinearVelocityPenaltyMarker.get(height=self.vis_height)]
 
 
 @attrs.define(frozen=True, kw_only=True)
-class NaiveForwardOrientationReward(NaiveForwardReward):
-    """Simple reward for keeping the robot oriented in the X-direction."""
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        quat = trajectory.qpos[..., 3:7]
-        forward_vec = jnp.array([1.0, 0.0, 0.0])
-        forward_vec = xax.rotate_vector_by_quat(forward_vec, quat, inverse=True)
-        return forward_vec[..., 0] - jnp.linalg.norm(forward_vec[..., 1:], axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class AngularVelocityReward(Reward):
+class AngularVelocityPenalty(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(validator=dimension_index_tuple_validator)
-    clip_min: float | None = attrs.field(default=None)
-    clip_max: float | None = attrs.field(default=None)
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-    in_robot_frame: bool = attrs.field(default=True)
+    cmd: str = attrs.field()
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        dims = index_to_dims(self.index)
-        angvel = trajectory.qvel[..., 3:6]
-        if self.in_robot_frame:
-            angvel = xax.rotate_vector_by_quat(angvel, trajectory.qpos[..., 3:7], inverse=True)
-        dimvel = angvel[..., dims].clip(self.clip_min, self.clip_max).mean(axis=-1)
-        return xax.get_norm(dimvel, self.norm)
-
-    def get_name(self) -> str:
-        indices = self.index if isinstance(self.index, tuple) else (self.index,)
-        return f"{''.join(indices)}_{super().get_name()}"
-
-
-@attrs.define(frozen=True, kw_only=True)
-class AngularVelocityPenalty(AngularVelocityReward): ...
-
-
-@attrs.define(frozen=True, kw_only=True)
-class XYAngularVelocityPenalty(AngularVelocityReward):
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
-        default=("x", "y"),
-        validator=dimension_index_tuple_validator,
-    )
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
+        cmd: AngularVelocityCommandValue = trajectory.command[self.cmd]
+        angvel = trajectory.qvel[..., 5]
+        return {
+            "l1_angvel": xax.get_norm(angvel - cmd.vel, "l1"),
+            "l2_angvel": xax.get_norm(angvel - cmd.vel, "l2"),
+        }
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -624,9 +623,6 @@ class PositionTrackingReward(Reward):
             monotonic_fn=monotonic_fn,
         )
 
-    def get_name(self) -> str:
-        return f"{self.body_name}_{super().get_name()}"
-
 
 @attrs.define(frozen=True, kw_only=True)
 class UprightReward(Reward):
@@ -705,170 +701,6 @@ class SymmetryReward(Reward):
         )
 
 
-@attrs.define(kw_only=True)
-class JoystickRewardMarker(Marker):
-    radius: float = attrs.field(default=0.1)
-    size: float = attrs.field(default=0.03)
-    arrow_len: float = attrs.field(default=1.0)
-    height: float = attrs.field(default=0.5)
-
-    def _update_arrow(self, cmd_x: float, cmd_y: float) -> None:
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
-        mag = (cmd_x * cmd_x + cmd_y * cmd_y) ** 0.5
-        cmd_x, cmd_y = cmd_x / mag, cmd_y / mag
-        self.orientation = self.quat_from_direction((cmd_x, cmd_y, 0.0))
-        self.scale = (self.size, self.size, self.arrow_len * mag)
-
-    def update(self, trajectory: Trajectory) -> None:
-        """Visualizes the joystick command target position and orientation."""
-        quat = JoystickReward.get_quat(trajectory)
-        linvel = trajectory.qvel[..., :3]
-        linvel = xax.rotate_vector_by_quat(linvel, quat, inverse=True)
-        self.pos = (0, 0, self.height)
-        self._update_arrow(linvel[..., 0].item(), linvel[..., 1].item())
-
-    @classmethod
-    def get(
-        cls,
-        radius: float = 0.05,
-        size: float = 0.03,
-        arrow_len: float = 0.25,
-        rgba: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
-        height: float = 0.6,
-    ) -> Self:
-        return cls(
-            target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_SPHERE,  # pyright: ignore[reportAttributeAccessIssue]
-            scale=(radius, radius, radius),
-            size=size,
-            arrow_len=arrow_len,
-            radius=radius,
-            rgba=rgba,
-            height=height,
-            track_x=True,
-            track_y=True,
-            track_z=True,
-            track_rotation=False,
-        )
-
-
-@attrs.define(frozen=True, kw_only=True)
-class JoystickReward(Reward):
-    """Reward for following the joystick command."""
-
-    command_name: str = attrs.field(default="joystick_command")
-    dir_scale: float = attrs.field(default=1.0)
-    mag_scale: float = attrs.field(default=1.0)
-    yaw_scale: float = attrs.field(default=1.0)
-
-    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
-        if self.command_name not in trajectory.command:
-            raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
-        return self._get_reward_for(trajectory.command[self.command_name], trajectory)
-
-    @classmethod
-    def get_quat(cls, trajectory: Trajectory) -> Array:
-        quat = trajectory.qpos[..., 3:7]
-        yaw = xax.quat_to_yaw(quat)
-        zeros = jnp.zeros_like(yaw)
-        euler = jnp.stack([zeros, zeros, yaw], axis=-1)
-        quat = xax.euler_to_quat(euler)
-        return quat
-
-    def _get_reward_for(self, joystick_cmd: JoystickCommandValue, trajectory: Trajectory) -> dict[str, Array]:
-        # Gets the target X, Y, and Yaw velocities.
-        tgts = joystick_cmd.vels
-
-        # Gets the robot's current velocities.
-        quat = self.get_quat(trajectory)
-        linvel = trajectory.qvel[..., :3]
-        linvel = xax.rotate_vector_by_quat(linvel, quat, inverse=True)
-        yawvel = trajectory.qvel[..., 5]
-
-        # Reward for tracking the direction (cosine similarity).
-        cur_xy = linvel[..., :2]
-        trg_xy = tgts[..., :2]
-        cur_norm = jnp.linalg.norm(cur_xy, axis=-1)
-        trg_norm = jnp.linalg.norm(trg_xy, axis=-1)
-        denom_xy = cur_norm * trg_norm
-        xy_cos_sim = (cur_xy * trg_xy).sum(axis=-1) / denom_xy.clip(min=1e-6)
-
-        # Reward for tracking the magnitude, in the direction of the target.
-        xy_mag_rew = 1.0 - jnp.where(trg_norm < 1e-6, cur_norm, jnp.abs(cur_norm - trg_norm) / trg_norm.clip(min=1e-6))
-
-        # Reward for tracking the yaw.
-        cur_yaw = yawvel
-        trg_yaw = tgts[..., 2]
-        yaw_mag_rew = 1.0 - jnp.abs(cur_yaw - trg_yaw)
-
-        return {
-            "dir": xy_cos_sim * self.dir_scale,
-            "mag": xy_mag_rew * self.mag_scale,
-            "yaw": yaw_mag_rew * self.yaw_scale,
-        }
-
-    def get_markers(self) -> Collection[Marker]:
-        return [JoystickRewardMarker.get()]
-
-
-@attrs.define(frozen=True, kw_only=True)
-class LinearVelocityTrackingReward(Reward):
-    """Reward for tracking the linear velocity."""
-
-    linvel_obs_name: str = attrs.field()
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
-        default=("x", "y"), validator=dimension_index_tuple_validator
-    )
-    error_scale: float = attrs.field(default=0.25)
-    command_name: str = attrs.field(default="linear_velocity_command")
-    in_robot_frame: bool = attrs.field(default=True)
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        if self.linvel_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
-
-        linvel = trajectory.obs[self.linvel_obs_name]
-        if self.in_robot_frame:
-            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
-
-        dims = index_to_dims(self.index)
-
-        linvel = linvel[..., dims]
-        robot_vel_cmd = trajectory.command[self.command_name]
-        robot_vel_cmd = robot_vel_cmd[..., dims]
-
-        vel_error = xax.get_norm(linvel - robot_vel_cmd, self.norm).sum(axis=-1)
-
-        return jnp.exp(-vel_error / self.error_scale)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class AngularVelocityTrackingReward(Reward):
-    """Reward for tracking the angular velocity."""
-
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
-        default=("x", "y"), validator=dimension_index_tuple_validator
-    )
-    error_scale: float = attrs.field(default=0.25)
-    command_name: str = attrs.field(default="angular_velocity_command")
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        angvel = trajectory.qvel[..., 3:6]
-
-        dims = index_to_dims(self.index)
-
-        angvel = angvel[..., dims]
-        robot_angvel_cmd = trajectory.command[self.command_name]
-
-        chex.assert_shape(robot_angvel_cmd, (..., len(dims)))
-
-        angvel_error = xax.get_norm(angvel - robot_angvel_cmd, self.norm).sum(axis=-1)
-
-        return jnp.exp(-angvel_error / self.error_scale)
-
-
 @attrs.define(frozen=True, kw_only=True)
 class ReachabilityPenalty(Reward):
     """Penalty for commands that exceed the per‑joint reachability envelope.
@@ -893,14 +725,57 @@ class ReachabilityPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class FeetHeightReward(StatefulReward):
+    """Reward for having the foot above the ground some amount."""
+
+    height: float = attrs.field()
+    position_obs: str = attrs.field()
+    contact_obs: str = attrs.field()
+    num_feet: int = attrs.field(default=2)
+    min_steps_no_contact: int = attrs.field(default=5)
+
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(self.num_feet, dtype=jnp.float32)
+
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: Array,
+    ) -> tuple[Array, Array]:
+        contact_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        contact_tn = contact_tcn.any(axis=-2)
+        chex.assert_shape(contact_tn, (..., self.num_feet))
+
+        position_tn3 = trajectory.obs[self.position_obs]
+        chex.assert_shape(position_tn3, (..., self.num_feet, 3))
+
+        # Give a sparse reward once the foot contacts the ground, equal to the
+        # maximum height of the foot since the last contact, thresholded at the
+        # target height.
+        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+            contact_n, position_n3 = x
+            height_n = position_n3[..., 2]
+            max_height_n = jnp.maximum(carry, height_n)
+            carry = jnp.where(contact_n, height_n, max_height_n)
+            reward_n = jnp.where(contact_n, max_height_n, 0.0).clip(max=self.height)
+            return carry, reward_n
+
+        reward_carry, reward_tn = xax.scan(scan_fn, reward_carry, (contact_tn, position_tn3))
+        reward_t = reward_tn.max(axis=-1)
+        return reward_t, reward_carry
+
+
+@attrs.define(frozen=True, kw_only=True)
 class FeetAirTimeReward(StatefulReward):
     """Reward for feet either touching or not touching the ground for some time."""
 
     threshold: float = attrs.field()
     ctrl_dt: float = attrs.field()
+    contact_obs: str = attrs.field()
     num_feet: int = attrs.field(default=2)
-    contact_obs: str = attrs.field(default="feet_contact_observation")
     bias: float = attrs.field(default=0.0)
+    linvel_moving_threshold: float = attrs.field(default=0.05)
+    angvel_moving_threshold: float = attrs.field(default=0.05)
 
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
         return jnp.zeros(self.num_feet, dtype=jnp.int32)
@@ -910,18 +785,22 @@ class FeetAirTimeReward(StatefulReward):
         trajectory: Trajectory,
         reward_carry: Array,
     ) -> tuple[Array, Array]:
+        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
+        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
+        not_moving = not_moving_lin & not_moving_ang
+
         sensor_data_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
         sensor_data_tn = sensor_data_tcn.any(axis=-2)
         chex.assert_shape(sensor_data_tn, (..., self.num_feet))
 
         threshold_steps = round(self.threshold / self.ctrl_dt)
 
-        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
-            count_n, (contact_n, done) = carry, x
-            count_n = jnp.where(done | contact_n, 0, count_n + 1)
+        def scan_fn(carry: Array, x: tuple[Array, Array, Array]) -> tuple[Array, Array]:
+            count_n, (contact_n, not_moving, done) = carry, x
+            count_n = jnp.where(done | not_moving | contact_n, 0, count_n + 1)
             return count_n, count_n
 
-        reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
+        reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, not_moving, trajectory.done))
 
         # Gradually increase reward until `threshold_steps`.
         reward_tn = (count_tn.astype(jnp.float32) / threshold_steps) + self.bias
@@ -934,9 +813,9 @@ class FeetAirTimeReward(StatefulReward):
 @attrs.define(kw_only=True)
 class SinusoidalGaitTargetMarker(Marker):
     foot_id: int = attrs.field()
+    obs_name: str = attrs.field()
     radius: float = attrs.field(default=0.1)
     size: float = attrs.field(default=0.03)
-    obs_name: str = attrs.field(default="feet_position_observation")
     cmd_name: str = attrs.field(default="sinusoidal_gait_command")
 
     def update(self, trajectory: Trajectory) -> None:
@@ -950,10 +829,10 @@ class SinusoidalGaitTargetMarker(Marker):
     def get(
         cls,
         foot_id: int,
+        obs_name: str,
+        cmd_name: str,
         radius: float = 0.05,
         size: float = 0.03,
-        obs_name: str = "feet_position_observation",
-        cmd_name: str = "sinusoidal_gait_command",
     ) -> Self:
         return cls(
             foot_id=foot_id,
@@ -975,9 +854,9 @@ class SinusoidalGaitTargetMarker(Marker):
 @attrs.define(kw_only=True)
 class SinusoidalGaitPositionMarker(Marker):
     foot_id: int = attrs.field()
+    obs_name: str = attrs.field()
     radius: float = attrs.field(default=0.1)
     size: float = attrs.field(default=0.03)
-    obs_name: str = attrs.field(default="feet_position_observation")
 
     def update(self, trajectory: Trajectory) -> None:
         """Visualizes the sinusoidal gait."""
@@ -988,7 +867,7 @@ class SinusoidalGaitPositionMarker(Marker):
     def get(
         cls,
         foot_id: int,
-        obs_name: str = "feet_position_observation",
+        obs_name: str,
         radius: float = 0.05,
         size: float = 0.03,
     ) -> Self:
@@ -1014,8 +893,8 @@ class SinusoidalGaitReward(Reward):
 
     ctrl_dt: float = attrs.field()
     max_height: float = attrs.field()
-    pos_obs: str = attrs.field(default="feet_position_observation")
-    pos_cmd: str = attrs.field(default="sinusoidal_gait_command")
+    pos_obs: str = attrs.field()
+    pos_cmd: str = attrs.field()
     num_feet: int = attrs.field(default=2)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -1029,7 +908,7 @@ class SinusoidalGaitReward(Reward):
         reward = 1.0 - (jnp.abs(obs - cmd).sum(axis=-1)) / self.max_height
         return reward
 
-    def get_markers(self) -> Collection[Marker]:
+    def get_markers(self, name: str) -> Collection[Marker]:
         return [
             marker
             for foot_id in range(self.num_feet)
@@ -1038,70 +917,6 @@ class SinusoidalGaitReward(Reward):
                 SinusoidalGaitTargetMarker.get(foot_id, obs_name=self.pos_obs, cmd_name=self.pos_cmd),
             )
         ]
-
-
-@attrs.define(kw_only=True)
-class EasyJoystickGaitTargetMarker(SinusoidalGaitTargetMarker):
-    cmd_name: str = attrs.field(default="easy_joystick_command")
-
-    def update(self, trajectory: Trajectory) -> None:
-        """Visualizes the sinusoidal gait."""
-        obs_x, obs_y, _ = trajectory.obs[self.obs_name][..., self.foot_id, :].tolist()
-        cmd: EasyJoystickCommandValue = trajectory.command[self.cmd_name]
-        cmd_h = cmd.gait.height[..., self.foot_id].item()
-        self.pos = (obs_x, obs_y, cmd_h)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class EasyJoystickReward(StatefulReward):
-    """Provides an easy-to-learn joystick reward.
-
-    When training joystick control policies, there's a bunch of tricky stuff
-    you need to do to get them to train well, compared with something like
-    NaiveForwardReward. This reward combines a few other rewards, with the
-    goal of providing a "one-shot" reward that you can put into your policy to
-    give your robot the ability to follow joystick commands.
-    """
-
-    gait: SinusoidalGaitReward = attrs.field()
-    joystick: JoystickReward = attrs.field()
-    airtime: FeetAirTimeReward = attrs.field()
-    scale: float = attrs.field(default=1.0)
-    command_name: str = attrs.field(default="easy_joystick_command")
-
-    def initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return self.airtime.initial_carry(rng)
-
-    def get_reward_stateful(self, trajectory: Trajectory, reward_carry: Array) -> tuple[dict[str, Array], Array]:
-        if self.command_name not in trajectory.command:
-            raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
-
-        cmd: EasyJoystickCommandValue = trajectory.command[self.command_name]
-        joystick_reward = self.joystick._get_reward_for(cmd.joystick, trajectory)
-        gait_reward = self.gait._get_reward_for(cmd.gait, trajectory)
-        airtime_reward, airtime_carry = self.airtime.get_reward_stateful(trajectory, reward_carry)
-
-        # Mask out airtime reward when the robot is not moving.
-        airtime_reward = jnp.where(cmd.joystick.command.argmax(axis=-1) == 0, 0.0, airtime_reward)
-
-        total_reward = {
-            "gait": gait_reward * self.gait.scale,
-            "airtime": airtime_reward * self.airtime.scale,
-        }
-        for k, v in joystick_reward.items():
-            total_reward[f"joystick/{k}"] = v * self.joystick.scale
-
-        return total_reward, airtime_carry
-
-    def get_markers(self) -> Collection[Marker]:
-        return [
-            marker
-            for foot_id in range(self.gait.num_feet)
-            for marker in (
-                SinusoidalGaitPositionMarker.get(foot_id, obs_name=self.gait.pos_obs),
-                EasyJoystickGaitTargetMarker.get(foot_id, obs_name=self.gait.pos_obs, cmd_name=self.command_name),
-            )
-        ] + [JoystickRewardMarker.get()]
 
 
 @attrs.define(frozen=True, kw_only=True)

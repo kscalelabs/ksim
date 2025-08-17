@@ -315,7 +315,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         )
         shared_state = replace(
             shared_state,
-            aux_values=xax.FrozenDict(
+            aux_values=xax.freeze_dict(
                 shared_state.aux_values.unfreeze()
                 | {
                     REAL_MOTIONS_KEY: self.get_real_motions(mj_model),
@@ -353,7 +353,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         # Adds the discriminator output to the auxiliary outputs.
         aux_outputs = trajectory.aux_outputs.unfreeze() if trajectory.aux_outputs else {}
         aux_outputs[DISCRIMINATOR_OUTPUT_KEY] = discriminator_logits
-        trajectory = replace(trajectory, aux_outputs=xax.FrozenDict(aux_outputs))
+        trajectory = replace(trajectory, aux_outputs=xax.freeze_dict(aux_outputs))
 
         return trajectory
 
@@ -435,7 +435,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
             "disc_sim_logits_std": sim_disc_logits.std(),
         }
 
-        return disc_loss, xax.FrozenDict(disc_metrics)
+        return disc_loss, xax.freeze_dict(disc_metrics)
 
     @xax.jit(static_argnames=["self", "model_static"], jit_level=JitLevel.RL_CORE)
     def _get_disc_metrics_and_grads(
@@ -540,7 +540,7 @@ class AMPTask(PPOTask[Config], Generic[Config], ABC):
         )
 
         # Combine metrics.
-        metrics = xax.FrozenDict(metrics.unfreeze() | disc_metrics.unfreeze())
+        metrics = xax.freeze_dict(metrics.unfreeze() | disc_metrics.unfreeze())
 
         return carry, metrics
 

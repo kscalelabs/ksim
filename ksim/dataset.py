@@ -141,7 +141,7 @@ class TrajectoryDataset(Dataset[tuple[Trajectory, RewardState], tuple[Trajectory
             offset += nelem
 
         def _dict(prefix: str) -> xax.FrozenDict[str, Array]:
-            return xax.FrozenDict({k.split(".", 1)[1]: v for k, v in arrs.items() if k.startswith(prefix)})
+            return xax.freeze_dict({k.split(".", 1)[1]: v for k, v in arrs.items() if k.startswith(prefix)})
 
         return (
             Trajectory(
@@ -152,7 +152,6 @@ class TrajectoryDataset(Dataset[tuple[Trajectory, RewardState], tuple[Trajectory
                 ctrl=arrs["ctrl"],
                 obs=_dict("obs"),
                 command=_dict("command"),
-                command_metrics=_dict("command_metrics"),
                 event_state=_dict("event_state"),
                 action=arrs["action"],
                 done=arrs["done"],

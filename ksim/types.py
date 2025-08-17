@@ -69,7 +69,6 @@ class Trajectory:
     success: Array
     timestep: Array
     termination_components: xax.FrozenDict[str, Array]
-    command_metrics: xax.FrozenDict[str, Array]
     aux_outputs: xax.FrozenDict[str, PyTree]
 
     def episode_length(self) -> Array:
@@ -114,7 +113,6 @@ class Metrics:
     reward: Mapping[str, Array | Histogram]
     termination: Mapping[str, Array | Histogram]
     curriculum_level: Array
-    command: Mapping[str, Array | Histogram] | None = None
 
 
 @jax.tree_util.register_dataclass

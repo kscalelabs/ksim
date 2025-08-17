@@ -131,7 +131,7 @@ class StudentTask(PPOTask[Config], Generic[Config], ABC):
         # adds the teacher distribution to the aux outputs
         aux_outputs = trajectory.aux_outputs.unfreeze() if trajectory.aux_outputs else {}
         aux_outputs[TEACHER_OUTPUT_KEY] = action_dist
-        trajectory = replace(trajectory, aux_outputs=xax.FrozenDict(aux_outputs))
+        trajectory = replace(trajectory, aux_outputs=xax.freeze_dict(aux_outputs))
 
         return trajectory
 

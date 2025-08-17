@@ -489,7 +489,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             loss_t = jnp.stack(list(losses_t.values()), axis=-1).sum(axis=-1)
             loss = loss_t.sum() / (num_valid + 1e-6)
 
-            return loss, xax.FrozenDict(metrics)
+            return loss, xax.freeze_dict(metrics)
 
         # Gets the loss and metrics for each trajectory in the batch.
         rngs = jax.random.split(rng, rewards.total.shape[0])
