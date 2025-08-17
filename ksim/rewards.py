@@ -28,6 +28,7 @@ __all__ = [
     "ReachabilityPenalty",
     "FeetAirTimeReward",
     "FeetHeightReward",
+    "MotionlessAtRestPenalty",
     "ForcePenalty",
     "SinusoidalGaitReward",
     "BaseHeightTrackingReward",
@@ -822,6 +823,76 @@ class FeetHeightReward(StatefulReward):
         )
         reward_t = reward_tn.max(axis=-1)
         return reward_t, reward_carry
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetAirTimeReward(StatefulReward):
+    """Reward for feet either touching or not touching the ground for some time."""
+
+    period: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    contact_obs: str = attrs.field()
+    num_feet: int = attrs.field(default=2)
+    bias: float = attrs.field(default=0.0)
+    linvel_moving_threshold: float = attrs.field(default=0.05)
+    angvel_moving_threshold: float = attrs.field(default=0.05)
+
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(self.num_feet, dtype=jnp.int32)
+
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: Array,
+    ) -> tuple[Array, Array]:
+        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
+        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
+        not_moving = not_moving_lin & not_moving_ang
+
+        contact_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        contact_tn = contact_tcn.any(axis=-2)
+        chex.assert_shape(contact_tn, (..., self.num_feet))
+
+        threshold_steps = round(self.period / self.ctrl_dt)
+
+        def scan_fn(
+            carry: Array,
+            x: tuple[Array, Array, Array],
+        ) -> tuple[Array, Array]:
+            count_n, (contact_n, not_moving, done) = carry, x
+            reset = done | not_moving | contact_n
+            count_n = jnp.where(reset, 0, count_n + 1)
+            return count_n, count_n
+
+        reward_carry, count_tn = xax.scan(
+            scan_fn,
+            reward_carry,
+            (contact_tn, not_moving, trajectory.done),
+        )
+
+        # Gradually increase reward until `threshold_steps`.
+        reward_tn = (count_tn.astype(jnp.float32) / threshold_steps) + self.bias
+        reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
+        reward_t = reward_tn.sum(axis=-1)
+        return reward_t, reward_carry
+
+
+@attrs.define(frozen=True, kw_only=True)
+class MotionlessAtRestPenalty(Reward):
+    """Reward for feet either touching or not touching the ground for some time."""
+
+    linvel_moving_threshold: float = attrs.field(default=0.05)
+    angvel_moving_threshold: float = attrs.field(default=0.05)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
+        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
+        not_moving = not_moving_lin & not_moving_ang
+
+        joint_vel = trajectory.qvel[..., 6:]
+        joint_vel_norm = jnp.linalg.norm(joint_vel, axis=-1)
+        penalty = jnp.where(not_moving, joint_vel_norm, 0.0)
+        return penalty
 
 
 @attrs.define(frozen=True, kw_only=True)
