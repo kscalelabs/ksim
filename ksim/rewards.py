@@ -25,6 +25,7 @@ __all__ = [
     "UprightReward",
     "LinkAccelerationPenalty",
     "LinkJerkPenalty",
+    "SymmetryReward",
     "ReachabilityPenalty",
     "FeetAirTimeReward",
     "FeetHeightReward",
