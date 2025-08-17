@@ -784,7 +784,6 @@ class FeetHeightReward(StatefulReward):
     position_obs: str = attrs.field()
     height: float = attrs.field()
     num_feet: int = attrs.field(default=2)
-    bias: float = attrs.field(default=0.0)
     linvel_moving_threshold: float = attrs.field(default=0.05)
     angvel_moving_threshold: float = attrs.field(default=0.05)
 
