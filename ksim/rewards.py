@@ -754,9 +754,9 @@ class FeetHeightReward(StatefulReward):
         def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
             contact_n, position_n3 = x
             height_n = position_n3[..., 2]
+            reward_n = jnp.where(contact_n, carry, 0.0).clip(max=self.height)
             max_height_n = jnp.maximum(carry, height_n)
-            carry = jnp.where(contact_n, height_n, max_height_n)
-            reward_n = jnp.where(contact_n, max_height_n, 0.0).clip(max=self.height)
+            carry = jnp.where(contact_n, 0.0, max_height_n)
             return carry, reward_n
 
         reward_carry, reward_tn = xax.scan(scan_fn, reward_carry, (contact_tn, position_tn3))
