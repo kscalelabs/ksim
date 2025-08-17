@@ -1364,22 +1364,18 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             buf.seek(0)
             return Image.open(buf)
 
-        arrs = (
-            (
+        arrs = [
+            ("🎁 reward images", logged_traj.rewards.components),
+            ("🎁 reward images", {"💯 total": logged_traj.rewards.total}),
+        ]
+        if self.config.log_all_images:
+            arrs += [
                 ("👀 obs images", xax.get_pytree_mapping(logged_traj.trajectory.obs)),
                 ("🕹️ command images", xax.get_pytree_mapping(logged_traj.trajectory.command)),
                 ("🏃 action images", {"action": logged_traj.trajectory.action}),
                 ("💀 termination images", logged_traj.trajectory.termination_components),
                 ("🗓️ event images", logged_traj.trajectory.event_state),
-                ("🎁 reward images", logged_traj.rewards.components),
-                ("🎁 reward images", {"total": logged_traj.rewards.total}),
-            )
-            if self.config.log_all_images
-            else (
-                ("🎁 reward images", logged_traj.rewards.components),
-                ("🎁 reward images", {"total": logged_traj.rewards.total}),
-            )
-        )
+            ]
 
         # Logs plots of the observations, commands, actions, rewards, and terminations.
         # Emojis are used in order to prevent conflicts with user-specified namespaces.
@@ -1438,7 +1434,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             self.config.plot_figsize[1],
         )
         img = create_plot_image(combined_rewards_figsize, plot_combined_rewards)
-        log_callback("all_components_comparison", img, "🎁 reward images")
+        log_callback("💯 components", img, "🎁 reward images")
 
     def _log_logged_trajectory_video(
         self,

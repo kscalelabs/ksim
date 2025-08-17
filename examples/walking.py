@@ -481,12 +481,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
         return {
-            "gait": ksim.SinusoidalGaitCommand(
-                gait_period=self.config.gait_period,
-                ctrl_dt=self.config.ctrl_dt,
-                max_height=self.config.max_foot_height,
-                height_offset=0.08,
-            ),
             "linvel": ksim.LinearVelocityCommand(
                 min_vel=self.config.linear_velocity_range[0],
                 max_vel=self.config.linear_velocity_range[1],
@@ -506,13 +500,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return {
             "stay_alive": ksim.StayAliveReward(scale=100.0),
             "upright": ksim.UprightReward(scale=5.0),
-            "gait": ksim.SinusoidalGaitReward(
-                ctrl_dt=self.config.ctrl_dt,
-                max_height=self.config.max_foot_height,
-                pos_obs="feet_position",
-                pos_cmd="gait",
-                scale=5.0,
-            ),
             "linvel": ksim.LinearVelocityPenalty(
                 cmd="linvel",
                 scale=-0.1,
@@ -521,7 +508,13 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 cmd="angvel",
                 scale=-0.01,
             ),
-            "airtime": ksim.FeetAirTimeReward(
+            "foot_height": ksim.FeetHeightReward(
+                height=self.config.max_foot_height,
+                position_obs="feet_position",
+                contact_obs="feet_contact",
+                scale=1.0,
+            ),
+            "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
                 threshold=self.config.gait_period / 2.0,
                 contact_obs="feet_contact",
@@ -547,8 +540,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return Model(
             params.key,
             physics_model=params.physics_model,
-            num_actor_inputs=44,
-            num_critic_inputs=336,
+            num_actor_inputs=43,
+            num_critic_inputs=334,
             num_joints=17,
             min_std=0.01,
             max_std=1.0,
@@ -585,14 +578,12 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         imu_gyro_3 = observations["noisy_imu_gyro"]
 
         # Command tensors.
-        gait_cmd: ksim.SinusoidalGaitCommandValue = commands["gait"]
         linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
         angvel_cmd: ksim.AngularVelocityCommandValue = commands["angvel"]
 
         # Stacks into tensors.
         linvel_cmd_2 = jnp.stack([linvel_cmd.vel, linvel_cmd.yaw], axis=-1)
         angvel_cmd_1 = jnp.stack([angvel_cmd.vel], axis=-1)
-        gait_phase_1 = jnp.stack([gait_cmd.phase], axis=-1)
 
         obs_n = jnp.concatenate(
             [
@@ -600,7 +591,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 proj_grav_3,  # 3
                 imu_gyro_3,  # 3
-                gait_phase_1,  # 1
                 linvel_cmd_2,  # 2
                 angvel_cmd_1,  # 1
             ],
@@ -630,18 +620,12 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         ang_vel_obs_3 = observations["base_angular_velocity"]
 
         # Command tensors.
-        gait_cmd: ksim.SinusoidalGaitCommandValue = commands["gait"]
         linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
         angvel_cmd: ksim.AngularVelocityCommandValue = commands["angvel"]
 
         # Stacks into tensors.
         linvel_cmd_4 = jnp.stack([linvel_cmd.vel, linvel_cmd.yaw, linvel_cmd.xvel, linvel_cmd.yvel], axis=-1)
         angvel_cmd_1 = jnp.stack([angvel_cmd.vel], axis=-1)
-
-        # Foot height difference.
-        foot_height_2 = observations["feet_position"][..., 2]
-        foot_tgt_height_2 = gait_cmd.height
-        foot_height_diff_2 = foot_height_2 - foot_tgt_height_2
 
         obs_n = jnp.concatenate(
             [
@@ -657,7 +641,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 base_quat_4,  # 4
                 lin_vel_obs_3,  # 3
                 ang_vel_obs_3,  # 3
-                foot_height_diff_2,  # 2
                 linvel_cmd_4,  # 4
                 angvel_cmd_1,  # 1
             ],

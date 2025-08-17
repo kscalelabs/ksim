@@ -25,9 +25,8 @@ __all__ = [
     "UprightReward",
     "LinkAccelerationPenalty",
     "LinkJerkPenalty",
-    "LinearVelocityTrackingReward",
-    "AngularVelocityTrackingReward",
     "ReachabilityPenalty",
+    "FeetHeightReward",
     "FeetAirTimeReward",
     "SinusoidalGaitReward",
     "BaseHeightTrackingReward",
@@ -50,7 +49,6 @@ from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by
 from ksim.utils.validators import (
     CartesianIndex,
     cartesian_index_to_dim,
-    dimension_index_tuple_validator,
     norm_validator,
 )
 from ksim.vis import Marker
@@ -648,64 +646,6 @@ class SymmetryReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class LinearVelocityTrackingReward(Reward):
-    """Reward for tracking the linear velocity."""
-
-    linvel_obs_name: str = attrs.field()
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
-        default=("x", "y"), validator=dimension_index_tuple_validator
-    )
-    error_scale: float = attrs.field(default=0.25)
-    command_name: str = attrs.field(default="linear_velocity_command")
-    in_robot_frame: bool = attrs.field(default=True)
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        if self.linvel_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
-
-        linvel = trajectory.obs[self.linvel_obs_name]
-        if self.in_robot_frame:
-            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
-
-        dims = index_to_dims(self.index)
-
-        linvel = linvel[..., dims]
-        robot_vel_cmd = trajectory.command[self.command_name]
-        robot_vel_cmd = robot_vel_cmd[..., dims]
-
-        vel_error = xax.get_norm(linvel - robot_vel_cmd, self.norm).sum(axis=-1)
-
-        return jnp.exp(-vel_error / self.error_scale)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class AngularVelocityTrackingReward(Reward):
-    """Reward for tracking the angular velocity."""
-
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
-        default=("x", "y"), validator=dimension_index_tuple_validator
-    )
-    error_scale: float = attrs.field(default=0.25)
-    command_name: str = attrs.field(default="angular_velocity_command")
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        angvel = trajectory.qvel[..., 3:6]
-
-        dims = index_to_dims(self.index)
-
-        angvel = angvel[..., dims]
-        robot_angvel_cmd = trajectory.command[self.command_name]
-
-        chex.assert_shape(robot_angvel_cmd, (..., len(dims)))
-
-        angvel_error = xax.get_norm(angvel - robot_angvel_cmd, self.norm).sum(axis=-1)
-
-        return jnp.exp(-angvel_error / self.error_scale)
-
-
-@attrs.define(frozen=True, kw_only=True)
 class ReachabilityPenalty(Reward):
     """Penalty for commands that exceed the per‑joint reachability envelope.
 
@@ -726,6 +666,47 @@ class ReachabilityPenalty(Reward):
         penalty_t = per_joint.sum(axis=-1)
 
         return penalty_t
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetHeightReward(StatefulReward):
+    """Reward for having the foot above the ground some amount."""
+
+    height: float = attrs.field()
+    position_obs: str = attrs.field()
+    contact_obs: str = attrs.field()
+    num_feet: int = attrs.field(default=2)
+    min_steps_no_contact: int = attrs.field(default=5)
+
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(self.num_feet, dtype=jnp.float32)
+
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: Array,
+    ) -> tuple[Array, Array]:
+        contact_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        contact_tn = contact_tcn.any(axis=-2)
+        chex.assert_shape(contact_tn, (..., self.num_feet))
+
+        position_tn3 = trajectory.obs[self.position_obs]
+        chex.assert_shape(position_tn3, (..., self.num_feet, 3))
+
+        # Give a sparse reward once the foot contacts the ground, equal to the
+        # maximum height of the foot since the last contact, thresholded at the
+        # target height.
+        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
+            contact_n, position_n3 = x
+            height_n = position_n3[..., 2]
+            max_height_n = jnp.maximum(carry, height_n)
+            carry = jnp.where(contact_n, height_n, max_height_n)
+            reward_n = jnp.where(contact_n, max_height_n, 0.0).clip(max=self.height)
+            return carry, reward_n
+
+        reward_carry, reward_tn = xax.scan(scan_fn, reward_carry, (contact_tn, position_tn3))
+        reward_t = reward_tn.max(axis=-1)
+        return reward_t, reward_carry
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -789,10 +770,10 @@ class SinusoidalGaitTargetMarker(Marker):
     def get(
         cls,
         foot_id: int,
+        obs_name: str,
+        cmd_name: str,
         radius: float = 0.05,
         size: float = 0.03,
-        obs_name: str = "feet_position_observation",
-        cmd_name: str = "sinusoidal_gait_command",
     ) -> Self:
         return cls(
             foot_id=foot_id,
@@ -814,9 +795,9 @@ class SinusoidalGaitTargetMarker(Marker):
 @attrs.define(kw_only=True)
 class SinusoidalGaitPositionMarker(Marker):
     foot_id: int = attrs.field()
+    obs_name: str = attrs.field()
     radius: float = attrs.field(default=0.1)
     size: float = attrs.field(default=0.03)
-    obs_name: str = attrs.field(default="feet_position_observation")
 
     def update(self, trajectory: Trajectory) -> None:
         """Visualizes the sinusoidal gait."""
@@ -827,7 +808,7 @@ class SinusoidalGaitPositionMarker(Marker):
     def get(
         cls,
         foot_id: int,
-        obs_name: str = "feet_position_observation",
+        obs_name: str,
         radius: float = 0.05,
         size: float = 0.03,
     ) -> Self:
