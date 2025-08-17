@@ -855,8 +855,14 @@ class ForcePenalty(StatefulReward):
     ) -> tuple[Array, Array]:
         alpha = jnp.exp(-self.ctrl_dt / self.ema_time)
         obs = (jnp.linalg.norm(trajectory.obs[self.force_obs], axis=-1) - self.bias).clip(min=0)
-        ema_fn = alpha * reward_carry + (1 - alpha) * obs
-        penalty = jnp.log1p(self.ema_scale * ema_fn).sum(axis=-1)
+
+        def scan_fn(carry: Array, x: Array) -> tuple[Array, Array]:
+            ema_n, obs_n = carry, x
+            ema_n = alpha * ema_n + (1 - alpha) * obs_n
+            return ema_n, ema_n
+
+        ema_fn, ema_acc = xax.scan(scan_fn, reward_carry, obs)
+        penalty = jnp.log1p(self.ema_scale * ema_acc).sum(axis=-1)
         return penalty, ema_fn
 
 
