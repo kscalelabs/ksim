@@ -746,9 +746,9 @@ class FeetAirTimeReward(StatefulReward):
         not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
         not_moving = not_moving_lin & not_moving_ang
 
-        sensor_data_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
-        sensor_data_tn = sensor_data_tcn.any(axis=-2)
-        chex.assert_shape(sensor_data_tn, (..., self.num_feet))
+        contact_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        contact_tn = contact_tcn.any(axis=-2)
+        chex.assert_shape(contact_tn, (..., self.num_feet))
 
         threshold_steps = round(self.period / self.ctrl_dt)
 
@@ -764,7 +764,7 @@ class FeetAirTimeReward(StatefulReward):
         reward_carry, count_tn = xax.scan(
             scan_fn,
             reward_carry,
-            (sensor_data_tn, not_moving, trajectory.done),
+            (contact_tn, not_moving, trajectory.done),
         )
 
         # Gradually increase reward until `threshold_steps`.
@@ -784,7 +784,6 @@ class FeetHeightReward(StatefulReward):
     position_obs: str = attrs.field()
     height: float = attrs.field()
     num_feet: int = attrs.field(default=2)
-    bias: float = attrs.field(default=0.0)
     linvel_moving_threshold: float = attrs.field(default=0.05)
     angvel_moving_threshold: float = attrs.field(default=0.05)
 
@@ -799,6 +798,10 @@ class FeetHeightReward(StatefulReward):
         trajectory: Trajectory,
         reward_carry: tuple[Array, Array],
     ) -> tuple[Array, tuple[Array, Array]]:
+        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
+        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
+        not_moving = not_moving_lin & not_moving_ang
+
         contact_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
         contact_tn = contact_tcn.any(axis=-2)
         chex.assert_shape(contact_tn, (..., self.num_feet))
@@ -809,17 +812,22 @@ class FeetHeightReward(StatefulReward):
         # Give a sparse reward once the foot contacts the ground, equal to the
         # maximum height of the foot since the last contact, thresholded at the
         # target height.
-        def scan_fn(carry: tuple[Array, Array], x: tuple[Array, Array]) -> tuple[tuple[Array, Array], Array]:
-            (elapsed_time_n, max_height_n), (contact_n, position_n3) = carry, x
+        def scan_fn(carry: tuple[Array, Array], x: tuple[Array, Array, Array]) -> tuple[tuple[Array, Array], Array]:
+            (elapsed_time_n, max_height_n), (contact_n, position_n3, not_moving) = carry, x
             height_n = position_n3[..., 2]
             scale = (elapsed_time_n / self.period).clip(max=1.0)
-            reward_n = jnp.where(contact_n, max_height_n, 0.0).clip(max=self.height) * scale
+            reset = not_moving | contact_n
+            reward_n = jnp.where(reset, max_height_n, 0.0).clip(max=self.height) * scale
             max_height_n = jnp.maximum(max_height_n, height_n)
-            max_height_n = jnp.where(contact_n, 0.0, max_height_n)
-            elapsed_time_n = jnp.where(contact_n, 0.0, elapsed_time_n + self.ctrl_dt)
+            max_height_n = jnp.where(reset, 0.0, max_height_n)
+            elapsed_time_n = jnp.where(reset, 0.0, elapsed_time_n + self.ctrl_dt)
             return (elapsed_time_n, max_height_n), reward_n
 
-        reward_carry, reward_tn = xax.scan(scan_fn, reward_carry, (contact_tn, position_tn3))
+        reward_carry, reward_tn = xax.scan(
+            scan_fn,
+            reward_carry,
+            (contact_tn, position_tn3, not_moving | trajectory.done),
+        )
         reward_t = reward_tn.max(axis=-1)
         return reward_t, reward_carry
 
