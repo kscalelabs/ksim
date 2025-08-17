@@ -176,9 +176,10 @@ def get_observation(
         observation_dict[name] = observation_val
         next_obs_carry[name] = new_carry
 
-        # Adds the noisy observations as well.
-        noisy_observation_val = observation.add_noise(observation_val, curriculum_level, noise_rng)
-        observation_dict[f"noisy_{name}"] = noisy_observation_val
+        # Adds the noisy observation, if we are supposed to add noise.
+        if observation.noise is not None:
+            noisy_observation_val = observation.noise.add_noise(observation_val, curriculum_level, noise_rng)
+            observation_dict[f"noisy_{name}"] = noisy_observation_val
 
     return xax.freeze_dict(observation_dict), xax.freeze_dict(next_obs_carry)
 

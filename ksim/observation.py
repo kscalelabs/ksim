@@ -35,7 +35,7 @@ __all__ = [
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Collection, Literal, Self
+from typing import Collection, Self
 
 import attrs
 import jax
@@ -44,6 +44,7 @@ import xax
 from jax import numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+from ksim.noise import Noise
 from ksim.types import PhysicsModel, PhysicsState
 from ksim.utils.mujoco import (
     geoms_colliding,
@@ -56,8 +57,6 @@ from ksim.utils.mujoco import (
 )
 from ksim.vis import Marker
 
-NoiseType = Literal["gaussian", "uniform"]
-
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
@@ -67,28 +66,11 @@ class ObservationInput:
     obs_carry: PyTree
 
 
-def add_noise(
-    observation: Array,
-    rng: PRNGKeyArray,
-    noise_type: NoiseType,
-    noise: float,
-    curriculum_level: Array,
-) -> Array:
-    match noise_type:
-        case "gaussian":
-            return observation + jax.random.normal(rng, observation.shape) * noise * curriculum_level
-        case "uniform":
-            return observation + (jax.random.uniform(rng, observation.shape) * 2 - 1) * noise * curriculum_level
-        case _:
-            raise ValueError(f"Invalid noise type: {noise_type}")
-
-
 @attrs.define(frozen=True, kw_only=True)
 class Observation(ABC):
     """Base class for observations."""
 
-    noise: float = attrs.field(default=0.0)
-    noise_type: NoiseType = attrs.field(default="gaussian")
+    noise: Noise | None = attrs.field(default=None)
 
     @abstractmethod
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
@@ -103,20 +85,6 @@ class Observation(ABC):
         Returns:
             The observation
         """
-
-    def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        """Override to add noise to the observation.
-
-        Args:
-            observation: The raw observation from the state
-            curriculum_level: The current curriculum level, a scalar between
-                zero and one.
-            rng: A PRNGKeyArray to use for the noise
-
-        Returns:
-            The observation with noise added
-        """
-        return add_noise(observation, rng, self.noise_type, self.noise, curriculum_level)
 
     def get_markers(self, name: str) -> Collection[Marker]:
         return []
@@ -333,16 +301,14 @@ class SensorObservation(Observation):
         *,
         physics_model: PhysicsModel,
         sensor_name: str,
-        noise: float = 0.0,
-        noise_type: NoiseType = "gaussian",
+        noise: Noise | None = None,
     ) -> Self:
         """Create a sensor observation from a physics model.
 
         Args:
             physics_model: MuJoCo physics model
             sensor_name: Name of sensor to observe
-            noise: Amount of noise to add
-            noise_type: Type of noise to add
+            noise: The observation noise
         """
         sensor_name_to_idx_range = get_sensor_data_idxs_by_name(physics_model)
         if sensor_name not in sensor_name_to_idx_range:
@@ -350,10 +316,9 @@ class SensorObservation(Observation):
             raise ValueError(f"{sensor_name} not found in model. Available:\n{options}")
 
         return cls(
-            noise=noise,
-            noise_type=noise_type,
             sensor_name=sensor_name,
             sensor_idx_range=sensor_name_to_idx_range[sensor_name],
+            noise=noise,
         )
 
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
@@ -372,6 +337,14 @@ class BaseLinearAccelerationObservation(Observation):
 class BaseAngularAccelerationObservation(Observation):
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         return state.physics_state.data.qacc[3:6]
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class ProjectedGravityCarry:
+    x: Array
+    lag: Array
+    bias: Array
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -406,8 +379,8 @@ class ProjectedGravityObservation(StatefulObservation):
         physics_model: PhysicsModel,
         framequat_name: str,
         lag_range: tuple[float, float] = (0.001, 0.005),
-        noise: float = 0.0,
         bias: float = math.radians(2.0),
+        noise: Noise | None = None,
     ) -> Self:
         """Create a projected gravity observation from a physics model.
 
@@ -416,8 +389,8 @@ class ProjectedGravityObservation(StatefulObservation):
             framequat_name: The name of the framequat sensor
             lag_range: The range of EMA factors to use, to approximate the
                 variation in the amount of smoothing of the Kalman filter.
-            noise: The observation noise.
             bias: The bias of the gravity vector, in radians.
+            noise: The observation noise.
         """
         sensor_name_to_idx_range = get_sensor_data_idxs_by_name(physics_model)
         if framequat_name not in sensor_name_to_idx_range:
@@ -434,36 +407,33 @@ class ProjectedGravityObservation(StatefulObservation):
             bias=bias,
         )
 
-    def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> tuple[Array, Array, Array]:
+    def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> ProjectedGravityCarry:
         minval, maxval = self.lag_range
         lrng, brng = jax.random.split(rng)
         lag = jax.random.uniform(lrng, (1,), minval=minval, maxval=maxval)
         bias = jax.random.uniform(brng, (3,), minval=-self.bias, maxval=self.bias)
-        return jnp.zeros((3,)), lag, bias
+        return ProjectedGravityCarry(x=jnp.zeros((3,)), lag=lag, bias=bias)
 
     def observe_stateful(
         self,
         state: ObservationInput,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, tuple[Array, Array, Array]]:
-        x, lag, bias = state.obs_carry
+    ) -> tuple[Array, ProjectedGravityCarry]:
+        carry: ProjectedGravityCarry = state.obs_carry
         framequat_start, framequat_end = self.framequat_idx_range
         framequat_data = state.physics_state.data.sensordata[framequat_start:framequat_end].ravel()
 
         # Orients the gravity vector according to the quaternion.
         gravity = jnp.array(self.gravity)
-        bias_quat = xax.euler_to_quat(bias)
+        bias_quat = xax.euler_to_quat(carry.bias)
         proj_gravity = xax.rotate_vector_by_quat(gravity, framequat_data, inverse=True)
         proj_gravity = xax.rotate_vector_by_quat(proj_gravity, bias_quat)
 
-        # Add noise to gravity vector measurement.
-        proj_gravity = add_noise(proj_gravity, rng, "gaussian", self.noise, curriculum_level)
+        # Get current lagging state.
+        x = carry.x * carry.lag + proj_gravity * (1 - carry.lag)
 
-        # Get current Kalman filter state
-        x = x * lag + proj_gravity * (1 - lag)
-
-        return x, (x, lag, bias)
+        return x, ProjectedGravityCarry(x=x, lag=carry.lag, bias=carry.bias)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -484,7 +454,7 @@ class ContactObservation(Observation):
         physics_model: PhysicsModel,
         geom_names: str | Collection[str],
         contact_group: str | None = None,
-        noise: float = 0.0,
+        noise: Noise | None = None,
     ) -> Self:
         """Create a sensor observation from a physics model."""
         if isinstance(geom_names, str):
@@ -516,7 +486,7 @@ class FeetContactObservation(Observation):
         foot_left_geom_names: str | Collection[str],
         foot_right_geom_names: str | Collection[str],
         floor_geom_names: str | Collection[str],
-        noise: float = 0.0,
+        noise: Noise | None = None,
     ) -> Self:
         """Create a sensor observation from a physics model."""
         if isinstance(foot_left_geom_names, str):
@@ -557,7 +527,7 @@ class FeetPositionObservation(Observation):
         physics_model: PhysicsModel,
         foot_left_body_name: str,
         foot_right_body_name: str,
-        noise: float = 0.0,
+        noise: Noise | None = None,
     ) -> Self:
         foot_left_idx = get_body_data_idx_from_name(physics_model, foot_left_body_name)
         foot_right_idx = get_body_data_idx_from_name(physics_model, foot_right_body_name)
@@ -584,7 +554,7 @@ class BodyOrientationObservation(Observation):
         *,
         physics_model: PhysicsModel,
         body_names: tuple[str, ...],
-        noise: float = 0.0,
+        noise: Noise | None = None,
     ) -> Self:
         body_ids = tuple(get_body_data_idx_from_name(physics_model, name) for name in body_names)
         name = f"{xax.camelcase_to_snakecase(cls.__name__)}_{'_'.join(body_names)}"
@@ -610,7 +580,7 @@ class SiteOrientationObservation(Observation):
         *,
         physics_model: PhysicsModel,
         site_names: tuple[str, ...],
-        noise: float = 0.0,
+        noise: Noise | None = None,
     ) -> Self:
         site_ids = tuple(get_site_data_idx_from_name(physics_model, name) for name in site_names)
         name = f"{xax.camelcase_to_snakecase(cls.__name__)}_{'_'.join(site_names)}"
@@ -634,7 +604,7 @@ class FeetOrientationObservation(BodyOrientationObservation):
         *,
         physics_model: PhysicsModel,
         body_names: tuple[str, ...],
-        noise: float = 0.0,
+        noise: Noise | None = None,
     ) -> Self:  # <- same return type
         if len(body_names) != 2:
             raise ValueError("FeetOrientationObservation expects exactly two body names (left and right foot).")
@@ -651,7 +621,7 @@ class FeetOrientationObservation(BodyOrientationObservation):
         physics_model: PhysicsModel,
         foot_left_body_name: str,
         foot_right_body_name: str,
-        noise: float = 0.0,
+        noise: Noise | None = None,
     ) -> Self:
         return super().create(
             physics_model=physics_model,

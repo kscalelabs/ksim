@@ -430,8 +430,12 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
         return {
-            "joint_position": ksim.JointPositionObservation(),
-            "joint_velocity": ksim.JointVelocityObservation(),
+            "joint_position": ksim.JointPositionObservation(
+                noise=ksim.AdditiveUniformNoise(mag=0.1),
+            ),
+            "joint_velocity": ksim.JointVelocityObservation(
+                noise=ksim.MultiplicativeUniformNoise(mag=0.3),
+            ),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
             "center_of_mass_velocity": ksim.CenterOfMassVelocityObservation(),
@@ -439,24 +443,28 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             "base_orientation": ksim.BaseOrientationObservation(),
             "base_linear_velocity": ksim.BaseLinearVelocityObservation(),
             "base_angular_velocity": ksim.BaseAngularVelocityObservation(),
-            "base_linear_acceleration": ksim.BaseLinearAccelerationObservation(),
-            "base_angular_acceleration": ksim.BaseAngularAccelerationObservation(),
             "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="orientation",
+                noise=ksim.AdditiveGaussianNoise(std=0.01),
+            ),
+            "clean_projected_gravity": ksim.ProjectedGravityObservation.create(
+                physics_model=physics_model,
+                framequat_name="orientation",
+                lag_range=(0.0, 0.0),
+                bias=0.0,
             ),
             "actuator_acceleration": ksim.ActuatorAccelerationObservation(),
-            "imu_acc": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_acc"),
-            "imu_gyro": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="imu_gyro"),
-            "local_linvel": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="local_linvel"),
-            "upvector": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="upvector"),
-            "forwardvector": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="forwardvector"),
-            "global_linvel": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_linvel"),
-            "global_angvel": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="global_angvel"),
-            "position": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="position"),
-            "orientation": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="orientation"),
-            "left_foot_pos": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_pos"),
-            "right_foot_pos": ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_pos"),
+            "imu_acc": ksim.SensorObservation.create(
+                physics_model=physics_model,
+                sensor_name="imu_acc",
+                noise=ksim.AdditiveGaussianNoise(std=0.01),
+            ),
+            "imu_gyro": ksim.SensorObservation.create(
+                physics_model=physics_model,
+                sensor_name="imu_gyro",
+                noise=ksim.AdditiveGaussianNoise(std=0.01),
+            ),
             "feet_contact": ksim.FeetContactObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names=["foot_left"],
@@ -468,12 +476,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 foot_left_body_name="foot_left",
                 foot_right_body_name="foot_right",
             ),
-            "feet_orientation": ksim.FeetOrientationObservation.create_from_feet(
-                physics_model=physics_model,
-                foot_left_body_name="foot_left",
-                foot_right_body_name="foot_right",
-            ),
-            "timestep": ksim.TimestepObservation(),
         }
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
@@ -516,7 +518,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             "angvel": ksim.AngularVelocityPenalty(
                 cmd="angvel",
-                scale=-0.1,
+                scale=-0.01,
             ),
             "airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
@@ -545,7 +547,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             params.key,
             physics_model=params.physics_model,
             num_actor_inputs=44,
-            num_critic_inputs=330,
+            num_critic_inputs=336,
             num_joints=17,
             min_std=0.01,
             max_std=1.0,
@@ -617,8 +619,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         dh_joint_vel_j = observations["joint_velocity"]
         com_inertia_n = observations["center_of_mass_inertia"]
         com_vel_n = observations["center_of_mass_velocity"]
-        # imu_acc_3 = observations["imu_acc"]
-        # imu_gyro_3 = observations["imu_gyro"]
+        imu_acc_3 = observations["imu_acc"]
+        imu_gyro_3 = observations["imu_gyro"]
         proj_grav_3 = observations["projected_gravity"]
         act_frc_obs_n = observations["actuator_force"]
         base_pos_3 = observations["base_position"]
@@ -646,6 +648,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 dh_joint_vel_j / 10.0,  # NUM_JOINTS
                 com_inertia_n,  # 160
                 com_vel_n,  # 96
+                imu_acc_3,  # 3
+                imu_gyro_3,  # 3
                 proj_grav_3,  # 3
                 act_frc_obs_n / 100.0,  # NUM_JOINTS
                 base_pos_3,  # 3
