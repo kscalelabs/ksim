@@ -171,7 +171,7 @@ class StayAliveReward(Reward):
     value will increase the relative penalty for termination.
     """
 
-    balance: float = attrs.field(default=10.0)
+    balance: float = attrs.field(default=100.0)
     success_reward: float | None = attrs.field(default=None)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
