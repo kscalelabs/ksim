@@ -187,6 +187,56 @@ class StayAliveReward(Reward):
         return reward
 
 
+@attrs.define(kw_only=True)
+class LinearVelocityPenaltyMarker(Marker):
+    size: float = attrs.field(default=0.03)
+    arrow_scale: float = attrs.field(default=0.3)
+    height: float = attrs.field(default=0.5)
+    base_length: float = attrs.field(default=0.15)
+    zero_threshold: float = attrs.field(default=1e-4)
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        linvel = trajectory.qvel[..., :3]
+        linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
+        xy = linvel[..., :2]
+        x = float(xy[..., 0])
+        y = float(xy[..., 1])
+        speed = (x**2 + y**2) ** 0.5
+        direction = (x / speed, y / speed, 0.0)
+
+        # Always show an arrow with base_length plus scaling by speed
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
+        arrow_length = self.base_length + self.arrow_scale * speed
+        self.scale = (self.size, self.size, arrow_length)
+
+        # If command is near-zero, show grey arrow pointing +X.
+        if speed < self.zero_threshold:
+            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
+            self.rgba = (0.8, 0.8, 0.8, 0.8)
+        else:
+            self.orientation = self.quat_from_direction(direction)
+            self.rgba = (0.2, 0.8, 0.2, 0.8)
+
+    @classmethod
+    def get(
+        cls,
+        *,
+        arrow_scale: float = 0.3,
+        height: float = 0.5,
+        base_length: float = 0.15,
+    ) -> Self:
+        return cls(
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(0.03, 0.03, base_length),
+            arrow_scale=arrow_scale,
+            height=height,
+            base_length=base_length,
+            track_rotation=True,
+        )
+
+
 @attrs.define(frozen=True, kw_only=True)
 class LinearVelocityPenalty(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
@@ -219,6 +269,9 @@ class LinearVelocityPenalty(Reward):
             "l1_y": xax.get_norm(y - cmd.yvel, "l1"),
             "l2_y": xax.get_norm(y - cmd.yvel, "l2"),
         }
+
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [LinearVelocityPenaltyMarker.get()]
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -718,7 +771,8 @@ class FeetAirTimeReward(StatefulReward):
     contact_obs: str = attrs.field()
     num_feet: int = attrs.field(default=2)
     bias: float = attrs.field(default=0.0)
-    moving_threshold: float = attrs.field(default=0.05)
+    linvel_moving_threshold: float = attrs.field(default=0.05)
+    angvel_moving_threshold: float = attrs.field(default=0.05)
 
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
         return jnp.zeros(self.num_feet, dtype=jnp.int32)
@@ -728,7 +782,9 @@ class FeetAirTimeReward(StatefulReward):
         trajectory: Trajectory,
         reward_carry: Array,
     ) -> tuple[Array, Array]:
-        not_moving = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.moving_threshold
+        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
+        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
+        not_moving = not_moving_lin & not_moving_ang
 
         sensor_data_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
         sensor_data_tn = sensor_data_tcn.any(axis=-2)
