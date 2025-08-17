@@ -524,20 +524,22 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 scale=1.0,
             ),
             "foot_height": ksim.FeetHeightReward(
-                ctrl_dt=self.config.ctrl_dt,
-                period=self.config.gait_period / 2.0,
                 contact_obs="feet_contact",
                 position_obs="feet_position",
                 height=self.config.max_foot_height,
                 scale=1.0,
             ),
-            "foot_force": ksim.FeetForcePenalty(
+            "foot_force": ksim.ForcePenalty(
                 force_obs="feet_force",
-                scale=-1e-6,
+                ctrl_dt=self.config.ctrl_dt,
+                bias=100.0,
+                scale=-1e-2,
             ),
-            "foot_torque": ksim.FeetTorquePenalty(
-                torque_obs="feet_torque",
-                scale=-1e-7,
+            "foot_torque": ksim.ForcePenalty(
+                force_obs="feet_torque",
+                ctrl_dt=self.config.ctrl_dt,
+                bias=100.0,
+                scale=-1e-2,
             ),
         }
 
