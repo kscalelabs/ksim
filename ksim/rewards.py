@@ -245,7 +245,6 @@ class LinearVelocityReward(Reward):
     cmd: str = attrs.field()
     vel_length_scale: float = attrs.field(default=0.25)
     yaw_length_scale: float = attrs.field(default=0.25)
-    deadzone: float = attrs.field(default=0.01)
     zero_threshold: float = attrs.field(default=0.01)
     vis_height: float = attrs.field(default=0.6)
 
@@ -286,7 +285,6 @@ class AngularVelocityReward(Reward):
 
     cmd: str = attrs.field()
     angvel_length_scale: float = attrs.field(default=0.25)
-    deadzone: float = attrs.field(default=0.01)
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         cmd: AngularVelocityCommandValue = trajectory.command[self.cmd]
@@ -298,25 +296,23 @@ class AngularVelocityReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class OffAxisVelocityPenalty(Reward):
+class OffAxisVelocityReward(Reward):
     """Penalizes velocities in the off-command directions."""
 
-    deadzone: float = attrs.field(default=0.01)
+    lin_length_scale: float = attrs.field(default=0.25)
+    ang_length_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         linz = trajectory.qvel[..., 2]
         angx = trajectory.qvel[..., 4]
         angy = trajectory.qvel[..., 5]
-        linz_diff = (jnp.abs(linz) - self.deadzone).clip(min=0.0)
-        angx_diff = (jnp.abs(angx) - self.deadzone).clip(min=0.0)
-        angy_diff = (jnp.abs(angy) - self.deadzone).clip(min=0.0)
+        linz_rew = jnp.exp(-jnp.square(linz) / (2 * self.lin_length_scale**2))
+        angx_rew = jnp.exp(-jnp.square(angx) / (2 * self.ang_length_scale**2))
+        angy_rew = jnp.exp(-jnp.square(angy) / (2 * self.ang_length_scale**2))
         return {
-            "linz_l1": linz_diff,
-            "linz_l2": linz_diff**2,
-            "angx_l1": angx_diff,
-            "angx_l2": angx_diff**2,
-            "angy_l1": angy_diff,
-            "angy_l2": angy_diff**2,
+            "linz": linz_rew,
+            "angx": angx_rew,
+            "angy": angy_rew,
         }
 
 
