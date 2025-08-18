@@ -6,9 +6,9 @@ __all__ = [
     "Reward",
     "StatefulReward",
     "StayAliveReward",
-    "LinearVelocityPenalty",
-    "AngularVelocityPenalty",
-    "OffAxisVelocityPenalty",
+    "LinearVelocityReward",
+    "AngularVelocityReward",
+    "OffAxisVelocityReward",
     "BaseHeightReward",
     "BaseHeightRangeReward",
     "ActionVelocityPenalty",
@@ -239,11 +239,12 @@ class LinearVelocityPenaltyMarker(Marker):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class LinearVelocityPenalty(Reward):
+class LinearVelocityReward(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
     cmd: str = attrs.field()
-    deadzone: float = attrs.field(default=0.01)
+    vel_length_scale: float = attrs.field(default=0.25)
+    yaw_length_scale: float = attrs.field(default=0.25)
     zero_threshold: float = attrs.field(default=0.01)
     vis_height: float = attrs.field(default=0.6)
 
@@ -262,20 +263,16 @@ class LinearVelocityPenalty(Reward):
         # Don't reward if the command is zero.
         is_zero = jnp.abs(cmd.vel) < self.zero_threshold
 
-        vel_diff = (jnp.abs(vel - cmd.vel) - self.deadzone).clip(min=0.0)
-        yaw_diff = (jnp.abs(yaw - cmd.yaw) - self.deadzone).clip(min=0.0)
-        x_diff = (jnp.abs(x - cmd.xvel) - self.deadzone).clip(min=0.0)
-        y_diff = (jnp.abs(y - cmd.yvel) - self.deadzone).clip(min=0.0)
+        vel_rew = jnp.exp(-jnp.square(vel - cmd.vel) / (2 * self.vel_length_scale**2))
+        yaw_rew = jnp.exp(-jnp.square(yaw - cmd.yaw) / (2 * self.yaw_length_scale**2))
+        x_rew = jnp.exp(-jnp.square(x - cmd.xvel) / (2 * self.vel_length_scale**2))
+        y_rew = jnp.exp(-jnp.square(y - cmd.yvel) / (2 * self.vel_length_scale**2))
 
         return {
-            "vel_l1": vel_diff,
-            "vel_l2": vel_diff**2,
-            "yaw_l1": jnp.where(is_zero, 0.0, yaw_diff),
-            "yaw_l2": jnp.where(is_zero, 0.0, yaw_diff**2),
-            "x_l1": x_diff,
-            "x_l2": x_diff**2,
-            "y_l1": y_diff,
-            "y_l2": y_diff**2,
+            "vel": vel_rew,
+            "yaw": jnp.where(is_zero, 0.0, yaw_rew),
+            "x": x_rew,
+            "y": y_rew,
         }
 
     def get_markers(self, name: str) -> Collection[Marker]:
@@ -283,42 +280,39 @@ class LinearVelocityPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class AngularVelocityPenalty(Reward):
+class AngularVelocityReward(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
     cmd: str = attrs.field()
-    deadzone: float = attrs.field(default=0.01)
+    angvel_length_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         cmd: AngularVelocityCommandValue = trajectory.command[self.cmd]
         angvel = trajectory.qvel[..., 5]
-        angvel_diff = (jnp.abs(angvel - cmd.vel) - self.deadzone).clip(min=0.0)
+        angvel_rew = jnp.exp(-jnp.square(angvel - cmd.vel) / (2 * self.angvel_length_scale**2))
         return {
-            "angvel_l1": angvel_diff,
-            "angvel_l2": angvel_diff**2,
+            "angvel": angvel_rew,
         }
 
 
 @attrs.define(frozen=True, kw_only=True)
-class OffAxisVelocityPenalty(Reward):
+class OffAxisVelocityReward(Reward):
     """Penalizes velocities in the off-command directions."""
 
-    deadzone: float = attrs.field(default=0.01)
+    lin_length_scale: float = attrs.field(default=0.25)
+    ang_length_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         linz = trajectory.qvel[..., 2]
         angx = trajectory.qvel[..., 4]
         angy = trajectory.qvel[..., 5]
-        linz_diff = (jnp.abs(linz) - self.deadzone).clip(min=0.0)
-        angx_diff = (jnp.abs(angx) - self.deadzone).clip(min=0.0)
-        angy_diff = (jnp.abs(angy) - self.deadzone).clip(min=0.0)
+        linz_rew = jnp.exp(-jnp.square(linz) / (2 * self.lin_length_scale**2))
+        angx_rew = jnp.exp(-jnp.square(angx) / (2 * self.ang_length_scale**2))
+        angy_rew = jnp.exp(-jnp.square(angy) / (2 * self.ang_length_scale**2))
         return {
-            "linz_l1": linz_diff,
-            "linz_l2": linz_diff**2,
-            "angx_l1": angx_diff,
-            "angx_l2": angx_diff**2,
-            "angy_l1": angy_diff,
-            "angy_l2": angy_diff**2,
+            "linz": linz_rew,
+            "angx": angx_rew,
+            "angy": angy_rew,
         }
 
 
