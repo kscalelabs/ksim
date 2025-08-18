@@ -243,6 +243,7 @@ class LinearVelocityPenalty(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
     cmd: str = attrs.field()
+    deadzone: float = attrs.field(default=0.01)
     zero_threshold: float = attrs.field(default=0.01)
     vis_height: float = attrs.field(default=0.6)
 
@@ -261,15 +262,20 @@ class LinearVelocityPenalty(Reward):
         # Don't reward if the command is zero.
         is_zero = jnp.abs(cmd.vel) < self.zero_threshold
 
+        vel_diff = ((vel - cmd.vel).abs() - self.deadzone).clip(min=0.0)
+        yaw_diff = ((yaw - cmd.yaw).abs() - self.deadzone).clip(min=0.0)
+        x_diff = ((x - cmd.xvel).abs() - self.deadzone).clip(min=0.0)
+        y_diff = ((y - cmd.yvel).abs() - self.deadzone).clip(min=0.0)
+
         return {
-            "l1_vel": xax.get_norm(vel - cmd.vel, "l1"),
-            "l2_vel": xax.get_norm(vel - cmd.vel, "l2"),
-            "l1_yaw": jnp.where(is_zero, 0.0, xax.get_norm(yaw - cmd.yaw, "l1")),
-            "l2_yaw": jnp.where(is_zero, 0.0, xax.get_norm(yaw - cmd.yaw, "l2")),
-            "l1_x": xax.get_norm(x - cmd.xvel, "l1"),
-            "l2_x": xax.get_norm(x - cmd.xvel, "l2"),
-            "l1_y": xax.get_norm(y - cmd.yvel, "l1"),
-            "l2_y": xax.get_norm(y - cmd.yvel, "l2"),
+            "vel_l1": vel_diff,
+            "vel_l2": vel_diff**2,
+            "yaw_l1": jnp.where(is_zero, 0.0, yaw_diff),
+            "yaw_l2": jnp.where(is_zero, 0.0, yaw_diff**2),
+            "x_l1": x_diff,
+            "x_l2": x_diff**2,
+            "y_l1": y_diff,
+            "y_l2": y_diff**2,
         }
 
     def get_markers(self, name: str) -> Collection[Marker]:
@@ -281,13 +287,15 @@ class AngularVelocityPenalty(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
     cmd: str = attrs.field()
+    deadzone: float = attrs.field(default=0.01)
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         cmd: AngularVelocityCommandValue = trajectory.command[self.cmd]
         angvel = trajectory.qvel[..., 5]
+        angvel_diff = ((angvel - cmd.vel).abs() - self.deadzone).clip(min=0.0)
         return {
-            "l1_angvel": xax.get_norm(angvel - cmd.vel, "l1"),
-            "l2_angvel": xax.get_norm(angvel - cmd.vel, "l2"),
+            "angvel_l1": angvel_diff,
+            "angvel_l2": angvel_diff**2,
         }
 
 
@@ -295,14 +303,22 @@ class AngularVelocityPenalty(Reward):
 class OffAxisVelocityPenalty(Reward):
     """Penalizes velocities in the off-command directions."""
 
+    deadzone: float = attrs.field(default=0.01)
+
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         linz = trajectory.qvel[..., 2]
         angx = trajectory.qvel[..., 4]
         angy = trajectory.qvel[..., 5]
+        linz_diff = ((linz).abs() - self.deadzone).clip(min=0.0)
+        angx_diff = ((angx).abs() - self.deadzone).clip(min=0.0)
+        angy_diff = ((angy).abs() - self.deadzone).clip(min=0.0)
         return {
-            "linz": xax.get_norm(linz, "l2"),
-            "angx": xax.get_norm(angx, "l2"),
-            "angy": xax.get_norm(angy, "l2"),
+            "linz_l1": linz_diff,
+            "linz_l2": linz_diff**2,
+            "angx_l1": angx_diff,
+            "angx_l2": angx_diff**2,
+            "angy_l1": angy_diff,
+            "angy_l2": angy_diff**2,
         }
 
 
