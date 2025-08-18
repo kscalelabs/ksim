@@ -8,7 +8,7 @@ __all__ = [
     "StayAliveReward",
     "LinearVelocityPenalty",
     "AngularVelocityPenalty",
-    "AngularVelocityPenalty",
+    "OffAxisVelocityPenalty",
     "BaseHeightReward",
     "BaseHeightRangeReward",
     "ActionVelocityPenalty",
@@ -288,6 +288,21 @@ class AngularVelocityPenalty(Reward):
         return {
             "l1_angvel": xax.get_norm(angvel - cmd.vel, "l1"),
             "l2_angvel": xax.get_norm(angvel - cmd.vel, "l2"),
+        }
+
+
+@attrs.define(frozen=True, kw_only=True)
+class OffAxisVelocityPenalty(Reward):
+    """Penalizes velocities in the off-command directions."""
+
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
+        linz = trajectory.qvel[..., 2]
+        angx = trajectory.qvel[..., 4]
+        angy = trajectory.qvel[..., 5]
+        return {
+            "linz": xax.get_norm(linz, "l2"),
+            "angx": xax.get_norm(angx, "l2"),
+            "angy": xax.get_norm(angy, "l2"),
         }
 
 
