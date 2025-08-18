@@ -262,10 +262,10 @@ class LinearVelocityPenalty(Reward):
         # Don't reward if the command is zero.
         is_zero = jnp.abs(cmd.vel) < self.zero_threshold
 
-        vel_diff = ((vel - cmd.vel).abs() - self.deadzone).clip(min=0.0)
-        yaw_diff = ((yaw - cmd.yaw).abs() - self.deadzone).clip(min=0.0)
-        x_diff = ((x - cmd.xvel).abs() - self.deadzone).clip(min=0.0)
-        y_diff = ((y - cmd.yvel).abs() - self.deadzone).clip(min=0.0)
+        vel_diff = (jnp.abs(vel - cmd.vel) - self.deadzone).clip(min=0.0)
+        yaw_diff = (jnp.abs(yaw - cmd.yaw) - self.deadzone).clip(min=0.0)
+        x_diff = (jnp.abs(x - cmd.xvel) - self.deadzone).clip(min=0.0)
+        y_diff = (jnp.abs(y - cmd.yvel) - self.deadzone).clip(min=0.0)
 
         return {
             "vel_l1": vel_diff,
@@ -292,7 +292,7 @@ class AngularVelocityPenalty(Reward):
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         cmd: AngularVelocityCommandValue = trajectory.command[self.cmd]
         angvel = trajectory.qvel[..., 5]
-        angvel_diff = ((angvel - cmd.vel).abs() - self.deadzone).clip(min=0.0)
+        angvel_diff = (jnp.abs(angvel - cmd.vel) - self.deadzone).clip(min=0.0)
         return {
             "angvel_l1": angvel_diff,
             "angvel_l2": angvel_diff**2,
@@ -309,9 +309,9 @@ class OffAxisVelocityPenalty(Reward):
         linz = trajectory.qvel[..., 2]
         angx = trajectory.qvel[..., 4]
         angy = trajectory.qvel[..., 5]
-        linz_diff = ((linz).abs() - self.deadzone).clip(min=0.0)
-        angx_diff = ((angx).abs() - self.deadzone).clip(min=0.0)
-        angy_diff = ((angy).abs() - self.deadzone).clip(min=0.0)
+        linz_diff = (jnp.abs(linz) - self.deadzone).clip(min=0.0)
+        angx_diff = (jnp.abs(angx) - self.deadzone).clip(min=0.0)
+        angy_diff = (jnp.abs(angy) - self.deadzone).clip(min=0.0)
         return {
             "linz_l1": linz_diff,
             "linz_l2": linz_diff**2,
