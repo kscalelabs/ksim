@@ -535,7 +535,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
         return {
-            "bad_z": ksim.BadZTermination(unhealthy_z_lower=0.5, unhealthy_z_upper=3.0),
+            "bad_z": ksim.BadZTermination(min_z=0.5, unhealthy_z_upper=3.0),
             "bad_velocity": ksim.BadVelocityTermination(max_vel=100.0),
             "far_from_origin": ksim.FarFromOriginTermination(max_dist=10.0),
         }

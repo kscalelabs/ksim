@@ -132,12 +132,18 @@ class IllegalContactTermination(Termination):
 class BadZTermination(Termination):
     """Terminates the episode if the robot is unhealthy."""
 
-    unhealthy_z_lower: float = attrs.field()
-    unhealthy_z_upper: float = attrs.field()
+    min_z: float = attrs.field()
+    final_min_z: float | None = attrs.field(default=None)
+    max_z: float = attrs.field()
+    final_max_z: float | None = attrs.field(default=None)
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         height = state.qpos[2]
-        return jnp.where((height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper), -1, 0)
+        final_min_z = self.min_z if self.final_min_z is None else self.final_min_z
+        final_max_z = self.max_z if self.final_max_z is None else self.final_max_z
+        min_z = (final_min_z - self.min_z) * curriculum_level + self.min_z
+        max_z = (final_max_z - self.max_z) * curriculum_level + self.max_z
+        return jnp.where((height < min_z) | (height > max_z), -1, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)
