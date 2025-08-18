@@ -8,7 +8,7 @@ __all__ = [
     "StayAliveReward",
     "LinearVelocityReward",
     "AngularVelocityReward",
-    "OffAxisVelocityPenalty",
+    "OffAxisVelocityReward",
     "BaseHeightReward",
     "BaseHeightRangeReward",
     "ActionVelocityPenalty",
