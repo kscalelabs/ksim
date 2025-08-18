@@ -295,7 +295,7 @@ class AngularVelocityPenalty(Reward):
 class OffAxisVelocityPenalty(Reward):
     """Penalizes velocities in the off-command directions."""
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         linz = trajectory.qvel[..., 2]
         angx = trajectory.qvel[..., 4]
         angy = trajectory.qvel[..., 5]
