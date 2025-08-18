@@ -94,7 +94,9 @@ def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) 
         raise ValueError(f"Reward function {reward_name} does not end with 'Reward' or 'Penalty': {value}")
 
 
-def index_to_dims(index: CartesianIndex | tuple[CartesianIndex, ...]) -> tuple[int, ...]:
+def index_to_dims(
+    index: CartesianIndex | tuple[CartesianIndex, ...],
+) -> tuple[int, ...]:
     indices = index if isinstance(index, tuple) else (index,)
     return tuple(cartesian_index_to_dim(index) for index in indices)
 
@@ -243,7 +245,6 @@ class LinearVelocityPenalty(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
     cmd: str = attrs.field()
-    deadzone: float = attrs.field(default=0.01)
     zero_threshold: float = attrs.field(default=0.01)
     vis_height: float = attrs.field(default=0.6)
 
@@ -262,20 +263,15 @@ class LinearVelocityPenalty(Reward):
         # Don't reward if the command is zero.
         is_zero = jnp.abs(cmd.vel) < self.zero_threshold
 
-        vel_diff = (jnp.abs(vel - cmd.vel) - self.deadzone).clip(min=0.0)
-        yaw_diff = (jnp.abs(yaw - cmd.yaw) - self.deadzone).clip(min=0.0)
-        x_diff = (jnp.abs(x - cmd.xvel) - self.deadzone).clip(min=0.0)
-        y_diff = (jnp.abs(y - cmd.yvel) - self.deadzone).clip(min=0.0)
-
         return {
-            "vel_l1": vel_diff,
-            "vel_l2": vel_diff**2,
-            "yaw_l1": jnp.where(is_zero, 0.0, yaw_diff),
-            "yaw_l2": jnp.where(is_zero, 0.0, yaw_diff**2),
-            "x_l1": x_diff,
-            "x_l2": x_diff**2,
-            "y_l1": y_diff,
-            "y_l2": y_diff**2,
+            "vel_l1": xax.get_norm(vel - cmd.vel, "l1"),
+            "vel_l2": xax.get_norm(vel - cmd.vel, "l2"),
+            "yaw_l1": jnp.where(is_zero, 0.0, xax.get_norm(yaw - cmd.yaw, "l1")),
+            "yaw_l2": jnp.where(is_zero, 0.0, xax.get_norm(yaw - cmd.yaw, "l2")),
+            "x_l1": xax.get_norm(x - cmd.xvel, "l1"),
+            "x_l2": xax.get_norm(x - cmd.xvel, "l2"),
+            "y_l1": xax.get_norm(y - cmd.yvel, "l1"),
+            "y_l2": xax.get_norm(y - cmd.yvel, "l2"),
         }
 
     def get_markers(self, name: str) -> Collection[Marker]:
@@ -287,15 +283,13 @@ class AngularVelocityPenalty(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
     cmd: str = attrs.field()
-    deadzone: float = attrs.field(default=0.01)
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         cmd: AngularVelocityCommandValue = trajectory.command[self.cmd]
         angvel = trajectory.qvel[..., 5]
-        angvel_diff = (jnp.abs(angvel - cmd.vel) - self.deadzone).clip(min=0.0)
         return {
-            "angvel_l1": angvel_diff,
-            "angvel_l2": angvel_diff**2,
+            "angvel_l1": xax.get_norm(angvel - cmd.vel, "l1"),
+            "angvel_l2": xax.get_norm(angvel - cmd.vel, "l2"),
         }
 
 
@@ -303,22 +297,17 @@ class AngularVelocityPenalty(Reward):
 class OffAxisVelocityPenalty(Reward):
     """Penalizes velocities in the off-command directions."""
 
-    deadzone: float = attrs.field(default=0.01)
-
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         linz = trajectory.qvel[..., 2]
         angx = trajectory.qvel[..., 4]
         angy = trajectory.qvel[..., 5]
-        linz_diff = (jnp.abs(linz) - self.deadzone).clip(min=0.0)
-        angx_diff = (jnp.abs(angx) - self.deadzone).clip(min=0.0)
-        angy_diff = (jnp.abs(angy) - self.deadzone).clip(min=0.0)
         return {
-            "linz_l1": linz_diff,
-            "linz_l2": linz_diff**2,
-            "angx_l1": angx_diff,
-            "angx_l2": angx_diff**2,
-            "angy_l1": angy_diff,
-            "angy_l2": angy_diff**2,
+            "linz_l1": xax.get_norm(linz, "l1"),
+            "linz_l2": xax.get_norm(linz, "l2"),
+            "angx_l1": xax.get_norm(angx, "l1"),
+            "angx_l2": xax.get_norm(angx, "l2"),
+            "angy_l1": xax.get_norm(angy, "l1"),
+            "angy_l2": xax.get_norm(angy, "l2"),
         }
 
 
@@ -333,7 +322,11 @@ class BaseHeightReward(Reward):
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
-        reward = norm_to_reward(xax.get_norm(base_height - self.height_target, self.norm), self.temp, self.monotonic_fn)
+        reward = norm_to_reward(
+            xax.get_norm(base_height - self.height_target, self.norm),
+            self.temp,
+            self.monotonic_fn,
+        )
         return reward
 
 
