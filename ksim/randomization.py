@@ -14,6 +14,7 @@ __all__ = [
 ]
 
 import functools
+import math
 from abc import ABC, abstractmethod
 from typing import Self
 
@@ -258,7 +259,7 @@ class JointZeroPositionRandomizer(PhysicsRandomizer):
 @attrs.define(frozen=True, kw_only=True)
 class IMUAlignmentRandomizer(PhysicsRandomizer):
     site_name: str = attrs.field(default="imu_site")
-    tilt_std_rad: float = attrs.field(default=0.0349066)  # 1σ for roll & pitch (2 deg in rad)
+    tilt_std_rad: float = attrs.field(default=math.radians(2))  # 1σ for roll & pitch (2 deg in rad)
     yaw_std_rad: float | None = attrs.field(default=None)  # 1σ for yaw if desired
     translate_std_m: float | None = attrs.field(default=None)  # 1σ in metres
 
