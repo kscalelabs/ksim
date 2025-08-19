@@ -55,6 +55,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install --upgrade --upgrade-strategy eager -e '.[dev]'
+          pip install -r examples/kbot/requirements.txt  # K-Bot example requirements.
 
       - name: Run static checks
         run: |
