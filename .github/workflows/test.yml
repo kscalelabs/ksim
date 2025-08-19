@@ -55,7 +55,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install --upgrade --upgrade-strategy eager -e '.[dev]'
-          pip install kinfer
+          pip install -r examples/kbot/requirements.txt
 
       - name: Run static checks
         run: |
