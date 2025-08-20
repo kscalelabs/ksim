@@ -28,24 +28,16 @@ pip install -e '.'  # To install your local copy
 python -m examples.walking
 ```
 
-## Creating reference motion data
+## Notes
 
-To create reference motion data, run the following command (from the root directory):
+If you're getting segfaults on Mujoco on a Linux-based headless GPU machine, you can force CPU rendering:
 
-```
-ksim-generate-reference --config examples/data/walk_normal.yaml
-```
-
-This will generate a `humanoid_amp_walk_ref.npz` file in the `examples/data` directory.
-
-To visualize the reference motion, run the following command:
-
-```
-ksim-visualize-reference examples/data/humanoid_amp_walk_ref.npz --model examples/data/scene.mjcf
+```bash
+export MUJOCO_GL=osmesa
 ```
 
-## To visualize the reference motion in your AMP task, run with the following config:
+This will require:
 
-```
-python -m examples.walking_amp run_mode=view_motion
+```bash
+sudo apt-get install -y libosmesa6 libosmesa6-dev
 ```
