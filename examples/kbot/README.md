@@ -19,3 +19,18 @@ Once trained, you can export the script using:
 ```bash
 python -m convert /path/to/ckpt.bin /path/to/output/dir/
 ```
+
+## Notes
+
+If you're getting segfaults on Mujoco on a Linux-based headless machine, you should use:
+
+```bash
+export MUJOCO_GL=egl
+export EGL_PLATFORM=surfaceless
+```
+
+This will require:
+
+```bash
+sudo apt-get install -y libosmesa6 libosmesa6-dev
+```

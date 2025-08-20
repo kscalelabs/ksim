@@ -471,10 +471,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 foot_right_geom_names=["foot_right"],
                 floor_geom_names=["floor"],
             ),
-            "feet_position": ksim.FeetPositionObservation.create(
+            "feet_position": ksim.BodyPositionObservation.create(
                 physics_model=physics_model,
-                foot_left_body_name="foot_left",
-                foot_right_body_name="foot_right",
+                body_names=("foot_left", "foot_right"),
             ),
             "feet_force": ksim.FeetForceObservation.create(
                 physics_model=physics_model,
@@ -729,6 +728,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, PyTree],
         commands: xax.FrozenDict[str, PyTree],
+        curriculum_level: Array,
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:

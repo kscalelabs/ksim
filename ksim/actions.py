@@ -8,6 +8,10 @@ __all__ = [
     "integrate_acceleration",
     "IntegrateAccelerationParams",
     "ClipPositions",
+    "TanhPositions",
+    "LowPassFilterParams",
+    "lowpass_one_pole",
+    "lowpass_one_pole_scan",
 ]
 
 from dataclasses import dataclass
@@ -198,3 +202,87 @@ class ClipPositions(eqx.Module):
     def clip(self, positions: Array) -> Array:
         chex.assert_shape(positions, (..., self.num_joints))
         return jnp.clip(positions, jnp.array(self.min_ranges), jnp.array(self.max_ranges))
+
+
+class TanhPositions(eqx.Module):
+    min_ranges: tuple[float, ...] = eqx.field()
+    max_ranges: tuple[float, ...] = eqx.field()
+    num_joints: int = eqx.field()
+
+    def __init__(self, ranges: list[tuple[float, float]]) -> None:
+        super().__init__()
+
+        min_ranges, max_ranges = zip(*ranges, strict=True)
+        self.min_ranges = tuple(min_ranges)
+        self.max_ranges = tuple(max_ranges)
+        self.num_joints = len(ranges)
+
+    @classmethod
+    def from_physics_model(cls, physics_model: PhysicsModel) -> Self:
+        ranges = physics_model.jnt_range
+        ranges_list = [(minv, maxv) for minv, maxv in ranges.tolist()[1:]]
+        return cls(ranges_list)
+
+    def clip(self, positions: Array) -> Array:
+        chex.assert_shape(positions, (..., self.num_joints))
+        minv, maxv = jnp.array(self.min_ranges), jnp.array(self.max_ranges)
+        return (jnp.tanh(positions) * (maxv - minv)) + minv
+
+    def get_bias(self, zeros: Array) -> Array:
+        minv, maxv = jnp.array(self.min_ranges), jnp.array(self.max_ranges)
+        return jnp.atanh((zeros - minv) / (maxv - minv))
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class LowPassFilterParams:
+    y_last: Array
+
+    @classmethod
+    def initialize(cls, num_joints: int) -> Self:
+        return cls(
+            y_last=jnp.zeros(num_joints),
+        )
+
+
+def lowpass_one_pole(
+    x: Array,
+    ctrl_dt: float,
+    fc: float | Array,
+    params: LowPassFilterParams,
+) -> tuple[Array, LowPassFilterParams]:
+    rc = 1.0 / (2.0 * jnp.pi * fc)
+    alpha = ctrl_dt / (rc + ctrl_dt)
+    y_next = params.y_last + alpha * (x - params.y_last)
+    return y_next, LowPassFilterParams(y_last=y_next)
+
+
+@xax.jit(
+    static_argnames=["ctrl_dt"],
+    donate_argnames=["params"],
+    jit_level=JitLevel.HELPER_FUNCTIONS,
+)
+def lowpass_one_pole_scan(
+    x: Array,
+    ctrl_dt: float,
+    fc: float | Array,
+    params: LowPassFilterParams,
+) -> tuple[Array, LowPassFilterParams]:
+    """Applies a one-pole low-pass filter to a signal.
+
+    Args:
+        x: The signal to filter, with shape (*, num_joints).
+        ctrl_dt: The time step of the control loop.
+        fc: The cutoff frequency.
+        params: The parameters of the filter.
+
+    Returns:
+        The filtered signal, with shape (*, num_joints).
+    """
+
+    def step(y_prev: LowPassFilterParams, xi: Array) -> tuple[LowPassFilterParams, Array]:
+        y_next, params = lowpass_one_pole(xi, ctrl_dt, fc, y_prev)
+        return params, y_next
+
+    y_last, y = xax.scan(step, params, x, jit_level=JitLevel.HELPER_FUNCTIONS)
+    return y, y_last

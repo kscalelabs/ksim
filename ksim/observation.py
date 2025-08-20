@@ -24,7 +24,7 @@ __all__ = [
     "BodyOrientationObservation",
     "SiteOrientationObservation",
     "FeetContactObservation",
-    "FeetPositionObservation",
+    "BodyPositionObservation",
     "FeetForceObservation",
     "FeetTorqueObservation",
     "FeetOrientationObservation",
@@ -34,7 +34,7 @@ __all__ = [
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Collection, Self
+from typing import Collection, Iterable, Self
 
 import attrs
 import jax
@@ -463,31 +463,22 @@ class FeetContactObservation(Observation):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class FeetPositionObservation(Observation):
-    foot_left: int = attrs.field()
-    foot_right: int = attrs.field()
+class BodyPositionObservation(Observation):
+    body_idxs: tuple[int, ...] = attrs.field()
 
     @classmethod
     def create(
         cls,
         *,
         physics_model: PhysicsModel,
-        foot_left_body_name: str,
-        foot_right_body_name: str,
+        body_names: Iterable[str],
         noise: Noise | None = None,
     ) -> Self:
-        foot_left_idx = get_body_data_idx_from_name(physics_model, foot_left_body_name)
-        foot_right_idx = get_body_data_idx_from_name(physics_model, foot_right_body_name)
-        return cls(
-            foot_left=foot_left_idx,
-            foot_right=foot_right_idx,
-            noise=noise,
-        )
+        body_idxs = tuple(get_body_data_idx_from_name(physics_model, name) for name in body_names)
+        return cls(body_idxs=body_idxs, noise=noise)
 
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        foot_left_pos = state.physics_state.data.xpos[self.foot_left]
-        foot_right_pos = state.physics_state.data.xpos[self.foot_right]
-        return jnp.stack([foot_left_pos, foot_right_pos], axis=-2)
+        return state.physics_state.data.xpos[self.body_idxs, :]
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -556,7 +547,7 @@ class BodyOrientationObservation(Observation):
         cls,
         *,
         physics_model: PhysicsModel,
-        body_names: tuple[str, ...],
+        body_names: Collection[str],
         noise: Noise | None = None,
     ) -> Self:
         body_ids = tuple(get_body_data_idx_from_name(physics_model, name) for name in body_names)
@@ -606,7 +597,7 @@ class FeetOrientationObservation(BodyOrientationObservation):
         cls,
         *,
         physics_model: PhysicsModel,
-        body_names: tuple[str, ...],
+        body_names: Collection[str],
         noise: Noise | None = None,
     ) -> Self:  # <- same return type
         if len(body_names) != 2:
