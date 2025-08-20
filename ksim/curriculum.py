@@ -197,7 +197,7 @@ class DistanceFromOriginCurriculum(Curriculum[DistanceFromOriginCurriculumState]
             jnp.minimum(current_level + 1.0 / self.num_levels, 1.0),
             jnp.where(
                 ema < self.decrease_threshold,
-                jnp.maximum(current_level - 1.0 / self.num_levels, 0.0),
+                jnp.maximum(current_level - 1.0 / self.num_levels, self.min_level),
                 current_level,
             ),
         )
