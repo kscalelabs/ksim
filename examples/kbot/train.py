@@ -107,7 +107,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the linear velocity command being switched.",
     )
     max_angular_velocity: float = xax.field(
-        value=(-math.radians(45), math.radians(45)),
+        value=math.radians(45),
         help="The range for the angular velocity command.",
     )
     angular_velocity_zero_prob: float = xax.field(
@@ -613,7 +613,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_air_time=self.config.gait_period * 0.4,
                 max_ground_time=self.config.gait_period * 0.6,
                 contact_obs="feet_contact",
-                scale=1.0,
+                scale=10.0,
             ),
             "foot_grounded": ksim.FeetGroundedAtRestReward(
                 ctrl_dt=self.config.ctrl_dt,

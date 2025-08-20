@@ -751,6 +751,7 @@ class FeetAirTimeReward(StatefulReward):
     contact_obs: str = attrs.field()
     num_feet: int = attrs.field(default=2)
     bias: float = attrs.field(default=0.0)
+    ground_penalty: float = attrs.field(default=0.1)
     linvel_moving_threshold: float = attrs.field(default=0.05)
     angvel_moving_threshold: float = attrs.field(default=0.05)
 
@@ -795,7 +796,7 @@ class FeetAirTimeReward(StatefulReward):
         air_rew_t = air_rew_tn.max(axis=-1)
 
         gnd_rew_tn = (gnd_cnt_tn.astype(jnp.float32) / gnd_steps) + self.bias
-        gnd_rew_tn = jnp.where((gnd_cnt_tn > 0) & (gnd_cnt_tn < gnd_steps), gnd_rew_tn, 0.0)
+        gnd_rew_tn = jnp.where(gnd_cnt_tn > gnd_steps, gnd_rew_tn, -self.ground_penalty)
         gnd_rew_t = gnd_rew_tn.max(axis=-1)
 
         reward_t = air_rew_t + gnd_rew_t

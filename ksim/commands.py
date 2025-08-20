@@ -347,6 +347,7 @@ class AngularVelocityCommandValue:
 @attrs.define(frozen=True)
 class AngularVelocityCommand(Command):
     max_vel: float = attrs.field()
+    min_vel: float = attrs.field(default=0.0)
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
 
@@ -356,8 +357,8 @@ class AngularVelocityCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> AngularVelocityCommandValue:
-        rng_vel, rng_flip, rng_zero = jax.random.split(rng)
-        vel = jax.random.uniform(rng_vel, (), minval=0.0, maxval=self.max_vel)
+        rng_vel, rng_flip, rng_zero = jax.random.split(rng, 3)
+        vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
         vel = jnp.where(jax.random.bernoulli(rng_flip, 0.5), -vel, vel)
         vel = jnp.where(jax.random.bernoulli(rng_zero, self.zero_prob), 0.0, vel)
         return AngularVelocityCommandValue(vel=vel)
