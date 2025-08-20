@@ -874,7 +874,7 @@ class FeetHeightMarker(Marker):
             radius=radius,
             obs_name=obs_name,
             target_height=target_height,
-            rgba=(1.0, 0.0, 0.0, 1.0),  # Red
+            rgba=(1.0, 0.0, 0.0, 1.0) if target_height is None else (0.0, 1.0, 0.0, 1.0),
             track_x=False,
             track_y=False,
             track_z=False,

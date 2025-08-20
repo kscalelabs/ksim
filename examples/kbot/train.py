@@ -64,11 +64,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The scale for the standard deviations of the actor.",
     )
     start_cutoff_frequency: float = xax.field(
-        value=6.0,
+        value=10.0,
         help="The cutoff frequency for the low-pass filter.",
     )
     end_cutoff_frequency: float = xax.field(
-        value=2.0,
+        value=4.0,
         help="The cutoff frequency for the low-pass filter.",
     )
 
@@ -110,7 +110,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The target period for the gait.",
     )
     max_knee_height: float = xax.field(
-        value=0.7,
+        value=0.6,
+        help="The maximum height of the foot.",
+    )
+    max_foot_height: float = xax.field(
+        value=0.3,
         help="The maximum height of the foot.",
     )
 
@@ -432,11 +436,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.PhysicsRandomizer]:
         return {
             "static_friction": ksim.StaticFrictionRandomizer(),
-            "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(physics_model, "floor"),
+            "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(
+                physics_model,
+                "floor",
+                scale_lower=0.98,
+                scale_upper=1.02,
+            ),
             "armature": ksim.ArmatureRandomizer(),
             "all_bodies_mass_multiplication": ksim.AllBodiesMassMultiplicationRandomizer(
-                scale_lower=0.95,
-                scale_upper=1.05,
+                scale_lower=0.5,
+                scale_upper=1.5,
             ),
             "joint_damping": ksim.JointDampingRandomizer(),
             "joint_zero_position": ksim.JointZeroPositionRandomizer(
@@ -518,6 +527,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 body_names=("KB_D_501L_L_LEG_FOOT", "KB_D_501R_R_LEG_FOOT"),
             ),
+            "foot_position": ksim.BodyPositionObservation.create(
+                physics_model=physics_model,
+                body_names=("KB_D_501L_L_LEG_FOOT", "KB_D_501R_R_LEG_FOOT"),
+            ),
             "knee_position": ksim.BodyPositionObservation.create(
                 physics_model=physics_model,
                 body_names=("KC_D_301R_R_Femur_Lower_Drive", "KC_D_301L_L_Femur_Lower_Drive"),
@@ -550,8 +563,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Reward]:
         return {
             "stay_alive": ksim.StayAliveReward(scale=100.0),
+            # Command tracking rewards.
             "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=1.0),
             "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
+            # Gait rewards.
+            "hip_deviation": ksim.JointDeviationPenalty.create(
+                physics_model=physics_model,
+                joint_names=("dof_right_hip_roll_03", "dof_left_hip_roll_03"),
+                joint_targets=(0.0, 0.0),
+                scale=-1.0,
+            ),
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
                 max_air_time=self.config.gait_period * 0.4,
@@ -565,19 +586,26 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 contact_obs="feet_contact",
                 scale=1.0,
             ),
-            "foot_height": ksim.TargetHeightReward(
+            "knee_height": ksim.TargetHeightReward(
                 contact_obs="feet_contact",
                 position_obs="knee_position",
                 height=self.config.max_knee_height,
                 scale=10.0,
             ),
-            "upright": ksim.UprightReward(scale=1.0),
+            "foot_height": ksim.TargetHeightReward(
+                contact_obs="feet_contact",
+                position_obs="foot_position",
+                height=self.config.max_foot_height,
+                scale=10.0,
+            ),
             "foot_contact": ksim.ForcePenalty(
                 force_obs="feet_force",
                 ctrl_dt=self.config.ctrl_dt,
                 bias=350.0,  # Weight of the robot, in Newtons.
                 scale=-1.0,
             ),
+            "upright": ksim.UprightReward(scale=1.0),
+            # Normalization penalties.
             "ctrl": ksim.SmallCtrlReward.create(model=physics_model, scale=0.1),
             "joint_velocity": ksim.SmallJointVelocityReward(scale=0.1, kernel_scale=0.25),
             "joint_acceleration": ksim.SmallJointAccelerationReward(scale=0.1, kernel_scale=0.25),
