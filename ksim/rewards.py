@@ -37,6 +37,7 @@ __all__ = [
 ]
 
 import logging
+import math
 from abc import ABC, abstractmethod
 from typing import Collection, Literal, Mapping, Self, final
 
@@ -809,8 +810,8 @@ class FeetGroundedAtRestReward(StatefulReward):
     ctrl_dt: float = attrs.field()
     contact_obs: str = attrs.field()
     num_feet: int = attrs.field(default=2)
-    linvel_moving_threshold: float = attrs.field(default=0.05)
-    angvel_moving_threshold: float = attrs.field(default=0.05)
+    linvel_moving_threshold: float = attrs.field(default=0.25)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(10))
 
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
         return jnp.zeros(self.num_feet, dtype=jnp.int32)
@@ -896,8 +897,8 @@ class TargetHeightReward(Reward):
     position_obs: str = attrs.field()
     height: float = attrs.field()
     num_feet: int = attrs.field(default=2)
-    linvel_moving_threshold: float = attrs.field(default=0.05)
-    angvel_moving_threshold: float = attrs.field(default=0.05)
+    linvel_moving_threshold: float = attrs.field(default=0.25)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(10))
     kernel_scale: float = attrs.field(default=0.25)
     sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
@@ -985,8 +986,8 @@ class SparseTargetHeightReward(StatefulReward):
 class MotionlessAtRestPenalty(Reward):
     """Reward for feet either touching or not touching the ground for some time."""
 
-    linvel_moving_threshold: float = attrs.field(default=0.05)
-    angvel_moving_threshold: float = attrs.field(default=0.05)
+    linvel_moving_threshold: float = attrs.field(default=0.25)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(10))
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold

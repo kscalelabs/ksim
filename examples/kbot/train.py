@@ -87,7 +87,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Reward parameters.
     linear_velocity_range: tuple[float, float] = xax.field(
-        value=(1.0, 3.0),
+        value=(0.5, 1.5),
         help="The range for the linear velocity command.",
     )
     linear_velocity_max_yaw: float = xax.field(
@@ -119,7 +119,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the angular velocity command being switched.",
     )
     gait_period: float = xax.field(
-        value=0.6,
+        value=1.2,
         help="The target period for the gait.",
     )
     max_knee_height: float = xax.field(
@@ -621,6 +621,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 contact_obs="feet_contact",
                 scale=0.1,
             ),
+            "still_at_rest": ksim.MotionlessAtRestPenalty(scale=-0.01),
             "knee_height": ksim.TargetHeightReward(
                 position_obs="knee_position",
                 height=self.config.max_knee_height,
