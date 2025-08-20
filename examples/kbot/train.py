@@ -86,8 +86,12 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
     # Reward parameters.
-    linear_velocity_range: tuple[float, float] = xax.field(
-        value=(0.5, 1.5),
+    min_linear_velocity: float = xax.field(
+        value=0.5,
+        help="The range for the linear velocity command.",
+    )
+    max_linear_velocity: float = xax.field(
+        value=1.5,
         help="The range for the linear velocity command.",
     )
     linear_velocity_max_yaw: float = xax.field(
@@ -558,8 +562,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
         return {
             "linvel": ksim.LinearVelocityCommand(
-                min_vel=self.config.linear_velocity_range[0],
-                max_vel=self.config.linear_velocity_range[1],
+                min_vel=self.config.min_linear_velocity,
+                max_vel=self.config.max_linear_velocity,
                 max_yaw=self.config.linear_velocity_max_yaw,
                 zero_prob=self.config.linear_velocity_zero_prob,
                 backward_prob=self.config.linear_velocity_backward_prob,
