@@ -64,7 +64,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The scale for the standard deviations of the actor.",
     )
     start_cutoff_frequency: float = xax.field(
-        value=25.0,
+        value=6.0,
         help="The cutoff frequency for the low-pass filter.",
     )
     end_cutoff_frequency: float = xax.field(
@@ -75,17 +75,14 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     # Reward parameters.
     linear_velocity_range: tuple[float, float] = xax.field(
         value=(1.0, 3.0),
-        # value=(2.0, 2.0),
         help="The range for the linear velocity command.",
     )
     linear_velocity_max_yaw: float = xax.field(
-        # value=math.radians(45.0),
-        value=0.0,
+        value=math.radians(45.0),
         help="The maximum yaw for the linear velocity command.",
     )
     linear_velocity_zero_prob: float = xax.field(
         value=0.2,
-        # value=0.0,
         help="The probability of the linear velocity command being zero.",
     )
     linear_velocity_backward_prob: float = xax.field(
@@ -97,13 +94,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the linear velocity command being switched.",
     )
     angular_velocity_range: tuple[float, float] = xax.field(
-        # value=(-math.radians(45), math.radians(45)),
-        value=(0.0, 0.0),
+        value=(-math.radians(45), math.radians(45)),
         help="The range for the angular velocity command.",
     )
     angular_velocity_zero_prob: float = xax.field(
-        # value=0.2,
-        value=0.0,
+        value=0.2,
         help="The probability of the angular velocity command being zero.",
     )
     angular_velocity_switch_prob: float = xax.field(
