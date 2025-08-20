@@ -513,7 +513,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             ),
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
-                max_air_time=self.config.gait_period / 2.0,
+                max_air_time=self.config.gait_period * 0.4,
+                max_ground_time=self.config.gait_period * 0.6,
                 contact_obs="feet_contact",
                 scale=1.0,
             ),
