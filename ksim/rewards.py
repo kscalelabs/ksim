@@ -29,10 +29,11 @@ __all__ = [
     "FeetAirTimeReward",
     "FeetGroundedAtRestReward",
     "TargetHeightReward",
+    "SparseTargetHeightReward",
     "MotionlessAtRestPenalty",
     "ForcePenalty",
     "SinusoidalGaitReward",
-    "BaseHeightTrackingReward",
+    "JointPositionReward",
 ]
 
 import logging
@@ -46,9 +47,14 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.commands import AngularVelocityCommandValue, LinearVelocityCommandValue, SinusoidalGaitCommandValue
+from ksim.commands import (
+    AngularVelocityCommandValue,
+    JointPositionCommandValue,
+    LinearVelocityCommandValue,
+    SinusoidalGaitCommandValue,
+)
 from ksim.types import PhysicsModel, Trajectory
-from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
+from ksim.utils.mujoco import get_body_data_idx_from_name, get_joint_names_in_order, get_qpos_data_idxs_by_name
 from ksim.utils.validators import CartesianIndex, cartesian_index_to_dim, norm_validator
 from ksim.vis import Marker
 
@@ -843,7 +849,7 @@ class FeetGroundedAtRestReward(StatefulReward):
 
 
 @attrs.define(kw_only=True)
-class FeetHeightMarker(Marker):
+class BodyHeightMarker(Marker):
     foot_id: int = attrs.field()
     obs_name: str = attrs.field()
     target_height: float | None = attrs.field()
@@ -883,18 +889,52 @@ class FeetHeightMarker(Marker):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class TargetHeightReward(StatefulReward):
+class TargetHeightReward(Reward):
     """Reward for having some bodies be close to a target height."""
 
-    contact_obs: str = attrs.field()
     position_obs: str = attrs.field()
     height: float = attrs.field()
     num_feet: int = attrs.field(default=2)
     linvel_moving_threshold: float = attrs.field(default=0.05)
     angvel_moving_threshold: float = attrs.field(default=0.05)
+    kernel_scale: float = attrs.field(default=0.25)
+    sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
+        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
+        not_moving = not_moving_lin & not_moving_ang
+        cur_height_tn = trajectory.obs[self.position_obs][..., 2]
+        penalty_tn = (cur_height_tn - self.height).clip(min=0.0)
+        reward_tn = exp_kernel_with_penalty(penalty_tn, self.kernel_scale, self.sq_scale, self.abs_scale)
+        reward_t = jnp.where(not_moving, 0.0, reward_tn.max(axis=-1))
+        return reward_t
+
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [
+            marker
+            for foot_id in range(self.num_feet)
+            for marker in (
+                BodyHeightMarker.get(foot_id, obs_name=self.position_obs),
+                BodyHeightMarker.get(foot_id, obs_name=self.position_obs, target_height=self.height),
+            )
+        ]
+
+
+@attrs.define(frozen=True, kw_only=True)
+class SparseTargetHeightReward(StatefulReward):
+    """Reward for having some bodies be close to a target height."""
+
+    contact_obs: str = attrs.field()
+    position_obs: str = attrs.field()
+    height: float = attrs.field()
+    num_bodies: int = attrs.field(default=2)
+    linvel_moving_threshold: float = attrs.field(default=0.05)
+    angvel_moving_threshold: float = attrs.field(default=0.05)
 
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(self.num_feet, dtype=jnp.float32)
+        return jnp.zeros(self.num_bodies, dtype=jnp.float32)
 
     def get_reward_stateful(self, trajectory: Trajectory, reward_carry: Array) -> tuple[Array, Array]:
         not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
@@ -903,10 +943,10 @@ class TargetHeightReward(StatefulReward):
 
         contact_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
         contact_tn = contact_tcn.any(axis=-2)
-        chex.assert_shape(contact_tn, (..., self.num_feet))
+        chex.assert_shape(contact_tn, (..., self.num_bodies))
 
         position_tn3 = trajectory.obs[self.position_obs]
-        chex.assert_shape(position_tn3, (..., self.num_feet, 3))
+        chex.assert_shape(position_tn3, (..., self.num_bodies, 3))
 
         # Give a sparse reward once the foot contacts the ground, equal to the
         # maximum height of the foot since the last contact, thresholded at the
@@ -932,10 +972,10 @@ class TargetHeightReward(StatefulReward):
     def get_markers(self, name: str) -> Collection[Marker]:
         return [
             marker
-            for foot_id in range(self.num_feet)
+            for foot_id in range(self.num_bodies)
             for marker in (
-                FeetHeightMarker.get(foot_id, obs_name=self.position_obs),
-                FeetHeightMarker.get(foot_id, obs_name=self.position_obs, target_height=self.height),
+                BodyHeightMarker.get(foot_id, obs_name=self.position_obs),
+                BodyHeightMarker.get(foot_id, obs_name=self.position_obs, target_height=self.height),
             )
         ]
 
@@ -1104,14 +1144,49 @@ class SinusoidalGaitReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class BaseHeightTrackingReward(Reward):
-    """Penalty for deviating from the base height target."""
+class JointPositionReward(Reward):
+    """Reward for tracking the joint positions."""
 
-    command_name: str = attrs.field(default="base_height_command")
+    command_name: str = attrs.field()
+    joint_indices: tuple[int, ...] = attrs.field()
+    length_scale: float = attrs.field(default=0.25)
+    sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
-        cmd = trajectory.command[self.command_name]
-        trg = trajectory.qpos[..., 2]
-        return -jnp.abs(cmd - trg)
+        cmd: JointPositionCommandValue = trajectory.command[self.command_name]
+        trg = trajectory.qpos[..., self.joint_indices]
+        diff = cmd.current_position - trg
+        return exp_kernel_with_penalty(diff, self.length_scale, self.sq_scale, self.abs_scale).mean(axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        joint_names: Collection[str],
+        command_name: str,
+        length_scale: float = 0.25,
+        sq_scale: float = 0.1,
+        abs_scale: float = 0.1,
+        scale: float = 1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        all_names = get_joint_names_in_order(physics_model)[1:]  # Remove floating base.
+        for joint_name in joint_names:
+            if joint_name not in all_names:
+                raise ValueError(f"Joint {joint_name} not found in the model! Options are: {all_names}")
+
+        joint_name_to_indices = {name: idx for idx, name in enumerate(all_names, start=7)}
+        joint_indices = tuple(joint_name_to_indices[name] for name in joint_names)
+
+        return cls(
+            joint_indices=joint_indices,
+            command_name=command_name,
+            length_scale=length_scale,
+            sq_scale=sq_scale,
+            abs_scale=abs_scale,
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )

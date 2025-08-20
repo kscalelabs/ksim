@@ -518,7 +518,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 contact_obs="feet_contact",
                 scale=1.0,
             ),
-            "foot_height": ksim.TargetHeightReward(
+            "foot_height": ksim.SparseTargetHeightReward(
                 contact_obs="feet_contact",
                 position_obs="feet_position",
                 height=self.config.max_foot_height,

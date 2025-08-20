@@ -50,7 +50,7 @@ def main() -> None:
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
-        num_commands=3,
+        num_commands=13,
         carry_size=carry_shape,
     )
 

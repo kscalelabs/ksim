@@ -10,10 +10,12 @@ __all__ = [
     "AngularVelocityCommand",
     "StartPositionCommand",
     "StartQuaternionCommand",
-    "PositionCommand",
+    "CartesianCoordinateCommand",
     "SinusoidalGaitCommand",
     "SinusoidalGaitCommandValue",
     "BaseHeightCommand",
+    "JointPositionCommand",
+    "JointPositionCommandValue",
 ]
 
 import logging
@@ -28,6 +30,7 @@ import mujoco
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
+from ksim.utils.mujoco import get_joint_names_in_order
 from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
@@ -406,7 +409,7 @@ class PositionCommandMarker(Marker):
 
 
 @attrs.define(frozen=True)
-class PositionCommand(Command):
+class CartesianCoordinateCommand(Command):
     """Samples a target xyz position within a bounding box.
 
     The bounding box is defined by min and max coordinates.
@@ -664,3 +667,96 @@ class BaseHeightCommand(Command):
     ) -> Array:
         new_height = jax.random.uniform(rng, (), minval=self.min_height, maxval=self.max_height)
         return jnp.where(jax.random.bernoulli(rng, self.switch_prob), new_height, prev_command)
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class JointPositionCommandValue:
+    current_position: Array
+    target_position: Array
+    step_size: Array
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointPositionCommand(Command):
+    """Command each joint to go to a specific position."""
+
+    indices: tuple[int, ...] = attrs.field()
+    ranges: tuple[tuple[float, float], ...] = attrs.field()
+    ctrl_dt: float = attrs.field()
+    min_time: float = attrs.field(validator=attrs.validators.gt(0.0))
+    max_time: float = attrs.field(validator=attrs.validators.gt(0.0))
+
+    def sample_target(self, rng: PRNGKeyArray) -> Array:
+        ranges = jnp.array(self.ranges)  # (N, 2)
+        return jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
+
+    def sample_time(self, rng: PRNGKeyArray) -> Array:
+        return jax.random.uniform(rng, (), minval=self.min_time, maxval=self.max_time)
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> JointPositionCommandValue:
+        rng_a, rng_b = jax.random.split(rng)
+        target = self.sample_target(rng_a)
+        start = physics_data.qpos[..., self.indices]
+        time = self.sample_time(rng_b)
+        step_size = (target - start) / time
+        return JointPositionCommandValue(
+            target_position=target,
+            step_size=step_size,
+            current_position=start,
+        )
+
+    def __call__(
+        self,
+        prev_command: JointPositionCommandValue,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> JointPositionCommandValue:
+        target = prev_command.target_position
+        current = prev_command.current_position
+        step_size = prev_command.step_size
+        at_target = (target - current) < step_size
+
+        next_command = JointPositionCommandValue(
+            target_position=target,
+            step_size=step_size,
+            current_position=current + step_size,
+        )
+
+        # Choose a new target and speed once we're close to the old target.
+        new_command = self.initial_command(physics_data, curriculum_level, rng)
+        return jax.tree.map(lambda x, y: jnp.where(at_target, y, x), next_command, new_command)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        ctrl_dt: float,
+        joint_names: Collection[str],
+        min_time: float = 0.3,
+        max_time: float = 2.0,
+    ) -> Self:
+        all_names = get_joint_names_in_order(physics_model)
+        for joint_name in joint_names:
+            if joint_name not in all_names:
+                raise ValueError(f"Joint {joint_name} not found in the model! Options are: {all_names}")
+
+        all_ranges = physics_model.jnt_range
+        ranges_list = [(minv, maxv) for minv, maxv in all_ranges.tolist()]
+        joint_name_to_indices = {name: idx for idx, name in enumerate(get_joint_names_in_order(physics_model))}
+        ranges = tuple(ranges_list[joint_name_to_indices[name]] for name in joint_names)
+        indices = tuple(joint_name_to_indices[name] + 7 for name in joint_names)
+
+        return cls(
+            indices=indices,
+            ranges=ranges,
+            ctrl_dt=ctrl_dt,
+            min_time=min_time,
+            max_time=max_time,
+        )
