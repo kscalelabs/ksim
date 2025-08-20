@@ -2,7 +2,6 @@
 
 __all__ = [
     "MonotonicFn",
-    "norm_to_reward",
     "Reward",
     "StatefulReward",
     "StayAliveReward",
@@ -14,11 +13,11 @@ __all__ = [
     "ActionVelocityPenalty",
     "ActionAccelerationPenalty",
     "ActionJerkPenalty",
-    "JointVelocityPenalty",
-    "JointAccelerationPenalty",
-    "JointJerkPenalty",
+    "SmallJointVelocityReward",
+    "SmallJointAccelerationReward",
+    "SmallJointJerkReward",
     "AvoidLimitsPenalty",
-    "CtrlPenalty",
+    "SmallCtrlReward",
     "JointDeviationPenalty",
     "FlatBodyReward",
     "PositionTrackingReward",
@@ -57,27 +56,16 @@ logger = logging.getLogger(__name__)
 MonotonicFn = Literal["exp", "inv", "sigmoid"]
 
 
-def norm_to_reward(value: Array, temp: float = 1.0, monotonic_fn: MonotonicFn = "inv") -> Array:
-    """Helper function for converting from a norm to a reward.
+def exp_kernel(x: Array, scale: float) -> Array:
+    return jnp.exp(-jnp.square(x) / (2 * scale**2))
 
-    Args:
-        value: The value (usually a norm) to convert to a reward.
-        temp: The temperature to use for the conversion. Higher temperatures
-            will make the reward drop off less steeply.
-        monotonic_fn: The monotonic function to use for the conversion.
 
-    Returns:
-        The reward.
-    """
-    match monotonic_fn:
-        case "inv":
-            return 1.0 / (value / temp + 1.0)
-        case "exp":
-            return jnp.exp(-value / temp)
-        case "sigmoid":
-            return 1.0 / (1.0 + jnp.exp(-value / temp))
-        case _:
-            raise ValueError(f"Invalid monotonic function: {monotonic_fn}")
+def rew_parts(x: Array, scale: float, sq_scale: float, abs_scale: float) -> dict[str, Array]:
+    x_abs = jnp.abs(x)
+    x_sq = jnp.square(x)
+    x_exp = jnp.exp(-x_sq / (2 * scale**2))
+    # return {"abs": x_abs * -abs_scale, "sq": x_sq * -sq_scale, "exp": x_exp}
+    return {"rew": x_abs * -abs_scale + x_sq * -sq_scale + x_exp}
 
 
 def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) -> None:
@@ -247,6 +235,8 @@ class LinearVelocityReward(Reward):
     yaw_length_scale: float = attrs.field(default=0.25)
     zero_threshold: float = attrs.field(default=0.01)
     vis_height: float = attrs.field(default=0.6)
+    sq_scale: float = attrs.field(default=0.1)
+    abs_scale: float = attrs.field(default=0.1)
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         cmd: LinearVelocityCommandValue = trajectory.command[self.cmd]
@@ -263,16 +253,16 @@ class LinearVelocityReward(Reward):
         # Don't reward if the command is zero.
         is_zero = jnp.abs(cmd.vel) < self.zero_threshold
 
-        vel_rew = jnp.exp(-jnp.square(vel - cmd.vel) / (2 * self.vel_length_scale**2))
-        yaw_rew = jnp.exp(-jnp.square(yaw - cmd.yaw) / (2 * self.yaw_length_scale**2))
-        x_rew = jnp.exp(-jnp.square(x - cmd.xvel) / (2 * self.vel_length_scale**2))
-        y_rew = jnp.exp(-jnp.square(y - cmd.yvel) / (2 * self.vel_length_scale**2))
+        vel_rews = rew_parts(vel - cmd.vel, self.vel_length_scale, self.sq_scale, self.abs_scale)
+        yaw_rews = rew_parts(yaw - cmd.yaw, self.yaw_length_scale, self.sq_scale, self.abs_scale)
+        x_rews = rew_parts(x - cmd.xvel, self.vel_length_scale, self.sq_scale, self.abs_scale)
+        y_rews = rew_parts(y - cmd.yvel, self.vel_length_scale, self.sq_scale, self.abs_scale)
 
         return {
-            "vel": vel_rew,
-            "yaw": jnp.where(is_zero, 0.0, yaw_rew),
-            "x": x_rew,
-            "y": y_rew,
+            **{f"vel_{k}": v for k, v in vel_rews.items()},
+            **{f"yaw_{k}": jnp.where(is_zero, 0.0, v) for k, v in yaw_rews.items()},
+            **{f"x_{k}": v for k, v in x_rews.items()},
+            **{f"y_{k}": v for k, v in y_rews.items()},
         }
 
     def get_markers(self, name: str) -> Collection[Marker]:
@@ -285,14 +275,14 @@ class AngularVelocityReward(Reward):
 
     cmd: str = attrs.field()
     angvel_length_scale: float = attrs.field(default=0.25)
+    sq_scale: float = attrs.field(default=0.1)
+    abs_scale: float = attrs.field(default=0.1)
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         cmd: AngularVelocityCommandValue = trajectory.command[self.cmd]
         angvel = trajectory.qvel[..., 5]
-        angvel_rew = jnp.exp(-jnp.square(angvel - cmd.vel) / (2 * self.angvel_length_scale**2))
-        return {
-            "angvel": angvel_rew,
-        }
+        angvel_rews = rew_parts(angvel - cmd.vel, self.angvel_length_scale, self.sq_scale, self.abs_scale)
+        return {f"angvel_{k}": v for k, v in angvel_rews.items()}
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -322,12 +312,11 @@ class BaseHeightReward(Reward):
 
     height_target: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    temp: float = attrs.field(default=1.0)
-    monotonic_fn: MonotonicFn = attrs.field(default="inv")
+    kernel_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
-        reward = norm_to_reward(xax.get_norm(base_height - self.height_target, self.norm), self.temp, self.monotonic_fn)
+        reward = exp_kernel(base_height - self.height_target, self.kernel_scale)
         return reward
 
 
@@ -407,24 +396,25 @@ class ActionJerkPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointVelocityPenalty(Reward):
+class SmallJointVelocityReward(Reward):
     """Penalty for how fast the joint angular velocities are changing."""
 
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    kernel_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos = trajectory.qpos[..., 7:]
         qpos_zp = jnp.pad(qpos, ((1, 0), (0, 0)), mode="edge")
         done = jnp.pad(trajectory.done, ((1, 0),), mode="edge")[..., :-1, None]
         qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
-        return xax.get_norm(qvel, self.norm).mean(axis=-1)
+        reward = exp_kernel(qvel, self.kernel_scale).mean(axis=-1)
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointAccelerationPenalty(Reward):
+class SmallJointAccelerationReward(Reward):
     """Penalty for high joint accelerations."""
 
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    kernel_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos = trajectory.qpos[..., 7:]
@@ -432,15 +422,15 @@ class JointAccelerationPenalty(Reward):
         done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., :-1, None]
         qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
         qacc = jnp.where(done[..., 1:, :], 0.0, qvel[..., 1:, :] - qvel[..., :-1, :])
-        penalty = xax.get_norm(qacc, self.norm).mean(axis=-1)
-        return penalty
+        reward = exp_kernel(qacc, self.kernel_scale).mean(axis=-1)
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointJerkPenalty(Reward):
+class SmallJointJerkReward(Reward):
     """Penalty for high joint jerks."""
 
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    kernel_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos = trajectory.qpos[..., 7:]
@@ -449,8 +439,8 @@ class JointJerkPenalty(Reward):
         qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
         qacc = jnp.where(done[..., 1:, :], 0.0, qvel[..., 1:, :] - qvel[..., :-1, :])
         qjerk = jnp.where(done[..., 2:, :], 0.0, qacc[..., 1:, :] - qacc[..., :-1, :])
-        penalty = xax.get_norm(qjerk, self.norm).mean(axis=-1)
-        return penalty
+        reward = exp_kernel(qjerk, self.kernel_scale).mean(axis=-1)
+        return reward
 
 
 def joint_limits_validator(inst: "AvoidLimitsPenalty", attr: attrs.Attribute, value: xax.HashableArray) -> None:
@@ -501,17 +491,17 @@ class AvoidLimitsPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class CtrlPenalty(Reward):
+class SmallCtrlReward(Reward):
     """Penalty for large torque commands."""
 
-    norm: xax.NormType = attrs.field(default="l2")
+    kernel_scale: float = attrs.field(default=0.25)
     scales: tuple[float, ...] | None = attrs.field(default=None)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         ctrl = trajectory.ctrl
         if self.scales is not None:
             ctrl = ctrl / jnp.array(self.scales)
-        return xax.get_norm(ctrl, self.norm).mean(axis=-1)
+        return exp_kernel(ctrl, self.kernel_scale).mean(axis=-1)
 
     @classmethod
     def create(cls, model: PhysicsModel, scale: float = -1.0, scale_by_curriculum: bool = False) -> Self:
@@ -609,15 +599,14 @@ class PositionTrackingReward(Reward):
     command_name: str = attrs.field()
     body_name: str = attrs.field()
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    temp: float = attrs.field(default=1.0)
-    monotonic_fn: MonotonicFn = attrs.field(default="inv")
+    kernel_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :]
         base_pos = trajectory.xpos[..., self.base_body_idx, :]
         target_pos = trajectory.command[self.command_name][..., :3]
         error = xax.get_norm((body_pos - base_pos) - target_pos, self.norm).sum(-1)
-        reward = norm_to_reward(error, self.temp, self.monotonic_fn)
+        reward = exp_kernel(error, self.kernel_scale)
         return reward
 
     @classmethod
@@ -628,8 +617,7 @@ class PositionTrackingReward(Reward):
         tracked_body_name: str,
         base_body_name: str,
         norm: xax.NormType = "l1",
-        temp: float = 1.0,
-        monotonic_fn: MonotonicFn = "inv",
+        kernel_scale: float = 0.25,
         scale: float = 1.0,
         scale_by_curriculum: bool = False,
     ) -> Self:
@@ -643,8 +631,7 @@ class PositionTrackingReward(Reward):
             body_name=tracked_body_name,
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
-            temp=temp,
-            monotonic_fn=monotonic_fn,
+            kernel_scale=kernel_scale,
         )
 
 
@@ -800,6 +787,46 @@ class FeetAirTimeReward(StatefulReward):
         return reward_t, reward_carry
 
 
+@attrs.define(kw_only=True)
+class FeetHeightMarker(Marker):
+    foot_id: int = attrs.field()
+    obs_name: str = attrs.field()
+    target_height: float | None = attrs.field()
+    radius: float = attrs.field(default=0.1)
+    size: float = attrs.field(default=0.03)
+    cmd_name: str = attrs.field(default="sinusoidal_gait_command")
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        obs_x, obs_y, obs_z = trajectory.obs[self.obs_name][..., self.foot_id, :].tolist()
+        self.pos = (obs_x, obs_y, obs_z if self.target_height is None else self.target_height)
+
+    @classmethod
+    def get(
+        cls,
+        foot_id: int,
+        obs_name: str,
+        target_height: float | None = None,
+        radius: float = 0.05,
+        size: float = 0.03,
+    ) -> Self:
+        return cls(
+            foot_id=foot_id,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(radius, radius, radius),
+            size=size,
+            radius=radius,
+            obs_name=obs_name,
+            target_height=target_height,
+            rgba=(1.0, 0.0, 0.0, 1.0),  # Red
+            track_x=False,
+            track_y=False,
+            track_z=False,
+            track_rotation=False,
+        )
+
+
 @attrs.define(frozen=True, kw_only=True)
 class FeetHeightReward(StatefulReward):
     """Reward for feet either touching or not touching the ground for some time."""
@@ -849,6 +876,16 @@ class FeetHeightReward(StatefulReward):
         )
         reward_t = reward_tn.max(axis=-1)
         return reward_t, reward_carry
+
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [
+            marker
+            for foot_id in range(self.num_feet)
+            for marker in (
+                FeetHeightMarker.get(foot_id, obs_name=self.position_obs),
+                FeetHeightMarker.get(foot_id, obs_name=self.position_obs, target_height=self.height),
+            )
+        ]
 
 
 @attrs.define(frozen=True, kw_only=True)

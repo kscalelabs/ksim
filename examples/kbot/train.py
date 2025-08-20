@@ -55,10 +55,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=2,
         help="The depth for the MLPs.",
     )
-    num_mixtures: int = xax.field(
-        value=5,
-        help="The number of mixtures for the actor.",
-    )
     num_hidden_layers: int = xax.field(
         value=2,
         help="The number of hidden layers for the MLPs.",
@@ -66,6 +62,14 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     var_scale: float = xax.field(
         value=0.5,
         help="The scale for the standard deviations of the actor.",
+    )
+    start_cutoff_frequency: float = xax.field(
+        value=6.0,
+        help="The cutoff frequency for the low-pass filter.",
+    )
+    end_cutoff_frequency: float = xax.field(
+        value=2.0,
+        help="The cutoff frequency for the low-pass filter.",
     )
 
     # Reward parameters.
@@ -103,11 +107,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
     gait_period: float = xax.field(
         value=0.6,
-        help="The period for the sinusoidal gait command.",
+        help="The target period for the gait.",
     )
-    max_foot_height: float = xax.field(
-        value=0.3,
-        help="The maximum height for the sinusoidal gait command.",
+    max_knee_height: float = xax.field(
+        value=0.7,
+        help="The maximum height of the foot.",
     )
 
     # Optimizer parameters.
@@ -129,6 +133,14 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Carry:
+    actor_carry: Array = eqx.field()
+    critic_carry: Array = eqx.field()
+    lpf_params: ksim.LowPassFilterParams = eqx.field()
+
+
 class Actor(eqx.Module):
     """Actor for the walking task."""
 
@@ -137,11 +149,13 @@ class Actor(eqx.Module):
     output_proj: eqx.nn.MLP
     num_inputs: int = eqx.field()
     num_outputs: int = eqx.field()
-    num_mixtures: int = eqx.field()
-    clip_positions: ksim.ClipPositions = eqx.field()
+    clip_positions: ksim.TanhPositions = eqx.field()
     min_std: float = eqx.field()
     max_std: float = eqx.field()
     var_scale: float = eqx.field()
+    ctrl_dt: float = eqx.field()
+    start_fc: float = eqx.field()
+    end_fc: float = eqx.field()
 
     def __init__(
         self,
@@ -154,9 +168,11 @@ class Actor(eqx.Module):
         max_std: float,
         var_scale: float,
         hidden_size: int,
-        num_mixtures: int,
         depth: int,
         num_hidden_layers: int,
+        ctrl_dt: float,
+        start_cutoff_frequency: float,
+        end_cutoff_frequency: float,
     ) -> None:
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
@@ -181,25 +197,41 @@ class Actor(eqx.Module):
         )
 
         # Project to output
-        self.output_proj = eqx.nn.MLP(
+        output_proj = eqx.nn.MLP(
             in_size=hidden_size,
-            out_size=num_outputs * 3 * num_mixtures,
+            out_size=num_outputs * 2,
             width_size=hidden_size,
             depth=num_hidden_layers,
             activation=jax.nn.gelu,
-            use_final_bias=False,
+            use_final_bias=True,
             key=key,
         )
 
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
-        self.num_mixtures = num_mixtures
-        self.clip_positions = ksim.ClipPositions.from_physics_model(physics_model)
+        self.clip_positions = ksim.TanhPositions.from_physics_model(physics_model)
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
+        self.ctrl_dt = ctrl_dt
+        self.start_fc = start_cutoff_frequency
+        self.end_fc = end_cutoff_frequency
 
-    def forward(self, obs_n: Array, carry: Array) -> tuple[xax.Distribution, Array]:
+        # Sets the bias of the output projection.
+        bias = self.clip_positions.get_bias(jnp.array([v for _, v in ZEROS]))
+        self.output_proj = eqx.tree_at(
+            lambda m: m.layers[-1].bias,
+            output_proj,
+            replace_fn=lambda b: b.at[..., : bias.shape[0]].set(bias),
+        )
+
+    def forward(
+        self,
+        obs_n: Array,
+        carry: Array,
+        curriculum_level: Array,
+        lpf_params: ksim.LowPassFilterParams,
+    ) -> tuple[xax.Distribution, Array, ksim.LowPassFilterParams]:
         # carry shape: (2, depth, hidden_size) -> [0]=h, [1]=c
         x_n = self.input_proj(obs_n)
         new_h = []
@@ -214,24 +246,25 @@ class Actor(eqx.Module):
         out_n = self.output_proj(x_n)
 
         # Reshape the output to be a mixture of gaussians.
-        slice_len = self.num_outputs * self.num_mixtures
-        mean_nm = out_n[..., :slice_len].reshape(self.num_outputs, self.num_mixtures)
-        std_nm = out_n[..., slice_len : slice_len * 2].reshape(self.num_outputs, self.num_mixtures)
-        logits_nm = out_n[..., slice_len * 2 :].reshape(self.num_outputs, self.num_mixtures)
+        slice_len = self.num_outputs
+        mean_n = out_n[..., :slice_len]
+        std_n = out_n[..., slice_len:]
 
         # Softplus and clip to ensure positive standard deviations.
-        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
-
-        # Apply bias to the means.
-        mean_nm = mean_nm + jnp.array([v for _, v in ZEROS])[:, None]
+        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Clip the target positions to the minimum and maximum ranges.
-        mean_nm = jax.vmap(self.clip_positions.clip, in_axes=-1, out_axes=-1)(mean_nm)
+        mean_n = self.clip_positions.clip(mean_n)
 
-        dist_n = xax.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
+        # Applies a low-pass filter.
+        fc = self.end_fc * curriculum_level + self.start_fc * (1.0 - curriculum_level)
+        mean_n, lpf_params = ksim.lowpass_one_pole(mean_n, self.ctrl_dt, fc, lpf_params)
+
+        # Creates a normal distribution.
+        dist_n = xax.Normal(loc_n=mean_n, scale_n=std_n)
 
         next_carry = jnp.stack([jnp.stack(new_h, axis=0), jnp.stack(new_c, axis=0)], axis=0)
-        return dist_n, next_carry
+        return dist_n, next_carry, lpf_params
 
 
 class Critic(eqx.Module):
@@ -322,9 +355,11 @@ class Model(eqx.Module):
         max_std: float,
         var_scale: float,
         hidden_size: int,
-        num_mixtures: int,
         depth: int,
         num_hidden_layers: int,
+        ctrl_dt: float,
+        start_cutoff_frequency: float,
+        end_cutoff_frequency: float,
     ) -> None:
         actor_key, critic_key = jax.random.split(key)
         self.actor = Actor(
@@ -336,9 +371,11 @@ class Model(eqx.Module):
             max_std=max_std,
             var_scale=var_scale,
             hidden_size=hidden_size,
-            num_mixtures=num_mixtures,
             depth=depth,
             num_hidden_layers=num_hidden_layers,
+            ctrl_dt=ctrl_dt,
+            start_cutoff_frequency=start_cutoff_frequency,
+            end_cutoff_frequency=end_cutoff_frequency,
         )
         self.critic = Critic(
             critic_key,
@@ -477,10 +514,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 ],
                 floor_geom_names=["floor"],
             ),
-            "feet_position": ksim.FeetPositionObservation.create(
+            "feet_position": ksim.BodyPositionObservation.create(
                 physics_model=physics_model,
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                body_names=("KB_D_501L_L_LEG_FOOT", "KB_D_501R_R_LEG_FOOT"),
+            ),
+            "knee_position": ksim.BodyPositionObservation.create(
+                physics_model=physics_model,
+                body_names=("KC_D_301R_R_Femur_Lower_Drive", "KC_D_301L_L_Femur_Lower_Drive"),
             ),
             "feet_force": ksim.FeetForceObservation.create(
                 physics_model=physics_model,
@@ -510,6 +550,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Reward]:
         return {
             "stay_alive": ksim.StayAliveReward(scale=100.0),
+            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=1.0),
+            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
                 period=self.config.gait_period / 2.0,
@@ -518,12 +560,21 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             "foot_height": ksim.FeetHeightReward(
                 contact_obs="feet_contact",
-                position_obs="feet_position",
-                height=self.config.max_foot_height,
+                position_obs="knee_position",
+                height=self.config.max_knee_height,
                 scale=10.0,
             ),
-            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=1.0),
-            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.1),
+            "upright": ksim.UprightReward(scale=1.0),
+            "foot_contact": ksim.ForcePenalty(
+                force_obs="feet_force",
+                ctrl_dt=self.config.ctrl_dt,
+                bias=350.0,  # Weight of the robot, in Newtons.
+                scale=-1.0,
+            ),
+            "ctrl": ksim.SmallCtrlReward.create(model=physics_model, scale=0.1),
+            "joint_velocity": ksim.SmallJointVelocityReward(scale=0.1, kernel_scale=0.25),
+            "joint_acceleration": ksim.SmallJointAccelerationReward(scale=0.1, kernel_scale=0.25),
+            "joint_jerk": ksim.SmallJointJerkReward(scale=0.1, kernel_scale=0.25),
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
@@ -550,9 +601,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             max_std=1.0,
             var_scale=self.config.var_scale,
             hidden_size=self.config.hidden_size,
-            num_mixtures=self.config.num_mixtures,
             depth=self.config.depth,
             num_hidden_layers=self.config.num_hidden_layers,
+            ctrl_dt=self.config.ctrl_dt,
+            start_cutoff_frequency=self.config.start_cutoff_frequency,
+            end_cutoff_frequency=self.config.end_cutoff_frequency,
         )
 
     def run_actor(
@@ -561,7 +614,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         observations: xax.FrozenDict[str, PyTree],
         commands: xax.FrozenDict[str, PyTree],
         carry: Array,
-    ) -> tuple[xax.Distribution, Array]:
+        curriculum_level: Array,
+        lpf_params: ksim.LowPassFilterParams,
+    ) -> tuple[xax.Distribution, Array, ksim.LowPassFilterParams]:
         joint_pos_n = observations["noisy_joint_position"]
         joint_vel_n = observations["noisy_joint_velocity"]
         proj_grav_3 = observations["noisy_imu_projected_gravity"]
@@ -585,9 +640,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
         obs_n = jnp.concatenate(obs, axis=-1)
-        action, carry = model.forward(obs_n, carry)
+        action, carry, lpf_params = model.forward(obs_n, carry, curriculum_level, lpf_params)
 
-        return action, carry
+        return action, carry, lpf_params
 
     def run_critic(
         self,
@@ -650,18 +705,19 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def _model_scan_fn(
         self,
-        actor_critic_carry: tuple[Array, Array],
+        actor_critic_carry: Carry,
         xs: tuple[ksim.Trajectory, PRNGKeyArray],
         model: Model,
-    ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
+    ) -> tuple[Carry, ksim.PPOVariables]:
         transition, rng = xs
 
-        actor_carry, critic_carry = actor_critic_carry
-        actor_dist, next_actor_carry = self.run_actor(
+        actor_dist, next_actor_carry, lpf_params = self.run_actor(
             model=model.actor,
             observations=transition.obs,
             commands=transition.command,
-            carry=actor_carry,
+            carry=actor_critic_carry.actor_carry,
+            curriculum_level=transition.curriculum_level,
+            lpf_params=actor_critic_carry.lpf_params,
         )
 
         # Gets the log probabilities of the action.
@@ -672,7 +728,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             model=model.critic,
             observations=transition.obs,
             commands=transition.command,
-            carry=critic_carry,
+            carry=actor_critic_carry.critic_carry,
         )
 
         transition_ppo_variables = ksim.PPOVariables(
@@ -683,7 +739,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         next_carry = jax.tree.map(
             lambda x, y: jnp.where(transition.done, x, y),
             self.get_initial_model_carry(model, rng),
-            (next_actor_carry, next_critic_carry),
+            Carry(
+                actor_carry=next_actor_carry,
+                critic_carry=next_critic_carry,
+                lpf_params=lpf_params,
+            ),
         )
 
         return next_carry, transition_ppo_variables
@@ -692,9 +752,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         self,
         model: Model,
         trajectory: ksim.Trajectory,
-        model_carry: tuple[Array, Array],
+        model_carry: Carry,
         rng: PRNGKeyArray,
-    ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
+    ) -> tuple[ksim.PPOVariables, Carry]:
         scan_fn = functools.partial(self._model_scan_fn, model=model)
         next_model_carry, ppo_variables = xax.scan(
             scan_fn,
@@ -704,32 +764,42 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
         return ppo_variables, next_model_carry
 
-    def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        return (
-            jnp.zeros(shape=(2, self.config.depth, self.config.hidden_size)),
-            jnp.zeros(shape=(2, self.config.depth, self.config.hidden_size)),
+    def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> Carry:
+        return Carry(
+            actor_carry=jnp.zeros(shape=(2, self.config.depth, self.config.hidden_size)),
+            critic_carry=jnp.zeros(shape=(2, self.config.depth, self.config.hidden_size)),
+            lpf_params=ksim.LowPassFilterParams.initialize(len(ZEROS)),
         )
 
     def sample_action(
         self,
         model: Model,
-        model_carry: tuple[Array, Array],
+        model_carry: Carry,
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
+        curriculum_level: Array,
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
-        actor_carry_in, critic_carry_in = model_carry
-        action_dist_j, actor_carry = self.run_actor(
+        action_dist_j, actor_carry, lpf_params = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
-            carry=actor_carry_in,
+            carry=model_carry.actor_carry,
+            curriculum_level=curriculum_level,
+            lpf_params=model_carry.lpf_params,
         )
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(key=rng)
-        return ksim.Action(action=action_j, carry=(actor_carry, critic_carry_in))
+        return ksim.Action(
+            action=action_j,
+            carry=Carry(
+                actor_carry=actor_carry,
+                critic_carry=model_carry.critic_carry,
+                lpf_params=lpf_params,
+            ),
+        )
 
 
 if __name__ == "__main__":

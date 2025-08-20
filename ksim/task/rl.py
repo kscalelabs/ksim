@@ -897,6 +897,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         physics_state: PhysicsState,
         observations: xax.FrozenDict[str, PyTree],
         commands: xax.FrozenDict[str, PyTree],
+        curriculum_level: Array,
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> Action:
@@ -914,6 +915,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             observations: The current observations.
             commands: The current commands.
             model_carry: The model carry from the previous step.
+            curriculum_level: The current curriculum level.
             rng: The random key.
             argmax: If set, get the argmax action, otherwise sample randomly
                 from the model.
@@ -986,6 +988,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             physics_state=env_states.physics_state,
             observations=observations,
             commands=env_states.commands,
+            curriculum_level=env_states.curriculum_state.level,
             rng=act_rng,
             argmax=constants.argmax_action,
         )
@@ -1059,6 +1062,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             done=terminated,
             success=success,
             timestep=next_physics_state.data.time,
+            curriculum_level=env_states.curriculum_state.level,
             termination_components=terminations,
             aux_outputs=action.aux_outputs,
         )

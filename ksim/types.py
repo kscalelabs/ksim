@@ -68,6 +68,7 @@ class Trajectory:
     done: Array
     success: Array
     timestep: Array
+    curriculum_level: Array
     termination_components: xax.FrozenDict[str, Array]
     aux_outputs: xax.FrozenDict[str, PyTree]
 

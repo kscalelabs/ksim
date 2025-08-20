@@ -157,6 +157,7 @@ class TrajectoryDataset(Dataset[tuple[Trajectory, RewardState], tuple[Trajectory
                 done=arrs["done"],
                 success=arrs["success"],
                 timestep=arrs["timestep"],
+                curriculum_level=arrs["curriculum_level"],
                 termination_components=_dict("termination_components"),
                 aux_outputs=_dict("aux_outputs"),
             ),
