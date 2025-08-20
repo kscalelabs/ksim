@@ -786,11 +786,11 @@ class FeetAirTimeReward(StatefulReward):
         # Gradually increase reward until `threshold_steps`.
         air_rew_tn = (air_cnt_tn.astype(jnp.float32) / air_steps) + self.bias
         air_rew_tn = jnp.where((air_cnt_tn > 0) & (air_cnt_tn < air_steps), air_rew_tn, 0.0)
-        air_rew_t = air_rew_tn.sum(axis=-1)
+        air_rew_t = air_rew_tn.max(axis=-1)
 
         gnd_rew_tn = (gnd_cnt_tn.astype(jnp.float32) / gnd_steps) + self.bias
         gnd_rew_tn = jnp.where((gnd_cnt_tn > 0) & (gnd_cnt_tn < gnd_steps), gnd_rew_tn, 0.0)
-        gnd_rew_t = gnd_rew_tn.sum(axis=-1)
+        gnd_rew_t = gnd_rew_tn.max(axis=-1)
 
         reward_t = air_rew_t + gnd_rew_t
         return reward_t, reward_carry
