@@ -703,7 +703,7 @@ class JointPositionCommand(Command):
         rng_a, rng_b = jax.random.split(rng)
         target = self.sample_target(rng_a)
         start = physics_data.qpos[..., self.indices]
-        time_steps = self.sample_time(rng_b) * self.ctrl_dt
+        time_steps = self.sample_time(rng_b) / self.ctrl_dt
         step_size = (target - start) / time_steps
         return JointPositionCommandValue(
             target_position=target,
