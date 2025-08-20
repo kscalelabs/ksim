@@ -554,11 +554,18 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
-                period=self.config.gait_period / 2.0,
+                max_air_time=self.config.gait_period * 0.4,
+                max_ground_time=self.config.gait_period * 0.6,
                 contact_obs="feet_contact",
-                scale=3.0,
+                scale=10.0,
             ),
-            "foot_height": ksim.FeetHeightReward(
+            "foot_grounded": ksim.FeetGroundedAtRestReward(
+                ctrl_dt=self.config.ctrl_dt,
+                max_ground_time=self.config.gait_period * 0.6,
+                contact_obs="feet_contact",
+                scale=1.0,
+            ),
+            "foot_height": ksim.TargetHeightReward(
                 contact_obs="feet_contact",
                 position_obs="knee_position",
                 height=self.config.max_knee_height,
