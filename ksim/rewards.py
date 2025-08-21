@@ -937,7 +937,7 @@ class TargetHeightReward(Reward):
         not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
         not_moving = not_moving_lin & not_moving_ang
         cur_height_tn = trajectory.obs[self.position_obs][..., 2]
-        penalty_tn = (cur_height_tn - self.height).clip(min=0.0)
+        penalty_tn = (cur_height_tn - self.height).clip(max=0.0)
         reward_tn = exp_kernel_with_penalty(penalty_tn, self.kernel_scale, self.sq_scale, self.abs_scale)
         reward_t = jnp.where(not_moving, 0.0, reward_tn.max(axis=-1))
         return reward_t
