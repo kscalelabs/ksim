@@ -68,8 +68,12 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The cutoff frequency for the low-pass filter.",
     )
     end_cutoff_frequency: float = xax.field(
-        value=6.0,
+        value=2.0,
         help="The cutoff frequency for the low-pass filter.",
+    )
+    mujoco_scene: str = xax.field(
+        value="smooth",
+        help="The MuJoCo scene to use.",
     )
 
     # Reward parameters.
@@ -428,7 +432,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot-headless", name="robot"))
-        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
+        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene=self.config.mujoco_scene)
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
         metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot-headless"))
@@ -489,6 +493,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.RandomJointPositionReset.create(physics_model, {k: v for k, v in ZEROS}, scale=0.1),
             ksim.RandomJointVelocityReset(),
+            ksim.get_xy_position_reset(physics_model),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
@@ -540,10 +545,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 floor_geom_names=["floor"],
             ),
             "feet_position": ksim.BodyPositionObservation.create(
-                physics_model=physics_model,
-                body_names=("KB_D_501L_L_LEG_FOOT", "KB_D_501R_R_LEG_FOOT"),
-            ),
-            "foot_position": ksim.BodyPositionObservation.create(
                 physics_model=physics_model,
                 body_names=("KB_D_501L_L_LEG_FOOT", "KB_D_501R_R_LEG_FOOT"),
             ),
@@ -625,7 +626,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "still_at_rest": ksim.MotionlessAtRestPenalty(scale=-0.01),
             "foot_height": ksim.SparseTargetHeightReward(
                 contact_obs="feet_contact",
-                position_obs="foot_position",
+                position_obs="feet_position",
                 height=self.config.max_foot_height,
                 scale=1.0,
             ),
