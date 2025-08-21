@@ -122,11 +122,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the angular velocity command being switched.",
     )
     gait_period: float = xax.field(
-        value=0.7,
+        value=0.8,
         help="The target period for the gait.",
     )
     air_time_percent: float = xax.field(
-        value=0.3,
+        value=0.45,
         help="The percentage of the gait period that the feet are in the air.",
     )
     max_knee_height: float = xax.field(
@@ -134,7 +134,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The maximum height of the foot.",
     )
     max_foot_height: float = xax.field(
-        value=0.4,
+        value=0.3,
         help="The maximum height of the foot.",
     )
 
@@ -617,26 +617,36 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_air_time=self.config.gait_period * self.config.air_time_percent,
                 max_ground_time=self.config.gait_period * (1.0 - self.config.air_time_percent),
                 contact_obs="feet_contact",
+                linvel_moving_threshold=self.config.min_linear_velocity * 0.75,
+                angvel_moving_threshold=self.config.min_angular_velocity * 0.75,
                 scale=10.0,
             ),
-            "no_roll": ksim.UprightReward(scale=1.0),
+            "no_roll": ksim.UprightReward(scale=2.0),
             "foot_grounded": ksim.FeetGroundedAtRestReward(
                 ctrl_dt=self.config.ctrl_dt,
                 max_ground_time=self.config.gait_period * 0.6,
                 contact_obs="feet_contact",
+                linvel_moving_threshold=self.config.min_linear_velocity * 0.75,
+                angvel_moving_threshold=self.config.min_angular_velocity * 0.75,
                 scale=0.1,
             ),
-            "still_at_rest": ksim.MotionlessAtRestPenalty(scale=-0.01),
+            "still_at_rest": ksim.MotionlessAtRestPenalty(
+                linvel_moving_threshold=self.config.min_linear_velocity * 0.75,
+                angvel_moving_threshold=self.config.min_angular_velocity * 0.75,
+                scale=-0.01,
+            ),
             "foot_height": ksim.TargetHeightReward(
                 position_obs="foot_position",
                 height=self.config.max_foot_height,
+                linvel_moving_threshold=self.config.min_linear_velocity * 0.75,
+                angvel_moving_threshold=self.config.min_angular_velocity * 0.75,
                 scale=0.1,
             ),
             "foot_contact": ksim.ForcePenalty(
                 force_obs="feet_force",
                 ctrl_dt=self.config.ctrl_dt,
-                bias=350.0,  # Weight of the robot, in Newtons.
-                scale=-1.0,
+                bias=500.0,  # Weight of the robot, in Newtons.
+                scale=-10.0,
             ),
             # Normalization penalties.
             "ctrl": ksim.SmallCtrlReward.create(model=physics_model, scale=0.1),
