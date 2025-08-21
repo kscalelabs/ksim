@@ -74,11 +74,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Reward parameters.
     min_linear_velocity: float = xax.field(
-        value=1.0,
+        value=1.5,
         help="The range for the linear velocity command.",
     )
     max_linear_velocity: float = xax.field(
-        value=2.0,
+        value=2.5,
         help="The range for the linear velocity command.",
     )
     linear_velocity_accel: float = xax.field(
