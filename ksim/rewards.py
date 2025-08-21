@@ -736,16 +736,25 @@ class LinkJerkPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class SymmetryReward(Reward):
+class SymmetryReward(StatefulReward):
     """Rewards joints for having symmetrical positions."""
 
     joint_indices: tuple[int, ...] = attrs.field()
     joint_targets: tuple[float, ...] = attrs.field()
+    alpha: float = attrs.field(default=0.1)
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.array(self.joint_targets)
+
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: Array,
+    ) -> tuple[Array, Array]:
         qpos = trajectory.qpos[..., jnp.array(self.joint_indices) + 7] - jnp.array(self.joint_targets)
         qpos_mean = qpos.mean(axis=-2, keepdims=True)
-        return (qpos * -qpos_mean).sum(axis=-1)
+        reward_carry = reward_carry * (1.0 - self.alpha) + qpos_mean * self.alpha
+        return (qpos * -reward_carry).sum(axis=-1), reward_carry
 
     @classmethod
     def create(
@@ -753,6 +762,7 @@ class SymmetryReward(Reward):
         physics_model: PhysicsModel,
         joint_names: tuple[str, ...],
         joint_targets: tuple[float, ...],
+        alpha: float = 0.1,
         scale: float = 1.0,
         scale_by_curriculum: bool = False,
     ) -> Self:
@@ -761,6 +771,7 @@ class SymmetryReward(Reward):
         return cls(
             joint_indices=joint_indices,
             joint_targets=joint_targets,
+            alpha=alpha,
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
         )
@@ -800,8 +811,8 @@ class FeetAirTimeReward(StatefulReward):
     num_feet: int = attrs.field(default=2)
     bias: float = attrs.field(default=0.0)
     ground_penalty: float = attrs.field(default=0.1)
-    linvel_moving_threshold: float = attrs.field(default=0.05)
-    angvel_moving_threshold: float = attrs.field(default=0.05)
+    linvel_moving_threshold: float = attrs.field(default=0.5)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(30))
 
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
         return jnp.zeros((self.num_feet, 2), dtype=jnp.int32)
@@ -857,8 +868,8 @@ class FeetGroundedAtRestReward(StatefulReward):
     ctrl_dt: float = attrs.field()
     contact_obs: str = attrs.field()
     num_feet: int = attrs.field(default=2)
-    linvel_moving_threshold: float = attrs.field(default=0.25)
-    angvel_moving_threshold: float = attrs.field(default=math.radians(10))
+    linvel_moving_threshold: float = attrs.field(default=0.5)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(30))
 
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
         return jnp.zeros(self.num_feet, dtype=jnp.int32)
@@ -944,8 +955,8 @@ class TargetHeightReward(Reward):
     position_obs: str = attrs.field()
     height: float = attrs.field()
     num_feet: int = attrs.field(default=2)
-    linvel_moving_threshold: float = attrs.field(default=0.25)
-    angvel_moving_threshold: float = attrs.field(default=math.radians(10))
+    linvel_moving_threshold: float = attrs.field(default=0.5)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(30))
     kernel_scale: float = attrs.field(default=0.25)
     sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
@@ -979,8 +990,8 @@ class SparseTargetHeightReward(StatefulReward):
     position_obs: str = attrs.field()
     height: float = attrs.field()
     num_bodies: int = attrs.field(default=2)
-    linvel_moving_threshold: float = attrs.field(default=0.05)
-    angvel_moving_threshold: float = attrs.field(default=0.05)
+    linvel_moving_threshold: float = attrs.field(default=0.5)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(30))
 
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
         return jnp.zeros(self.num_bodies, dtype=jnp.float32)
@@ -1033,8 +1044,8 @@ class SparseTargetHeightReward(StatefulReward):
 class MotionlessAtRestPenalty(Reward):
     """Reward for feet either touching or not touching the ground for some time."""
 
-    linvel_moving_threshold: float = attrs.field(default=0.25)
-    angvel_moving_threshold: float = attrs.field(default=math.radians(10))
+    linvel_moving_threshold: float = attrs.field(default=0.5)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(30))
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
