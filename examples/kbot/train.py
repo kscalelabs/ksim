@@ -68,13 +68,13 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The cutoff frequency for the low-pass filter.",
     )
     end_cutoff_frequency: float = xax.field(
-        value=2.0,
+        value=4.0,
         help="The cutoff frequency for the low-pass filter.",
     )
 
     # Reward parameters.
     min_linear_velocity: float = xax.field(
-        value=1.0,
+        value=1.5,
         help="The range for the linear velocity command.",
     )
     max_linear_velocity: float = xax.field(
@@ -94,7 +94,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The maximum yaw for the linear velocity command.",
     )
     linear_velocity_zero_prob: float = xax.field(
-        value=0.2,
+        value=0.05,
         help="The probability of the linear velocity command being zero.",
     )
     linear_velocity_backward_prob: float = xax.field(
@@ -122,16 +122,12 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the angular velocity command being switched.",
     )
     gait_period: float = xax.field(
-        value=0.8,
+        value=1.0,
         help="The target period for the gait.",
     )
     air_time_percent: float = xax.field(
-        value=0.45,
+        value=0.4,
         help="The percentage of the gait period that the feet are in the air.",
-    )
-    max_knee_height: float = xax.field(
-        value=0.6,
-        help="The maximum height of the foot.",
     )
     max_foot_height: float = xax.field(
         value=0.25,
@@ -583,7 +579,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Reward]:
         return {
-            "stay_alive": ksim.StayAliveReward(scale=100.0),
+            "stay_alive": ksim.StayAliveReward(scale=500.0),
             # Command tracking rewards.
             "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=2.0),
             "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
@@ -592,13 +588,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 joint_names=("dof_right_hip_roll_03", "dof_left_hip_roll_03"),
                 joint_targets=(0.0, 0.0),
-                scale=-1.0,
+                scale=-10.0,
             ),
             "leg_deviation": ksim.JointDeviationPenalty.create(
                 physics_model=physics_model,
                 joint_names=("dof_right_hip_yaw_03", "dof_left_hip_yaw_03"),
                 joint_targets=(0.0, 0.0),
-                scale=-1.0,
+                scale=-10.0,
             ),
             "arm_deviation": ksim.JointDeviationPenalty.create(
                 physics_model=physics_model,
@@ -646,6 +642,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     "dof_left_shoulder_pitch_03",
                 ),
                 joint_targets=(0.0, 0.0),
+                scale=0.01,
+            ),
+            "leg_symmetry": ksim.SymmetryReward.create(
+                physics_model=physics_model,
+                joint_names=(
+                    "dof_right_hip_pitch_04",
+                    "dof_left_hip_pitch_04",
+                ),
+                joint_targets=(math.radians(-10.0), math.radians(10.0)),
                 scale=0.01,
             ),
             # Normalization penalties.
