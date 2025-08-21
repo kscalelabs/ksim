@@ -1,4 +1,26 @@
-"""Converts a checkpoint to a deployable model."""
+"""Converts a checkpoint to a deployable model.
+
+The expected command structure for K-Bot is:
+
+- [0] x linear velocity [m/s]
+- [1] y linear velocity [m/s]
+- [2] z angular velocity [rad/s]
+- [3] base height offset [m]
+- [4] base roll [rad]
+- [5] base pitch [rad]
+- [6] right shoulder pitch [rad]
+- [7] right shoulder roll [rad]
+- [8] right elbow pitch [rad]
+- [9] right elbow roll [rad]
+- [10] right wrist pitch [rad]
+- [11] left shoulder pitch [rad]
+- [12] left shoulder roll [rad]
+- [13] left elbow pitch [rad]
+- [14] left elbow roll [rad]
+- [15] left wrist pitch [rad]
+
+Since the training commands differ from this, we need to correct them here.
+"""
 
 import argparse
 from dataclasses import dataclass
@@ -50,7 +72,7 @@ def main() -> None:
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
-        num_commands=3,
+        num_commands=16,
         carry_size=carry_shape,
     )
 
@@ -73,6 +95,18 @@ def main() -> None:
         command: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
+        x_vel = command[..., 0]
+        y_vel = command[..., 1]
+        ang_vel = command[..., 2]
+
+        # Converts to the expected command structure.
+        xy_vel = jnp.stack([x_vel, y_vel], axis=-1)
+        cmd_vel = jnp.linalg.norm(xy_vel, axis=-1)
+        cmd_yaw = jnp.arctan2(y_vel, x_vel)
+
+        linvel_cmd_2 = jnp.stack([cmd_vel, cmd_yaw], axis=-1)
+        angvel_cmd_1 = jnp.stack([ang_vel], axis=-1)
+
         # Call the model.
         obs = jnp.concatenate(
             [
@@ -80,7 +114,8 @@ def main() -> None:
                 joint_angular_velocities / 10.0,
                 projected_gravity,
                 gyroscope,
-                command,
+                linvel_cmd_2,
+                angvel_cmd_1,
             ],
             axis=-1,
         )
