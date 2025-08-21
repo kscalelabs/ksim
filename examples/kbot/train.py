@@ -82,11 +82,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The range for the linear velocity command.",
     )
     linear_velocity_accel: float = xax.field(
-        value=0.5,
+        value=1.0,
         help="The acceleration for the linear velocity command, in m/s^2.",
     )
     angular_velocity_accel: float = xax.field(
-        value=0.5,
+        value=1.0,
         help="The acceleration for the angular velocity command, in rad/s^2.",
     )
     linear_velocity_max_yaw: float = xax.field(
@@ -582,7 +582,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Command tracking rewards.
             "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=2.0),
             "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
-            # Gait rewards.
+            # Deviation penalties.
             "hip_deviation": ksim.JointDeviationPenalty.create(
                 physics_model=physics_model,
                 joint_names=("dof_right_hip_roll_03", "dof_left_hip_roll_03"),
@@ -595,6 +595,18 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 joint_targets=(0.0, 0.0),
                 scale=-1.0,
             ),
+            "arm_deviation": ksim.JointDeviationPenalty.create(
+                physics_model=physics_model,
+                joint_names=(
+                    "dof_right_shoulder_roll_03",
+                    "dof_left_shoulder_roll_03",
+                    "dof_right_shoulder_yaw_02",
+                    "dof_left_shoulder_yaw_02",
+                ),
+                joint_targets=(math.radians(-10.0), math.radians(10.0), 0.0, 0.0),
+                scale=-10.0,
+            ),
+            # Gait rewards.
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
                 max_air_time=self.config.gait_period * 0.4,
