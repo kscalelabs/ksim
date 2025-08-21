@@ -68,7 +68,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The cutoff frequency for the low-pass filter.",
     )
     end_cutoff_frequency: float = xax.field(
-        value=4.0,
+        value=6.0,
         help="The cutoff frequency for the low-pass filter.",
     )
 
@@ -94,11 +94,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The maximum yaw for the linear velocity command.",
     )
     linear_velocity_zero_prob: float = xax.field(
-        value=0.05,
+        value=0.2,
         help="The probability of the linear velocity command being zero.",
     )
     linear_velocity_backward_prob: float = xax.field(
-        value=0.1,
+        value=0.0,
         help="The probability of the linear velocity command being backward.",
     )
     linear_velocity_switch_prob: float = xax.field(
@@ -122,7 +122,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the angular velocity command being switched.",
     )
     gait_period: float = xax.field(
-        value=1.0,
+        value=0.8,
         help="The target period for the gait.",
     )
     air_time_percent: float = xax.field(
@@ -130,7 +130,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The percentage of the gait period that the feet are in the air.",
     )
     max_foot_height: float = xax.field(
-        value=0.25,
+        value=0.4,
         help="The maximum height of the foot.",
     )
 
