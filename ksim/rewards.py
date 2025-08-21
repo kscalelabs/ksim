@@ -22,6 +22,7 @@ __all__ = [
     "FlatBodyReward",
     "PositionTrackingReward",
     "UprightReward",
+    "NoRollReward",
     "LinkAccelerationPenalty",
     "LinkJerkPenalty",
     "SymmetryReward",
@@ -651,6 +652,34 @@ class UprightReward(Reward):
         quat = trajectory.qpos[..., 3:7]
         global_z = xax.rotate_vector_by_quat(local_z, quat)
         return global_z[..., 2] - jnp.linalg.norm(global_z[..., :2], axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class NoRollReward(Reward):
+    """Reward for staying upright."""
+
+    angvel_scale: float = attrs.field(default=0.25)
+    roll_scale: float = attrs.field(default=0.25)
+    angvel_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    angvel_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    roll_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    roll_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
+        quat = trajectory.qpos[..., 3:7]
+
+        # Avoid angular velocity in the roll direction.
+        rollvel = trajectory.qvel[..., 3]
+
+        # Avoid any off-axis roll orientation.
+        z_world = jnp.array([0.0, 0.0, 1.0])
+        z_in_body = xax.rotate_vector_by_quat(z_world, quat, inverse=True)
+        roll = -jnp.arctan2(z_in_body[..., 1], z_in_body[..., 2])
+
+        return {
+            "angvel": exp_kernel_with_penalty(rollvel, self.angvel_scale, self.angvel_sq_scale, self.angvel_abs_scale),
+            "pose": exp_kernel_with_penalty(roll, self.roll_scale, self.roll_sq_scale, self.roll_abs_scale),
+        }
 
 
 @attrs.define(frozen=True, kw_only=True)

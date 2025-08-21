@@ -68,7 +68,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The cutoff frequency for the low-pass filter.",
     )
     end_cutoff_frequency: float = xax.field(
-        value=4.0,
+        value=2.0,
         help="The cutoff frequency for the low-pass filter.",
     )
 
@@ -82,7 +82,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The range for the linear velocity command.",
     )
     linear_velocity_accel: float = xax.field(
-        value=1.0,
+        value=2.0,
         help="The acceleration for the linear velocity command, in m/s^2.",
     )
     angular_velocity_accel: float = xax.field(
@@ -614,6 +614,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 contact_obs="feet_contact",
                 scale=10.0,
             ),
+            "no_roll": ksim.NoRollReward(scale=5.0),
             "foot_grounded": ksim.FeetGroundedAtRestReward(
                 ctrl_dt=self.config.ctrl_dt,
                 max_ground_time=self.config.gait_period * 0.6,
@@ -637,7 +638,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 bias=350.0,  # Weight of the robot, in Newtons.
                 scale=-1.0,
             ),
-            "upright": ksim.UprightReward(scale=1.0),
             # Normalization penalties.
             "ctrl": ksim.SmallCtrlReward.create(model=physics_model, scale=0.1),
             "joint_velocity": ksim.SmallJointVelocityReward(scale=0.1, kernel_scale=0.25),
