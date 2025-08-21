@@ -647,11 +647,29 @@ class PositionTrackingReward(Reward):
 class UprightReward(Reward):
     """Reward for staying upright."""
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        local_z = jnp.array([0.0, 0.0, 1.0])
+    angvel_scale: float = attrs.field(default=0.25)
+    pose_scale: float = attrs.field(default=0.25)
+    angvel_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    angvel_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    pose_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    pose_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         quat = trajectory.qpos[..., 3:7]
-        global_z = xax.rotate_vector_by_quat(local_z, quat)
-        return global_z[..., 2] - jnp.linalg.norm(global_z[..., :2], axis=-1)
+
+        # Avoid angular velocity in the roll or pitch directions.
+        angvel = jnp.linalg.norm(trajectory.qvel[..., 3:5], axis=-1)
+
+        # Avoid any roll or pitch orientation.
+        z_world = jnp.array([0.0, 0.0, 1.0])
+        z_in_body = xax.rotate_vector_by_quat(z_world, quat, inverse=True)
+        roll = jnp.arctan2(z_in_body[..., 1], z_in_body[..., 2])
+        pitch = jnp.arctan2(z_in_body[..., 0], z_in_body[..., 2])
+        roll_pitch = jnp.linalg.norm(jnp.stack([roll, pitch], axis=-1), axis=-1)
+
+        angvel_rew = exp_kernel_with_penalty(angvel, self.angvel_scale, self.angvel_sq_scale, self.angvel_abs_scale)
+        pose_rew = exp_kernel_with_penalty(roll_pitch, self.pose_scale, self.pose_sq_scale, self.pose_abs_scale)
+        return {"angvel": angvel_rew, "pose": pose_rew}
 
 
 @attrs.define(frozen=True, kw_only=True)
