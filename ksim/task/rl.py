@@ -1323,6 +1323,14 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             bbox = draw.textbbox((0, 0), text)
             draw.rectangle((8, 8, 12 + bbox[2] - bbox[0], 12 + bbox[3] - bbox[1]), fill="white")
             draw.text((10, 10), text, fill="black")
+
+            # Overlays the time on the frame.
+            cur_time = indices[frame_id] * self.config.ctrl_dt
+            text = f"Time {cur_time:.2f}s"
+            bbox = draw.textbbox((0, 0), text)
+            draw.rectangle((8, 23, 12 + bbox[2] - bbox[0], 12 + bbox[3] - bbox[1]), fill="white")
+            draw.text((10, 25), text, fill="black")
+
             frame = np.array(frame_img)
 
             # Draws an RGB patch in the bottom right corner of the frame.
@@ -1402,8 +1410,9 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                         )
                         processed_value = processed_value[..., : self.config.max_values_per_plot]
 
+                    indices = np.arange(processed_value.shape[0], dtype=np.float32) * self.config.ctrl_dt
                     for i in range(processed_value.shape[1]):
-                        ax.plot(processed_value[:, i], label=f"{i}")
+                        ax.plot(indices, processed_value[:, i], label=f"{i}")
 
                     if processed_value.shape[1] > 1:
                         ax.legend()

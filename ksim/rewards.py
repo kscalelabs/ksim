@@ -26,6 +26,7 @@ __all__ = [
     "LinkAccelerationPenalty",
     "LinkJerkPenalty",
     "SymmetryReward",
+    "PairwiseSymmetryReward",
     "ReachabilityPenalty",
     "FeetAirTimeReward",
     "FeetGroundedAtRestReward",
@@ -772,6 +773,51 @@ class SymmetryReward(StatefulReward):
             joint_indices=joint_indices,
             joint_targets=joint_targets,
             alpha=alpha,
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class PairwiseSymmetryReward(Reward):
+    """Rewards joints for having symmetrical positions."""
+
+    left_joint_index: int = attrs.field()
+    right_joint_index: int = attrs.field()
+    zeros: tuple[float, float] = attrs.field(default=(0.0, 0.0))
+    flipped: bool = attrs.field(default=False)
+    kernel_scale: float = attrs.field(default=0.25)
+    sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        lzero, rzero = self.zeros
+        qpos_left = trajectory.qpos[..., self.left_joint_index + 7] - lzero
+        qpos_right = trajectory.qpos[..., self.right_joint_index + 7] - rzero
+        if self.flipped:
+            qpos_right = -qpos_right
+        qpos_diff = qpos_left - qpos_right
+        return exp_kernel_with_penalty(qpos_diff, self.kernel_scale, self.sq_scale, self.abs_scale)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        left_joint_name: str,
+        right_joint_name: str,
+        zeros: tuple[float, float] = (0.0, 0.0),
+        flipped: bool = False,
+        scale: float = 1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
+        left_joint_index = int(joint_to_idx[left_joint_name][0]) - 7
+        right_joint_index = int(joint_to_idx[right_joint_name][0]) - 7
+        return cls(
+            left_joint_index=left_joint_index,
+            right_joint_index=right_joint_index,
+            zeros=zeros,
+            flipped=flipped,
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
         )
