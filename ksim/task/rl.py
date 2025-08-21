@@ -1328,7 +1328,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             cur_time = indices[frame_id] * self.config.ctrl_dt
             text = f"Time {cur_time:.2f}s"
             bbox = draw.textbbox((0, 0), text)
-            draw.rectangle((8, 23, 12 + bbox[2] - bbox[0], 12 + bbox[3] - bbox[1]), fill="white")
+            draw.rectangle((8, 23, 12 + bbox[2] - bbox[0], 27 + bbox[3] - bbox[1]), fill="white")
             draw.text((10, 25), text, fill="black")
 
             frame = np.array(frame_img)
