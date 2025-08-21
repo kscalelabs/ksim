@@ -41,19 +41,6 @@ ZEROS: list[tuple[str, float]] = [
     ("dof_left_ankle_02", math.radians(-20.0)),
 ]
 
-ARM_JOINTS: list[str] = [
-    "dof_right_shoulder_pitch_03",
-    "dof_right_shoulder_roll_03",
-    "dof_right_shoulder_yaw_02",
-    "dof_right_elbow_02",
-    "dof_right_wrist_00",
-    "dof_left_shoulder_pitch_03",
-    "dof_left_shoulder_roll_03",
-    "dof_left_shoulder_yaw_02",
-    "dof_left_elbow_02",
-    "dof_left_wrist_00",
-]
-
 
 @dataclass
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
@@ -93,6 +80,14 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     max_linear_velocity: float = xax.field(
         value=1.5,
         help="The range for the linear velocity command.",
+    )
+    linear_velocity_accel: float = xax.field(
+        value=0.5,
+        help="The acceleration for the linear velocity command, in m/s^2.",
+    )
+    angular_velocity_accel: float = xax.field(
+        value=0.5,
+        help="The acceleration for the angular velocity command, in rad/s^2.",
     )
     linear_velocity_max_yaw: float = xax.field(
         value=math.radians(45.0),
@@ -564,6 +559,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "linvel": ksim.LinearVelocityCommand(
                 min_vel=self.config.min_linear_velocity,
                 max_vel=self.config.max_linear_velocity,
+                ctrl_dt=self.config.ctrl_dt,
+                linear_accel=self.config.linear_velocity_accel,
+                angular_accel=self.config.angular_velocity_accel,
                 max_yaw=self.config.linear_velocity_max_yaw,
                 zero_prob=self.config.linear_velocity_zero_prob,
                 backward_prob=self.config.linear_velocity_backward_prob,
@@ -571,15 +569,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             "angvel": ksim.AngularVelocityCommand(
                 max_vel=self.config.max_angular_velocity,
+                ctrl_dt=self.config.ctrl_dt,
+                angular_accel=self.config.angular_velocity_accel,
                 zero_prob=self.config.angular_velocity_zero_prob,
                 switch_prob=self.config.angular_velocity_switch_prob,
-            ),
-            "arm_position": ksim.JointPositionCommand.create(
-                physics_model=physics_model,
-                joint_names=ARM_JOINTS,
-                ctrl_dt=self.config.ctrl_dt,
-                min_time=0.3,
-                max_time=2.0,
             ),
         }
 
@@ -589,16 +582,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Command tracking rewards.
             "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=2.0),
             "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
-            "arm_position": ksim.JointPositionReward.create(
-                physics_model=physics_model,
-                joint_names=ARM_JOINTS,
-                command_name="arm_position",
-                length_scale=0.25,
-                sq_scale=0.1,
-                abs_scale=0.1,
-                scale=1.0,
-                scale_by_curriculum=True,
-            ),
             # Gait rewards.
             "hip_deviation": ksim.JointDeviationPenalty.create(
                 physics_model=physics_model,
@@ -668,9 +651,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return Model(
             params.key,
             physics_model=params.physics_model,
-            num_actor_inputs=59,
+            num_actor_inputs=49,
             num_actor_outputs=len(ZEROS),
-            num_critic_inputs=473,
+            num_critic_inputs=463,
             min_std=0.01,
             max_std=1.0,
             var_scale=self.config.var_scale,
@@ -699,11 +682,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # Command tensors.
         linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
         angvel_cmd: ksim.AngularVelocityCommandValue = commands["angvel"]
-        joint_pos_cmd: ksim.JointPositionCommandValue = commands["arm_position"]
 
         # Stacks into tensors.
-        linvel_cmd_2 = jnp.stack([linvel_cmd.vel, linvel_cmd.yaw], axis=-1)
-        angvel_cmd_1 = jnp.stack([angvel_cmd.vel], axis=-1)
+        linvel_cmd_2 = jnp.stack([linvel_cmd.target_vel, linvel_cmd.target_yaw], axis=-1)
+        angvel_cmd_1 = jnp.stack([angvel_cmd.target_vel], axis=-1)
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
@@ -712,7 +694,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             imu_gyro_3,  # 3
             linvel_cmd_2,  # 2
             angvel_cmd_1,  # 1
-            joint_pos_cmd.current_position,  # 10
         ]
 
         obs_n = jnp.concatenate(obs, axis=-1)
@@ -749,11 +730,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # Command tensors.
         linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
         angvel_cmd: ksim.AngularVelocityCommandValue = commands["angvel"]
-        joint_pos_cmd: ksim.JointPositionCommandValue = commands["arm_position"]
 
         # Stacks into tensors.
-        linvel_cmd_2 = jnp.stack([linvel_cmd.vel, linvel_cmd.yaw], axis=-1)
-        angvel_cmd_1 = jnp.stack([angvel_cmd.vel], axis=-1)
+        linvel_cmd_2 = jnp.stack([linvel_cmd.target_vel, linvel_cmd.target_yaw], axis=-1)
+        angvel_cmd_1 = jnp.stack([angvel_cmd.target_vel], axis=-1)
 
         obs_n = jnp.concatenate(
             [
@@ -774,7 +754,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 feet_force_obs_6 / 100.0,
                 linvel_cmd_2,
                 angvel_cmd_1,
-                joint_pos_cmd.current_position,
             ],
             axis=-1,
         )

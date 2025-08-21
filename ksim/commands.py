@@ -27,6 +27,7 @@ import attrs
 import jax
 import jax.numpy as jnp
 import mujoco
+import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
@@ -218,6 +219,8 @@ class LinearVelocityCommandValue:
     yaw: Array
     xvel: Array
     yvel: Array
+    target_vel: Array
+    target_yaw: Array
 
 
 @attrs.define(kw_only=True)
@@ -285,6 +288,9 @@ class LinearVelocityCommand(Command):
 
     min_vel: float = attrs.field()
     max_vel: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    linear_accel: float = attrs.field()
+    angular_accel: float = attrs.field()
     max_yaw: float = attrs.field(default=0.0)
     zero_prob: float = attrs.field(default=0.0)
     backward_prob: float = attrs.field(default=0.0)
@@ -300,22 +306,54 @@ class LinearVelocityCommand(Command):
     ) -> LinearVelocityCommandValue:
         rng_vel, rng_yaw, rng_zero, rng_backward = jax.random.split(rng, 4)
 
-        vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
-        yaw = jax.random.uniform(rng_yaw, (), minval=-self.max_yaw, maxval=self.max_yaw)
+        # Gets the current linear velocity in the robot's frame.
+        linvel = physics_data.qvel[..., :3]
+        linvel = xax.rotate_vector_by_quat(linvel, physics_data.qpos[..., 3:7], inverse=True)
+        xy = linvel[..., :2]
+        cur_vel = jnp.linalg.norm(xy, axis=-1)
+        x = xy[..., 0]
+        y = xy[..., 1]
+        cur_yaw = jnp.arctan2(y, x)
+
+        trg_vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
+        trg_yaw = jax.random.uniform(rng_yaw, (), minval=-self.max_yaw, maxval=self.max_yaw)
 
         zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
         backward_mask = jax.random.bernoulli(rng_backward, self.backward_prob)
-        vel = jnp.where(zero_mask, 0.0, jnp.where(backward_mask, -vel, vel))
-        yaw = jnp.where(zero_mask, 0.0, yaw)
+        trg_vel = jnp.where(zero_mask, 0.0, jnp.where(backward_mask, -trg_vel, trg_vel))
+        trg_yaw = jnp.where(zero_mask, 0.0, trg_yaw)
 
-        xvel = vel * jnp.cos(yaw)
-        yvel = vel * jnp.sin(yaw)
+        xvel = cur_vel * jnp.cos(cur_yaw)
+        yvel = cur_vel * jnp.sin(cur_yaw)
 
         return LinearVelocityCommandValue(
-            vel=vel,
-            yaw=yaw,
+            target_vel=trg_vel,
+            target_yaw=trg_yaw,
+            vel=cur_vel,
+            yaw=cur_yaw,
             xvel=xvel,
             yvel=yvel,
+        )
+
+    def update_command(self, prev_command: LinearVelocityCommandValue) -> LinearVelocityCommandValue:
+        cur_vel = prev_command.vel
+        cur_yaw = prev_command.yaw
+        cur_target_vel = prev_command.target_vel
+        cur_target_yaw = prev_command.target_yaw
+
+        # Move the current velocity command towards the target velocity.
+        new_vel = cur_vel + (cur_target_vel - cur_vel).clip(-self.linear_accel, self.linear_accel) * self.ctrl_dt
+        new_yaw = cur_yaw + (cur_target_yaw - cur_yaw).clip(-self.angular_accel, self.angular_accel) * self.ctrl_dt
+        new_xvel = new_vel * jnp.cos(new_yaw)
+        new_yvel = new_vel * jnp.sin(new_yaw)
+
+        return LinearVelocityCommandValue(
+            target_vel=cur_target_vel,
+            target_yaw=cur_target_yaw,
+            vel=new_vel,
+            yaw=new_yaw,
+            xvel=new_xvel,
+            yvel=new_yvel,
         )
 
     def __call__(
@@ -327,10 +365,11 @@ class LinearVelocityCommand(Command):
     ) -> LinearVelocityCommandValue:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        updated_command = self.update_command(prev_command)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jax.tree_util.tree_map(
             lambda x, y: jnp.where(switch_mask, y, x),
-            prev_command,
+            updated_command,
             new_commands,
         )
 
@@ -342,11 +381,14 @@ class LinearVelocityCommand(Command):
 @dataclass(frozen=True)
 class AngularVelocityCommandValue:
     vel: Array
+    target_vel: Array
 
 
 @attrs.define(frozen=True)
 class AngularVelocityCommand(Command):
     max_vel: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    angular_accel: float = attrs.field()
     min_vel: float = attrs.field(default=0.0)
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
@@ -358,10 +400,23 @@ class AngularVelocityCommand(Command):
         rng: PRNGKeyArray,
     ) -> AngularVelocityCommandValue:
         rng_vel, rng_flip, rng_zero = jax.random.split(rng, 3)
-        vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
-        vel = jnp.where(jax.random.bernoulli(rng_flip, 0.5), -vel, vel)
-        vel = jnp.where(jax.random.bernoulli(rng_zero, self.zero_prob), 0.0, vel)
-        return AngularVelocityCommandValue(vel=vel)
+
+        trg_vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
+        trg_vel = jnp.where(jax.random.bernoulli(rng_flip, 0.5), -trg_vel, trg_vel)
+        trg_vel = jnp.where(jax.random.bernoulli(rng_zero, self.zero_prob), 0.0, trg_vel)
+
+        cur_vel = physics_data.qvel[..., 5]
+
+        return AngularVelocityCommandValue(vel=cur_vel, target_vel=trg_vel)
+
+    def update_command(self, prev_command: AngularVelocityCommandValue) -> AngularVelocityCommandValue:
+        cur_vel = prev_command.vel
+        cur_target_vel = prev_command.target_vel
+
+        # Move the current velocity command towards the target velocity.
+        new_vel = cur_vel + (cur_target_vel - cur_vel).clip(-self.angular_accel, self.angular_accel) * self.ctrl_dt
+
+        return AngularVelocityCommandValue(vel=new_vel, target_vel=cur_target_vel)
 
     def __call__(
         self,
