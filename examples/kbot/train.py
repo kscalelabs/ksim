@@ -134,7 +134,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The maximum height of the foot.",
     )
     max_foot_height: float = xax.field(
-        value=0.3,
+        value=0.25,
         help="The maximum height of the foot.",
     )
 
@@ -627,10 +627,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=0.1,
             ),
             "still_at_rest": ksim.MotionlessAtRestPenalty(scale=-0.01),
-            "foot_height": ksim.TargetHeightReward(
+            "foot_height": ksim.SparseTargetHeightReward(
+                contact_obs="feet_contact",
                 position_obs="foot_position",
                 height=self.config.max_foot_height,
-                scale=0.1,
+                scale=1.0,
             ),
             "foot_contact": ksim.ForcePenalty(
                 force_obs="feet_force",

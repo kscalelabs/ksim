@@ -1014,10 +1014,9 @@ class SparseTargetHeightReward(StatefulReward):
         def scan_fn(carry: Array, x: tuple[Array, Array, Array]) -> tuple[Array, Array]:
             max_height_n, (contact_n, position_n3, not_moving) = carry, x
             height_n = position_n3[..., 2]
-            reset = not_moving | contact_n
-            reward_n = jnp.where(reset, max_height_n, 0.0).clip(max=self.height)
+            reward_n = jnp.where(contact_n, max_height_n, 0.0).clip(max=self.height)
             max_height_n = jnp.maximum(max_height_n, height_n)
-            max_height_n = jnp.where(reset, 0.0, max_height_n)
+            max_height_n = jnp.where(not_moving | contact_n, 0.0, max_height_n)
             return max_height_n, reward_n
 
         reward_carry, reward_tn = xax.scan(
