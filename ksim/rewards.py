@@ -752,9 +752,9 @@ class SymmetryReward(StatefulReward):
         reward_carry: Array,
     ) -> tuple[Array, Array]:
         qpos = trajectory.qpos[..., jnp.array(self.joint_indices) + 7] - jnp.array(self.joint_targets)
-        qpos_mean = qpos.mean(axis=-2, keepdims=True)
-        reward_carry = reward_carry * (1.0 - self.alpha) + qpos_mean * self.alpha
-        return (qpos * -reward_carry).sum(axis=-1), reward_carry
+        qpos_mean = qpos.mean(axis=-2)
+        new_reward_carry = reward_carry * (1.0 - self.alpha) + qpos_mean * self.alpha
+        return (qpos * -new_reward_carry[..., None, :]).sum(axis=-1), new_reward_carry
 
     @classmethod
     def create(
