@@ -642,7 +642,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     "dof_left_shoulder_pitch_03",
                 ),
                 joint_targets=(0.0, 0.0),
-                scale=0.01,
+                scale=1.0,
             ),
             "leg_symmetry": ksim.SymmetryReward.create(
                 physics_model=physics_model,
@@ -651,7 +651,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     "dof_left_hip_pitch_04",
                 ),
                 joint_targets=(math.radians(-10.0), math.radians(10.0)),
-                scale=0.01,
+                scale=1.0,
             ),
             # Normalization penalties.
             "ctrl": ksim.SmallCtrlReward.create(model=physics_model, scale=0.1),
