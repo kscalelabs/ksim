@@ -36,8 +36,7 @@ from kinfer.export.serialize import pack
 from kinfer.rust_bindings import PyModelMetadata
 
 import ksim
-
-from .train import HumanoidWalkingTask, Model
+from examples.kbot.train import HumanoidWalkingTask, Model
 
 
 @jax.tree_util.register_dataclass
@@ -68,12 +67,12 @@ def main() -> None:
     # Constant values.
     depth = task.config.depth
     hidden_size = task.config.hidden_size
-    carry_shape = (depth * hidden_size,)
+    carry_shape = (2, depth, hidden_size)
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
         num_commands=16,
-        carry_size=carry_shape,
+        carry_size=(2 * depth * hidden_size + len(joint_names),),
     )
 
     init_carry = Carry(

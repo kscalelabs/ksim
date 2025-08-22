@@ -643,7 +643,22 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     "dof_left_shoulder_pitch_03",
                 ),
                 joint_targets=(0.0, 0.0),
-                scale=1.0,
+                scale=10.0,
+            ),
+            "arm_pair_symmetry": ksim.PairwiseSymmetryReward.create(
+                physics_model=physics_model,
+                left_joint_name="dof_left_shoulder_pitch_03",
+                right_joint_name="dof_right_shoulder_pitch_03",
+                flipped=True,
+                scale=10.0,
+            ),
+            "elbow_pair_symmetry": ksim.PairwiseSymmetryReward.create(
+                physics_model=physics_model,
+                left_joint_name="dof_left_elbow_02",
+                right_joint_name="dof_right_elbow_02",
+                zeros=(math.radians(-45.0), math.radians(45.0)),
+                flipped=True,
+                scale=10.0,
             ),
             "leg_symmetry": ksim.SymmetryReward.create(
                 physics_model=physics_model,
