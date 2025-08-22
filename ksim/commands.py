@@ -303,17 +303,22 @@ class LinearVelocityCommand(Command):
         physics_data: PhysicsData,
         curriculum_level: Array,
         rng: PRNGKeyArray,
+        prev_command: LinearVelocityCommandValue | None = None,
     ) -> LinearVelocityCommandValue:
         rng_vel, rng_yaw, rng_zero, rng_backward = jax.random.split(rng, 4)
 
         # Gets the current linear velocity in the robot's frame.
-        linvel = physics_data.qvel[..., :3]
-        linvel = xax.rotate_vector_by_quat(linvel, physics_data.qpos[..., 3:7], inverse=True)
-        xy = linvel[..., :2]
-        cur_vel = jnp.linalg.norm(xy, axis=-1)
-        x = xy[..., 0]
-        y = xy[..., 1]
-        cur_yaw = jnp.arctan2(y, x)
+        if prev_command is None:
+            linvel = physics_data.qvel[..., :3]
+            linvel = xax.rotate_vector_by_quat(linvel, physics_data.qpos[..., 3:7], inverse=True)
+            xy = linvel[..., :2]
+            cur_vel = jnp.linalg.norm(xy, axis=-1)
+            x = xy[..., 0]
+            y = xy[..., 1]
+            cur_yaw = jnp.arctan2(y, x)
+        else:
+            cur_vel = prev_command.vel
+            cur_yaw = prev_command.yaw
 
         trg_vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
         trg_yaw = jax.random.uniform(rng_yaw, (), minval=-self.max_yaw, maxval=self.max_yaw)
@@ -366,7 +371,7 @@ class LinearVelocityCommand(Command):
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         updated_command = self.update_command(prev_command)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b, prev_command)
         return jax.tree_util.tree_map(
             lambda x, y: jnp.where(switch_mask, y, x),
             updated_command,

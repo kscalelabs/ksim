@@ -78,15 +78,15 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
     # Reward parameters.
     min_linear_velocity: float = xax.field(
-        value=1.5,
+        value=1.0,
         help="The range for the linear velocity command.",
     )
     max_linear_velocity: float = xax.field(
-        value=2.0,
+        value=3.0,
         help="The range for the linear velocity command.",
     )
     linear_velocity_accel: float = xax.field(
-        value=1.0,
+        value=2.0,
         help="The acceleration for the linear velocity command, in m/s^2.",
     )
     angular_velocity_accel: float = xax.field(
@@ -134,7 +134,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The percentage of the gait period that the feet are in the air.",
     )
     max_foot_height: float = xax.field(
-        value=0.4,
+        value=0.25,
         help="The maximum height of the foot.",
     )
 
@@ -628,7 +628,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 contact_obs="feet_contact",
                 position_obs="feet_position",
                 height=self.config.max_foot_height,
-                scale=1.0,
+                scale=25.0,
             ),
             "foot_contact": ksim.ForcePenalty(
                 force_obs="feet_force",
