@@ -929,7 +929,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         if self.config.rollout_length_seconds is not None and self.config.rollout_length_frames is not None:
             raise ValueError("Either rollout_length_seconds or rollout_length_frames must be set")
         if self.config.rollout_length_seconds is not None:
-            return round(self.config.rollout_length_seconds / self.config.dt)
+            return round(self.config.rollout_length_seconds / self.config.ctrl_dt)
         if self.config.rollout_length_frames is not None:
             return self.config.rollout_length_frames
         raise ValueError("Either rollout_length_seconds or rollout_length_frames must be set")
