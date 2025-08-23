@@ -577,8 +577,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return {
             "stay_alive": ksim.StayAliveReward(scale=100.0),
             # Command tracking rewards.
-            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=ksim.NonZeroScale(scale=25.0, bias=5.0)),
-            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=ksim.NonZeroScale(scale=25.0, bias=5.0)),
+            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=ksim.NonZeroScale(scale=25.0, bias=2.0)),
+            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=ksim.NonZeroScale(scale=25.0, bias=2.0)),
             # Deviation penalties.
             "hip_deviation": ksim.JointDeviationPenalty.create(
                 physics_model=physics_model,
