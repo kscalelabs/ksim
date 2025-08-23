@@ -290,14 +290,13 @@ class AngularVelocityRewardMarker(Marker):
         speed = float(trajectory.qvel[..., 5])
 
         self.pos = (0.0, 0.0, self.height)
+        self.rgba = (0.2, 0.2, 0.8, 1.0)
         self.orientation = self.quat_from_direction((0.0, 0.0, 1.0))
 
         # Always show an arrow with base_length plus scaling by speed
         self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
         arrow_length = self.base_length + self.arrow_scale * speed
         self.scale = (self.size, self.size, arrow_length)
-
-        self.rgba = (0.2, 0.2, 0.8, 1.0)
 
     @classmethod
     def get(

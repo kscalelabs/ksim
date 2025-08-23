@@ -6,6 +6,7 @@ __all__ = [
     "LinearScale",
     "QuadraticScale",
     "SquareRootScale",
+    "NonZeroScale",
 ]
 
 from abc import ABC, abstractmethod
@@ -92,3 +93,14 @@ class SquareRootScale(Scale):
     @classmethod
     def from_endpoints(cls, start: float, end: float) -> Self:
         return cls(scale=(end - start), bias=start)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class NonZeroScale(Scale):
+    """Apply the scale only when the curriculum level is non-zero."""
+
+    scale: float = attrs.field()
+    bias: float = attrs.field(validator=attrs.validators.ge(0.0), default=0.0)
+
+    def get_scale(self, curriculum_level: Array) -> Array:
+        return jnp.where(curriculum_level > 0.0, self.scale, self.bias)
