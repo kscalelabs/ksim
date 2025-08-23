@@ -248,12 +248,12 @@ class LinearVelocityCommandMarker(Marker):
         self.scale = (self.size, self.size, arrow_length)
 
         # If command is near-zero, show grey arrow pointing +X.
-        if speed < self.zero_threshold:
+        if abs(speed) < self.zero_threshold:
             self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
-            self.rgba = (0.8, 0.8, 0.8, 0.8)
+            self.rgba = (0.8, 0.8, 0.8, 0.5)
         else:
             self.orientation = self.quat_from_direction((vx, vy, 0.0))
-            self.rgba = (0.2, 0.8, 0.2, 0.8)
+            self.rgba = (0.2, 0.8, 0.2, 0.5)
 
     @classmethod
     def get(
@@ -296,7 +296,6 @@ class LinearVelocityCommand(Command):
     backward_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=0.5)
-    vis_scale: float = attrs.field(default=0.05)
 
     def initial_command(
         self,
@@ -389,6 +388,57 @@ class AngularVelocityCommandValue:
     target_vel: Array
 
 
+@attrs.define(kw_only=True)
+class AngularVelocityCommandMarker(Marker):
+    """Visualises the planar (x,y) linear velocity command."""
+
+    command_name: str = attrs.field()
+    size: float = attrs.field(default=0.03)
+    arrow_scale: float = attrs.field(default=0.3)
+    height: float = attrs.field(default=0.5)
+    base_length: float = attrs.field(default=0.15)
+    zero_threshold: float = attrs.field(default=1e-4)
+
+    def update(self, trajectory: Trajectory) -> None:
+        cmd: AngularVelocityCommandValue = trajectory.command[self.command_name]
+        speed = float(cmd.vel)
+
+        self.pos = (0.0, 0.0, self.height)
+
+        # Always show an arrow with base_length plus scaling by speed
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
+        arrow_length = self.base_length + self.arrow_scale * speed
+        self.scale = (self.size, self.size, arrow_length)
+
+        # If command is near-zero, show grey arrow pointing +X.
+        if abs(speed) < self.zero_threshold:
+            self.orientation = self.quat_from_direction((0.0, 0.0, 1.0))
+            self.rgba = (0.8, 0.8, 0.8, 0.5)
+        else:
+            self.orientation = self.quat_from_direction((0.0, 0.0, speed))
+            self.rgba = (0.2, 0.8, 0.2, 0.5)
+
+    @classmethod
+    def get(
+        cls,
+        command_name: str,
+        *,
+        arrow_scale: float = 0.3,
+        height: float = 0.5,
+        base_length: float = 0.15,
+    ) -> Self:
+        return cls(
+            command_name=command_name,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(0.03, 0.03, base_length),
+            arrow_scale=arrow_scale,
+            height=height,
+            base_length=base_length,
+            track_rotation=True,
+        )
+
+
 @attrs.define(frozen=True)
 class AngularVelocityCommand(Command):
     max_vel: float = attrs.field()
@@ -397,6 +447,7 @@ class AngularVelocityCommand(Command):
     min_vel: float = attrs.field(default=0.0)
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
+    vis_height: float = attrs.field(default=0.5)
 
     def initial_command(
         self,
@@ -432,12 +483,16 @@ class AngularVelocityCommand(Command):
     ) -> AngularVelocityCommandValue:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        updated_command = self.update_command(prev_command)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jax.tree_util.tree_map(
             lambda x, y: jnp.where(switch_mask, y, x),
-            prev_command,
+            updated_command,
             new_commands,
         )
+
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [AngularVelocityCommandMarker.get(command_name=name, height=self.vis_height)]
 
 
 @attrs.define(kw_only=True)

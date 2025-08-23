@@ -15,6 +15,7 @@ from .observation import *
 from .randomization import *
 from .resets import *
 from .rewards import *
+from .scales import *
 from .task import *
 from .terminations import *
 from .types import *

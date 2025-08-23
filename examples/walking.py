@@ -516,14 +516,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return {
             "stay_alive": ksim.StayAliveReward(scale=100.0),
             "upright": ksim.UprightReward(scale=5.0),
-            "linvel": ksim.LinearVelocityReward(
-                cmd="linvel",
-                scale=0.1,
-            ),
-            "angvel": ksim.AngularVelocityReward(
-                cmd="angvel",
-                scale=0.01,
-            ),
+            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=0.1),
+            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.01),
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
                 max_air_time=self.config.gait_period * 0.4,
