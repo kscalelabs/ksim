@@ -38,6 +38,7 @@ __all__ = [
     "JointPositionReward",
 ]
 
+import functools
 import logging
 import math
 from abc import ABC, abstractmethod
@@ -56,6 +57,7 @@ from ksim.commands import (
     LinearVelocityCommandValue,
     SinusoidalGaitCommandValue,
 )
+from ksim.scales import ConstantScale, Scale
 from ksim.types import PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_body_data_idx_from_name, get_joint_names_in_order, get_qpos_data_idxs_by_name
 from ksim.utils.validators import CartesianIndex, cartesian_index_to_dim, norm_validator
@@ -70,25 +72,19 @@ def exp_kernel(x: Array, scale: float) -> Array:
     return jnp.exp(-jnp.square(x) / (2 * scale**2))
 
 
+def convert_to_scale(value: float | int | Scale) -> Scale:
+    if isinstance(value, (float, int)):
+        return ConstantScale(scale=value)
+    if isinstance(value, Scale):
+        return value
+    raise ValueError(f"Invalid scale: {value}")
+
+
 def exp_kernel_with_penalty(x: Array, scale: float, sq_scale: float, abs_scale: float) -> Array:
     x_abs = jnp.abs(x)
     x_sq = jnp.square(x)
     x_exp = jnp.exp(-x_sq / (2 * scale**2))
     return x_abs * -abs_scale + x_sq * -sq_scale + x_exp
-
-
-def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) -> None:
-    # Reward function classes should end with either "Reward" or "Penalty",
-    # which we use here to check if the scale is positive or negative.
-    reward_name = inst.__class__.__name__
-    if reward_name.lower().endswith("reward"):
-        if value < 0:
-            raise RuntimeError(f"Reward function {reward_name} has a negative scale {value}")
-    elif reward_name.lower().endswith("penalty"):
-        if value > 0:
-            raise RuntimeError(f"Penalty function {reward_name} has a positive scale {value}")
-    else:
-        raise ValueError(f"Reward function {reward_name} does not end with 'Reward' or 'Penalty': {value}")
 
 
 def index_to_dims(index: CartesianIndex | tuple[CartesianIndex, ...]) -> tuple[int, ...]:
@@ -100,8 +96,7 @@ def index_to_dims(index: CartesianIndex | tuple[CartesianIndex, ...]) -> tuple[i
 class Reward(ABC):
     """Base class for defining reward functions."""
 
-    scale: float = attrs.field(validator=reward_scale_validator)
-    scale_by_curriculum: bool = attrs.field(default=False)
+    scale: Scale = attrs.field(converter=convert_to_scale)
 
     @abstractmethod
     def get_reward(self, trajectory: Trajectory) -> Array | Mapping[str, Array]:
@@ -117,6 +112,15 @@ class Reward(ABC):
     def get_markers(self, name: str) -> Collection[Marker]:
         """Get the markers for the reward, optionally overridable."""
         return []
+
+    @functools.cached_property
+    def is_penalty(self) -> bool:
+        reward_name = self.__class__.__name__
+        if reward_name.lower().endswith("reward"):
+            return False
+        if reward_name.lower().endswith("penalty"):
+            return True
+        raise ValueError(f"Reward function {reward_name} does not end with 'Reward' or 'Penalty'")
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -480,8 +484,7 @@ class AvoidLimitsPenalty(Reward):
         cls,
         model: PhysicsModel,
         factor: float = 0.05,
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
+        scale: float | Scale = 1.0,
     ) -> Self:
         jnt_range = jnp.array(model.jnt_range)
         jnt_limited = jnp.array(model.jnt_limited, dtype=jnp.bool_)
@@ -495,7 +498,6 @@ class AvoidLimitsPenalty(Reward):
         return cls(
             joint_limits=xax.hashable_array(joint_limits[..., 1:, :]),
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
 
@@ -513,7 +515,7 @@ class SmallCtrlReward(Reward):
         return exp_kernel(ctrl, self.kernel_scale).mean(axis=-1)
 
     @classmethod
-    def create(cls, model: PhysicsModel, scale: float = -1.0, scale_by_curriculum: bool = False) -> Self:
+    def create(cls, model: PhysicsModel, scale: float | Scale = 1.0) -> Self:
         ctrl_min = model.actuator_ctrlrange[..., 0]
         ctrl_max = model.actuator_ctrlrange[..., 1]
         ctrl_range = (ctrl_max - ctrl_min) / 2.0
@@ -521,7 +523,6 @@ class SmallCtrlReward(Reward):
         return cls(
             scales=tuple(ctrl_range_list),
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
 
@@ -551,9 +552,8 @@ class JointDeviationPenalty(Reward):
         physics_model: PhysicsModel,
         joint_names: tuple[str, ...],
         joint_targets: tuple[float, ...],
-        scale: float = -1.0,
+        scale: float | Scale = 1.0,
         joint_weights: tuple[float, ...] | None = None,
-        scale_by_curriculum: bool = False,
     ) -> Self:
         joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
         joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
@@ -562,7 +562,6 @@ class JointDeviationPenalty(Reward):
             joint_targets=joint_targets,
             joint_weights=joint_weights,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
 
@@ -587,15 +586,13 @@ class FlatBodyReward(Reward):
         body_names: tuple[str, ...],
         plane: tuple[float, float, float] = (0.0, 0.0, 1.0),
         norm: xax.NormType = "l2",
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
+        scale: float | Scale = 1.0,
     ) -> Self:
         return cls(
             body_indices=tuple([get_body_data_idx_from_name(physics_model, name) for name in body_names]),
             plane=plane,
             norm=norm,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
 
@@ -627,8 +624,7 @@ class PositionTrackingReward(Reward):
         base_body_name: str,
         norm: xax.NormType = "l1",
         kernel_scale: float = 0.25,
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
+        scale: float | Scale = 1.0,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
         base_body_idx = get_body_data_idx_from_name(model, base_body_name)
@@ -639,7 +635,6 @@ class PositionTrackingReward(Reward):
             command_name=command_name,
             body_name=tracked_body_name,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
             kernel_scale=kernel_scale,
         )
 
@@ -764,8 +759,7 @@ class SymmetryReward(StatefulReward):
         joint_names: tuple[str, ...],
         joint_targets: tuple[float, ...],
         alpha: float = 0.1,
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
+        scale: float | Scale = 1.0,
     ) -> Self:
         joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
         joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
@@ -774,7 +768,6 @@ class SymmetryReward(StatefulReward):
             joint_targets=joint_targets,
             alpha=alpha,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
 
@@ -807,8 +800,7 @@ class PairwiseSymmetryReward(Reward):
         right_joint_name: str,
         zeros: tuple[float, float] = (0.0, 0.0),
         flipped: bool = False,
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
+        scale: float | Scale = 1.0,
     ) -> Self:
         joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
         left_joint_index = int(joint_to_idx[left_joint_name][0]) - 7
@@ -819,7 +811,6 @@ class PairwiseSymmetryReward(Reward):
             zeros=zeros,
             flipped=flipped,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
 
@@ -1275,8 +1266,7 @@ class JointPositionReward(Reward):
         length_scale: float = 0.25,
         sq_scale: float = 0.1,
         abs_scale: float = 0.1,
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
+        scale: float | Scale = 1.0,
     ) -> Self:
         all_names = get_joint_names_in_order(physics_model)[1:]  # Remove floating base.
         for joint_name in joint_names:
@@ -1293,5 +1283,4 @@ class JointPositionReward(Reward):
             sq_scale=sq_scale,
             abs_scale=abs_scale,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )

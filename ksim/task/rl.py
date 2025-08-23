@@ -212,12 +212,16 @@ def get_rewards(
             reward_val, reward_carry = reward.get_reward_stateful(trajectory, reward_carry)
         else:
             reward_val = reward.get_reward(trajectory)
+
+        # Gets the reward scale.
+        scale = reward.scale.get_scale(curriculum_level)
+        if reward.is_penalty:
+            scale = -scale
+
         if isinstance(reward_val, Mapping):
-            reward_val = {f"{name}/{k}": v * reward.scale for k, v in reward_val.items()}
+            reward_val = {f"{name}/{k}": v * scale for k, v in reward_val.items()}
         else:
-            reward_val = {name: reward_val * reward.scale}
-        if reward.scale_by_curriculum:
-            reward_val = {k: v * curriculum_level for k, v in reward_val.items()}
+            reward_val = {name: reward_val * scale}
 
         for k, v in reward_val.items():
             if v.shape != trajectory.done.shape:
