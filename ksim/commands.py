@@ -236,18 +236,23 @@ class LinearVelocityCommandMarker(Marker):
 
     def update(self, trajectory: Trajectory) -> None:
         cmd: LinearVelocityCommandValue = trajectory.command[self.command_name]
-        speed = float(cmd.vel)
         vx = float(cmd.xvel)
         vy = float(cmd.yvel)
+        speed = float(cmd.vel)
 
         self.pos = (0.0, 0.0, self.height)
-        self.rgba = (0.2, 0.8, 0.2, 0.5)
-        self.orientation = self.quat_from_direction((vx, vy, 0.0))
 
         # Always show an arrow with base_length plus scaling by speed
         self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
         arrow_length = self.base_length + self.arrow_scale * speed
         self.scale = (self.size, self.size, arrow_length)
+
+        # If command is near-zero, show grey arrow pointing +X.
+        self.rgba = (0.2, 0.8, 0.2, 0.8)
+        if speed < self.zero_threshold:
+            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
+        else:
+            self.orientation = self.quat_from_direction((vx, vy, 0.0))
 
     @classmethod
     def get(
@@ -398,13 +403,18 @@ class AngularVelocityCommandMarker(Marker):
         speed = float(cmd.vel)
 
         self.pos = (0.0, 0.0, self.height)
-        self.orientation = self.quat_from_direction((0.0, 0.0, speed))
-        self.rgba = (0.2, 0.8, 0.2, 0.5)
 
         # Always show an arrow with base_length plus scaling by speed
         self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
         arrow_length = self.base_length + self.arrow_scale * speed
         self.scale = (self.size, self.size, arrow_length)
+
+        # If command is near-zero, show grey arrow pointing +X.
+        self.rgba = (0.2, 0.8, 0.2, 0.8)
+        if speed < self.zero_threshold:
+            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
+        else:
+            self.orientation = self.quat_from_direction((0.0, 0.0, speed))
 
     @classmethod
     def get(
