@@ -18,6 +18,7 @@ __all__ = [
     "update_model_field",
     "update_data_field",
     "slice_update",
+    "slice_update_many",
     "quat_to_mat",
     "mat_to_quat",
     "get_body_pose",
@@ -382,6 +383,29 @@ def slice_update(
         return val
     if isinstance(model, (mjx.Model, mjx.Data)):
         return getattr(model, name).at[slice].set(value)
+    raise ValueError(f"Model type {type(model)} not supported")
+
+
+def slice_update_many(
+    model: mujoco.MjModel | mjx.Model | mujoco.MjData | mjx.Data,
+    name: str,
+    updates: list[tuple[Any, Array]],  # noqa: ANN401
+) -> Array:
+    """Apply multiple slice assignments to a single model/data field.
+
+    This avoids repeating backend-specific branching and ensures that multiple
+    updates compose correctly before writing the final value back.
+    """
+    if isinstance(model, (mujoco.MjModel, mujoco.MjData)):
+        val = getattr(model, name).copy()
+        for slc, v in updates:
+            val[slc] = v
+        return val
+    if isinstance(model, (mjx.Model, mjx.Data)):
+        arr = getattr(model, name)
+        for slc, v in updates:
+            arr = arr.at[slc].set(v)
+        return arr
     raise ValueError(f"Model type {type(model)} not supported")
 
 
