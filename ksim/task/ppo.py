@@ -88,7 +88,8 @@ def compute_ppo_inputs(
         discount_horizon = 1 / (1 - decay_gamma)
         bootstrapped_rewards_t = rewards_t / discount_horizon + decay_gamma * values_t * trunc_mask_t
 
-        mask_t = jnp.where(dones_t, 0.0, 1.0)
+        is_failure = dones_t & ~successes_t
+        mask_t = jnp.where(is_failure, 0.0, 1.0)
 
         # Compute returns and GAE.
         deltas_t = bootstrapped_rewards_t + decay_gamma * values_shifted_t * mask_t - values_t
