@@ -1441,7 +1441,8 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                 if processed_value.shape[1] > 1:
                     processed_value = processed_value.mean(axis=1)
 
-                ax.plot(processed_value, label=key, alpha=0.8)
+                indices = np.arange(processed_value.shape[0], dtype=np.float32) * self.config.ctrl_dt
+                ax.plot(indices, processed_value, label=key, alpha=0.8)
 
             ax.set_title("All Rewards")
             ax.legend(loc="best", fontsize=8, ncol=(len(logged_traj.rewards.components) + 14) // 15)
