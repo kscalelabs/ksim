@@ -76,6 +76,12 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The MuJoCo scene to use.",
     )
 
+    # Local model override
+    local_model_dir: str | None = xax.field(
+        value=None,
+        help="Path to local robot directory containing metadata.json and *.mjcf/*.xml to bypass K API",
+    )
+
     # Reward parameters.
     min_linear_velocity: float = xax.field(
         value=1.0,
@@ -426,11 +432,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot-headless", name="robot"))
-        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene=self.config.mujoco_scene)
+        model_name_or_dir = self.config.local_model_dir or "kbot-headless"
+        mjcf_path = asyncio.run(ksim.get_mujoco_model_path(model_name_or_dir, name="robot"))
+        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
-        metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot-headless"))
+        model_name_or_dir = self.config.local_model_dir or "kbot-headless"
+        metadata = asyncio.run(ksim.get_mujoco_model_metadata(model_name_or_dir))
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is not available")
         if metadata.actuator_type_to_metadata is None:
@@ -530,23 +538,23 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "feet_contact": ksim.FeetContactObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names=[
-                    "KB_D_501L_L_LEG_FOOT_collision_capsule_0",
-                    "KB_D_501L_L_LEG_FOOT_collision_capsule_1",
+                    "LFootBushing_GPF_1517_12_collision_capsule_0",
+                    "LFootBushing_GPF_1517_12_collision_capsule_1",
                 ],
                 foot_right_geom_names=[
-                    "KB_D_501R_R_LEG_FOOT_collision_capsule_0",
-                    "KB_D_501R_R_LEG_FOOT_collision_capsule_1",
+                    "RFootBushing_GPF_1517_12_collision_capsule_0",
+                    "RFootBushing_GPF_1517_12_collision_capsule_1",
                 ],
                 floor_geom_names=["floor"],
             ),
             "feet_position": ksim.BodyPositionObservation.create(
                 physics_model=physics_model,
-                body_names=("KB_D_501L_L_LEG_FOOT", "KB_D_501R_R_LEG_FOOT"),
+                body_names=("LFootBushing_GPF_1517_12", "RFootBushing_GPF_1517_12"),
             ),
             "feet_force": ksim.FeetForceObservation.create(
                 physics_model=physics_model,
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                foot_left_body_name="LFootBushing_GPF_1517_12",
+                foot_right_body_name="RFootBushing_GPF_1517_12",
             ),
         }
 
