@@ -577,8 +577,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return {
             "stay_alive": ksim.StayAliveReward(scale=100.0),
             # Command tracking rewards.
-            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=ksim.NonZeroScale(scale=25.0, bias=1.0)),
-            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=ksim.NonZeroScale(scale=25.0, bias=1.0)),
+            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=ksim.NonZeroScale(scale=25.0, bias=5.0)),
+            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=ksim.NonZeroScale(scale=25.0, bias=5.0)),
             # Deviation penalties.
             "hip_deviation": ksim.JointDeviationPenalty.create(
                 physics_model=physics_model,
@@ -609,7 +609,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_air_time=self.config.gait_period * self.config.air_time_percent,
                 max_ground_time=self.config.gait_period * (1.0 - self.config.air_time_percent),
                 contact_obs="feet_contact",
-                scale=ksim.LinearScale(scale=10.0, bias=1.0),
+                scale=ksim.NonZeroScale(scale=10.0, bias=1.0),
             ),
             "no_roll": ksim.NoRollReward(scale=ksim.NonZeroScale(scale=25.0)),
             "foot_grounded": ksim.FeetGroundedAtRestReward(
