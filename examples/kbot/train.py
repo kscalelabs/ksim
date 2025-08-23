@@ -178,8 +178,7 @@ class Actor(eqx.Module):
     max_std: float = eqx.field()
     var_scale: float = eqx.field()
     ctrl_dt: float = eqx.field()
-    start_fc: float = eqx.field()
-    end_fc: float = eqx.field()
+    fc_scale: ksim.Scale = eqx.field()
 
     def __init__(
         self,
@@ -195,8 +194,7 @@ class Actor(eqx.Module):
         depth: int,
         num_hidden_layers: int,
         ctrl_dt: float,
-        start_cutoff_frequency: float,
-        end_cutoff_frequency: float,
+        fc_scale: ksim.Scale,
     ) -> None:
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
@@ -238,8 +236,7 @@ class Actor(eqx.Module):
         self.max_std = max_std
         self.var_scale = var_scale
         self.ctrl_dt = ctrl_dt
-        self.start_fc = start_cutoff_frequency
-        self.end_fc = end_cutoff_frequency
+        self.fc_scale = fc_scale
 
         # Sets the bias of the output projection.
         bias = self.clip_positions.get_bias(jnp.array([v for _, v in ZEROS]))
@@ -281,7 +278,7 @@ class Actor(eqx.Module):
         mean_n = self.clip_positions.clip(mean_n)
 
         # Applies a low-pass filter.
-        fc = self.end_fc * curriculum_level + self.start_fc * (1.0 - curriculum_level)
+        fc = self.fc_scale.get_scale(curriculum_level)
         mean_n, lpf_params = ksim.lowpass_one_pole(mean_n, self.ctrl_dt, fc, lpf_params)
 
         # Creates a normal distribution.
@@ -382,8 +379,7 @@ class Model(eqx.Module):
         depth: int,
         num_hidden_layers: int,
         ctrl_dt: float,
-        start_cutoff_frequency: float,
-        end_cutoff_frequency: float,
+        fc_scale: ksim.Scale,
     ) -> None:
         actor_key, critic_key = jax.random.split(key)
         self.actor = Actor(
@@ -398,8 +394,7 @@ class Model(eqx.Module):
             depth=depth,
             num_hidden_layers=num_hidden_layers,
             ctrl_dt=ctrl_dt,
-            start_cutoff_frequency=start_cutoff_frequency,
-            end_cutoff_frequency=end_cutoff_frequency,
+            fc_scale=fc_scale,
         )
         self.critic = Critic(
             critic_key,
@@ -582,22 +577,20 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return {
             "stay_alive": ksim.StayAliveReward(scale=500.0),
             # Command tracking rewards.
-            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=2.0),
-            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
-            "linvel_scaled": ksim.LinearVelocityReward(cmd="linvel", scale=25.0),
-            "angvel_scaled": ksim.AngularVelocityReward(cmd="angvel", scale=5.0),
+            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=ksim.LinearScale(scale=25.0, bias=2.0)),
+            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=ksim.LinearScale(scale=5.0, bias=0.5)),
             # Deviation penalties.
             "hip_deviation": ksim.JointDeviationPenalty.create(
                 physics_model=physics_model,
                 joint_names=("dof_right_hip_roll_03", "dof_left_hip_roll_03"),
                 joint_targets=(0.0, 0.0),
-                scale=-10.0,
+                scale=ksim.LinearScale(scale=10.0),
             ),
             "leg_deviation": ksim.JointDeviationPenalty.create(
                 physics_model=physics_model,
                 joint_names=("dof_right_hip_yaw_03", "dof_left_hip_yaw_03"),
                 joint_targets=(0.0, 0.0),
-                scale=-10.0,
+                scale=ksim.LinearScale(scale=10.0),
             ),
             "arm_deviation": ksim.JointDeviationPenalty.create(
                 physics_model=physics_model,
@@ -608,7 +601,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     "dof_left_shoulder_yaw_02",
                 ),
                 joint_targets=(math.radians(-10.0), math.radians(10.0), 0.0, 0.0),
-                scale=-10.0,
+                scale=ksim.LinearScale(scale=10.0),
             ),
             # Gait rewards.
             "foot_airtime": ksim.FeetAirTimeReward(
@@ -616,28 +609,27 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_air_time=self.config.gait_period * self.config.air_time_percent,
                 max_ground_time=self.config.gait_period * (1.0 - self.config.air_time_percent),
                 contact_obs="feet_contact",
-                scale=10.0,
+                scale=ksim.LinearScale(scale=10.0, bias=1.0),
             ),
-            "no_roll": ksim.NoRollReward(scale=1.0),
-            "no_roll_scaled": ksim.NoRollReward(scale=25.0),
+            "no_roll": ksim.NoRollReward(scale=ksim.LinearScale(scale=25.0)),
             "foot_grounded": ksim.FeetGroundedAtRestReward(
                 ctrl_dt=self.config.ctrl_dt,
                 max_ground_time=self.config.gait_period * 0.6,
                 contact_obs="feet_contact",
-                scale=0.1,
+                scale=ksim.LinearScale(scale=1.0),
             ),
-            "still_at_rest": ksim.MotionlessAtRestPenalty(scale=10.0),
+            "still_at_rest": ksim.MotionlessAtRestPenalty(scale=ksim.LinearScale(scale=0.1)),
             "foot_height": ksim.SparseTargetHeightReward(
                 contact_obs="feet_contact",
                 position_obs="feet_position",
                 height=self.config.max_foot_height,
-                scale=50.0,
+                scale=ksim.LinearScale(scale=10.0),
             ),
             "foot_contact": ksim.ForcePenalty(
                 force_obs="feet_force",
                 ctrl_dt=self.config.ctrl_dt,
                 bias=350.0,  # Weight of the robot, in Newtons.
-                scale=10.0,
+                scale=ksim.LinearScale(scale=10.0),
             ),
             "arm_symmetry": ksim.SymmetryReward.create(
                 physics_model=physics_model,
@@ -646,7 +638,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     "dof_right_shoulder_pitch_03",
                 ),
                 joint_targets=(0.0, 0.0),
-                scale=10.0,
+                scale=ksim.LinearScale(scale=10.0),
             ),
             "elbow_symmetry": ksim.SymmetryReward.create(
                 physics_model=physics_model,
@@ -655,7 +647,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     "dof_right_elbow_02",
                 ),
                 joint_targets=(math.radians(-45.0), math.radians(45.0)),
-                scale=10.0,
+                scale=ksim.LinearScale(scale=10.0),
             ),
             "leg_symmetry": ksim.SymmetryReward.create(
                 physics_model=physics_model,
@@ -664,34 +656,34 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     "dof_right_hip_pitch_04",
                 ),
                 joint_targets=(math.radians(10.0), math.radians(-10.0)),
-                scale=1.0,
+                scale=ksim.LinearScale(scale=10.0),
             ),
             "arm_pair_symmetry": ksim.PairwiseSymmetryReward.create(
                 physics_model=physics_model,
                 left_joint_name="dof_left_shoulder_pitch_03",
                 right_joint_name="dof_right_shoulder_pitch_03",
                 zeros=(0.0, 0.0),
-                scale=10.0,
+                scale=ksim.LinearScale(scale=10.0),
             ),
             "elbow_pair_symmetry": ksim.PairwiseSymmetryReward.create(
                 physics_model=physics_model,
                 left_joint_name="dof_left_elbow_02",
                 right_joint_name="dof_right_elbow_02",
                 zeros=(math.radians(-45.0), math.radians(45.0)),
-                scale=10.0,
+                scale=ksim.LinearScale(scale=10.0),
             ),
             "leg_pair_symmetry": ksim.PairwiseSymmetryReward.create(
                 physics_model=physics_model,
                 left_joint_name="dof_left_hip_pitch_04",
                 right_joint_name="dof_right_hip_pitch_04",
                 zeros=(math.radians(10.0), math.radians(-10.0)),
-                scale=10.0,
+                scale=ksim.LinearScale(scale=10.0),
             ),
             # Normalization penalties.
-            "ctrl": ksim.SmallCtrlReward.create(model=physics_model, scale=0.1),
-            "joint_velocity": ksim.SmallJointVelocityReward(scale=0.1, kernel_scale=0.25),
-            "joint_acceleration": ksim.SmallJointAccelerationReward(scale=0.1, kernel_scale=0.25),
-            "joint_jerk": ksim.SmallJointJerkReward(scale=0.1, kernel_scale=0.25),
+            "ctrl": ksim.SmallCtrlReward.create(model=physics_model, scale=ksim.QuadraticScale(scale=1.0)),
+            "joint_velocity": ksim.SmallJointVelocityReward(scale=ksim.QuadraticScale(scale=1.0)),
+            "joint_acceleration": ksim.SmallJointAccelerationReward(scale=ksim.QuadraticScale(scale=1.0)),
+            "joint_jerk": ksim.SmallJointJerkReward(scale=ksim.QuadraticScale(scale=1.0)),
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
@@ -722,8 +714,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             depth=self.config.depth,
             num_hidden_layers=self.config.num_hidden_layers,
             ctrl_dt=self.config.ctrl_dt,
-            start_cutoff_frequency=self.config.start_cutoff_frequency,
-            end_cutoff_frequency=self.config.end_cutoff_frequency,
+            fc_scale=ksim.QuadraticScale.from_endpoints(
+                start=self.config.start_cutoff_frequency,
+                end=self.config.end_cutoff_frequency,
+            ),
         )
 
     def run_actor(

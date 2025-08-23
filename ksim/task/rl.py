@@ -465,6 +465,10 @@ class RLConfig(xax.Config):
         value=(8, 4),
         help="The size of the figure for each plot.",
     )
+    all_rewards_plot_figsize_multiplier: float = xax.field(
+        value=1.5,
+        help="The multiplier for the figure size of the all rewards plot.",
+    )
     render_shadow: bool = xax.field(
         value=False,
         help="If true, render shadows.",
@@ -1440,15 +1444,13 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                 ax.plot(processed_value, label=key, alpha=0.8)
 
             ax.set_title("All Rewards")
-            ax.legend(loc="center left", bbox_to_anchor=(1.05, 0.5))
+            ax.legend(loc="best", fontsize=8, ncol=(len(logged_traj.rewards.components) + 14) // 15)
             fig.tight_layout()
-            # Add extra space to the right for the legend
-            fig.subplots_adjust(right=0.7)
 
         # Make the plot wider so the legend fits
         combined_rewards_figsize = (
-            self.config.plot_figsize[0] * 1.3,
-            self.config.plot_figsize[1],
+            self.config.plot_figsize[0] * self.config.all_rewards_plot_figsize_multiplier,
+            self.config.plot_figsize[1] * self.config.all_rewards_plot_figsize_multiplier,
         )
         img = create_plot_image(combined_rewards_figsize, plot_combined_rewards)
         log_callback("_components", img, "🎁 reward images")
@@ -2564,6 +2566,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                                     key=key,
                                     value=value,
                                     namespace=namespace,
+                                    target_resolution=None,
                                 ),
                             )
 

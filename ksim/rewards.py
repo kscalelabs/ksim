@@ -188,8 +188,8 @@ class StayAliveReward(Reward):
 
 
 @attrs.define(kw_only=True)
-class LinearVelocityPenaltyMarker(Marker):
-    size: float = attrs.field(default=0.03)
+class LinearVelocityRewardMarker(Marker):
+    size: float = attrs.field(default=0.02)
     arrow_scale: float = attrs.field(default=0.3)
     height: float = attrs.field(default=0.5)
     base_length: float = attrs.field(default=0.15)
@@ -212,13 +212,8 @@ class LinearVelocityPenaltyMarker(Marker):
         arrow_length = self.base_length + self.arrow_scale * speed
         self.scale = (self.size, self.size, arrow_length)
 
-        # If command is near-zero, show grey arrow pointing +X.
-        if speed < self.zero_threshold:
-            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
-            self.rgba = (0.8, 0.8, 0.8, 0.8)
-        else:
-            self.orientation = self.quat_from_direction(direction)
-            self.rgba = (0.2, 0.2, 0.8, 0.8)
+        self.orientation = self.quat_from_direction(direction)
+        self.rgba = (0.2, 0.2, 0.8, 1.0)
 
     @classmethod
     def get(
@@ -247,7 +242,7 @@ class LinearVelocityReward(Reward):
     vel_length_scale: float = attrs.field(default=0.25)
     yaw_length_scale: float = attrs.field(default=0.25)
     zero_threshold: float = attrs.field(default=0.01)
-    vis_height: float = attrs.field(default=0.6)
+    vis_height: float = attrs.field(default=0.5)
     sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
 
@@ -279,7 +274,48 @@ class LinearVelocityReward(Reward):
         }
 
     def get_markers(self, name: str) -> Collection[Marker]:
-        return [LinearVelocityPenaltyMarker.get(height=self.vis_height)]
+        return [LinearVelocityRewardMarker.get(height=self.vis_height)]
+
+
+@attrs.define(kw_only=True)
+class AngularVelocityRewardMarker(Marker):
+    size: float = attrs.field(default=0.02)
+    arrow_scale: float = attrs.field(default=0.3)
+    height: float = attrs.field(default=0.5)
+    base_length: float = attrs.field(default=0.15)
+    zero_threshold: float = attrs.field(default=1e-4)
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        speed = float(trajectory.qvel[..., 5])
+
+        self.pos = (0.0, 0.0, self.height)
+        self.orientation = self.quat_from_direction((0.0, 0.0, 1.0))
+
+        # Always show an arrow with base_length plus scaling by speed
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
+        arrow_length = self.base_length + self.arrow_scale * speed
+        self.scale = (self.size, self.size, arrow_length)
+
+        self.rgba = (0.2, 0.2, 0.8, 1.0)
+
+    @classmethod
+    def get(
+        cls,
+        *,
+        arrow_scale: float = 0.3,
+        height: float = 0.5,
+        base_length: float = 0.15,
+    ) -> Self:
+        return cls(
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(0.03, 0.03, base_length),
+            arrow_scale=arrow_scale,
+            height=height,
+            base_length=base_length,
+            track_rotation=True,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -290,12 +326,16 @@ class AngularVelocityReward(Reward):
     angvel_length_scale: float = attrs.field(default=0.25)
     sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    vis_height: float = attrs.field(default=0.5)
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         cmd: AngularVelocityCommandValue = trajectory.command[self.cmd]
         angvel = trajectory.qvel[..., 5]
         angvel_rews = exp_kernel_with_penalty(angvel - cmd.vel, self.angvel_length_scale, self.sq_scale, self.abs_scale)
         return {"angvel": angvel_rews}
+
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [AngularVelocityRewardMarker.get(height=self.vis_height)]
 
 
 @attrs.define(frozen=True, kw_only=True)
