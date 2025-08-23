@@ -369,12 +369,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             metrics[f"loss_{name}"] = loss.mean()
         if off_policy_variables.entropy is not None:
             metrics["entropy"] = off_policy_variables.entropy.mean(0).flatten()
-        if off_policy_variables.aux_losses is not None:
-            for (
-                aux_loss_name,
-                aux_loss_value,
-            ) in off_policy_variables.aux_losses.items():
-                metrics[aux_loss_name] = aux_loss_value.mean()
         return metrics
 
     def _get_logged_trajectory_metrics(
