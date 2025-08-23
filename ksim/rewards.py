@@ -890,14 +890,17 @@ class FeetAirTimeReward(StatefulReward):
     linvel_moving_threshold: float = attrs.field(default=0.5)
     angvel_moving_threshold: float = attrs.field(default=math.radians(30))
 
-    def initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros((self.num_feet, 2), dtype=jnp.int32)
+    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return (
+            jnp.zeros((self.num_feet,), dtype=jnp.int32),
+            jnp.zeros((self.num_feet,), dtype=jnp.int32),
+        )
 
     def get_reward_stateful(
         self,
         trajectory: Trajectory,
-        reward_carry: Array,
-    ) -> tuple[Array, Array]:
+        reward_carry: tuple[Array, Array],
+    ) -> tuple[Array, tuple[Array, Array]]:
         not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
         not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
         not_moving = not_moving_lin & not_moving_ang
@@ -909,21 +912,21 @@ class FeetAirTimeReward(StatefulReward):
         air_steps = round(self.max_air_time / self.ctrl_dt)
         gnd_steps = round(self.max_ground_time / self.ctrl_dt)
 
-        def scan_fn(carry: Array, x: tuple[Array, Array]) -> tuple[Array, Array]:
-            air_cnt_n, gnd_cnt_n = carry[..., 0], carry[..., 1]
+        def scan_fn(
+            carry: tuple[Array, Array],
+            x: tuple[Array, Array],
+        ) -> tuple[tuple[Array, Array], tuple[Array, Array]]:
+            air_cnt_n, gnd_cnt_n = carry
             contact_n, stay_still = x
             air_cnt_n = jnp.where(stay_still | contact_n, 0, air_cnt_n + 1)
             gnd_cnt_n = jnp.where(stay_still | (~contact_n), 0, gnd_cnt_n + 1)
-            counts_n2 = jnp.stack([air_cnt_n, gnd_cnt_n], axis=-1)
-            return counts_n2, counts_n2
+            return (air_cnt_n, gnd_cnt_n), (air_cnt_n, gnd_cnt_n)
 
-        reward_carry, count_tn2 = xax.scan(
+        reward_carry, (air_cnt_tn, gnd_cnt_tn) = xax.scan(
             scan_fn,
             reward_carry,
             (contact_tn, not_moving | trajectory.done),
         )
-
-        air_cnt_tn, gnd_cnt_tn = count_tn2[..., 0], count_tn2[..., 1]
 
         # Gradually increase reward until `threshold_steps`.
         air_rew_tn = (air_cnt_tn.astype(jnp.float32) / air_steps) + self.bias
