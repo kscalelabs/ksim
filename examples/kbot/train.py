@@ -126,7 +126,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the angular velocity command being switched.",
     )
     gait_period: float = xax.field(
-        value=0.8,
+        value=0.6,
         help="The target period for the gait.",
     )
     air_time_percent: float = xax.field(
@@ -609,7 +609,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_air_time=self.config.gait_period * self.config.air_time_percent,
                 max_ground_time=self.config.gait_period * (1.0 - self.config.air_time_percent),
                 contact_obs="feet_contact",
-                scale=ksim.NonZeroScale(scale=5.0, bias=1.0),
+                scale=ksim.NonZeroScale(scale=5.0),
             ),
             "no_roll": ksim.NoRollReward(scale=ksim.NonZeroScale(scale=3.0)),
             "foot_grounded": ksim.FeetGroundedAtRestReward(
