@@ -931,7 +931,7 @@ class FeetAirTimeReward(StatefulReward):
         air_rew_t = air_rew_tn.max(axis=-1)
 
         gnd_rew_tn = (gnd_cnt_tn.astype(jnp.float32) / gnd_steps) + self.bias
-        gnd_rew_tn = jnp.where(gnd_cnt_tn > gnd_steps, gnd_rew_tn, -self.ground_penalty)
+        gnd_rew_tn = jnp.where(gnd_cnt_tn < gnd_steps, gnd_rew_tn, -self.ground_penalty)
         gnd_rew_t = gnd_rew_tn.max(axis=-1)
 
         reward_t = air_rew_t + gnd_rew_t
