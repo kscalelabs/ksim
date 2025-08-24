@@ -1443,5 +1443,6 @@ class IntersectionPenalty(Reward):
         obs_tn3 = trajectory.obs[self.position_obs]
         lobs_tn13, robs_t1n3 = obs_tn3[..., None, :], obs_tn3[..., None, :, :]
         dist_tnn = jnp.linalg.norm(lobs_tn13 - robs_t1n3, axis=-1)
+        dist_tnn = dist_tnn + (jnp.triu(jnp.ones_like(dist_tnn)) * self.min_distance * 2)
         any_close = jnp.any(dist_tnn < self.min_distance, axis=(-2, -1))
         return jnp.where(any_close, 1.0, 0.0)
