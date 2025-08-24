@@ -102,7 +102,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the linear velocity command being zero.",
     )
     linear_velocity_backward_prob: float = xax.field(
-        value=0.0,
+        value=0.3,
         help="The probability of the linear velocity command being backward.",
     )
     linear_velocity_switch_prob: float = xax.field(
@@ -579,30 +579,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "stay_alive": ksim.StayAliveReward(scale=500.0),
             # Command tracking rewards.
             "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=2.0),
-            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=2.0),
+            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
             # Deviation penalties.
-            "hip_deviation": ksim.JointDeviationPenalty.create(
+            "symmetry": ksim.SymmetryReward.create(
                 physics_model=physics_model,
-                joint_names=("dof_right_hip_roll_03", "dof_left_hip_roll_03"),
-                joint_targets=(0.0, 0.0),
-                scale=ksim.QuadraticScale(scale=5.0),
-            ),
-            "leg_deviation": ksim.JointDeviationPenalty.create(
-                physics_model=physics_model,
-                joint_names=("dof_right_hip_yaw_03", "dof_left_hip_yaw_03"),
-                joint_targets=(0.0, 0.0),
-                scale=ksim.QuadraticScale(scale=5.0),
-            ),
-            "arm_deviation": ksim.JointDeviationPenalty.create(
-                physics_model=physics_model,
-                joint_names=(
-                    "dof_right_shoulder_roll_03",
-                    "dof_left_shoulder_roll_03",
-                    "dof_right_shoulder_yaw_02",
-                    "dof_left_shoulder_yaw_02",
-                ),
-                joint_targets=(math.radians(-10.0), math.radians(10.0), 0.0, 0.0),
-                scale=ksim.QuadraticScale(scale=5.0),
+                joint_names=[k for k, _ in ZEROS],
+                joint_targets=[v for _, v in ZEROS],
+                scale=ksim.LinearScale(scale=3.0, bias=0.1),
             ),
             # Gait rewards.
             "foot_airtime": ksim.FeetAirTimeReward(
@@ -612,7 +595,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 contact_obs="feet_contact",
                 scale=1.0,
             ),
-            "no_roll": ksim.NoRollReward(scale=ksim.QuadraticScale(scale=3.0)),
+            "upright": ksim.UprightReward(scale=ksim.QuadraticScale(scale=3.0)),
             "foot_height": ksim.TargetHeightReward(
                 position_obs="feet_position",
                 height=self.config.max_foot_height,
@@ -624,29 +607,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 bias=500.0,  # Weight of the robot is 350 Newtons.
                 scale=0.1,
             ),
-            "arm_pair_symmetry": ksim.PairwiseSymmetryReward.create(
-                physics_model=physics_model,
-                left_joint_name="dof_left_shoulder_pitch_03",
-                right_joint_name="dof_right_shoulder_pitch_03",
-                left_zero=0.0,
-                right_zero=0.0,
-                scale=0.1,
-            ),
-            "elbow_pair_symmetry": ksim.PairwiseSymmetryReward.create(
-                physics_model=physics_model,
-                left_joint_name="dof_left_elbow_02",
-                right_joint_name="dof_right_elbow_02",
-                left_zero=math.radians(-45.0),
-                right_zero=math.radians(45.0),
-                scale=0.1,
-            ),
-            "leg_pair_symmetry": ksim.PairwiseSymmetryReward.create(
-                physics_model=physics_model,
-                left_joint_name="dof_left_hip_pitch_04",
-                right_joint_name="dof_right_hip_pitch_04",
-                left_zero=math.radians(10.0),
-                right_zero=math.radians(-10.0),
-                scale=0.1,
+            "foot_intersection": ksim.IntersectionPenalty(
+                position_obs="feet_position",
+                min_distance=0.15,
+                scale=10.0,
             ),
             # Normalization penalties.
             "ctrl": ksim.TorquePenalty.create(model=physics_model, scale=1.0),
