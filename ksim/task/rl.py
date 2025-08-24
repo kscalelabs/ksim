@@ -1561,15 +1561,11 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         has_termination = (all_terminations.any(axis=-1)).sum(axis=-1)
         num_terminations = has_termination.sum().clip(min=1)
         mean_terminations = trajectories.done.sum(-1).mean()
-        mean_successes = trajectories.success.sum(-1).mean()
-        success_rate = mean_successes / mean_terminations.clip(min=1)
 
         return {
             "episode_length": trajectories.episode_length(),
             "mean_terminations": mean_terminations,
-            "mean_successes": mean_successes,
-            "success_rate": success_rate,
-            **{f"prct/{key}": ((value != 0).sum() / num_terminations) for key, value in kvs},
+            **{f"prct/{key}": (float(value.sum()) / num_terminations) for key, value in kvs},
         }
 
     def get_markers(

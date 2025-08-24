@@ -412,7 +412,7 @@ class AngularVelocityCommandMarker(Marker):
         # If command is near-zero, show grey arrow pointing +X.
         self.rgba = (0.2, 0.8, 0.2, 0.8)
         if speed < self.zero_threshold:
-            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
+            self.orientation = self.quat_from_direction((0.0, 0.0, 1.0))
         else:
             self.orientation = self.quat_from_direction((0.0, 0.0, speed))
 
