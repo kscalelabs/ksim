@@ -1052,8 +1052,8 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         )
 
         # Convert ternary terminations to binary arrays.
-        terminated = jax.tree.reduce(jnp.logical_or, [t != 0 for t in terminations.values()])
-        success = jax.tree.reduce(jnp.logical_and, [t != -1 for t in terminations.values()]) & terminated
+        done = jax.tree.reduce(jnp.logical_or, [t != 0 for t in terminations.values()])
+        success = jax.tree.reduce(jnp.logical_and, [t != -1 for t in terminations.values()]) & done
 
         # Combines all the relevant data into a single object. Lives up here to
         # avoid accidentally incorporating information it shouldn't access to.
@@ -1067,7 +1067,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             command=env_states.commands,
             event_state=next_physics_state.event_states,
             action=action.action,
-            done=terminated,
+            done=done,
             success=success,
             timestep=next_physics_state.data.time,
             curriculum_level=env_states.curriculum_state.level,
@@ -1076,7 +1076,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         )
 
         next_physics_state = jax.lax.cond(
-            terminated,
+            done,
             lambda: constants.engine.reset(
                 shared_state.physics_model,
                 env_states.curriculum_state.level,
@@ -1087,7 +1087,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
 
         # Conditionally reset on termination.
         next_commands = jax.lax.cond(
-            terminated,
+            done,
             lambda: get_initial_commands(
                 rng=cmd_rng,
                 physics_data=next_physics_state.data,
@@ -1104,7 +1104,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         )
 
         next_obs_carry = jax.lax.cond(
-            terminated,
+            done,
             lambda: get_initial_obs_carry(
                 rng=obs_carry_rng,
                 physics_state=next_physics_state,
@@ -1114,7 +1114,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         )
 
         next_model_carry = jax.lax.cond(
-            terminated,
+            done,
             lambda: self.get_initial_model_carry(policy_model, carry_rng),
             lambda: action.carry,
         )
@@ -1561,10 +1561,14 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         has_termination = (all_terminations.any(axis=-1)).sum(axis=-1)
         num_terminations = has_termination.sum().clip(min=1)
         mean_terminations = trajectories.done.sum(-1).mean()
+        mean_successes = trajectories.success.sum(-1).mean()
+        success_rate = mean_successes / mean_terminations.clip(min=1)
 
         return {
             "episode_length": trajectories.episode_length(),
             "mean_terminations": mean_terminations,
+            "mean_successes": mean_successes,
+            "success_rate": success_rate,
             **{f"prct/{key}": ((value != 0).sum() / num_terminations) for key, value in kvs},
         }
 

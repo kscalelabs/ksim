@@ -17,7 +17,7 @@ __all__ = [
     "SmallJointAccelerationReward",
     "SmallJointJerkReward",
     "AvoidLimitsPenalty",
-    "SmallCtrlReward",
+    "TorquePenalty",
     "JointDeviationPenalty",
     "FlatBodyReward",
     "PositionTrackingReward",
@@ -541,17 +541,14 @@ class AvoidLimitsPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class SmallCtrlReward(Reward):
+class TorquePenalty(Reward):
     """Penalty for large torque commands."""
 
-    kernel_scale: float = attrs.field(default=0.25)
-    scales: tuple[float, ...] | None = attrs.field(default=None)
+    ctrl_scales: tuple[float, ...] = attrs.field()
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        ctrl = trajectory.ctrl
-        if self.scales is not None:
-            ctrl = ctrl / jnp.array(self.scales)
-        return exp_kernel(ctrl, self.kernel_scale).mean(axis=-1)
+        ctrl = trajectory.ctrl / jnp.array(self.ctrl_scales)
+        return jnp.abs(ctrl).mean(axis=-1)
 
     @classmethod
     def create(cls, model: PhysicsModel, scale: float | Scale = 1.0) -> Self:
@@ -560,7 +557,7 @@ class SmallCtrlReward(Reward):
         ctrl_range = (ctrl_max - ctrl_min) / 2.0
         ctrl_range_list = ctrl_range.flatten().tolist()
         return cls(
-            scales=tuple(ctrl_range_list),
+            ctrl_scales=tuple(ctrl_range_list),
             scale=scale,
         )
 
@@ -1047,7 +1044,7 @@ class TargetHeightReward(Reward):
         cur_height_tn = trajectory.obs[self.position_obs][..., 2]
         penalty_tn = cur_height_tn - self.height
         reward_tn = exp_kernel_with_penalty(penalty_tn, self.kernel_scale, self.sq_scale, self.abs_scale)
-        reward_t = jnp.where(not_moving, 0.0, reward_tn.max(axis=-1))
+        reward_t = jnp.where(not_moving, reward_tn.mean(), reward_tn.max(axis=-1))
         return reward_t
 
     def get_markers(self, name: str) -> Collection[Marker]:
