@@ -61,57 +61,63 @@ def compute_ppo_inputs(
     monte_carlo_returns: bool = False,
 ) -> PPOInputs:
     """Computes the advantages using Generalized Advantage Estimation (GAE)."""
-    # V_{t+1}; for the last step use V_T as bootstrap value (passed-in last value)
-    values_shifted_t = jnp.concatenate([values_t[..., 1:], values_t[..., -1:]], axis=-1)
 
-    # Masks for the TD residuals.
-    mask_t = jnp.where(dones_t, 0.0, 1.0).astype(rewards_t.dtype)
-    success_mask_t = jnp.where(successes_t, 1.0, 0.0).astype(rewards_t.dtype)
-
-    # Inject a single-step bootstrap term at success step only: r'_t = r_t + γ V_{t+1} * 1_{success}
-    # This keeps the recursion terminal (mask=0) at that step but adds the one-step bootstrap in-place.
-    reward_injected_t = rewards_t + decay_gamma * values_shifted_t * success_mask_t
-
-    # TD residuals with the injected reward stream
-    deltas_t = reward_injected_t + decay_gamma * values_shifted_t * mask_t - values_t
-
-    def scan_fn(
-        carry: tuple[Array, Array],
+    def returns_and_gae_scan_fn(
+        x_t_plus_1: tuple[Array, Array],
         x: tuple[Array, Array, Array],
     ) -> tuple[tuple[Array, Array], tuple[Array, Array]]:
-        R_tp1, A_tp1 = carry
-        r_t, d_t, m_t = x
-        R_t = r_t + decay_gamma * m_t * R_tp1
-        A_t = d_t + decay_gamma * gae_lambda * m_t * A_tp1
-        return (R_t, A_t), (R_t, A_t)
+        """Scanning this computes the returns in reverse order."""
+        reward, delta, mask = x
+        returns_t_plus_1, adv_t_plus_1 = x_t_plus_1
+        return_t = reward + decay_gamma * mask * returns_t_plus_1
+        adv_t = delta + decay_gamma * gae_lambda * mask * adv_t_plus_1
+        return (return_t, adv_t), (return_t, adv_t)
 
-    (_, _), (returns_t, gae_t) = xax.scan(
-        scan_fn,
-        (jnp.zeros_like(rewards_t[..., -1]), jnp.zeros_like(deltas_t[..., -1])),
-        (reward_injected_t, deltas_t, mask_t),
-        reverse=True,
-        jit_level=JitLevel.RL_CORE,
-    )
+    def compute_gae_and_targets_for_sample(
+        values_t: Array,
+        rewards_t: Array,
+        dones_t: Array,
+        successes_t: Array,
+    ) -> PPOInputs:
+        # values_shifted_t is V(s_{t+1}) for t < T_rollout, and V(s_T) for t = T_rollout
+        # Uses the last value of the trajectory as the bootstrap value.
+        values_shifted_t = jnp.concatenate([values_t[1:], jnp.expand_dims(values_t[-1], 0)], axis=0)
 
-    # Value targets: TD(λ) vs Monte-Carlo (with single-step success bootstrap already injected)
-    value_targets_t = jnp.where(
-        jnp.asarray(monte_carlo_returns),
-        returns_t,
-        gae_t + values_t,
-    )
+        # 1-step bootstrap on successful terminations.
+        trunc_mask_t = jnp.where(successes_t, 1.0, 0.0)
+        discount_horizon = 1 / (1 - decay_gamma)
+        bootstrapped_rewards_t = rewards_t / discount_horizon + decay_gamma * values_t * trunc_mask_t
 
-    advantages_t = gae_t
+        mask_t = jnp.where(dones_t, 0.0, 1.0)
+
+        # Compute returns and GAE.
+        deltas_t = bootstrapped_rewards_t + decay_gamma * values_shifted_t * mask_t - values_t
+        _, (returns_t, gae_t) = xax.scan(
+            returns_and_gae_scan_fn,
+            (jnp.zeros_like(rewards_t[-1]), jnp.zeros_like(deltas_t[-1])),
+            (bootstrapped_rewards_t, deltas_t, mask_t),
+            reverse=True,
+            jit_level=JitLevel.RL_CORE,
+        )
+
+        # Get the value targets.
+        value_targets_t = returns_t if monte_carlo_returns else gae_t + values_t
+
+        return PPOInputs(
+            advantages_t=gae_t,
+            value_targets_t=value_targets_t,
+            gae_t=gae_t,
+            returns_t=returns_t,
+        )
+
+    # Compute the advantages and value targets for each sample in the batch.
+    # Pass successes_t to the inner function for 1-step bootstrap on successful terminations.
+    inputs = compute_gae_and_targets_for_sample(values_t, rewards_t, dones_t, successes_t)
+
     if normalize_advantages:
-        mean = advantages_t.mean(keepdims=True)
-        std = advantages_t.std(keepdims=True)
-        advantages_t = (advantages_t - mean) / jnp.maximum(std, 1e-6)
+        inputs.advantages_t = inputs.advantages_t / jnp.maximum(inputs.advantages_t.std(axis=-1, keepdims=True), 1e-6)
 
-    return PPOInputs(
-        advantages_t=jax.lax.stop_gradient(advantages_t),
-        value_targets_t=jax.lax.stop_gradient(value_targets_t),
-        gae_t=jax.lax.stop_gradient(gae_t),
-        returns_t=jax.lax.stop_gradient(returns_t),
-    )
+    return inputs
 
 
 @xax.jit(static_argnames=["clip_param"], jit_level=JitLevel.HELPER_FUNCTIONS)
@@ -363,12 +369,6 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             metrics[f"loss_{name}"] = loss.mean()
         if off_policy_variables.entropy is not None:
             metrics["entropy"] = off_policy_variables.entropy.mean(0).flatten()
-        if off_policy_variables.aux_losses is not None:
-            for (
-                aux_loss_name,
-                aux_loss_value,
-            ) in off_policy_variables.aux_losses.items():
-                metrics[aux_loss_name] = aux_loss_value.mean()
         return metrics
 
     def _get_logged_trajectory_metrics(
@@ -449,7 +449,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             off_policy_variables, _ = self.get_ppo_variables(model, trajectory, init_model_carry, rng)
 
             ppo_inputs = compute_ppo_inputs(
-                values_t=off_policy_variables.values,
+                values_t=jax.lax.stop_gradient(off_policy_variables.values),
                 rewards_t=rewards.total,
                 dones_t=trajectory.done,
                 successes_t=trajectory.success,
@@ -570,7 +570,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         on_policy_rngs = jax.random.split(onp_rng, trajectories.done.shape[0])
         ppo_fn = xax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0), jit_level=JitLevel.RL_CORE)
         on_policy_variables, _ = ppo_fn(policy_model, trajectories, carry.env_states.model_carry, on_policy_rngs)
-        on_policy_variables = jax.lax.stop_gradient(on_policy_variables)
+        on_policy_variables = jax.tree.map(lambda x: jax.lax.stop_gradient(x), on_policy_variables)
 
         # Loops over the trajectory batches and applies gradient updates.
         def update_model_in_batch(
