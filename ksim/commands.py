@@ -248,7 +248,7 @@ class LinearVelocityCommandMarker(Marker):
         self.scale = (self.size, self.size, arrow_length)
 
         # If command is near-zero, show grey arrow pointing +X.
-        if speed < self.zero_threshold:
+        if abs(speed) < self.zero_threshold:
             self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
             self.rgba = (1.0, 1.0, 1.0, 0.2)
         else:
@@ -411,7 +411,7 @@ class AngularVelocityCommandMarker(Marker):
         self.scale = (self.size, self.size, arrow_length)
 
         # If command is near-zero, show grey arrow pointing +X.
-        if speed < self.zero_threshold:
+        if abs(speed) < self.zero_threshold:
             self.orientation = self.quat_from_direction((0.0, 0.0, 1.0))
             self.rgba = (1.0, 1.0, 1.0, 0.2)
         else:
