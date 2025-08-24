@@ -537,7 +537,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 bias=100.0,
                 scale=-1e-1,
             ),
-            "motionless_at_rest": ksim.MotionlessAtRestPenalty(scale=-1e-2),
+            "motionless_at_rest": ksim.MotionlessAtRestPenalty(scale=1e-2),
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
