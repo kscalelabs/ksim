@@ -36,6 +36,7 @@ __all__ = [
     "ForcePenalty",
     "SinusoidalGaitReward",
     "JointPositionReward",
+    "IntersectionPenalty",
 ]
 
 import functools
@@ -555,7 +556,14 @@ class AvoidLimitsPenalty(Reward):
 class TorquePenalty(Reward):
     """Penalty for large torque commands."""
 
-    ctrl_scales: tuple[float, ...] = attrs.field()
+    ctrl_scales: tuple[float, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(float),
+            ),
+        ),
+    )
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         ctrl = trajectory.ctrl / jnp.array(self.ctrl_scales)
@@ -578,9 +586,33 @@ class JointDeviationPenalty(Reward):
     """Penalty for joint deviations from target positions."""
 
     norm: xax.NormType = attrs.field(default="l2")
-    joint_indices: tuple[int, ...] = attrs.field()
-    joint_targets: tuple[float, ...] = attrs.field()
-    joint_weights: tuple[float, ...] | None = attrs.field(default=None)
+    joint_indices: tuple[int, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(int),
+            ),
+        ),
+    )
+    joint_targets: tuple[float, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(float),
+            ),
+        ),
+    )
+    joint_weights: tuple[float, ...] | None = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(
+            attrs.validators.and_(
+                attrs.validators.instance_of(tuple),
+                attrs.validators.deep_iterable(
+                    member_validator=attrs.validators.instance_of(float),
+                ),
+            ),
+        ),
+    )
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
@@ -597,16 +629,23 @@ class JointDeviationPenalty(Reward):
     def create(
         cls,
         physics_model: PhysicsModel,
-        joint_names: tuple[str, ...],
-        joint_targets: tuple[float, ...],
+        joint_names: Collection[str],
+        joint_targets: Collection[float],
         scale: float | Scale = 1.0,
-        joint_weights: tuple[float, ...] | None = None,
+        joint_weights: Collection[float] | None = None,
     ) -> Self:
+        if len(joint_names) != len(joint_targets):
+            raise ValueError(f"Joint names and targets must match, got {len(joint_names)} and {len(joint_targets)}")
+        if joint_weights is not None:
+            if len(joint_weights) != len(joint_names):
+                raise ValueError(f"Joint weights and names must match, got {len(joint_weights)} and {len(joint_names)}")
+            joint_weights = tuple(joint_weights)
+
         joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
         joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
         return cls(
             joint_indices=joint_indices,
-            joint_targets=joint_targets,
+            joint_targets=tuple(joint_targets),
             joint_weights=joint_weights,
             scale=scale,
         )
@@ -616,7 +655,14 @@ class JointDeviationPenalty(Reward):
 class FlatBodyReward(Reward):
     """Reward for keeping the body parallel to the ground."""
 
-    body_indices: tuple[int, ...] = attrs.field()
+    body_indices: tuple[int, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(int),
+            ),
+        ),
+    )
     plane: tuple[float, float, float] = attrs.field(default=(0.0, 0.0, 1.0))
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
@@ -782,8 +828,22 @@ class LinkJerkPenalty(Reward):
 class SymmetryReward(StatefulReward):
     """Rewards joints for having symmetrical positions."""
 
-    joint_indices: tuple[int, ...] = attrs.field()
-    joint_targets: tuple[float, ...] = attrs.field()
+    joint_indices: tuple[int, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(int),
+            ),
+        ),
+    )
+    joint_targets: tuple[float, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(float),
+            ),
+        ),
+    )
     alpha: float = attrs.field(default=0.1)
 
     def initial_carry(self, rng: PRNGKeyArray) -> Array:
@@ -803,13 +863,16 @@ class SymmetryReward(StatefulReward):
     def create(
         cls,
         physics_model: PhysicsModel,
-        joint_names: tuple[str, ...],
-        joint_targets: tuple[float, ...],
+        joint_names: Collection[str],
+        joint_targets: Collection[float],
         alpha: float = 0.1,
         scale: float | Scale = 1.0,
     ) -> Self:
         joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
         joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
+        if len(joint_names) != len(joint_targets):
+            raise ValueError(f"Joint names and targets must match, got {len(joint_names)} and {len(joint_targets)}")
+        joint_targets = tuple(joint_targets)
         return cls(
             joint_indices=joint_indices,
             joint_targets=joint_targets,
@@ -1320,7 +1383,14 @@ class JointPositionReward(Reward):
     """Reward for tracking the joint positions."""
 
     command_name: str = attrs.field()
-    joint_indices: tuple[int, ...] = attrs.field()
+    joint_indices: tuple[int, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(int),
+            ),
+        ),
+    )
     length_scale: float = attrs.field(default=0.25)
     sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
@@ -1360,3 +1430,18 @@ class JointPositionReward(Reward):
             abs_scale=abs_scale,
             scale=scale,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class IntersectionPenalty(Reward):
+    """Penalty for having the feet too close together."""
+
+    position_obs: str = attrs.field()
+    min_distance: float = attrs.field()
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        obs_tn3 = trajectory.obs[self.position_obs]
+        lobs_tn13, robs_t1n3 = obs_tn3[..., None, :], obs_tn3[..., None, :, :]
+        dist_tnn = jnp.linalg.norm(lobs_tn13 - robs_t1n3, axis=-1)
+        any_close = jnp.any(dist_tnn < self.min_distance, axis=(-2, -1))
+        return jnp.where(any_close, 1.0, 0.0)
