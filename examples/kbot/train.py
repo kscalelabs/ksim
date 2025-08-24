@@ -578,102 +578,78 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return {
             "stay_alive": ksim.StayAliveReward(scale=500.0),
             # Command tracking rewards.
-            # "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=2.0),
-            # "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
+            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=2.0),
+            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=2.0),
             # Deviation penalties.
-            # "hip_deviation": ksim.JointDeviationPenalty.create(
-            #     physics_model=physics_model,
-            #     joint_names=("dof_right_hip_roll_03", "dof_left_hip_roll_03"),
-            #     joint_targets=(0.0, 0.0),
-            #     scale=5.0,
-            # ),
-            # "leg_deviation": ksim.JointDeviationPenalty.create(
-            #     physics_model=physics_model,
-            #     joint_names=("dof_right_hip_yaw_03", "dof_left_hip_yaw_03"),
-            #     joint_targets=(0.0, 0.0),
-            #     scale=5.0,
-            # ),
-            # "arm_deviation": ksim.JointDeviationPenalty.create(
-            #     physics_model=physics_model,
-            #     joint_names=(
-            #         "dof_right_shoulder_roll_03",
-            #         "dof_left_shoulder_roll_03",
-            #         "dof_right_shoulder_yaw_02",
-            #         "dof_left_shoulder_yaw_02",
-            #     ),
-            #     joint_targets=(math.radians(-10.0), math.radians(10.0), 0.0, 0.0),
-            #     scale=5.0,
-            # ),
-            # # Gait rewards.
-            # "foot_airtime": ksim.FeetAirTimeReward(
-            #     ctrl_dt=self.config.ctrl_dt,
-            #     max_air_time=self.config.gait_period * self.config.air_time_percent,
-            #     max_ground_time=self.config.gait_period * (1.0 - self.config.air_time_percent),
-            #     contact_obs="feet_contact",
-            #     scale=5.0,
-            # ),
-            # "no_roll": ksim.NoRollReward(scale=1.0),
-            # "foot_height": ksim.TargetHeightReward(
-            #     position_obs="feet_position",
-            #     height=self.config.max_foot_height,
-            #     scale=1.0,
-            # ),
-            # "foot_contact": ksim.ForcePenalty(
-            #     force_obs="feet_force",
-            #     ctrl_dt=self.config.ctrl_dt,
-            #     bias=500.0,  # Weight of the robot is 350 Newtons.
-            #     scale=3.0,
-            # ),
-            # "arm_symmetry": ksim.SymmetryReward.create(
-            #     physics_model=physics_model,
-            #     joint_names=(
-            #         "dof_left_shoulder_pitch_03",
-            #         "dof_right_shoulder_pitch_03",
-            #     ),
-            #     joint_targets=(0.0, 0.0),
-            #     scale=1.0,
-            # ),
-            # "elbow_symmetry": ksim.SymmetryReward.create(
-            #     physics_model=physics_model,
-            #     joint_names=(
-            #         "dof_left_elbow_02",
-            #         "dof_right_elbow_02",
-            #     ),
-            #     joint_targets=(math.radians(-45.0), math.radians(45.0)),
-            #     scale=1.0,
-            # ),
-            # "leg_symmetry": ksim.SymmetryReward.create(
-            #     physics_model=physics_model,
-            #     joint_names=(
-            #         "dof_left_hip_pitch_04",
-            #         "dof_right_hip_pitch_04",
-            #     ),
-            #     joint_targets=(math.radians(10.0), math.radians(-10.0)),
-            #     scale=1.0,
-            # ),
-            # "arm_pair_symmetry": ksim.PairwiseSymmetryReward.create(
-            #     physics_model=physics_model,
-            #     left_joint_name="dof_left_shoulder_pitch_03",
-            #     right_joint_name="dof_right_shoulder_pitch_03",
-            #     zeros=(0.0, 0.0),
-            #     scale=1.0,
-            # ),
-            # "elbow_pair_symmetry": ksim.PairwiseSymmetryReward.create(
-            #     physics_model=physics_model,
-            #     left_joint_name="dof_left_elbow_02",
-            #     right_joint_name="dof_right_elbow_02",
-            #     zeros=(math.radians(-45.0), math.radians(45.0)),
-            #     scale=1.0,
-            # ),
-            # "leg_pair_symmetry": ksim.PairwiseSymmetryReward.create(
-            #     physics_model=physics_model,
-            #     left_joint_name="dof_left_hip_pitch_04",
-            #     right_joint_name="dof_right_hip_pitch_04",
-            #     zeros=(math.radians(10.0), math.radians(-10.0)),
-            #     scale=1.0,
-            # ),
+            "hip_deviation": ksim.JointDeviationPenalty.create(
+                physics_model=physics_model,
+                joint_names=("dof_right_hip_roll_03", "dof_left_hip_roll_03"),
+                joint_targets=(0.0, 0.0),
+                scale=ksim.QuadraticScale(scale=5.0),
+            ),
+            "leg_deviation": ksim.JointDeviationPenalty.create(
+                physics_model=physics_model,
+                joint_names=("dof_right_hip_yaw_03", "dof_left_hip_yaw_03"),
+                joint_targets=(0.0, 0.0),
+                scale=ksim.QuadraticScale(scale=5.0),
+            ),
+            "arm_deviation": ksim.JointDeviationPenalty.create(
+                physics_model=physics_model,
+                joint_names=(
+                    "dof_right_shoulder_roll_03",
+                    "dof_left_shoulder_roll_03",
+                    "dof_right_shoulder_yaw_02",
+                    "dof_left_shoulder_yaw_02",
+                ),
+                joint_targets=(math.radians(-10.0), math.radians(10.0), 0.0, 0.0),
+                scale=ksim.QuadraticScale(scale=5.0),
+            ),
+            # Gait rewards.
+            "foot_airtime": ksim.FeetAirTimeReward(
+                ctrl_dt=self.config.ctrl_dt,
+                max_air_time=self.config.gait_period * self.config.air_time_percent,
+                max_ground_time=self.config.gait_period * (1.0 - self.config.air_time_percent),
+                contact_obs="feet_contact",
+                scale=1.0,
+            ),
+            "no_roll": ksim.NoRollReward(scale=ksim.QuadraticScale(scale=3.0)),
+            "foot_height": ksim.TargetHeightReward(
+                position_obs="feet_position",
+                height=self.config.max_foot_height,
+                scale=1.0,
+            ),
+            "foot_contact": ksim.ForcePenalty(
+                force_obs="feet_force",
+                ctrl_dt=self.config.ctrl_dt,
+                bias=500.0,  # Weight of the robot is 350 Newtons.
+                scale=0.1,
+            ),
+            "arm_pair_symmetry": ksim.PairwiseSymmetryReward.create(
+                physics_model=physics_model,
+                left_joint_name="dof_left_shoulder_pitch_03",
+                right_joint_name="dof_right_shoulder_pitch_03",
+                left_zero=0.0,
+                right_zero=0.0,
+                scale=0.1,
+            ),
+            "elbow_pair_symmetry": ksim.PairwiseSymmetryReward.create(
+                physics_model=physics_model,
+                left_joint_name="dof_left_elbow_02",
+                right_joint_name="dof_right_elbow_02",
+                left_zero=math.radians(-45.0),
+                right_zero=math.radians(45.0),
+                scale=0.1,
+            ),
+            "leg_pair_symmetry": ksim.PairwiseSymmetryReward.create(
+                physics_model=physics_model,
+                left_joint_name="dof_left_hip_pitch_04",
+                right_joint_name="dof_right_hip_pitch_04",
+                left_zero=math.radians(10.0),
+                right_zero=math.radians(-10.0),
+                scale=0.1,
+            ),
             # Normalization penalties.
-            # "ctrl": ksim.TorquePenalty.create(model=physics_model, scale=1.0),
+            "ctrl": ksim.TorquePenalty.create(model=physics_model, scale=1.0),
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
@@ -920,7 +896,7 @@ if __name__ == "__main__":
             action_latency_range=(0.001, 0.01),  # Simulate 1-10ms of latency.
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
-            # If running this on Mac and you are getting segaults,
+            # If running this on Mac and you are getting segfaults,
             # you might need to disable `render_markers`
             render_markers=True,
             render_track_body_id=0,

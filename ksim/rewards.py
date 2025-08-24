@@ -326,12 +326,23 @@ class AngularVelocityReward(Reward):
     sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     vis_height: float = attrs.field(default=0.5)
+    zero_threshold: float = attrs.field(default=1e-4)
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         cmd: AngularVelocityCommandValue = trajectory.command[self.cmd]
         angvel = trajectory.qvel[..., 5]
+
+        # Reward for the magnitude of the angular velocity.
         angvel_rews = exp_kernel_with_penalty(angvel - cmd.vel, self.angvel_length_scale, self.sq_scale, self.abs_scale)
-        return {"angvel": angvel_rews}
+
+        # Reward for the direction of the angular velocity.
+        is_zero = jnp.abs(angvel) < self.zero_threshold
+        angvel_dir_rews = jnp.where(is_zero, angvel_rews, jnp.sign(angvel) * jnp.sign(cmd.vel))
+
+        return {
+            "mag": angvel_rews,
+            "dir": angvel_dir_rews,
+        }
 
     def get_markers(self, name: str) -> Collection[Marker]:
         return [AngularVelocityRewardMarker.get(height=self.vis_height)]
@@ -808,25 +819,41 @@ class SymmetryReward(StatefulReward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class PairwiseSymmetryReward(Reward):
+class PairwiseSymmetryReward(StatefulReward):
     """Rewards joints for having symmetrical positions."""
 
     left_joint_index: int = attrs.field()
     right_joint_index: int = attrs.field()
-    zeros: tuple[float, float] = attrs.field(default=(0.0, 0.0))
+    left_zero: float = attrs.field(default=0.0)
+    right_zero: float = attrs.field(default=0.0)
     flipped: bool = attrs.field(default=False)
+    alpha: float = attrs.field(default=0.1)
     kernel_scale: float = attrs.field(default=0.25)
     sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        lzero, rzero = self.zeros
-        qpos_left = trajectory.qpos[..., self.left_joint_index + 7] - lzero
-        qpos_right = trajectory.qpos[..., self.right_joint_index + 7] - rzero
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.array([self.left_zero, self.right_zero])
+
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: Array,
+    ) -> tuple[dict[str, Array], Array]:
+        qpos_left = trajectory.qpos[..., self.left_joint_index + 7] - self.left_zero
+        qpos_right = trajectory.qpos[..., self.right_joint_index + 7] - self.right_zero
         if self.flipped:
             qpos_right = -qpos_right
+
         qpos_diff = qpos_left - qpos_right
-        return exp_kernel_with_penalty(qpos_diff, self.kernel_scale, self.sq_scale, self.abs_scale)
+        lr_symmetry = exp_kernel_with_penalty(qpos_diff, self.kernel_scale, self.sq_scale, self.abs_scale)
+
+        qpos = jnp.stack([qpos_left, qpos_right], axis=-1)
+        qpos_mean = qpos.mean(axis=-2)
+        new_reward_carry = reward_carry * (1.0 - self.alpha) + qpos_mean * self.alpha
+        self_symmetry = (qpos * -new_reward_carry[..., None, :]).sum(axis=-1)
+
+        return {"lr": lr_symmetry, "self": self_symmetry}, new_reward_carry
 
     @classmethod
     def create(
@@ -834,8 +861,13 @@ class PairwiseSymmetryReward(Reward):
         physics_model: PhysicsModel,
         left_joint_name: str,
         right_joint_name: str,
-        zeros: tuple[float, float] = (0.0, 0.0),
+        left_zero: float = 0.0,
+        right_zero: float = 0.0,
         flipped: bool = False,
+        alpha: float = 0.1,
+        kernel_scale: float = 0.25,
+        sq_scale: float = 0.1,
+        abs_scale: float = 0.1,
         scale: float | Scale = 1.0,
     ) -> Self:
         joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
@@ -844,8 +876,13 @@ class PairwiseSymmetryReward(Reward):
         return cls(
             left_joint_index=left_joint_index,
             right_joint_index=right_joint_index,
-            zeros=zeros,
+            left_zero=left_zero,
+            right_zero=right_zero,
             flipped=flipped,
+            alpha=alpha,
+            kernel_scale=kernel_scale,
+            sq_scale=sq_scale,
+            abs_scale=abs_scale,
             scale=scale,
         )
 

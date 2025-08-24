@@ -79,8 +79,7 @@ def compute_ppo_inputs(
 
     # 1-step bootstrap on successful terminations.
     trunc_mask_bt = jnp.where(successes_bt, 1.0, 0.0)
-    discount_horizon = 1 / (1 - decay_gamma)
-    bootstrapped_rewards_bt = rewards_bt / discount_horizon + decay_gamma * values_bt * trunc_mask_bt
+    bootstrapped_rewards_bt = (1 - decay_gamma) * rewards_bt + decay_gamma * values_bt * trunc_mask_bt
 
     mask_bt = jnp.where(dones_bt, 0.0, 1.0)
     deltas_bt = bootstrapped_rewards_bt + decay_gamma * values_shifted_t * mask_bt - values_bt
@@ -118,7 +117,7 @@ def compute_ppo_inputs(
         adv_std = inputs.advantages_bt.std(keepdims=True).clip(min=1e-6)
         inputs.advantages_bt = (inputs.advantages_bt - adv_mean) / adv_std
 
-    return inputs
+    return jax.lax.stop_gradient(inputs)
 
 
 @xax.jit(static_argnames=["clip_param"], jit_level=JitLevel.HELPER_FUNCTIONS)
@@ -433,7 +432,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         off_policy_variables, _ = ppo_fn(model, trajectories, init_carry, rngs)
 
         ppo_inputs = compute_ppo_inputs(
-            values_bt=jax.lax.stop_gradient(off_policy_variables.values),
+            values_bt=off_policy_variables.values,
             rewards_bt=rewards.total,
             dones_bt=trajectories.done,
             successes_bt=trajectories.success,
@@ -462,10 +461,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             off_policy_variables=off_policy_variables,
         )
 
-        # Mean over all non-masked trajectories.
-        num_valid = jnp.sum(~trajectories.done)
+        # Mean loss over all losses.
         loss_bt = jnp.stack(list(losses_bt.values()), axis=-1).sum(axis=-1)
-        loss = loss_bt.sum() / (num_valid + 1e-6)
+        loss = loss_bt.mean()
 
         return loss, xax.freeze_dict(metrics)
 
@@ -547,7 +545,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         on_policy_rngs = jax.random.split(onp_rng, trajectories.done.shape[0])
         ppo_fn = xax.vmap(self.get_ppo_variables, in_axes=(None, 0, 0, 0), jit_level=JitLevel.RL_CORE)
         on_policy_variables, _ = ppo_fn(policy_model, trajectories, carry.env_states.model_carry, on_policy_rngs)
-        on_policy_variables = jax.tree.map(lambda x: jax.lax.stop_gradient(x), on_policy_variables)
+        on_policy_variables = jax.lax.stop_gradient(on_policy_variables)
 
         # Loops over the trajectory batches and applies gradient updates.
         def update_model_in_batch(
