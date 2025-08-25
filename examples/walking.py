@@ -520,8 +520,8 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.01),
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
-                max_air_time=self.config.gait_period * 0.4,
-                max_ground_time=self.config.gait_period * 0.6,
+                gait_period=self.config.gait_period,
+                air_time_percent=0.4,
                 contact_obs="feet_contact",
                 scale=1.0,
             ),

@@ -1012,7 +1012,7 @@ class FeetAirTimeReward(StatefulReward):
 
         def scan_fn(
             carry: tuple[Array, Array, Array],
-            x: tuple[Array, Array, Array],
+            x: tuple[Array, Array],
         ) -> tuple[tuple[Array, Array, Array], tuple[Array, Array]]:
             air_cnt_n, gnd_cnt_n, prev_contact_n = carry
             contact_n, not_moving = x
