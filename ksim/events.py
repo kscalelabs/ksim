@@ -88,13 +88,15 @@ class AngularPushEvent(Event):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, Array]:
-        urng, brng, trng = jax.random.split(rng, 3)
+        frng, brng, trng = jax.random.split(rng, 3)
 
         # Scales the curriculum level range.
         curriculum_min, curriculum_max = self.curriculum_range
         curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
 
+        flip = jax.random.bernoulli(frng, p=0.5, shape=())
         push_mag = jax.random.uniform(brng, (), minval=self.vel_range[0], maxval=self.vel_range[1]) * self.angvel
+        push_mag = jnp.where(flip, -push_mag, push_mag)
         push_vel = push_mag * curriculum_level
         new_qvel = slice_update(data, "qvel", slice(5, 6), data.qvel[..., 5:6] + push_vel)
         updated_data = update_data_field(data, "qvel", new_qvel)

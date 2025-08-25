@@ -110,11 +110,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the linear velocity command being switched.",
     )
     min_angular_velocity: float = xax.field(
-        value=math.radians(0.0),
+        value=math.radians(45.0),
         help="The minimum velocity for the angular velocity command.",
     )
     max_angular_velocity: float = xax.field(
-        value=math.radians(0.0),
+        value=math.radians(90.0),
         help="The range for the angular velocity command.",
     )
     angular_velocity_zero_prob: float = xax.field(
@@ -479,7 +479,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 curriculum_range=(0.0, 1.0),
             ),
             "angular_push": ksim.AngularPushEvent(
-                angvel=1.0,
+                angvel=math.radians(90.0),
                 vel_range=(0.0, 1.0),
                 interval_range=(4.0, 8.0),
                 curriculum_range=(0.0, 1.0),
@@ -628,7 +628,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     physics_model=physics_model,
                     joint_names=names,
                     joint_targets=[zeros[name] for name in names],
-                    scale=5.0,
+                    scale=ksim.QuadraticScale(scale=10.0),
                 )
                 for (k, names) in (
                     ("shoulder_roll", ["dof_right_shoulder_roll_03", "dof_left_shoulder_roll_03"]),
@@ -650,7 +650,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     left_zero=zeros[left_name],
                     right_zero=zeros[right_name],
                     flipped=flipped,
-                    scale=1.0,
+                    scale=ksim.QuadraticScale(scale=10.0),
                 )
                 for (k, right_name, left_name, flipped) in (
                     ("shoulder", "dof_right_shoulder_pitch_03", "dof_left_shoulder_pitch_03", True),
@@ -667,7 +667,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     physics_model=physics_model,
                     joint_names=names,
                     joint_targets=[zeros[name] for name in names],
-                    scale=1.0,
+                    scale=ksim.QuadraticScale(scale=10.0),
                 )
                 for (k, names) in (
                     ("knee", ["dof_right_knee_04", "dof_left_knee_04"]),
