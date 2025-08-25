@@ -100,7 +100,7 @@ class AngularPushEvent(Event):
         frng, brng, trng = jax.random.split(rng, 3)
 
         # Scales the curriculum level range.
-        curriculum_level = self.scale(curriculum_level)
+        curriculum_level = self.scale.get_scale(curriculum_level)
 
         flip = jax.random.bernoulli(frng, p=0.5, shape=())
         push_mag = jax.random.uniform(brng, (), minval=self.vel_range[0], maxval=self.vel_range[1]) * self.angvel
@@ -158,7 +158,7 @@ class LinearPushEvent(Event):
         urng, brng, trng = jax.random.split(rng, 3)
 
         # Scales the curriculum level range.
-        curriculum_level = self.scale(curriculum_level)
+        curriculum_level = self.scale.get_scale(curriculum_level)
 
         push_theta = jax.random.uniform(urng, (), minval=0.0, maxval=2.0 * jnp.pi)
         push_theta = jnp.array([jnp.cos(push_theta), jnp.sin(push_theta), 0.0])
@@ -217,7 +217,7 @@ class JumpEvent(Event):
         urng, trng = jax.random.split(rng, 2)
 
         # Scales the curriculum level range.
-        curriculum_level = self.scale(curriculum_level)
+        curriculum_level = self.scale.get_scale(curriculum_level)
 
         # Implements a jump as a vertical velocity impulse. We compute the
         # required vertical velocity impulse to reach the desired jump height.
