@@ -65,8 +65,25 @@ async def get_mujoco_model_metadata(model_name: str, cache: bool = True) -> Meta
             with open(metadata_path, "w") as f:
                 json.dump(metadata.model_dump(), f, indent=2)
 
+    # Read and coerce any numeric fields that the schema expects as strings.
     with open(metadata_path, "r") as f:
-        metadata = RobotURDFMetadataOutput.model_validate_json(f.read())
+        raw = json.load(f)
+
+    # Some actuator metadata fields arrive as numbers in local files, but the
+    # generated schema expects strings. Coerce known numeric fields to strings.
+    try:
+        actuator_map = raw.get("actuator_type_to_metadata", {})
+        for actuator_type, actuator_meta in actuator_map.items():
+            if not isinstance(actuator_meta, dict):
+                continue
+            for key in ("max_torque", "armature", "frictionloss", "max_velocity"):
+                val = actuator_meta.get(key)
+                if isinstance(val, (int, float)):
+                    actuator_meta[key] = str(val)
+    except Exception:  # Best-effort coercion; fall through to validation
+        pass
+
+    metadata = RobotURDFMetadataOutput.model_validate(raw)
 
     return Metadata.from_kscale_metadata(metadata)
 
