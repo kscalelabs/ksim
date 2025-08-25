@@ -23,6 +23,12 @@ class Noise(ABC):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class NoNoise(Noise):
+    def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        return observation
+
+
+@attrs.define(frozen=True, kw_only=True)
 class AdditiveGaussianNoise(Noise):
     std: float = attrs.field()
 
