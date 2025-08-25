@@ -14,8 +14,17 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+from ksim.scales import ConstantScale, Scale
 from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import slice_update, update_data_field
+
+
+def convert_to_scale(value: float | int | Scale) -> Scale:
+    if isinstance(value, (float, int)):
+        return ConstantScale(scale=value)
+    if isinstance(value, Scale):
+        return value
+    raise ValueError(f"Invalid scale: {value}")
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -59,7 +68,7 @@ class AngularPushEvent(Event):
     angvel: float = attrs.field()
     vel_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
     interval_range: tuple[float, float] = attrs.field()
-    curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
+    scale: Scale = attrs.field(default=ConstantScale(scale=1.0), converter=convert_to_scale)
 
     def __call__(
         self,
@@ -91,8 +100,7 @@ class AngularPushEvent(Event):
         frng, brng, trng = jax.random.split(rng, 3)
 
         # Scales the curriculum level range.
-        curriculum_min, curriculum_max = self.curriculum_range
-        curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
+        curriculum_level = self.scale(curriculum_level)
 
         flip = jax.random.bernoulli(frng, p=0.5, shape=())
         push_mag = jax.random.uniform(brng, (), minval=self.vel_range[0], maxval=self.vel_range[1]) * self.angvel
@@ -118,7 +126,7 @@ class LinearPushEvent(Event):
     linvel: float = attrs.field()
     vel_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
     interval_range: tuple[float, float] = attrs.field()
-    curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
+    scale: Scale = attrs.field(default=ConstantScale(scale=1.0), converter=convert_to_scale)
 
     def __call__(
         self,
@@ -150,8 +158,7 @@ class LinearPushEvent(Event):
         urng, brng, trng = jax.random.split(rng, 3)
 
         # Scales the curriculum level range.
-        curriculum_min, curriculum_max = self.curriculum_range
-        curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
+        curriculum_level = self.scale(curriculum_level)
 
         push_theta = jax.random.uniform(urng, (), minval=0.0, maxval=2.0 * jnp.pi)
         push_theta = jnp.array([jnp.cos(push_theta), jnp.sin(push_theta), 0.0])
@@ -177,7 +184,7 @@ class JumpEvent(Event):
 
     jump_height_range: tuple[float, float] = attrs.field()
     interval_range: tuple[float, float] = attrs.field()
-    curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
+    scale: Scale = attrs.field(default=ConstantScale(scale=1.0), converter=convert_to_scale)
 
     def __call__(
         self,
@@ -210,8 +217,7 @@ class JumpEvent(Event):
         urng, trng = jax.random.split(rng, 2)
 
         # Scales the curriculum level range.
-        curriculum_min, curriculum_max = self.curriculum_range
-        curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
+        curriculum_level = self.scale(curriculum_level)
 
         # Implements a jump as a vertical velocity impulse. We compute the
         # required vertical velocity impulse to reach the desired jump height.

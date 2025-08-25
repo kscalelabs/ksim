@@ -475,19 +475,19 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "linear_push": ksim.LinearPushEvent(
                 linvel=1.0,
                 vel_range=(0.0, 1.0),
-                interval_range=(4.0, 8.0),
-                curriculum_range=(0.0, 1.0),
+                interval_range=(1.0, 2.0),
+                scale=ksim.QuadraticScale.from_endpoints(0.1, 1.0),
             ),
             "angular_push": ksim.AngularPushEvent(
                 angvel=math.radians(90.0),
                 vel_range=(0.0, 1.0),
-                interval_range=(4.0, 8.0),
-                curriculum_range=(0.0, 1.0),
+                interval_range=(1.0, 2.0),
+                scale=ksim.QuadraticScale.from_endpoints(0.1, 1.0),
             ),
             "jump": ksim.JumpEvent(
                 jump_height_range=(0.1, 0.3),
-                interval_range=(4.0, 8.0),
-                curriculum_range=(0.0, 1.0),
+                interval_range=(1.0, 2.0),
+                scale=ksim.QuadraticScale.from_endpoints(0.1, 1.0),
             ),
         }
 
@@ -586,14 +586,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         rewards = {
             "stay_alive": ksim.StayAliveReward(scale=500.0),
             # Command tracking rewards.
-            "linvel": ksim.LinearVelocityReward(
-                cmd="linvel",
-                scale=ksim.LinearScale.from_endpoints(0.5, 10.0),
-            ),
-            "angvel": ksim.AngularVelocityReward(
-                cmd="angvel",
-                scale=ksim.LinearScale.from_endpoints(0.5, 10.0),
-            ),
+            # TODO: Removing these for stand frozen.
+            # "linvel": ksim.LinearVelocityReward(
+            #     cmd="linvel",
+            #     scale=ksim.LinearScale.from_endpoints(0.5, 10.0),
+            # ),
+            # "angvel": ksim.AngularVelocityReward(
+            #     cmd="angvel",
+            #     scale=ksim.LinearScale.from_endpoints(0.5, 10.0),
+            # ),
             # Gait rewards.
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
@@ -602,7 +603,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 contact_obs="feet_contact",
                 scale=ksim.QuadraticScale(scale=10.0),
             ),
-            "upright": ksim.UprightReward(scale=3.0),
+            "upright": ksim.UprightReward(
+                scale=ksim.LinearScale(scale=3.0),
+            ),
             "foot_height": ksim.SparseTargetHeightReward(
                 contact_obs="feet_contact",
                 position_obs="feet_position",
@@ -691,12 +694,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         }
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.DistanceFromOriginCurriculum(
-            min_level=0.0,
-            min_level_steps=5,
-            increase_threshold=8.0,
-            decrease_threshold=8.0,
-        )
+        # return ksim.DistanceFromOriginCurriculum(
+        #     min_level=0.0,
+        #     min_level_steps=5,
+        #     increase_threshold=8.0,
+        #     decrease_threshold=8.0,
+        # )
+        # TODO: Changing this for stand frozen.
+        return ksim.EpisodeLengthCurriculum()
 
     def get_model(self, params: ksim.InitParams) -> Model:
         return Model(
