@@ -586,8 +586,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         rewards = {
             "stay_alive": ksim.StayAliveReward(scale=500.0),
             # Command tracking rewards.
-            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=10.0),
-            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=4.0),
+            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=2.0),
+            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
             # Gait rewards.
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
