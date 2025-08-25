@@ -169,7 +169,7 @@ class Actor(eqx.Module):
     """Actor for the walking task."""
 
     input_proj: eqx.nn.Linear
-    ssms: tuple[xax.SSMBlock, ...]
+    rnns: tuple[eqx.nn.LSTMCell, ...]
     output_proj: eqx.nn.MLP
     num_inputs: int = eqx.field()
     num_outputs: int = eqx.field()
@@ -204,10 +204,19 @@ class Actor(eqx.Module):
             key=input_proj_key,
         )
 
-        # Create SSM blocks.
-        key, ssm_key = jax.random.split(key)
-        ssm_keys = jax.random.split(ssm_key, depth)
-        self.ssms = tuple([xax.SSMBlock(hidden_size=hidden_size, key=k) for k in ssm_keys])
+        # Create RNN layers (LSTM)
+        key, rnn_key = jax.random.split(key)
+        rnn_keys = jax.random.split(rnn_key, depth)
+        self.rnns = tuple(
+            [
+                eqx.nn.LSTMCell(
+                    input_size=hidden_size,
+                    hidden_size=hidden_size,
+                    key=k,
+                )
+                for k in rnn_keys
+            ]
+        )
 
         # Project to output
         output_proj = eqx.nn.MLP(
@@ -247,10 +256,14 @@ class Actor(eqx.Module):
         # carry shape: (depth, hidden_size)
         x_n = self.input_proj(obs_n)
         new_h = []
-        for i, ssm in enumerate(self.ssms):
-            h_i = carry[i]
-            x_n = ssm.forward(h_i, x_n)
-            new_h.append(x_n)
+        new_c = []
+        for i, rnn in enumerate(self.rnns):
+            h_i = carry[0, i]
+            c_i = carry[1, i]
+            h_o, c_o = rnn(x_n, (h_i, c_i))
+            x_n = h_o
+            new_h.append(h_o)
+            new_c.append(c_o)
         out_n = self.output_proj(x_n)
 
         # Reshape the output to be a mixture of gaussians.
@@ -271,7 +284,7 @@ class Actor(eqx.Module):
         # Creates a normal distribution.
         dist_n = xax.Normal(loc_n=mean_n, scale_n=std_n)
 
-        next_carry = jnp.stack(new_h, axis=0)
+        next_carry = jnp.stack([jnp.stack(new_h, axis=0), jnp.stack(new_c, axis=0)], axis=0)
         return dist_n, next_carry, lpf_params
 
 
@@ -279,7 +292,7 @@ class Critic(eqx.Module):
     """Critic for the walking task."""
 
     input_proj: eqx.nn.Linear
-    ssms: tuple[xax.SSMBlock, ...]
+    rnns: tuple[eqx.nn.LSTMCell, ...]
     output_proj: eqx.nn.MLP
     num_inputs: int = eqx.field()
 
@@ -303,9 +316,18 @@ class Critic(eqx.Module):
         )
 
         # Create RNN layers (LSTM)
-        key, ssm_key = jax.random.split(key)
-        ssm_keys = jax.random.split(ssm_key, depth)
-        self.ssms = tuple([xax.SSMBlock(hidden_size=hidden_size, key=k) for k in ssm_keys])
+        key, rnn_key = jax.random.split(key)
+        rnn_keys = jax.random.split(rnn_key, depth)
+        self.rnns = tuple(
+            [
+                eqx.nn.LSTMCell(
+                    input_size=hidden_size,
+                    hidden_size=hidden_size,
+                    key=k,
+                )
+                for k in rnn_keys
+            ]
+        )
 
         # Create MLP
         self.output_proj = eqx.nn.MLP(
@@ -324,13 +346,17 @@ class Critic(eqx.Module):
         # carry shape: (depth, hidden_size)
         x_n = self.input_proj(obs_n)
         new_h = []
-        for i, ssm in enumerate(self.ssms):
-            h_i = carry[i]
-            x_n = ssm.forward(h_i, x_n)
-            new_h.append(x_n)
+        new_c = []
+        for i, rnn in enumerate(self.rnns):
+            h_i = carry[0, i]
+            c_i = carry[1, i]
+            h_o, c_o = rnn(x_n, (h_i, c_i))
+            x_n = h_o
+            new_h.append(h_o)
+            new_c.append(c_o)
         out_n = self.output_proj(x_n)
 
-        next_carry = jnp.stack(new_h, axis=0)
+        next_carry = jnp.stack([jnp.stack(new_h, axis=0), jnp.stack(new_c, axis=0)], axis=0)
         return out_n, next_carry
 
 
@@ -838,8 +864,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> Carry:
         return Carry(
-            actor_carry=jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-            critic_carry=jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+            actor_carry=jnp.zeros(shape=(2, self.config.depth, self.config.hidden_size)),
+            critic_carry=jnp.zeros(shape=(2, self.config.depth, self.config.hidden_size)),
             lpf_params=ksim.LowPassFilterParams.initialize(len(ZEROS)),
         )
 
@@ -881,7 +907,7 @@ if __name__ == "__main__":
             num_envs=4096,
             batch_size=512,
             num_passes=4,
-            rollout_length_frames=96,
+            rollout_length_frames=24,
             # Simulation parameters.
             dt=0.004,
             ctrl_dt=0.02,
