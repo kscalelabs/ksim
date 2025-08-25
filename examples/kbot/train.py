@@ -110,11 +110,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the linear velocity command being switched.",
     )
     min_angular_velocity: float = xax.field(
-        value=math.radians(45.0),
+        value=math.radians(0.0),
         help="The minimum velocity for the angular velocity command.",
     )
     max_angular_velocity: float = xax.field(
-        value=math.radians(90.0),
+        value=math.radians(0.0),
         help="The range for the angular velocity command.",
     )
     angular_velocity_zero_prob: float = xax.field(
@@ -472,8 +472,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
         return {
-            "push": ksim.LinearPushEvent(
+            "linear_push": ksim.LinearPushEvent(
                 linvel=1.0,
+                vel_range=(0.0, 1.0),
+                interval_range=(4.0, 8.0),
+                curriculum_range=(0.0, 1.0),
+            ),
+            "angular_push": ksim.AngularPushEvent(
+                angvel=1.0,
                 vel_range=(0.0, 1.0),
                 interval_range=(4.0, 8.0),
                 curriculum_range=(0.0, 1.0),
@@ -585,17 +591,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Gait rewards.
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
-                max_air_time=self.config.gait_period * self.config.air_time_percent,
-                max_ground_time=self.config.gait_period * (1.0 - self.config.air_time_percent),
+                gait_period=self.config.gait_period,
+                air_time_percent=self.config.air_time_percent,
                 contact_obs="feet_contact",
-                scale=5.0,
+                scale=ksim.QuadraticScale(scale=10.0),
             ),
             "upright": ksim.UprightReward(scale=3.0),
             "foot_height": ksim.SparseTargetHeightReward(
                 contact_obs="feet_contact",
                 position_obs="feet_position",
                 height=self.config.max_foot_height,
-                scale=10.0,
+                scale=ksim.QuadraticScale(scale=10.0),
             ),
             "foot_contact": ksim.ForcePenalty(
                 force_obs="feet_force",
@@ -605,7 +611,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             "foot_intersection": ksim.IntersectionPenalty(
                 position_obs="feet_position",
-                min_distance=0.15,
+                min_distance=0.25,
                 scale=ksim.QuadraticScale(scale=10.0),
             ),
             # Normalization penalties.
@@ -644,7 +650,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     left_zero=zeros[left_name],
                     right_zero=zeros[right_name],
                     flipped=flipped,
-                    scale=0.25,
+                    scale=1.0,
                 )
                 for (k, right_name, left_name, flipped) in (
                     ("shoulder", "dof_right_shoulder_pitch_03", "dof_left_shoulder_pitch_03", True),
@@ -661,7 +667,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     physics_model=physics_model,
                     joint_names=names,
                     joint_targets=[zeros[name] for name in names],
-                    scale=0.25,
+                    scale=1.0,
                 )
                 for (k, names) in (
                     ("knee", ["dof_right_knee_04", "dof_left_knee_04"]),
@@ -681,7 +687,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.DistanceFromOriginCurriculum(
             min_level=0.0,
-            min_level_steps=25,
+            min_level_steps=5,
             increase_threshold=8.0,
             decrease_threshold=8.0,
         )
