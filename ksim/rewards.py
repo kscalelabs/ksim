@@ -976,57 +976,79 @@ class ReachabilityPenalty(Reward):
 class FeetAirTimeReward(StatefulReward):
     """Reward for feet either touching or not touching the ground for some time."""
 
-    max_air_time: float = attrs.field()
-    max_ground_time: float = attrs.field()
+    gait_period: float = attrs.field()
+    air_time_percent: float = attrs.field()
     ctrl_dt: float = attrs.field()
     contact_obs: str = attrs.field()
     num_feet: int = attrs.field(default=2)
     bias: float = attrs.field(default=0.0)
+    alpha: float = attrs.field(default=0.1)
     ground_penalty: float = attrs.field(default=0.1)
     linvel_moving_threshold: float = attrs.field(default=0.5)
     angvel_moving_threshold: float = attrs.field(default=math.radians(30))
 
-    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array, Array]:
         return (
             jnp.zeros((self.num_feet,), dtype=jnp.int32),
             jnp.zeros((self.num_feet,), dtype=jnp.int32),
+            jnp.zeros((self.num_feet,), dtype=jnp.bool_),
         )
 
     def get_reward_stateful(
         self,
         trajectory: Trajectory,
-        reward_carry: tuple[Array, Array],
-    ) -> tuple[Array, tuple[Array, Array]]:
+        reward_carry: tuple[Array, Array, Array],
+    ) -> tuple[Array, tuple[Array, Array, Array]]:
         not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
         not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
-        not_moving = not_moving_lin & not_moving_ang
+        not_moving = jnp.bitwise_and(not_moving_lin, not_moving_ang)
 
-        contact_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
-        contact_tn = contact_tcn.any(axis=-2)
+        contact_tcn: Array = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        contact_tn = jnp.any(contact_tcn, axis=-2)
         chex.assert_shape(contact_tn, (..., self.num_feet))
 
-        air_steps = round(self.max_air_time / self.ctrl_dt)
-        gnd_steps = round(self.max_ground_time / self.ctrl_dt)
+        air_steps = round(self.gait_period * self.air_time_percent / self.ctrl_dt)
+        gnd_steps = round(self.gait_period * (1.0 - self.air_time_percent) / self.ctrl_dt)
 
         def scan_fn(
-            carry: tuple[Array, Array],
-            x: tuple[Array, Array],
-        ) -> tuple[tuple[Array, Array], tuple[Array, Array]]:
-            air_cnt_n, gnd_cnt_n = carry
-            contact_n, stay_still = x
-            air_cnt_n = jnp.where(stay_still | contact_n, 0, air_cnt_n + 1)
-            gnd_cnt_n = jnp.where(stay_still | (~contact_n), 0, gnd_cnt_n + 1)
-            return (air_cnt_n, gnd_cnt_n), (air_cnt_n, gnd_cnt_n)
+            carry: tuple[Array, Array, Array],
+            x: tuple[Array, Array, Array],
+        ) -> tuple[tuple[Array, Array, Array], tuple[Array, Array]]:
+            air_cnt_n, gnd_cnt_n, prev_contact_n = carry
+            contact_n, not_moving = x
 
-        reward_carry, (air_cnt_tn, gnd_cnt_tn) = xax.scan(
-            scan_fn,
-            reward_carry,
-            (contact_tn, not_moving | trajectory.done),
-        )
+            # After changing states, initialize opposite counters with extra steps.
+            next_air_cnt_n = jnp.where(
+                ~contact_n,
+                jnp.where(
+                    prev_contact_n,
+                    (gnd_cnt_n - gnd_steps).clip(-gnd_steps, 0),
+                    air_cnt_n + 1,
+                ),
+                -gnd_steps,
+            )
+            next_gnd_cnt_n = jnp.where(
+                contact_n,
+                jnp.where(
+                    ~prev_contact_n,
+                    (air_cnt_n - air_steps).clip(-air_steps, 0),
+                    gnd_cnt_n + 1,
+                ),
+                -air_steps,
+            )
+
+            # If not moving, set both to zero.
+            next_air_cnt_n = jnp.where(not_moving, 0, next_air_cnt_n)
+            next_gnd_cnt_n = jnp.where(not_moving, 0, next_gnd_cnt_n)
+
+            return (next_air_cnt_n, next_gnd_cnt_n, contact_n), (next_air_cnt_n, next_gnd_cnt_n)
+
+        not_moving_t = not_moving | trajectory.done
+        reward_carry, (air_cnt_tn, gnd_cnt_tn) = xax.scan(scan_fn, reward_carry, (contact_tn, not_moving_t))
 
         # Gradually increase reward until `threshold_steps`.
         air_rew_tn = (air_cnt_tn.astype(jnp.float32) / air_steps) + self.bias
-        air_rew_tn = jnp.where((air_cnt_tn > 0) & (air_cnt_tn < air_steps), air_rew_tn, 0.0)
+        air_rew_tn = jnp.where(air_cnt_tn < air_steps, air_rew_tn, 0.0)
         air_rew_t = air_rew_tn.max(axis=-1)
 
         gnd_rew_tn = (gnd_cnt_tn.astype(jnp.float32) / gnd_steps) + self.bias
