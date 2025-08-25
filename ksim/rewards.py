@@ -30,7 +30,6 @@ __all__ = [
     "ReachabilityPenalty",
     "FeetAirTimeReward",
     "FeetGroundedAtRestReward",
-    "TargetHeightReward",
     "SparseTargetHeightReward",
     "MotionlessAtRestPenalty",
     "ForcePenalty",
@@ -1122,40 +1121,6 @@ class BodyHeightMarker(Marker):
             track_z=False,
             track_rotation=False,
         )
-
-
-@attrs.define(frozen=True, kw_only=True)
-class TargetHeightReward(Reward):
-    """Reward for having some bodies be close to a target height."""
-
-    position_obs: str = attrs.field()
-    height: float = attrs.field()
-    num_feet: int = attrs.field(default=2)
-    linvel_moving_threshold: float = attrs.field(default=0.5)
-    angvel_moving_threshold: float = attrs.field(default=math.radians(30))
-    kernel_scale: float = attrs.field(default=0.25)
-    sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
-    abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
-        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
-        not_moving = not_moving_lin & not_moving_ang
-        cur_height_tn = trajectory.obs[self.position_obs][..., 2]
-        penalty_tn = cur_height_tn - self.height
-        reward_tn = exp_kernel_with_penalty(penalty_tn, self.kernel_scale, self.sq_scale, self.abs_scale)
-        reward_t = jnp.where(not_moving, reward_tn.mean(), reward_tn.max(axis=-1))
-        return reward_t
-
-    def get_markers(self, name: str) -> Collection[Marker]:
-        return [
-            marker
-            for foot_id in range(self.num_feet)
-            for marker in (
-                BodyHeightMarker.get(foot_id, obs_name=self.position_obs),
-                BodyHeightMarker.get(foot_id, obs_name=self.position_obs, target_height=self.height),
-            )
-        ]
 
 
 @attrs.define(frozen=True, kw_only=True)
