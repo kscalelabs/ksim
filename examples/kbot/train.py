@@ -102,7 +102,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the linear velocity command being zero.",
     )
     linear_velocity_backward_prob: float = xax.field(
-        value=0.3,
+        value=0.0,
         help="The probability of the linear velocity command being backward.",
     )
     linear_velocity_switch_prob: float = xax.field(
@@ -169,7 +169,7 @@ class Actor(eqx.Module):
     """Actor for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnns: tuple[eqx.nn.LSTMCell, ...]
+    ssms: tuple[xax.SSMBlock, ...]
     output_proj: eqx.nn.MLP
     num_inputs: int = eqx.field()
     num_outputs: int = eqx.field()
@@ -204,19 +204,10 @@ class Actor(eqx.Module):
             key=input_proj_key,
         )
 
-        # Create RNN layers (LSTM)
-        key, rnn_key = jax.random.split(key)
-        rnn_keys = jax.random.split(rnn_key, depth)
-        self.rnns = tuple(
-            [
-                eqx.nn.LSTMCell(
-                    input_size=hidden_size,
-                    hidden_size=hidden_size,
-                    key=k,
-                )
-                for k in rnn_keys
-            ]
-        )
+        # Create SSM blocks.
+        key, ssm_key = jax.random.split(key)
+        ssm_keys = jax.random.split(ssm_key, depth)
+        self.ssms = tuple([xax.SSMBlock(hidden_size=hidden_size, key=k) for k in ssm_keys])
 
         # Project to output
         output_proj = eqx.nn.MLP(
@@ -253,17 +244,13 @@ class Actor(eqx.Module):
         curriculum_level: Array,
         lpf_params: ksim.LowPassFilterParams,
     ) -> tuple[xax.Distribution, Array, ksim.LowPassFilterParams]:
-        # carry shape: (2, depth, hidden_size) -> [0]=h, [1]=c
+        # carry shape: (depth, hidden_size)
         x_n = self.input_proj(obs_n)
         new_h = []
-        new_c = []
-        for i, rnn in enumerate(self.rnns):
-            h_i = carry[0, i]
-            c_i = carry[1, i]
-            h_o, c_o = rnn(x_n, (h_i, c_i))
-            x_n = h_o
-            new_h.append(h_o)
-            new_c.append(c_o)
+        for i, ssm in enumerate(self.ssms):
+            h_i = carry[i]
+            x_n = ssm.forward(h_i, x_n)
+            new_h.append(x_n)
         out_n = self.output_proj(x_n)
 
         # Reshape the output to be a mixture of gaussians.
@@ -284,7 +271,7 @@ class Actor(eqx.Module):
         # Creates a normal distribution.
         dist_n = xax.Normal(loc_n=mean_n, scale_n=std_n)
 
-        next_carry = jnp.stack([jnp.stack(new_h, axis=0), jnp.stack(new_c, axis=0)], axis=0)
+        next_carry = jnp.stack(new_h, axis=0)
         return dist_n, next_carry, lpf_params
 
 
@@ -292,7 +279,7 @@ class Critic(eqx.Module):
     """Critic for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnns: tuple[eqx.nn.LSTMCell, ...]
+    ssms: tuple[xax.SSMBlock, ...]
     output_proj: eqx.nn.MLP
     num_inputs: int = eqx.field()
 
@@ -316,18 +303,9 @@ class Critic(eqx.Module):
         )
 
         # Create RNN layers (LSTM)
-        key, rnn_key = jax.random.split(key)
-        rnn_keys = jax.random.split(rnn_key, depth)
-        self.rnns = tuple(
-            [
-                eqx.nn.LSTMCell(
-                    input_size=hidden_size,
-                    hidden_size=hidden_size,
-                    key=k,
-                )
-                for k in rnn_keys
-            ]
-        )
+        key, ssm_key = jax.random.split(key)
+        ssm_keys = jax.random.split(ssm_key, depth)
+        self.ssms = tuple([xax.SSMBlock(hidden_size=hidden_size, key=k) for k in ssm_keys])
 
         # Create MLP
         self.output_proj = eqx.nn.MLP(
@@ -343,20 +321,16 @@ class Critic(eqx.Module):
         self.num_inputs = num_inputs
 
     def forward(self, obs_n: Array, carry: Array) -> tuple[Array, Array]:
-        # carry shape: (2, depth, hidden_size) -> [0]=h, [1]=c
+        # carry shape: (depth, hidden_size)
         x_n = self.input_proj(obs_n)
         new_h = []
-        new_c = []
-        for i, rnn in enumerate(self.rnns):
-            h_i = carry[0, i]
-            c_i = carry[1, i]
-            h_o, c_o = rnn(x_n, (h_i, c_i))
-            x_n = h_o
-            new_h.append(h_o)
-            new_c.append(c_o)
+        for i, ssm in enumerate(self.ssms):
+            h_i = carry[i]
+            x_n = ssm.forward(h_i, x_n)
+            new_h.append(x_n)
         out_n = self.output_proj(x_n)
 
-        next_carry = jnp.stack([jnp.stack(new_h, axis=0), jnp.stack(new_c, axis=0)], axis=0)
+        next_carry = jnp.stack(new_h, axis=0)
         return out_n, next_carry
 
 
@@ -575,31 +549,27 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         }
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Reward]:
-        return {
+        zeros = {k: v for k, v in ZEROS}
+
+        rewards = {
             "stay_alive": ksim.StayAliveReward(scale=500.0),
             # Command tracking rewards.
-            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=2.0),
-            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
-            # Deviation penalties.
-            "symmetry": ksim.SymmetryReward.create(
-                physics_model=physics_model,
-                joint_names=[k for k, _ in ZEROS],
-                joint_targets=[v for _, v in ZEROS],
-                scale=ksim.LinearScale(scale=3.0, bias=0.1),
-            ),
+            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=10.0),
+            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=4.0),
             # Gait rewards.
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
                 max_air_time=self.config.gait_period * self.config.air_time_percent,
                 max_ground_time=self.config.gait_period * (1.0 - self.config.air_time_percent),
                 contact_obs="feet_contact",
-                scale=1.0,
+                scale=5.0,
             ),
-            "upright": ksim.UprightReward(scale=ksim.QuadraticScale(scale=3.0)),
-            "foot_height": ksim.TargetHeightReward(
+            "upright": ksim.UprightReward(scale=3.0),
+            "foot_height": ksim.SparseTargetHeightReward(
+                contact_obs="feet_contact",
                 position_obs="feet_position",
                 height=self.config.max_foot_height,
-                scale=1.0,
+                scale=10.0,
             ),
             "foot_contact": ksim.ForcePenalty(
                 force_obs="feet_force",
@@ -610,11 +580,71 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "foot_intersection": ksim.IntersectionPenalty(
                 position_obs="feet_position",
                 min_distance=0.15,
-                scale=10.0,
+                scale=ksim.QuadraticScale(scale=10.0),
             ),
             # Normalization penalties.
-            "ctrl": ksim.TorquePenalty.create(model=physics_model, scale=1.0),
+            "ctrl": ksim.TorquePenalty.create(
+                model=physics_model,
+                scale=1.0,
+            ),
         }
+
+        # Joint deviation penalties.
+        rewards.update(
+            {
+                f"joint_deviation_{k}": ksim.JointDeviationPenalty.create(
+                    physics_model=physics_model,
+                    joint_names=names,
+                    joint_targets=[zeros[name] for name in names],
+                    scale=5.0,
+                )
+                for (k, names) in (
+                    ("shoulder_roll", ["dof_right_shoulder_roll_03", "dof_left_shoulder_roll_03"]),
+                    ("shoulder_yaw", ["dof_right_shoulder_yaw_02", "dof_left_shoulder_yaw_02"]),
+                    ("hip_roll", ["dof_right_hip_roll_03", "dof_left_hip_roll_03"]),
+                    ("hip_yaw", ["dof_right_hip_yaw_03", "dof_left_hip_yaw_03"]),
+                    ("wrist", ["dof_right_wrist_00", "dof_left_wrist_00"]),
+                )
+            }
+        )
+
+        # Pairwise symmetry rewards.
+        rewards.update(
+            {
+                f"symmetry_{k}": ksim.PairwiseSymmetryReward.create(
+                    physics_model=physics_model,
+                    left_joint_name=left_name,
+                    right_joint_name=right_name,
+                    left_zero=zeros[left_name],
+                    right_zero=zeros[right_name],
+                    flipped=flipped,
+                    scale=0.25,
+                )
+                for (k, right_name, left_name, flipped) in (
+                    ("shoulder", "dof_right_shoulder_pitch_03", "dof_left_shoulder_pitch_03", True),
+                    ("elbow", "dof_right_elbow_02", "dof_left_elbow_02", True),
+                    ("hip", "dof_right_hip_pitch_04", "dof_left_hip_pitch_04", True),
+                )
+            }
+        )
+
+        # Symmetry rewards.
+        rewards.update(
+            {
+                f"symmetry_{k}": ksim.SymmetryReward.create(
+                    physics_model=physics_model,
+                    joint_names=names,
+                    joint_targets=[zeros[name] for name in names],
+                    scale=0.25,
+                )
+                for (k, names) in (
+                    ("knee", ["dof_right_knee_04", "dof_left_knee_04"]),
+                    ("ankle", ["dof_right_ankle_02", "dof_left_ankle_02"]),
+                )
+            }
+        )
+
+        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
         return {
@@ -808,8 +838,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> Carry:
         return Carry(
-            actor_carry=jnp.zeros(shape=(2, self.config.depth, self.config.hidden_size)),
-            critic_carry=jnp.zeros(shape=(2, self.config.depth, self.config.hidden_size)),
+            actor_carry=jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+            critic_carry=jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
             lpf_params=ksim.LowPassFilterParams.initialize(len(ZEROS)),
         )
 
@@ -851,7 +881,7 @@ if __name__ == "__main__":
             num_envs=4096,
             batch_size=512,
             num_passes=4,
-            rollout_length_frames=24,
+            rollout_length_frames=96,
             # Simulation parameters.
             dt=0.004,
             ctrl_dt=0.02,
