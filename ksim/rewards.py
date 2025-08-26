@@ -30,6 +30,7 @@ __all__ = [
     "ReachabilityPenalty",
     "FeetAirTimeReward",
     "FeetGroundedAtRestReward",
+    "NoContactWhenMovingReward",
     "SparseTargetHeightReward",
     "MotionlessAtRestPenalty",
     "ForcePenalty",
@@ -1143,6 +1144,23 @@ class BodyHeightMarker(Marker):
             track_z=False,
             track_rotation=False,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class NoContactWhenMovingReward(Reward):
+    """Reward for having some bodies be close to a target height."""
+
+    contact_obs: str = attrs.field()
+    linvel_moving_threshold: float = attrs.field(default=0.5)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(30))
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
+        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
+        not_moving = not_moving_lin & not_moving_ang
+        contact_tcn: Array = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        contact_t = contact_tcn.any(axis=(-2, -1))
+        return jnp.where(not_moving, 0.0, jnp.where(contact_t, -1.0, 1.0))
 
 
 @attrs.define(frozen=True, kw_only=True)
