@@ -586,7 +586,7 @@ class TorquePenalty(Reward):
 class EnergyPenalty(TorquePenalty):
     def get_reward(self, trajectory: Trajectory) -> Array:
         ctrl = trajectory.ctrl / jnp.array(self.ctrl_scales)
-        vel = trajectory.qvel[..., 7:]
+        vel = trajectory.qvel[..., 6:]
         return jnp.abs(ctrl * vel).mean(axis=-1)
 
 
