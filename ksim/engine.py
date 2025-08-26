@@ -166,7 +166,12 @@ class MjxEngine(PhysicsEngine):
                         rng=rng_update,
                     )
                 else:
-                    torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng_update)
+                    torques = self.actuators.get_ctrl(
+                        action=ctrl,
+                        physics_data=data,
+                        curriculum_level=curriculum_level,
+                        rng=rng_update,
+                    )
                     actuator_state = prev_actuator_state
                 return torques, actuator_state
 
@@ -295,7 +300,12 @@ class MujocoEngine(PhysicsEngine):
                         rng=rng,
                     )
                 else:
-                    torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
+                    torques = self.actuators.get_ctrl(
+                        action=ctrl,
+                        physics_data=data,
+                        curriculum_level=curriculum_level,
+                        rng=rng,
+                    )
                 last_torques = torques
             else:
                 torques = last_torques

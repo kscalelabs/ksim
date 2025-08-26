@@ -284,6 +284,10 @@ class WalkingConfig(ksim.PPOConfig):
         value=math.pi / 4.0,
         help="The maximum yaw for the linear velocity command.",
     )
+    linear_velocity_accel: float = xax.field(
+        value=0.5,
+        help="The acceleration for the linear velocity command, in m/s^2.",
+    )
     linear_velocity_zero_prob: float = xax.field(
         value=0.2,
         help="The probability of the linear velocity command being zero.",
@@ -291,6 +295,10 @@ class WalkingConfig(ksim.PPOConfig):
     linear_velocity_switch_prob: float = xax.field(
         value=0.001,
         help="The probability of the linear velocity command being switched.",
+    )
+    angular_velocity_accel: float = xax.field(
+        value=0.5,
+        help="The acceleration for the angular velocity command, in rad/s^2.",
     )
     angular_velocity_range: tuple[float, float] = xax.field(
         value=(-0.2, 0.2),
@@ -490,12 +498,17 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 max_yaw=self.config.linear_velocity_max_yaw,
                 zero_prob=self.config.linear_velocity_zero_prob,
                 switch_prob=self.config.linear_velocity_switch_prob,
+                ctrl_dt=self.config.ctrl_dt,
+                linear_accel=self.config.linear_velocity_accel,
+                angular_accel=self.config.angular_velocity_accel,
             ),
             "angvel": ksim.AngularVelocityCommand(
                 min_vel=self.config.angular_velocity_range[0],
                 max_vel=self.config.angular_velocity_range[1],
                 zero_prob=self.config.angular_velocity_zero_prob,
                 switch_prob=self.config.angular_velocity_switch_prob,
+                ctrl_dt=self.config.ctrl_dt,
+                angular_accel=self.config.angular_velocity_accel,
             ),
         }
 
@@ -503,18 +516,12 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return {
             "stay_alive": ksim.StayAliveReward(scale=100.0),
             "upright": ksim.UprightReward(scale=5.0),
-            "linvel": ksim.LinearVelocityReward(
-                cmd="linvel",
-                scale=0.1,
-            ),
-            "angvel": ksim.AngularVelocityReward(
-                cmd="angvel",
-                scale=0.01,
-            ),
+            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=0.1),
+            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.01),
             "foot_airtime": ksim.FeetAirTimeReward(
                 ctrl_dt=self.config.ctrl_dt,
-                max_air_time=self.config.gait_period * 0.4,
-                max_ground_time=self.config.gait_period * 0.6,
+                gait_period=self.config.gait_period,
+                air_time_percent=0.4,
                 contact_obs="feet_contact",
                 scale=1.0,
             ),
@@ -530,7 +537,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 bias=100.0,
                 scale=-1e-1,
             ),
-            "motionless_at_rest": ksim.MotionlessAtRestPenalty(scale=-1e-2),
+            "motionless_at_rest": ksim.MotionlessAtRestPenalty(scale=1e-2),
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
