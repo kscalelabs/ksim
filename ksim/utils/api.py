@@ -73,7 +73,7 @@ async def get_mujoco_model_metadata(model_name: str, cache: bool = True) -> Meta
     # generated schema expects strings. Coerce known numeric fields to strings.
     try:
         actuator_map = raw_metadata.get("actuator_type_to_metadata", {})
-        for actuator_type, actuator_meta in actuator_map.items():
+        for _, actuator_meta in actuator_map.items():
             if not isinstance(actuator_meta, dict):
                 continue
             for key in ("max_torque", "armature", "frictionloss", "max_velocity"):
