@@ -551,27 +551,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         }
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
-        return {
-            "linvel": ksim.LinearVelocityCommand(
-                min_vel=self.config.min_linear_velocity,
-                max_vel=self.config.max_linear_velocity,
-                ctrl_dt=self.config.ctrl_dt,
-                linear_accel=self.config.linear_velocity_accel,
-                angular_accel=self.config.angular_velocity_accel,
-                max_yaw=self.config.linear_velocity_max_yaw,
-                zero_prob=self.config.linear_velocity_zero_prob,
-                backward_prob=self.config.linear_velocity_backward_prob,
-                switch_prob=self.config.linear_velocity_switch_prob,
-            ),
-            "angvel": ksim.AngularVelocityCommand(
-                min_vel=self.config.min_angular_velocity,
-                max_vel=self.config.max_angular_velocity,
-                ctrl_dt=self.config.ctrl_dt,
-                angular_accel=self.config.angular_velocity_accel,
-                zero_prob=self.config.angular_velocity_zero_prob,
-                switch_prob=self.config.angular_velocity_switch_prob,
-            ),
-        }
+        return {}
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Reward]:
         zeros = {k: v for k, v in ZEROS}
@@ -586,9 +566,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 contact_obs="feet_contact",
                 scale=1.0,
             ),
-            "no_contact_when_moving": ksim.NoContactWhenMovingReward(
-                contact_obs="feet_contact",
-                scale=ksim.LinearScale.from_endpoints(10.0, 0.0),
+            "upright": ksim.UprightReward(
+                scale=1.0,
             ),
             "foot_height": ksim.SparseTargetHeightReward(
                 contact_obs="feet_contact",
@@ -682,10 +661,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return Model(
             params.key,
             physics_model=params.physics_model,
-            num_actor_inputs=49,
+            num_actor_inputs=46,
             num_actor_outputs=len(ZEROS),
-            num_critic_inputs=463,
-            min_std=0.01,
+            num_critic_inputs=460,
+            min_std=0.0001,
             max_std=1.0,
             var_scale=self.config.var_scale,
             hidden_size=self.config.hidden_size,
@@ -712,21 +691,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         proj_grav_3 = observations["noisy_imu_projected_gravity"]
         imu_gyro_3 = observations["noisy_imu_gyro"]
 
-        # Command tensors.
-        linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
-        angvel_cmd: ksim.AngularVelocityCommandValue = commands["angvel"]
-
-        # Stacks into tensors.
-        linvel_cmd_2 = jnp.stack([linvel_cmd.target_vel, linvel_cmd.target_yaw], axis=-1)
-        angvel_cmd_1 = jnp.stack([angvel_cmd.target_vel], axis=-1)
-
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n / 10.0,  # NUM_JOINTS
             proj_grav_3,  # 3
             imu_gyro_3,  # 3
-            linvel_cmd_2,  # 2
-            angvel_cmd_1,  # 1
         ]
 
         obs_n = jnp.concatenate(obs, axis=-1)
@@ -760,14 +729,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # Flattens the last two dimensions.
         feet_force_obs_6 = feet_force_obs_23.reshape(*feet_force_obs_23.shape[:-2], 6)
 
-        # Command tensors.
-        linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
-        angvel_cmd: ksim.AngularVelocityCommandValue = commands["angvel"]
-
-        # Stacks into tensors.
-        linvel_cmd_2 = jnp.stack([linvel_cmd.target_vel, linvel_cmd.target_yaw], axis=-1)
-        angvel_cmd_1 = jnp.stack([angvel_cmd.target_vel], axis=-1)
-
         obs_n = jnp.concatenate(
             [
                 dh_joint_pos_j,  # NUM_JOINTS
@@ -785,8 +746,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 feet_contact_2,
                 feet_height_2,
                 feet_force_obs_6 / 100.0,
-                linvel_cmd_2,
-                angvel_cmd_1,
             ],
             axis=-1,
         )
@@ -824,7 +783,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         transition_ppo_variables = ksim.PPOVariables(
             log_probs=log_probs,
             values=value.squeeze(-1),
-            entropy=actor_dist.entropy(),
+            # entropy=actor_dist.entropy(),
         )
 
         next_carry = jax.tree.map(

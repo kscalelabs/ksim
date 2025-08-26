@@ -94,18 +94,6 @@ def main() -> None:
         command: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
-        x_vel = command[..., 0]
-        y_vel = command[..., 1]
-        ang_vel = command[..., 2]
-
-        # Converts to the expected command structure.
-        xy_vel = jnp.stack([x_vel, y_vel], axis=-1)
-        cmd_vel = jnp.linalg.norm(xy_vel, axis=-1)
-        cmd_yaw = jnp.arctan2(y_vel, x_vel)
-
-        linvel_cmd_2 = jnp.stack([cmd_vel, cmd_yaw], axis=-1)
-        angvel_cmd_1 = jnp.stack([ang_vel], axis=-1)
-
         # Call the model.
         obs = jnp.concatenate(
             [
@@ -113,8 +101,6 @@ def main() -> None:
                 joint_angular_velocities / 10.0,
                 projected_gravity,
                 gyroscope,
-                linvel_cmd_2,
-                angvel_cmd_1,
             ],
             axis=-1,
         )
