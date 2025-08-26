@@ -473,14 +473,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
         return {
             "linear_push": ksim.LinearPushEvent(
-                linvel=2.0,
+                linvel=3.0,
                 vel_range=(0.0, 1.0),
                 interval_range=(0.5, 2.0),
+                scale=ksim.LinearScale.from_endpoints(0.25, 1.0),
             ),
             "angular_push": ksim.AngularPushEvent(
-                angvel=math.radians(180.0),
+                angvel=math.radians(360.0),
                 vel_range=(0.0, 1.0),
                 interval_range=(0.5, 2.0),
+                scale=ksim.LinearScale.from_endpoints(0.25, 1.0),
             ),
         }
 
@@ -493,7 +495,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
         return {
-            "joint_position": ksim.JointPositionObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(2))),
+            "joint_position": ksim.JointPositionObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(5))),
             "joint_velocity": ksim.JointVelocityObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(30))),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
@@ -569,6 +571,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "upright": ksim.UprightReward(
                 scale=1.0,
             ),
+            "motionless": ksim.StandFrozenReward(
+                scale=1.0,
+            ),
             "foot_height": ksim.SparseTargetHeightReward(
                 contact_obs="feet_contact",
                 position_obs="feet_position",
@@ -588,6 +593,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             # Normalization penalties.
             "ctrl": ksim.TorquePenalty.create(
+                model=physics_model,
+                scale=ksim.LinearScale(scale=1.0),
+            ),
+            "energy": ksim.EnergyPenalty.create(
                 model=physics_model,
                 scale=ksim.LinearScale(scale=1.0),
             ),

@@ -18,9 +18,11 @@ __all__ = [
     "SmallJointJerkReward",
     "AvoidLimitsPenalty",
     "TorquePenalty",
+    "EnergyPenalty",
     "JointDeviationPenalty",
     "FlatBodyReward",
     "PositionTrackingReward",
+    "StandFrozenReward",
     "UprightReward",
     "NoRollReward",
     "LinkAccelerationPenalty",
@@ -581,6 +583,14 @@ class TorquePenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class EnergyPenalty(TorquePenalty):
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        ctrl = trajectory.ctrl / jnp.array(self.ctrl_scales)
+        vel = trajectory.qvel[..., 7:]
+        return jnp.abs(ctrl * vel).mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class JointDeviationPenalty(Reward):
     """Penalty for joint deviations from target positions."""
 
@@ -732,13 +742,45 @@ class PositionTrackingReward(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class StandFrozenReward(Reward):
+    """Reward for staying frozen."""
+
+    angvel_scale: float = attrs.field(default=0.25)
+    angvel_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    angvel_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    linvel_scale: float = attrs.field(default=0.25)
+    linvel_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    linvel_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
+        linvel = trajectory.qvel[..., 0:3]
+        angvel = trajectory.qvel[..., 3:6]
+        linvel_norm = jnp.linalg.norm(linvel, axis=-1)
+        angvel_norm = jnp.linalg.norm(angvel, axis=-1)
+        return {
+            "linvel": exp_kernel_with_penalty(
+                linvel_norm,
+                self.linvel_scale,
+                self.linvel_sq_scale,
+                self.linvel_abs_scale,
+            ),
+            "angvel": exp_kernel_with_penalty(
+                angvel_norm,
+                self.angvel_scale,
+                self.angvel_sq_scale,
+                self.angvel_abs_scale,
+            ),
+        }
+
+
+@attrs.define(frozen=True, kw_only=True)
 class UprightReward(Reward):
     """Reward for staying upright."""
 
     angvel_scale: float = attrs.field(default=0.25)
-    pose_scale: float = attrs.field(default=0.25)
     angvel_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     angvel_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    pose_scale: float = attrs.field(default=0.25)
     pose_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     pose_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
 
