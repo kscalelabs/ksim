@@ -76,6 +76,7 @@ class PositionActuators(Actuators):
         metadata: Metadata,
         action_noise: Noise | None = None,
         torque_noise: Noise | None = None,
+        action_scale: float = 1.0,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
@@ -120,6 +121,8 @@ class PositionActuators(Actuators):
         self.action_noise = NoNoise() if action_noise is None else action_noise
         self.torque_noise = NoNoise() if torque_noise is None else torque_noise
 
+        self.action_scale = action_scale
+
         if any(self.kps < 0) or any(self.kds < 0):
             raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
         if any(self.kps == 0) or any(self.kds == 0):
@@ -131,12 +134,14 @@ class PositionActuators(Actuators):
 
     def get_ctrl(self, action: Array, physics_data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         """Get the control signal from the (position) action vector."""
+        scaled = action * self.action_scale
+
         pos_rng, tor_rng = jax.random.split(rng)
         current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
         current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
 
         # Add position and velocity noise
-        target_position = self.action_noise.add_noise(action, curriculum_level, pos_rng)
+        target_position = self.action_noise.add_noise(scaled, curriculum_level, pos_rng)
         target_velocity = jnp.zeros_like(action)
 
         pos_delta = target_position - current_pos
