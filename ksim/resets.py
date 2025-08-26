@@ -11,9 +11,9 @@ __all__ = [
     "get_xy_position_reset",
     "RandomHeadingReset",
     "RandomHeightReset",
+    "RandomPitchRollReset",
 ]
 
-import functools
 import logging
 from abc import ABC, abstractmethod
 
@@ -26,12 +26,7 @@ from jaxtyping import Array, PRNGKeyArray
 from mujoco import mjx
 
 from ksim.types import PhysicsData, PhysicsModel
-from ksim.utils.mujoco import (
-    get_joint_names_in_order,
-    get_position_limits,
-    slice_update,
-    update_data_field,
-)
+from ksim.utils.mujoco import get_joint_names_in_order, get_position_limits, slice_update, update_data_field
 from ksim.utils.priors import MotionReferenceData
 
 logger = logging.getLogger(__name__)
@@ -44,13 +39,6 @@ class Reset(ABC):
     @abstractmethod
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         """Resets the environment."""
-
-    def get_name(self) -> str:
-        return xax.camelcase_to_snakecase(self.__class__.__name__)
-
-    @functools.cached_property
-    def reset_name(self) -> str:
-        return self.get_name()
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -136,14 +124,22 @@ class RandomJointPositionReset(Reset):
     """Resets the joint positions of the robot to random values."""
 
     scale: float = attrs.field(default=0.01)
+    scale_by_curriculum: bool = attrs.field(default=True)
     zeros: tuple[float, ...] | None = attrs.field(default=None)
+    mins: tuple[float, ...] | None = attrs.field(default=None)
+    maxs: tuple[float, ...] | None = attrs.field(default=None)
 
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
-        pos = jax.random.uniform(rng, data.qpos[7:].shape, minval=-self.scale, maxval=self.scale) * curriculum_level
+        pos = jax.random.uniform(rng, data.qpos[7:].shape, minval=-self.scale, maxval=self.scale)
+        if self.scale_by_curriculum:
+            pos = pos * curriculum_level
         if self.zeros is not None:
             pos = pos + jnp.array(self.zeros)
-        new_qpos = data.qpos[7:] + pos
-        new_qpos = jnp.concatenate([data.qpos[:7], new_qpos])
+        if self.mins is not None:
+            pos = jnp.clip(pos, min=jnp.array(self.mins))
+        if self.maxs is not None:
+            pos = jnp.clip(pos, max=jnp.array(self.maxs))
+        new_qpos = jnp.concatenate([data.qpos[:7], pos])
         data = update_data_field(data, "qpos", new_qpos)
         return data
 
@@ -153,19 +149,28 @@ class RandomJointPositionReset(Reset):
         physics_model: PhysicsModel,
         zeros: dict[str, float] | None = None,
         scale: float = 0.01,
+        scale_by_curriculum: bool = True,
     ) -> "RandomJointPositionReset":
         joint_names = get_joint_names_in_order(physics_model)[1:]  # Remove the first joint (root)
+        joint_limits = get_position_limits(physics_model)
         zeros_values = [0.0 for _ in range(len(joint_names))]
+        mins = [joint_limits[name][0] for name in joint_names]
+        maxs = [joint_limits[name][1] for name in joint_names]
         if zeros is not None:
-            joint_limits = get_position_limits(physics_model)
             for name, value in zeros.items():
                 if (index := joint_names.index(name)) < 0:
                     raise ValueError(f"Joint {name} not found in model. Choices are: {joint_names}")
-                joint_min, joint_max = joint_limits[name]
+                joint_min, joint_max = mins[index], maxs[index]
                 if value < joint_min or value > joint_max:
                     raise ValueError(f"Zero value {value} for joint {name} is out of range {joint_min}, {joint_max}")
                 zeros_values[index] = value
-        return cls(scale=scale, zeros=tuple(zeros_values))
+        return cls(
+            scale=scale,
+            zeros=tuple(zeros_values),
+            mins=tuple(mins),
+            maxs=tuple(maxs),
+            scale_by_curriculum=scale_by_curriculum,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -173,11 +178,13 @@ class RandomJointVelocityReset(Reset):
     """Resets the joint velocities of the robot to random values."""
 
     scale: float = attrs.field(default=0.01)
+    scale_by_curriculum: bool = attrs.field(default=True)
 
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
-        noise = jax.random.uniform(rng, data.qvel[6:].shape, minval=-self.scale, maxval=self.scale) * curriculum_level
-        new_qvel = data.qvel[6:] + noise
-        new_qvel = jnp.concatenate([data.qvel[:6], new_qvel])
+        noise = jax.random.uniform(rng, data.qvel[6:].shape, minval=-self.scale, maxval=self.scale)
+        if self.scale_by_curriculum:
+            noise = noise * curriculum_level
+        new_qvel = jnp.concatenate([data.qvel[:6], noise])
         data = update_data_field(data, "qvel", new_qvel)
         return data
 
@@ -261,7 +268,7 @@ def get_xy_position_reset(
             raise ValueError("No heightfield or plane geom found in the model. MuJoCo scene missing floor!")
         floor_idx = plane_indices[0]
         x_bound, y_bound = 5.0, 5.0
-        z_pos = physics_model.geom_pos[floor_idx][2]
+        z_pos = float(physics_model.geom_pos[floor_idx][2])
         logger.info("Using plane based floor with bounds: %s, %s, %s", x_bound, y_bound, z_pos)
         padded_bounds = compute_padded_bounds(x_bound, y_bound, x_edge_padding, y_edge_padding)
         return PlaneXYPositionReset(
@@ -305,7 +312,8 @@ class RandomHeadingReset(Reset):
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         angle = jax.random.uniform(rng, data.qpos.shape[:-1], minval=-jnp.pi, maxval=jnp.pi)
         euler = jnp.stack([jnp.zeros_like(angle), jnp.zeros_like(angle), angle], axis=-1)
-        quat = xax.euler_to_quat(euler)
+        new_quat = xax.euler_to_quat(euler)
+        quat = xax.quat_mul(data.qpos[..., 3:7], new_quat)
         qpos = slice_update(data, "qpos", slice(3, 7), quat)
         data = update_data_field(data, "qpos", qpos)
         return data
@@ -322,5 +330,25 @@ class RandomHeightReset(Reset):
         min_height, max_height = self.range
         new_z = jax.random.uniform(rng, qpos[..., 2:3].shape, minval=min_height, maxval=max_height)
         qpos = slice_update(data, "qpos", slice(2, 3), qpos[..., 2:3] + new_z)
+        data = update_data_field(data, "qpos", qpos)
+        return data
+
+
+@attrs.define(frozen=True, kw_only=True)
+class RandomPitchRollReset(Reset):
+    """Resets the pitch and roll of the robot to a random value."""
+
+    pitch_range: tuple[float, float] = attrs.field(default=(-0.1, 0.1))
+    roll_range: tuple[float, float] = attrs.field(default=(-0.1, 0.1))
+
+    def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
+        qpos = data.qpos
+        min_pitch, max_pitch = self.pitch_range
+        min_roll, max_roll = self.roll_range
+        pitch = jax.random.uniform(rng, qpos[..., 0].shape, minval=min_pitch, maxval=max_pitch)
+        roll = jax.random.uniform(rng, qpos[..., 0].shape, minval=min_roll, maxval=max_roll)
+        quat = xax.euler_to_quat(jnp.stack([roll, pitch, jnp.zeros_like(pitch)], axis=-1))
+        new_quat = xax.quat_mul(data.qpos[..., 3:7], quat)
+        qpos = slice_update(data, "qpos", slice(3, 7), new_quat)
         data = update_data_field(data, "qpos", qpos)
         return data

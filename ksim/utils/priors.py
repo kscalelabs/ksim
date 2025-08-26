@@ -128,7 +128,7 @@ class MotionReferenceData:
         # Reconstruct cartesian poses dictionary
         body_ids = data["cartesian_pose_body_ids"]
         cartesian_poses_stacked = data["cartesian_poses_stacked"]
-        cartesian_poses: xax.FrozenDict[int, xax.HashableArray] = xax.FrozenDict(
+        cartesian_poses: xax.FrozenDict[int, xax.HashableArray] = xax.freeze_dict(
             {
                 int(body_id): xax.HashableArray(jnp.array(cartesian_poses_stacked[i]))
                 for i, body_id in enumerate(body_ids)
@@ -352,9 +352,7 @@ def get_reference_cartesian_poses(
     body_ids = get_body_ids(model, mappings)
 
     total_frames = len(root.layout()[0][0].Keyframes)
-    reference_motion: xax.FrozenDict[int, np.ndarray] = xax.FrozenDict(
-        {body_id: np.zeros((total_frames, 3)) for body_id in body_ids}
-    )
+    reference_motion = xax.freeze_dict({body_id: np.zeros((total_frames, 3)) for body_id in body_ids})
 
     for frame in range(total_frames):
         root.loadPose(frame)

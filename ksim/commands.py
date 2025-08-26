@@ -4,17 +4,23 @@ __all__ = [
     "Command",
     "FloatVectorCommand",
     "IntVectorCommand",
-    "JoystickCommand",
+    "LinearVelocityCommandValue",
     "LinearVelocityCommand",
+    "AngularVelocityCommandValue",
+    "AngularVelocityCommand",
     "StartPositionCommand",
     "StartQuaternionCommand",
-    "PositionCommand",
+    "CartesianCoordinateCommand",
+    "SinusoidalGaitCommand",
+    "SinusoidalGaitCommandValue",
+    "BaseHeightCommand",
+    "JointPositionCommand",
+    "JointPositionCommandValue",
 ]
 
-import functools
 import logging
-import math
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Collection, Self
 
 import attrs
@@ -22,10 +28,10 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import xax
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
-from ksim.utils.validators import sample_probs_validator
+from ksim.utils.mujoco import get_joint_names_in_order
 from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
@@ -41,7 +47,7 @@ class Command(ABC):
         physics_data: PhysicsData,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> Array:
+    ) -> PyTree:
         """Returns the initial command.
 
         Args:
@@ -57,11 +63,11 @@ class Command(ABC):
     @abstractmethod
     def __call__(
         self,
-        prev_command: Array,
+        prev_command: PyTree,
         physics_data: PhysicsData,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> Array:
+    ) -> PyTree:
         """Updates the command.
 
         Args:
@@ -75,24 +81,16 @@ class Command(ABC):
             The command to perform, with shape (command_dim).
         """
 
-    def get_markers(self) -> Collection[Marker]:
+    def get_markers(self, name: str) -> Collection[Marker]:
         """Get the visualizations for the command.
 
         Args:
-            command: The command to get the visualizations for.
+            name: The name of the command.
 
         Returns:
             The visualizations to add to the scene.
         """
         return []
-
-    def get_name(self) -> str:
-        """Get the name of the command."""
-        return xax.camelcase_to_snakecase(self.__class__.__name__)
-
-    @functools.cached_property
-    def command_name(self) -> str:
-        return self.get_name()
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -101,10 +99,13 @@ class FloatVectorCommand(Command):
 
     The commands update to some new commands with some probability. They can
     be used to represent any vector, such as target position, velocity, etc.
+
+    The zero_prob can be used to set the command to zero with some probability.
     """
 
     ranges: tuple[tuple[float, float], ...] = attrs.field()
     switch_prob: float = attrs.field(default=0.0)
+    zero_prob: float = attrs.field(default=0.0)
 
     def initial_command(
         self,
@@ -113,7 +114,10 @@ class FloatVectorCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         ranges = jnp.array(self.ranges)  # (N, 2)
-        return jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
+        zero_mask = jax.random.bernoulli(rng, self.zero_prob)
+        return jnp.where(
+            zero_mask, 0.0, jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
+        )
 
     def __call__(
         self,
@@ -130,10 +134,14 @@ class FloatVectorCommand(Command):
 
 @attrs.define(frozen=True, kw_only=True)
 class IntVectorCommand(Command):
-    """Samples an integer vector uniformly within some bounding box."""
+    """Samples an integer vector uniformly within some bounding box.
+
+    The zero_prob can be used to set the command to zero with some probability.
+    """
 
     ranges: tuple[tuple[int, int], ...] = attrs.field()
     switch_prob: float = attrs.field(default=0.0)
+    zero_prob: float = attrs.field(default=0.0)
 
     def initial_command(
         self,
@@ -142,7 +150,10 @@ class IntVectorCommand(Command):
         rng: PRNGKeyArray,
     ) -> Array:
         ranges = jnp.array(self.ranges)  # (N, 2)
-        return jax.random.randint(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1] + 1)
+        zero_mask = jax.random.bernoulli(rng, self.zero_prob)
+        return jnp.where(
+            zero_mask, 0.0, jax.random.randint(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1] + 1)
+        )
 
     def __call__(
         self,
@@ -201,176 +212,15 @@ class StartQuaternionCommand(Command):
         return prev_command
 
 
-@attrs.define(kw_only=True)
-class JoystickCommandMarker(Marker):
-    command_name: str = attrs.field()
-    radius: float = attrs.field(default=0.05)
-    size: float = attrs.field(default=0.03)
-    arrow_len: float = attrs.field(default=0.25)
-    height: float = attrs.field(default=0.5)
-
-    def update(self, trajectory: Trajectory) -> None:
-        """Visualizes the joystick command target position and orientation."""
-        cmd = trajectory.command[self.command_name]
-        x, y, yaw = cmd[..., -3].item(), cmd[..., -2].item(), cmd[..., -1].item()
-        cmd_idx = cmd[..., :7].argmax().item()
-
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
-        self.scale = (self.size, self.size, self.arrow_len)
-        self.pos = (x, y, self.height)
-        self.orientation = self.quat_from_direction((math.cos(yaw), math.sin(yaw), 0.0))
-        self.rgba = [
-            (1.0, 1.0, 1.0, 1.0),  # Stand still (white)
-            (0.0, 1.0, 0.0, 1.0),  # Walk forward (green)
-            (0.0, 0.0, 1.0, 1.0),  # Run forward (blue)
-            (1.0, 0.0, 0.0, 1.0),  # Walk backward (red)
-            (1.0, 0.0, 1.0, 1.0),  # Turn left (purple)
-            (0.0, 0.0, 0.0, 1.0),  # Turn right (black)
-            (0.0, 1.0, 1.0, 1.0),  # Strafe left (cyan)
-            (1.0, 1.0, 0.0, 1.0),  # Strafe right (yellow)
-        ][cmd_idx]
-
-    @classmethod
-    def get(
-        cls,
-        command_name: str,
-        radius: float = 0.05,
-        size: float = 0.03,
-        arrow_len: float = 0.25,
-        rgba: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 0.8),
-        height: float = 0.5,
-    ) -> Self:
-        return cls(
-            command_name=command_name,
-            target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_SPHERE,  # pyright: ignore[reportAttributeAccessIssue]
-            scale=(radius, radius, radius),
-            size=size,
-            arrow_len=arrow_len,
-            radius=radius,
-            rgba=rgba,
-            height=height,
-            track_x=False,
-            track_y=False,
-            track_z=True,
-            track_rotation=False,
-        )
-
-
-@attrs.define(frozen=True, kw_only=True)
-class JoystickCommand(Command):
-    """Provides joystick-like controls for the robot.
-
-    Commands are encoded as one-hot vectors. This command should be paired with
-    the JoystickReward. The robot is expected to always start aligned with the
-    forward X direction of the world frame - for example, we reward the robot
-    for moving forward along the global X axis.
-
-    Command mapping:
-
-        0 = stand still
-        1 = walk forward
-        2 = run forward
-        3 = walk backward
-        4 = turn left
-        5 = turn right
-        6 = strafe left
-        7 = strafe right
-
-    The joystick command is composed of two parts:
-
-    - A one-hot vector of length 8, which is the command to take.
-    - A 3 dimensional vector representing the target X, Y and yaw at some time.
-    """
-
-    walk_speed: float = attrs.field()
-    run_speed: float = attrs.field()
-    strafe_speed: float = attrs.field()
-    rotation_speed: float = attrs.field()
-    ctrl_dt: float = attrs.field()
-    sample_probs: tuple[float, float, float, float, float, float, float, float] = attrs.field(
-        default=(0.1, 0.3, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1),
-        validator=sample_probs_validator,
-    )
-    marker_z_offset: float = attrs.field(default=0.5)
-    switch_prob: float = attrs.field(default=0.005)
-
-    def _get_position_vector(self, physics_data: PhysicsData) -> Array:
-        xpos = physics_data.qpos[..., 0]
-        ypos = physics_data.qpos[..., 1]
-
-        quat = physics_data.qpos[..., 3:7]
-        euler = xax.quat_to_euler(quat)
-        yaw = euler[..., 2]
-
-        return jnp.array([xpos, ypos, yaw])
-
-    def _update_position_vector(self, command: Array) -> Array:
-        command_ohe, position_vector = command[..., :8], command[..., 8:]
-
-        command_targets = jnp.array(
-            [
-                [0.0, 0.0, 0.0],  # Stand still
-                [self.walk_speed, 0.0, 0.0],  # Walk forward
-                [self.run_speed, 0.0, 0.0],  # Run forward
-                [-self.walk_speed, 0.0, 0.0],  # Walk backward
-                [0.0, 0.0, self.rotation_speed],  # Turn left
-                [0.0, 0.0, -self.rotation_speed],  # Turn right
-                [0.0, self.strafe_speed, 0.0],  # Strafe left
-                [0.0, -self.strafe_speed, 0.0],  # Strafe right
-            ]
-        )
-
-        # Rotate the command target by the current yaw.
-        cmd_x, cmd_y, cmd_yaw = command_targets[..., 0], command_targets[..., 1], command_targets[..., 2]
-        yaw = position_vector[..., 2]
-        cmd_x_rot = cmd_x * jnp.cos(yaw) - cmd_y * jnp.sin(yaw)
-        cmd_y_rot = cmd_x * jnp.sin(yaw) + cmd_y * jnp.cos(yaw)
-        cmd_yaw_rot = cmd_yaw
-        command_targets = jnp.stack([cmd_x_rot, cmd_y_rot, cmd_yaw_rot], axis=-1)
-
-        # Add to the position vector.
-        vel_tgt = jnp.einsum("...i,ij->...j", command_ohe, command_targets) * self.ctrl_dt
-        return jnp.concatenate([command_ohe, position_vector + vel_tgt], axis=-1)
-
-    def initial_command(
-        self,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        command = jax.random.choice(rng, jnp.arange(len(self.sample_probs)), p=jnp.array(self.sample_probs))
-        command_ohe = jax.nn.one_hot(command, num_classes=8)
-        position_vector = self._get_position_vector(physics_data)
-        return jnp.concatenate([command_ohe, position_vector], axis=-1)
-
-    def __call__(
-        self,
-        prev_command: Array,
-        physics_data: PhysicsData,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return self._update_position_vector(jnp.where(switch_mask, new_commands, prev_command))
-
-    def get_markers(self) -> Collection[Marker]:
-        """Get the visualizations for the command.
-
-        Args:
-            command: The command to get the visualizations for.
-
-        Returns:
-            The visualizations to add to the scene.
-        """
-        return [
-            JoystickCommandMarker.get(
-                self.command_name,
-                height=self.marker_z_offset,
-            )
-        ]
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class LinearVelocityCommandValue:
+    vel: Array
+    yaw: Array
+    xvel: Array
+    yvel: Array
+    target_vel: Array
+    target_yaw: Array
 
 
 @attrs.define(kw_only=True)
@@ -385,21 +235,22 @@ class LinearVelocityCommandMarker(Marker):
     zero_threshold: float = attrs.field(default=1e-4)
 
     def update(self, trajectory: Trajectory) -> None:
-        cmd = trajectory.command[self.command_name]
-        vx, vy = float(cmd[0]), float(cmd[1])
-        speed = (vx * vx + vy * vy) ** 0.5
+        cmd: LinearVelocityCommandValue = trajectory.command[self.command_name]
+        vx = float(cmd.xvel)
+        vy = float(cmd.yvel)
+        speed = float(cmd.vel)
 
         self.pos = (0.0, 0.0, self.height)
 
         # Always show an arrow with base_length plus scaling by speed
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
         arrow_length = self.base_length + self.arrow_scale * speed
         self.scale = (self.size, self.size, arrow_length)
 
         # If command is near-zero, show grey arrow pointing +X.
-        if speed < self.zero_threshold:
+        if abs(speed) < self.zero_threshold:
             self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
-            self.rgba = (0.8, 0.8, 0.8, 0.8)
+            self.rgba = (1.0, 1.0, 1.0, 0.2)
         else:
             self.orientation = self.quat_from_direction((vx, vy, 0.0))
             self.rgba = (0.2, 0.8, 0.2, 0.8)
@@ -416,7 +267,7 @@ class LinearVelocityCommandMarker(Marker):
         return cls(
             command_name=command_name,
             target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_ARROW,
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,  # pyright: ignore[reportAttributeAccessIssue]
             scale=(0.03, 0.03, base_length),
             arrow_scale=arrow_scale,
             height=height,
@@ -435,43 +286,213 @@ class LinearVelocityCommand(Command):
     any command.
     """
 
-    x_range: tuple[float, float] = attrs.field()
-    y_range: tuple[float, float] = attrs.field()
-    x_zero_prob: float = attrs.field(default=0.0)
-    y_zero_prob: float = attrs.field(default=0.0)
+    min_vel: float = attrs.field()
+    max_vel: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    linear_accel: float = attrs.field()
+    angular_accel: float = attrs.field()
+    max_yaw: float = attrs.field(default=0.0)
+    zero_prob: float = attrs.field(default=0.0)
+    backward_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
-    vis_height: float = attrs.field(default=1.0)
-    vis_scale: float = attrs.field(default=0.05)
+    vis_height: float = attrs.field(default=0.5)
 
-    def initial_command(self, physics_data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
-        (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
-        x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
-        y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
-        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
-        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
-        return jnp.concatenate(
-            [
-                jnp.where(x_zero_mask, 0.0, x),
-                jnp.where(y_zero_mask, 0.0, y),
-            ]
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+        prev_command: LinearVelocityCommandValue | None = None,
+    ) -> LinearVelocityCommandValue:
+        rng_vel, rng_yaw, rng_zero, rng_backward = jax.random.split(rng, 4)
+
+        # Gets the current linear velocity in the robot's frame.
+        if prev_command is None:
+            linvel = physics_data.qvel[..., :3]
+            linvel = xax.rotate_vector_by_quat(linvel, physics_data.qpos[..., 3:7], inverse=True)
+            xy = linvel[..., :2]
+            cur_vel = jnp.linalg.norm(xy, axis=-1)
+            x = xy[..., 0]
+            y = xy[..., 1]
+            cur_yaw = jnp.arctan2(y, x)
+        else:
+            cur_vel = prev_command.vel
+            cur_yaw = prev_command.yaw
+
+        trg_vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
+        trg_yaw = jax.random.uniform(rng_yaw, (), minval=-self.max_yaw, maxval=self.max_yaw)
+
+        zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
+        backward_mask = jax.random.bernoulli(rng_backward, self.backward_prob)
+        trg_vel = jnp.where(zero_mask, 0.0, jnp.where(backward_mask, -trg_vel, trg_vel))
+        trg_yaw = jnp.where(zero_mask, 0.0, trg_yaw)
+
+        xvel = cur_vel * jnp.cos(cur_yaw)
+        yvel = cur_vel * jnp.sin(cur_yaw)
+
+        return LinearVelocityCommandValue(
+            target_vel=trg_vel,
+            target_yaw=trg_yaw,
+            vel=cur_vel,
+            yaw=cur_yaw,
+            xvel=xvel,
+            yvel=yvel,
+        )
+
+    def update_command(self, prev_command: LinearVelocityCommandValue) -> LinearVelocityCommandValue:
+        cur_vel = prev_command.vel
+        cur_yaw = prev_command.yaw
+        cur_target_vel = prev_command.target_vel
+        cur_target_yaw = prev_command.target_yaw
+
+        # Move the current velocity command towards the target velocity.
+        new_vel = cur_vel + (cur_target_vel - cur_vel).clip(-self.linear_accel, self.linear_accel) * self.ctrl_dt
+        new_yaw = cur_yaw + (cur_target_yaw - cur_yaw).clip(-self.angular_accel, self.angular_accel) * self.ctrl_dt
+        new_xvel = new_vel * jnp.cos(new_yaw)
+        new_yvel = new_vel * jnp.sin(new_yaw)
+
+        return LinearVelocityCommandValue(
+            target_vel=cur_target_vel,
+            target_yaw=cur_target_yaw,
+            vel=new_vel,
+            yaw=new_yaw,
+            xvel=new_xvel,
+            yvel=new_yvel,
         )
 
     def __call__(
-        self, prev_command: Array, physics_data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
-    ) -> Array:
+        self,
+        prev_command: LinearVelocityCommandValue,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> LinearVelocityCommandValue:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
+        updated_command = self.update_command(prev_command)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b, prev_command)
+        return jax.tree_util.tree_map(
+            lambda x, y: jnp.where(switch_mask, y, x),
+            updated_command,
+            new_commands,
+        )
 
-    def get_markers(self) -> Collection[Marker]:
-        return [
-            LinearVelocityCommandMarker.get(
-                command_name=self.command_name,
-                height=0.5,
-            )
-        ]
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [LinearVelocityCommandMarker.get(command_name=name, height=self.vis_height)]
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class AngularVelocityCommandValue:
+    vel: Array
+    target_vel: Array
+
+
+@attrs.define(kw_only=True)
+class AngularVelocityCommandMarker(Marker):
+    """Visualises the planar (x,y) linear velocity command."""
+
+    command_name: str = attrs.field()
+    size: float = attrs.field(default=0.03)
+    arrow_scale: float = attrs.field(default=0.3)
+    height: float = attrs.field(default=0.5)
+    base_length: float = attrs.field(default=0.15)
+    zero_threshold: float = attrs.field(default=1e-4)
+
+    def update(self, trajectory: Trajectory) -> None:
+        cmd: AngularVelocityCommandValue = trajectory.command[self.command_name]
+        speed = float(cmd.vel)
+
+        self.pos = (0.0, 0.0, self.height)
+
+        # Always show an arrow with base_length plus scaling by speed
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
+        arrow_length = self.base_length + self.arrow_scale * speed
+        self.scale = (self.size, self.size, arrow_length)
+
+        # If command is near-zero, show grey arrow pointing +X.
+        if abs(speed) < self.zero_threshold:
+            self.orientation = self.quat_from_direction((0.0, 0.0, 1.0))
+            self.rgba = (1.0, 1.0, 1.0, 0.2)
+        else:
+            self.orientation = self.quat_from_direction((0.0, 0.0, speed))
+            self.rgba = (0.2, 0.8, 0.2, 0.8)
+
+    @classmethod
+    def get(
+        cls,
+        command_name: str,
+        *,
+        arrow_scale: float = 0.3,
+        height: float = 0.5,
+        base_length: float = 0.15,
+    ) -> Self:
+        return cls(
+            command_name=command_name,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(0.03, 0.03, base_length),
+            arrow_scale=arrow_scale,
+            height=height,
+            base_length=base_length,
+            track_rotation=True,
+        )
+
+
+@attrs.define(frozen=True)
+class AngularVelocityCommand(Command):
+    max_vel: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    angular_accel: float = attrs.field()
+    min_vel: float = attrs.field(default=0.0)
+    zero_prob: float = attrs.field(default=0.0)
+    switch_prob: float = attrs.field(default=0.0)
+    vis_height: float = attrs.field(default=0.5)
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> AngularVelocityCommandValue:
+        rng_vel, rng_flip, rng_zero = jax.random.split(rng, 3)
+
+        trg_vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
+        trg_vel = jnp.where(jax.random.bernoulli(rng_flip, 0.5), -trg_vel, trg_vel)
+        trg_vel = jnp.where(jax.random.bernoulli(rng_zero, self.zero_prob), 0.0, trg_vel)
+
+        cur_vel = physics_data.qvel[..., 5]
+
+        return AngularVelocityCommandValue(vel=cur_vel, target_vel=trg_vel)
+
+    def update_command(self, prev_command: AngularVelocityCommandValue) -> AngularVelocityCommandValue:
+        cur_vel = prev_command.vel
+        cur_target_vel = prev_command.target_vel
+
+        # Move the current velocity command towards the target velocity.
+        new_vel = cur_vel + (cur_target_vel - cur_vel).clip(-self.angular_accel, self.angular_accel) * self.ctrl_dt
+
+        return AngularVelocityCommandValue(vel=new_vel, target_vel=cur_target_vel)
+
+    def __call__(
+        self,
+        prev_command: AngularVelocityCommandValue,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> AngularVelocityCommandValue:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        updated_command = self.update_command(prev_command)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jax.tree_util.tree_map(
+            lambda x, y: jnp.where(switch_mask, y, x),
+            updated_command,
+            new_commands,
+        )
+
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [AngularVelocityCommandMarker.get(command_name=name, height=self.vis_height)]
 
 
 @attrs.define(kw_only=True)
@@ -500,7 +521,7 @@ class PositionCommandMarker(Marker):
 
 
 @attrs.define(frozen=True)
-class PositionCommand(Command):
+class CartesianCoordinateCommand(Command):
     """Samples a target xyz position within a bounding box.
 
     The bounding box is defined by min and max coordinates.
@@ -622,21 +643,8 @@ class PositionCommand(Command):
         # Return updated command
         return jnp.concatenate([new_current, target, jnp.array([speed])])
 
-    def get_markers(self) -> Collection[Marker]:
-        return [
-            PositionCommandMarker.get(
-                self.command_name,
-                self.base_name,
-                self.vis_radius,
-                self.vis_color,
-            )
-        ]
-
-    def get_name(self) -> str:
-        name = super().get_name()
-        if self.unique_name is not None:
-            name = f"{self.unique_name}_{name}"
-        return name
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [PositionCommandMarker.get(name, self.base_name, self.vis_radius, self.vis_color)]
 
     @classmethod
     def create(
@@ -667,4 +675,200 @@ class PositionCommand(Command):
             switch_prob=switch_prob,
             jump_prob=jump_prob,
             curriculum_scale=curriculum_scale,
+        )
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class SinusoidalGaitCommandValue:
+    moving_flag: Array
+    phase: Array
+    height: Array
+
+
+@attrs.define(frozen=True, kw_only=True)
+class SinusoidalGaitCommand(Command):
+    gait_period: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    max_height: float = attrs.field()
+    height_offset: float = attrs.field(default=0.0)
+    num_feet: int = attrs.field(default=2)
+    stance_ratio: float = attrs.field(default=0.6)
+    moving_threshold: float = attrs.field(default=0.05)
+
+    def _foot_height_profile(self, phase: Array) -> Array:
+        """Computes foot height as a function of phase in [0, 1)."""
+        # Define stance/swing phase cutoff
+        swing_phase = phase >= self.stance_ratio
+
+        # Normalize swing phase ∈ [0, 1]
+        swing_progress = (phase - self.stance_ratio) / (1.0 - self.stance_ratio)
+        swing_progress = jnp.clip(swing_progress, 0.0, 1.0)
+
+        # Smooth foot lift trajectory: half-sine (or use poly for asymmetry)
+        swing_height = jnp.sin(jnp.pi * swing_progress)  # ∈ [0, 1]
+        target_height = jnp.where(swing_phase, self.max_height * swing_height, 0.0) + self.height_offset
+
+        return target_height
+
+    def _get_height(self, phase: Array) -> Array:
+        foot_phase_offsets = jnp.linspace(0.0, 1.0, self.num_feet, endpoint=False)
+        per_foot_phase = (phase + foot_phase_offsets) % 1.0
+        return self._foot_height_profile(per_foot_phase)
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> SinusoidalGaitCommandValue:
+        moving_flag = jnp.ones((), dtype=jnp.bool_)
+        phase = jnp.zeros((), dtype=jnp.float32)
+        return SinusoidalGaitCommandValue(
+            moving_flag=moving_flag,
+            phase=phase,
+            height=self._get_height(phase),
+        )
+
+    def __call__(
+        self,
+        prev_command: SinusoidalGaitCommandValue,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> SinusoidalGaitCommandValue:
+        moving_flag = prev_command.moving_flag
+        phase = prev_command.phase
+
+        # Compute delta phase: dt / period
+        dphase = self.ctrl_dt / self.gait_period
+        new_phase = jnp.where(moving_flag, (phase + dphase) % 1.0, 0.0)
+
+        # If not moving, reset the phase.
+        is_moving = jnp.linalg.norm(physics_data.qvel[..., :2]) > self.moving_threshold
+        moving_flag = jnp.where(is_moving, moving_flag, jnp.zeros_like(moving_flag))
+        new_phase = jnp.where(is_moving, new_phase, 0.0)
+
+        return SinusoidalGaitCommandValue(
+            moving_flag=moving_flag,
+            phase=new_phase,
+            height=self._get_height(new_phase),
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class BaseHeightCommand(Command):
+    min_height: float = attrs.field()
+    max_height: float = attrs.field()
+    switch_prob: float = attrs.field(default=0.005)
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        return jax.random.uniform(rng, (), minval=self.min_height, maxval=self.max_height)
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        new_height = jax.random.uniform(rng, (), minval=self.min_height, maxval=self.max_height)
+        return jnp.where(jax.random.bernoulli(rng, self.switch_prob), new_height, prev_command)
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class JointPositionCommandValue:
+    current_position: Array
+    target_position: Array
+    step_size: Array
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointPositionCommand(Command):
+    """Command each joint to go to a specific position."""
+
+    indices: tuple[int, ...] = attrs.field()
+    ranges: tuple[tuple[float, float], ...] = attrs.field()
+    ctrl_dt: float = attrs.field()
+    min_time: float = attrs.field(validator=attrs.validators.gt(0.0))
+    max_time: float = attrs.field(validator=attrs.validators.gt(0.0))
+
+    def sample_target(self, rng: PRNGKeyArray) -> Array:
+        ranges = jnp.array(self.ranges)  # (N, 2)
+        return jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
+
+    def sample_time(self, rng: PRNGKeyArray) -> Array:
+        return jax.random.uniform(rng, (), minval=self.min_time, maxval=self.max_time)
+
+    def initial_command(
+        self,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> JointPositionCommandValue:
+        rng_a, rng_b = jax.random.split(rng)
+        target = self.sample_target(rng_a)
+        start = physics_data.qpos[..., self.indices]
+        time_steps = self.sample_time(rng_b) / self.ctrl_dt
+        step_size = (target - start) / time_steps
+        return JointPositionCommandValue(
+            target_position=target,
+            step_size=step_size,
+            current_position=start,
+        )
+
+    def __call__(
+        self,
+        prev_command: JointPositionCommandValue,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> JointPositionCommandValue:
+        target = prev_command.target_position
+        current = prev_command.current_position
+        step_size = prev_command.step_size
+        at_target = (target - current) < step_size * 1.5
+
+        next_command = JointPositionCommandValue(
+            target_position=target,
+            step_size=step_size,
+            current_position=current + step_size,
+        )
+
+        # Choose a new target and speed once we're close to the old target.
+        new_command = self.initial_command(physics_data, curriculum_level, rng)
+        return jax.tree.map(lambda x, y: jnp.where(at_target, y, x), next_command, new_command)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        ctrl_dt: float,
+        joint_names: Collection[str],
+        min_time: float = 0.3,
+        max_time: float = 2.0,
+    ) -> Self:
+        all_names = get_joint_names_in_order(physics_model)
+        for joint_name in joint_names:
+            if joint_name not in all_names:
+                raise ValueError(f"Joint {joint_name} not found in the model! Options are: {all_names}")
+
+        all_ranges = physics_model.jnt_range
+        ranges_list = [(minv, maxv) for minv, maxv in all_ranges.tolist()]
+        joint_name_to_indices = {name: idx for idx, name in enumerate(get_joint_names_in_order(physics_model))}
+        ranges = tuple(ranges_list[joint_name_to_indices[name]] for name in joint_names)
+        indices = tuple(joint_name_to_indices[name] + 7 for name in joint_names)
+
+        return cls(
+            indices=indices,
+            ranges=ranges,
+            ctrl_dt=ctrl_dt,
+            min_time=min_time,
+            max_time=max_time,
         )

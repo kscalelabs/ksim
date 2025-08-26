@@ -6,8 +6,7 @@ __all__ = [
     "MinimumHeightTermination",
     "IllegalContactTermination",
     "BadZTermination",
-    "HighVelocityTermination",
-    "HighRootVelocityTermination",
+    "BadVelocityTermination",
     "FarFromOriginTermination",
     "EpisodeLengthTermination",
 ]
@@ -133,39 +132,29 @@ class IllegalContactTermination(Termination):
 class BadZTermination(Termination):
     """Terminates the episode if the robot is unhealthy."""
 
-    unhealthy_z_lower: float = attrs.field()
-    unhealthy_z_upper: float = attrs.field()
+    min_z: float = attrs.field()
+    final_min_z: float | None = attrs.field(default=None)
+    max_z: float = attrs.field()
+    final_max_z: float | None = attrs.field(default=None)
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
         height = state.qpos[2]
-        return jnp.where((height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper), -1, 0)
+        final_min_z = self.min_z if self.final_min_z is None else self.final_min_z
+        final_max_z = self.max_z if self.final_max_z is None else self.final_max_z
+        min_z = (final_min_z - self.min_z) * curriculum_level + self.min_z
+        max_z = (final_max_z - self.max_z) * curriculum_level + self.max_z
+        return jnp.where((height < min_z) | (height > max_z), -1, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)
-class HighVelocityTermination(Termination):
-    """Terminates the episode if the robot is moving too fast."""
-
-    # Good default value for Mujoco physics errors.
-    max_lin_vel: float = attrs.field(default=100.0)
-    max_ang_vel: float = attrs.field(default=100.0)
-
-    def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        lin_vel = jnp.linalg.norm(state.cvel[..., :3], axis=-1)
-        ang_vel = jnp.linalg.norm(state.cvel[..., 3:], axis=-1)
-        return jnp.where((lin_vel > self.max_lin_vel).any() | (ang_vel > self.max_ang_vel).any(), -1, 0)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class HighRootVelocityTermination(Termination):
+class BadVelocityTermination(Termination):
     """Terminates the episode if the robot's root is moving too fast."""
 
-    max_lin_vel: float = attrs.field()
-    max_ang_vel: float = attrs.field()
+    max_vel: float = attrs.field()
 
     def __call__(self, state: PhysicsData, curriculum_level: Array) -> Array:
-        lin_vel = jnp.linalg.norm(state.qvel[..., :3], axis=-1)
-        ang_vel = jnp.linalg.norm(state.qvel[..., 3:6], axis=-1)
-        return jnp.where((lin_vel > self.max_lin_vel) | (ang_vel > self.max_ang_vel), -1, 0)
+        lin_vel = jnp.linalg.norm(state.qvel[..., 0:3], axis=-1)
+        return jnp.where(lin_vel > self.max_vel, -1, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)

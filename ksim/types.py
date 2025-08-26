@@ -68,6 +68,7 @@ class Trajectory:
     done: Array
     success: Array
     timestep: Array
+    curriculum_level: Array
     termination_components: xax.FrozenDict[str, Array]
     aux_outputs: xax.FrozenDict[str, PyTree]
 
@@ -120,7 +121,6 @@ class Metrics:
 class LoggedTrajectory:
     trajectory: Trajectory
     rewards: RewardState
-    metrics: xax.FrozenDict[str, Array]
 
 
 def _parse_float(value: str | None) -> float | None:
