@@ -382,6 +382,10 @@ def slice_update(
         return val
     if isinstance(model, (mjx.Model, mjx.Data)):
         return getattr(model, name).at[slice].set(value)
+    # Support for tests that use DummyMjxData
+    if hasattr(model, "replace"):
+        arr = getattr(model, name)
+        return jnp.array(arr).at[slice].set(value)
     raise ValueError(f"Model type {type(model)} not supported")
 
 
@@ -591,5 +595,11 @@ def slice_update_many(
         arr = getattr(model, name)
         for slc, v in updates:
             arr = arr.at[slc].set(v)
+        return arr
+    # Support for tests that use DummyMjxData
+    if hasattr(model, "replace"):
+        arr = getattr(model, name)
+        for slc, v in updates:
+            arr = jnp.array(arr).at[slc].set(v)
         return arr
     raise ValueError(f"Model type {type(model)} not supported")
