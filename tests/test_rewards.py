@@ -35,6 +35,7 @@ def create_test_trajectory(
     dummy_xquat = jnp.zeros((timesteps, 5, 4))
     dummy_ctrl = jnp.zeros((timesteps, action_dims))
     dummy_timestep = jnp.arange(timesteps, dtype=jnp.float32)
+    dummy_curriculum_level = jnp.zeros(timesteps)
     dummy_success = jnp.zeros(timesteps, dtype=bool)
 
     return ksim.Trajectory(
@@ -43,15 +44,16 @@ def create_test_trajectory(
         xpos=dummy_xpos,
         xquat=dummy_xquat,
         ctrl=dummy_ctrl,
-        obs=xax.FrozenDict({}),
-        command=xax.FrozenDict({}),
-        event_state=xax.FrozenDict({}),
+        obs=xax.freeze_dict({}),
+        command=xax.freeze_dict({}),
+        event_state=xax.freeze_dict({}),
         action=actions,
         done=done,
         success=dummy_success,
         timestep=dummy_timestep,
-        termination_components=xax.FrozenDict({}),
-        aux_outputs=xax.FrozenDict({}),
+        curriculum_level=dummy_curriculum_level,
+        termination_components=xax.freeze_dict({}),
+        aux_outputs=xax.freeze_dict({}),
     )
 
 
@@ -60,7 +62,7 @@ class TestActionVelocityPenalty:
 
     def test_constant_action_zero_penalty(self) -> None:
         """Test that constant actions result in zero velocity penalty."""
-        penalty = ksim.ActionVelocityPenalty(scale=-1.0)
+        penalty = ksim.ActionVelocityPenalty(scale=1.0)
 
         constant_actions = jnp.ones((5, 3)) * 2.0
         trajectory = create_test_trajectory(constant_actions)
@@ -72,7 +74,7 @@ class TestActionVelocityPenalty:
 
     def test_linear_action_change_constant_velocity(self) -> None:
         """Test linear action changes result in constant velocity penalty."""
-        penalty = ksim.ActionVelocityPenalty(scale=-1.0, norm="l2")
+        penalty = ksim.ActionVelocityPenalty(scale=1.0, norm="l2")
 
         # Linear increase: actions go from [0,0,0] to [4,4,4] over 5 steps
         actions = jnp.array(
@@ -97,7 +99,7 @@ class TestActionVelocityPenalty:
 
     def test_step_action_change(self) -> None:
         """Test step change in actions."""
-        penalty = ksim.ActionVelocityPenalty(scale=-1.0, norm="l1")
+        penalty = ksim.ActionVelocityPenalty(scale=1.0, norm="l1")
 
         # Step change: constant then sudden jump
         actions = jnp.array(
@@ -122,7 +124,7 @@ class TestActionVelocityPenalty:
 
     def test_done_mask_resets_velocity(self) -> None:
         """Test that done episodes reset action velocity calculations."""
-        penalty = ksim.ActionVelocityPenalty(scale=-1.0, norm="l2")
+        penalty = ksim.ActionVelocityPenalty(scale=1.0, norm="l2")
 
         actions = jnp.array(
             [
@@ -150,7 +152,7 @@ class TestActionAccelerationPenalty:
 
     def test_constant_velocity_zero_acceleration(self) -> None:
         """Test that constant velocity (linear actions) gives zero acceleration penalty."""
-        penalty = ksim.ActionAccelerationPenalty(scale=-1.0)
+        penalty = ksim.ActionAccelerationPenalty(scale=1.0)
 
         # Linear actions: constant velocity
         actions = jnp.array(
@@ -173,7 +175,7 @@ class TestActionAccelerationPenalty:
 
     def test_quadratic_action_constant_acceleration(self) -> None:
         """Test quadratic action progression gives constant acceleration."""
-        penalty = ksim.ActionAccelerationPenalty(scale=-1.0, norm="l2")
+        penalty = ksim.ActionAccelerationPenalty(scale=1.0, norm="l2")
 
         # Quadratic progression: 0, 1, 4, 9, 16 (squared values)
         actions = jnp.array(
@@ -198,7 +200,7 @@ class TestActionAccelerationPenalty:
 
     def test_acceleration_step_change(self) -> None:
         """Test step change in acceleration."""
-        penalty = ksim.ActionAccelerationPenalty(scale=-1.0, norm="l1")
+        penalty = ksim.ActionAccelerationPenalty(scale=1.0, norm="l1")
 
         # Velocities: constant, then linear increase
         actions = jnp.array(
@@ -227,7 +229,7 @@ class TestActionJerkPenalty:
 
     def test_constant_acceleration_zero_jerk(self) -> None:
         """Test that constant acceleration gives zero jerk penalty."""
-        penalty = ksim.ActionJerkPenalty(scale=-1.0)
+        penalty = ksim.ActionJerkPenalty(scale=1.0)
 
         # Quadratic actions: constant acceleration
         actions = jnp.array(
@@ -251,7 +253,7 @@ class TestActionJerkPenalty:
 
     def test_cubic_action_constant_jerk(self) -> None:
         """Test cubic action progression gives constant jerk."""
-        penalty = ksim.ActionJerkPenalty(scale=-1.0, norm="l2")
+        penalty = ksim.ActionJerkPenalty(scale=1.0, norm="l2")
 
         # Cubic progression: t^3 for t = 0,1,2,3,4,5
         t = jnp.arange(6)

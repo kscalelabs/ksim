@@ -14,7 +14,7 @@ __all__ = [
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Literal
+from typing import Collection, Literal, Mapping
 
 import equinox as eqx
 import jax
@@ -40,7 +40,7 @@ class PhysicsEngine(eqx.Module, ABC):
 
     actuators: Actuators = eqx.field()
     resets: tuple[Reset, ...] = eqx.field()
-    events: tuple[Event, ...] = eqx.field()
+    events: xax.FrozenDict[str, Event] = eqx.field()
     phys_steps_per_ctrl_steps: int = eqx.field()
     min_action_latency_step: float = eqx.field()
     max_action_latency_step: float = eqx.field()
@@ -64,10 +64,10 @@ class PhysicsEngine(eqx.Module, ABC):
 
     def _reset_events(self, rng: PRNGKeyArray) -> xax.FrozenDict[str, PyTree]:
         event_states: dict[str, PyTree] = {}
-        for event in self.events:
+        for name, event in self.events.items():
             rng, event_rng = jax.random.split(rng)
-            event_states[event.event_name] = event.get_initial_event_state(event_rng)
-        return xax.FrozenDict(event_states)
+            event_states[name] = event.get_initial_event_state(event_rng)
+        return xax.freeze_dict(event_states)
 
 
 class MjxEngine(PhysicsEngine):
@@ -111,14 +111,22 @@ class MjxEngine(PhysicsEngine):
             ),
         )
 
-    @xax.jit(static_argnames=["self"], jit_level=JitLevel.MJX)
+    @xax.jit(
+        static_argnames=["self"],
+        donate_argnames=["data"],
+        jit_level=JitLevel.MJX,
+    )
     def _physics_step(self, physics_model: mjx.Model, data: mjx.Data) -> mjx.Data:
         # Just performs the MJX step, but wraps it in it's own JIT which can be
         # cached to prevent heavy recompilation every time the rewards or
         # events change.
         return mjx.step(physics_model, data)
 
-    @xax.jit(static_argnames=["self"], jit_level=JitLevel.ENGINE)
+    @xax.jit(
+        static_argnames=["self"],
+        donate_argnames=["physics_state", "rng"],
+        jit_level=JitLevel.ENGINE,
+    )
     def step(
         self,
         action: Array,
@@ -137,16 +145,17 @@ class MjxEngine(PhysicsEngine):
         action = jnp.where(drop_action, prev_action, action)
 
         def move_physics(
-            carry: tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree, Array],
-            rng: PRNGKeyArray,
-        ) -> tuple[tuple[mjx.Data, Array, xax.FrozenDict[str, PyTree], PyTree, Array], None]:
-            data, step_num, event_states, actuator_state, last_torques = carry
+            carry: tuple[mjx.Data, Array, PRNGKeyArray, xax.FrozenDict[str, PyTree], PyTree, Array],
+            _: None,
+        ) -> tuple[tuple[mjx.Data, Array, PRNGKeyArray, xax.FrozenDict[str, PyTree], PyTree, Array], None]:
+            data, step_num, rng, event_states, actuator_state, last_torques = carry
 
             # Randomly apply the action with some latency.
             prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
             ctrl = prev_action * (1.0 - prct) + action * prct
 
             should_update = jnp.mod(step_num, self.phys_steps_per_actuator_step) == 0
+            rng, rng_update = jax.random.split(rng)
 
             def update_actuators(prev_actuator_state: PyTree) -> tuple[Array, PyTree]:
                 if isinstance(self.actuators, StatefulActuators):
@@ -154,10 +163,15 @@ class MjxEngine(PhysicsEngine):
                         action=ctrl,
                         physics_data=data,
                         actuator_state=prev_actuator_state,
-                        rng=rng,
+                        rng=rng_update,
                     )
                 else:
-                    torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
+                    torques = self.actuators.get_ctrl(
+                        action=ctrl,
+                        physics_data=data,
+                        curriculum_level=curriculum_level,
+                        rng=rng_update,
+                    )
                     actuator_state = prev_actuator_state
                 return torques, actuator_state
 
@@ -171,19 +185,19 @@ class MjxEngine(PhysicsEngine):
 
             # Apply the events.
             new_event_states = {}
-            for event in self.events:
-                rng, event_rng = jax.random.split(rng)
+            for name, event in self.events.items():
+                rng, rng_event = jax.random.split(rng)
                 data, new_event_state = event(
                     model=physics_model,
                     data=data,
-                    event_state=event_states[event.event_name],
+                    event_state=event_states[name],
                     curriculum_level=curriculum_level,
-                    rng=event_rng,
+                    rng=rng_event,
                 )
-                new_event_states[event.event_name] = new_event_state
+                new_event_states[name] = new_event_state
 
             new_data = self._physics_step(physics_model, data)
-            return (new_data, step_num + 1.0, xax.FrozenDict(new_event_states), actuator_state, torques), None
+            return (new_data, step_num + 1.0, rng, xax.freeze_dict(new_event_states), actuator_state, torques), None
 
         # Runs the model for N steps.
         (mjx_data, *_, event_info, actuator_state_final, _), _ = xax.scan(
@@ -192,18 +206,19 @@ class MjxEngine(PhysicsEngine):
             (
                 mjx_data,
                 jnp.array(0.0),
+                rng,
                 physics_state.event_states,
                 physics_state.actuator_state,
                 jnp.zeros_like(physics_state.data.ctrl),
             ),
-            jax.random.split(rng, phys_steps_per_ctrl_steps),
+            length=phys_steps_per_ctrl_steps,
             jit_level=JitLevel.ENGINE,
         )
 
         return PhysicsState(
             data=mjx_data,
             most_recent_action=action,
-            event_states=xax.FrozenDict(event_info),
+            event_states=xax.freeze_dict(event_info),
             actuator_state=actuator_state_final,
             action_latency=physics_state.action_latency,
         )
@@ -285,7 +300,12 @@ class MujocoEngine(PhysicsEngine):
                         rng=rng,
                     )
                 else:
-                    torques = self.actuators.get_ctrl(action=ctrl, physics_data=data, rng=rng)
+                    torques = self.actuators.get_ctrl(
+                        action=ctrl,
+                        physics_data=data,
+                        curriculum_level=curriculum_level,
+                        rng=rng,
+                    )
                 last_torques = torques
             else:
                 torques = last_torques
@@ -294,16 +314,16 @@ class MujocoEngine(PhysicsEngine):
 
             # Apply the events.
             new_event_states = {}
-            for event in self.events:
+            for name, event in self.events.items():
                 data, new_event_state = event(
                     model=physics_model,
                     data=data,
-                    event_state=event_states[event.event_name],
+                    event_state=event_states[name],
                     curriculum_level=curriculum_level,
                     rng=rng,
                 )
-                new_event_states[event.event_name] = new_event_state
-            event_states = xax.FrozenDict(new_event_states)
+                new_event_states[name] = new_event_state
+            event_states = xax.freeze_dict(new_event_states)
 
             mujoco.mj_step(physics_model, data)
 
@@ -319,7 +339,7 @@ class MujocoEngine(PhysicsEngine):
 def get_physics_engine(
     engine_type: EngineType,
     resets: Collection[Reset],
-    events: Collection[Event],
+    events: Mapping[str, Event],
     actuators: Actuators,
     *,
     dt: float,
@@ -354,7 +374,7 @@ def get_physics_engine(
         case "mujoco":
             return MujocoEngine(
                 resets=tuple(resets),
-                events=tuple(events),
+                events=xax.freeze_dict(events),
                 actuators=actuators,
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,
@@ -366,7 +386,7 @@ def get_physics_engine(
         case "mjx":
             return MjxEngine(
                 resets=tuple(resets),
-                events=tuple(events),
+                events=xax.freeze_dict(events),
                 actuators=actuators,
                 min_action_latency_step=min_action_latency_step,
                 max_action_latency_step=max_action_latency_step,

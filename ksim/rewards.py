@@ -2,58 +2,65 @@
 
 __all__ = [
     "MonotonicFn",
-    "norm_to_reward",
     "Reward",
     "StatefulReward",
     "StayAliveReward",
     "LinearVelocityReward",
-    "LinearVelocityPenalty",
-    "NaiveForwardReward",
-    "NaiveForwardOrientationReward",
     "AngularVelocityReward",
-    "AngularVelocityPenalty",
-    "XYAngularVelocityPenalty",
+    "OffAxisVelocityReward",
     "BaseHeightReward",
     "BaseHeightRangeReward",
     "ActionVelocityPenalty",
     "ActionAccelerationPenalty",
     "ActionJerkPenalty",
-    "JointVelocityPenalty",
-    "JointAccelerationPenalty",
-    "JointJerkPenalty",
+    "SmallJointVelocityReward",
+    "SmallJointAccelerationReward",
+    "SmallJointJerkReward",
     "AvoidLimitsPenalty",
-    "CtrlPenalty",
+    "TorquePenalty",
     "JointDeviationPenalty",
     "FlatBodyReward",
     "PositionTrackingReward",
     "UprightReward",
+    "NoRollReward",
     "LinkAccelerationPenalty",
     "LinkJerkPenalty",
-    "JoystickReward",
-    "LinearVelocityTrackingReward",
+    "SymmetryReward",
+    "PairwiseSymmetryReward",
     "ReachabilityPenalty",
     "FeetAirTimeReward",
+    "FeetGroundedAtRestReward",
+    "SparseTargetHeightReward",
+    "MotionlessAtRestPenalty",
+    "ForcePenalty",
+    "SinusoidalGaitReward",
+    "JointPositionReward",
+    "IntersectionPenalty",
 ]
 
 import functools
 import logging
+import math
 from abc import ABC, abstractmethod
-from typing import Collection, Literal, Self, final
+from typing import Collection, Literal, Mapping, Self, final
 
 import attrs
 import chex
 import jax.numpy as jnp
+import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.types import PhysicsModel, Trajectory
-from ksim.utils.mujoco import get_body_data_idx_from_name, get_qpos_data_idxs_by_name
-from ksim.utils.validators import (
-    CartesianIndex,
-    cartesian_index_to_dim,
-    dimension_index_tuple_validator,
-    norm_validator,
+from ksim.commands import (
+    AngularVelocityCommandValue,
+    JointPositionCommandValue,
+    LinearVelocityCommandValue,
+    SinusoidalGaitCommandValue,
 )
+from ksim.scales import ConstantScale, Scale
+from ksim.types import PhysicsModel, Trajectory
+from ksim.utils.mujoco import get_body_data_idx_from_name, get_joint_names_in_order, get_qpos_data_idxs_by_name
+from ksim.utils.validators import CartesianIndex, cartesian_index_to_dim, norm_validator
 from ksim.vis import Marker
 
 logger = logging.getLogger(__name__)
@@ -61,40 +68,23 @@ logger = logging.getLogger(__name__)
 MonotonicFn = Literal["exp", "inv", "sigmoid"]
 
 
-def norm_to_reward(value: Array, temp: float = 1.0, monotonic_fn: MonotonicFn = "inv") -> Array:
-    """Helper function for converting from a norm to a reward.
-
-    Args:
-        value: The value (usually a norm) to convert to a reward.
-        temp: The temperature to use for the conversion. Higher temperatures
-            will make the reward drop off less steeply.
-        monotonic_fn: The monotonic function to use for the conversion.
-
-    Returns:
-        The reward.
-    """
-    match monotonic_fn:
-        case "inv":
-            return 1.0 / (value / temp + 1.0)
-        case "exp":
-            return jnp.exp(-value / temp)
-        case "sigmoid":
-            return 1.0 / (1.0 + jnp.exp(-value / temp))
-        case _:
-            raise ValueError(f"Invalid monotonic function: {monotonic_fn}")
+def exp_kernel(x: Array, scale: float) -> Array:
+    return jnp.exp(-jnp.square(x) / (2 * scale**2))
 
 
-def reward_scale_validator(inst: "Reward", attr: attrs.Attribute, value: float) -> None:
-    # Reward function classes should end with either "Reward" or "Penalty",
-    # which we use here to check if the scale is positive or negative.
-    if inst.reward_name.lower().endswith("reward"):
-        if value < 0:
-            raise RuntimeError(f"Reward function {inst.reward_name} has a negative scale {value}")
-    elif inst.reward_name.lower().endswith("penalty"):
-        if value > 0:
-            raise RuntimeError(f"Penalty function {inst.reward_name} has a positive scale {value}")
-    else:
-        logger.warning("Reward function %s does not end with 'Reward' or 'Penalty': %f", inst.reward_name, value)
+def convert_to_scale(value: float | int | Scale) -> Scale:
+    if isinstance(value, (float, int)):
+        return ConstantScale(scale=value)
+    if isinstance(value, Scale):
+        return value
+    raise ValueError(f"Invalid scale: {value}")
+
+
+def exp_kernel_with_penalty(x: Array, scale: float, sq_scale: float, abs_scale: float) -> Array:
+    x_abs = jnp.abs(x)
+    x_sq = jnp.square(x)
+    x_exp = jnp.exp(-x_sq / (2 * scale**2))
+    return x_abs * -abs_scale + x_sq * -sq_scale + x_exp
 
 
 def index_to_dims(index: CartesianIndex | tuple[CartesianIndex, ...]) -> tuple[int, ...]:
@@ -106,11 +96,10 @@ def index_to_dims(index: CartesianIndex | tuple[CartesianIndex, ...]) -> tuple[i
 class Reward(ABC):
     """Base class for defining reward functions."""
 
-    scale: float = attrs.field(validator=reward_scale_validator)
-    scale_by_curriculum: bool = attrs.field(default=False)
+    scale: Scale = attrs.field(converter=convert_to_scale)
 
     @abstractmethod
-    def get_reward(self, trajectory: Trajectory) -> Array:
+    def get_reward(self, trajectory: Trajectory) -> Array | Mapping[str, Array]:
         """Get the reward for a single trajectory.
 
         Args:
@@ -120,16 +109,18 @@ class Reward(ABC):
             An array of shape (time) containing the reward for each timestep.
         """
 
-    def get_markers(self) -> Collection[Marker]:
+    def get_markers(self, name: str) -> Collection[Marker]:
         """Get the markers for the reward, optionally overridable."""
         return []
 
-    def get_name(self) -> str:
-        return xax.camelcase_to_snakecase(self.__class__.__name__)
-
     @functools.cached_property
-    def reward_name(self) -> str:
-        return self.get_name()
+    def is_penalty(self) -> bool:
+        reward_name = self.__class__.__name__
+        if reward_name.lower().endswith("reward"):
+            return False
+        if reward_name.lower().endswith("penalty"):
+            return True
+        raise ValueError(f"Reward function {reward_name} does not end with 'Reward' or 'Penalty'")
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -151,7 +142,11 @@ class StatefulReward(Reward):
         """
 
     @abstractmethod
-    def get_reward_stateful(self, trajectory: Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: PyTree,
+    ) -> tuple[Array | Mapping[str, Array], PyTree]:
         """Get the reward for a single trajectory.
 
         This is the same as `get_reward`, but it also takes in the reward carry
@@ -176,7 +171,7 @@ class StayAliveReward(Reward):
     value will increase the relative penalty for termination.
     """
 
-    balance: float = attrs.field(default=10.0)
+    balance: float = attrs.field(default=100.0)
     success_reward: float | None = attrs.field(default=None)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
@@ -192,95 +187,186 @@ class StayAliveReward(Reward):
         return reward
 
 
+@attrs.define(kw_only=True)
+class LinearVelocityRewardMarker(Marker):
+    size: float = attrs.field(default=0.02)
+    arrow_scale: float = attrs.field(default=0.3)
+    height: float = attrs.field(default=0.5)
+    base_length: float = attrs.field(default=0.15)
+    zero_threshold: float = attrs.field(default=1e-4)
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        linvel = trajectory.qvel[..., :3]
+        linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
+        xy = linvel[..., :2]
+        x = float(xy[..., 0])
+        y = float(xy[..., 1])
+        speed = float(jnp.linalg.norm(xy, axis=-1))
+        direction = (x / speed, y / speed, 0.0)
+
+        self.pos = (0.0, 0.0, self.height)
+
+        # Always show an arrow with base_length plus scaling by speed
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
+        arrow_length = self.base_length + self.arrow_scale * speed
+        self.scale = (self.size, self.size, arrow_length)
+
+        self.orientation = self.quat_from_direction(direction)
+        self.rgba = (0.2, 0.2, 0.8, 1.0)
+
+    @classmethod
+    def get(
+        cls,
+        *,
+        arrow_scale: float = 0.3,
+        height: float = 0.5,
+        base_length: float = 0.15,
+    ) -> Self:
+        return cls(
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(0.03, 0.03, base_length),
+            arrow_scale=arrow_scale,
+            height=height,
+            base_length=base_length,
+            track_rotation=True,
+        )
+
+
 @attrs.define(frozen=True, kw_only=True)
 class LinearVelocityReward(Reward):
     """Penalty for how fast the robot is moving in the z-direction."""
 
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(validator=dimension_index_tuple_validator)
-    clip_min: float | None = attrs.field(default=None)
-    clip_max: float | None = attrs.field(default=None)
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-    in_robot_frame: bool = attrs.field(default=True)
+    cmd: str = attrs.field()
+    vel_length_scale: float = attrs.field(default=0.25)
+    yaw_length_scale: float = attrs.field(default=0.25)
+    zero_threshold: float = attrs.field(default=0.01)
+    vis_height: float = attrs.field(default=0.5)
+    sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        dims = index_to_dims(self.index)
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
+        cmd: LinearVelocityCommandValue = trajectory.command[self.cmd]
+
+        # Gets the linear velocity in the robot's frame.
         linvel = trajectory.qvel[..., :3]
-        if self.in_robot_frame:
-            # Same as reading from a velocimeter attached to base.
-            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
-        dimvel = linvel[..., dims].clip(self.clip_min, self.clip_max).mean(axis=-1)
-        return xax.get_norm(dimvel, self.norm)
+        linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
+        xy = linvel[..., :2]
+        vel = jnp.linalg.norm(xy, axis=-1)
+        x = xy[..., 0]
+        y = xy[..., 1]
+        yaw = jnp.arctan2(y, x)
 
-    def get_name(self) -> str:
-        indices = self.index if isinstance(self.index, tuple) else (self.index,)
-        return f"{''.join(indices)}_{super().get_name()}"
+        # Don't reward if the command is zero.
+        is_zero = jnp.abs(cmd.vel) < self.zero_threshold
 
+        vel_rews = exp_kernel_with_penalty(vel - cmd.vel, self.vel_length_scale, self.sq_scale, self.abs_scale)
+        yaw_rews = exp_kernel_with_penalty(yaw - cmd.yaw, self.yaw_length_scale, self.sq_scale, self.abs_scale)
+        x_rews = exp_kernel_with_penalty(x - cmd.xvel, self.vel_length_scale, self.sq_scale, self.abs_scale)
+        y_rews = exp_kernel_with_penalty(y - cmd.yvel, self.vel_length_scale, self.sq_scale, self.abs_scale)
 
-@attrs.define(frozen=True, kw_only=True)
-class LinearVelocityPenalty(LinearVelocityReward): ...
+        return {
+            "vel": vel_rews,
+            "yaw": jnp.where(is_zero, 0.0, yaw_rews),
+            "x": x_rews,
+            "y": y_rews,
+        }
 
-
-@attrs.define(frozen=True, kw_only=True)
-class NaiveForwardReward(Reward):
-    """Simple reward for moving forward in the X-direction."""
-
-    clip_min: float | None = attrs.field(default=None)
-    clip_max: float | None = attrs.field(default=None)
-    in_robot_frame: bool = attrs.field(default=True)
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        linvel = trajectory.qvel[..., :3]
-        if self.in_robot_frame:
-            # Same as reading from a velocimeter attached to base.
-            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
-        dimvel = linvel[..., 0].clip(self.clip_min, self.clip_max)
-        return dimvel
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [LinearVelocityRewardMarker.get(height=self.vis_height)]
 
 
-@attrs.define(frozen=True, kw_only=True)
-class NaiveForwardOrientationReward(NaiveForwardReward):
-    """Simple reward for keeping the robot oriented in the X-direction."""
+@attrs.define(kw_only=True)
+class AngularVelocityRewardMarker(Marker):
+    size: float = attrs.field(default=0.02)
+    arrow_scale: float = attrs.field(default=0.3)
+    height: float = attrs.field(default=0.5)
+    base_length: float = attrs.field(default=0.15)
+    zero_threshold: float = attrs.field(default=1e-4)
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        quat = trajectory.qpos[..., 3:7]
-        forward_vec = jnp.array([1.0, 0.0, 0.0])
-        forward_vec = xax.rotate_vector_by_quat(forward_vec, quat, inverse=True)
-        return forward_vec[..., 0] - jnp.linalg.norm(forward_vec[..., 1:], axis=-1)
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        speed = float(trajectory.qvel[..., 5])
+
+        self.pos = (0.0, 0.0, self.height)
+        self.rgba = (0.2, 0.2, 0.8, 1.0)
+        self.orientation = self.quat_from_direction((0.0, 0.0, 1.0))
+
+        # Always show an arrow with base_length plus scaling by speed
+        self.geom = mujoco.mjtGeom.mjGEOM_ARROW  # pyright: ignore[reportAttributeAccessIssue]
+        arrow_length = self.base_length + self.arrow_scale * speed
+        self.scale = (self.size, self.size, arrow_length)
+
+    @classmethod
+    def get(
+        cls,
+        *,
+        arrow_scale: float = 0.3,
+        height: float = 0.5,
+        base_length: float = 0.15,
+    ) -> Self:
+        return cls(
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_ARROW,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(0.03, 0.03, base_length),
+            arrow_scale=arrow_scale,
+            height=height,
+            base_length=base_length,
+            track_rotation=True,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
 class AngularVelocityReward(Reward):
     """Penalty for how fast the robot is rotating in the xy-plane."""
 
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(validator=dimension_index_tuple_validator)
-    clip_min: float | None = attrs.field(default=None)
-    clip_max: float | None = attrs.field(default=None)
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
-    in_robot_frame: bool = attrs.field(default=True)
+    cmd: str = attrs.field()
+    angvel_length_scale: float = attrs.field(default=0.25)
+    sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    vis_height: float = attrs.field(default=0.5)
+    zero_threshold: float = attrs.field(default=1e-4)
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        dims = index_to_dims(self.index)
-        angvel = trajectory.qvel[..., 3:6]
-        if self.in_robot_frame:
-            angvel = xax.rotate_vector_by_quat(angvel, trajectory.qpos[..., 3:7], inverse=True)
-        dimvel = angvel[..., dims].clip(self.clip_min, self.clip_max).mean(axis=-1)
-        return xax.get_norm(dimvel, self.norm)
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
+        cmd: AngularVelocityCommandValue = trajectory.command[self.cmd]
+        angvel = trajectory.qvel[..., 5]
 
-    def get_name(self) -> str:
-        indices = self.index if isinstance(self.index, tuple) else (self.index,)
-        return f"{''.join(indices)}_{super().get_name()}"
+        # Reward for the magnitude of the angular velocity.
+        angvel_rews = exp_kernel_with_penalty(angvel - cmd.vel, self.angvel_length_scale, self.sq_scale, self.abs_scale)
+
+        # Reward for the direction of the angular velocity.
+        is_zero = jnp.abs(angvel) < self.zero_threshold
+        angvel_dir_rews = jnp.where(is_zero, angvel_rews, jnp.sign(angvel) * jnp.sign(cmd.vel))
+
+        return {
+            "mag": angvel_rews,
+            "dir": angvel_dir_rews,
+        }
+
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [AngularVelocityRewardMarker.get(height=self.vis_height)]
 
 
 @attrs.define(frozen=True, kw_only=True)
-class AngularVelocityPenalty(AngularVelocityReward): ...
+class OffAxisVelocityReward(Reward):
+    """Penalizes velocities in the off-command directions."""
 
+    lin_length_scale: float = attrs.field(default=0.25)
+    ang_length_scale: float = attrs.field(default=0.25)
 
-@attrs.define(frozen=True, kw_only=True)
-class XYAngularVelocityPenalty(AngularVelocityReward):
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
-        default=("x", "y"),
-        validator=dimension_index_tuple_validator,
-    )
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
+        linz = trajectory.qvel[..., 2]
+        angx = trajectory.qvel[..., 4]
+        angy = trajectory.qvel[..., 5]
+        linz_rew = jnp.exp(-jnp.square(linz) / (2 * self.lin_length_scale**2))
+        angx_rew = jnp.exp(-jnp.square(angx) / (2 * self.ang_length_scale**2))
+        angy_rew = jnp.exp(-jnp.square(angy) / (2 * self.ang_length_scale**2))
+        return {
+            "linz": linz_rew,
+            "angx": angx_rew,
+            "angy": angy_rew,
+        }
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -289,12 +375,11 @@ class BaseHeightReward(Reward):
 
     height_target: float = attrs.field()
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    temp: float = attrs.field(default=1.0)
-    monotonic_fn: MonotonicFn = attrs.field(default="inv")
+    kernel_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         base_height = trajectory.qpos[..., 2]
-        reward = norm_to_reward(xax.get_norm(base_height - self.height_target, self.norm), self.temp, self.monotonic_fn)
+        reward = exp_kernel(base_height - self.height_target, self.kernel_scale)
         return reward
 
 
@@ -374,24 +459,25 @@ class ActionJerkPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointVelocityPenalty(Reward):
+class SmallJointVelocityReward(Reward):
     """Penalty for how fast the joint angular velocities are changing."""
 
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    kernel_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos = trajectory.qpos[..., 7:]
         qpos_zp = jnp.pad(qpos, ((1, 0), (0, 0)), mode="edge")
         done = jnp.pad(trajectory.done, ((1, 0),), mode="edge")[..., :-1, None]
         qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
-        return xax.get_norm(qvel, self.norm).mean(axis=-1)
+        reward = exp_kernel(qvel, self.kernel_scale).mean(axis=-1)
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointAccelerationPenalty(Reward):
+class SmallJointAccelerationReward(Reward):
     """Penalty for high joint accelerations."""
 
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    kernel_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos = trajectory.qpos[..., 7:]
@@ -399,15 +485,15 @@ class JointAccelerationPenalty(Reward):
         done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., :-1, None]
         qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
         qacc = jnp.where(done[..., 1:, :], 0.0, qvel[..., 1:, :] - qvel[..., :-1, :])
-        penalty = xax.get_norm(qacc, self.norm).mean(axis=-1)
-        return penalty
+        reward = exp_kernel(qacc, self.kernel_scale).mean(axis=-1)
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointJerkPenalty(Reward):
+class SmallJointJerkReward(Reward):
     """Penalty for high joint jerks."""
 
-    norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
+    kernel_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos = trajectory.qpos[..., 7:]
@@ -416,8 +502,8 @@ class JointJerkPenalty(Reward):
         qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
         qacc = jnp.where(done[..., 1:, :], 0.0, qvel[..., 1:, :] - qvel[..., :-1, :])
         qjerk = jnp.where(done[..., 2:, :], 0.0, qacc[..., 1:, :] - qacc[..., :-1, :])
-        penalty = xax.get_norm(qjerk, self.norm).mean(axis=-1)
-        return penalty
+        reward = exp_kernel(qjerk, self.kernel_scale).mean(axis=-1)
+        return reward
 
 
 def joint_limits_validator(inst: "AvoidLimitsPenalty", attr: attrs.Attribute, value: xax.HashableArray) -> None:
@@ -448,8 +534,7 @@ class AvoidLimitsPenalty(Reward):
         cls,
         model: PhysicsModel,
         factor: float = 0.05,
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
+        scale: float | Scale = 1.0,
     ) -> Self:
         jnt_range = jnp.array(model.jnt_range)
         jnt_limited = jnp.array(model.jnt_limited, dtype=jnp.bool_)
@@ -463,33 +548,35 @@ class AvoidLimitsPenalty(Reward):
         return cls(
             joint_limits=xax.hashable_array(joint_limits[..., 1:, :]),
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
 
 @attrs.define(frozen=True, kw_only=True)
-class CtrlPenalty(Reward):
+class TorquePenalty(Reward):
     """Penalty for large torque commands."""
 
-    norm: xax.NormType = attrs.field(default="l2")
-    scales: tuple[float, ...] | None = attrs.field(default=None)
+    ctrl_scales: tuple[float, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(float),
+            ),
+        ),
+    )
 
     def get_reward(self, trajectory: Trajectory) -> Array:
-        ctrl = trajectory.ctrl
-        if self.scales is not None:
-            ctrl = ctrl / jnp.array(self.scales)
-        return xax.get_norm(ctrl, self.norm).mean(axis=-1)
+        ctrl = trajectory.ctrl / jnp.array(self.ctrl_scales)
+        return jnp.abs(ctrl).mean(axis=-1)
 
     @classmethod
-    def create(cls, model: PhysicsModel, scale: float = -1.0, scale_by_curriculum: bool = False) -> Self:
+    def create(cls, model: PhysicsModel, scale: float | Scale = 1.0) -> Self:
         ctrl_min = model.actuator_ctrlrange[..., 0]
         ctrl_max = model.actuator_ctrlrange[..., 1]
         ctrl_range = (ctrl_max - ctrl_min) / 2.0
         ctrl_range_list = ctrl_range.flatten().tolist()
         return cls(
-            scales=tuple(ctrl_range_list),
+            ctrl_scales=tuple(ctrl_range_list),
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
 
@@ -498,9 +585,33 @@ class JointDeviationPenalty(Reward):
     """Penalty for joint deviations from target positions."""
 
     norm: xax.NormType = attrs.field(default="l2")
-    joint_indices: tuple[int, ...] = attrs.field()
-    joint_targets: tuple[float, ...] = attrs.field()
-    joint_weights: tuple[float, ...] | None = attrs.field(default=None)
+    joint_indices: tuple[int, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(int),
+            ),
+        ),
+    )
+    joint_targets: tuple[float, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(float),
+            ),
+        ),
+    )
+    joint_weights: tuple[float, ...] | None = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(
+            attrs.validators.and_(
+                attrs.validators.instance_of(tuple),
+                attrs.validators.deep_iterable(
+                    member_validator=attrs.validators.instance_of(float),
+                ),
+            ),
+        ),
+    )
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
@@ -517,20 +628,25 @@ class JointDeviationPenalty(Reward):
     def create(
         cls,
         physics_model: PhysicsModel,
-        joint_names: tuple[str, ...],
-        joint_targets: tuple[float, ...],
-        scale: float = -1.0,
-        joint_weights: tuple[float, ...] | None = None,
-        scale_by_curriculum: bool = False,
+        joint_names: Collection[str],
+        joint_targets: Collection[float],
+        scale: float | Scale = 1.0,
+        joint_weights: Collection[float] | None = None,
     ) -> Self:
+        if len(joint_names) != len(joint_targets):
+            raise ValueError(f"Joint names and targets must match, got {len(joint_names)} and {len(joint_targets)}")
+        if joint_weights is not None:
+            if len(joint_weights) != len(joint_names):
+                raise ValueError(f"Joint weights and names must match, got {len(joint_weights)} and {len(joint_names)}")
+            joint_weights = tuple(joint_weights)
+
         joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
         joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
         return cls(
             joint_indices=joint_indices,
-            joint_targets=joint_targets,
+            joint_targets=tuple(joint_targets),
             joint_weights=joint_weights,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
 
@@ -538,7 +654,14 @@ class JointDeviationPenalty(Reward):
 class FlatBodyReward(Reward):
     """Reward for keeping the body parallel to the ground."""
 
-    body_indices: tuple[int, ...] = attrs.field()
+    body_indices: tuple[int, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(int),
+            ),
+        ),
+    )
     plane: tuple[float, float, float] = attrs.field(default=(0.0, 0.0, 1.0))
     norm: xax.NormType = attrs.field(default="l2", validator=norm_validator)
 
@@ -555,15 +678,13 @@ class FlatBodyReward(Reward):
         body_names: tuple[str, ...],
         plane: tuple[float, float, float] = (0.0, 0.0, 1.0),
         norm: xax.NormType = "l2",
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
+        scale: float | Scale = 1.0,
     ) -> Self:
         return cls(
             body_indices=tuple([get_body_data_idx_from_name(physics_model, name) for name in body_names]),
             plane=plane,
             norm=norm,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
 
@@ -576,15 +697,14 @@ class PositionTrackingReward(Reward):
     command_name: str = attrs.field()
     body_name: str = attrs.field()
     norm: xax.NormType = attrs.field(default="l1", validator=norm_validator)
-    temp: float = attrs.field(default=1.0)
-    monotonic_fn: MonotonicFn = attrs.field(default="inv")
+    kernel_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: Trajectory) -> Array:
         body_pos = trajectory.xpos[..., self.tracked_body_idx, :]
         base_pos = trajectory.xpos[..., self.base_body_idx, :]
         target_pos = trajectory.command[self.command_name][..., :3]
         error = xax.get_norm((body_pos - base_pos) - target_pos, self.norm).sum(-1)
-        reward = norm_to_reward(error, self.temp, self.monotonic_fn)
+        reward = exp_kernel(error, self.kernel_scale)
         return reward
 
     @classmethod
@@ -595,10 +715,8 @@ class PositionTrackingReward(Reward):
         tracked_body_name: str,
         base_body_name: str,
         norm: xax.NormType = "l1",
-        temp: float = 1.0,
-        monotonic_fn: MonotonicFn = "inv",
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
+        kernel_scale: float = 0.25,
+        scale: float | Scale = 1.0,
     ) -> Self:
         body_idx = get_body_data_idx_from_name(model, tracked_body_name)
         base_body_idx = get_body_data_idx_from_name(model, base_body_name)
@@ -609,24 +727,65 @@ class PositionTrackingReward(Reward):
             command_name=command_name,
             body_name=tracked_body_name,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
-            temp=temp,
-            monotonic_fn=monotonic_fn,
+            kernel_scale=kernel_scale,
         )
-
-    def get_name(self) -> str:
-        return f"{self.body_name}_{super().get_name()}"
 
 
 @attrs.define(frozen=True, kw_only=True)
 class UprightReward(Reward):
     """Reward for staying upright."""
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        local_z = jnp.array([0.0, 0.0, 1.0])
+    angvel_scale: float = attrs.field(default=0.25)
+    pose_scale: float = attrs.field(default=0.25)
+    angvel_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    angvel_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    pose_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    pose_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         quat = trajectory.qpos[..., 3:7]
-        global_z = xax.rotate_vector_by_quat(local_z, quat)
-        return global_z[..., 2] - jnp.linalg.norm(global_z[..., :2], axis=-1)
+
+        # Avoid angular velocity in the roll or pitch directions.
+        angvel = jnp.linalg.norm(trajectory.qvel[..., 3:5], axis=-1)
+
+        # Avoid any roll or pitch orientation.
+        z_world = jnp.array([0.0, 0.0, 1.0])
+        z_in_body = xax.rotate_vector_by_quat(z_world, quat, inverse=True)
+        roll = jnp.arctan2(z_in_body[..., 1], z_in_body[..., 2])
+        pitch = jnp.arctan2(z_in_body[..., 0], z_in_body[..., 2])
+        roll_pitch = jnp.linalg.norm(jnp.stack([roll, pitch], axis=-1), axis=-1)
+
+        angvel_rew = exp_kernel_with_penalty(angvel, self.angvel_scale, self.angvel_sq_scale, self.angvel_abs_scale)
+        pose_rew = exp_kernel_with_penalty(roll_pitch, self.pose_scale, self.pose_sq_scale, self.pose_abs_scale)
+        return {"angvel": angvel_rew, "pose": pose_rew}
+
+
+@attrs.define(frozen=True, kw_only=True)
+class NoRollReward(Reward):
+    """Reward for staying upright."""
+
+    angvel_scale: float = attrs.field(default=0.25)
+    roll_scale: float = attrs.field(default=0.25)
+    angvel_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    angvel_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    roll_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    roll_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
+        quat = trajectory.qpos[..., 3:7]
+
+        # Avoid angular velocity in the roll direction.
+        rollvel = trajectory.qvel[..., 3]
+
+        # Avoid any off-axis roll orientation.
+        z_world = jnp.array([0.0, 0.0, 1.0])
+        z_in_body = xax.rotate_vector_by_quat(z_world, quat, inverse=True)
+        roll = -jnp.arctan2(z_in_body[..., 1], z_in_body[..., 2])
+
+        return {
+            "angvel": exp_kernel_with_penalty(rollvel, self.angvel_scale, self.angvel_sq_scale, self.angvel_abs_scale),
+            "pose": exp_kernel_with_penalty(roll, self.roll_scale, self.roll_sq_scale, self.roll_abs_scale),
+        }
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -665,105 +824,129 @@ class LinkJerkPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class SymmetryReward(Reward):
+class SymmetryReward(StatefulReward):
     """Rewards joints for having symmetrical positions."""
 
-    joint_indices: tuple[int, ...] = attrs.field()
-    joint_targets: tuple[float, ...] = attrs.field()
+    joint_indices: tuple[int, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(int),
+            ),
+        ),
+    )
+    joint_targets: tuple[float, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(float),
+            ),
+        ),
+    )
+    alpha: float = attrs.field(default=0.1)
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.array(self.joint_targets)
+
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: Array,
+    ) -> tuple[Array, Array]:
         qpos = trajectory.qpos[..., jnp.array(self.joint_indices) + 7] - jnp.array(self.joint_targets)
-        qpos_mean = qpos.mean(axis=-2, keepdims=True)
-        return (qpos * -qpos_mean).sum(axis=-1)
+        qpos_mean = qpos.mean(axis=-2)
+        new_reward_carry = reward_carry * (1.0 - self.alpha) + qpos_mean * self.alpha
+        return (qpos * -new_reward_carry[..., None, :]).sum(axis=-1), new_reward_carry
 
     @classmethod
     def create(
         cls,
         physics_model: PhysicsModel,
-        joint_names: tuple[str, ...],
-        joint_targets: tuple[float, ...],
-        scale: float = 1.0,
-        scale_by_curriculum: bool = False,
+        joint_names: Collection[str],
+        joint_targets: Collection[float],
+        alpha: float = 0.1,
+        scale: float | Scale = 1.0,
     ) -> Self:
         joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
         joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
+        if len(joint_names) != len(joint_targets):
+            raise ValueError(f"Joint names and targets must match, got {len(joint_names)} and {len(joint_targets)}")
+        joint_targets = tuple(joint_targets)
         return cls(
             joint_indices=joint_indices,
             joint_targets=joint_targets,
+            alpha=alpha,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JoystickReward(Reward):
-    """Reward for tracking the joystick commands.
+class PairwiseSymmetryReward(StatefulReward):
+    """Rewards joints for having symmetrical positions."""
 
-    This reward uses global coordinates, so the robot should always start
-    facing forward in the X direction.
-    """
+    left_joint_index: int = attrs.field()
+    right_joint_index: int = attrs.field()
+    left_zero: float = attrs.field(default=0.0)
+    right_zero: float = attrs.field(default=0.0)
+    flipped: bool = attrs.field(default=False)
+    alpha: float = attrs.field(default=0.1)
+    kernel_scale: float = attrs.field(default=0.25)
+    sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
 
-    command_name: str = attrs.field(default="joystick_command")
-    ang_vel_penalty_ratio: float = attrs.field(default=0.5)
-    lin_slope: float = attrs.field(default=1.0)
-    ang_slope: float = attrs.field(default=1.0)
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.array([self.left_zero, self.right_zero])
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        if self.command_name not in trajectory.command:
-            raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
-        joystick_cmd = trajectory.command[self.command_name]
-        chex.assert_shape(joystick_cmd, (..., 11))
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: Array,
+    ) -> tuple[dict[str, Array], Array]:
+        qpos_left = trajectory.qpos[..., self.left_joint_index + 7] - self.left_zero
+        qpos_right = trajectory.qpos[..., self.right_joint_index + 7] - self.right_zero
+        if self.flipped:
+            qpos_right = -qpos_right
 
-        position_vector = joystick_cmd[..., -3:]
+        qpos_diff = qpos_left - qpos_right
+        lr_symmetry = exp_kernel_with_penalty(qpos_diff, self.kernel_scale, self.sq_scale, self.abs_scale)
 
-        # Gets the target position and orientation.
-        trg_x, trg_y, trg_yaw = position_vector[..., 0], position_vector[..., 1], position_vector[..., 2]
-        cur_x, cur_y = trajectory.qpos[..., 0], trajectory.qpos[..., 1]
-        quat = trajectory.qpos[..., 3:7]
-        euler = xax.quat_to_euler(quat)
-        cur_yaw = euler[..., 2]
+        qpos = jnp.stack([qpos_left, qpos_right], axis=-1)
+        qpos_mean = qpos.mean(axis=-2)
+        new_reward_carry = reward_carry * (1.0 - self.alpha) + qpos_mean * self.alpha
+        self_symmetry = (qpos * -new_reward_carry[..., None, :]).sum(axis=-1)
 
-        # Exponential kernel for the reward.
-        linvel_x_rew = 1.0 - jnp.abs(trg_x - cur_x) * self.lin_slope
-        linvel_y_rew = 1.0 - jnp.abs(trg_y - cur_y) * self.lin_slope
-        ang_diff = jnp.minimum(jnp.abs(trg_yaw - cur_yaw), jnp.abs(trg_yaw - cur_yaw + 2 * jnp.pi))
-        angvel_z_rew = 1.0 - ang_diff * self.ang_slope
+        return {"lr": lr_symmetry, "self": self_symmetry}, new_reward_carry
 
-        # Normalize the rewards to sum to 1.
-        denom = 2.0 + self.ang_vel_penalty_ratio
-        return (linvel_x_rew / denom) + (linvel_y_rew / denom) + (angvel_z_rew * self.ang_vel_penalty_ratio / denom)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class LinearVelocityTrackingReward(Reward):
-    """Reward for tracking the linear velocity."""
-
-    linvel_obs_name: str = attrs.field()
-    index: CartesianIndex | tuple[CartesianIndex, ...] = attrs.field(
-        default=("x", "y"), validator=dimension_index_tuple_validator
-    )
-    error_scale: float = attrs.field(default=0.25)
-    command_name: str = attrs.field(default="linear_velocity_command")
-    in_robot_frame: bool = attrs.field(default=True)
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def get_reward(self, trajectory: Trajectory) -> Array:
-        if self.linvel_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
-
-        linvel = trajectory.obs[self.linvel_obs_name]
-        if self.in_robot_frame:
-            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
-
-        dims = index_to_dims(self.index)
-
-        linvel = linvel[..., dims]
-        robot_vel_cmd = trajectory.command[self.command_name]
-        robot_vel_cmd = robot_vel_cmd[..., dims]
-
-        vel_error = xax.get_norm(linvel - robot_vel_cmd, self.norm).sum(axis=-1)
-
-        return jnp.exp(-vel_error / self.error_scale)
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        left_joint_name: str,
+        right_joint_name: str,
+        left_zero: float = 0.0,
+        right_zero: float = 0.0,
+        flipped: bool = False,
+        alpha: float = 0.1,
+        kernel_scale: float = 0.25,
+        sq_scale: float = 0.1,
+        abs_scale: float = 0.1,
+        scale: float | Scale = 1.0,
+    ) -> Self:
+        joint_to_idx = get_qpos_data_idxs_by_name(physics_model)
+        left_joint_index = int(joint_to_idx[left_joint_name][0]) - 7
+        right_joint_index = int(joint_to_idx[right_joint_name][0]) - 7
+        return cls(
+            left_joint_index=left_joint_index,
+            right_joint_index=right_joint_index,
+            left_zero=left_zero,
+            right_zero=right_zero,
+            flipped=flipped,
+            alpha=alpha,
+            kernel_scale=kernel_scale,
+            sq_scale=sq_scale,
+            abs_scale=abs_scale,
+            scale=scale,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -793,78 +976,460 @@ class ReachabilityPenalty(Reward):
 class FeetAirTimeReward(StatefulReward):
     """Reward for feet either touching or not touching the ground for some time."""
 
-    threshold: float = attrs.field()
+    gait_period: float = attrs.field()
+    air_time_percent: float = attrs.field()
     ctrl_dt: float = attrs.field()
+    contact_obs: str = attrs.field()
     num_feet: int = attrs.field(default=2)
-    contact_obs: str = attrs.field(default="feet_contact_observation")
-    start_reward: float = attrs.field(
-        default=0.1,
-        validator=attrs.validators.and_(
-            attrs.validators.ge(0.0),
-            attrs.validators.le(1.0),
-        ),
-    )
+    bias: float = attrs.field(default=0.0)
+    alpha: float = attrs.field(default=0.1)
+    ground_penalty: float = attrs.field(default=0.1)
+    linvel_moving_threshold: float = attrs.field(default=0.5)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(30))
 
-    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        return (jnp.zeros(self.num_feet, dtype=jnp.int32), jnp.zeros(self.num_feet, dtype=jnp.int32))
+    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array, Array]:
+        return (
+            jnp.zeros((self.num_feet,), dtype=jnp.int32),
+            jnp.zeros((self.num_feet,), dtype=jnp.int32),
+            jnp.zeros((self.num_feet,), dtype=jnp.bool_),
+        )
 
     def get_reward_stateful(
         self,
         trajectory: Trajectory,
-        reward_carry: tuple[Array, Array],
-    ) -> tuple[Array, tuple[Array, Array]]:
-        sensor_data_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
-        sensor_data_tn = sensor_data_tcn.any(axis=-2)
-        chex.assert_shape(sensor_data_tn, (..., self.num_feet))
+        reward_carry: tuple[Array, Array, Array],
+    ) -> tuple[Array, tuple[Array, Array, Array]]:
+        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
+        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
+        not_moving = jnp.bitwise_and(not_moving_lin, not_moving_ang)
 
-        threshold_steps = round(self.threshold / self.ctrl_dt)
+        contact_tcn: Array = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        contact_tn = jnp.any(contact_tcn, axis=-2)
+        chex.assert_shape(contact_tn, (..., self.num_feet))
 
-        def scan_fn(carry: tuple[Array, Array], x: tuple[Array, Array]) -> tuple[tuple[Array, Array], Array]:
-            count_n, cooldown_n = carry
-            contact_n, done = x
+        air_steps = round(self.gait_period * self.air_time_percent / self.ctrl_dt)
+        gnd_steps = round(self.gait_period * (1.0 - self.air_time_percent) / self.ctrl_dt)
 
-            # The logic for this algorithm is to reward the agent for having
-            # some foot off the ground for up to `threshold_steps` steps, but
-            # then don't reward it for some cooldown period after that.
-            on_cooldown = cooldown_n > 0
+        def scan_fn(
+            carry: tuple[Array, Array, Array],
+            x: tuple[Array, Array],
+        ) -> tuple[tuple[Array, Array, Array], tuple[Array, Array]]:
+            air_cnt_n, gnd_cnt_n, prev_contact_n = carry
+            contact_n, not_moving = x
 
-            cooldown_n = jnp.where(
-                done,
-                0,
+            # After changing states, initialize opposite counters with extra steps.
+            next_air_cnt_n = jnp.where(
+                ~contact_n,
                 jnp.where(
-                    on_cooldown,
-                    cooldown_n - 1,
-                    jnp.where(
-                        contact_n & (count_n > 0),
-                        jnp.minimum(count_n, threshold_steps),
-                        0,
-                    ),
+                    prev_contact_n,
+                    (gnd_cnt_n - gnd_steps).clip(-gnd_steps, 0),
+                    air_cnt_n + 1,
                 ),
+                -gnd_steps,
+            )
+            next_gnd_cnt_n = jnp.where(
+                contact_n,
+                jnp.where(
+                    ~prev_contact_n,
+                    (air_cnt_n - air_steps).clip(-air_steps, 0),
+                    gnd_cnt_n + 1,
+                ),
+                -air_steps,
             )
 
-            count_n = jnp.where(
-                done,
-                0,
-                jnp.where(
-                    on_cooldown,
-                    0,
-                    jnp.where(
-                        contact_n,
-                        0,
-                        count_n + 1,
-                    ),
-                ),
-            )
+            # If not moving, set both to zero.
+            next_air_cnt_n = jnp.where(not_moving, 0, next_air_cnt_n)
+            next_gnd_cnt_n = jnp.where(not_moving, 0, next_gnd_cnt_n)
 
-            return (count_n, cooldown_n), count_n
+            return (next_air_cnt_n, next_gnd_cnt_n, contact_n), (next_air_cnt_n, next_gnd_cnt_n)
 
-        reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
-
-        # Slight upward slope as the steps get longer. Make sure that the
-        # average value will be 1 after taking a full step.
-        reward_tn = (count_tn.astype(jnp.float32) / threshold_steps) * (2.0 - self.start_reward * 2) + self.start_reward
+        not_moving_t = not_moving | trajectory.done
+        reward_carry, (air_cnt_tn, gnd_cnt_tn) = xax.scan(scan_fn, reward_carry, (contact_tn, not_moving_t))
 
         # Gradually increase reward until `threshold_steps`.
-        reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
+        air_rew_tn = (air_cnt_tn.astype(jnp.float32) / air_steps) + self.bias
+        air_rew_tn = jnp.where(air_cnt_tn < air_steps, air_rew_tn, 0.0)
+        air_rew_t = air_rew_tn.max(axis=-1)
 
-        return reward_tn.max(axis=-1), reward_carry
+        gnd_rew_tn = (gnd_cnt_tn.astype(jnp.float32) / gnd_steps) + self.bias
+        gnd_rew_tn = jnp.where(gnd_cnt_tn < gnd_steps, gnd_rew_tn, -self.ground_penalty)
+        gnd_rew_t = gnd_rew_tn.max(axis=-1)
+
+        reward_t = air_rew_t + gnd_rew_t
+        return reward_t, reward_carry
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetGroundedAtRestReward(StatefulReward):
+    max_ground_time: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    contact_obs: str = attrs.field()
+    num_feet: int = attrs.field(default=2)
+    linvel_moving_threshold: float = attrs.field(default=0.5)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(30))
+
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(self.num_feet, dtype=jnp.int32)
+
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: Array,
+    ) -> tuple[Array, Array]:
+        moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) > self.linvel_moving_threshold
+        moving_ang = trajectory.qvel[..., 5] > self.angvel_moving_threshold
+        moving = moving_lin | moving_ang
+
+        contact_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        contact_tn = contact_tcn.any(axis=-2)
+        chex.assert_shape(contact_tn, (..., self.num_feet))
+
+        gnd_steps = round(self.max_ground_time / self.ctrl_dt)
+
+        def scan_fn(carry: Array, x: Array) -> tuple[Array, Array]:
+            gnd_cnt_n, reset_cnt = carry, x
+            gnd_cnt_n = jnp.where(reset_cnt, 0, gnd_cnt_n + 1)
+            return gnd_cnt_n, gnd_cnt_n
+
+        reward_carry, count_tn = xax.scan(
+            scan_fn,
+            reward_carry,
+            moving[..., None] | trajectory.done[..., None] | contact_tn,
+        )
+
+        # Gradually increase reward until `threshold_steps`.
+        gnd_rew_tn = count_tn.astype(jnp.float32) / gnd_steps
+        gnd_rew_tn = gnd_rew_tn.clip(0.0, 1.0)
+        reward_t = gnd_rew_tn.sum(axis=-1)
+
+        return reward_t, reward_carry
+
+
+@attrs.define(kw_only=True)
+class BodyHeightMarker(Marker):
+    foot_id: int = attrs.field()
+    obs_name: str = attrs.field()
+    target_height: float | None = attrs.field()
+    radius: float = attrs.field(default=0.1)
+    size: float = attrs.field(default=0.03)
+    cmd_name: str = attrs.field(default="sinusoidal_gait_command")
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        obs_x, obs_y, obs_z = trajectory.obs[self.obs_name][..., self.foot_id, :].tolist()
+        self.pos = (obs_x, obs_y, obs_z if self.target_height is None else self.target_height)
+
+    @classmethod
+    def get(
+        cls,
+        foot_id: int,
+        obs_name: str,
+        target_height: float | None = None,
+        radius: float = 0.05,
+        size: float = 0.03,
+    ) -> Self:
+        return cls(
+            foot_id=foot_id,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(radius, radius, radius),
+            size=size,
+            radius=radius,
+            obs_name=obs_name,
+            target_height=target_height,
+            rgba=(1.0, 0.0, 0.0, 1.0) if target_height is None else (0.0, 1.0, 0.0, 1.0),
+            track_x=False,
+            track_y=False,
+            track_z=False,
+            track_rotation=False,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class SparseTargetHeightReward(StatefulReward):
+    """Reward for having some bodies be close to a target height."""
+
+    contact_obs: str = attrs.field()
+    position_obs: str = attrs.field()
+    height: float = attrs.field()
+    num_bodies: int = attrs.field(default=2)
+    linvel_moving_threshold: float = attrs.field(default=0.5)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(30))
+
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(self.num_bodies, dtype=jnp.float32)
+
+    def get_reward_stateful(self, trajectory: Trajectory, reward_carry: Array) -> tuple[Array, Array]:
+        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
+        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
+        not_moving = not_moving_lin & not_moving_ang
+
+        contact_tcn = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
+        contact_tn = contact_tcn.any(axis=-2)
+        chex.assert_shape(contact_tn, (..., self.num_bodies))
+
+        position_tn3 = trajectory.obs[self.position_obs]
+        chex.assert_shape(position_tn3, (..., self.num_bodies, 3))
+
+        # Give a sparse reward once the foot contacts the ground, equal to the
+        # maximum height of the foot since the last contact, thresholded at the
+        # target height.
+        def scan_fn(carry: Array, x: tuple[Array, Array, Array]) -> tuple[Array, Array]:
+            max_height_n, (contact_n, position_n3, not_moving) = carry, x
+            height_n = position_n3[..., 2]
+            reward_n = jnp.where(contact_n, max_height_n, 0.0).clip(max=self.height)
+            max_height_n = jnp.maximum(max_height_n, height_n)
+            max_height_n = jnp.where(not_moving | contact_n, 0.0, max_height_n)
+            return max_height_n, reward_n
+
+        reward_carry, reward_tn = xax.scan(
+            scan_fn,
+            reward_carry,
+            (contact_tn, position_tn3, not_moving | trajectory.done),
+        )
+
+        reward_t = reward_tn.max(axis=-1)
+        return reward_t, reward_carry
+
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [
+            marker
+            for foot_id in range(self.num_bodies)
+            for marker in (
+                BodyHeightMarker.get(foot_id, obs_name=self.position_obs),
+                BodyHeightMarker.get(foot_id, obs_name=self.position_obs, target_height=self.height),
+            )
+        ]
+
+
+@attrs.define(frozen=True, kw_only=True)
+class MotionlessAtRestPenalty(Reward):
+    """Reward for feet either touching or not touching the ground for some time."""
+
+    linvel_moving_threshold: float = attrs.field(default=0.5)
+    angvel_moving_threshold: float = attrs.field(default=math.radians(30))
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        not_moving_lin = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) < self.linvel_moving_threshold
+        not_moving_ang = trajectory.qvel[..., 5] < self.angvel_moving_threshold
+        not_moving = not_moving_lin & not_moving_ang
+
+        joint_vel = trajectory.qvel[..., 6:]
+        joint_vel_norm = jnp.linalg.norm(joint_vel, axis=-1)
+        penalty = jnp.where(not_moving, joint_vel_norm, 0.0)
+        return penalty
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ForcePenalty(StatefulReward):
+    """Reward for reducing the force on some body.
+
+    This is modeled with a low-pass filter to simulate compliance, since when
+    using stiff contacts the force can sometimes be very high.
+    """
+
+    force_obs: str = attrs.field()
+    ctrl_dt: float = attrs.field()
+    ema_time: float = attrs.field(default=0.03)
+    ema_scale: float = attrs.field(default=0.001)
+    num_feet: int = attrs.field(default=2)
+    bias: float = attrs.field(default=0.0)
+
+    def initial_carry(self, rng: PRNGKeyArray) -> Array:
+        return jnp.zeros(self.num_feet, dtype=jnp.float32)
+
+    def get_reward_stateful(
+        self,
+        trajectory: Trajectory,
+        reward_carry: Array,
+    ) -> tuple[Array, Array]:
+        alpha = jnp.exp(-self.ctrl_dt / self.ema_time)
+        obs = (jnp.linalg.norm(trajectory.obs[self.force_obs], axis=-1) - self.bias).clip(min=0)
+
+        def scan_fn(carry: Array, x: Array) -> tuple[Array, Array]:
+            ema_n, obs_n = carry, x
+            ema_n = alpha * ema_n + (1 - alpha) * obs_n
+            return ema_n, ema_n
+
+        ema_fn, ema_acc = xax.scan(scan_fn, reward_carry, obs)
+        penalty = jnp.log1p(self.ema_scale * ema_acc).sum(axis=-1)
+        return penalty, ema_fn
+
+
+@attrs.define(kw_only=True)
+class SinusoidalGaitTargetMarker(Marker):
+    foot_id: int = attrs.field()
+    obs_name: str = attrs.field()
+    radius: float = attrs.field(default=0.1)
+    size: float = attrs.field(default=0.03)
+    cmd_name: str = attrs.field(default="sinusoidal_gait_command")
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        obs_x, obs_y, _ = trajectory.obs[self.obs_name][..., self.foot_id, :].tolist()
+        cmd: SinusoidalGaitCommandValue = trajectory.command[self.cmd_name]
+        cmd_h = cmd.height[..., self.foot_id].item()
+        self.pos = (obs_x, obs_y, cmd_h)
+
+    @classmethod
+    def get(
+        cls,
+        foot_id: int,
+        obs_name: str,
+        cmd_name: str,
+        radius: float = 0.05,
+        size: float = 0.03,
+    ) -> Self:
+        return cls(
+            foot_id=foot_id,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(radius, radius, radius),
+            size=size,
+            radius=radius,
+            obs_name=obs_name,
+            cmd_name=cmd_name,
+            rgba=(1.0, 0.0, 0.0, 1.0),  # Red
+            track_x=False,
+            track_y=False,
+            track_z=False,
+            track_rotation=False,
+        )
+
+
+@attrs.define(kw_only=True)
+class SinusoidalGaitPositionMarker(Marker):
+    foot_id: int = attrs.field()
+    obs_name: str = attrs.field()
+    radius: float = attrs.field(default=0.1)
+    size: float = attrs.field(default=0.03)
+
+    def update(self, trajectory: Trajectory) -> None:
+        """Visualizes the sinusoidal gait."""
+        x, y, z = trajectory.obs[self.obs_name][..., self.foot_id, :].tolist()
+        self.pos = (x, y, z)
+
+    @classmethod
+    def get(
+        cls,
+        foot_id: int,
+        obs_name: str,
+        radius: float = 0.05,
+        size: float = 0.03,
+    ) -> Self:
+        return cls(
+            foot_id=foot_id,
+            target_type="root",
+            geom=mujoco.mjtGeom.mjGEOM_SPHERE,  # pyright: ignore[reportAttributeAccessIssue]
+            scale=(radius, radius, radius),
+            size=size,
+            radius=radius,
+            obs_name=obs_name,
+            rgba=(0.0, 1.0, 0.0, 1.0),  # Green
+            track_x=False,
+            track_y=False,
+            track_z=False,
+            track_rotation=False,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class SinusoidalGaitReward(Reward):
+    """Reward for a biped following a sinusoidal gait."""
+
+    ctrl_dt: float = attrs.field()
+    max_height: float = attrs.field()
+    pos_obs: str = attrs.field()
+    pos_cmd: str = attrs.field()
+    num_feet: int = attrs.field(default=2)
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        if self.pos_cmd not in trajectory.command:
+            raise ValueError(f"Command {self.pos_cmd} not found! Ensure that it is in the task.")
+        return self._get_reward_for(trajectory.command[self.pos_cmd], trajectory)
+
+    def _get_reward_for(self, gait_cmd: SinusoidalGaitCommandValue, trajectory: Trajectory) -> Array:
+        obs = trajectory.obs[self.pos_obs][..., 2]
+        cmd = gait_cmd.height
+        reward = 1.0 - (jnp.abs(obs - cmd).sum(axis=-1)) / self.max_height
+        return reward
+
+    def get_markers(self, name: str) -> Collection[Marker]:
+        return [
+            marker
+            for foot_id in range(self.num_feet)
+            for marker in (
+                SinusoidalGaitPositionMarker.get(foot_id, obs_name=self.pos_obs),
+                SinusoidalGaitTargetMarker.get(foot_id, obs_name=self.pos_obs, cmd_name=self.pos_cmd),
+            )
+        ]
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointPositionReward(Reward):
+    """Reward for tracking the joint positions."""
+
+    command_name: str = attrs.field()
+    joint_indices: tuple[int, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(int),
+            ),
+        ),
+    )
+    length_scale: float = attrs.field(default=0.25)
+    sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        if self.command_name not in trajectory.command:
+            raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
+        cmd: JointPositionCommandValue = trajectory.command[self.command_name]
+        trg = trajectory.qpos[..., self.joint_indices]
+        diff = cmd.current_position - trg
+        return exp_kernel_with_penalty(diff, self.length_scale, self.sq_scale, self.abs_scale).mean(axis=-1)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: PhysicsModel,
+        joint_names: Collection[str],
+        command_name: str,
+        length_scale: float = 0.25,
+        sq_scale: float = 0.1,
+        abs_scale: float = 0.1,
+        scale: float | Scale = 1.0,
+    ) -> Self:
+        all_names = get_joint_names_in_order(physics_model)[1:]  # Remove floating base.
+        for joint_name in joint_names:
+            if joint_name not in all_names:
+                raise ValueError(f"Joint {joint_name} not found in the model! Options are: {all_names}")
+
+        joint_name_to_indices = {name: idx for idx, name in enumerate(all_names, start=7)}
+        joint_indices = tuple(joint_name_to_indices[name] for name in joint_names)
+
+        return cls(
+            joint_indices=joint_indices,
+            command_name=command_name,
+            length_scale=length_scale,
+            sq_scale=sq_scale,
+            abs_scale=abs_scale,
+            scale=scale,
+        )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class IntersectionPenalty(Reward):
+    """Penalty for having the feet too close together."""
+
+    position_obs: str = attrs.field()
+    min_distance: float = attrs.field()
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        obs_tn3 = trajectory.obs[self.position_obs]
+        lobs_tn13, robs_t1n3 = obs_tn3[..., None, :], obs_tn3[..., None, :, :]
+        dist_tnn = jnp.linalg.norm(lobs_tn13 - robs_t1n3, axis=-1)
+        dist_tnn = dist_tnn + (jnp.triu(jnp.ones_like(dist_tnn)) * self.min_distance * 2)
+        any_close = jnp.any(dist_tnn < self.min_distance, axis=(-2, -1))
+        return jnp.where(any_close, 1.0, 0.0)

@@ -1,0 +1,4 @@
+# Additional requirements for the K-Bot example.
+
+mujoco_scenes
+kinfer
