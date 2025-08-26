@@ -125,7 +125,7 @@ class PlaneXYPositionReset(Reset):
             [
                 (slice(0, 1), new_x),
                 (slice(1, 2), new_y),
-                (slice(2, 3), z_pos + self.robot_base_height),
+                (slice(2, 3), jnp.array([z_pos + self.robot_base_height])),
             ],
         )
         data = update_data_field(data, "qpos", qpos_new)
