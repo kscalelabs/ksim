@@ -3,6 +3,7 @@
 __all__ = [
     "Event",
     "LinearPushEvent",
+    "AngularPushEvent",
     "JumpEvent",
 ]
 
@@ -13,8 +14,17 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+from ksim.scales import ConstantScale, Scale
 from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import slice_update, update_data_field
+
+
+def convert_to_scale(value: float | int | Scale) -> Scale:
+    if isinstance(value, (float, int)):
+        return ConstantScale(scale=value)
+    if isinstance(value, Scale):
+        return value
+    raise ValueError(f"Invalid scale: {value}")
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -52,13 +62,71 @@ class Event(ABC):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class AngularPushEvent(Event):
+    """Randomly push the robot in a linear direction."""
+
+    angvel: float = attrs.field()
+    vel_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
+    interval_range: tuple[float, float] = attrs.field()
+    scale: Scale = attrs.field(default=ConstantScale(scale=1.0), converter=convert_to_scale)
+
+    def __call__(
+        self,
+        model: PhysicsModel,
+        data: PhysicsData,
+        event_state: Array,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[PhysicsData, Array]:
+        # Decrement by physics timestep.
+        dt = jnp.float32(model.opt.timestep)
+        time_remaining = event_state - dt
+
+        # Update the data if the time remaining is less than 0.
+        updated_data, time_remaining = jax.lax.cond(
+            time_remaining <= 0.0,
+            lambda: self._apply_random_force(data, curriculum_level, rng),
+            lambda: (data, time_remaining),
+        )
+
+        return updated_data, time_remaining
+
+    def _apply_random_force(
+        self,
+        data: PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[PhysicsData, Array]:
+        frng, brng, trng = jax.random.split(rng, 3)
+
+        # Scales the curriculum level range.
+        curriculum_level = self.scale.get_scale(curriculum_level)
+
+        flip = jax.random.bernoulli(frng, p=0.5, shape=())
+        push_mag = jax.random.uniform(brng, (), minval=self.vel_range[0], maxval=self.vel_range[1]) * self.angvel
+        push_mag = jnp.where(flip, -push_mag, push_mag)
+        push_vel = push_mag * curriculum_level
+        new_qvel = slice_update(data, "qvel", slice(5, 6), data.qvel[..., 5:6] + push_vel)
+        updated_data = update_data_field(data, "qvel", new_qvel)
+
+        # Chooses a new remaining interval.
+        minval, maxval = self.interval_range
+        time_remaining = jax.random.uniform(trng, (), minval=minval, maxval=maxval)
+        return updated_data, time_remaining
+
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
+        minval, maxval = self.interval_range
+        return jax.random.uniform(rng, (), minval=minval, maxval=maxval)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class LinearPushEvent(Event):
     """Randomly push the robot in a linear direction."""
 
     linvel: float = attrs.field()
     vel_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
     interval_range: tuple[float, float] = attrs.field()
-    curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
+    scale: Scale = attrs.field(default=ConstantScale(scale=1.0), converter=convert_to_scale)
 
     def __call__(
         self,
@@ -90,15 +158,14 @@ class LinearPushEvent(Event):
         urng, brng, trng = jax.random.split(rng, 3)
 
         # Scales the curriculum level range.
-        curriculum_min, curriculum_max = self.curriculum_range
-        curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
+        curriculum_level = self.scale.get_scale(curriculum_level)
 
         push_theta = jax.random.uniform(urng, (), minval=0.0, maxval=2.0 * jnp.pi)
         push_theta = jnp.array([jnp.cos(push_theta), jnp.sin(push_theta), 0.0])
 
-        push_mag = jax.random.uniform(brng, (), minval=self.vel_range[0], maxval=self.vel_range[1])
+        push_mag = jax.random.uniform(brng, (), minval=self.vel_range[0], maxval=self.vel_range[1]) * self.linvel
         push_vel = push_theta * push_mag * curriculum_level
-        new_qvel = slice_update(data, "qvel", slice(0, 3), data.qvel[:3] + push_vel)
+        new_qvel = slice_update(data, "qvel", slice(0, 3), data.qvel[..., :3] + push_vel)
         updated_data = update_data_field(data, "qvel", new_qvel)
 
         # Chooses a new remaining interval.
@@ -117,7 +184,7 @@ class JumpEvent(Event):
 
     jump_height_range: tuple[float, float] = attrs.field()
     interval_range: tuple[float, float] = attrs.field()
-    curriculum_range: tuple[float, float] = attrs.field(default=(0.0, 1.0))
+    scale: Scale = attrs.field(default=ConstantScale(scale=1.0), converter=convert_to_scale)
 
     def __call__(
         self,
@@ -150,8 +217,7 @@ class JumpEvent(Event):
         urng, trng = jax.random.split(rng, 2)
 
         # Scales the curriculum level range.
-        curriculum_min, curriculum_max = self.curriculum_range
-        curriculum_level = curriculum_level * (curriculum_max - curriculum_min) + curriculum_min
+        curriculum_level = self.scale.get_scale(curriculum_level)
 
         # Implements a jump as a vertical velocity impulse. We compute the
         # required vertical velocity impulse to reach the desired jump height.
@@ -160,7 +226,7 @@ class JumpEvent(Event):
         linvel = jnp.sqrt(2 * -model.opt.gravity * jump_height)
         angvel = jnp.zeros(3)
         vel = jnp.concatenate([linvel, angvel], axis=0)
-        new_qvel = slice_update(data, "qvel", slice(0, 6), data.qvel[:6] + vel)
+        new_qvel = slice_update(data, "qvel", slice(0, 6), data.qvel[..., :6] + vel)
         updated_data = update_data_field(data, "qvel", new_qvel)
 
         # Chooses a new remaining interval.
