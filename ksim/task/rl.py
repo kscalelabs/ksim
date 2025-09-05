@@ -1387,6 +1387,8 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         arrs: list[tuple[str, Mapping[str, Array]]] = [
             ("🎁 reward images", logged_traj.rewards.components),
             ("🎁 reward images", {"_total": logged_traj.rewards.total}),
+            ("🕹️ command images", xax.get_pytree_mapping(logged_traj.trajectory.command)),
+            ("🏃 action images", {"action": logged_traj.trajectory.action}),
         ]
         if self.config.log_all_images:
             arrs += [

@@ -21,6 +21,9 @@ import mujoco_scenes.mjcf
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
+import attrs
+from ksim.vis import Marker
+from ksim.utils.mujoco import get_joint_names_in_order
 
 import ksim
 
@@ -45,6 +48,56 @@ ZEROS: list[tuple[str, float]] = [
     ("dof_left_elbow_02", math.radians(-45.0)),
     ("dof_left_wrist_00", 0.0),
 ]
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FixedPeriodJointTargetCommand(ksim.Command):
+    """Piecewise-constant joint targets for specific joints, resampled every period_s seconds.
+
+    State encoding: [targets..., elapsed_time]
+    """
+
+    joint_indices: tuple[int, ...] = attrs.field()
+    ranges: tuple[tuple[float, float], ...] = attrs.field()
+    dt: float = attrs.field()
+    period_s: float = attrs.field()
+
+    def _sample_targets(self, rng: PRNGKeyArray) -> Array:
+        ranges = jnp.array(self.ranges)  # (N, 2)
+        return jax.random.uniform(rng, (ranges.shape[0],), minval=ranges[:, 0], maxval=ranges[:, 1])
+
+    def initial_command(
+        self,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        targets = self._sample_targets(rng)
+        t = jnp.array(0.0)
+        return jnp.concatenate([targets, jnp.array([t])])
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        n = len(self.joint_indices)
+        targets = prev_command[..., :n]
+        t = prev_command[..., n]
+        t_new = t + self.dt
+        resample = t_new >= self.period_s
+        new_targets = self._sample_targets(rng)
+        targets_next = jnp.where(resample, new_targets, targets)
+        t_next = jnp.where(resample, jnp.array(0.0), t_new)
+        return jnp.concatenate([targets_next, jnp.array([t_next])])
+
+    def get_markers(self, name: str) -> list[Marker]:
+        # No markers for joint-space targets.
+        return []
+
+
 
 
 @dataclass
@@ -79,6 +132,12 @@ class HumanoidManipulationTaskConfig(ksim.PPOConfig):
     mujoco_scene: str = xax.field(
         value="smooth",
         help="The MuJoCo scene to use.",
+    )
+
+    # Command timing for left-arm joint targets
+    left_arm_target_period_s: float = xax.field(
+        value=1.0,
+        help="Seconds between resampling left-arm joint targets.",
     )
 
     # Local model override
@@ -496,32 +555,71 @@ class HumanoidManipulationTask(ksim.PPOTask[HumanoidManipulationTaskConfig]):
         return obs
     
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
+        # Command: piecewise-constant joint targets for the left arm; resample every fixed period.
+        left_joint_names = (
+            # "dof_left_shoulder_pitch_03",
+            # "dof_left_shoulder_roll_03",
+            # "dof_left_shoulder_yaw_02",
+            "dof_left_elbow_02",
+            # "dof_left_wrist_00",
+        )
+
+        all_names = tuple(get_joint_names_in_order(physics_model))
+        name_to_idx = {name: idx for idx, name in enumerate(all_names)}
+        left_joint_indices = tuple(int(name_to_idx[n]) for n in left_joint_names)
+
+        # Build ranges in the same order as indices
+        all_ranges = physics_model.jnt_range.tolist()
+        ranges_list = [(float(minv), float(maxv)) for (minv, maxv) in all_ranges]
+        joint_ranges = tuple(ranges_list[name_to_idx[n]] for n in left_joint_names)
+
         return {
-            # "linvel": ksim.LinearVelocityCommand(
-            #     min_vel=self.config.min_linear_velocity,
-            #     max_vel=self.config.max_linear_velocity,
-            #     ctrl_dt=self.config.ctrl_dt,
-            #     linear_accel=self.config.linear_velocity_accel,
-            #     angular_accel=self.config.angular_velocity_accel,
-            #     max_yaw=self.config.linear_velocity_max_yaw,
-            #     zero_prob=self.config.linear_velocity_zero_prob,
-            #     backward_prob=self.config.linear_velocity_backward_prob,
-            #     switch_prob=self.config.linear_velocity_switch_prob,
-            # ),
-            # "angvel": ksim.AngularVelocityCommand(
-            #     min_vel=self.config.min_angular_velocity,
-            #     max_vel=self.config.max_angular_velocity,
-            #     ctrl_dt=self.config.ctrl_dt,
-            #     angular_accel=self.config.angular_velocity_accel,
-            #     zero_prob=self.config.angular_velocity_zero_prob,
-            #     switch_prob=self.config.angular_velocity_switch_prob,
-            # ),
+            "left_arm_joint_targets": FixedPeriodJointTargetCommand(
+                joint_indices=left_joint_indices,
+                ranges=joint_ranges,
+                dt=self.config.ctrl_dt,
+                period_s=self.config.left_arm_target_period_s,
+            ),
         }
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Reward]:
         rewards: dict[str, ksim.Reward] = {}
-        
         rewards["stay_alive"] = ksim.StayAliveReward(scale=100.0)
+
+        # Reward: track the commanded left arm joint targets.
+        left_joint_names = (
+            # "dof_left_shoulder_pitch_03",
+            # "dof_left_shoulder_roll_03",
+            # "dof_left_shoulder_yaw_02",
+            "dof_left_elbow_02",
+            # "dof_left_wrist_00",
+        )
+
+        # Precompute indices to avoid capturing the model in the reward.
+        all_names = tuple(get_joint_names_in_order(physics_model))
+        name_to_idx = {name: idx for idx, name in enumerate(all_names)}
+        left_joint_indices = tuple(int(name_to_idx[n]) for n in left_joint_names)
+
+        @attrs.define(frozen=True, kw_only=True)
+        class TrackLeftArmToCommandReward(ksim.Reward):
+            joint_indices: tuple[int, ...] = attrs.field()
+
+            def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+                idxs = jnp.array(self.joint_indices) + 7
+                qpos_sel = trajectory.qpos[..., idxs]
+
+                # Command target vector for these joints is the first N entries
+                cmd_state = trajectory.command["left_arm_joint_targets"]
+                n = qpos_sel.shape[-1]
+                target = cmd_state[..., :n]
+
+                diff = qpos_sel - target
+                return -jnp.sum(jnp.square(diff), axis=-1)
+
+        rewards["track_left_arm_to_command"] = TrackLeftArmToCommandReward(
+            joint_indices=left_joint_indices,
+            scale=1.0,
+        )
 
         return rewards
 
@@ -761,5 +859,7 @@ if __name__ == "__main__":
             render_markers=True,
             render_track_body_id=0,
             disable_multiprocessing=True,
+            render_azimuth=135,
+            render_distance=1.5
         ),
     )
