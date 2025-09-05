@@ -638,9 +638,15 @@ class HumanoidManipulationTask(ksim.PPOTask[HumanoidManipulationTaskConfig]):
         num_joints = pm.nq - 7  # exclude floating base (pos 3 + quat 4); welded, but model still has freejoint in file.
         nu = pm.nu
         nbody = pm.nbody
+        # Number of command target values fed into the networks (exclude timer)
+        cmd_joint_names = (
+            # Currently matching get_commands / get_rewards selection
+            "dof_right_elbow_02",
+        )
+        n_cmd_targets = len(cmd_joint_names)
 
         # Actor obs: joint_pos (N) + joint_vel (N) + proj_grav (3) + imu_gyro (3)
-        num_actor_inputs = (2 * num_joints) + 3 + 3
+        num_actor_inputs = (2 * num_joints) + 3 + 3 + n_cmd_targets
 
         # Critic obs matches run_critic concatenation (no EE/target, no commands)
         num_critic_inputs = (
@@ -655,7 +661,7 @@ class HumanoidManipulationTask(ksim.PPOTask[HumanoidManipulationTaskConfig]):
             + 4  # base_quat
             + 3  # lin_vel
             + 3  # ang_vel
-        )
+        ) + n_cmd_targets
 
         return Model(
             params.key,
@@ -689,6 +695,8 @@ class HumanoidManipulationTask(ksim.PPOTask[HumanoidManipulationTaskConfig]):
         joint_vel_n = observations["noisy_joint_velocity"]
         proj_grav_3 = observations["noisy_imu_projected_gravity"]
         imu_gyro_3 = observations["noisy_imu_gyro"]
+        # Command targets for the joint(s) (drop trailing timer)
+        cmd_targets = commands["left_arm_joint_targets"][..., :-1]
 
 
         obs_n = jnp.concatenate(
@@ -697,6 +705,7 @@ class HumanoidManipulationTask(ksim.PPOTask[HumanoidManipulationTaskConfig]):
                 joint_vel_n / 10.0,     # N
                 proj_grav_3,            # 3
                 imu_gyro_3,             # 3
+                cmd_targets,             # command targets (no timer)
             ],
             axis=-1,
         )
@@ -722,6 +731,8 @@ class HumanoidManipulationTask(ksim.PPOTask[HumanoidManipulationTaskConfig]):
         base_quat_4 = observations["base_orientation"]
         lin_vel_obs_3 = observations["base_linear_velocity"]
         ang_vel_obs_3 = observations["base_angular_velocity"]
+        # Command targets for the joint(s) (drop trailing timer)
+        cmd_targets = commands["left_arm_joint_targets"][..., :-1]
 
 
         obs_n = jnp.concatenate(
@@ -738,6 +749,7 @@ class HumanoidManipulationTask(ksim.PPOTask[HumanoidManipulationTaskConfig]):
                 base_quat_4,
                 lin_vel_obs_3,
                 ang_vel_obs_3,
+                cmd_targets,                    # command targets (no timer)
             ],
             axis=-1,
         )
