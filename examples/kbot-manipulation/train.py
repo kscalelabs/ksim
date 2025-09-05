@@ -560,8 +560,9 @@ class HumanoidManipulationTask(ksim.PPOTask[HumanoidManipulationTaskConfig]):
             # "dof_left_shoulder_pitch_03",
             # "dof_left_shoulder_roll_03",
             # "dof_left_shoulder_yaw_02",
-            "dof_left_elbow_02",
+            # "dof_left_elbow_02",
             # "dof_left_wrist_00",
+            "dof_right_elbow_02",
         )
 
         all_names = tuple(get_joint_names_in_order(physics_model))
@@ -591,8 +592,9 @@ class HumanoidManipulationTask(ksim.PPOTask[HumanoidManipulationTaskConfig]):
             # "dof_left_shoulder_pitch_03",
             # "dof_left_shoulder_roll_03",
             # "dof_left_shoulder_yaw_02",
-            "dof_left_elbow_02",
+            # "dof_left_elbow_02",
             # "dof_left_wrist_00",
+            "dof_right_elbow_02",
         )
 
         # Precompute indices to avoid capturing the model in the reward.
@@ -860,6 +862,9 @@ if __name__ == "__main__":
             render_track_body_id=0,
             disable_multiprocessing=True,
             render_azimuth=135,
-            render_distance=1.5
+            render_distance=1.5,
+            valid_every_n_steps=5,
+            log_all_images=True,
+            max_values_per_plot=50,
         ),
     )
