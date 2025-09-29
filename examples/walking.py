@@ -414,7 +414,6 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             "armature": ksim.ArmatureRandomizer(),
             "mass_multiplication": ksim.MassMultiplicationRandomizer.from_body_name(physics_model, "torso"),
             "joint_damping": ksim.JointDampingRandomizer(),
-            "joint_zero_position": ksim.JointZeroPositionRandomizer(),
         }
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
