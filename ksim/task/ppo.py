@@ -275,6 +275,14 @@ class PPOConfig(RLConfig):
         value=1e-3,
         help="KL divergence coefficient for PPO, to discourage large changes in the policy.",
     )
+    adaptive_kl: bool = xax.field(
+        value=False,
+        help="If true, adapt kl_coef online to target desired_kl.",
+    )
+    desired_kl: float = xax.field(
+        value=1e-2,
+        help="Target KL divergence between old and new policy when adaptive_kl is enabled.",
+    )
     log_clip_value: float = xax.field(
         value=5.0,
         help="The log clip value for PPO, for numerical stability.",
@@ -353,6 +361,9 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             "value_targets": ppo_inputs.value_targets_bt.mean(),
             "advantages": ppo_inputs.advantages_bt.mean(),
         }
+        # KL metric between on- and off-policy distributions
+        kl_div = (on_policy_variables.log_probs - off_policy_variables.log_probs).sum(axis=-1).mean()
+        metrics["kl"] = kl_div
         for name, loss in losses_bt.items():
             metrics[f"loss_{name}"] = loss.mean()
         if off_policy_variables.entropy is not None:
@@ -409,6 +420,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         init_carry: PyTree,
         on_policy_variables: PPOVariables,
         rng: PRNGKeyArray,
+        kl_scale: float,
     ) -> tuple[Array, xax.FrozenDict[str, Array]]:
         """Computes the PPO loss and additional metrics.
 
@@ -420,6 +432,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             init_carry: The initial carry for the model.
             on_policy_variables: The PPO variables from the on-policy rollout.
             rng: A random seed.
+            kl_scale: A runtime scaling factor applied to the KL loss term to support adaptive KL.
 
         Returns:
             A tuple containing the loss value as a scalar, a dictionary of
@@ -453,6 +466,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             log_clip_value=self.config.log_clip_value,
             use_clipped_value_loss=self.config.use_clipped_value_loss,
         )
+
+        # Rescale KL loss dynamically to support adaptive KL without recompilation.
+        losses_bt = dict(losses_bt)
+        losses_bt["kl"] = losses_bt["kl"] * kl_scale
 
         metrics = self.get_ppo_metrics(
             losses_bt=losses_bt,
@@ -494,6 +511,10 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             has_aux=True,
             jit_level=JitLevel.RL_CORE,
         )
+        # Compute runtime KL scaling factor for adaptive KL.
+        current_kl_coef = carry.shared_state.aux_values["kl_coef"] if self.config.adaptive_kl else self.config.kl_coef
+        kl_scale = current_kl_coef / self.config.kl_coef
+
         grads, ppo_metrics = loss_fn(
             model_arr,
             model_static,
@@ -502,6 +523,7 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             carry.env_states.model_carry,
             on_policy_variables,
             rng,
+            kl_scale,
         )
 
         # Applies the gradients.
@@ -517,6 +539,25 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
             ),
             opt_state=xax.tuple_insert(carry.opt_state, 0, new_opt_state),
         )
+
+        # If enabled, adapt KL coefficient toward the desired KL.
+        if self.config.adaptive_kl:
+            kl_mean = ppo_metrics["kl"].mean()
+            desired = self.config.desired_kl
+            factor = 1.5
+            new_kl_coef = jnp.where(kl_mean > desired * factor, current_kl_coef * factor, current_kl_coef)
+            new_kl_coef = jnp.where(kl_mean < desired / factor, new_kl_coef / factor, new_kl_coef)
+            new_kl_coef = jnp.clip(new_kl_coef, 1e-8, 1e2)
+
+            aux_vals = {**dict(carry.shared_state.aux_values)}
+            aux_vals["kl_coef"] = new_kl_coef
+            carry = replace(
+                carry,
+                shared_state=replace(
+                    carry.shared_state,
+                    aux_values=xax.freeze_dict(aux_vals),
+                ),
+            )
 
         return carry, ppo_metrics
 
@@ -535,6 +576,18 @@ class PPOTask(RLTask[Config], Generic[Config], ABC):
         rng: PRNGKeyArray,
     ) -> tuple[RLLoopCarry, xax.FrozenDict[str, Array]]:
         rng, onp_rng, passes_rng = jax.random.split(rng, 3)
+
+        # Initialize adaptive KL coefficient in aux_values if needed.
+        if self.config.adaptive_kl and "kl_coef" not in carry.shared_state.aux_values:
+            init_aux = {**dict(carry.shared_state.aux_values)}
+            init_aux["kl_coef"] = jnp.asarray(self.config.kl_coef)
+            carry = replace(
+                carry,
+                shared_state=replace(
+                    carry.shared_state,
+                    aux_values=xax.freeze_dict(init_aux),
+                ),
+            )
 
         # Gets the policy model.
         policy_model_arr = carry.shared_state.model_arrs[0]
