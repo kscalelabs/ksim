@@ -93,17 +93,6 @@ def test_joint_damping_randomization(
     assert np.allclose(mj_dict["dof_damping"], mjx_dict["dof_damping"])
 
 
-def test_joint_zero_position_randomization(
-    simple_model: mujoco.MjModel,
-    simple_mjx_model: mjx.Model,
-    rng: jax.Array,
-) -> None:
-    randomizer = ksim.JointZeroPositionRandomizer(scale_lower=-0.1, scale_upper=0.1)
-    mj_dict = randomizer(simple_model, rng)
-    mjx_dict = randomizer(simple_mjx_model, rng)
-    assert np.allclose(mj_dict["qpos0"], mjx_dict["qpos0"])
-
-
 def test_static_friction_randomization(
     simple_model: mujoco.MjModel,
     simple_mjx_model: mjx.Model,

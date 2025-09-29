@@ -461,10 +461,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale_upper=1.5,
             ),
             "joint_damping": ksim.JointDampingRandomizer(),
-            "joint_zero_position": ksim.JointZeroPositionRandomizer(
-                scale_lower=math.radians(-2),
-                scale_upper=math.radians(2),
-            ),
         }
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:

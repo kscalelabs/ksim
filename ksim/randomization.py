@@ -9,7 +9,6 @@ __all__ = [
     "MassMultiplicationRandomizer",
     "AllBodiesMassMultiplicationRandomizer",
     "JointDampingRandomizer",
-    "JointZeroPositionRandomizer",
     "IMUAlignmentRandomizer",
 ]
 
@@ -236,24 +235,6 @@ class JointDampingRandomizer(PhysicsRandomizer):
         )
         dof_damping = jnp.concatenate([model.dof_damping[:6], kd])
         return {"dof_damping": dof_damping}
-
-
-@attrs.define(frozen=True, kw_only=True)
-class JointZeroPositionRandomizer(PhysicsRandomizer):
-    """Randomizes the joint zero position."""
-
-    scale_lower: float = attrs.field(default=-0.01)
-    scale_upper: float = attrs.field(default=0.01)
-
-    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
-        new_qpos = model.qpos0[7:] + jax.random.uniform(
-            rng,
-            shape=(model.qpos0.shape[0] - 7,),
-            minval=self.scale_lower,
-            maxval=self.scale_upper,
-        )
-        new_qpos = jnp.concatenate([model.qpos0[:7], new_qpos])
-        return {"qpos0": new_qpos}
 
 
 @attrs.define(frozen=True, kw_only=True)
