@@ -63,7 +63,7 @@ class Trajectory:
     ctrl: Array
     obs: xax.FrozenDict[str, PyTree]
     command: xax.FrozenDict[str, PyTree]
-    event_state: xax.FrozenDict[str, Array]
+    event_state: xax.FrozenDict[str, PyTree]
     action: Array
     done: Array
     success: Array

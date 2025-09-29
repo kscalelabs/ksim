@@ -41,7 +41,7 @@ class Event(ABC):
         event_state: PyTree,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[PhysicsData, Array]:
+    ) -> tuple[PhysicsData, PyTree]:
         """Apply the event to the data.
 
         Note that this function is called on every physics timestep, not
@@ -59,7 +59,7 @@ class Event(ABC):
         """
 
     @abstractmethod
-    def get_initial_event_state(self, rng: PRNGKeyArray) -> Array:
+    def get_initial_event_state(self, rng: PRNGKeyArray) -> PyTree:
         """Get the initial info for the event."""
 
 
