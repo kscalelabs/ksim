@@ -11,6 +11,7 @@ __all__ = [
     "JointPositionObservation",
     "JointVelocityObservation",
     "DelayedJointPositionObservation",
+    "BiasedJointPositionObservation",
     "DelayedJointVelocityObservation",
     "CenterOfMassInertiaObservation",
     "CenterOfMassVelocityObservation",
@@ -190,6 +191,31 @@ class DelayedJointPositionObservation(StatefulObservation):
         new_carry = new_carry.at[-1].set(current_qpos)
 
         return delayed_qpos, new_carry
+
+
+@attrs.define(frozen=True, kw_only=True)
+class BiasedJointPositionObservation(StatefulObservation):
+    """Observes joint positions with an added bias in addition to noise."""
+
+    bias_range: float = attrs.field(default=0.0)
+
+    def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> Array:
+        num_joints = physics_state.data.qpos[7:].shape[0]  # Skip first 7 DoF (base pose)
+        bias = jax.random.uniform(rng, shape=(num_joints,), minval=-self.bias_range, maxval=self.bias_range)
+        return bias
+
+    def observe_stateful(
+        self,
+        state: ObservationInput,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, Array]:
+        bias: Array = state.obs_carry
+        joint_pos = state.physics_state.data.qpos[7:]  # Skip first 7 DoF (base pose)
+
+        biased_pos = joint_pos + bias
+
+        return biased_pos, bias
 
 
 @attrs.define(frozen=True, kw_only=True)
