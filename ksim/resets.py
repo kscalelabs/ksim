@@ -20,13 +20,17 @@ from abc import ABC, abstractmethod
 import attrs
 import jax
 import jax.numpy as jnp
-import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray
-from mujoco import mjx
 
 from ksim.types import PhysicsData, PhysicsModel
-from ksim.utils.mujoco import get_joint_names_in_order, get_position_limits, slice_update, update_data_field
+from ksim.utils.mujoco import (
+    get_joint_names_in_order,
+    get_position_limits,
+    slice_update,
+    slice_update_many,
+    update_data_field,
+)
 from ksim.utils.priors import MotionReferenceData
 
 logger = logging.getLogger(__name__)
@@ -65,10 +69,6 @@ class HFieldXYPositionReset(Reset):
         new_x = jnp.clip(offset_x, lower_x, upper_x)
         new_y = jnp.clip(offset_y, lower_y, upper_y)
 
-        qpos_j = data.qpos
-        qpos_j = qpos_j.at[0:1].set(new_x)
-        qpos_j = qpos_j.at[1:2].set(new_y)
-
         # Map new XY to heightfield indices.
         nx, ny = self.hfield_data.array.shape
         x_idx = jnp.clip(
@@ -84,8 +84,16 @@ class HFieldXYPositionReset(Reset):
 
         # Get the height from the heightfield and add the z offset.
         z = self.hfield_data.array[x_idx, y_idx]
-        qpos_j = qpos_j.at[2:3].set(z + z_top + self.robot_base_height)
-        data = update_data_field(data, "qpos", qpos_j)
+        qpos_new = slice_update_many(
+            data,
+            "qpos",
+            [
+                (slice(0, 1), new_x),
+                (slice(1, 2), new_y),
+                (slice(2, 3), z + z_top + self.robot_base_height),
+            ],
+        )
+        data = update_data_field(data, "qpos", qpos_new)
         return data
 
 
@@ -111,11 +119,16 @@ class PlaneXYPositionReset(Reset):
         new_x = jnp.clip(offset_x, lower_x, upper_x)
         new_y = jnp.clip(offset_y, lower_y, upper_y)
 
-        qpos_j = data.qpos
-        qpos_j = qpos_j.at[0:1].set(new_x)
-        qpos_j = qpos_j.at[1:2].set(new_y)
-        qpos_j = qpos_j.at[2:3].set(z_pos + self.robot_base_height)
-        data = update_data_field(data, "qpos", qpos_j)
+        qpos_new = slice_update_many(
+            data,
+            "qpos",
+            [
+                (slice(0, 1), new_x),
+                (slice(1, 2), new_y),
+                (slice(2, 3), jnp.array([z_pos + self.robot_base_height])),
+            ],
+        )
+        data = update_data_field(data, "qpos", qpos_new)
         return data
 
 
@@ -198,12 +211,8 @@ class RandomBaseVelocityXYReset(Reset):
     def __call__(self, data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsData:
         qvel = data.qvel
         noise = jax.random.uniform(rng, qvel[0:2].shape, minval=-self.scale, maxval=self.scale) * curriculum_level
-        match type(data):
-            case mujoco.MjData:
-                qvel[0:2] = noise
-            case mjx.Data:
-                qvel.at[0:2].set(noise)
-        data = update_data_field(data, "qvel", qvel)
+        qvel_new = slice_update_many(data, "qvel", [(slice(0, 2), noise)])
+        data = update_data_field(data, "qvel", qvel_new)
         return data
 
 

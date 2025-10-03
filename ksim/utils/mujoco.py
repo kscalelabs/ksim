@@ -382,6 +382,10 @@ def slice_update(
         return val
     if isinstance(model, (mjx.Model, mjx.Data)):
         return getattr(model, name).at[slice].set(value)
+    # Support for tests that use DummyMjxData
+    if hasattr(model, "replace"):
+        arr = getattr(model, name)
+        return jnp.array(arr).at[slice].set(value)
     raise ValueError(f"Model type {type(model)} not supported")
 
 
@@ -570,3 +574,32 @@ def add_new_mujoco_body(
     parent_body.append(new_body)
 
     return ET.tostring(root, encoding="utf-8").decode("utf-8")
+
+
+def slice_update_many(
+    model: mujoco.MjModel | mjx.Model | mujoco.MjData | mjx.Data,
+    name: str,
+    updates: list[tuple[Any, Array]],  # noqa: ANN401
+) -> Array:
+    """Apply multiple slice assignments to a single model/data field.
+
+    This avoids repeating backend-specific branching and ensures that multiple
+    updates compose correctly before writing the final value back.
+    """
+    if isinstance(model, (mujoco.MjModel, mujoco.MjData)):
+        val = getattr(model, name).copy()
+        for slc, v in updates:
+            val[slc] = v
+        return val
+    if isinstance(model, (mjx.Model, mjx.Data)):
+        arr = getattr(model, name)
+        for slc, v in updates:
+            arr = arr.at[slc].set(v)
+        return arr
+    # Support for tests that use DummyMjxData
+    if hasattr(model, "replace"):
+        arr = getattr(model, name)
+        for slc, v in updates:
+            arr = jnp.array(arr).at[slc].set(v)
+        return arr
+    raise ValueError(f"Model type {type(model)} not supported")
