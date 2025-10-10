@@ -30,6 +30,7 @@ exclude = "run_\\d"
 
 module = [
     "_pytest.*",
+    "chex.*",
     "equinox.*",
     "glfw.*",
     "mujoco.*",

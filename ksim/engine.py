@@ -107,8 +107,8 @@ class EngineData:
     ctrl_dt: float
     drop_action_prob: float
     actuator_update_dt: float | None
-    min_action_latency_step: int
-    max_action_latency_step: int
+    min_action_latency_step: float
+    max_action_latency_step: float
     phys_steps_per_ctrl_steps: int
     phys_steps_per_actuator_step: int
 
