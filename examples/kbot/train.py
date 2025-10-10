@@ -919,16 +919,17 @@ if __name__ == "__main__":
             num_passes=4,
             rollout_length_frames=24,
             # Simulation parameters.
-            dt=0.004,
-            ctrl_dt=0.02,
             iterations=8,
             ls_iterations=8,
+            # Engine parameters.
+            dt=0.004,
+            ctrl_dt=0.02,
             action_latency_range=(0.001, 0.01),  # Simulate 1-10ms of latency.
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             # If running this on Mac and you are getting segfaults,
             # you might need to disable `render_markers`
-            render_markers=True,
+            # render_markers=True,
             render_track_body_id=0,
             disable_multiprocessing=True,
         ),

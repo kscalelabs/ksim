@@ -5,6 +5,7 @@ model and data.
 """
 
 __all__ = [
+    "EngineConfig",
     "PhysicsEngine",
     "MjxEngine",
     "MujocoEngine",
@@ -14,7 +15,8 @@ __all__ = [
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Collection, Literal, Mapping
+from dataclasses import dataclass
+from typing import Collection, Literal, Mapping, Self
 
 import equinox as eqx
 import jax
@@ -23,6 +25,7 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from mujoco import mjx
+from omegaconf import MISSING
 
 from ksim.actuators import Actuators, StatefulActuators
 from ksim.debugging import JitLevel
@@ -35,17 +38,103 @@ logger = logging.getLogger(__name__)
 EngineType = Literal["mjx", "mujoco"]
 
 
+@jax.tree_util.register_dataclass
+@dataclass
+class EngineConfig:
+    action_latency_range: tuple[float, float] = xax.field(
+        value=(0.0, 0.0),
+        help="The range of action latencies to use.",
+    )
+    drop_action_prob: float = xax.field(
+        value=0.0,
+        help="The probability of dropping an action.",
+    )
+    actuator_update_dt: float | None = xax.field(
+        value=None,
+        help="The time step of the actuator update.",
+    )
+    ctrl_dt: float = xax.field(
+        value=MISSING,
+        help="The time step of the control loop.",
+    )
+    dt: float = xax.field(
+        value=MISSING,
+        help="The time step of the physics loop.",
+    )
+
+    def __post_init__(self) -> None:
+        if self.dt is MISSING:
+            raise ValueError("`dt` is required")
+        if self.ctrl_dt is MISSING:
+            raise ValueError("`ctrl_dt` is required")
+
+        min_action_latency, max_action_latency = self.action_latency_range
+        if min_action_latency < 0:
+            raise ValueError("`min_action_latency` must be non-negative")
+        if min_action_latency > max_action_latency:
+            raise ValueError("`min_action_latency` must be less than or equal to `max_action_latency`")
+        if max_action_latency > self.ctrl_dt:
+            logger.warning("`max_action_latency=%f` is greater than `ctrl_dt=%f`", max_action_latency, self.ctrl_dt)
+        if (remainder := (self.ctrl_dt - round(self.ctrl_dt / self.dt) * self.dt)) > 1e-6:
+            logger.warning("`ctrl_dt=%f` is not a multiple of `dt=%f` (remainder=%f)", self.ctrl_dt, self.dt, remainder)
+
+        if self.drop_action_prob < 0 or self.drop_action_prob >= 1:
+            raise ValueError("`drop_action_prob` must be between 0 and 1")
+
+    @property
+    def min_action_latency_step(self) -> float:
+        return self.action_latency_range[0] / self.dt
+
+    @property
+    def max_action_latency_step(self) -> float:
+        return self.action_latency_range[1] / self.dt
+
+    @property
+    def phys_steps_per_ctrl_steps(self) -> int:
+        return round(self.ctrl_dt / self.dt)
+
+    @property
+    def phys_steps_per_actuator_step(self) -> int:
+        if self.actuator_update_dt is not None:
+            return max(1, round(self.actuator_update_dt / self.dt))
+        return 1
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class EngineData:
+    dt: float
+    ctrl_dt: float
+    drop_action_prob: float
+    actuator_update_dt: float | None
+    min_action_latency_step: float
+    max_action_latency_step: float
+    phys_steps_per_ctrl_steps: int
+    phys_steps_per_actuator_step: int
+
+    @classmethod
+    def from_config(cls, config: EngineConfig) -> Self:
+        # We need to build the static EngineData object from the config in
+        # order to satisfy PyTree requirements.
+        return cls(
+            dt=config.dt,
+            ctrl_dt=config.ctrl_dt,
+            drop_action_prob=config.drop_action_prob,
+            actuator_update_dt=config.actuator_update_dt,
+            min_action_latency_step=config.min_action_latency_step,
+            max_action_latency_step=config.max_action_latency_step,
+            phys_steps_per_ctrl_steps=config.phys_steps_per_ctrl_steps,
+            phys_steps_per_actuator_step=config.phys_steps_per_actuator_step,
+        )
+
+
 class PhysicsEngine(eqx.Module, ABC):
     """The role of an engine is simple: reset and step. Decoupled from data."""
 
     actuators: Actuators = eqx.field()
     resets: tuple[Reset, ...] = eqx.field()
     events: xax.FrozenDict[str, Event] = eqx.field()
-    phys_steps_per_ctrl_steps: int = eqx.field()
-    min_action_latency_step: float = eqx.field()
-    max_action_latency_step: float = eqx.field()
-    drop_action_prob: float = eqx.field()
-    phys_steps_per_actuator_step: int = eqx.field()
+    data: EngineData = eqx.field()
 
     @abstractmethod
     def reset(self, physics_model: PhysicsModel, curriculum_level: Array, rng: PRNGKeyArray) -> PhysicsState:
@@ -106,8 +195,8 @@ class MjxEngine(PhysicsEngine):
             actuator_state=actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
-                minval=self.min_action_latency_step * curriculum_level,
-                maxval=self.max_action_latency_step * curriculum_level,
+                minval=self.data.min_action_latency_step * curriculum_level,
+                maxval=self.data.max_action_latency_step * curriculum_level,
             ),
         )
 
@@ -136,12 +225,12 @@ class MjxEngine(PhysicsEngine):
         rng: PRNGKeyArray,
     ) -> PhysicsState:
         mjx_data = physics_state.data
-        phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
+        phys_steps_per_ctrl_steps = self.data.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
 
         # Randomly drops some actions.
         rng, drop_rng = jax.random.split(rng)
-        drop_action = jax.random.bernoulli(drop_rng, self.drop_action_prob * curriculum_level, shape=action.shape)
+        drop_action = jax.random.bernoulli(drop_rng, self.data.drop_action_prob * curriculum_level, shape=action.shape)
         action = jnp.where(drop_action, prev_action, action)
 
         def move_physics(
@@ -154,7 +243,7 @@ class MjxEngine(PhysicsEngine):
             prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
             ctrl = prev_action * (1.0 - prct) + action * prct
 
-            should_update = jnp.mod(step_num, self.phys_steps_per_actuator_step) == 0
+            should_update = jnp.mod(step_num, self.data.phys_steps_per_actuator_step) == 0
             rng, rng_update = jax.random.split(rng)
 
             def update_actuators(prev_actuator_state: PyTree) -> tuple[Array, PyTree]:
@@ -254,8 +343,8 @@ class MujocoEngine(PhysicsEngine):
             actuator_state=actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
-                minval=self.min_action_latency_step * curriculum_level,
-                maxval=self.max_action_latency_step * curriculum_level,
+                minval=self.data.min_action_latency_step * curriculum_level,
+                maxval=self.data.max_action_latency_step * curriculum_level,
             ),
         )
 
@@ -273,12 +362,12 @@ class MujocoEngine(PhysicsEngine):
             raise ValueError("Mujoco data is not a MjData")
 
         mujoco.mj_forward(physics_model, data)
-        phys_steps_per_ctrl_steps = self.phys_steps_per_ctrl_steps
+        phys_steps_per_ctrl_steps = self.data.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
 
         # Randomly drops some actions.
         rng, drop_rng = jax.random.split(rng)
-        drop_action = jax.random.bernoulli(drop_rng, self.drop_action_prob * curriculum_level, shape=action.shape)
+        drop_action = jax.random.bernoulli(drop_rng, self.data.drop_action_prob * curriculum_level, shape=action.shape)
         action = jnp.where(drop_action, prev_action, action)
 
         event_states = physics_state.event_states
@@ -291,7 +380,7 @@ class MujocoEngine(PhysicsEngine):
             prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
             ctrl = prev_action * (1.0 - prct) + action * prct
 
-            if (step_num % self.phys_steps_per_actuator_step) == 0:
+            if (step_num % self.data.phys_steps_per_actuator_step) == 0:
                 if isinstance(self.actuators, StatefulActuators):
                     torques, actuator_state = self.actuators.get_stateful_ctrl(
                         action=ctrl,
@@ -341,34 +430,9 @@ def get_physics_engine(
     resets: Collection[Reset],
     events: Mapping[str, Event],
     actuators: Actuators,
-    *,
-    dt: float,
-    ctrl_dt: float,
-    action_latency_range: tuple[float, float],
-    drop_action_prob: float,
-    actuator_update_dt: float | None,
+    config: EngineConfig,
 ) -> PhysicsEngine:
-    min_action_latency, max_action_latency = action_latency_range
-    if min_action_latency < 0:
-        raise ValueError("`min_action_latency` must be non-negative")
-    if min_action_latency > max_action_latency:
-        raise ValueError("`min_action_latency` must be less than or equal to `max_action_latency`")
-    if max_action_latency > ctrl_dt:
-        logger.warning("`max_action_latency=%f` is greater than `ctrl_dt=%f`", max_action_latency, ctrl_dt)
-    if (remainder := (ctrl_dt - round(ctrl_dt / dt) * dt)) > 1e-6:
-        logger.warning("`ctrl_dt=%f` is not a multiple of `dt=%f` (remainder=%f)", ctrl_dt, dt, remainder)
-    if drop_action_prob < 0 or drop_action_prob >= 1:
-        raise ValueError("`drop_action_prob` must be between 0 and 1")
-
-    # Converts to steps.
-    min_action_latency_step = min_action_latency / dt
-    max_action_latency_step = max_action_latency / dt
-    phys_steps_per_ctrl_steps = round(ctrl_dt / dt)
-
-    if actuator_update_dt is not None:
-        phys_steps_per_actuator_step = max(1, round(actuator_update_dt / dt))
-    else:
-        phys_steps_per_actuator_step = 1
+    data = EngineData.from_config(config)
 
     match engine_type:
         case "mujoco":
@@ -376,11 +440,7 @@ def get_physics_engine(
                 resets=tuple(resets),
                 events=xax.freeze_dict(events),
                 actuators=actuators,
-                min_action_latency_step=min_action_latency_step,
-                max_action_latency_step=max_action_latency_step,
-                phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
-                drop_action_prob=drop_action_prob,
-                phys_steps_per_actuator_step=phys_steps_per_actuator_step,
+                data=data,
             )
 
         case "mjx":
@@ -388,11 +448,7 @@ def get_physics_engine(
                 resets=tuple(resets),
                 events=xax.freeze_dict(events),
                 actuators=actuators,
-                min_action_latency_step=min_action_latency_step,
-                max_action_latency_step=max_action_latency_step,
-                phys_steps_per_ctrl_steps=phys_steps_per_ctrl_steps,
-                drop_action_prob=drop_action_prob,
-                phys_steps_per_actuator_step=phys_steps_per_actuator_step,
+                data=data,
             )
 
         case _:

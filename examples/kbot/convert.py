@@ -64,6 +64,8 @@ def main() -> None:
     # Loads the Mujoco model and gets the joint names.
     joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
 
+    command_names = ["todo"]
+
     # Constant values.
     depth = task.config.depth
     hidden_size = task.config.hidden_size
@@ -71,7 +73,7 @@ def main() -> None:
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
-        num_commands=16,
+        command_names=command_names,
         carry_size=(2 * depth * hidden_size + len(joint_names),),
     )
 
