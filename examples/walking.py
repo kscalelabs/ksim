@@ -776,9 +776,10 @@ if __name__ == "__main__":
             batch_size=512,
             num_passes=4,
             rollout_length_frames=24,
-            # Simulation parameters.
+            # Engine parameters.
             dt=0.004,
             ctrl_dt=0.02,
+            # Simulation parameters.
             iterations=8,
             ls_iterations=8,
         ),

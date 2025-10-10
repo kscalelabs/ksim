@@ -54,7 +54,7 @@ from ksim.commands import Command
 from ksim.curriculum import Curriculum, CurriculumState
 from ksim.dataset import TrajectoryDataset
 from ksim.debugging import JitLevel
-from ksim.engine import PhysicsEngine, engine_type_from_physics_model, get_physics_engine
+from ksim.engine import EngineConfig, PhysicsEngine, engine_type_from_physics_model, get_physics_engine
 from ksim.events import Event
 from ksim.observation import Observation, ObservationInput, StatefulObservation
 from ksim.randomization import PhysicsRandomizer
@@ -361,7 +361,7 @@ def apply_randomizations(
 
 @jax.tree_util.register_dataclass
 @dataclass
-class RLConfig(xax.Config):
+class RLConfig(EngineConfig, xax.Config):
     # Toggle this to run the environment viewer loop.
     run_mode: str = xax.field(
         value="train",
@@ -529,16 +529,16 @@ class RLConfig(xax.Config):
         value=[0.0, 0.0, 0.5],
         help="The lookat point of the render camera.",
     )
+    render_markers: bool = xax.field(
+        value=False,
+        help="If true, render markers.",
+    )
+    render_camera_name: str | int | None = xax.field(
+        value=None,
+        help="The name or id of the camera to use in rendering.",
+    )
 
-    # Engine parameters.
-    ctrl_dt: float = xax.field(
-        value=MISSING,
-        help="The time step of the control loop.",
-    )
-    dt: float = xax.field(
-        value=MISSING,
-        help="The time step of the physics loop.",
-    )
+    # Mujoco parameters.
     tolerance: float = xax.field(
         value=1e-10,
         help="The tolerance of the solver.",
@@ -563,18 +563,8 @@ class RLConfig(xax.Config):
         value=True,
         help="If set, disable Euler damping - this is a performance improvement",
     )
-    action_latency_range: tuple[float, float] = xax.field(
-        value=(0.0, 0.0),
-        help="The range of action latencies to use.",
-    )
-    actuator_update_dt: float | None = xax.field(
-        value=None,
-        help="The time step of the actuator update.",
-    )
-    drop_action_prob: float = xax.field(
-        value=0.0,
-        help="The probability of dropping an action.",
-    )
+
+    # Numerical stability parameters.
     reward_clip_min: float | None = xax.field(
         value=None,
         help="The minimum value of the reward.",
@@ -587,14 +577,8 @@ class RLConfig(xax.Config):
         value=1e3,
         help="The maximum value of the action.",
     )
-    render_markers: bool = xax.field(
-        value=False,
-        help="If true, render markers.",
-    )
-    render_camera_name: str | int | None = xax.field(
-        value=None,
-        help="The name or id of the camera to use in rendering.",
-    )
+
+    # Logging parameters.
     num_compiled_steps_to_log: int = xax.field(
         value=3,
         help="The number of compiled steps to log.",
@@ -784,11 +768,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             resets=self.get_resets(physics_model),
             events=self.get_events(physics_model),
             actuators=self.get_actuators(physics_model, metadata),
-            dt=float(physics_model.opt.timestep),
-            ctrl_dt=self.config.ctrl_dt,
-            action_latency_range=self.config.action_latency_range,
-            drop_action_prob=self.config.drop_action_prob,
-            actuator_update_dt=self.config.actuator_update_dt,
+            config=self.config,
         )
 
     @abstractmethod
