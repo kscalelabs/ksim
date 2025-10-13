@@ -447,6 +447,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             physics_model=physics_model,
             metadata=metadata,
             action_bias=ksim.UniformRandomVariable(mean=0.0, mag=math.radians(3.0)),
+            torque_bias=ksim.UniformRandomVariable(mean=0.0, mag=3.0),
+            action_noise=ksim.AdditiveGaussianNoise(std=0.01),
             torque_noise=ksim.AdditiveGaussianNoise(std=0.01),
         )
 
