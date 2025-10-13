@@ -263,14 +263,10 @@ class LinearVelocityReward(Reward):
 
         vel_rews = exp_kernel_with_penalty(vel - cmd.vel, self.vel_length_scale, self.sq_scale, self.abs_scale)
         yaw_rews = exp_kernel_with_penalty(yaw - cmd.yaw, self.yaw_length_scale, self.sq_scale, self.abs_scale)
-        x_rews = exp_kernel_with_penalty(x - cmd.xvel, self.vel_length_scale, self.sq_scale, self.abs_scale)
-        y_rews = exp_kernel_with_penalty(y - cmd.yvel, self.vel_length_scale, self.sq_scale, self.abs_scale)
 
         return {
             "vel": vel_rews,
             "yaw": jnp.where(is_zero, 0.0, yaw_rews),
-            "x": x_rews,
-            "y": y_rews,
         }
 
     def get_markers(self, name: str) -> Collection[Marker]:
@@ -326,7 +322,7 @@ class AngularVelocityReward(Reward):
     sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     vis_height: float = attrs.field(default=0.5)
-    zero_threshold: float = attrs.field(default=1e-4)
+    zero_threshold: float = attrs.field(default=math.radians(5.0))
 
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         cmd: AngularVelocityCommandValue = trajectory.command[self.cmd]
@@ -336,8 +332,9 @@ class AngularVelocityReward(Reward):
         angvel_rews = exp_kernel_with_penalty(angvel - cmd.vel, self.angvel_length_scale, self.sq_scale, self.abs_scale)
 
         # Reward for the direction of the angular velocity.
-        is_zero = jnp.abs(angvel) < self.zero_threshold
-        angvel_dir_rews = jnp.where(is_zero, angvel_rews, jnp.sign(angvel) * jnp.sign(cmd.vel))
+        real_sign = jnp.where(jnp.abs(angvel) < self.zero_threshold, 0.0, jnp.sign(angvel))
+        cmd_sign = jnp.where(jnp.abs(cmd.vel) < self.zero_threshold, 0.0, jnp.sign(cmd.vel))
+        angvel_dir_rews = jnp.where(real_sign == cmd_sign, 1.0, -1.0)
 
         return {
             "mag": angvel_rews,

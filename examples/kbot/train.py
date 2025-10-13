@@ -934,7 +934,7 @@ if __name__ == "__main__":
             # Visualization parameters.
             # If running this on Mac and you are getting segfaults,
             # you might need to disable `render_markers`
-            render_markers=True,
+            # render_markers=True,
             render_track_body_id=0,
             disable_multiprocessing=True,
         ),
