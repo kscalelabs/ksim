@@ -30,7 +30,7 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.scales import Scale, convert_to_scale
+from ksim.scales import ConstantScale, Scale, convert_to_scale
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_joint_names_in_order
 from ksim.vis import Marker
@@ -292,10 +292,10 @@ class LinearVelocityCommand(Command):
     ctrl_dt: float = attrs.field()
     linear_accel: float = attrs.field()
     angular_accel: float = attrs.field()
-    max_yaw: Scale = attrs.field(default=0.0, converter=convert_to_scale)
-    zero_prob: Scale = attrs.field(default=0.0, converter=convert_to_scale)
-    backward_prob: Scale = attrs.field(default=0.0, converter=convert_to_scale)
-    switch_prob: Scale = attrs.field(default=0.0, converter=convert_to_scale)
+    max_yaw: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
+    zero_prob: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
+    backward_prob: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
+    switch_prob: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
     vis_height: float = attrs.field(default=0.5)
 
     def initial_command(
@@ -452,9 +452,9 @@ class AngularVelocityCommand(Command):
     max_vel: Scale = attrs.field(converter=convert_to_scale)
     ctrl_dt: float = attrs.field()
     angular_accel: float = attrs.field()
-    min_vel: Scale = attrs.field(default=0.0, converter=convert_to_scale)
-    zero_prob: Scale = attrs.field(default=0.0, converter=convert_to_scale)
-    switch_prob: Scale = attrs.field(default=0.0, converter=convert_to_scale)
+    min_vel: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
+    zero_prob: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
+    switch_prob: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
     vis_height: float = attrs.field(default=0.5)
 
     def initial_command(

@@ -498,12 +498,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return {
             "joint_position": ksim.JointPositionObservation(
                 noise=ksim.AdditiveUniformNoise(mag=math.radians(2)),
-                bias=ksim.AdditiveUniformBias(mean=0.0, mag=math.radians(2)),
+                bias=ksim.AdditiveUniformBias(mag=math.radians(2)),
             ),
-            "joint_velocity": ksim.JointVelocityObservation(
-                noise=ksim.AdditiveUniformNoise(mag=math.radians(10)),
-                bias=ksim.AdditiveUniformBias(mean=0.0, mag=math.radians(10)),
-            ),
+            "joint_velocity": ksim.JointVelocityObservation(),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
             "center_of_mass_velocity": ksim.CenterOfMassVelocityObservation(),
@@ -589,8 +586,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         }
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Reward]:
-        zeros = {k: v for k, v in ZEROS}
-
         rewards = {
             "stay_alive": ksim.StayAliveReward(scale=500.0),
             # Command tracking rewards.
@@ -602,95 +597,97 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 cmd="angvel",
                 scale=ksim.LinearScale.from_endpoints(0.5, 10.0),
             ),
-            # Gait rewards.
-            "foot_airtime": ksim.FeetAirTimeReward(
-                ctrl_dt=self.config.ctrl_dt,
-                gait_period=self.config.gait_period,
-                air_time_percent=self.config.air_time_percent,
-                contact_obs="feet_contact",
-                scale=ksim.QuadraticScale(scale=10.0),
-            ),
-            "upright": ksim.UprightReward(
-                scale=ksim.LinearScale(scale=3.0),
-            ),
-            "foot_height": ksim.SparseTargetHeightReward(
-                contact_obs="feet_contact",
-                position_obs="feet_position",
-                height=self.config.max_foot_height,
-                scale=ksim.QuadraticScale(scale=10.0),
-            ),
-            "foot_contact": ksim.ForcePenalty(
-                force_obs="feet_force",
-                ctrl_dt=self.config.ctrl_dt,
-                bias=500.0,  # Weight of the robot is 350 Newtons.
-                scale=0.1,
-            ),
-            "foot_intersection": ksim.IntersectionPenalty(
-                position_obs="feet_position",
-                min_distance=0.25,
-                scale=ksim.QuadraticScale(scale=10.0),
-            ),
-            # Normalization penalties.
-            "ctrl": ksim.TorquePenalty.create(
-                model=physics_model,
-                scale=1.0,
-            ),
+            # # Gait rewards.
+            # "foot_airtime": ksim.FeetAirTimeReward(
+            #     ctrl_dt=self.config.ctrl_dt,
+            #     gait_period=self.config.gait_period,
+            #     air_time_percent=self.config.air_time_percent,
+            #     contact_obs="feet_contact",
+            #     scale=ksim.QuadraticScale(scale=10.0),
+            # ),
+            # "upright": ksim.UprightReward(
+            #     scale=ksim.LinearScale(scale=3.0),
+            # ),
+            # "foot_height": ksim.SparseTargetHeightReward(
+            #     contact_obs="feet_contact",
+            #     position_obs="feet_position",
+            #     height=self.config.max_foot_height,
+            #     scale=ksim.QuadraticScale(scale=10.0),
+            # ),
+            # "foot_contact": ksim.ForcePenalty(
+            #     force_obs="feet_force",
+            #     ctrl_dt=self.config.ctrl_dt,
+            #     bias=500.0,  # Weight of the robot is 350 Newtons.
+            #     scale=0.1,
+            # ),
+            # "foot_intersection": ksim.IntersectionPenalty(
+            #     position_obs="feet_position",
+            #     min_distance=0.25,
+            #     scale=ksim.QuadraticScale(scale=10.0),
+            # ),
+            # # Normalization penalties.
+            # "ctrl": ksim.TorquePenalty.create(
+            #     model=physics_model,
+            #     scale=1.0,
+            # ),
         }
 
+        # zeros = {k: v for k, v in ZEROS}
+
         # Joint deviation penalties.
-        rewards.update(
-            {
-                f"joint_deviation_{k}": ksim.JointDeviationPenalty.create(
-                    physics_model=physics_model,
-                    joint_names=names,
-                    joint_targets=[zeros[name] for name in names],
-                    scale=ksim.QuadraticScale(scale=10.0),
-                )
-                for (k, names) in (
-                    ("shoulder_roll", ["dof_right_shoulder_roll_03", "dof_left_shoulder_roll_03"]),
-                    ("shoulder_yaw", ["dof_right_shoulder_yaw_02", "dof_left_shoulder_yaw_02"]),
-                    ("hip_roll", ["dof_right_hip_roll_03", "dof_left_hip_roll_03"]),
-                    ("hip_yaw", ["dof_right_hip_yaw_03", "dof_left_hip_yaw_03"]),
-                    ("wrist", ["dof_right_wrist_00", "dof_left_wrist_00"]),
-                )
-            }
-        )
+        # rewards.update(
+        #     {
+        #         f"joint_deviation_{k}": ksim.JointDeviationPenalty.create(
+        #             physics_model=physics_model,
+        #             joint_names=names,
+        #             joint_targets=[zeros[name] for name in names],
+        #             scale=ksim.QuadraticScale(scale=10.0),
+        #         )
+        #         for (k, names) in (
+        #             ("shoulder_roll", ["dof_right_shoulder_roll_03", "dof_left_shoulder_roll_03"]),
+        #             ("shoulder_yaw", ["dof_right_shoulder_yaw_02", "dof_left_shoulder_yaw_02"]),
+        #             ("hip_roll", ["dof_right_hip_roll_03", "dof_left_hip_roll_03"]),
+        #             ("hip_yaw", ["dof_right_hip_yaw_03", "dof_left_hip_yaw_03"]),
+        #             ("wrist", ["dof_right_wrist_00", "dof_left_wrist_00"]),
+        #         )
+        #     }
+        # )
 
         # Pairwise symmetry rewards.
-        rewards.update(
-            {
-                f"symmetry_{k}": ksim.PairwiseSymmetryReward.create(
-                    physics_model=physics_model,
-                    left_joint_name=left_name,
-                    right_joint_name=right_name,
-                    left_zero=zeros[left_name],
-                    right_zero=zeros[right_name],
-                    flipped=flipped,
-                    scale=ksim.QuadraticScale(scale=10.0),
-                )
-                for (k, right_name, left_name, flipped) in (
-                    ("shoulder", "dof_right_shoulder_pitch_03", "dof_left_shoulder_pitch_03", True),
-                    ("elbow", "dof_right_elbow_02", "dof_left_elbow_02", True),
-                    ("hip", "dof_right_hip_pitch_04", "dof_left_hip_pitch_04", True),
-                )
-            }
-        )
+        # rewards.update(
+        #     {
+        #         f"symmetry_{k}": ksim.PairwiseSymmetryReward.create(
+        #             physics_model=physics_model,
+        #             left_joint_name=left_name,
+        #             right_joint_name=right_name,
+        #             left_zero=zeros[left_name],
+        #             right_zero=zeros[right_name],
+        #             flipped=flipped,
+        #             scale=ksim.QuadraticScale(scale=10.0),
+        #         )
+        #         for (k, right_name, left_name, flipped) in (
+        #             ("shoulder", "dof_right_shoulder_pitch_03", "dof_left_shoulder_pitch_03", True),
+        #             ("elbow", "dof_right_elbow_02", "dof_left_elbow_02", True),
+        #             ("hip", "dof_right_hip_pitch_04", "dof_left_hip_pitch_04", True),
+        #         )
+        #     }
+        # )
 
         # Symmetry rewards.
-        rewards.update(
-            {
-                f"symmetry_{k}": ksim.SymmetryReward.create(
-                    physics_model=physics_model,
-                    joint_names=names,
-                    joint_targets=[zeros[name] for name in names],
-                    scale=ksim.QuadraticScale(scale=10.0),
-                )
-                for (k, names) in (
-                    ("knee", ["dof_right_knee_04", "dof_left_knee_04"]),
-                    ("ankle", ["dof_right_ankle_02", "dof_left_ankle_02"]),
-                )
-            }
-        )
+        # rewards.update(
+        #     {
+        #         f"symmetry_{k}": ksim.SymmetryReward.create(
+        #             physics_model=physics_model,
+        #             joint_names=names,
+        #             joint_targets=[zeros[name] for name in names],
+        #             scale=ksim.QuadraticScale(scale=10.0),
+        #         )
+        #         for (k, names) in (
+        #             ("knee", ["dof_right_knee_04", "dof_left_knee_04"]),
+        #             ("ankle", ["dof_right_ankle_02", "dof_left_ankle_02"]),
+        #         )
+        #     }
+        # )
 
         return rewards
 
@@ -712,7 +709,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return Model(
             params.key,
             physics_model=params.physics_model,
-            num_actor_inputs=46,
+            num_actor_inputs=26,
             num_actor_outputs=len(ZEROS),
             num_critic_inputs=463,
             min_std=0.0001,
@@ -738,7 +735,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         lpf_params: ksim.LowPassFilterParams,
     ) -> tuple[xax.Distribution, Array, ksim.LowPassFilterParams]:
         joint_pos_n = observations["noisy_joint_position"]
-        joint_vel_n = observations["noisy_joint_velocity"]
         proj_grav_3 = observations["noisy_imu_projected_gravity"]
 
         # Command tensors.
@@ -751,7 +747,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
-            joint_vel_n / 10.0,  # NUM_JOINTS
             proj_grav_3,  # 3
             linvel_cmd_2,  # 2
             angvel_cmd_1,  # 1
@@ -939,7 +934,7 @@ if __name__ == "__main__":
             # Visualization parameters.
             # If running this on Mac and you are getting segfaults,
             # you might need to disable `render_markers`
-            # render_markers=True,
+            render_markers=True,
             render_track_body_id=0,
             disable_multiprocessing=True,
         ),

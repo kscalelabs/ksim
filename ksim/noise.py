@@ -111,22 +111,22 @@ class MultiplicativeBias(Bias):
 
 @attrs.define(frozen=True, kw_only=True)
 class AdditiveGaussianBias(AdditiveBias, GaussianRandomVariable):
-    pass
+    mean: float = attrs.field(default=0.0)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class MultiplicativeGaussianBias(MultiplicativeBias, GaussianRandomVariable):
-    pass
+    mean: float = attrs.field(default=1.0)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class AdditiveUniformBias(AdditiveBias, UniformRandomVariable):
-    pass
+    mean: float = attrs.field(default=0.0)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class MultiplicativeUniformBias(MultiplicativeBias, UniformRandomVariable):
-    pass
+    mean: float = attrs.field(default=1.0)
 
 
 @attrs.define(frozen=True, kw_only=True)
