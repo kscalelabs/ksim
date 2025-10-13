@@ -443,9 +443,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         metadata: ksim.Metadata | None = None,
     ) -> ksim.Actuators:
         assert metadata is not None, "Metadata is required"
-        return ksim.PositionActuators(
+        return ksim.BiasedPositionActuators(
             physics_model=physics_model,
             metadata=metadata,
+            action_bias=math.radians(3.0),
             torque_noise=ksim.AdditiveGaussianNoise(std=0.01),
         )
 

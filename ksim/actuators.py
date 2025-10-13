@@ -6,6 +6,7 @@ __all__ = [
     "TorqueActuators",
     "PositionActuators",
     "PositionVelocityActuator",
+    "BiasedPositionActuators",
 ]
 
 import logging
@@ -41,6 +42,7 @@ class StatefulActuators(Actuators):
         self,
         action: Array,
         physics_data: PhysicsData,
+        curriculum_level: Array,
         actuator_state: PyTree,
         rng: PRNGKeyArray,
     ) -> tuple[Array, PyTree]:
@@ -49,9 +51,6 @@ class StatefulActuators(Actuators):
     @abstractmethod
     def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> PyTree:
         """Get the initial state for the actuator."""
-
-    def get_ctrl(self, action: Array, physics_data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        raise NotImplementedError("Stateful actuators should use `get_stateful_ctrl` instead.")
 
 
 class TorqueActuators(Actuators):
@@ -202,3 +201,41 @@ class PositionVelocityActuator(PositionActuators):
         """Get the default action (zeros) with the correct shape."""
         qpos_dim = len(physics_data.qpos[7:])
         return jnp.zeros(qpos_dim * 2)
+
+
+class BiasedPositionActuators(PositionActuators, StatefulActuators):
+    """Adds some random bias to the position action to simulate imperfect actuators."""
+
+    def __init__(
+        self,
+        physics_model: PhysicsModel,
+        metadata: Metadata,
+        action_bias: float,
+        action_noise: Noise | None = None,
+        torque_noise: Noise | None = None,
+        action_scale: float = 1.0,
+    ) -> None:
+        super().__init__(
+            physics_model=physics_model,
+            metadata=metadata,
+            action_noise=action_noise,
+            torque_noise=torque_noise,
+            action_scale=action_scale,
+        )
+
+        self.action_bias = action_bias
+
+    def get_stateful_ctrl(
+        self,
+        action: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        actuator_state: PyTree,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, PyTree]:
+        ctrl = super().get_ctrl(action, physics_data, curriculum_level, rng)
+        return ctrl + actuator_state, actuator_state
+
+    def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> PyTree:
+        shape = physics_data.qpos[..., 7:].shape
+        return jax.random.uniform(rng, shape=shape, minval=-self.action_bias, maxval=self.action_bias)
