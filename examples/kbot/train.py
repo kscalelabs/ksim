@@ -497,8 +497,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
         return {
-            "joint_position": ksim.JointPositionObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(2))),
-            "joint_velocity": ksim.JointVelocityObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(30))),
+            "joint_position": ksim.JointPositionObservation(
+                noise=ksim.AdditiveUniformNoise(mag=math.radians(2)),
+                bias=ksim.AdditiveUniformBias(mean=0.0, mag=math.radians(2)),
+            ),
+            "joint_velocity": ksim.JointVelocityObservation(
+                noise=ksim.AdditiveUniformNoise(mag=math.radians(10)),
+                bias=ksim.AdditiveUniformBias(mean=0.0, mag=math.radians(10)),
+            ),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
             "center_of_mass_velocity": ksim.CenterOfMassVelocityObservation(),

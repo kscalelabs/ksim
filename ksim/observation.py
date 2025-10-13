@@ -114,6 +114,23 @@ class Observation(ABC):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> Array | None:
+        """Adds noise to the observation.
+
+        Args:
+            observation: The observation to add noise to.
+            bias_rng: A random key to use for the bias. This key is reused for
+                each step in the trajectory, meaning that calls to
+                `get_random_variable` should return the same value throughout
+                the trajectory. Note that this is different from the `rng`
+                parameter, which is a new random key for each call to
+                `add_noise`.
+            curriculum_level: The current curriculum level, a scalar between
+                zero and one.
+            rng: A random key to use for the noise
+
+        Returns:
+            The noisy observation, or None if no noise or bias is added.
+        """
         if self.noise is None and self.bias is None:
             return None
         if self.noise is not None:

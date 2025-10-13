@@ -11,6 +11,7 @@ __all__ = [
 
 import logging
 from abc import ABC, abstractmethod
+from typing import TypedDict
 
 import chex
 import jax
@@ -203,6 +204,11 @@ class PositionVelocityActuator(PositionActuators):
         return jnp.zeros(qpos_dim * 2)
 
 
+class TorqueBias(TypedDict):
+    action: Array
+    torque: Array
+
+
 class BiasedPositionActuators(PositionActuators, StatefulActuators):
     """Adds some random bias to the position action to simulate imperfect actuators."""
 
@@ -211,6 +217,7 @@ class BiasedPositionActuators(PositionActuators, StatefulActuators):
         physics_model: PhysicsModel,
         metadata: Metadata,
         action_bias: RandomVariable | float,
+        torque_bias: RandomVariable | float,
         action_noise: Noise | None = None,
         torque_noise: Noise | None = None,
         action_scale: float = 1.0,
@@ -225,19 +232,43 @@ class BiasedPositionActuators(PositionActuators, StatefulActuators):
 
         if not isinstance(action_bias, RandomVariable):
             action_bias = UniformRandomVariable(mean=0.0, mag=action_bias)
+        if not isinstance(torque_bias, RandomVariable):
+            torque_bias = UniformRandomVariable(mean=0.0, mag=torque_bias)
         self.action_bias = action_bias
+        self.torque_bias = torque_bias
 
     def get_stateful_ctrl(
         self,
         action: Array,
         physics_data: PhysicsData,
         curriculum_level: Array,
-        actuator_state: PyTree,
+        actuator_state: TorqueBias,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, PyTree]:
-        ctrl = super().get_ctrl(action, physics_data, curriculum_level, rng)
-        return ctrl + actuator_state, actuator_state
+    ) -> tuple[Array, TorqueBias]:
+        """Get the control signal from the (position) action vector."""
+        action_bias = actuator_state["action"]
+        torque_bias = actuator_state["torque"]
 
-    def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> PyTree:
+        scaled = action * self.action_scale
+
+        pos_rng, tor_rng = jax.random.split(rng)
+        current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
+        current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
+
+        # Add position and velocity noise
+        target_position = self.action_noise.add_noise(scaled, curriculum_level, pos_rng) + action_bias
+        target_velocity = jnp.zeros_like(action)
+
+        pos_delta = target_position - current_pos
+        vel_delta = target_velocity - current_vel
+
+        ctrl = self.kps * pos_delta + self.kds * vel_delta
+        ctrl = self.torque_noise.add_noise(ctrl, curriculum_level, tor_rng) + torque_bias
+        return jnp.clip(ctrl, -self.ctrl_clip, self.ctrl_clip), actuator_state
+
+    def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> TorqueBias:
         shape = physics_data.qpos[..., 7:].shape
-        return self.action_bias.get_random_variable(shape, rng)
+        return {
+            "action": self.action_bias.get_random_variable(shape, rng),
+            "torque": self.torque_bias.get_random_variable(shape, rng),
+        }

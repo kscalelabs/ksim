@@ -439,11 +439,9 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
         return {
             "joint_position": ksim.JointPositionObservation(
                 noise=ksim.AdditiveUniformNoise(mag=math.radians(2.0)),
-                bias=ksim.AdditiveUniformBias(mag=math.radians(2.0)),
             ),
             "joint_velocity": ksim.JointVelocityObservation(
                 noise=ksim.MultiplicativeUniformNoise(mag=math.radians(10.0)),
-                bias=ksim.AdditiveUniformBias(mag=math.radians(10.0)),
             ),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
