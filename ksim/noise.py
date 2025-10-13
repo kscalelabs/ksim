@@ -1,11 +1,17 @@
 """Defines types of noise to add to observations."""
 
 __all__ = [
+    "RandomVariable",
+    "UniformRandomVariable",
+    "GaussianRandomVariable",
     "Noise",
+    "AdditiveNoise",
+    "MultiplicativeNoise",
     "AdditiveGaussianNoise",
     "MultiplicativeGaussianNoise",
     "AdditiveUniformNoise",
     "MultiplicativeUniformNoise",
+    "NoNoise",
     "ChainedNoise",
 ]
 
@@ -17,52 +23,87 @@ from jaxtyping import Array, PRNGKeyArray
 
 
 @attrs.define(frozen=True, kw_only=True)
+class RandomVariable(ABC):
+    @abstractmethod
+    def get_random_variable(
+        self,
+        shape: tuple[int, ...],
+        rng: PRNGKeyArray,
+        curriculum_level: Array | float = 1.0,
+    ) -> Array: ...
+
+
+@attrs.define(frozen=True, kw_only=True)
+class UniformRandomVariable(RandomVariable):
+    mean: float = attrs.field()
+    mag: float = attrs.field(validator=attrs.validators.gt(0.0))
+
+    def get_random_variable(
+        self,
+        shape: tuple[int, ...],
+        rng: PRNGKeyArray,
+        curriculum_level: Array | float = 1.0,
+    ) -> Array:
+        minv, maxv = self.mean - self.mag * curriculum_level, self.mean + self.mag * curriculum_level
+        return jax.random.uniform(rng, shape, minval=minv, maxval=maxv)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class GaussianRandomVariable(RandomVariable):
+    mean: float = attrs.field()
+    std: float = attrs.field(validator=attrs.validators.gt(0.0))
+
+    def get_random_variable(
+        self,
+        shape: tuple[int, ...],
+        rng: PRNGKeyArray,
+        curriculum_level: Array | float = 1.0,
+    ) -> Array:
+        return jax.random.normal(rng, shape) * (self.std * curriculum_level) + self.mean
+
+
+@attrs.define(frozen=True, kw_only=True)
 class Noise(ABC):
     @abstractmethod
     def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array: ...
 
 
 @attrs.define(frozen=True, kw_only=True)
+class AdditiveNoise(Noise, RandomVariable):
+    def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        return observation + self.get_random_variable(observation.shape, rng, curriculum_level)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class MultiplicativeNoise(Noise, RandomVariable):
+    def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        return observation * self.get_random_variable(observation.shape, rng, curriculum_level)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AdditiveGaussianNoise(AdditiveNoise, GaussianRandomVariable):
+    mean: float = attrs.field(default=0.0)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class MultiplicativeGaussianNoise(MultiplicativeNoise, GaussianRandomVariable):
+    mean: float = attrs.field(default=1.0)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AdditiveUniformNoise(AdditiveNoise, UniformRandomVariable):
+    mean: float = attrs.field(default=0.0)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class MultiplicativeUniformNoise(MultiplicativeNoise, UniformRandomVariable):
+    mean: float = attrs.field(default=1.0)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class NoNoise(Noise):
     def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         return observation
-
-
-@attrs.define(frozen=True, kw_only=True)
-class AdditiveGaussianNoise(Noise):
-    std: float = attrs.field()
-
-    def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        return observation + jax.random.normal(rng, observation.shape) * self.std * curriculum_level
-
-
-@attrs.define(frozen=True, kw_only=True)
-class MultiplicativeGaussianNoise(Noise):
-    std: float = attrs.field()
-    bias: float = attrs.field(default=1.0)
-
-    def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        noise = (jax.random.normal(rng, observation.shape) * self.std * curriculum_level) + self.bias
-        return observation * noise
-
-
-@attrs.define(frozen=True, kw_only=True)
-class AdditiveUniformNoise(Noise):
-    mag: float = attrs.field()
-
-    def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        noise = (jax.random.uniform(rng, observation.shape) * 2 - 1) * self.mag * curriculum_level
-        return observation + noise
-
-
-@attrs.define(frozen=True, kw_only=True)
-class MultiplicativeUniformNoise(Noise):
-    mag: float = attrs.field()
-    bias: float = attrs.field(default=1.0)
-
-    def add_noise(self, observation: Array, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        noise = ((jax.random.uniform(rng, observation.shape) * 2 - 1) * self.mag * curriculum_level) + self.bias
-        return observation * noise
 
 
 @attrs.define(frozen=True, kw_only=True)

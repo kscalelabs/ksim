@@ -446,7 +446,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.BiasedPositionActuators(
             physics_model=physics_model,
             metadata=metadata,
-            action_bias=math.radians(3.0),
+            action_bias=ksim.UniformRandomVariable(mean=0.0, mag=math.radians(3.0)),
             torque_noise=ksim.AdditiveGaussianNoise(std=0.01),
         )
 

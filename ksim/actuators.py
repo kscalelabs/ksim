@@ -17,7 +17,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.noise import Noise, NoNoise
+from ksim.noise import Noise, NoNoise, RandomVariable, UniformRandomVariable
 from ksim.types import Metadata, PhysicsData, PhysicsModel
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
@@ -210,7 +210,7 @@ class BiasedPositionActuators(PositionActuators, StatefulActuators):
         self,
         physics_model: PhysicsModel,
         metadata: Metadata,
-        action_bias: float,
+        action_bias: RandomVariable | float,
         action_noise: Noise | None = None,
         torque_noise: Noise | None = None,
         action_scale: float = 1.0,
@@ -223,6 +223,8 @@ class BiasedPositionActuators(PositionActuators, StatefulActuators):
             action_scale=action_scale,
         )
 
+        if not isinstance(action_bias, RandomVariable):
+            action_bias = UniformRandomVariable(mean=0.0, mag=action_bias)
         self.action_bias = action_bias
 
     def get_stateful_ctrl(
@@ -238,4 +240,4 @@ class BiasedPositionActuators(PositionActuators, StatefulActuators):
 
     def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> PyTree:
         shape = physics_data.qpos[..., 7:].shape
-        return jax.random.uniform(rng, shape=shape, minval=-self.action_bias, maxval=self.action_bias)
+        return self.action_bias.get_random_variable(shape, rng)
