@@ -7,6 +7,7 @@ __all__ = [
     "QuadraticScale",
     "SquareRootScale",
     "NonZeroScale",
+    "convert_to_scale",
 ]
 
 from abc import ABC, abstractmethod
@@ -29,7 +30,7 @@ class Scale(ABC):
 class ConstantScale(Scale):
     """A constant scale function."""
 
-    scale: float = attrs.field(validator=attrs.validators.gt(0.0))
+    scale: float = attrs.field(validator=attrs.validators.ge(0.0))
 
     def get_scale(self, curriculum_level: Array) -> Array:
         return self.scale * jnp.ones_like(curriculum_level)
@@ -104,3 +105,11 @@ class NonZeroScale(Scale):
 
     def get_scale(self, curriculum_level: Array) -> Array:
         return jnp.where(curriculum_level > 0.0, self.scale, self.bias)
+
+
+def convert_to_scale(value: float | int | Scale) -> Scale:
+    if isinstance(value, (float, int)):
+        return ConstantScale(scale=value)
+    if isinstance(value, Scale):
+        return value
+    raise ValueError(f"Invalid scale: {value}")

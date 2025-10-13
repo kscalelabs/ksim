@@ -1,4 +1,8 @@
-"""Defines types of noise to add to observations."""
+"""Defines types of noise to add to observations.
+
+This is a bit verbose, but doing this provides a common interface for passing
+random variables to other parts of the code, for type checking.
+"""
 
 __all__ = [
     # Random Variable

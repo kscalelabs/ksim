@@ -30,6 +30,7 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+from ksim.scales import Scale, convert_to_scale
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_joint_names_in_order
 from ksim.vis import Marker
@@ -286,15 +287,15 @@ class LinearVelocityCommand(Command):
     any command.
     """
 
-    min_vel: float = attrs.field()
-    max_vel: float = attrs.field()
+    min_vel: Scale = attrs.field(converter=convert_to_scale)
+    max_vel: Scale = attrs.field(converter=convert_to_scale)
     ctrl_dt: float = attrs.field()
     linear_accel: float = attrs.field()
     angular_accel: float = attrs.field()
-    max_yaw: float = attrs.field(default=0.0)
-    zero_prob: float = attrs.field(default=0.0)
-    backward_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
+    max_yaw: Scale = attrs.field(default=0.0, converter=convert_to_scale)
+    zero_prob: Scale = attrs.field(default=0.0, converter=convert_to_scale)
+    backward_prob: Scale = attrs.field(default=0.0, converter=convert_to_scale)
+    switch_prob: Scale = attrs.field(default=0.0, converter=convert_to_scale)
     vis_height: float = attrs.field(default=0.5)
 
     def initial_command(
@@ -304,6 +305,12 @@ class LinearVelocityCommand(Command):
         rng: PRNGKeyArray,
         prev_command: LinearVelocityCommandValue | None = None,
     ) -> LinearVelocityCommandValue:
+        min_vel = self.min_vel.get_scale(curriculum_level)
+        max_vel = self.max_vel.get_scale(curriculum_level)
+        max_yaw = self.max_yaw.get_scale(curriculum_level)
+        zero_prob = self.zero_prob.get_scale(curriculum_level)
+        backward_prob = self.backward_prob.get_scale(curriculum_level)
+
         rng_vel, rng_yaw, rng_zero, rng_backward = jax.random.split(rng, 4)
 
         # Gets the current linear velocity in the robot's frame.
@@ -319,11 +326,11 @@ class LinearVelocityCommand(Command):
             cur_vel = prev_command.vel
             cur_yaw = prev_command.yaw
 
-        trg_vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
-        trg_yaw = jax.random.uniform(rng_yaw, (), minval=-self.max_yaw, maxval=self.max_yaw)
+        trg_vel = jax.random.uniform(rng_vel, (), minval=min_vel, maxval=max_vel)
+        trg_yaw = jax.random.uniform(rng_yaw, (), minval=-max_yaw, maxval=max_yaw)
 
-        zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
-        backward_mask = jax.random.bernoulli(rng_backward, self.backward_prob)
+        zero_mask = jax.random.bernoulli(rng_zero, zero_prob)
+        backward_mask = jax.random.bernoulli(rng_backward, backward_prob)
         trg_vel = jnp.where(zero_mask, 0.0, jnp.where(backward_mask, -trg_vel, trg_vel))
         trg_yaw = jnp.where(zero_mask, 0.0, trg_yaw)
 
@@ -367,8 +374,9 @@ class LinearVelocityCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> LinearVelocityCommandValue:
+        switch_prob = self.switch_prob.get_scale(curriculum_level)
         rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        switch_mask = jax.random.bernoulli(rng_a, switch_prob)
         updated_command = self.update_command(prev_command)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b, prev_command)
         return jax.tree_util.tree_map(
@@ -441,12 +449,12 @@ class AngularVelocityCommandMarker(Marker):
 
 @attrs.define(frozen=True)
 class AngularVelocityCommand(Command):
-    max_vel: float = attrs.field()
+    max_vel: Scale = attrs.field(converter=convert_to_scale)
     ctrl_dt: float = attrs.field()
     angular_accel: float = attrs.field()
-    min_vel: float = attrs.field(default=0.0)
-    zero_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
+    min_vel: Scale = attrs.field(default=0.0, converter=convert_to_scale)
+    zero_prob: Scale = attrs.field(default=0.0, converter=convert_to_scale)
+    switch_prob: Scale = attrs.field(default=0.0, converter=convert_to_scale)
     vis_height: float = attrs.field(default=0.5)
 
     def initial_command(
@@ -455,11 +463,15 @@ class AngularVelocityCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> AngularVelocityCommandValue:
+        min_vel = self.min_vel.get_scale(curriculum_level)
+        max_vel = self.max_vel.get_scale(curriculum_level)
+        zero_prob = self.zero_prob.get_scale(curriculum_level)
+
         rng_vel, rng_flip, rng_zero = jax.random.split(rng, 3)
 
-        trg_vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
+        trg_vel = jax.random.uniform(rng_vel, (), minval=min_vel, maxval=max_vel)
         trg_vel = jnp.where(jax.random.bernoulli(rng_flip, 0.5), -trg_vel, trg_vel)
-        trg_vel = jnp.where(jax.random.bernoulli(rng_zero, self.zero_prob), 0.0, trg_vel)
+        trg_vel = jnp.where(jax.random.bernoulli(rng_zero, zero_prob), 0.0, trg_vel)
 
         cur_vel = physics_data.qvel[..., 5]
 
@@ -481,8 +493,9 @@ class AngularVelocityCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> AngularVelocityCommandValue:
+        switch_prob = self.switch_prob.get_scale(curriculum_level)
         rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        switch_mask = jax.random.bernoulli(rng_a, switch_prob)
         updated_command = self.update_command(prev_command)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jax.tree_util.tree_map(

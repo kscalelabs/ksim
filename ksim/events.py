@@ -16,17 +16,9 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.scales import ConstantScale, Scale
+from ksim.scales import ConstantScale, Scale, convert_to_scale
 from ksim.types import PhysicsData, PhysicsModel
 from ksim.utils.mujoco import get_body_data_idx_by_name, slice_update, update_data_field
-
-
-def convert_to_scale(value: float | int | Scale) -> Scale:
-    if isinstance(value, (float, int)):
-        return ConstantScale(scale=value)
-    if isinstance(value, Scale):
-        return value
-    raise ValueError(f"Invalid scale: {value}")
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -255,6 +247,7 @@ class ForcePushEvent(Event):
     duration_range: tuple[float, float] = attrs.field()
     interval_range: tuple[float, float] = attrs.field()
     body_id: int = attrs.field()
+    scale: Scale = attrs.field(default=ConstantScale(scale=1.0), converter=convert_to_scale)
 
     @classmethod
     def from_body_name(
@@ -267,6 +260,7 @@ class ForcePushEvent(Event):
         duration_range: tuple[float, float],
         interval_range: tuple[float, float],
         force_range: tuple[float, float] = (0.0, 1.0),
+        scale: float | int | Scale = 1.0,
     ) -> Self:
         names_to_idxs = get_body_data_idx_by_name(model)
         if body_name not in names_to_idxs:
@@ -279,6 +273,7 @@ class ForcePushEvent(Event):
             interval_range=interval_range,
             force_range=force_range,
             body_id=body_id,
+            scale=scale,
         )
 
     def __call__(
@@ -290,6 +285,9 @@ class ForcePushEvent(Event):
         rng: PRNGKeyArray,
     ) -> tuple[PhysicsData, tuple[Array, Array, Array]]:
         time_remaining, force_duration, force = event_state
+
+        # Scales the curriculum level range.
+        curriculum_level = self.scale.get_scale(curriculum_level)
 
         # Decrement timers by physics timestep
         dt = jnp.float32(model.opt.timestep)
@@ -344,10 +342,16 @@ class ForcePushEvent(Event):
 
         # Initial timers
         time_remaining = jax.random.uniform(
-            rng_splits[4], (), minval=self.interval_range[0], maxval=self.interval_range[1]
+            rng_splits[4],
+            (),
+            minval=self.interval_range[0],
+            maxval=self.interval_range[1],
         )
         force_duration = jax.random.uniform(
-            rng_splits[5], (), minval=self.duration_range[0], maxval=self.duration_range[1]
+            rng_splits[5],
+            (),
+            minval=self.duration_range[0],
+            maxval=self.duration_range[1],
         )
 
         return (time_remaining, force_duration, force)

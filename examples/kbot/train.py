@@ -471,22 +471,19 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
         return {
-            "linear_push": ksim.LinearPushEvent(
-                linvel=1.0,
-                vel_range=(0.0, 1.0),
-                interval_range=(1.0, 2.0),
-                scale=ksim.QuadraticScale.from_endpoints(0.1, 1.0),
-            ),
-            "angular_push": ksim.AngularPushEvent(
-                angvel=math.radians(90.0),
-                vel_range=(0.0, 1.0),
-                interval_range=(1.0, 2.0),
-                scale=ksim.QuadraticScale.from_endpoints(0.1, 1.0),
+            "push": ksim.ForcePushEvent.from_body_name(
+                model=physics_model,
+                body_name="base",
+                max_force=500.0,
+                max_torque=250.0,
+                duration_range=(0.25, 1.0),
+                interval_range=(4.0, 8.0),
+                scale=ksim.QuadraticScale.from_endpoints(0.0, 1.0),
             ),
             "jump": ksim.JumpEvent(
                 jump_height_range=(0.1, 0.3),
                 interval_range=(1.0, 2.0),
-                scale=ksim.QuadraticScale.from_endpoints(0.1, 1.0),
+                scale=ksim.QuadraticScale.from_endpoints(0.0, 1.0),
             ),
         }
 
@@ -537,7 +534,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "imu_gyro": ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=ksim.AdditiveUniformNoise(mag=math.radians(10)),
+                noise=ksim.AdditiveUniformNoise(mag=math.radians(3)),
             ),
             "feet_contact": ksim.FeetContactObservation.create(
                 physics_model=physics_model,
@@ -565,13 +562,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
         return {
             "linvel": ksim.LinearVelocityCommand(
-                min_vel=self.config.min_linear_velocity,
+                min_vel=ksim.LinearScale.from_endpoints(
+                    start=self.config.max_linear_velocity,
+                    end=self.config.min_linear_velocity,
+                ),
                 max_vel=self.config.max_linear_velocity,
                 ctrl_dt=self.config.ctrl_dt,
                 linear_accel=self.config.linear_velocity_accel,
                 angular_accel=self.config.angular_velocity_accel,
-                max_yaw=self.config.linear_velocity_max_yaw,
-                zero_prob=self.config.linear_velocity_zero_prob,
+                max_yaw=ksim.LinearScale.from_endpoints(start=0.0, end=self.config.linear_velocity_max_yaw),
+                zero_prob=ksim.LinearScale.from_endpoints(start=0.0, end=self.config.linear_velocity_zero_prob),
                 backward_prob=self.config.linear_velocity_backward_prob,
                 switch_prob=self.config.linear_velocity_switch_prob,
             ),
@@ -580,7 +580,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_vel=self.config.max_angular_velocity,
                 ctrl_dt=self.config.ctrl_dt,
                 angular_accel=self.config.angular_velocity_accel,
-                zero_prob=self.config.angular_velocity_zero_prob,
+                zero_prob=ksim.LinearScale.from_endpoints(
+                    start=1.0,
+                    end=self.config.angular_velocity_zero_prob,
+                ),
                 switch_prob=self.config.angular_velocity_switch_prob,
             ),
         }
@@ -709,7 +712,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return Model(
             params.key,
             physics_model=params.physics_model,
-            num_actor_inputs=49,
+            num_actor_inputs=46,
             num_actor_outputs=len(ZEROS),
             num_critic_inputs=463,
             min_std=0.0001,
@@ -737,7 +740,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_pos_n = observations["noisy_joint_position"]
         joint_vel_n = observations["noisy_joint_velocity"]
         proj_grav_3 = observations["noisy_imu_projected_gravity"]
-        imu_gyro_3 = observations["noisy_imu_gyro"]
 
         # Command tensors.
         linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
@@ -751,7 +753,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n / 10.0,  # NUM_JOINTS
             proj_grav_3,  # 3
-            imu_gyro_3,  # 3
             linvel_cmd_2,  # 2
             angvel_cmd_1,  # 1
         ]
