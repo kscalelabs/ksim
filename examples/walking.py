@@ -438,10 +438,12 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
         return {
             "joint_position": ksim.JointPositionObservation(
-                noise=ksim.AdditiveUniformNoise(mag=0.1),
+                noise=ksim.AdditiveUniformNoise(mag=math.radians(2.0)),
+                bias=ksim.AdditiveUniformBias(mag=math.radians(2.0)),
             ),
             "joint_velocity": ksim.JointVelocityObservation(
-                noise=ksim.MultiplicativeUniformNoise(mag=0.3),
+                noise=ksim.MultiplicativeUniformNoise(mag=math.radians(10.0)),
+                bias=ksim.AdditiveUniformBias(mag=math.radians(10.0)),
             ),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
@@ -456,7 +458,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 noise=ksim.AdditiveGaussianNoise(std=0.01),
                 min_lag=0.001,
                 max_lag=0.005,
-                bias=math.radians(2.0),
+                imu_bias=math.radians(2.0),
             ),
             "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,

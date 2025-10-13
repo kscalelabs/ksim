@@ -515,7 +515,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 noise=ksim.AdditiveGaussianNoise(std=0.01),
                 min_lag=0.001,
                 max_lag=0.005,
-                bias=math.radians(2.0),
+                imu_bias=math.radians(2.0),
             ),
             "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,

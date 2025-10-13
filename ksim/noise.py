@@ -1,9 +1,20 @@
 """Defines types of noise to add to observations."""
 
 __all__ = [
+    # Random Variable
     "RandomVariable",
     "UniformRandomVariable",
     "GaussianRandomVariable",
+    # Bias
+    "Bias",
+    "AdditiveBias",
+    "MultiplicativeBias",
+    "AdditiveGaussianBias",
+    "MultiplicativeGaussianBias",
+    "AdditiveUniformBias",
+    "MultiplicativeUniformBias",
+    "NoBias",
+    # Noise
     "Noise",
     "AdditiveNoise",
     "MultiplicativeNoise",
@@ -19,7 +30,14 @@ from abc import ABC, abstractmethod
 
 import attrs
 import jax
+import xax
 from jaxtyping import Array, PRNGKeyArray
+
+from ksim.debugging import JitLevel
+
+# ---------------
+# Random Variable
+# ---------------
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -38,6 +56,7 @@ class UniformRandomVariable(RandomVariable):
     mean: float = attrs.field()
     mag: float = attrs.field(validator=attrs.validators.gt(0.0))
 
+    @xax.jit(static_argnames=["self", "shape"], donate_argnames=["rng"], jit_level=JitLevel.HELPER_FUNCTIONS)
     def get_random_variable(
         self,
         shape: tuple[int, ...],
@@ -53,6 +72,7 @@ class GaussianRandomVariable(RandomVariable):
     mean: float = attrs.field()
     std: float = attrs.field(validator=attrs.validators.gt(0.0))
 
+    @xax.jit(static_argnames=["self", "shape"], donate_argnames=["rng"], jit_level=JitLevel.HELPER_FUNCTIONS)
     def get_random_variable(
         self,
         shape: tuple[int, ...],
@@ -60,6 +80,60 @@ class GaussianRandomVariable(RandomVariable):
         curriculum_level: Array | float = 1.0,
     ) -> Array:
         return jax.random.normal(rng, shape) * (self.std * curriculum_level) + self.mean
+
+
+# ----
+# Bias
+# ----
+
+
+@attrs.define(frozen=True, kw_only=True)
+class Bias(RandomVariable):
+    @abstractmethod
+    def apply_bias(self, observation: Array, random_variable: Array) -> Array: ...
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AdditiveBias(Bias):
+    def apply_bias(self, observation: Array, random_variable: Array) -> Array:
+        return observation + random_variable
+
+
+@attrs.define(frozen=True, kw_only=True)
+class MultiplicativeBias(Bias):
+    def apply_bias(self, observation: Array, random_variable: Array) -> Array:
+        return observation * random_variable
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AdditiveGaussianBias(AdditiveBias, GaussianRandomVariable):
+    pass
+
+
+@attrs.define(frozen=True, kw_only=True)
+class MultiplicativeGaussianBias(MultiplicativeBias, GaussianRandomVariable):
+    pass
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AdditiveUniformBias(AdditiveBias, UniformRandomVariable):
+    pass
+
+
+@attrs.define(frozen=True, kw_only=True)
+class MultiplicativeUniformBias(MultiplicativeBias, UniformRandomVariable):
+    pass
+
+
+@attrs.define(frozen=True, kw_only=True)
+class NoBias(Bias):
+    def apply_bias(self, observation: Array, random_variable: Array) -> Array:
+        return observation
+
+
+# -----
+# Noise
+# -----
 
 
 @attrs.define(frozen=True, kw_only=True)

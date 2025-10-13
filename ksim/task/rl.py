@@ -118,6 +118,7 @@ class RolloutEnvState:
     model_carry: PyTree
     reward_carry: xax.FrozenDict[str, Array]
     obs_carry: xax.FrozenDict[str, PyTree]
+    obs_bias_rngs: xax.FrozenDict[str, PRNGKeyArray | None]
     curriculum_state: CurriculumState
     rng: PRNGKeyArray
 
@@ -152,7 +153,8 @@ class RolloutConstants:
 def get_observation(
     rollout_env_state: RolloutEnvState,
     observations: xax.FrozenDict[str, Observation],
-    obs_carry: PyTree,
+    obs_carry: Mapping[str, PyTree],
+    obs_bias: Mapping[str, PRNGKeyArray | None],
     curriculum_level: Array,
     rng: PRNGKeyArray,
 ) -> tuple[xax.FrozenDict[str, PyTree], xax.FrozenDict[str, PyTree]]:
@@ -177,9 +179,9 @@ def get_observation(
         next_obs_carry[name] = new_carry
 
         # Adds the noisy observation, if we are supposed to add noise.
-        if observation.noise is not None:
-            noisy_observation_val = observation.noise.add_noise(observation_val, curriculum_level, noise_rng)
-            observation_dict[f"noisy_{name}"] = noisy_observation_val
+        noisy_observation = observation.add_noise(observation_val, obs_bias[name], curriculum_level, noise_rng)
+        if noisy_observation is not None:
+            observation_dict[f"noisy_{name}"] = noisy_observation
 
     return xax.freeze_dict(observation_dict), xax.freeze_dict(next_obs_carry)
 
@@ -255,6 +257,17 @@ def get_initial_obs_carry(
             name: (obs.initial_carry(physics_state, rng) if isinstance(obs, StatefulObservation) else None)
             for (name, obs), rng in zip(observations.items(), rngs, strict=True)
         }
+    )
+
+
+def get_initial_obs_bias(
+    rng: PRNGKeyArray,
+    observations: xax.FrozenDict[str, Observation],
+) -> xax.FrozenDict[str, PRNGKeyArray | None]:
+    """Get the initial observation bias."""
+    rngs = jax.random.split(rng, len(observations))
+    return xax.freeze_dict(
+        {name: (None if obs.bias is None else rng) for (name, obs), rng in zip(observations.items(), rngs, strict=True)}
     )
 
 
@@ -964,6 +977,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             rollout_env_state=env_states,
             observations=constants.observations,
             obs_carry=env_states.obs_carry,
+            obs_bias=env_states.obs_bias_rngs,
             curriculum_level=env_states.curriculum_state.level,
             rng=obs_rng,
         )
@@ -1017,7 +1031,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
         next_physics_state: PhysicsState,
         rng: PRNGKeyArray,
     ) -> tuple[Trajectory, RolloutEnvState]:
-        cmd_rng, carry_rng, obs_carry_rng, reset_rng, next_rng = jax.random.split(rng, 5)
+        cmd_rng, carry_rng, obs_carry_rng, obs_bias_rng, reset_rng, next_rng = jax.random.split(rng, 6)
 
         # Recombines the mutable and static parts of the model.
         policy_model_arr = shared_state.model_arrs[0]
@@ -1093,6 +1107,15 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             lambda: next_obs_carry,
         )
 
+        next_obs_bias_rngs = jax.lax.cond(
+            done,
+            lambda: get_initial_obs_bias(
+                rng=obs_bias_rng,
+                observations=constants.observations,
+            ),
+            lambda: env_states.obs_bias_rngs,
+        )
+
         next_model_carry = jax.lax.cond(
             done,
             lambda: self.get_initial_model_carry(policy_model, carry_rng),
@@ -1106,6 +1129,7 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             physics_state=next_physics_state,
             model_carry=next_model_carry,
             obs_carry=next_obs_carry,
+            obs_bias_rngs=next_obs_bias_rngs,
             rng=next_rng,
         )
 
@@ -2162,12 +2186,13 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             rng,
             carry_model_rng,
             carry_obs_rng,
+            carry_obs_bias_rng,
             command_rng,
             rand_rng,
             rollout_rng,
             curriculum_rng,
             reward_rng,
-        ) = jax.random.split(rng, 8)
+        ) = jax.random.split(rng, 9)
 
         if isinstance(physics_model, mjx.Model):
             # Defines the vectorized initialization functions.
@@ -2189,6 +2214,11 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
             obs_carry_fn = xax.vmap(
                 get_initial_obs_carry,
                 in_axes=(0, 0, None),
+                jit_level=JitLevel.INITIALIZATION,
+            )
+            obs_bias_fn = xax.vmap(
+                get_initial_obs_bias,
+                in_axes=(0, None),
                 jit_level=JitLevel.INITIALIZATION,
             )
 
@@ -2231,6 +2261,10 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                     physics_state,
                     rollout_constants.observations,
                 ),
+                obs_bias_rngs=obs_bias_fn(
+                    jax.random.split(carry_obs_bias_rng, self.config.num_envs),
+                    rollout_constants.observations,
+                ),
                 curriculum_state=curriculum_state,
                 rng=jax.random.split(rollout_rng, self.config.num_envs),
             )
@@ -2257,11 +2291,21 @@ class RLTask(xax.Task[Config, InitParams], Generic[Config], ABC):
                 ),
                 physics_state=physics_state,
                 randomization_dict=randomization_dict,
-                model_carry=self.get_initial_model_carry(policy_model, carry_model_rng),
-                reward_carry=get_initial_reward_carry(reward_rng, rollout_constants.rewards),
+                model_carry=self.get_initial_model_carry(
+                    policy_model,
+                    carry_model_rng,
+                ),
+                reward_carry=get_initial_reward_carry(
+                    reward_rng,
+                    rollout_constants.rewards,
+                ),
                 obs_carry=get_initial_obs_carry(
                     rng=carry_obs_rng,
                     physics_state=physics_state,
+                    observations=rollout_constants.observations,
+                ),
+                obs_bias_rngs=get_initial_obs_bias(
+                    rng=carry_obs_bias_rng,
                     observations=rollout_constants.observations,
                 ),
                 curriculum_state=curriculum_state,
