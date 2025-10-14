@@ -8,7 +8,7 @@ format:
 	@ruff check --fix ksim tests examples
 .PHONY: format
 
-static-checks:
+lint:
 	@echo "=== Running Ruff Checks ==="
 	@ruff check ksim tests examples
 	@echo ""

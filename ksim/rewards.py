@@ -771,10 +771,8 @@ class UprightReward(Reward):
         # Avoid any roll or pitch orientation.
         z_world = jnp.array([0.0, 0.0, 1.0])
         z_in_body = xax.rotate_vector_by_quat(z_world, quat, inverse=True)
-        roll = jnp.arctan2(z_in_body[..., 1], z_in_body[..., 2])
         pitch = jnp.arctan2(z_in_body[..., 0], z_in_body[..., 2])
-        roll_pitch = jnp.linalg.norm(jnp.stack([roll, pitch], axis=-1), axis=-1)
-        pose_rew = exp_kernel_with_penalty(roll_pitch, self.pose_scale, self.pose_sq_scale, self.pose_abs_scale)
+        pose_rew = exp_kernel_with_penalty(pitch, self.pose_scale, self.pose_sq_scale, self.pose_abs_scale)
 
         return {"angvel": angvel_rew, "linvel": linvel_rew, "pose": pose_rew}
 
