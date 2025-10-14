@@ -18,6 +18,7 @@ __all__ = [
     "SmallJointJerkReward",
     "AvoidLimitsPenalty",
     "TorquePenalty",
+    "EnergyPenalty",
     "JointDeviationPenalty",
     "FlatBodyReward",
     "PositionTrackingReward",
@@ -579,6 +580,16 @@ class TorquePenalty(Reward):
             ctrl_scales=tuple(ctrl_range_list),
             scale=scale,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class EnergyPenalty(TorquePenalty):
+    """Penalty for large torque commands."""
+
+    def get_reward(self, trajectory: Trajectory) -> Array:
+        ctrl_n = trajectory.ctrl / jnp.array(self.ctrl_scales)
+        vel_n = trajectory.qvel[..., 6:]
+        return jnp.abs(ctrl_n * vel_n).mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
