@@ -6,17 +6,19 @@ __all__ = [
     "TorqueActuators",
     "PositionActuators",
     "PositionVelocityActuator",
+    "BiasedPositionActuators",
 ]
 
 import logging
 from abc import ABC, abstractmethod
+from typing import TypedDict
 
 import chex
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.noise import Noise, NoNoise
+from ksim.noise import Noise, NoNoise, RandomVariable, UniformRandomVariable
 from ksim.types import Metadata, PhysicsData, PhysicsModel
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
@@ -41,6 +43,7 @@ class StatefulActuators(Actuators):
         self,
         action: Array,
         physics_data: PhysicsData,
+        curriculum_level: Array,
         actuator_state: PyTree,
         rng: PRNGKeyArray,
     ) -> tuple[Array, PyTree]:
@@ -49,9 +52,6 @@ class StatefulActuators(Actuators):
     @abstractmethod
     def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> PyTree:
         """Get the initial state for the actuator."""
-
-    def get_ctrl(self, action: Array, physics_data: PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        raise NotImplementedError("Stateful actuators should use `get_stateful_ctrl` instead.")
 
 
 class TorqueActuators(Actuators):
@@ -202,3 +202,73 @@ class PositionVelocityActuator(PositionActuators):
         """Get the default action (zeros) with the correct shape."""
         qpos_dim = len(physics_data.qpos[7:])
         return jnp.zeros(qpos_dim * 2)
+
+
+class TorqueBias(TypedDict):
+    action: Array
+    torque: Array
+
+
+class BiasedPositionActuators(PositionActuators, StatefulActuators):
+    """Adds some random bias to the position action to simulate imperfect actuators."""
+
+    def __init__(
+        self,
+        physics_model: PhysicsModel,
+        metadata: Metadata,
+        action_bias: RandomVariable | float,
+        torque_bias: RandomVariable | float,
+        action_noise: Noise | None = None,
+        torque_noise: Noise | None = None,
+        action_scale: float = 1.0,
+    ) -> None:
+        super().__init__(
+            physics_model=physics_model,
+            metadata=metadata,
+            action_noise=action_noise,
+            torque_noise=torque_noise,
+            action_scale=action_scale,
+        )
+
+        if not isinstance(action_bias, RandomVariable):
+            action_bias = UniformRandomVariable(mean=0.0, mag=action_bias)
+        if not isinstance(torque_bias, RandomVariable):
+            torque_bias = UniformRandomVariable(mean=0.0, mag=torque_bias)
+        self.action_bias = action_bias
+        self.torque_bias = torque_bias
+
+    def get_stateful_ctrl(
+        self,
+        action: Array,
+        physics_data: PhysicsData,
+        curriculum_level: Array,
+        actuator_state: TorqueBias,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, TorqueBias]:
+        """Get the control signal from the (position) action vector."""
+        action_bias = actuator_state["action"]
+        torque_bias = actuator_state["torque"]
+
+        scaled = action * self.action_scale
+
+        pos_rng, tor_rng = jax.random.split(rng)
+        current_pos = physics_data.qpos[7:]  # First 7 are always root pos.
+        current_vel = physics_data.qvel[6:]  # First 6 are always root vel.
+
+        # Add position and velocity noise
+        target_position = self.action_noise.add_noise(scaled, curriculum_level, pos_rng) + action_bias
+        target_velocity = jnp.zeros_like(action)
+
+        pos_delta = target_position - current_pos
+        vel_delta = target_velocity - current_vel
+
+        ctrl = self.kps * pos_delta + self.kds * vel_delta
+        ctrl = self.torque_noise.add_noise(ctrl, curriculum_level, tor_rng) + torque_bias
+        return jnp.clip(ctrl, -self.ctrl_clip, self.ctrl_clip), actuator_state
+
+    def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> TorqueBias:
+        shape = physics_data.qpos[..., 7:].shape
+        return {
+            "action": self.action_bias.get_random_variable(shape, rng),
+            "torque": self.torque_bias.get_random_variable(shape, rng),
+        }

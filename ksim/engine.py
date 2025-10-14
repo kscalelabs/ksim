@@ -179,19 +179,17 @@ class MjxEngine(PhysicsEngine):
             qacc=jnp.zeros_like(mjx_data.qacc),
         )
 
-        default_action = self.actuators.get_default_action(mjx_data)
-
         # Gets the initial actuator state for stateful actuators.
         actuator_state = (
             self.actuators.get_initial_state(mjx_data, rng) if isinstance(self.actuators, StatefulActuators) else None
         )
 
-        rng, latency_rng = jax.random.split(rng)
+        events_rng, latency_rng = jax.random.split(rng)
 
         return PhysicsState(
+            most_recent_action=self.actuators.get_default_action(mjx_data),
             data=mjx_data,
-            most_recent_action=default_action,
-            event_states=self._reset_events(rng),
+            event_states=self._reset_events(events_rng),
             actuator_state=actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
@@ -229,7 +227,7 @@ class MjxEngine(PhysicsEngine):
         prev_action = physics_state.most_recent_action
 
         # Randomly drops some actions.
-        rng, drop_rng = jax.random.split(rng)
+        drop_rng, scan_rng = jax.random.split(rng)
         drop_action = jax.random.bernoulli(drop_rng, self.data.drop_action_prob * curriculum_level, shape=action.shape)
         action = jnp.where(drop_action, prev_action, action)
 
@@ -251,6 +249,7 @@ class MjxEngine(PhysicsEngine):
                     torques, actuator_state = self.actuators.get_stateful_ctrl(
                         action=ctrl,
                         physics_data=data,
+                        curriculum_level=curriculum_level,
                         actuator_state=prev_actuator_state,
                         rng=rng_update,
                     )
@@ -295,7 +294,7 @@ class MjxEngine(PhysicsEngine):
             (
                 mjx_data,
                 jnp.array(0.0),
-                rng,
+                scan_rng,
                 physics_state.event_states,
                 physics_state.actuator_state,
                 jnp.zeros_like(physics_state.data.ctrl),
@@ -305,8 +304,8 @@ class MjxEngine(PhysicsEngine):
         )
 
         return PhysicsState(
-            data=mjx_data,
             most_recent_action=action,
+            data=mjx_data,
             event_states=xax.freeze_dict(event_info),
             actuator_state=actuator_state_final,
             action_latency=physics_state.action_latency,
@@ -334,12 +333,12 @@ class MujocoEngine(PhysicsEngine):
             self.actuators.get_initial_state(mj_data, rng) if isinstance(self.actuators, StatefulActuators) else None
         )
 
-        rng, latency_rng = jax.random.split(rng)
+        events_rng, latency_rng = jax.random.split(rng)
 
         return PhysicsState(
-            data=mj_data,
             most_recent_action=default_action,
-            event_states=self._reset_events(rng),
+            data=mj_data,
+            event_states=self._reset_events(events_rng),
             actuator_state=actuator_state,
             action_latency=jax.random.uniform(
                 latency_rng,
@@ -356,17 +355,17 @@ class MujocoEngine(PhysicsEngine):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> PhysicsState:
-        data = physics_state.data
+        mj_data = physics_state.data
 
-        if not isinstance(data, mujoco.MjData):
+        if not isinstance(mj_data, mujoco.MjData):
             raise ValueError("Mujoco data is not a MjData")
 
-        mujoco.mj_forward(physics_model, data)
+        mujoco.mj_forward(physics_model, mj_data)
         phys_steps_per_ctrl_steps = self.data.phys_steps_per_ctrl_steps
         prev_action = physics_state.most_recent_action
 
         # Randomly drops some actions.
-        rng, drop_rng = jax.random.split(rng)
+        drop_rng, scan_rng = jax.random.split(rng)
         drop_action = jax.random.bernoulli(drop_rng, self.data.drop_action_prob * curriculum_level, shape=action.shape)
         action = jnp.where(drop_action, prev_action, action)
 
@@ -381,44 +380,48 @@ class MujocoEngine(PhysicsEngine):
             ctrl = prev_action * (1.0 - prct) + action * prct
 
             if (step_num % self.data.phys_steps_per_actuator_step) == 0:
+                scan_rng, rng_update = jax.random.split(scan_rng)
+
                 if isinstance(self.actuators, StatefulActuators):
                     torques, actuator_state = self.actuators.get_stateful_ctrl(
                         action=ctrl,
-                        physics_data=data,
+                        physics_data=mj_data,
+                        curriculum_level=curriculum_level,
                         actuator_state=actuator_state,
-                        rng=rng,
+                        rng=rng_update,
                     )
                 else:
                     torques = self.actuators.get_ctrl(
                         action=ctrl,
-                        physics_data=data,
+                        physics_data=mj_data,
                         curriculum_level=curriculum_level,
-                        rng=rng,
+                        rng=rng_update,
                     )
                 last_torques = torques
             else:
                 torques = last_torques
 
-            data.ctrl[:] = torques
+            mj_data.ctrl[:] = torques
 
             # Apply the events.
             new_event_states = {}
             for name, event in self.events.items():
-                data, new_event_state = event(
+                scan_rng, event_rng = jax.random.split(scan_rng)
+                mj_data, new_event_state = event(
                     model=physics_model,
-                    data=data,
+                    data=mj_data,
                     event_state=event_states[name],
                     curriculum_level=curriculum_level,
-                    rng=rng,
+                    rng=event_rng,
                 )
                 new_event_states[name] = new_event_state
             event_states = xax.freeze_dict(new_event_states)
 
-            mujoco.mj_step(physics_model, data)
+            mujoco.mj_step(physics_model, mj_data)
 
         return PhysicsState(
-            data=data,
             most_recent_action=action,
+            data=mj_data,
             event_states=event_states,
             actuator_state=actuator_state,
             action_latency=physics_state.action_latency,

@@ -26,6 +26,7 @@ __all__ = [
     "SiteOrientationObservation",
     "FeetContactObservation",
     "BodyPositionObservation",
+    "BodyVelocityObservation",
     "FeetForceObservation",
     "FeetTorqueObservation",
     "FeetOrientationObservation",
@@ -44,7 +45,7 @@ import xax
 from jax import numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.noise import Noise
+from ksim.noise import AdditiveGaussianBias, AdditiveGaussianNoise, Bias, Noise
 from ksim.types import PhysicsModel, PhysicsState
 from ksim.utils.mujoco import (
     geoms_colliding,
@@ -66,11 +67,32 @@ class ObservationInput:
     obs_carry: PyTree
 
 
+def convert_to_noise(noise: float | Noise | None) -> Noise | None:
+    if noise is None:
+        return None
+    if isinstance(noise, float):
+        return AdditiveGaussianNoise(mean=0.0, std=noise)
+    if isinstance(noise, Noise):
+        return noise
+    raise ValueError(f"Invalid noise: {noise}")
+
+
+def convert_to_bias(bias: float | Bias | None) -> Bias | None:
+    if bias is None:
+        return None
+    if isinstance(bias, float):
+        return AdditiveGaussianBias(mean=0.0, std=bias)
+    if isinstance(bias, Bias):
+        return bias
+    raise ValueError(f"Invalid bias: {bias}")
+
+
 @attrs.define(frozen=True, kw_only=True)
 class Observation(ABC):
     """Base class for observations."""
 
-    noise: Noise | None = attrs.field(default=None)
+    noise: Noise | None = attrs.field(default=None, converter=convert_to_noise)
+    bias: Bias | None = attrs.field(default=None, converter=convert_to_bias)
 
     @abstractmethod
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
@@ -85,6 +107,40 @@ class Observation(ABC):
         Returns:
             The observation
         """
+
+    def add_noise(
+        self,
+        observation: Array,
+        bias_rng: PRNGKeyArray | None,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array | None:
+        """Adds noise to the observation.
+
+        Args:
+            observation: The observation to add noise to.
+            bias_rng: A random key to use for the bias. This key is reused for
+                each step in the trajectory, meaning that calls to
+                `get_random_variable` should return the same value throughout
+                the trajectory. Note that this is different from the `rng`
+                parameter, which is a new random key for each call to
+                `add_noise`.
+            curriculum_level: The current curriculum level, a scalar between
+                zero and one.
+            rng: A random key to use for the noise
+
+        Returns:
+            The noisy observation, or None if no noise or bias is added.
+        """
+        if self.noise is None and self.bias is None:
+            return None
+        if self.noise is not None:
+            observation = self.noise.add_noise(observation, curriculum_level, rng)
+        if self.bias is not None:
+            assert bias_rng is not None  # Handled elsewhere, typechecking here.
+            bias = self.bias.get_random_variable(observation.shape, bias_rng, curriculum_level)
+            observation = self.bias.apply_bias(observation, bias)
+        return observation
 
     def get_markers(self, name: str) -> Collection[Marker]:
         return []
@@ -340,7 +396,7 @@ class ProjectedGravityObservation(StatefulObservation):
     gravity: tuple[float, float, float] = attrs.field()
     min_lag: float = attrs.field(validator=attrs.validators.and_(attrs.validators.ge(0.0), attrs.validators.lt(1.0)))
     max_lag: float = attrs.field(validator=attrs.validators.and_(attrs.validators.ge(0.0), attrs.validators.lt(1.0)))
-    bias: float = attrs.field(validator=attrs.validators.ge(0.0))
+    imu_bias: float = attrs.field(validator=attrs.validators.ge(0.0))
 
     @classmethod
     def create(
@@ -350,7 +406,7 @@ class ProjectedGravityObservation(StatefulObservation):
         framequat_name: str,
         min_lag: float = 0.0,
         max_lag: float = 0.0,
-        bias: float = 0.0,
+        imu_bias: float = 0.0,
         noise: Noise | None = None,
     ) -> Self:
         """Create a projected gravity observation from a physics model.
@@ -362,7 +418,7 @@ class ProjectedGravityObservation(StatefulObservation):
                 variation in the amount of smoothing of the Kalman filter.
             max_lag: The maximum EMA factor to use, to approximate the
                 variation in the amount of smoothing of the Kalman filter.
-            bias: The bias of the gravity vector, in radians.
+            imu_bias: The bias of the gravity vector, in radians.
             noise: The observation noise.
         """
         sensor_name_to_idx_range = get_sensor_data_idxs_by_name(physics_model)
@@ -378,13 +434,13 @@ class ProjectedGravityObservation(StatefulObservation):
             min_lag=min_lag,
             max_lag=max_lag,
             noise=noise,
-            bias=bias,
+            imu_bias=imu_bias,
         )
 
     def initial_carry(self, physics_state: PhysicsState, rng: PRNGKeyArray) -> ProjectedGravityCarry:
         lrng, brng = jax.random.split(rng)
         lag = jax.random.uniform(lrng, (1,), minval=self.min_lag, maxval=self.max_lag)
-        bias = jax.random.uniform(brng, (3,), minval=-self.bias, maxval=self.bias)
+        bias = jax.random.uniform(brng, (3,), minval=-self.imu_bias, maxval=self.imu_bias)
         return ProjectedGravityCarry(x=jnp.zeros((3,)), lag=lag, bias=bias)
 
     def observe_stateful(
@@ -504,7 +560,26 @@ class BodyPositionObservation(Observation):
         return cls(body_idxs=body_idxs, noise=noise)
 
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        return state.physics_state.data.xpos[self.body_idxs, :]
+        return state.physics_state.data.xpos[..., self.body_idxs, :]
+
+
+@attrs.define(frozen=True, kw_only=True)
+class BodyVelocityObservation(Observation):
+    body_idxs: tuple[int, ...] = attrs.field()
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        body_names: Iterable[str],
+        noise: Noise | None = None,
+    ) -> Self:
+        body_idxs = tuple(get_body_data_idx_from_name(physics_model, name) for name in body_names)
+        return cls(body_idxs=body_idxs, noise=noise)
+
+    def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        return state.physics_state.data.cvel[..., self.body_idxs, :]
 
 
 @attrs.define(frozen=True, kw_only=True)

@@ -30,6 +30,7 @@ import mujoco
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+from ksim.scales import ConstantScale, Scale, convert_to_scale
 from ksim.types import PhysicsData, PhysicsModel, Trajectory
 from ksim.utils.mujoco import get_joint_names_in_order
 from ksim.vis import Marker
@@ -286,15 +287,15 @@ class LinearVelocityCommand(Command):
     any command.
     """
 
-    min_vel: float = attrs.field()
-    max_vel: float = attrs.field()
+    min_vel: Scale = attrs.field(converter=convert_to_scale)
+    max_vel: Scale = attrs.field(converter=convert_to_scale)
     ctrl_dt: float = attrs.field()
     linear_accel: float = attrs.field()
     angular_accel: float = attrs.field()
-    max_yaw: float = attrs.field(default=0.0)
-    zero_prob: float = attrs.field(default=0.0)
-    backward_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
+    max_yaw: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
+    zero_prob: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
+    backward_prob: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
+    switch_prob: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
     vis_height: float = attrs.field(default=0.5)
 
     def initial_command(
@@ -304,6 +305,12 @@ class LinearVelocityCommand(Command):
         rng: PRNGKeyArray,
         prev_command: LinearVelocityCommandValue | None = None,
     ) -> LinearVelocityCommandValue:
+        min_vel = self.min_vel.get_scale(curriculum_level)
+        max_vel = self.max_vel.get_scale(curriculum_level)
+        max_yaw = self.max_yaw.get_scale(curriculum_level)
+        zero_prob = self.zero_prob.get_scale(curriculum_level)
+        backward_prob = self.backward_prob.get_scale(curriculum_level)
+
         rng_vel, rng_yaw, rng_zero, rng_backward = jax.random.split(rng, 4)
 
         # Gets the current linear velocity in the robot's frame.
@@ -319,11 +326,11 @@ class LinearVelocityCommand(Command):
             cur_vel = prev_command.vel
             cur_yaw = prev_command.yaw
 
-        trg_vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
-        trg_yaw = jax.random.uniform(rng_yaw, (), minval=-self.max_yaw, maxval=self.max_yaw)
+        trg_vel = jax.random.uniform(rng_vel, (), minval=min_vel, maxval=max_vel)
+        trg_yaw = jax.random.uniform(rng_yaw, (), minval=-max_yaw, maxval=max_yaw)
 
-        zero_mask = jax.random.bernoulli(rng_zero, self.zero_prob)
-        backward_mask = jax.random.bernoulli(rng_backward, self.backward_prob)
+        zero_mask = jax.random.bernoulli(rng_zero, zero_prob)
+        backward_mask = jax.random.bernoulli(rng_backward, backward_prob)
         trg_vel = jnp.where(zero_mask, 0.0, jnp.where(backward_mask, -trg_vel, trg_vel))
         trg_yaw = jnp.where(zero_mask, 0.0, trg_yaw)
 
@@ -367,8 +374,9 @@ class LinearVelocityCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> LinearVelocityCommandValue:
+        switch_prob = self.switch_prob.get_scale(curriculum_level)
         rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        switch_mask = jax.random.bernoulli(rng_a, switch_prob)
         updated_command = self.update_command(prev_command)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b, prev_command)
         return jax.tree_util.tree_map(
@@ -441,12 +449,12 @@ class AngularVelocityCommandMarker(Marker):
 
 @attrs.define(frozen=True)
 class AngularVelocityCommand(Command):
-    max_vel: float = attrs.field()
+    max_vel: Scale = attrs.field(converter=convert_to_scale)
     ctrl_dt: float = attrs.field()
     angular_accel: float = attrs.field()
-    min_vel: float = attrs.field(default=0.0)
-    zero_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
+    min_vel: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
+    zero_prob: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
+    switch_prob: Scale = attrs.field(default=ConstantScale(scale=0.0), converter=convert_to_scale)
     vis_height: float = attrs.field(default=0.5)
 
     def initial_command(
@@ -455,11 +463,15 @@ class AngularVelocityCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> AngularVelocityCommandValue:
+        min_vel = self.min_vel.get_scale(curriculum_level)
+        max_vel = self.max_vel.get_scale(curriculum_level)
+        zero_prob = self.zero_prob.get_scale(curriculum_level)
+
         rng_vel, rng_flip, rng_zero = jax.random.split(rng, 3)
 
-        trg_vel = jax.random.uniform(rng_vel, (), minval=self.min_vel, maxval=self.max_vel)
+        trg_vel = jax.random.uniform(rng_vel, (), minval=min_vel, maxval=max_vel)
         trg_vel = jnp.where(jax.random.bernoulli(rng_flip, 0.5), -trg_vel, trg_vel)
-        trg_vel = jnp.where(jax.random.bernoulli(rng_zero, self.zero_prob), 0.0, trg_vel)
+        trg_vel = jnp.where(jax.random.bernoulli(rng_zero, zero_prob), 0.0, trg_vel)
 
         cur_vel = physics_data.qvel[..., 5]
 
@@ -481,8 +493,9 @@ class AngularVelocityCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> AngularVelocityCommandValue:
+        switch_prob = self.switch_prob.get_scale(curriculum_level)
         rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        switch_mask = jax.random.bernoulli(rng_a, switch_prob)
         updated_command = self.update_command(prev_command)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jax.tree_util.tree_map(
@@ -784,16 +797,40 @@ class BaseHeightCommand(Command):
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class JointPositionCommandValue:
-    current_position: Array
+    start_position: Array
     target_position: Array
-    step_size: Array
+    total_time: Array
+    num_steps: Array
+    step_id: Array
+
+    @property
+    def current_position(self) -> Array:
+        start = self.start_position
+        target = self.target_position
+        step_id = self.step_id[..., None]
+        num_steps = self.num_steps[..., None]
+        return start + (target - start) * step_id.astype(jnp.float32) / num_steps.astype(jnp.float32)
+
+    @property
+    def current_velocity(self) -> Array:
+        start = self.start_position
+        target = self.target_position
+        total_time = self.total_time[..., None]
+        return (target - start) / total_time
 
 
 @attrs.define(frozen=True, kw_only=True)
 class JointPositionCommand(Command):
     """Command each joint to go to a specific position."""
 
-    indices: tuple[int, ...] = attrs.field()
+    indices: tuple[int, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(int),
+            ),
+        ),
+    )
     ranges: tuple[tuple[float, float], ...] = attrs.field()
     ctrl_dt: float = attrs.field()
     min_time: float = attrs.field(validator=attrs.validators.gt(0.0))
@@ -814,13 +851,15 @@ class JointPositionCommand(Command):
     ) -> JointPositionCommandValue:
         rng_a, rng_b = jax.random.split(rng)
         target = self.sample_target(rng_a)
-        start = physics_data.qpos[..., self.indices]
-        time_steps = self.sample_time(rng_b) / self.ctrl_dt
-        step_size = (target - start) / time_steps
+        indices = jnp.array(self.indices)
+        start = physics_data.qpos[..., indices + 7]
+        total_time = self.sample_time(rng_b)
         return JointPositionCommandValue(
+            start_position=start,
             target_position=target,
-            step_size=step_size,
-            current_position=start,
+            total_time=jnp.array(total_time),
+            num_steps=jnp.ceil(total_time / self.ctrl_dt).astype(jnp.int32),
+            step_id=jnp.zeros((), dtype=jnp.int32),
         )
 
     def __call__(
@@ -830,15 +869,20 @@ class JointPositionCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> JointPositionCommandValue:
+        start = prev_command.start_position
         target = prev_command.target_position
-        current = prev_command.current_position
-        step_size = prev_command.step_size
-        at_target = (target - current) < step_size * 1.5
+        total_time = prev_command.total_time
+        num_steps = prev_command.num_steps
+
+        step_id = prev_command.step_id + 1
+        at_target = step_id > prev_command.num_steps
 
         next_command = JointPositionCommandValue(
+            start_position=start,
             target_position=target,
-            step_size=step_size,
-            current_position=current + step_size,
+            total_time=total_time,
+            num_steps=num_steps,
+            step_id=step_id,
         )
 
         # Choose a new target and speed once we're close to the old target.
@@ -851,19 +895,19 @@ class JointPositionCommand(Command):
         physics_model: PhysicsModel,
         ctrl_dt: float,
         joint_names: Collection[str],
-        min_time: float = 0.3,
-        max_time: float = 2.0,
+        min_time: float = 0.1,
+        max_time: float = 1.0,
     ) -> Self:
-        all_names = get_joint_names_in_order(physics_model)
+        all_names = get_joint_names_in_order(physics_model)[1:]  # Remove floating base.
         for joint_name in joint_names:
             if joint_name not in all_names:
                 raise ValueError(f"Joint {joint_name} not found in the model! Options are: {all_names}")
 
-        all_ranges = physics_model.jnt_range
+        all_ranges = physics_model.jnt_range[1:]
         ranges_list = [(minv, maxv) for minv, maxv in all_ranges.tolist()]
-        joint_name_to_indices = {name: idx for idx, name in enumerate(get_joint_names_in_order(physics_model))}
+        joint_name_to_indices = {name: idx for idx, name in enumerate(all_names)}
         ranges = tuple(ranges_list[joint_name_to_indices[name]] for name in joint_names)
-        indices = tuple(joint_name_to_indices[name] + 7 for name in joint_names)
+        indices = tuple(joint_name_to_indices[name] for name in joint_names)
 
         return cls(
             indices=indices,

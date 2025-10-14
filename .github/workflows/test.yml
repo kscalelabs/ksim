@@ -60,7 +60,7 @@ jobs:
       - name: Run static checks
         run: |
           mkdir -p .mypy_cache
-          make static-checks
+          make lint
 
       - name: Run unit tests
         run: |
