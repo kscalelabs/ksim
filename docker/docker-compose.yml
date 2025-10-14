@@ -1,0 +1,32 @@
+services:
+  ksim-dev:
+    image: ksim-jax-cu12:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: bash
+    ports:
+      - 9249:9249
+      - 6006:6006
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # device_ids: ['0', '2']   # Specify the desired GPU indices here, else all will be made available
+              count: all # Specify the desired number of GPU devices that should be reserved and made available to the container
+              capabilities: [gpu]
+    environment:
+      - DISPLAY=${DISPLAY}
+    working_dir: /ksim
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix # X11 socket for GUI
+      - /usr/lib/x86_64-linux-gnu/libGL.so.1:/usr/lib/x86_64-linux-gnu/libGL.so.1
+      - /usr/lib/x86_64-linux-gnu/libGLX.so.0:/usr/lib/x86_64-linux-gnu/libGLX.so.0
+      - /usr/lib/x86_64-linux-gnu/libGLdispatch.so.0:/usr/lib/x86_64-linux-gnu/libGLdispatch.so.0
+      - /dev/dri:/dev/dri
+      - ../:/ksim
+    shm_size: 2g # Set high shared memory
+    # ipc: host                           # Alternatively, use this for host-level shared memory
+    stdin_open: true
+    tty: true
