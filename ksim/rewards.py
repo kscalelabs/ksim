@@ -1377,6 +1377,7 @@ class JointPositionReward(Reward):
         vel_diff = cmd.current_velocity - cur_vel
         pos_penalty_tn = exp_kernel_with_penalty(pos_diff, self.pos_scale, self.sq_scale, self.abs_scale)
         vel_penalty_tn = exp_kernel_with_penalty(vel_diff, self.vel_scale, self.sq_scale, self.abs_scale)
+
         return {
             "pos": pos_penalty_tn.mean(axis=-1),
             "vel": vel_penalty_tn.mean(axis=-1),

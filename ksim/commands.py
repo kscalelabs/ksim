@@ -895,15 +895,15 @@ class JointPositionCommand(Command):
         physics_model: PhysicsModel,
         ctrl_dt: float,
         joint_names: Collection[str],
-        min_time: float = 0.3,
-        max_time: float = 2.0,
+        min_time: float = 0.1,
+        max_time: float = 1.0,
     ) -> Self:
         all_names = get_joint_names_in_order(physics_model)[1:]  # Remove floating base.
         for joint_name in joint_names:
             if joint_name not in all_names:
                 raise ValueError(f"Joint {joint_name} not found in the model! Options are: {all_names}")
 
-        all_ranges = physics_model.jnt_range
+        all_ranges = physics_model.jnt_range[1:]
         ranges_list = [(minv, maxv) for minv, maxv in all_ranges.tolist()]
         joint_name_to_indices = {name: idx for idx, name in enumerate(all_names)}
         ranges = tuple(ranges_list[joint_name_to_indices[name]] for name in joint_names)
