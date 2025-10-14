@@ -26,6 +26,7 @@ __all__ = [
     "SiteOrientationObservation",
     "FeetContactObservation",
     "BodyPositionObservation",
+    "BodyVelocityObservation",
     "FeetForceObservation",
     "FeetTorqueObservation",
     "FeetOrientationObservation",
@@ -559,7 +560,26 @@ class BodyPositionObservation(Observation):
         return cls(body_idxs=body_idxs, noise=noise)
 
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        return state.physics_state.data.xpos[self.body_idxs, :]
+        return state.physics_state.data.xpos[..., self.body_idxs, :]
+
+
+@attrs.define(frozen=True, kw_only=True)
+class BodyVelocityObservation(Observation):
+    body_idxs: tuple[int, ...] = attrs.field()
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: PhysicsModel,
+        body_names: Iterable[str],
+        noise: Noise | None = None,
+    ) -> Self:
+        body_idxs = tuple(get_body_data_idx_from_name(physics_model, name) for name in body_names)
+        return cls(body_idxs=body_idxs, noise=noise)
+
+    def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        return state.physics_state.data.cvel[..., self.body_idxs, :]
 
 
 @attrs.define(frozen=True, kw_only=True)

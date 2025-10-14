@@ -41,6 +41,19 @@ ZEROS: list[tuple[str, float]] = [
     ("dof_left_ankle_02", math.radians(-20.0)),
 ]
 
+ARM_JOINT_NAMES = [
+    "dof_right_shoulder_pitch_03",
+    "dof_right_shoulder_roll_03",
+    "dof_right_shoulder_yaw_02",
+    "dof_right_elbow_02",
+    "dof_right_wrist_00",
+    "dof_left_shoulder_pitch_03",
+    "dof_left_shoulder_roll_03",
+    "dof_left_shoulder_yaw_02",
+    "dof_left_elbow_02",
+    "dof_left_wrist_00",
+]
+
 
 @dataclass
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
@@ -64,7 +77,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The scale for the standard deviations of the actor.",
     )
     start_cutoff_frequency: float = xax.field(
-        value=10.0,
+        value=25.0,
         help="The cutoff frequency for the low-pass filter.",
     )
     end_cutoff_frequency: float = xax.field(
@@ -102,7 +115,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the linear velocity command being zero.",
     )
     linear_velocity_backward_prob: float = xax.field(
-        value=0.0,
+        value=0.1,
         help="The probability of the linear velocity command being backward.",
     )
     linear_velocity_switch_prob: float = xax.field(
@@ -455,12 +468,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.PhysicsRandomizer]:
         return {
             "static_friction": ksim.StaticFrictionRandomizer(),
-            "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(
-                physics_model,
-                "floor",
-                scale_lower=0.98,
-                scale_upper=1.02,
-            ),
+            "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(physics_model, "floor"),
             "armature": ksim.ArmatureRandomizer(),
             "all_bodies_mass_multiplication": ksim.AllBodiesMassMultiplicationRandomizer(
                 scale_lower=0.5,
@@ -478,11 +486,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_torque=250.0,
                 duration_range=(0.25, 1.0),
                 interval_range=(4.0, 8.0),
-                scale=ksim.QuadraticScale.from_endpoints(0.0, 1.0),
-            ),
-            "jump": ksim.JumpEvent(
-                jump_height_range=(0.1, 0.3),
-                interval_range=(1.0, 2.0),
                 scale=ksim.QuadraticScale.from_endpoints(0.0, 1.0),
             ),
         }
@@ -549,6 +552,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 body_names=("KB_D_501L_L_LEG_FOOT", "KB_D_501R_R_LEG_FOOT"),
             ),
+            "feet_velocity": ksim.BodyVelocityObservation.create(
+                physics_model=physics_model,
+                body_names=("KB_D_501L_L_LEG_FOOT", "KB_D_501R_R_LEG_FOOT"),
+            ),
             "feet_force": ksim.FeetForceObservation.create(
                 physics_model=physics_model,
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
@@ -559,16 +566,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
         return {
             "linvel": ksim.LinearVelocityCommand(
-                min_vel=ksim.LinearScale.from_endpoints(
-                    start=self.config.max_linear_velocity,
-                    end=self.config.min_linear_velocity,
-                ),
+                min_vel=self.config.min_linear_velocity,
                 max_vel=self.config.max_linear_velocity,
                 ctrl_dt=self.config.ctrl_dt,
                 linear_accel=self.config.linear_velocity_accel,
                 angular_accel=self.config.angular_velocity_accel,
-                max_yaw=ksim.LinearScale.from_endpoints(start=0.0, end=self.config.linear_velocity_max_yaw),
-                zero_prob=ksim.LinearScale.from_endpoints(start=0.0, end=self.config.linear_velocity_zero_prob),
+                max_yaw=self.config.linear_velocity_max_yaw,
+                zero_prob=self.config.linear_velocity_zero_prob,
                 backward_prob=self.config.linear_velocity_backward_prob,
                 switch_prob=self.config.linear_velocity_switch_prob,
             ),
@@ -577,119 +581,64 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_vel=self.config.max_angular_velocity,
                 ctrl_dt=self.config.ctrl_dt,
                 angular_accel=self.config.angular_velocity_accel,
-                zero_prob=ksim.LinearScale.from_endpoints(
-                    start=1.0,
-                    end=self.config.angular_velocity_zero_prob,
-                ),
+                zero_prob=self.config.angular_velocity_zero_prob,
                 switch_prob=self.config.angular_velocity_switch_prob,
+            ),
+            "arm_positions": ksim.JointPositionCommand.create(
+                physics_model=physics_model,
+                joint_names=ARM_JOINT_NAMES,
+                ctrl_dt=self.config.ctrl_dt,
             ),
         }
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Reward]:
-        rewards = {
-            "stay_alive": ksim.StayAliveReward(scale=500.0),
+        return {
+            "stay_alive": ksim.StayAliveReward(scale=100.0),
             # Command tracking rewards.
-            "linvel": ksim.LinearVelocityReward(
-                cmd="linvel",
-                scale=ksim.LinearScale.from_endpoints(2.0, 10.0),
+            "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=2.0),
+            "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
+            # Gait rewards.
+            "foot_airtime": ksim.FeetAirTimeReward(
+                ctrl_dt=self.config.ctrl_dt,
+                gait_period=self.config.gait_period,
+                air_time_percent=self.config.air_time_percent,
+                contact_obs="feet_contact",
+                linvel_cmd="linvel",
+                angvel_cmd="angvel",
+                scale=2.0,
             ),
-            "angvel": ksim.AngularVelocityReward(
-                cmd="angvel",
-                scale=ksim.LinearScale.from_endpoints(0.5, 10.0),
+            "foot_slip": ksim.FeetSlipPenalty(
+                contact_obs="feet_contact",
+                velocity_obs="feet_velocity",
+                scale=0.1,
             ),
-            # # Gait rewards.
-            # "foot_airtime": ksim.FeetAirTimeReward(
-            #     ctrl_dt=self.config.ctrl_dt,
-            #     gait_period=self.config.gait_period,
-            #     air_time_percent=self.config.air_time_percent,
-            #     contact_obs="feet_contact",
-            #     scale=ksim.QuadraticScale(scale=10.0),
-            # ),
-            # "upright": ksim.UprightReward(
-            #     scale=ksim.LinearScale(scale=3.0),
-            # ),
-            # "foot_height": ksim.SparseTargetHeightReward(
-            #     contact_obs="feet_contact",
-            #     position_obs="feet_position",
-            #     height=self.config.max_foot_height,
-            #     scale=ksim.QuadraticScale(scale=10.0),
-            # ),
-            # "foot_contact": ksim.ForcePenalty(
-            #     force_obs="feet_force",
-            #     ctrl_dt=self.config.ctrl_dt,
-            #     bias=500.0,  # Weight of the robot is 350 Newtons.
-            #     scale=0.1,
-            # ),
-            # "foot_intersection": ksim.IntersectionPenalty(
-            #     position_obs="feet_position",
-            #     min_distance=0.25,
-            #     scale=ksim.QuadraticScale(scale=10.0),
-            # ),
-            # # Normalization penalties.
-            # "ctrl": ksim.TorquePenalty.create(
-            #     model=physics_model,
-            #     scale=1.0,
-            # ),
+            "upright": ksim.UprightReward(
+                scale=1.0,
+            ),
+            "foot_height": ksim.SparseTargetHeightReward(
+                contact_obs="feet_contact",
+                position_obs="feet_position",
+                height=self.config.max_foot_height,
+                scale=1.0,
+            ),
+            "foot_contact": ksim.ForcePenalty(
+                force_obs="feet_force",
+                ctrl_dt=self.config.ctrl_dt,
+                bias=355.0,  # Weight of the robot is 350 Newtons.
+                scale=1.0,
+            ),
+            "foot_intersection": ksim.IntersectionPenalty(
+                position_obs="feet_position",
+                min_distance=0.15,
+                scale=10.0,
+            ),
+            "arm_positions": ksim.JointPositionReward.create(
+                physics_model=physics_model,
+                joint_names=ARM_JOINT_NAMES,
+                command_name="arm_positions",
+                scale=10.0,
+            ),
         }
-
-        # zeros = {k: v for k, v in ZEROS}
-
-        # Joint deviation penalties.
-        # rewards.update(
-        #     {
-        #         f"joint_deviation_{k}": ksim.JointDeviationPenalty.create(
-        #             physics_model=physics_model,
-        #             joint_names=names,
-        #             joint_targets=[zeros[name] for name in names],
-        #             scale=ksim.QuadraticScale(scale=10.0),
-        #         )
-        #         for (k, names) in (
-        #             ("shoulder_roll", ["dof_right_shoulder_roll_03", "dof_left_shoulder_roll_03"]),
-        #             ("shoulder_yaw", ["dof_right_shoulder_yaw_02", "dof_left_shoulder_yaw_02"]),
-        #             ("hip_roll", ["dof_right_hip_roll_03", "dof_left_hip_roll_03"]),
-        #             ("hip_yaw", ["dof_right_hip_yaw_03", "dof_left_hip_yaw_03"]),
-        #             ("wrist", ["dof_right_wrist_00", "dof_left_wrist_00"]),
-        #         )
-        #     }
-        # )
-
-        # Pairwise symmetry rewards.
-        # rewards.update(
-        #     {
-        #         f"symmetry_{k}": ksim.PairwiseSymmetryReward.create(
-        #             physics_model=physics_model,
-        #             left_joint_name=left_name,
-        #             right_joint_name=right_name,
-        #             left_zero=zeros[left_name],
-        #             right_zero=zeros[right_name],
-        #             flipped=flipped,
-        #             scale=ksim.QuadraticScale(scale=10.0),
-        #         )
-        #         for (k, right_name, left_name, flipped) in (
-        #             ("shoulder", "dof_right_shoulder_pitch_03", "dof_left_shoulder_pitch_03", True),
-        #             ("elbow", "dof_right_elbow_02", "dof_left_elbow_02", True),
-        #             ("hip", "dof_right_hip_pitch_04", "dof_left_hip_pitch_04", True),
-        #         )
-        #     }
-        # )
-
-        # Symmetry rewards.
-        # rewards.update(
-        #     {
-        #         f"symmetry_{k}": ksim.SymmetryReward.create(
-        #             physics_model=physics_model,
-        #             joint_names=names,
-        #             joint_targets=[zeros[name] for name in names],
-        #             scale=ksim.QuadraticScale(scale=10.0),
-        #         )
-        #         for (k, names) in (
-        #             ("knee", ["dof_right_knee_04", "dof_left_knee_04"]),
-        #             ("ankle", ["dof_right_ankle_02", "dof_left_ankle_02"]),
-        #         )
-        #     }
-        # )
-
-        return rewards
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
         return {
@@ -700,7 +649,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.DistanceFromOriginCurriculum(
             min_level=0.0,
-            min_level_steps=5,
+            min_level_steps=25,
             increase_threshold=8.0,
             decrease_threshold=8.0,
         )
@@ -709,10 +658,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return Model(
             params.key,
             physics_model=params.physics_model,
-            num_actor_inputs=26,
+            num_actor_inputs=36,
             num_actor_outputs=len(ZEROS),
-            num_critic_inputs=463,
-            min_std=0.0001,
+            num_critic_inputs=473,
+            min_std=0.01,
             max_std=1.0,
             var_scale=self.config.var_scale,
             hidden_size=self.config.hidden_size,
@@ -740,6 +689,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # Command tensors.
         linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
         angvel_cmd: ksim.AngularVelocityCommandValue = commands["angvel"]
+        arm_pos_cmd_n: ksim.JointPositionCommandValue = commands["arm_positions"]
 
         # Stacks into tensors.
         linvel_cmd_2 = jnp.stack([linvel_cmd.target_vel, linvel_cmd.target_yaw], axis=-1)
@@ -750,6 +700,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             proj_grav_3,  # 3
             linvel_cmd_2,  # 2
             angvel_cmd_1,  # 1
+            arm_pos_cmd_n.current_position,  # NUM_ARM_JOINTS
         ]
 
         obs_n = jnp.concatenate(obs, axis=-1)
@@ -786,6 +737,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # Command tensors.
         linvel_cmd: ksim.LinearVelocityCommandValue = commands["linvel"]
         angvel_cmd: ksim.AngularVelocityCommandValue = commands["angvel"]
+        arm_pos_cmd_n: ksim.JointPositionCommandValue = commands["arm_positions"]
 
         # Stacks into tensors.
         linvel_cmd_2 = jnp.stack([linvel_cmd.target_vel, linvel_cmd.target_yaw], axis=-1)
@@ -810,6 +762,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 feet_force_obs_6 / 100.0,
                 linvel_cmd_2,
                 angvel_cmd_1,
+                arm_pos_cmd_n.current_position,
             ],
             axis=-1,
         )
@@ -847,6 +800,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         transition_ppo_variables = ksim.PPOVariables(
             log_probs=log_probs,
             values=value.squeeze(-1),
+            entropy=actor_dist.entropy(),
         )
 
         next_carry = jax.tree.map(

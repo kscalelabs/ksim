@@ -797,16 +797,40 @@ class BaseHeightCommand(Command):
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class JointPositionCommandValue:
-    current_position: Array
+    start_position: Array
     target_position: Array
-    step_size: Array
+    total_time: Array
+    num_steps: Array
+    step_id: Array
+
+    @property
+    def current_position(self) -> Array:
+        start = self.start_position
+        target = self.target_position
+        step_id = self.step_id[..., None]
+        num_steps = self.num_steps[..., None]
+        return start + (target - start) * step_id.astype(jnp.float32) / num_steps.astype(jnp.float32)
+
+    @property
+    def current_velocity(self) -> Array:
+        start = self.start_position
+        target = self.target_position
+        total_time = self.total_time[..., None]
+        return (target - start) / total_time
 
 
 @attrs.define(frozen=True, kw_only=True)
 class JointPositionCommand(Command):
     """Command each joint to go to a specific position."""
 
-    indices: tuple[int, ...] = attrs.field()
+    indices: tuple[int, ...] = attrs.field(
+        validator=attrs.validators.and_(
+            attrs.validators.instance_of(tuple),
+            attrs.validators.deep_iterable(
+                member_validator=attrs.validators.instance_of(int),
+            ),
+        ),
+    )
     ranges: tuple[tuple[float, float], ...] = attrs.field()
     ctrl_dt: float = attrs.field()
     min_time: float = attrs.field(validator=attrs.validators.gt(0.0))
@@ -827,13 +851,15 @@ class JointPositionCommand(Command):
     ) -> JointPositionCommandValue:
         rng_a, rng_b = jax.random.split(rng)
         target = self.sample_target(rng_a)
-        start = physics_data.qpos[..., self.indices]
-        time_steps = self.sample_time(rng_b) / self.ctrl_dt
-        step_size = (target - start) / time_steps
+        indices = jnp.array(self.indices)
+        start = physics_data.qpos[..., indices + 7]
+        total_time = self.sample_time(rng_b)
         return JointPositionCommandValue(
+            start_position=start,
             target_position=target,
-            step_size=step_size,
-            current_position=start,
+            total_time=jnp.array(total_time),
+            num_steps=jnp.ceil(total_time / self.ctrl_dt).astype(jnp.int32),
+            step_id=jnp.zeros((), dtype=jnp.int32),
         )
 
     def __call__(
@@ -843,15 +869,20 @@ class JointPositionCommand(Command):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> JointPositionCommandValue:
+        start = prev_command.start_position
         target = prev_command.target_position
-        current = prev_command.current_position
-        step_size = prev_command.step_size
-        at_target = (target - current) < step_size * 1.5
+        total_time = prev_command.total_time
+        num_steps = prev_command.num_steps
+
+        step_id = prev_command.step_id + 1
+        at_target = step_id > prev_command.num_steps
 
         next_command = JointPositionCommandValue(
+            start_position=start,
             target_position=target,
-            step_size=step_size,
-            current_position=current + step_size,
+            total_time=total_time,
+            num_steps=num_steps,
+            step_id=step_id,
         )
 
         # Choose a new target and speed once we're close to the old target.
@@ -867,16 +898,16 @@ class JointPositionCommand(Command):
         min_time: float = 0.3,
         max_time: float = 2.0,
     ) -> Self:
-        all_names = get_joint_names_in_order(physics_model)
+        all_names = get_joint_names_in_order(physics_model)[1:]  # Remove floating base.
         for joint_name in joint_names:
             if joint_name not in all_names:
                 raise ValueError(f"Joint {joint_name} not found in the model! Options are: {all_names}")
 
         all_ranges = physics_model.jnt_range
         ranges_list = [(minv, maxv) for minv, maxv in all_ranges.tolist()]
-        joint_name_to_indices = {name: idx for idx, name in enumerate(get_joint_names_in_order(physics_model))}
+        joint_name_to_indices = {name: idx for idx, name in enumerate(all_names)}
         ranges = tuple(ranges_list[joint_name_to_indices[name]] for name in joint_names)
-        indices = tuple(joint_name_to_indices[name] + 7 for name in joint_names)
+        indices = tuple(joint_name_to_indices[name] for name in joint_names)
 
         return cls(
             indices=indices,
