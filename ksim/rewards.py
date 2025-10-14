@@ -737,9 +737,12 @@ class UprightReward(Reward):
     """Reward for staying upright."""
 
     angvel_scale: float = attrs.field(default=0.25)
+    linvel_scale: float = attrs.field(default=0.25)
     pose_scale: float = attrs.field(default=0.25)
     angvel_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     angvel_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    linvel_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
+    linvel_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     pose_sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     pose_abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
 
@@ -748,6 +751,11 @@ class UprightReward(Reward):
 
         # Avoid angular velocity in the roll or pitch directions.
         angvel = jnp.linalg.norm(trajectory.qvel[..., 3:5], axis=-1)
+        angvel_rew = exp_kernel_with_penalty(angvel, self.angvel_scale, self.angvel_sq_scale, self.angvel_abs_scale)
+
+        # Avoid linear velocity in the z-direction.
+        linvel = trajectory.qvel[..., 2]
+        linvel_rew = exp_kernel_with_penalty(linvel, self.linvel_scale, self.linvel_sq_scale, self.linvel_abs_scale)
 
         # Avoid any roll or pitch orientation.
         z_world = jnp.array([0.0, 0.0, 1.0])
@@ -755,10 +763,9 @@ class UprightReward(Reward):
         roll = jnp.arctan2(z_in_body[..., 1], z_in_body[..., 2])
         pitch = jnp.arctan2(z_in_body[..., 0], z_in_body[..., 2])
         roll_pitch = jnp.linalg.norm(jnp.stack([roll, pitch], axis=-1), axis=-1)
-
-        angvel_rew = exp_kernel_with_penalty(angvel, self.angvel_scale, self.angvel_sq_scale, self.angvel_abs_scale)
         pose_rew = exp_kernel_with_penalty(roll_pitch, self.pose_scale, self.pose_sq_scale, self.pose_abs_scale)
-        return {"angvel": angvel_rew, "pose": pose_rew}
+
+        return {"angvel": angvel_rew, "linvel": linvel_rew, "pose": pose_rew}
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -977,7 +984,7 @@ class ReachabilityPenalty(Reward):
 class FeetAirTimeReward(StatefulReward):
     """Reward for feet either touching or not touching the ground for some time."""
 
-    gait_period: float = attrs.field()
+    gait_period: Scale = attrs.field(converter=convert_to_scale)
     air_time_percent: float = attrs.field()
     ctrl_dt: float = attrs.field()
     contact_obs: str = attrs.field()
@@ -1026,8 +1033,9 @@ class FeetAirTimeReward(StatefulReward):
         contact_tn = jnp.any(contact_tcn, axis=-2)
         chex.assert_shape(contact_tn, (..., self.num_feet))
 
-        air_steps = round(self.gait_period * self.air_time_percent / self.ctrl_dt)
-        gnd_steps = round(self.gait_period * (1.0 - self.air_time_percent) / self.ctrl_dt)
+        gait_period = self.gait_period.get_scale(trajectory.curriculum_level)
+        air_steps_t1 = jnp.round(gait_period * self.air_time_percent / self.ctrl_dt)[..., None]
+        gnd_steps_t1 = jnp.round(gait_period * (1.0 - self.air_time_percent) / self.ctrl_dt)[..., None]
 
         def scan_fn(
             carry: tuple[Array, Array, Array],
@@ -1048,15 +1056,15 @@ class FeetAirTimeReward(StatefulReward):
         air_cnt_tn, gnd_cnt_tn, stationary_gnd_cnt_tn = cnts_tn
 
         # Gradually increase reward until `threshold_steps`.
-        air_rew_tn = (air_cnt_tn.astype(jnp.float32) / air_steps) + self.bias
-        air_rew_tn = jnp.where(air_cnt_tn < air_steps, air_rew_tn, 0.0)
+        air_rew_tn = (air_cnt_tn.astype(jnp.float32) / air_steps_t1) + self.bias
+        air_rew_tn = jnp.where(air_cnt_tn < air_steps_t1, air_rew_tn, 0.0)
         air_rew_t = air_rew_tn.max(axis=-1)
 
-        gnd_rew_tn = (gnd_cnt_tn.astype(jnp.float32) / gnd_steps) + self.bias
-        gnd_rew_tn = jnp.where(gnd_cnt_tn < gnd_steps, gnd_rew_tn, -self.ground_penalty)
+        gnd_rew_tn = (gnd_cnt_tn.astype(jnp.float32) / gnd_steps_t1) + self.bias
+        gnd_rew_tn = jnp.where(gnd_cnt_tn < gnd_steps_t1, gnd_rew_tn, -self.ground_penalty)
         gnd_rew_t = gnd_rew_tn.max(axis=-1)
 
-        stationary_gnd_rew_tn = (stationary_gnd_cnt_tn.astype(jnp.float32) / gnd_steps).clip(0.0, 1.0) + self.bias
+        stationary_gnd_rew_tn = (stationary_gnd_cnt_tn.astype(jnp.float32) / gnd_steps_t1).clip(0.0, 1.0) + self.bias
         stationary_gnd_rew_t = stationary_gnd_rew_tn.max(axis=-1)
 
         rewards = {

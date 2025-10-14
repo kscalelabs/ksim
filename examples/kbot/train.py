@@ -601,7 +601,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Reward]:
         return {
-            "stay_alive": ksim.StayAliveReward(scale=250.0),
+            "stay_alive": ksim.StayAliveReward(scale=100.0),
             # Command tracking rewards.
             "linvel": ksim.LinearVelocityReward(cmd="linvel", scale=2.0),
             "angvel": ksim.AngularVelocityReward(cmd="angvel", scale=0.5),
@@ -638,7 +638,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 joint_names=ARM_JOINT_NAMES,
                 command_name="arm_positions",
-                scale=10.0,
+                scale=1.0,
             ),
         }
 
