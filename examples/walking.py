@@ -533,7 +533,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
             "foot_force": ksim.ForcePenalty(
                 force_obs="feet_force",
                 ctrl_dt=self.config.ctrl_dt,
-                bias=100.0,
+                expected_weight=10.0,
                 scale=-1e-1,
             ),
             "motionless_at_rest": ksim.MotionlessAtRestPenalty(scale=1e-2),

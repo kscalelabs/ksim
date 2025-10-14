@@ -1019,16 +1019,16 @@ class FeetAirTimeReward(StatefulReward):
         if self.linvel_cmd is None:
             moving_lin_t = jnp.linalg.norm(trajectory.qvel[..., :2], axis=-1) > self.linvel_moving_threshold
         else:
-            moving_cmd: LinearVelocityCommandValue = trajectory.command[self.linvel_cmd]
-            assert isinstance(moving_cmd, LinearVelocityCommandValue)
-            moving_lin_t = jnp.abs(moving_cmd.vel) > self.linvel_moving_threshold
+            linvel_cmd: LinearVelocityCommandValue = trajectory.command[self.linvel_cmd]
+            assert isinstance(linvel_cmd, LinearVelocityCommandValue)
+            moving_lin_t = jnp.abs(linvel_cmd.vel) > self.linvel_moving_threshold
 
         if self.angvel_cmd is None:
             moving_ang_t = trajectory.qvel[..., 5] > self.angvel_moving_threshold
         else:
-            moving_cmd: AngularVelocityCommandValue = trajectory.command[self.angvel_cmd]
-            assert isinstance(moving_cmd, AngularVelocityCommandValue)
-            moving_ang_t = jnp.abs(moving_cmd.vel) > self.angvel_moving_threshold
+            angvel_cmd: AngularVelocityCommandValue = trajectory.command[self.angvel_cmd]
+            assert isinstance(angvel_cmd, AngularVelocityCommandValue)
+            moving_ang_t = jnp.abs(angvel_cmd.vel) > self.angvel_moving_threshold
 
         moving_t = jnp.bitwise_and(jnp.bitwise_or(moving_lin_t, moving_ang_t), ~trajectory.done)
         return moving_t
@@ -1037,7 +1037,7 @@ class FeetAirTimeReward(StatefulReward):
         self,
         trajectory: Trajectory,
         reward_carry: tuple[Array, Array, Array],
-    ) -> tuple[Array, tuple[Array, Array, Array]]:
+    ) -> tuple[dict[str, Array], tuple[Array, Array, Array]]:
         moving_t = self._get_is_moving(trajectory)
 
         contact_tcn: Array = trajectory.obs[self.contact_obs] > 0.5  # Values are either 0 or 1.
@@ -1368,7 +1368,7 @@ class JointPositionReward(Reward):
     sq_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
     abs_scale: float = attrs.field(default=0.1, validator=attrs.validators.gt(0.0))
 
-    def get_reward(self, trajectory: Trajectory) -> Array:
+    def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         if self.command_name not in trajectory.command:
             raise ValueError(f"Command {self.command_name} not found! Ensure that it is in the task.")
         cmd: JointPositionCommandValue = trajectory.command[self.command_name]
