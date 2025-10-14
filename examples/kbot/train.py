@@ -139,7 +139,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The probability of the angular velocity command being switched.",
     )
     gait_period: float = xax.field(
-        value=0.8,
+        value=0.6,
         help="The target period for the gait.",
     )
     air_time_percent: float = xax.field(
