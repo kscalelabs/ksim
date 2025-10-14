@@ -749,8 +749,8 @@ class UprightReward(Reward):
     def get_reward(self, trajectory: Trajectory) -> dict[str, Array]:
         quat = trajectory.qpos[..., 3:7]
 
-        # Avoid angular velocity in the roll or pitch directions.
-        angvel = jnp.linalg.norm(trajectory.qvel[..., 3:5], axis=-1)
+        # Avoid angular velocity in the pitch directions.
+        angvel = trajectory.qvel[..., 4]
         angvel_rew = exp_kernel_with_penalty(angvel, self.angvel_scale, self.angvel_sq_scale, self.angvel_abs_scale)
 
         # Avoid linear velocity in the z-direction.
