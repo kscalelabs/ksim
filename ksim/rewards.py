@@ -1212,7 +1212,7 @@ class MotionlessAtRestPenalty(Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class ForcePenalty(StatefulReward):
+class ForcePenalty(Reward):
     """Reward for reducing the force on some body.
 
     This is modeled with a low-pass filter to simulate compliance, since when
@@ -1221,30 +1221,13 @@ class ForcePenalty(StatefulReward):
 
     force_obs: str = attrs.field()
     ctrl_dt: float = attrs.field()
-    ema_time: float = attrs.field(default=0.03)
-    ema_scale: float = attrs.field(default=0.001)
-    num_feet: int = attrs.field(default=2)
+    expected_weight: float = attrs.field()
     bias: float = attrs.field(default=0.0)
 
-    def initial_carry(self, rng: PRNGKeyArray) -> Array:
-        return jnp.zeros(self.num_feet, dtype=jnp.float32)
-
-    def get_reward_stateful(
-        self,
-        trajectory: Trajectory,
-        reward_carry: Array,
-    ) -> tuple[Array, Array]:
-        alpha = jnp.exp(-self.ctrl_dt / self.ema_time)
+    def get_reward(self, trajectory: Trajectory) -> Array:
         obs = (jnp.linalg.norm(trajectory.obs[self.force_obs], axis=-1) - self.bias).clip(min=0)
-
-        def scan_fn(carry: Array, x: Array) -> tuple[Array, Array]:
-            ema_n, obs_n = carry, x
-            ema_n = alpha * ema_n + (1 - alpha) * obs_n
-            return ema_n, ema_n
-
-        ema_fn, ema_acc = xax.scan(scan_fn, reward_carry, obs)
-        penalty = jnp.log1p(self.ema_scale * ema_acc).sum(axis=-1)
-        return penalty, ema_fn
+        penalty = jnp.square(obs / self.expected_weight).max(axis=-1)
+        return penalty
 
 
 @attrs.define(kw_only=True)

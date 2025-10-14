@@ -626,7 +626,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "foot_contact": ksim.ForcePenalty(
                 force_obs="feet_force",
                 ctrl_dt=self.config.ctrl_dt,
-                bias=355.0,  # Weight of the robot is 350 Newtons.
+                expected_weight=340.0,
                 scale=1.0,
             ),
             "foot_intersection": ksim.IntersectionPenalty(
