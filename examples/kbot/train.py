@@ -11,13 +11,14 @@ import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import ksim
 import mujoco
 import mujoco_scenes
 import mujoco_scenes.mjcf
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
+
+import ksim
 
 # These are in the order of the neural network outputs.
 # Joint name, neutral position
@@ -1194,7 +1195,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
         arm_joint_names = list(JOINT_BIASES.keys())[10:20]
         joint_limits = ksim.get_position_limits(physics_model)
-        arm_joint_limits = tuple(zip(*[joint_limits[name] for name in arm_joint_names]))
+        arm_joint_limits = tuple(zip(*[joint_limits[name] for name in arm_joint_names], strict=False))
         return {
             "unified_command": UnifiedCommand(
                 vx_range=(-0.5, 1.2),  # m/s
