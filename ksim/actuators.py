@@ -16,8 +16,13 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+<<<<<<< HEAD
 from ksim.noise import Noise, NoNoise
 from ksim.types import Metadata, PhysicsModel
+=======
+from ksim.noise import Noise, NoNoise, RandomVariable
+from ksim.types import Metadata, PhysicsData, PhysicsModel
+>>>>>>> bb6a67e (unify actuators)
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
 logger = logging.getLogger(__name__)
@@ -76,7 +81,12 @@ class TorqueActuators(Actuators):
         return self.noise.add_noise(action, curriculum_level, rng)
 
 
-class PositionActuators(Actuators):
+class ActuatorState(TypedDict):
+    action: Array
+    torque: Array
+
+
+class PositionActuators(StatefulActuators):
     """MIT Cheetah-style actuator controller operating on position."""
 
     def __init__(
@@ -86,6 +96,8 @@ class PositionActuators(Actuators):
         action_noise: Noise | None = None,
         torque_noise: Noise | None = None,
         action_scale: float = 1.0,
+        action_bias: RandomVariable | None = None,
+        torque_bias: RandomVariable | None = None,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
@@ -132,6 +144,9 @@ class PositionActuators(Actuators):
 
         self.action_scale = action_scale
 
+        self.action_bias = action_bias
+        self.torque_bias = torque_bias
+
         if any(self.kps < 0) or any(self.kds < 0):
             raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
         if any(self.kps == 0) or any(self.kds == 0):
@@ -141,15 +156,19 @@ class PositionActuators(Actuators):
         # This can be overridden if necessary.
         return f"{joint_name}_ctrl"
 
-    def get_ctrl(
+    def get_stateful_ctrl(
         self,
         action: Array,
         qpos: Array,
         qvel: Array,
         curriculum_level: Array,
+        actuator_state: ActuatorState,
         rng: PRNGKeyArray,
-    ) -> Array:
-        """Get the control signal from the (position) action vector."""
+    ) -> tuple[Array, ActuatorState]:
+        """Get the control signal from the (position) action vector with optional biases."""
+        action_bias = actuator_state["action"]
+        torque_bias = actuator_state["torque"]
+
         scaled = action * self.action_scale
 
         pos_rng, tor_rng = jax.random.split(rng)
@@ -159,15 +178,22 @@ class PositionActuators(Actuators):
         current_vel = qvel
 
         # Add position and velocity noise
-        target_position = self.action_noise.add_noise(scaled, curriculum_level, pos_rng)
+        target_position = self.action_noise.add_noise(scaled, curriculum_level, pos_rng) + action_bias
         target_velocity = jnp.zeros_like(action)
 
         pos_delta = target_position - current_pos
         vel_delta = target_velocity - current_vel
 
         ctrl = self.kps * pos_delta + self.kds * vel_delta
-        ctrl = self.torque_noise.add_noise(ctrl, curriculum_level, tor_rng)
-        return jnp.clip(ctrl, -self.ctrl_clip, self.ctrl_clip)
+        ctrl = self.torque_noise.add_noise(ctrl, curriculum_level, tor_rng) + torque_bias
+        return jnp.clip(ctrl, -self.ctrl_clip, self.ctrl_clip), actuator_state
+
+    def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> ActuatorState:
+        """Get the initial state for the actuator."""
+        shape = physics_data.qpos[..., 7:].shape
+        action_bias_value = self.action_bias.get_random_variable(shape, rng) if self.action_bias else jnp.zeros(shape)
+        torque_bias_value = self.torque_bias.get_random_variable(shape, rng) if self.torque_bias else jnp.zeros(shape)
+        return {"action": action_bias_value, "torque": torque_bias_value}
 
 
 class PositionVelocityActuator(PositionActuators):
