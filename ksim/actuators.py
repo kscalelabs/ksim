@@ -16,13 +16,8 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-<<<<<<< HEAD
-from ksim.noise import Noise, NoNoise
-from ksim.types import Metadata, PhysicsModel
-=======
 from ksim.noise import Noise, NoNoise, RandomVariable
 from ksim.types import Metadata, PhysicsData, PhysicsModel
->>>>>>> bb6a67e (unify actuators)
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
 logger = logging.getLogger(__name__)
@@ -198,19 +193,23 @@ class PositionActuators(StatefulActuators):
 
         ctrl = (self.kps * kp_scale) * pos_delta + (self.kds * kd_scale) * vel_delta
         ctrl = self.torque_noise.add_noise(ctrl, curriculum_level, tor_rng) + torque_bias
-        return jnp.clip(ctrl, -(self.ctrl_clip * torque_limit_scale), self.ctrl_clip * torque_limit_scale), actuator_state
+        return jnp.clip(
+            ctrl, -(self.ctrl_clip * torque_limit_scale), self.ctrl_clip * torque_limit_scale
+        ), actuator_state
 
     def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> ActuatorState:
         """Get the initial state for the actuator."""
         shape = physics_data.qpos[..., 7:].shape
         rng1, rng2, rng3, rng4, rng5 = jax.random.split(rng, 5)
-        
+
         action_bias_value = self.action_bias.get_random_variable(shape, rng1) if self.action_bias else jnp.zeros(shape)
         torque_bias_value = self.torque_bias.get_random_variable(shape, rng2) if self.torque_bias else jnp.zeros(shape)
         kp_scale_value = self.kp_scale.get_random_variable((), rng3) if self.kp_scale else jnp.ones(())
         kd_scale_value = self.kd_scale.get_random_variable((), rng4) if self.kd_scale else jnp.ones(())
-        torque_limit_scale_value = self.torque_limit_scale.get_random_variable((), rng5) if self.torque_limit_scale else jnp.ones(())
-        
+        torque_limit_scale_value = (
+            self.torque_limit_scale.get_random_variable((), rng5) if self.torque_limit_scale else jnp.ones(())
+        )
+
         return {
             "action": action_bias_value,
             "torque": torque_bias_value,
