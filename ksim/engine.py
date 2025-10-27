@@ -30,6 +30,13 @@ from omegaconf import MISSING
 from ksim.actuators import Actuators, StatefulActuators
 from ksim.debugging import JitLevel
 from ksim.events import Event
+from ksim.noise import (
+    GaussianRandomVariable,
+    RandomVariable,
+    UniformGaussianRandomVariable,
+    UniformRandomVariable,
+    ZeroRandomVariable,
+)
 from ksim.resets import Reset
 from ksim.types import PhysicsModel, PhysicsState
 
@@ -49,9 +56,13 @@ class EngineConfig:
         value=0.0,
         help="The probability of dropping an action.",
     )
-    zero_offset_std: float = xax.field(
-        value=0.0,
-        help="The standard deviation of the zero offset randomization.",
+    zero_offset_std: float | None = xax.field(
+        value=None,
+        help="The standard deviation of the zero offset Gaussian randomization.",
+    )
+    zero_offset_mag: float | None = xax.field(
+        value=None,
+        help="The magnitude of the zero offset uniform randomization.",
     )
     actuator_update_dt: float | None = xax.field(
         value=None,
@@ -105,6 +116,29 @@ class EngineConfig:
             return max(1, round(self.actuator_update_dt / self.dt))
         return 1
 
+    def zero_offset_random_variable(self) -> RandomVariable:
+        if self.zero_offset_mag is not None and self.zero_offset_std is not None:
+            return UniformGaussianRandomVariable(
+                mean=0.0,
+                std=self.zero_offset_std,
+                mag=self.zero_offset_mag,
+            )
+
+        elif self.zero_offset_std is not None:
+            return GaussianRandomVariable(
+                mean=0.0,
+                std=self.zero_offset_std,
+            )
+
+        elif self.zero_offset_mag is not None:
+            return UniformRandomVariable(
+                mean=0.0,
+                mag=self.zero_offset_mag,
+            )
+
+        else:
+            return ZeroRandomVariable()
+
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
@@ -117,7 +151,7 @@ class EngineData:
     max_action_latency_step: float
     phys_steps_per_ctrl_steps: int
     phys_steps_per_actuator_step: int
-    zero_offset_std: float
+    zero_offset: RandomVariable
 
     @classmethod
     def from_config(cls, config: EngineConfig) -> Self:
@@ -132,7 +166,7 @@ class EngineData:
             max_action_latency_step=config.max_action_latency_step,
             phys_steps_per_ctrl_steps=config.phys_steps_per_ctrl_steps,
             phys_steps_per_actuator_step=config.phys_steps_per_actuator_step,
-            zero_offset_std=config.zero_offset_std,
+            zero_offset=config.zero_offset_random_variable(),
         )
 
 
@@ -206,7 +240,11 @@ class MjxEngine(PhysicsEngine):
                 minval=self.data.min_action_latency_step * curriculum_level,
                 maxval=self.data.max_action_latency_step * curriculum_level,
             ),
-            zero_offset=jax.random.normal(zero_offset_rng, shape=mjx_data.ctrl.shape) * self.data.zero_offset_std,
+            zero_offset=self.data.zero_offset.get_random_variable(
+                mjx_data.ctrl.shape,
+                zero_offset_rng,
+                curriculum_level,
+            ),
         )
 
     @xax.jit(
@@ -359,7 +397,11 @@ class MujocoEngine(PhysicsEngine):
                 minval=self.data.min_action_latency_step * curriculum_level,
                 maxval=self.data.max_action_latency_step * curriculum_level,
             ),
-            zero_offset=jax.random.normal(zero_offset_rng, shape=mj_data.ctrl.shape) * self.data.zero_offset_std,
+            zero_offset=self.data.zero_offset.get_random_variable(
+                mj_data.ctrl.shape,
+                zero_offset_rng,
+                curriculum_level,
+            ),
         )
 
     def step(

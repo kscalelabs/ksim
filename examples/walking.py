@@ -779,7 +779,8 @@ if __name__ == "__main__":
             # Engine parameters.
             dt=0.004,
             ctrl_dt=0.02,
-            zero_offset_std=math.radians(5.0),
+            zero_offset_std=math.radians(3.0),
+            zero_offset_mag=math.radians(3.0),
             # Simulation parameters.
             iterations=8,
             ls_iterations=8,
