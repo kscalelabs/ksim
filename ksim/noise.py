@@ -7,8 +7,10 @@ random variables to other parts of the code, for type checking.
 __all__ = [
     # Random Variable
     "RandomVariable",
+    "ZeroRandomVariable",
     "UniformRandomVariable",
     "GaussianRandomVariable",
+    "UniformGaussianRandomVariable",
     # Bias
     "Bias",
     "AdditiveBias",
@@ -34,6 +36,7 @@ from abc import ABC, abstractmethod
 
 import attrs
 import jax
+import jax.numpy as jnp
 import xax
 from jaxtyping import Array, PRNGKeyArray
 
@@ -53,6 +56,19 @@ class RandomVariable(ABC):
         rng: PRNGKeyArray,
         curriculum_level: Array | float = 1.0,
     ) -> Array: ...
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ZeroRandomVariable(RandomVariable):
+    """A random variable that always returns zero."""
+
+    def get_random_variable(
+        self,
+        shape: tuple[int, ...],
+        rng: PRNGKeyArray,
+        curriculum_level: Array | float = 1.0,
+    ) -> Array:
+        return jnp.zeros(shape)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -84,6 +100,25 @@ class GaussianRandomVariable(RandomVariable):
         curriculum_level: Array | float = 1.0,
     ) -> Array:
         return jax.random.normal(rng, shape) * (self.std * curriculum_level) + self.mean
+
+
+@attrs.define(frozen=True, kw_only=True)
+class UniformGaussianRandomVariable(RandomVariable):
+    mean: float = attrs.field()
+    std: float = attrs.field(validator=attrs.validators.gt(0.0))
+    mag: float = attrs.field(validator=attrs.validators.gt(0.0))
+
+    @xax.jit(static_argnames=["self", "shape"], donate_argnames=["rng"], jit_level=JitLevel.HELPER_FUNCTIONS)
+    def get_random_variable(
+        self,
+        shape: tuple[int, ...],
+        rng: PRNGKeyArray,
+        curriculum_level: Array | float = 1.0,
+    ) -> Array:
+        minv, maxv = -self.mag * curriculum_level, self.mag * curriculum_level
+        normal = jax.random.normal(rng, shape) * (self.std * curriculum_level)
+        uniform = jax.random.uniform(rng, shape, minval=minv, maxval=maxv)
+        return normal + uniform + self.mean
 
 
 # ----

@@ -452,11 +452,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         metadata: ksim.Metadata | None = None,
     ) -> ksim.Actuators:
         assert metadata is not None, "Metadata is required"
-        return ksim.BiasedPositionActuators(
+        return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
-            action_bias=ksim.UniformRandomVariable(mean=0.0, mag=math.radians(3.0)),
-            torque_bias=ksim.UniformRandomVariable(mean=0.0, mag=3.0),
             action_noise=ksim.AdditiveGaussianNoise(std=0.01),
             torque_noise=ksim.AdditiveGaussianNoise(std=0.01),
         )
@@ -891,6 +889,8 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             action_latency_range=(0.001, 0.01),  # Simulate 1-10ms of latency.
             drop_action_prob=0.05,  # Drop 5% of commands.
+            zero_offset_std=math.radians(3.0),
+            zero_offset_mag=math.radians(3.0),
             # Visualization parameters.
             # If running this on Mac and you are getting segfaults,
             # you might need to disable `render_markers`
