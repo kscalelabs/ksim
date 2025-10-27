@@ -221,8 +221,8 @@ class BaseAngularVelocityObservation(Observation):
 class JointPositionObservation(Observation):
     def observe(self, state: ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         qpos = state.physics_state.data.qpos[7:]
-        offset = state.physics_state.zero_offset
-        return qpos - offset  # (N,)
+        zero_offset = state.physics_state.zero_offset
+        return qpos - zero_offset  # (N,)
 
 
 @attrs.define(frozen=True, kw_only=True)
