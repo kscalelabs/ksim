@@ -301,7 +301,7 @@ class WalkingConfig(ksim.PPOConfig):
         help="The acceleration for the angular velocity command, in rad/s^2.",
     )
     angular_velocity_range: tuple[float, float] = xax.field(
-        value=(-0.2, 0.2),
+        value=(0.0, 0.2),
         help="The range for the angular velocity command.",
     )
     angular_velocity_zero_prob: float = xax.field(
@@ -534,7 +534,7 @@ class WalkingTask(ksim.PPOTask[Config], Generic[Config]):
                 force_obs="feet_force",
                 ctrl_dt=self.config.ctrl_dt,
                 expected_weight=10.0,
-                scale=-1e-1,
+                scale=1e-1,
             ),
             "motionless_at_rest": ksim.MotionlessAtRestPenalty(scale=1e-2),
         }
@@ -779,6 +779,7 @@ if __name__ == "__main__":
             # Engine parameters.
             dt=0.004,
             ctrl_dt=0.02,
+            zero_offset_std=math.radians(5.0),
             # Simulation parameters.
             iterations=8,
             ls_iterations=8,

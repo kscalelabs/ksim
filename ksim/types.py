@@ -23,11 +23,7 @@ import jax.numpy as jnp
 import mujoco
 import xax
 from jaxtyping import Array, PyTree
-from kscale.web.gen.api import (
-    ActuatorMetadataOutput,
-    JointMetadataOutput,
-    RobotURDFMetadataOutput,
-)
+from kscale.web.gen.api import ActuatorMetadataOutput, JointMetadataOutput, RobotURDFMetadataOutput
 from mujoco import mjx
 
 PhysicsData: TypeAlias = mjx.Data | mujoco.MjData
@@ -39,11 +35,12 @@ PhysicsModel: TypeAlias = mjx.Model | mujoco.MjModel
 class PhysicsState:
     """Everything you need for the engine to take an action and step physics."""
 
-    most_recent_action: Array
+    last_ctrl: Array
     data: PhysicsData
     event_states: xax.FrozenDict[str, PyTree]
     actuator_state: PyTree
     action_latency: Array
+    zero_offset: Array
 
 
 @jax.tree_util.register_dataclass

@@ -49,6 +49,10 @@ class EngineConfig:
         value=0.0,
         help="The probability of dropping an action.",
     )
+    zero_offset_std: float = xax.field(
+        value=0.0,
+        help="The standard deviation of the zero offset randomization.",
+    )
     actuator_update_dt: float | None = xax.field(
         value=None,
         help="The time step of the actuator update.",
@@ -75,6 +79,8 @@ class EngineConfig:
             raise ValueError("`min_action_latency` must be less than or equal to `max_action_latency`")
         if max_action_latency > self.ctrl_dt:
             logger.warning("`max_action_latency=%f` is greater than `ctrl_dt=%f`", max_action_latency, self.ctrl_dt)
+        if self.zero_offset_std < 0:
+            raise ValueError("`zero_offset_std` must be non-negative")
         if (remainder := (self.ctrl_dt - round(self.ctrl_dt / self.dt) * self.dt)) > 1e-6:
             logger.warning("`ctrl_dt=%f` is not a multiple of `dt=%f` (remainder=%f)", self.ctrl_dt, self.dt, remainder)
 
@@ -111,6 +117,7 @@ class EngineData:
     max_action_latency_step: float
     phys_steps_per_ctrl_steps: int
     phys_steps_per_actuator_step: int
+    zero_offset_std: float
 
     @classmethod
     def from_config(cls, config: EngineConfig) -> Self:
@@ -125,6 +132,7 @@ class EngineData:
             max_action_latency_step=config.max_action_latency_step,
             phys_steps_per_ctrl_steps=config.phys_steps_per_ctrl_steps,
             phys_steps_per_actuator_step=config.phys_steps_per_actuator_step,
+            zero_offset_std=config.zero_offset_std,
         )
 
 
@@ -181,13 +189,15 @@ class MjxEngine(PhysicsEngine):
 
         # Gets the initial actuator state for stateful actuators.
         actuator_state = (
-            self.actuators.get_initial_state(mjx_data, rng) if isinstance(self.actuators, StatefulActuators) else None
+            self.actuators.get_initial_state(mjx_data.qpos, mjx_data.qvel, rng)
+            if isinstance(self.actuators, StatefulActuators)
+            else None
         )
 
-        events_rng, latency_rng = jax.random.split(rng)
+        events_rng, latency_rng, zero_offset_rng = jax.random.split(rng, 3)
 
         return PhysicsState(
-            most_recent_action=self.actuators.get_default_action(mjx_data),
+            last_ctrl=jnp.zeros_like(mjx_data.ctrl),
             data=mjx_data,
             event_states=self._reset_events(events_rng),
             actuator_state=actuator_state,
@@ -196,6 +206,7 @@ class MjxEngine(PhysicsEngine):
                 minval=self.data.min_action_latency_step * curriculum_level,
                 maxval=self.data.max_action_latency_step * curriculum_level,
             ),
+            zero_offset=jax.random.normal(zero_offset_rng, shape=mjx_data.ctrl.shape) * self.data.zero_offset_std,
         )
 
     @xax.jit(
@@ -224,12 +235,11 @@ class MjxEngine(PhysicsEngine):
     ) -> PhysicsState:
         mjx_data = physics_state.data
         phys_steps_per_ctrl_steps = self.data.phys_steps_per_ctrl_steps
-        prev_action = physics_state.most_recent_action
+        last_ctrl = physics_state.last_ctrl
 
         # Randomly drops some actions.
         drop_rng, scan_rng = jax.random.split(rng)
         drop_action = jax.random.bernoulli(drop_rng, self.data.drop_action_prob * curriculum_level, shape=action.shape)
-        action = jnp.where(drop_action, prev_action, action)
 
         def move_physics(
             carry: tuple[mjx.Data, Array, PRNGKeyArray, xax.FrozenDict[str, PyTree], PyTree, Array],
@@ -239,7 +249,7 @@ class MjxEngine(PhysicsEngine):
 
             # Randomly apply the action with some latency.
             prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
-            ctrl = prev_action * (1.0 - prct) + action * prct
+            ctrl = jnp.where(drop_action, last_ctrl, last_ctrl * (1.0 - prct) + action * prct)
 
             should_update = jnp.mod(step_num, self.data.phys_steps_per_actuator_step) == 0
             rng, rng_update = jax.random.split(rng)
@@ -248,7 +258,8 @@ class MjxEngine(PhysicsEngine):
                 if isinstance(self.actuators, StatefulActuators):
                     torques, actuator_state = self.actuators.get_stateful_ctrl(
                         action=ctrl,
-                        physics_data=data,
+                        qpos=data.qpos - physics_state.zero_offset,
+                        qvel=data.qvel,
                         curriculum_level=curriculum_level,
                         actuator_state=prev_actuator_state,
                         rng=rng_update,
@@ -256,7 +267,8 @@ class MjxEngine(PhysicsEngine):
                 else:
                     torques = self.actuators.get_ctrl(
                         action=ctrl,
-                        physics_data=data,
+                        qpos=data.qpos - physics_state.zero_offset,
+                        qvel=data.qvel,
                         curriculum_level=curriculum_level,
                         rng=rng_update,
                     )
@@ -304,11 +316,12 @@ class MjxEngine(PhysicsEngine):
         )
 
         return PhysicsState(
-            most_recent_action=action,
+            last_ctrl=action,
             data=mjx_data,
             event_states=xax.freeze_dict(event_info),
             actuator_state=actuator_state_final,
             action_latency=physics_state.action_latency,
+            zero_offset=physics_state.zero_offset,
         )
 
 
@@ -328,15 +341,16 @@ class MujocoEngine(PhysicsEngine):
         mj_data.qvel[:] = 0.0
         mj_data.qacc[:] = 0.0
 
-        default_action = self.actuators.get_default_action(mj_data)
         actuator_state = (
-            self.actuators.get_initial_state(mj_data, rng) if isinstance(self.actuators, StatefulActuators) else None
+            self.actuators.get_initial_state(mj_data.qpos, mj_data.qvel, rng)
+            if isinstance(self.actuators, StatefulActuators)
+            else None
         )
 
-        events_rng, latency_rng = jax.random.split(rng)
+        events_rng, latency_rng, zero_offset_rng = jax.random.split(rng, 3)
 
         return PhysicsState(
-            most_recent_action=default_action,
+            last_ctrl=jnp.zeros_like(mj_data.ctrl),
             data=mj_data,
             event_states=self._reset_events(events_rng),
             actuator_state=actuator_state,
@@ -345,6 +359,7 @@ class MujocoEngine(PhysicsEngine):
                 minval=self.data.min_action_latency_step * curriculum_level,
                 maxval=self.data.max_action_latency_step * curriculum_level,
             ),
+            zero_offset=jax.random.normal(zero_offset_rng, shape=mj_data.ctrl.shape) * self.data.zero_offset_std,
         )
 
     def step(
@@ -362,12 +377,11 @@ class MujocoEngine(PhysicsEngine):
 
         mujoco.mj_forward(physics_model, mj_data)
         phys_steps_per_ctrl_steps = self.data.phys_steps_per_ctrl_steps
-        prev_action = physics_state.most_recent_action
+        last_ctrl = physics_state.last_ctrl
 
         # Randomly drops some actions.
         drop_rng, scan_rng = jax.random.split(rng)
         drop_action = jax.random.bernoulli(drop_rng, self.data.drop_action_prob * curriculum_level, shape=action.shape)
-        action = jnp.where(drop_action, prev_action, action)
 
         event_states = physics_state.event_states
         actuator_state = physics_state.actuator_state
@@ -377,7 +391,7 @@ class MujocoEngine(PhysicsEngine):
         for step_num in range(phys_steps_per_ctrl_steps):
             # Randomly apply the action with some latency.
             prct = jnp.clip(step_num - physics_state.action_latency, 0.0, 1.0)
-            ctrl = prev_action * (1.0 - prct) + action * prct
+            ctrl = jnp.where(drop_action, last_ctrl, last_ctrl * (1.0 - prct) + action * prct)
 
             if (step_num % self.data.phys_steps_per_actuator_step) == 0:
                 scan_rng, rng_update = jax.random.split(scan_rng)
@@ -385,7 +399,8 @@ class MujocoEngine(PhysicsEngine):
                 if isinstance(self.actuators, StatefulActuators):
                     torques, actuator_state = self.actuators.get_stateful_ctrl(
                         action=ctrl,
-                        physics_data=mj_data,
+                        qpos=mj_data.qpos - physics_state.zero_offset,
+                        qvel=mj_data.qvel,
                         curriculum_level=curriculum_level,
                         actuator_state=actuator_state,
                         rng=rng_update,
@@ -393,7 +408,8 @@ class MujocoEngine(PhysicsEngine):
                 else:
                     torques = self.actuators.get_ctrl(
                         action=ctrl,
-                        physics_data=mj_data,
+                        qpos=mj_data.qpos - physics_state.zero_offset,
+                        qvel=mj_data.qvel,
                         curriculum_level=curriculum_level,
                         rng=rng_update,
                     )
@@ -420,11 +436,12 @@ class MujocoEngine(PhysicsEngine):
             mujoco.mj_step(physics_model, mj_data)
 
         return PhysicsState(
-            most_recent_action=action,
+            last_ctrl=action,
             data=mj_data,
             event_states=event_states,
             actuator_state=actuator_state,
             action_latency=physics_state.action_latency,
+            zero_offset=physics_state.zero_offset,
         )
 
 
