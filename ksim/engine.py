@@ -90,8 +90,6 @@ class EngineConfig:
             raise ValueError("`min_action_latency` must be less than or equal to `max_action_latency`")
         if max_action_latency > self.ctrl_dt:
             logger.warning("`max_action_latency=%f` is greater than `ctrl_dt=%f`", max_action_latency, self.ctrl_dt)
-        if self.zero_offset_std < 0:
-            raise ValueError("`zero_offset_std` must be non-negative")
         if (remainder := (self.ctrl_dt - round(self.ctrl_dt / self.dt) * self.dt)) > 1e-6:
             logger.warning("`ctrl_dt=%f` is not a multiple of `dt=%f` (remainder=%f)", self.ctrl_dt, self.dt, remainder)
 

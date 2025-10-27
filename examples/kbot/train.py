@@ -889,6 +889,8 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             action_latency_range=(0.001, 0.01),  # Simulate 1-10ms of latency.
             drop_action_prob=0.05,  # Drop 5% of commands.
+            zero_offset_std=math.radians(3.0),
+            zero_offset_mag=math.radians(3.0),
             # Visualization parameters.
             # If running this on Mac and you are getting segfaults,
             # you might need to disable `render_markers`
