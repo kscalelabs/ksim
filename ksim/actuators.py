@@ -153,8 +153,10 @@ class PositionActuators(Actuators):
         scaled = action * self.action_scale
 
         pos_rng, tor_rng = jax.random.split(rng)
-        current_pos = qpos[7:]  # First 7 are always root pos.
-        current_vel = qvel[6:]  # First 6 are always root vel.
+
+        # Calling function removes root position and velocity.
+        current_pos = qpos
+        current_vel = qvel
 
         # Add position and velocity noise
         target_position = self.action_noise.add_noise(scaled, curriculum_level, pos_rng)
@@ -199,8 +201,9 @@ class PositionVelocityActuator(PositionActuators):
         """Get the control signal from the (position and velocity) action vector."""
         pos_rng, vel_rng, tor_rng = jax.random.split(rng, 3)
 
-        current_pos = qpos[7:]  # First 7 are always root pos.
-        current_vel = qvel[6:]  # First 6 are always root vel.
+        # Calling function removes root position and velocity.
+        current_pos = qpos
+        current_vel = qvel
 
         # Extract position and velocity targets
         target_position = action[: len(current_pos)]

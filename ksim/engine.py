@@ -296,8 +296,8 @@ class MjxEngine(PhysicsEngine):
                 if isinstance(self.actuators, StatefulActuators):
                     torques, actuator_state = self.actuators.get_stateful_ctrl(
                         action=ctrl,
-                        qpos=carry_data.qpos - physics_state.zero_offset,
-                        qvel=carry_data.qvel,
+                        qpos=carry_data.qpos[..., 7:] - physics_state.zero_offset,
+                        qvel=carry_data.qvel[..., 6:],
                         curriculum_level=curriculum_level,
                         actuator_state=prev_actuator_state,
                         rng=rng_update,
@@ -305,8 +305,8 @@ class MjxEngine(PhysicsEngine):
                 else:
                     torques = self.actuators.get_ctrl(
                         action=ctrl,
-                        qpos=carry_data.qpos - physics_state.zero_offset,
-                        qvel=carry_data.qvel,
+                        qpos=carry_data.qpos[..., 7:] - physics_state.zero_offset,
+                        qvel=carry_data.qvel[..., 6:],
                         curriculum_level=curriculum_level,
                         rng=rng_update,
                     )
@@ -441,8 +441,8 @@ class MujocoEngine(PhysicsEngine):
                 if isinstance(self.actuators, StatefulActuators):
                     torques, actuator_state = self.actuators.get_stateful_ctrl(
                         action=ctrl,
-                        qpos=mj_data.qpos - physics_state.zero_offset,
-                        qvel=mj_data.qvel,
+                        qpos=mj_data.qpos[..., 7:] - physics_state.zero_offset,
+                        qvel=mj_data.qvel[..., 6:],
                         curriculum_level=curriculum_level,
                         actuator_state=actuator_state,
                         rng=rng_update,
@@ -450,8 +450,8 @@ class MujocoEngine(PhysicsEngine):
                 else:
                     torques = self.actuators.get_ctrl(
                         action=ctrl,
-                        qpos=mj_data.qpos - physics_state.zero_offset,
-                        qvel=mj_data.qvel,
+                        qpos=mj_data.qpos[..., 7:] - physics_state.zero_offset,
+                        qvel=mj_data.qvel[..., 6:],
                         curriculum_level=curriculum_level,
                         rng=rng_update,
                     )
