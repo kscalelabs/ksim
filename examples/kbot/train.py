@@ -1704,6 +1704,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         return xax.FrozenDict(
             {
+                "noisy_joint_position": noisy_joint_pos_m,
                 "noisy_joint_velocity": noisy_joint_vel_m,
                 "noisy_imu_gyro": noisy_imu_gyro_m,
                 "noisy_imu_projected_gravity": noisy_imu_projected_gravity_m,
