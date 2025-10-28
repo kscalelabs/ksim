@@ -905,7 +905,7 @@ class Actor(eqx.Module):
         obs_n: Array,
         carry: Array | tuple[tuple[Array, ...], ...],
         lpf_params: ksim.LowPassFilterParams,
-    ) -> tuple[xax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
+    ) -> tuple[xax.Normal, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -1354,7 +1354,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         commands: xax.FrozenDict[str, Array],
         carry: tuple[tuple[Array, ...], ...],
         lpf_params: ksim.LowPassFilterParams,
-    ) -> tuple[xax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
+    ) -> tuple[xax.Normal, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
         joint_pos_n = observations["noisy_joint_position"]
         joint_vel_n = observations["noisy_joint_velocity"]
         projected_gravity_3 = observations["noisy_imu_projected_gravity"]
@@ -1482,7 +1482,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             log_probs=log_probs,
             values=value.squeeze(-1),
             entropy=actor_dist.entropy(),
-            # action_std=actor_dist.scale_n,
+            action_std=actor_dist.scale_n,
             aux_losses={
                 "action_mirror_loss": action_mirror_loss,
                 "value_mirror_loss": value_mirror_loss,
@@ -1777,7 +1777,7 @@ if __name__ == "__main__":
             # sim2real parameters.
             action_latency_range=(0.003, 0.01),  # Simulate 3-10ms of latency.
             drop_action_prob=0.05,  # Drop 5% of commands.
-            zero_offset_std=math.radians(3.0),
+            # zero_offset_std=math.radians(3.0),
             zero_offset_mag=math.radians(3.0),
             # Visualization parameters.
             render_track_body_id=0,
