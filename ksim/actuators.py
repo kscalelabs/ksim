@@ -10,6 +10,7 @@ __all__ = [
 
 import logging
 from abc import ABC, abstractmethod
+from typing import TypedDict
 
 import chex
 import jax

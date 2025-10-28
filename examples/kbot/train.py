@@ -1,13 +1,12 @@
 """Defines simple task for training a joystick walking policy for K-Bot."""
 
-import asyncio
 import functools
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Self, TypedDict
 
 import attrs
-import distrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -17,6 +16,7 @@ import mujoco_scenes.mjcf
 import optax
 import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from kscale.web.gen.api import RobotURDFMetadataOutput
 
 import ksim
 
@@ -900,8 +900,11 @@ class Actor(eqx.Module):
         self.ctrl_dt = ctrl_dt
 
     def forward(
-        self, obs_n: Array, carry: Array | tuple[tuple[Array, ...], ...], lpf_params: ksim.LowPassFilterParams
-    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
+        self,
+        obs_n: Array,
+        carry: Array | tuple[tuple[Array, ...], ...],
+        lpf_params: ksim.LowPassFilterParams,
+    ) -> tuple[xax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -925,7 +928,7 @@ class Actor(eqx.Module):
         mean_n, lpf_params = ksim.lowpass_one_pole(mean_n, self.ctrl_dt, self.cutoff_frequency, lpf_params)
 
         # Create diagonal gaussian distribution
-        dist_n = distrax.MultivariateNormalDiag(loc=mean_n, scale_diag=std_n)
+        dist_n = xax.Normal(loc_n=mean_n, scale_n=std_n)
 
         return dist_n, tuple(out_carries), lpf_params
 
@@ -936,7 +939,7 @@ class Critic(eqx.Module):
     input_proj: eqx.nn.Linear
     rnns: tuple[eqx.nn.LSTMCell, ...]
     output_proj: eqx.nn.Linear
-    num_inputs: int = eqx.static_field()
+    num_inputs: int = eqx.field()
 
     def __init__(
         self,
@@ -1065,12 +1068,18 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         else:
             return optax.chain(optax.adamw(learning_rate=cosine_schedule, weight_decay=self.config.adam_weight_decay))
 
+    @property
+    def data_root_dir(self) -> Path:
+        return Path(__file__).parent / "robot" / "kbot-headless"
+
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("robot/kbot-headless", name="robot"))
+        mjcf_path = self.data_root_dir / "robot.mjcf"
         return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="sine")
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
-        metadata = asyncio.run(ksim.get_mujoco_model_metadata("robot/kbot-headless"))
+        metadata_path = self.data_root_dir / "metadata.json"
+        with open(metadata_path, "r") as f:
+            metadata = RobotURDFMetadataOutput.model_validate_json(f.read())
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is not available")
         if metadata.actuator_type_to_metadata is None:
@@ -1343,7 +1352,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         commands: xax.FrozenDict[str, Array],
         carry: tuple[tuple[Array, ...], ...],
         lpf_params: ksim.LowPassFilterParams,
-    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
+    ) -> tuple[xax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
         # joint_pos_n = observations["noisy_joint_position"]
         joint_pos_n = observations["noisy_biased_joint_position"]
         joint_vel_n = observations["noisy_joint_velocity"]
