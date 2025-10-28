@@ -17,8 +17,8 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.noise import Noise, NoNoise, RandomVariable
-from ksim.types import Metadata, PhysicsData, PhysicsModel
+from ksim.noise import Noise, NoNoise, RandomVariable, UniformRandomVariable
+from ksim.types import Metadata, PhysicsModel
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,16 @@ class Actuators(ABC):
 
 
 class StatefulActuators(Actuators):
+    def get_ctrl(
+        self,
+        action: Array,
+        qpos: Array,
+        qvel: Array,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        raise NotImplementedError("StatefulActuators do not implement get_ctrl")
+
     @abstractmethod
     def get_stateful_ctrl(
         self,
@@ -97,9 +107,9 @@ class PositionActuators(StatefulActuators):
         action_scale: float = 1.0,
         action_bias: RandomVariable | None = None,
         torque_bias: RandomVariable | None = None,
-        kp_scale: RandomVariable | None = None,
-        kd_scale: RandomVariable | None = None,
-        torque_limit_scale: RandomVariable | None = None,
+        kp_scale: float | RandomVariable | None = None,
+        kd_scale: float | RandomVariable | None = None,
+        torque_limit_scale: float | RandomVariable | None = None,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
@@ -148,6 +158,14 @@ class PositionActuators(StatefulActuators):
 
         self.action_bias = action_bias
         self.torque_bias = torque_bias
+
+        if isinstance(kp_scale, float):
+            kp_scale = UniformRandomVariable(mean=kp_scale, mag=0.0)
+        if isinstance(kd_scale, float):
+            kd_scale = UniformRandomVariable(mean=kd_scale, mag=0.0)
+        if isinstance(torque_limit_scale, float):
+            torque_limit_scale = UniformRandomVariable(mean=torque_limit_scale, mag=0.0)
+
         self.kp_scale = kp_scale
         self.kd_scale = kd_scale
         self.torque_limit_scale = torque_limit_scale
@@ -198,9 +216,9 @@ class PositionActuators(StatefulActuators):
             ctrl, -(self.ctrl_clip * torque_limit_scale), self.ctrl_clip * torque_limit_scale
         ), actuator_state
 
-    def get_initial_state(self, physics_data: PhysicsData, rng: PRNGKeyArray) -> ActuatorState:
+    def get_initial_state(self, qpos: Array, qvel: Array, rng: PRNGKeyArray) -> PyTree:
         """Get the initial state for the actuator."""
-        shape = physics_data.qpos[..., 7:].shape
+        shape = qpos.shape
         rng1, rng2, rng3, rng4, rng5 = jax.random.split(rng, 5)
 
         action_bias_value = self.action_bias.get_random_variable(shape, rng1) if self.action_bias else jnp.zeros(shape)

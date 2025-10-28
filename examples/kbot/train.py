@@ -19,6 +19,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from kscale.web.gen.api import RobotURDFMetadataOutput
 
 import ksim
+from ksim.types import Metadata
 
 # These are in the order of the neural network outputs.
 # Joint name, neutral position
@@ -1079,7 +1080,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
         metadata_path = self.data_root_dir / "metadata.json"
         with open(metadata_path, "r") as f:
-            metadata = RobotURDFMetadataOutput.model_validate_json(f.read())
+            raw_metadata = RobotURDFMetadataOutput.model_validate_json(f.read(), strict=True)
+        metadata = Metadata.from_kscale_metadata(raw_metadata)
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is not available")
         if metadata.actuator_type_to_metadata is None:
@@ -1153,10 +1155,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
         return {
             "joint_position": ksim.JointPositionObservation(),
-            "biased_joint_position": ksim.BiasedJointPositionObservation(
-                bias_range=math.radians(3),
-                noise=ksim.AdditiveUniformNoise(mag=math.radians(3)),  # 0.05 rad i think
-            ),
             "joint_velocity": ksim.JointVelocityObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(15))),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
@@ -1192,7 +1190,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 noise=ksim.AdditiveGaussianNoise(std=math.radians(3)),
                 min_lag=0.0,
                 max_lag=0.75,  # 0.75 is effectively 3 timesteps so 60ms
-                bias=math.radians(4),
+                imu_bias=math.radians(4),
             ),
             "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
@@ -1353,8 +1351,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         carry: tuple[tuple[Array, ...], ...],
         lpf_params: ksim.LowPassFilterParams,
     ) -> tuple[xax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
-        # joint_pos_n = observations["noisy_joint_position"]
-        joint_pos_n = observations["noisy_biased_joint_position"]
+        joint_pos_n = observations["noisy_joint_position"]
         joint_vel_n = observations["noisy_joint_velocity"]
         projected_gravity_3 = observations["noisy_imu_projected_gravity"]
         imu_gyro_3 = observations["noisy_imu_gyro"]
@@ -1580,7 +1577,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def mirror_obs(self, obs: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
         # actor obs
-        noisy_joint_pos_m = self.mirror_joints(obs["noisy_biased_joint_position"])
+        noisy_joint_pos_m = self.mirror_joints(obs["noisy_joint_position"])
         noisy_joint_vel_m = self.mirror_joints(obs["noisy_joint_velocity"])
         noisy_imu_gyro_m = jnp.concatenate(
             [
@@ -1707,7 +1704,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         return xax.FrozenDict(
             {
-                "noisy_biased_joint_position": noisy_joint_pos_m,
                 "noisy_joint_velocity": noisy_joint_vel_m,
                 "noisy_imu_gyro": noisy_imu_gyro_m,
                 "noisy_imu_projected_gravity": noisy_imu_projected_gravity_m,

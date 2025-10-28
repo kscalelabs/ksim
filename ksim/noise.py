@@ -74,7 +74,7 @@ class ZeroRandomVariable(RandomVariable):
 @attrs.define(frozen=True, kw_only=True)
 class UniformRandomVariable(RandomVariable):
     mean: float = attrs.field()
-    mag: float = attrs.field(validator=attrs.validators.gt(0.0))
+    mag: float = attrs.field(validator=attrs.validators.ge(0.0))
 
     @xax.jit(static_argnames=["self", "shape"], donate_argnames=["rng"], jit_level=JitLevel.HELPER_FUNCTIONS)
     def get_random_variable(
@@ -90,7 +90,7 @@ class UniformRandomVariable(RandomVariable):
 @attrs.define(frozen=True, kw_only=True)
 class GaussianRandomVariable(RandomVariable):
     mean: float = attrs.field()
-    std: float = attrs.field(validator=attrs.validators.gt(0.0))
+    std: float = attrs.field(validator=attrs.validators.ge(0.0))
 
     @xax.jit(static_argnames=["self", "shape"], donate_argnames=["rng"], jit_level=JitLevel.HELPER_FUNCTIONS)
     def get_random_variable(
@@ -105,8 +105,8 @@ class GaussianRandomVariable(RandomVariable):
 @attrs.define(frozen=True, kw_only=True)
 class UniformGaussianRandomVariable(RandomVariable):
     mean: float = attrs.field()
-    std: float = attrs.field(validator=attrs.validators.gt(0.0))
-    mag: float = attrs.field(validator=attrs.validators.gt(0.0))
+    std: float = attrs.field(validator=attrs.validators.ge(0.0))
+    mag: float = attrs.field(validator=attrs.validators.ge(0.0))
 
     @xax.jit(static_argnames=["self", "shape"], donate_argnames=["rng"], jit_level=JitLevel.HELPER_FUNCTIONS)
     def get_random_variable(
