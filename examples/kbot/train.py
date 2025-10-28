@@ -552,10 +552,10 @@ class COMDistanceObservation(ksim.Observation):
         pts = jnp.asarray(points)
         n = pts.shape[0]
         if n == 0:
-            return jnp.array([], dtype=jnp.int32), jnp.empty((0, 2), pts.dtype)
+            return jnp.array([], dtype=jnp.int32), jnp.empty((0, 2), pts.dtype), jnp.array([], dtype=bool)
         if n <= 2:
             idxs = jnp.arange(n, dtype=jnp.int32)
-            return idxs, pts
+            return idxs, pts, jnp.ones(n, dtype=bool)
 
         # lexicographic sort by x then y
         order = jnp.lexsort((pts[:, 1], pts[:, 0])).astype(jnp.int32)
@@ -568,7 +568,7 @@ class COMDistanceObservation(ksim.Observation):
             stack = -jnp.ones((indices.shape[0],), dtype=jnp.int32)
             ptr0 = jnp.int32(0)
 
-            def push(carry: tuple[Array, int], idx: int) -> tuple[tuple[Array, int], None]:
+            def push(carry: tuple[Array, Array], idx: int) -> tuple[tuple[Array, Array], None]:
                 stack, ptr = carry
 
                 def cond_fn(carry_inner: tuple[Array, int]) -> bool:
@@ -1526,18 +1526,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Model,
         rng: PRNGKeyArray,
     ) -> Carry:
+        lstm_carry = tuple(
+            (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
+            for _ in range(self.config.depth)
+        )
         return Carry(
-            **{
-                **{
-                    name: tuple(
-                        (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
-                        for _ in range(self.config.depth)
-                    )
-                    for name in ["actor", "actor_mirror", "critic", "critic_mirror"]
-                },
-                "lpf_params": ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
-                "lpf_params_mirror": ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
-            }
+            actor=lstm_carry,
+            actor_mirror=lstm_carry,
+            critic=lstm_carry,
+            critic_mirror=lstm_carry,
+            lpf_params=ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
+            lpf_params_mirror=ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
         )
 
     def sample_action(

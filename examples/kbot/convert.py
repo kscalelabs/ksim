@@ -33,9 +33,10 @@ from jaxtyping import Array
 from kinfer.export.jax import export_fn
 from kinfer.export.serialize import pack
 from kinfer.rust_bindings import PyModelMetadata
-from train import HumanoidWalkingTask, Model
 
 import ksim
+
+from .train import HumanoidWalkingTask, Model
 
 
 @jax.tree_util.register_dataclass
