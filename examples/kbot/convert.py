@@ -19,7 +19,7 @@ The expected command structure for K-Bot is:
 - [14] left elbow roll [rad]
 - [15] left wrist pitch [rad]
 
-""" # NOTE the above is not true anymore, new kinfer allows specifying the command names
+"""  # NOTE the above is not true anymore, new kinfer allows specifying the command names
 
 import argparse
 from dataclasses import dataclass
@@ -28,14 +28,14 @@ from typing import cast
 
 import jax
 import jax.numpy as jnp
-import ksim
 from jax.flatten_util import ravel_pytree
 from jaxtyping import Array
 from kinfer.export.jax import export_fn
 from kinfer.export.serialize import pack
 from kinfer.rust_bindings import PyModelMetadata
-
 from train import HumanoidWalkingTask, Model
+
+import ksim
 
 
 @jax.tree_util.register_dataclass
