@@ -623,7 +623,7 @@ class COMDistanceObservation(ksim.Observation):
         return hull_idx, hull_pts, hull_mask
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        contact = state.physics_state.data.contact
+        contact = state.physics_state.data._impl.contact
         floor_contact_mask = contact.geom1 == 0
         feet_to_floor_contacts = jnp.where(floor_contact_mask[:, None], contact.pos, jnp.zeros_like(contact.pos))
         base_subtree_com = state.physics_state.data.subtree_com[2]
@@ -905,7 +905,7 @@ class Actor(eqx.Module):
         obs_n: Array,
         carry: Array | tuple[tuple[Array, ...], ...],
         lpf_params: ksim.LowPassFilterParams,
-    ) -> tuple[xax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
+    ) -> tuple[xax.Normal, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -1154,8 +1154,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
         return {
-            "joint_position": ksim.JointPositionObservation(),
-            "joint_velocity": ksim.JointVelocityObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(15))),
+            "joint_position": ksim.JointPositionObservation(
+                noise=ksim.AdditiveGaussianNoise(std=math.radians(3)),
+            ),
+            "joint_velocity": ksim.JointVelocityObservation(
+                noise=ksim.AdditiveUniformNoise(mag=math.radians(15)),
+            ),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
             "center_of_mass_velocity": ksim.CenterOfMassVelocityObservation(),
@@ -1350,7 +1354,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         commands: xax.FrozenDict[str, Array],
         carry: tuple[tuple[Array, ...], ...],
         lpf_params: ksim.LowPassFilterParams,
-    ) -> tuple[xax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
+    ) -> tuple[xax.Normal, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
         joint_pos_n = observations["noisy_joint_position"]
         joint_vel_n = observations["noisy_joint_velocity"]
         projected_gravity_3 = observations["noisy_imu_projected_gravity"]
@@ -1461,9 +1465,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             carry=carry["actor_mirror"],
             lpf_params=carry["lpf_params_mirror"],
         )
-        double_mirrored_actor_dist = self.mirror_joints(mirrored_actor_dist.mean())
+        double_mirrored_actor_dist = self.mirror_joints(mirrored_actor_dist.mode())
         action_mirror_loss = (
-            jnp.mean((actor_dist.mean() - double_mirrored_actor_dist) ** 2) * self.config.actor_mirror_loss_scale
+            jnp.mean((actor_dist.mode() - double_mirrored_actor_dist) ** 2) * self.config.actor_mirror_loss_scale
         )
 
         mirrored_value, next_critic_c_m = self.run_critic(
@@ -1475,10 +1479,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         value_mirror_loss = jnp.mean((value - mirrored_value) ** 2) * self.config.critic_mirror_loss_scale
 
         transition_ppo_variables = ksim.PPOVariables(
-            log_probs=jnp.expand_dims(log_probs, axis=0),
+            log_probs=log_probs,
             values=value.squeeze(-1),
-            entropy=jnp.expand_dims(actor_dist.entropy(), axis=0),
-            action_std=actor_dist.stddev(),
+            entropy=actor_dist.entropy(),
+            action_std=actor_dist.scale_n,
             aux_losses={
                 "action_mirror_loss": action_mirror_loss,
                 "value_mirror_loss": value_mirror_loss,
@@ -1555,7 +1559,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             carry=model_carry["actor"],
             lpf_params=model_carry["lpf_params"],
         )
-        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
+        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(key=rng)
         return ksim.Action(
             action=action_j,
             carry={
