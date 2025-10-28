@@ -571,7 +571,7 @@ class COMDistanceObservation(ksim.Observation):
             def push(carry: tuple[Array, Array], idx: int) -> tuple[tuple[Array, Array], None]:
                 stack, ptr = carry
 
-                def cond_fn(carry_inner: tuple[Array, int]) -> bool:
+                def cond_fn(carry_inner: tuple[Array, Array]) -> bool:
                     stack_i, ptr_i = carry_inner
                     # need ptr_i >= 2 and cross <= 0
                     a_idx = stack_i[ptr_i - 2]
@@ -579,7 +579,7 @@ class COMDistanceObservation(ksim.Observation):
                     # compute cross on sorted points
                     return (ptr_i >= 2) & (cross(spts[a_idx], spts[b_idx], spts[idx]) <= 0)
 
-                def body_fn(carry_inner: tuple[Array, int]) -> tuple[Array, int]:
+                def body_fn(carry_inner: tuple[Array, Array]) -> tuple[Array, Array]:
                     stack_i, ptr_i = carry_inner
                     # pop last
                     stack_i = stack_i.at[ptr_i - 1].set(-1)
