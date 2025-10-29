@@ -10,13 +10,14 @@ __all__ = [
 
 import logging
 from abc import ABC, abstractmethod
+from typing import TypedDict
 
 import chex
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ksim.noise import Noise, NoNoise
+from ksim.noise import Noise, NoNoise, RandomVariable, UniformRandomVariable
 from ksim.types import Metadata, PhysicsModel
 from ksim.utils.mujoco import get_ctrl_data_idx_by_name
 
@@ -39,6 +40,16 @@ class Actuators(ABC):
 
 
 class StatefulActuators(Actuators):
+    def get_ctrl(
+        self,
+        action: Array,
+        qpos: Array,
+        qvel: Array,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        raise NotImplementedError("StatefulActuators do not implement get_ctrl")
+
     @abstractmethod
     def get_stateful_ctrl(
         self,
@@ -76,7 +87,15 @@ class TorqueActuators(Actuators):
         return self.noise.add_noise(action, curriculum_level, rng)
 
 
-class PositionActuators(Actuators):
+class ActuatorState(TypedDict):
+    action: Array
+    torque: Array
+    kp_scale: Array
+    kd_scale: Array
+    torque_limit_scale: Array
+
+
+class PositionActuators(StatefulActuators):
     """MIT Cheetah-style actuator controller operating on position."""
 
     def __init__(
@@ -86,6 +105,11 @@ class PositionActuators(Actuators):
         action_noise: Noise | None = None,
         torque_noise: Noise | None = None,
         action_scale: float = 1.0,
+        action_bias: RandomVariable | None = None,
+        torque_bias: RandomVariable | None = None,
+        kp_scale: float | RandomVariable | None = None,
+        kd_scale: float | RandomVariable | None = None,
+        torque_limit_scale: float | RandomVariable | None = None,
     ) -> None:
         """Creates easily vector multipliable kps and kds."""
         ctrl_name_to_idx = get_ctrl_data_idx_by_name(physics_model)
@@ -132,6 +156,20 @@ class PositionActuators(Actuators):
 
         self.action_scale = action_scale
 
+        self.action_bias = action_bias
+        self.torque_bias = torque_bias
+
+        if isinstance(kp_scale, float):
+            kp_scale = UniformRandomVariable(mean=kp_scale, mag=0.0)
+        if isinstance(kd_scale, float):
+            kd_scale = UniformRandomVariable(mean=kd_scale, mag=0.0)
+        if isinstance(torque_limit_scale, float):
+            torque_limit_scale = UniformRandomVariable(mean=torque_limit_scale, mag=0.0)
+
+        self.kp_scale = kp_scale
+        self.kd_scale = kd_scale
+        self.torque_limit_scale = torque_limit_scale
+
         if any(self.kps < 0) or any(self.kds < 0):
             raise ValueError("Some KPs or KDs are negative. Check the provided metadata.")
         if any(self.kps == 0) or any(self.kds == 0):
@@ -141,15 +179,22 @@ class PositionActuators(Actuators):
         # This can be overridden if necessary.
         return f"{joint_name}_ctrl"
 
-    def get_ctrl(
+    def get_stateful_ctrl(
         self,
         action: Array,
         qpos: Array,
         qvel: Array,
         curriculum_level: Array,
+        actuator_state: ActuatorState,
         rng: PRNGKeyArray,
-    ) -> Array:
-        """Get the control signal from the (position) action vector."""
+    ) -> tuple[Array, ActuatorState]:
+        """Get the control signal from the (position) action vector with optional biases."""
+        action_bias = actuator_state["action"]
+        torque_bias = actuator_state["torque"]
+        kp_scale = actuator_state["kp_scale"]
+        kd_scale = actuator_state["kd_scale"]
+        torque_limit_scale = actuator_state["torque_limit_scale"]
+
         scaled = action * self.action_scale
 
         pos_rng, tor_rng = jax.random.split(rng)
@@ -159,15 +204,38 @@ class PositionActuators(Actuators):
         current_vel = qvel
 
         # Add position and velocity noise
-        target_position = self.action_noise.add_noise(scaled, curriculum_level, pos_rng)
+        target_position = self.action_noise.add_noise(scaled, curriculum_level, pos_rng) + action_bias
         target_velocity = jnp.zeros_like(action)
 
         pos_delta = target_position - current_pos
         vel_delta = target_velocity - current_vel
 
-        ctrl = self.kps * pos_delta + self.kds * vel_delta
-        ctrl = self.torque_noise.add_noise(ctrl, curriculum_level, tor_rng)
-        return jnp.clip(ctrl, -self.ctrl_clip, self.ctrl_clip)
+        ctrl = (self.kps * kp_scale) * pos_delta + (self.kds * kd_scale) * vel_delta
+        ctrl = self.torque_noise.add_noise(ctrl, curriculum_level, tor_rng) + torque_bias
+        return jnp.clip(
+            ctrl, -(self.ctrl_clip * torque_limit_scale), self.ctrl_clip * torque_limit_scale
+        ), actuator_state
+
+    def get_initial_state(self, qpos: Array, qvel: Array, rng: PRNGKeyArray) -> PyTree:
+        """Get the initial state for the actuator."""
+        shape = qpos.shape
+        rng1, rng2, rng3, rng4, rng5 = jax.random.split(rng, 5)
+
+        action_bias_value = self.action_bias.get_random_variable(shape, rng1) if self.action_bias else jnp.zeros(shape)
+        torque_bias_value = self.torque_bias.get_random_variable(shape, rng2) if self.torque_bias else jnp.zeros(shape)
+        kp_scale_value = self.kp_scale.get_random_variable((), rng3) if self.kp_scale else jnp.ones(())
+        kd_scale_value = self.kd_scale.get_random_variable((), rng4) if self.kd_scale else jnp.ones(())
+        torque_limit_scale_value = (
+            self.torque_limit_scale.get_random_variable((), rng5) if self.torque_limit_scale else jnp.ones(())
+        )
+
+        return {
+            "action": action_bias_value,
+            "torque": torque_bias_value,
+            "kp_scale": kp_scale_value,
+            "kd_scale": kd_scale_value,
+            "torque_limit_scale": torque_limit_scale_value,
+        }
 
 
 class PositionVelocityActuator(PositionActuators):

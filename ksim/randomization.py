@@ -13,6 +13,7 @@ __all__ = [
     "COMRandomizer",
     "AllBodiesCOMRandomizer",
     "AllBodiesInertiaRandomizer",
+    "CollisionBodyRandomizer",
 ]
 
 import functools
@@ -373,3 +374,114 @@ class AllBodiesInertiaRandomizer(PhysicsRandomizer):
         }
 
         return updates
+
+
+@attrs.define(frozen=True, kw_only=True)
+class CollisionBodyRandomizer(PhysicsRandomizer):
+    """Randomizes collision body capsule geometries.
+
+    Jitters capsule positions independently in x, y, z and varies their radius and length.
+    Useful for domain randomization of collision geometries to improve sim-to-real transfer.
+
+    Note: When randomizing capsule length (half-length), the capsule grows/shrinks symmetrically
+    from its center position along its longitudinal axis - both ends move equally.
+    """
+
+    geom_ids: tuple[int, ...] = attrs.field()
+    radius_scale: float = attrs.field(default=0.05)  # scales from (1-scale) to (1+scale)
+    length_scale: float = attrs.field(default=0.05)  # scales from (1-scale) to (1+scale)
+    position_jitter_x: float = attrs.field(default=0.001)  # in meters, uniform range
+    position_jitter_y: float = attrs.field(default=0.001)  # in meters, uniform range
+    position_jitter_z: float = attrs.field(default=0.001)  # in meters, uniform range
+
+    def __call__(self, model: PhysicsModel, rng: PRNGKeyArray) -> dict[str, Array]:
+        updates = {}
+
+        # Randomize radius and length independently for capsules
+        # For capsules: geom_size[geom_id, 0] = radius, geom_size[geom_id, 1] = half-length
+        rng, radius_rng = jax.random.split(rng)
+        radius_scales = jax.random.uniform(
+            radius_rng,
+            shape=(len(self.geom_ids),),
+            minval=1.0 - self.radius_scale,
+            maxval=1.0 + self.radius_scale,
+        )
+
+        rng, length_rng = jax.random.split(rng)
+        length_scales = jax.random.uniform(
+            length_rng,
+            shape=(len(self.geom_ids),),
+            minval=1.0 - self.length_scale,
+            maxval=1.0 + self.length_scale,
+        )
+
+        new_geom_size = model.geom_size
+        for i, geom_id in enumerate(self.geom_ids):
+            # Scale radius (index 0) and half-length (index 1) independently
+            new_radius = model.geom_size[geom_id, 0] * radius_scales[i]
+            new_half_length = model.geom_size[geom_id, 1] * length_scales[i]
+            new_geom_size = new_geom_size.at[geom_id, 0].set(new_radius)
+            new_geom_size = new_geom_size.at[geom_id, 1].set(new_half_length)
+        updates["geom_size"] = new_geom_size
+
+        # Randomize position - jitter independently in x, y, z with uniform distribution
+        rng, pos_rng = jax.random.split(rng)
+        position_offsets = jax.random.uniform(
+            pos_rng,
+            shape=(len(self.geom_ids), 3),
+            minval=jnp.array([-self.position_jitter_x, -self.position_jitter_y, -self.position_jitter_z]),
+            maxval=jnp.array([self.position_jitter_x, self.position_jitter_y, self.position_jitter_z]),
+        )
+
+        new_geom_pos = model.geom_pos
+        for i, geom_id in enumerate(self.geom_ids):
+            new_geom_pos = new_geom_pos.at[geom_id].add(position_offsets[i])
+
+        updates["geom_pos"] = new_geom_pos
+
+        return updates
+
+    @classmethod
+    def from_geom_names(
+        cls,
+        model: PhysicsModel,
+        geom_names: list[str] | tuple[str, ...],
+        radius_scale: float = 0.05,
+        length_scale: float = 0.05,
+        position_jitter_x: float = 0.001,
+        position_jitter_y: float = 0.001,
+        position_jitter_z: float = 0.001,
+    ) -> Self:
+        """Create a CollisionBodyRandomizer from collision geom names.
+
+        Args:
+            model: The physics model
+            geom_names: List or tuple of collision geom names to randomize
+            radius_scale: Symmetric scaling range for radius, samples from (1-scale) to (1+scale) (default: 0.05)
+            length_scale: Symmetric scaling range for length, samples from (1-scale) to (1+scale) (default: 0.05)
+            position_jitter_x: Uniform jitter range in meters along x-axis, ±value (default: 0.001)
+            position_jitter_y: Uniform jitter range in meters along y-axis, ±value (default: 0.001)
+            position_jitter_z: Uniform jitter range in meters along z-axis, ±value (default: 0.001)
+
+        Returns:
+            CollisionBodyRandomizer instance
+
+        Raises:
+            ValueError: If any geom name is not found in the model
+        """
+        names_to_idxs = get_geom_data_idx_by_name(model)
+        geom_ids = []
+        for geom_name in geom_names:
+            if geom_name not in names_to_idxs:
+                available_geoms = list(names_to_idxs.keys())
+                raise ValueError(f"Geom name '{geom_name}' not found in model. Available geoms: {available_geoms}")
+            geom_ids.append(names_to_idxs[geom_name])
+
+        return cls(
+            geom_ids=tuple(geom_ids),
+            radius_scale=radius_scale,
+            length_scale=length_scale,
+            position_jitter_x=position_jitter_x,
+            position_jitter_y=position_jitter_y,
+            position_jitter_z=position_jitter_z,
+        )

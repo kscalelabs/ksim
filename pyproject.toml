@@ -30,15 +30,17 @@ exclude = "run_\\d"
 
 module = [
     "_pytest.*",
+    "bvhio.*",
     "chex.*",
     "equinox.*",
     "glfw.*",
+    "glm.*",
+    "imageio.*",
     "mujoco.*",
     "optax.*",
     "scipy.*",
-    "bvhio.*",
-    "glm.*",
-    "imageio.*",
+    "tabulate.*",
+    "tqdm.*",
 ]
 ignore_missing_imports = true
 

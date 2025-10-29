@@ -221,7 +221,7 @@ class MjxEngine(PhysicsEngine):
 
         # Gets the initial actuator state for stateful actuators.
         actuator_state = (
-            self.actuators.get_initial_state(mjx_data.qpos, mjx_data.qvel, rng)
+            self.actuators.get_initial_state(mjx_data.qpos[..., 7:], mjx_data.qvel[..., 6:], rng)
             if isinstance(self.actuators, StatefulActuators)
             else None
         )
@@ -378,7 +378,7 @@ class MujocoEngine(PhysicsEngine):
         mj_data.qacc[:] = 0.0
 
         actuator_state = (
-            self.actuators.get_initial_state(mj_data.qpos, mj_data.qvel, rng)
+            self.actuators.get_initial_state(mj_data.qpos[..., 7:], mj_data.qvel[..., 6:], rng)
             if isinstance(self.actuators, StatefulActuators)
             else None
         )
