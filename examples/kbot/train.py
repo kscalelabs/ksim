@@ -983,18 +983,16 @@ class Critic(eqx.Module):
 
         self.num_inputs = num_inputs
 
-    def forward(
-        self, obs_n: Array, carry: tuple[tuple[Array, ...], ...]
-    ) -> tuple[Array, tuple[tuple[Array, Array], ...]]:
+    def forward(self, obs_n: Array, carry: Array) -> tuple[Array, Array]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
             h, c = rnn(x_n, carry[i])
-            out_carries.append((h, c))
+            out_carries.append(jnp.stack([h, c], axis=0))
             x_n = h
         out_n = self.output_proj(h)
 
-        return out_n, tuple(out_carries)
+        return out_n, jnp.stack(out_carries, axis=0)
 
 
 class Model(eqx.Module):
@@ -1040,10 +1038,10 @@ class Model(eqx.Module):
 
 
 class Carry(TypedDict):
-    actor: tuple[tuple[Array, Array], ...]  # for every layer in lstm: (h, c)
-    actor_mirror: tuple[tuple[Array, Array], ...]
-    critic: tuple[tuple[Array, Array], ...]
-    critic_mirror: tuple[tuple[Array, Array], ...]
+    actor: Array
+    actor_mirror: Array
+    critic: Array
+    critic_mirror: Array
     lpf_params: ksim.LowPassFilterParams
     lpf_params_mirror: ksim.LowPassFilterParams
 
@@ -1352,9 +1350,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Actor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry: tuple[tuple[Array, ...], ...],
+        carry: Array,
         lpf_params: ksim.LowPassFilterParams,
-    ) -> tuple[xax.Normal, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
+    ) -> tuple[xax.Normal, Array, ksim.LowPassFilterParams]:
         joint_pos_n = observations["noisy_joint_position"]
         joint_vel_n = observations["noisy_joint_velocity"]
         projected_gravity_3 = observations["noisy_imu_projected_gravity"]
@@ -1381,8 +1379,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Critic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry: tuple[tuple[Array, ...], ...],
-    ) -> tuple[Array, tuple[tuple[Array, ...], ...]]:
+        carry: Array,
+    ) -> tuple[Array, Array]:
         qpos_n = observations["joint_position"]
         qvel_n = observations["joint_velocity"]
         projected_gravity_3 = observations["projected_gravity"]
@@ -1526,15 +1524,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Model,
         rng: PRNGKeyArray,
     ) -> Carry:
-        lstm_carry = tuple(
-            (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
-            for _ in range(self.config.depth)
-        )
         return Carry(
-            actor=lstm_carry,
-            actor_mirror=lstm_carry,
-            critic=lstm_carry,
-            critic_mirror=lstm_carry,
+            actor=jnp.zeros(shape=(self.config.depth, 2, self.config.hidden_size)),
+            actor_mirror=jnp.zeros(shape=(self.config.depth, 2, self.config.hidden_size)),
+            critic=jnp.zeros(shape=(self.config.depth, 2, self.config.hidden_size)),
+            critic_mirror=jnp.zeros(shape=(self.config.depth, 2, self.config.hidden_size)),
             lpf_params=ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
             lpf_params_mirror=ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
         )
