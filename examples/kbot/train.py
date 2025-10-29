@@ -568,10 +568,10 @@ class COMDistanceObservation(ksim.Observation):
             stack = -jnp.ones((indices.shape[0],), dtype=jnp.int32)
             ptr0 = jnp.int32(0)
 
-            def push(carry: tuple[Array, Array], idx: int) -> tuple[tuple[Array, Array], None]:
+            def push(carry: tuple[Array, Array], idx: Array) -> tuple[tuple[Array, Array], None]:
                 stack, ptr = carry
 
-                def cond_fn(carry_inner: tuple[Array, Array]) -> bool:
+                def cond_fn(carry_inner: tuple[Array, Array]) -> Array:
                     stack_i, ptr_i = carry_inner
                     # need ptr_i >= 2 and cross <= 0
                     a_idx = stack_i[ptr_i - 2]
@@ -903,14 +903,14 @@ class Actor(eqx.Module):
     def forward(
         self,
         obs_n: Array,
-        carry: Array | tuple[tuple[Array, ...], ...],
+        carry: Array,
         lpf_params: ksim.LowPassFilterParams,
-    ) -> tuple[xax.Normal, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
+    ) -> tuple[xax.Normal, Array, ksim.LowPassFilterParams]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
             h, c = rnn(x_n, carry[i])
-            out_carries.append((h, c))
+            out_carries.append(jnp.stack([h, c], axis=0))
             x_n = h
         out_n = self.output_proj(h)
 
@@ -931,7 +931,7 @@ class Actor(eqx.Module):
         # Create diagonal gaussian distribution
         dist_n = xax.Normal(loc_n=mean_n, scale_n=std_n)
 
-        return dist_n, tuple(out_carries), lpf_params
+        return dist_n, jnp.stack(out_carries, axis=0), lpf_params
 
 
 class Critic(eqx.Module):
